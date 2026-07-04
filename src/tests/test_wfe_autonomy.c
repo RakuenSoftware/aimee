@@ -260,6 +260,24 @@ int main(void)
       assert(strcmp(wi.pause_reason, "stuck") == 0);
    }
 
+   /* PC2: the CI-event webhook routes by pr_ref -> work-item id. */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("auto", "pc2repo", "pc2prop", "autonomous", id, err,
+                                  sizeof err) == 0);
+      assert(db1_work_item_set_pr_ref(id, "https://github.com/o/r/pull/77") == 0);
+      char got[80] = "";
+      assert(db1_work_item_id_by_pr_ref("https://github.com/o/r/pull/77", got, sizeof got) == 1);
+      assert(strcmp(got, id) == 0);
+      /* an unknown pr_ref resolves to none (webhook returns 404) */
+      char none[80] = "x";
+      assert(db1_work_item_id_by_pr_ref("https://github.com/o/r/pull/999", none, sizeof none) == 0);
+      assert(none[0] == '\0');
+      /* empty / NULL pr_ref is a bad arg */
+      assert(db1_work_item_id_by_pr_ref("", got, sizeof got) == -1);
+      assert(db1_work_item_id_by_pr_ref(NULL, got, sizeof got) == -1);
+   }
+
    printf("ok\n");
    return 0;
 }

@@ -638,9 +638,56 @@ static wfe_step_result_t exec_merge(wfe_ctx *ctx, const wfe_node_t *node)
 }
 
 /* gate.ci: only an explicit all-green advances; everything else fails closed. */
+/* PC2: the latest CI outcome RECORDED by the /v1/dev/ci-event webhook for this work
+ * item (preferred over a live forge poll — it is authoritative + free), plus the
+ * count of recorded CI FAILURES (for the per-work-item red-CI retry cap). The webhook
+ * writes a "ci_event" lifecycle event with detail "<status>|<head_sha>|<log_url>";
+ * status ∈ passed|failed|error|pending. Returns WFE_CI_NONE when nothing is recorded
+ * (caller falls back to the forge poll). Events are chronological, so the last
+ * ci_event is the latest. */
+static wfe_ci_status_t wfe_last_ci_outcome(const char *work_item_id, int *out_fail_count)
+{
+   if (out_fail_count)
+      *out_fail_count = 0;
+   db1_lifecycle_event_t *evs = NULL;
+   int n = db1_lifecycle_event_list(work_item_id, &evs);
+   if (n <= 0)
+   {
+      free(evs);
+      return WFE_CI_NONE;
+   }
+   wfe_ci_status_t latest = WFE_CI_NONE;
+   for (int i = 0; i < n; i++)
+   {
+      if (strcmp(evs[i].kind, "ci_event") != 0)
+         continue;
+      /* status is the prefix up to the first '|' */
+      const char *d = evs[i].detail;
+      if (strncmp(d, "passed", 6) == 0 && (d[6] == '\0' || d[6] == '|'))
+         latest = WFE_CI_SUCCESS;
+      else if (strncmp(d, "pending", 7) == 0 && (d[7] == '\0' || d[7] == '|'))
+         latest = WFE_CI_PENDING;
+      else /* failed | error -> CI failure */
+      {
+         latest = WFE_CI_FAILURE;
+         if (out_fail_count)
+            (*out_fail_count)++;
+      }
+   }
+   free(evs);
+   return latest;
+}
+
 static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   switch (g_forge->ci_status(wfe_ctx_repo(ctx), pr_ref(ctx)))
+   /* PC2: prefer the webhook-recorded outcome; fall back to a live forge poll only
+    * when nothing has been recorded (e.g. a poll-only deployment). */
+   int fail_count = 0;
+   wfe_ci_status_t st = wfe_last_ci_outcome(wfe_ctx_work_item(ctx), &fail_count);
+   if (st == WFE_CI_NONE)
+      st = g_forge->ci_status(wfe_ctx_repo(ctx), pr_ref(ctx));
+
+   switch (st)
    {
    case WFE_CI_SUCCESS:
    {
@@ -649,7 +696,24 @@ static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_advanced(h, "", 0.0);
    }
    case WFE_CI_FAILURE:
+   {
+      /* Red-CI retry (PC2 / Q3): loop back to `implement` with the CI failure as new
+       * input, bounded per-work-item by AIMEE_AUTONOMY_CI_RETRY_MAX (default 2,
+       * counted from the recorded ci_event failures). On exhaustion, park for a human
+       * via the PC1 DEGRADED class rather than spinning the loop. */
+      const char *cv = getenv("AIMEE_AUTONOMY_CI_RETRY_MAX");
+      long cap = 2;
+      if (cv && cv[0])
+      {
+         char *e = NULL;
+         long v = strtol(cv, &e, 10);
+         if (e && *e == '\0' && v > 0)
+            cap = v;
+      }
+      if (fail_count >= cap)
+         return wfe_step_failed_class(WFE_FAIL_DEGRADED, 0); /* park pending_human */
       return wfe_step_looped();
+   }
    default: /* PENDING or NONE/unknown -> park, never advance */
       return wfe_step_pending(WFE_PAUSE_CI_PENDING);
    }

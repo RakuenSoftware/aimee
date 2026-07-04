@@ -58,6 +58,12 @@ int db1_work_item_get(const char *work_item_id, db1_work_item_t *out);
  * (e.g. resume an interactive work-item after its lease was reclaimed). */
 int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, char *out, size_t n);
 
+/* Resolve a work-item id from its forge PR ref (the value stored by
+ * db1_work_item_set_pr_ref) — used by the CI-event webhook to route an inbound CI
+ * outcome to its run. Returns 1 + fills out on a unique match, 0 if none, -1 on a
+ * bad arg / db error. pr_ref must be non-empty. */
+int db1_work_item_id_by_pr_ref(const char *pr_ref, char *out, size_t n);
+
 /* Move to a new stage + update content_hash (state unchanged). */
 int db1_work_item_set_stage(const char *work_item_id, const char *stage, const char *content_hash);
 /* Record the forge PR ref opened for this work item (set when pr.open advances),

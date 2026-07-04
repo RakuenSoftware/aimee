@@ -146,7 +146,11 @@ typedef struct
  *     best such neighbour. The gain is EXACT INTEGER arithmetic (compared as
  *     2m*k_in - k_i*sigma_tot, gamma=1) so it is permutation-invariant — no
  *     floating point, no summation-order sensitivity. (A node only re-isolates at
+<<<<<<< Updated upstream
  *     initialization; a merged node staying by default keeps its current
+=======
+ *     initialization; a merged node returning by default lands in its current
+>>>>>>> Stashed changes
  *     community — standard single-level behaviour.)
  *   - Iteration: repeat passes until a pass moves nothing (convergence) or
  *     KB_GRAPH_COMMUNITY_MAX_PASSES is reached.

@@ -4,7 +4,11 @@
  * is covered by unit-test-wfe-webapi; here we only need the symbols to resolve
  * without pulling the wfe_ definition model + DB1 store into the link. */
 #include "server/server_workflow_api.h"
+#include "wfe_approval.h" /* wfe_approval_present/record */
+#include "wfe_def.h"      /* wfe_def_t, wfe_gate_reject_t, wfe_def_free */
+#include "wfe_engine.h"   /* wfe_load_workflow */
 
+#include <stddef.h>
 #include <stdio.h>
 
 static int stub(char *resp, int cap)
@@ -112,4 +116,44 @@ int wfe_work_item_resolve(const char *workflow_name, const char *repo, char out_
 }
 void wfe_scheduler_notify(void)
 {
+}
+
+/* PC2: the /v1/dev/ci-event route entry keeps rh_workflow_gate live under LTO, so
+ * these wfe symbols must resolve in this minimal-link test (it does not exercise the
+ * workflow-gate route). Trivial stubs — the real logic is covered by unit-test-wfe-*. */
+int wfe_approval_present(const char *work_item_id, const char *gate, const char *content_hash)
+{
+   (void)work_item_id;
+   (void)gate;
+   (void)content_hash;
+   return 0;
+}
+int wfe_approval_record(const char *work_item_id, const char *gate, const char *content_hash,
+                        const char *actor)
+{
+   (void)work_item_id;
+   (void)gate;
+   (void)content_hash;
+   (void)actor;
+   return 0;
+}
+wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
+{
+   (void)name;
+   if (err && errlen)
+      err[0] = '\0';
+   return NULL;
+}
+void wfe_def_free(wfe_def_t *def)
+{
+   (void)def;
+}
+wfe_gate_reject_t wfe_gate_reject_target(const wfe_def_t *def, const char *gate_id,
+                                         char *out_target, size_t out_n)
+{
+   (void)def;
+   (void)gate_id;
+   if (out_target && out_n)
+      out_target[0] = '\0';
+   return WFE_GATE_REJECT_TERMINAL;
 }
