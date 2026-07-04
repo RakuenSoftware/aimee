@@ -236,8 +236,9 @@ int main(void)
       assert(r);
       assert(st.recognized && st.spilled && !strcmp(st.family, "test"));
       assert(st.final_bytes < st.raw_bytes);
-      assert(strstr(r, "tool_output_get")); /* retrieval pointer present */
-      assert(strstr(r, st.spill_ref));
+      assert(strstr(r, "condensed by aimee")); /* recovery pointer present */
+      assert(strstr(r, st.spill_ref));         /* references the spill file */
+      assert(strstr(r, dir));                  /* the catable full path */
       /* the spill file exists + holds the FULL raw */
       char spath[512];
       snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);

@@ -1,6 +1,9 @@
 #include "aimee.h"
 #include "util.h"
 #include "agent_tools.h"
+#include "aimee_home.h"
+#include "tool_condense.h"
+#include "log.h"
 #include "agent_tools_internal.h"
 #include "agent_source_authority.h"
 #include "process_mgr.h"
@@ -990,9 +993,37 @@ char *tool_bash(const char *command, int timeout_ms)
    }
    out_buf[out_len] = '\0';
    err_buf[err_len] = '\0';
-   /* Compress output to fit token budget (#4) */
-   char *compressed_out = agent_compress_tool_result(out_buf, out_len, "bash");
-   char *compressed_err = agent_compress_tool_result(err_buf, err_len, "bash");
+
+   /* Command-aware condensation (reduce_command_filter, default off): for a RECOGNIZED
+    * command, deterministically condense the output (test failures kept, passes elided)
+    * and spill the full raw so the delegate can read it back. Fail-open: any miss/decline
+    * returns NULL and we fall through to the size-based agent_compress_tool_result. */
+   char *cond_out = NULL, *cond_err = NULL;
+   {
+      config_t tccfg;
+      if (config_load(&tccfg) == 0 && tool_condense_enabled(&tccfg))
+      {
+         char spill_dir[600];
+         const char *home = aimee_home();
+         if (home && home[0] &&
+             snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) < (int)sizeof spill_dir)
+         {
+            (void)mkdir(spill_dir, 0700); /* idempotent; 0700 per-user */
+            tc_stats_t st;
+            cond_out = tool_condense_apply(&tccfg, command, exit_code, out_buf, spill_dir, &st);
+            if (cond_out)
+               aimee_log(LOG_INFO, "tool_condense", "bash stdout condensed %ld->%ld (%s)",
+                         st.raw_bytes, st.final_bytes, st.family);
+            cond_err = tool_condense_apply(&tccfg, command, exit_code, err_buf, spill_dir, NULL);
+         }
+      }
+   }
+   /* Compress output to fit token budget (#4) — the command-aware condensed form when we
+    * produced one, else the size-based fallback. */
+   char *compressed_out =
+       cond_out ? cond_out : agent_compress_tool_result(out_buf, out_len, "bash");
+   char *compressed_err =
+       cond_err ? cond_err : agent_compress_tool_result(err_buf, err_len, "bash");
 
    /* Build JSON result */
    cJSON *result = cJSON_CreateObject();

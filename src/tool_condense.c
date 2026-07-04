@@ -850,8 +850,11 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
 
    sb_t out = {0};
    sb_adds(&out, cond);
-   char ptr[96];
-   snprintf(ptr, sizeof ptr, "\n... full output (%ld bytes): tool_output_get %s", rawlen, ref);
+   char ptr[1600];
+   snprintf(ptr, sizeof ptr,
+            "\n[output condensed by aimee — %ld bytes total; the full, unfiltered output is "
+            "at %s/%s.out — read it if you need a passing case or elided detail]",
+            rawlen, spill_dir, ref);
    sb_adds(&out, ptr);
    free(cond);
    char *final = sb_finish(&out);
