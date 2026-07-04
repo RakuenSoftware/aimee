@@ -1303,6 +1303,153 @@ const char *config_default_dir(void)
    return "/tmp";
 }
 
+/* ── db2 governance stubs (decision_log + audit read) for kb_http_governance.o ─
+ * Note: we do NOT include db2/artifacts.h (it re-declares db2_artifact_* which
+ * this file already stubs with different signatures). Mirror just the audit row
+ * struct — layout must match db2/artifacts.h. */
+#include "db2/decision_log.h"
+typedef struct
+{
+   char id[64];
+   char target_surface[64];
+   char target_id[160];
+   char operator_id[128];
+   char scope_kind[32];
+   char scope_id[128];
+   char applied_at[32];
+   double applied_confidence;
+   int flagged_for_review;
+} db2_audit_event_row_t;
+int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
+                         db2_audit_event_row_t *out, int max);
+static void fill_decision(db2_decision_log_row_t *d, int64_t id)
+{
+   memset(d, 0, sizeof(*d));
+   d->id = id;
+   snprintf(d->subject, sizeof(d->subject), "policy:x");
+   snprintf(d->options, sizeof(d->options), "a|b");
+   snprintf(d->chosen, sizeof(d->chosen), "a");
+   snprintf(d->status, sizeof(d->status), "active");
+   snprintf(d->created_at, sizeof(d->created_at), "2026-07-04 00:00:00");
+}
+int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                 db2_decision_log_row_t *out, int max)
+{
+   (void)subject;
+   (void)limit;
+   if (!out || max < 1)
+      return -1;
+   if (status && strcmp(status, "active") == 0)
+      return 0; /* create's conflict pre-check sees no active decision */
+   fill_decision(&out[0], 5);
+   return 1;
+}
+int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
+{
+   if (id != 7)
+      return -1;
+   fill_decision(out, 7);
+   return 0;
+}
+int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id)
+{
+   (void)linked_policy_id;
+   /* "policy:taken" already has an active decision (id 5); everything else free. */
+   return (subject && strcmp(subject, "policy:taken") == 0) ? 5 : 0;
+}
+int db2_decision_log_record(const char *subject, const char *options, const char *chosen,
+                            const char *rationale, const char *author, int64_t linked_policy_id,
+                            const char *revisit_when, int64_t supersedes_id,
+                            db2_decision_log_row_t *out)
+{
+   (void)options;
+   (void)chosen;
+   (void)rationale;
+   (void)author;
+   (void)linked_policy_id;
+   (void)revisit_when;
+   (void)supersedes_id;
+   if (!subject || !subject[0])
+      return -1;
+   fill_decision(out, 8);
+   snprintf(out->subject, sizeof(out->subject), "%s", subject);
+   return 0;
+}
+int db2_decision_log_set_outcome(int64_t id, const char *outcome)
+{
+   (void)outcome;
+   return id == 7 ? 0 : -1;
+}
+int db2_decision_log_set_status(int64_t id, const char *status)
+{
+   (void)status;
+   return id == 7 ? 0 : -1;
+}
+int db2_decision_log_set_revisit(int64_t id, const char *revisit_when)
+{
+   (void)revisit_when;
+   return id == 7 ? 0 : -1;
+}
+int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
+                         db2_audit_event_row_t *out, int max)
+{
+   (void)until;
+   (void)scope_kind;
+   (void)limit;
+   if (!since || !since[0] || !out || max < 1)
+      return -1;
+   memset(&out[0], 0, sizeof(out[0]));
+   snprintf(out[0].id, sizeof(out[0].id), "evt-1");
+   snprintf(out[0].target_surface, sizeof(out[0].target_surface), "memory");
+   snprintf(out[0].applied_at, sizeof(out[0].applied_at), "2026-07-04 12:00:00");
+   return 1;
+}
+
+static void test_governance_routes(void)
+{
+   char buf[65536];
+   int s;
+   s = kb_http_route_ex("GET", "/v1/decisions", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"decisions\"") && strstr(buf, "\"subject\":\"policy:x\""));
+   s = kb_http_route_ex("GET", "/v1/decisions/7", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"supersede_chain\""));
+   s = kb_http_route_ex("GET", "/v1/decisions/999", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 404);
+   const char *cbody = "{\"subject\":\"policy:new\",\"options\":\"a|b\",\"chosen\":\"a\"}";
+   s = kb_http_route_ex("POST", "/v1/decisions", NULL, NULL, NULL, cbody, (int)strlen(cbody), buf,
+                        sizeof(buf));
+   assert(s == 201 && strstr(buf, "\"subject\":\"policy:new\""));
+   s = kb_http_route_ex("POST", "/v1/decisions", NULL, NULL, NULL, "{}", 2, buf, sizeof(buf));
+   assert(s == 400);
+   /* empty subject -> 400 */
+   s = kb_http_route_ex("POST", "/v1/decisions", NULL, NULL, NULL,
+                        "{\"subject\":\"\",\"options\":\"a\",\"chosen\":\"a\"}", 40, buf,
+                        sizeof(buf));
+   assert(s == 400);
+   /* one-active-per-scope conflict -> 409 */
+   const char *dup = "{\"subject\":\"policy:taken\",\"options\":\"a|b\",\"chosen\":\"a\"}";
+   s = kb_http_route_ex("POST", "/v1/decisions", NULL, NULL, NULL, dup, (int)strlen(dup), buf,
+                        sizeof(buf));
+   assert(s == 409 && strstr(buf, "\"active_id\":5"));
+   /* invalid status value -> 400 */
+   s = kb_http_route_ex("POST", "/v1/decisions/7/status", NULL, NULL, NULL,
+                        "{\"status\":\"bogus\"}", 18, buf, sizeof(buf));
+   assert(s == 400);
+   /* trailing path segment must not dispatch to an action -> 400 */
+   s = kb_http_route_ex("POST", "/v1/decisions/7/supersede/extra", NULL, NULL, NULL, "{}", 2, buf,
+                        sizeof(buf));
+   assert(s == 400);
+   const char *obody = "{\"outcome\":\"good\"}";
+   s = kb_http_route_ex("POST", "/v1/decisions/7/outcome", NULL, NULL, NULL, obody,
+                        (int)strlen(obody), buf, sizeof(buf));
+   assert(s == 200);
+   s = kb_http_route_ex("GET", "/v1/audit/actions", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 400);
+   s = kb_http_route_ex("GET", "/v1/audit/actions", "since=2026-07-01", NULL, NULL, NULL, 0, buf,
+                        sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"actions\"") && strstr(buf, "evt-1"));
+}
+
 static void test_accounts_routes(void)
 {
    char buf[65536];
@@ -3855,6 +4002,7 @@ int main(void)
    test_capabilities();
    test_console_overview();
    test_accounts_routes();
+   test_governance_routes();
    test_intelligence_calibration_readiness();
    test_intelligence_demotion_check();
    test_intelligence_bandit_export();

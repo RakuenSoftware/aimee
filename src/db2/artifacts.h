@@ -103,6 +103,27 @@ extern "C"
                              double applied_confidence, int flagged_for_review,
                              const char *before_json, const char *after_json);
 
+   /* Read-side projection of audit_events for the console action feed. The
+    * free-text before/after snapshots are intentionally NOT included (redaction). */
+   typedef struct
+   {
+      char id[64];
+      char target_surface[64];
+      char target_id[160];
+      char operator_id[128];
+      char scope_kind[32];
+      char scope_id[128];
+      char applied_at[32];
+      double applied_confidence;
+      int flagged_for_review;
+   } db2_audit_event_row_t;
+
+   /* List audit events applied within [since, until] (since is REQUIRED — no
+    * full-table scans), optionally filtered by scope_kind, most-recent-first.
+    * Returns the count written, or -1 (incl. a missing `since`). */
+   int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
+                            db2_audit_event_row_t *out, int max);
+
    /* Count artifacts matching kind and state (NULL = any).
     * Returns count >= 0 on success, -1 on error. */
    int db2_artifact_count(const char *kind, const char *state);

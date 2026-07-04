@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 52
+Total endpoints: 56
 
 ## Endpoints
 
@@ -49,6 +49,22 @@ Responses:
 - `200` — Artifact links
 - `401` — Unauthorized
 - `404` — Artifact not found
+
+### `GET /v1/audit/actions`
+
+Policy-verdict action audit feed (console)
+
+Requires a `since` time-window bound; optional `until`, `scope_kind`, `limit`.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `since` | query | yes | string |  |
+
+Responses:
+
+- `200` — Audit action list
+- `400` — Missing required time-window
+- `401` — Unauthorized
 
 ### `GET /v1/capabilities`
 
@@ -264,6 +280,43 @@ Responses:
 - `200` — Overview envelope
 - `401` — Unauthorized
 - `403` — Forbidden (credential not permitted for this route)
+
+### `GET /v1/decisions`
+
+List governance decision records (console)
+
+Filter by subject/status; most-recent-first. Console-admin only.
+
+Responses:
+
+- `200` — Decision list
+- `401` — Unauthorized
+
+### `POST /v1/decisions`
+
+Author a decision record (console)
+
+Creates a decision; one active decision per (subject, linked_policy_id).
+A conflicting create returns 409 (supersede the active one instead).
+
+Responses:
+
+- `201` — Created decision
+- `400` — Bad request
+- `409` — Conflict — an active decision already exists for this scope
+
+### `GET /v1/decisions/{id}`
+
+Decision record + supersede chain (console)
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `id` | path | yes | integer |  |
+
+Responses:
+
+- `200` — Decision with supersede_chain
+- `404` — Not found
 
 ### `POST /v1/docs`
 

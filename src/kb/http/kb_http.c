@@ -27,6 +27,7 @@
 #include "kb_route_acl.h"
 #include "kb_http_console.h"
 #include "kb_http_accounts.h"
+#include "kb_http_governance.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
 #include "kb/http/openapi_data.h"
@@ -713,6 +714,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int ar = kb_http_accounts_route(method, path, query_string, out_buf, out_cap);
       if (ar >= 0)
          return ar;
+      int gr = kb_http_governance_route(method, path, query_string, body, out_buf, out_cap);
+      if (gr >= 0)
+         return gr;
    }
 
    /* POST /v1/enroll — the owner mints a one-time client enrollment (the HTTP

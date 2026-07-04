@@ -82,6 +82,19 @@ extern "C"
     * no outcome filter is applied. `limit <= 0` means no SQL LIMIT. */
    int db2_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out, int max);
 
+   /* List decisions filtered by subject and/or status (either NULL/empty = no
+    * filter), most-recent-first. Returns the count written, or -1. */
+   int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                    db2_decision_log_row_t *out, int max);
+
+   /* The id of the active decision for (subject, linked_policy_id) — the exact
+    * idx_dl_active_scope key — or 0 if none. For a precise pre-check 409. */
+   int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id);
+
+   /* Set a decision's status / revisit_when. Returns 0, or -1 if the id is absent. */
+   int db2_decision_log_set_status(int64_t id, const char *status);
+   int db2_decision_log_set_revisit(int64_t id, const char *revisit_when);
+
 #ifdef __cplusplus
 }
 #endif

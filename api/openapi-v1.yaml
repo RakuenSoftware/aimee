@@ -1057,6 +1057,81 @@ paths:
         "401":
           description: Unauthorized
 
+  /decisions:
+    get:
+      operationId: listDecisions
+      summary: List governance decision records (console)
+      description: Filter by subject/status; most-recent-first. Console-admin only.
+      responses:
+        "200":
+          description: Decision list
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+    post:
+      operationId: createDecision
+      summary: Author a decision record (console)
+      description: |
+        Creates a decision; one active decision per (subject, linked_policy_id).
+        A conflicting create returns 409 (supersede the active one instead).
+      responses:
+        "201":
+          description: Created decision
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad request
+        "409":
+          description: Conflict — an active decision already exists for this scope
+
+  /decisions/{id}:
+    get:
+      operationId: getDecision
+      summary: Decision record + supersede chain (console)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Decision with supersede_chain
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Not found
+
+  /audit/actions:
+    get:
+      operationId: listAuditActions
+      summary: Policy-verdict action audit feed (console)
+      description: Requires a `since` time-window bound; optional `until`, `scope_kind`, `limit`.
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit action list
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Missing required time-window
+        "401":
+          description: Unauthorized
+
   /intelligence/calibration/readiness:
     get:
       operationId: getIntelligenceCalibrationReadiness

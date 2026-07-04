@@ -631,6 +631,67 @@ int db2_audit_event_write(const char *id, const char *source_artifact_id,
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
+int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
+                         db2_audit_event_row_t *out, int max)
+{
+   if (!out || max <= 0 || !since || !since[0])
+      return -1; /* since is required: no unbounded full-table scans */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   if (limit <= 0 || limit > max)
+      limit = max;
+   char sql[512];
+   int pos = snprintf(sql, sizeof(sql),
+                      "SELECT id, target_surface, target_id, operator_id, scope_kind, scope_id,"
+                      " applied_at, applied_confidence, flagged_for_review"
+                      " FROM audit_events WHERE applied_at >= ?1");
+   int has_until = until && until[0];
+   int has_scope = scope_kind && scope_kind[0];
+   if (has_until)
+      pos += snprintf(sql + pos, sizeof(sql) - (size_t)pos, " AND applied_at <= ?2");
+   if (has_scope)
+      pos += snprintf(sql + pos, sizeof(sql) - (size_t)pos, " AND scope_kind = ?3");
+   snprintf(sql + pos, sizeof(sql) - (size_t)pos, " ORDER BY applied_at DESC LIMIT ?4");
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", since);
+   if (has_until)
+      aimee_pg_bind_text(st, "?2", until);
+   if (has_scope)
+      aimee_pg_bind_text(st, "?3", scope_kind);
+   aimee_pg_bind_int64(st, "?4", limit);
+
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      db2_audit_event_row_t *r = &out[n++];
+      memset(r, 0, sizeof(*r));
+      const char *c;
+      c = aimee_pg_column_text(st, 0);
+      snprintf(r->id, sizeof(r->id), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 1);
+      snprintf(r->target_surface, sizeof(r->target_surface), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 2);
+      snprintf(r->target_id, sizeof(r->target_id), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 3);
+      snprintf(r->operator_id, sizeof(r->operator_id), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 4);
+      snprintf(r->scope_kind, sizeof(r->scope_kind), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 5);
+      snprintf(r->scope_id, sizeof(r->scope_id), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 6);
+      snprintf(r->applied_at, sizeof(r->applied_at), "%s", c ? c : "");
+      r->applied_confidence = aimee_pg_column_double(st, 7);
+      r->flagged_for_review = (int)aimee_pg_column_int64(st, 8);
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int db2_artifact_count(const char *kind, const char *state)
 {
    void *conn = db2_conn();

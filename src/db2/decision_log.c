@@ -241,6 +241,99 @@ int db2_decision_log_set_outcome(int64_t id, const char *outcome)
    return (rc == AIMEE_PG_DONE && changes > 0) ? 0 : -1;
 }
 
+/* All columns in row_from_stmt order — keep in sync with that function. */
+#define DL_COLS                                                                                    \
+   "id, task_id, options, chosen, rationale, assumptions, outcome, created_at, status, "           \
+   "revisit_when, supersedes_id, subject, author, linked_policy_id"
+
+int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                 db2_decision_log_row_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   if (limit <= 0 || limit > max)
+      limit = max;
+   char sql[512];
+   int pos = snprintf(sql, sizeof(sql), "SELECT " DL_COLS " FROM decision_log WHERE 1=1");
+   int has_subject = subject && subject[0];
+   int has_status = status && status[0];
+   if (has_subject)
+      pos += snprintf(sql + pos, sizeof(sql) - (size_t)pos, " AND subject = ?1");
+   if (has_status)
+      pos += snprintf(sql + pos, sizeof(sql) - (size_t)pos, " AND status = ?2");
+   snprintf(sql + pos, sizeof(sql) - (size_t)pos, " ORDER BY created_at DESC, id DESC LIMIT ?3");
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   if (has_subject)
+      aimee_pg_bind_text(st, "?1", subject);
+   if (has_status)
+      aimee_pg_bind_text(st, "?2", status);
+   aimee_pg_bind_int64(st, "?3", limit);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      row_from_stmt(st, &out[n++]);
+   aimee_pg_finalize(st);
+   return n;
+}
+
+static int dl_update_field(int64_t id, const char *sql, const char *val)
+{
+   void *conn = db2_conn();
+   if (!conn || !val)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", val);
+   aimee_pg_bind_int64(st, "?2", id);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE && changes > 0) ? 0 : -1;
+}
+
+int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id)
+{
+   if (!subject || !subject[0])
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   char err[256] = "";
+   /* Matches idx_dl_active_scope exactly: (subject, linked_policy_id) WHERE active. */
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT id FROM decision_log WHERE subject = ?1 AND linked_policy_id = ?2"
+                        " AND status = 'active' LIMIT 1",
+                        err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", subject);
+   aimee_pg_bind_int64(st, "?2", linked_policy_id);
+   int64_t id = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return id;
+}
+
+int db2_decision_log_set_status(int64_t id, const char *status)
+{
+   return dl_update_field(id, "UPDATE decision_log SET status = ?1 WHERE id = ?2", status);
+}
+
+int db2_decision_log_set_revisit(int64_t id, const char *revisit_when)
+{
+   return dl_update_field(id, "UPDATE decision_log SET revisit_when = ?1 WHERE id = ?2",
+                          revisit_when);
+}
+
 int db2_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out, int max)
 {
    void *conn = db2_conn();
