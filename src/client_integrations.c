@@ -1042,6 +1042,18 @@ static void ensure_claude_code_hooks(const char *settings_path)
       }
    }
 
+   /* Session-level injection: the SessionStart hook is what delivers aimee's
+    * session brief (`aimee session-start` -> session_start_emit -> the persona
+    * principles/brief, the MCP-skill index, Rules, and Key Facts via
+    * build_session_context) as additionalContext. Without it the primary agent
+    * starts with NO aimee persona/skills/rules context -- the per-turn
+    * UserPromptSubmit + PreCompact hooks only re-prime memory RECALL, not the
+    * brief, so this is the seam that establishes identity. No matcher: it fires
+    * on startup/resume/clear AND compact, so the brief is re-injected after a
+    * compaction (which PreCompact's recall-only re-prime does not restore).
+    * session_start_emit gates its heavy startup work (db check, worktree
+    * checkout) on is_startup, so the non-startup sources stay cheap. */
+   ensure_aimee_event_hook(hooks, "SessionStart", "session-start", NULL, &dirty);
    /* Context pre-injection hooks: the P1 per-turn UserPromptSubmit envelope and
     * the P3 PreCompact re-prime. Both fire with no matcher and soft-fail, so
     * they never block a turn. */

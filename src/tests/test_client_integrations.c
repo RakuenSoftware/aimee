@@ -105,6 +105,25 @@ static void test_mcp_config_uses_resolved_command(void)
    cJSON_Delete(server);
 }
 
+/* 1 if hooks[event] has an entry whose command contains `needle`. */
+static int hook_event_has_cmd(cJSON *hooks, const char *event, const char *needle)
+{
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
+   if (!cJSON_IsArray(arr))
+      return 0;
+   for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+   {
+      cJSON *ha = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(arr, i), "hooks");
+      for (int j = 0; cJSON_IsArray(ha) && j < cJSON_GetArraySize(ha); j++)
+      {
+         cJSON *c = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(ha, j), "command");
+         if (cJSON_IsString(c) && strstr(c->valuestring, needle))
+            return 1;
+      }
+   }
+   return 0;
+}
+
 /* --- Test read_json_file --- */
 
 static void test_read_json_file_missing(void)
@@ -310,6 +329,15 @@ static void test_claude_hooks_create_post_hook_on_fresh_settings(void)
          break;
    }
    assert(found);
+
+   /* Regression: the SessionStart hook MUST be registered -- it is the seam that
+    * delivers aimee's session brief (persona principles/brief + MCP-skill index +
+    * Rules + Key Facts via `aimee session-start`). Its absence left the primary
+    * agent with no aimee persona/skills/rules context. The per-turn context hooks
+    * are registered alongside it. */
+   assert(hook_event_has_cmd(hooks, "SessionStart", "session-start"));
+   assert(hook_event_has_cmd(hooks, "UserPromptSubmit", "user-prompt-submit"));
+   assert(hook_event_has_cmd(hooks, "PreCompact", "pre-compact"));
    cJSON_Delete(root);
 
    char cmd[512];
