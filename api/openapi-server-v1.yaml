@@ -2725,6 +2725,31 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /session/brief:
+    post:
+      summary: Workspace-independent session brief for the remote thin client
+      description: >-
+        Assembles and returns the workspace-independent SessionStart brief
+        (persona principles + learned Rules + key facts) via build_session_context,
+        with none of the hooks/session_start workspace side-effects (no worktree
+        checkout, state persistence, or reindex) and no client filesystem access.
+        Returns a minimal versioned envelope so the thin client has a stable
+        contract. CAP_SESSION_READ.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Versioned brief envelope { schema_version, output }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema_version: { type: integer }
+                  output: { type: string }
   /tools/execute:
     post:
       summary: Execute a tool via the workspace plane (privileged)
