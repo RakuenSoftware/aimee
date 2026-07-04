@@ -1,6 +1,45 @@
 # Proposal: Config changes take effect immediately (live reload)
 
-- **State:** proposed — design (pending review). A config change made via `aimee config set`
+- **State:** ✅ **CORE COMPLETE — all core phases merged to `testing` (closed out
+  2026-07-04).** The central goal — a config change takes effect **immediately** on the
+  running server, with the few genuinely restart-bound settings surfaced honestly — is
+  delivered and **live-verified**. See **Implementation status** below for what shipped and
+  the carried follow-ups.
+
+## Implementation status
+
+| Phase | PR | Result |
+| --- | --- | --- |
+| Proposal | #1056 | This doc — 2 roundtable rounds, no blocking. |
+| **P1a** | #1057 | Reload core: config-snapshot **double-buffer + seqlock**, `config_reload()` with **validate-or-keep** + a content-hash no-op guard (torn-read stress-tested). Also fixed a pre-existing bug: `economizer.*` was ignored when a config had no `reduce:` block. |
+| **P1b** | #1059 | **Wired + live-verified:** `config set` → the same running server reflects it **immediately**; **SIGHUP reloads** instead of shutting down; `config_load` transparently returns the live snapshot in the server (disk-fresh read-modify-save for `config.set`), which also closed the pre-existing `g_config_cache` reader race. |
+| **P2** | #1062 | **Honesty layer:** `reload_class` (`hot`/`reappliable`/`restart`) per field + a **Live / Restart** verdict on `config set`/Settings. Table audited (endpoints/models/flags are per-request = HOT; the startup-bound minority `db2_url`/`kb_api_*`/`autonomy.*` = RESTART). |
+| **P3** | #1063 | **Re-applier registry** — a `hook(old, new)` invoked after a changed reload, the foundation for making bound state live. |
+| **P5** | (this) | Close-out. |
+
+**The core win:** aimee's config changes now take effect immediately for the per-request
+path (the majority of settings), and the user is told **Live** vs **Restart** for every
+`config set` instead of guessing. Notably, the P1a parse-bug fix alone already resolved the
+specific staleness that motivated this proposal (`economizer.aggressive`).
+
+**Carried follow-ups** (each a genuine, separate effort — not loose ends):
+1. **TLS cert live reload.** The TLS/`aimee.api.*` fields are **not** in the `config.set`
+   allowlist (only `kb_api_*` is), so there is no `config.set` trigger; live TLS reload is a
+   distinct SIGHUP-driven cert-re-read + listener `SSL_CTX` swap effort, using the P3 registry.
+2. **`autonomy.*` live** — reverted the env-`setenv` re-applier as a **POSIX/glibc data race**
+   against wfe's per-run `getenv`. Making it live safely needs wfe to read the thread-safe
+   snapshot instead of env — a wfe-boundary redesign (wfe is deliberately decoupled from
+   `config.h`). Stays `RESTART` until then.
+3. **Bearer-token rotation / plugin re-parse** — further P3 re-applier consumers.
+
+The proposal's original P3–P5 (re-appliers for every startup-bound field, TLS, close-out) is
+narrowed by reality: most fields were already made live by P1b (per-request readers), so only
+the small startup-bound minority needs re-appliers, and those (TLS, autonomy-via-wfe) are the
+carried efforts above.
+
+---
+
+- **Original design (as proposed):** A config change made via `aimee config set`
   or the web **Settings** page should take effect **immediately** on the running server, not
   "on the next server start." Where a setting genuinely cannot be re-applied live, the server
   says so **explicitly** at change time instead of silently deferring to a restart.
