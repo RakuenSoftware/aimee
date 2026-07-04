@@ -161,6 +161,23 @@ merged to `testing`, each roundtable-reviewed, all **default-safe / opt-in**:
   verify + retry-different-delegate → sequential-commit patch-coordinator → **mandatory
   aggregate verify** → **no silent partial advance** (any unit fail → park).
 
+Clarifications (from the closeout verification roundtable):
+- `DEGRADED` is a failure **class** that maps to the **park-human** disposition (the CI
+  retry-cap exhaustion parks for a human). `AIMEE_AUTONOMY_SKEPTICS=0` short-circuits the
+  adversarial gate to *pass* before the `refutes*2 < K` rule (so K=0 is "no review", never
+  a silent block).
+- **Aggregate verify** = the same mechanical `git_verify` (format=json, top-level
+  `verdict:passed`) run on the whole merged worktree after fan-out — plus the opt-in
+  adversarial gate. Fan-out is **sequential** (scheduler concurrency=1): units land as
+  successive commits on one branch, so there is no parallel-merge conflict; any
+  integration breakage is caught by the aggregate verify → loop/park, never a silent
+  partial advance.
+- The **live judge is fail-closed**: a missing/unreachable agent, a dispatch error, or an
+  unparseable verdict is treated as REFUTED (the gate blocks), mirroring the webhook's
+  fail-closed posture; and the judge worktree is hard-reset after each judgment so it
+  cannot mutate the change. The CI webhook dedupes on `(status, head_sha)` and the
+  scheduler's existing per-work-item single-flight serializes concurrent resumes.
+
 **Carried (ratified GA gates — NOT code I land autonomously):** the real
 seccomp/namespace/cgroup execution sandbox (hardware tier); branch protection on the
 forge; scoped/rotated forge creds + break-glass; multi-forge; the default-ON of the live
