@@ -516,31 +516,160 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
  * artifact. A failed dispatch loops (retry); fails closed if the repo is
  * unavailable. With no provider installed it preserves the prior freeze-only
  * behavior so the engine remains drivable without a live delegate. */
+/* A positive-long env with a default (0/garbage/negative -> default). */
+static long wfe_env_pos(const char *name, long def)
+{
+   const char *v = getenv(name);
+   if (!v || !v[0])
+      return def;
+   char *e = NULL;
+   long n = strtol(v, &e, 10);
+   return (e && *e == '\0' && n > 0) ? n : def;
+}
+
+/* Read `.aimee/units.json` (a JSON array of unit-task strings the coordinator wrote)
+ * from `wd`. Returns a NEW cJSON array (caller frees) or NULL if absent/invalid. */
+static cJSON *read_units_json(const char *wd)
+{
+   char path[1200];
+   if (snprintf(path, sizeof path, "%s/.aimee/units.json", wd) >= (int)sizeof path)
+      return NULL;
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   fseek(f, 0, SEEK_END);
+   long len = ftell(f);
+   fseek(f, 0, SEEK_SET);
+   if (len <= 0 || len > (1 << 20))
+   {
+      fclose(f);
+      return NULL;
+   }
+   char *buf = malloc((size_t)len + 1);
+   if (!buf)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t rd = fread(buf, 1, (size_t)len, f);
+   fclose(f);
+   buf[rd] = '\0';
+   cJSON *doc = cJSON_Parse(buf);
+   free(buf);
+   if (!doc)
+      return NULL;
+   /* accept either a bare array or {"units":[...]} */
+   cJSON *arr = cJSON_IsArray(doc) ? doc : cJSON_GetObjectItemCaseSensitive(doc, "units");
+   if (!cJSON_IsArray(arr))
+   {
+      cJSON_Delete(doc);
+      return NULL;
+   }
+   if (arr == doc)
+      return doc;
+   cJSON *detached = cJSON_Duplicate(arr, 1);
+   cJSON_Delete(doc);
+   return detached;
+}
+
+/* Engine-level fan-out (PC3b/Q2), gated by AIMEE_AUTONOMY_FANOUT. Decompose the plan
+ * into units via a coordinator delegate, then implement each unit SEQUENTIALLY (the
+ * scheduler is concurrency=1) with a per-unit mechanical verify and retry on a
+ * DIFFERENT delegate (bounded by AIMEE_AUTONOMY_UNIT_RETRY). Units land as sequential
+ * commits on the one work-item branch (the patch-coordinator merge is implicit). A
+ * decompose that yields nothing falls back to a SINGLE unit (the whole plan) — which
+ * still runs the mandatory per-unit + aggregate tiers (no verification bypass).
+ * Returns 0 if every unit passed its per-unit verify (caller then runs the mandatory
+ * aggregate gate), -1 if any unit permanently failed (caller parks — NO silent partial
+ * advance). *cost accumulates every dispatch. */
+static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost)
+{
+   /* 1. Decompose (coordinator writes .aimee/units.json + commits; do not implement). */
+   char c[64] = "";
+   (void)wfe_delegate_dispatch(
+       wd, "architect", "$random",
+       "Decompose the approved plan into a SMALL number of INDEPENDENT implementation units. "
+       "Write ONLY a JSON array of concise imperative unit-task strings to .aimee/units.json in "
+       "the repo root, then commit that file. Do NOT implement anything else.",
+       NULL, c, cost);
+
+   cJSON *units = read_units_json(wd);
+   cJSON *fallback = NULL;
+   int n_units = units ? cJSON_GetArraySize(units) : 0;
+   if (n_units <= 0)
+   {
+      /* single-unit fallback = the whole plan (still fully verified below). */
+      fallback = cJSON_CreateArray();
+      cJSON_AddItemToArray(fallback, cJSON_CreateString("Implement the entire approved plan."));
+      units = fallback;
+      n_units = 1;
+   }
+
+   long retry_max = wfe_env_pos("AIMEE_AUTONOMY_UNIT_RETRY", 2);
+   int failed = 0;
+   for (int i = 0; i < n_units && !failed; i++)
+   {
+      const cJSON *u = cJSON_GetArrayItem(units, i);
+      const char *utext = (cJSON_IsString(u) && u->valuestring) ? u->valuestring : "";
+      char prompt[2048];
+      snprintf(prompt, sizeof prompt,
+               "Implement ONLY this unit of the approved plan on the work-item branch, run "
+               "`aimee git verify`, fix any failures, then commit. UNIT: %s",
+               utext);
+      int ok = 0;
+      for (long attempt = 0; attempt <= retry_max && !ok; attempt++)
+      {
+         /* retry-DIFFERENT-delegate: the first attempt uses the pinned delegate;
+          * retries use $random so a fresh perspective takes over (Q2). */
+         const char *deleg = (attempt == 0) ? node_delegate(node) : "$random";
+         char uc[64] = "";
+         if (wfe_delegate_dispatch(wd, "engineer", deleg, prompt, NULL, uc, cost) < 0)
+            continue; /* dispatch failed -> next attempt */
+         if (wfe_implement_verify_ok(wd))
+            ok = 1;
+      }
+      if (!ok)
+         failed = 1; /* this unit could not be made to pass -> park (no partial advance) */
+   }
+   cJSON_Delete(units == fallback ? fallback : units);
+   return failed ? -1 : 0;
+}
+
 static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char wd[1024];
    resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(
-           wd, "engineer", node_delegate(node),
-           "Implement the approved plan on the work-item branch: split into units, delegate each, "
-           "VERIFY each with `aimee git verify` and fix any failures, then commit the accepted "
-           "work.",
-           NULL, commit, &cost) < 0)
+
+   if (getenv("AIMEE_AUTONOMY_FANOUT") && getenv("AIMEE_AUTONOMY_FANOUT")[0] == '1')
+   {
+      /* Manager loop (PC3b): decompose -> fan out engineer per unit -> per-unit verify
+       * + retry-different. A unit that never passes parks pending_human via DEGRADED
+       * (NO silent partial advance); the mandatory aggregate gate still runs below. */
+      if (run_fanout_units(wd, node, &cost) < 0)
+         return with_cost(wfe_step_failed_class(WFE_FAIL_DEGRADED, 0), cost);
+   }
+   else if (wfe_delegate_dispatch(
+                wd, "engineer", node_delegate(node),
+                "Implement the approved plan on the work-item branch: split into units, delegate "
+                "each, VERIFY each with `aimee git verify` and fix any failures, then commit the "
+                "accepted work.",
+                NULL, commit, &cost) < 0)
       return with_cost(wfe_step_looped(), cost);
+
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return with_cost(wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0), cost); /* worktree/git */
-   /* Mechanical verify gate (WP-1b): a unit only advances if it PASSES. A failed
-    * verdict loops back to implement (the engine bounds the retries via
-    * stage_attempt and parks max_attempts on exhaustion); a re-dispatched fresh
-    * engineer delegate has the verify tool to see + fix the findings. */
+   /* MANDATORY aggregate mechanical verify (WP-1b): the whole merged change must PASS
+    * (integration breakage from independently-verified units cannot advance). A failed
+    * verdict loops back (the engine bounds retries via stage_attempt, parks
+    * max_attempts on exhaustion); a re-dispatched fresh engineer sees + fixes findings. */
    if (!wfe_implement_verify_ok(wd))
       return with_cost(wfe_step_looped(), cost);
-   /* Adversarial gate (PC3/Q2): with AIMEE_AUTONOMY_SKEPTICS>0, a reviewer + N skeptic
-    * judgments must not refute the change. A refute loops back to implement (bounded
-    * like the mechanical gate). Tier OFF by default -> unchanged behavior. */
+   /* MANDATORY aggregate adversarial gate (PC3/Q2): with AIMEE_AUTONOMY_SKEPTICS>0, a
+    * reviewer + N skeptic judgments must not refute the merged change. A refute loops
+    * back (bounded). Tier OFF by default -> unchanged behavior. */
    if (!wfe_implement_adversarial_ok(wd))
       return with_cost(wfe_step_looped(), cost);
    char handle[80];
