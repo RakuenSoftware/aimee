@@ -3,10 +3,12 @@
  * enable gate. CORE layer: depends only on config.h + libc. */
 #include "tool_condense.h"
 
+#include <fcntl.h>
 #include <stdint.h>
-#include <stdio.h> /* snprintf, fopen */
+#include <stdio.h> /* snprintf */
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 int tool_condense_enabled(const config_t *cfg)
 {
@@ -681,6 +683,8 @@ char *tc_family_test_runner(int exit_code, const char *in)
       return NULL;
    }
 
+   /* Always keep the first HEAD lines (banner/session start) and the last TAIL lines
+    * (the end-of-run summary lives here); drop passing transcripts in between. */
    const size_t HEAD = 2, TAIL = 6;
    sb_t s = {0};
    int first = 1;
@@ -746,20 +750,33 @@ static void tc_hash_ref(const char *seed, const char *content, char out[40])
    snprintf(out, 40, "tc-%016llx", (unsigned long long)h);
 }
 
-/* Write the full raw output to <dir>/<ref>.out. Returns 0 on a fully-durable write,
- * -1 otherwise (the caller then passes through — never a condense without a backstop). */
+/* Write the full raw output to <dir>/<ref>.out. Returns 0 iff every byte was written,
+ * -1 otherwise (the caller then passes through — never a condense without a backstop).
+ * Opened O_NOFOLLOW (never follow a pre-planted symlink at the predictable path) + 0600.
+ * The ref is content-derived so re-writing an existing ref is idempotent (same bytes). */
 static int tc_spill_write(const char *dir, const char *ref, const char *content)
 {
    char path[1400];
    if (snprintf(path, sizeof path, "%s/%s.out", dir, ref) >= (int)sizeof path)
       return -1;
-   FILE *f = fopen(path, "wb");
-   if (!f)
+   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+   if (fd < 0)
       return -1;
-   size_t n = strlen(content);
-   size_t w = fwrite(content, 1, n, f);
-   /* fflush+fclose success + full write == durable enough for the backstop. */
-   return (fclose(f) == 0 && w == n) ? 0 : -1;
+   size_t n = strlen(content), off = 0;
+   int ok = 1;
+   while (off < n)
+   {
+      ssize_t w = write(fd, content + off, n - off);
+      if (w <= 0)
+      {
+         ok = 0;
+         break;
+      }
+      off += (size_t)w;
+   }
+   if (close(fd) != 0)
+      ok = 0;
+   return (ok && off == n) ? 0 : -1;
 }
 
 /* Does the recognized command denote a TEST-RUNNER invocation (the only S3 family)? */
