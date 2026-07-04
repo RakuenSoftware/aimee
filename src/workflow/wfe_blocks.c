@@ -683,9 +683,13 @@ static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
    /* PC2: prefer the webhook-recorded outcome; fall back to a live forge poll only
     * when nothing has been recorded (e.g. a poll-only deployment). */
    int fail_count = 0;
+   int from_recorded = 1;
    wfe_ci_status_t st = wfe_last_ci_outcome(wfe_ctx_work_item(ctx), &fail_count);
    if (st == WFE_CI_NONE)
+   {
+      from_recorded = 0;
       st = g_forge->ci_status(wfe_ctx_repo(ctx), pr_ref(ctx));
+   }
 
    switch (st)
    {
@@ -712,6 +716,12 @@ static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
       }
       if (fail_count >= cap)
          return wfe_step_failed_class(WFE_FAIL_DEGRADED, 0); /* park pending_human */
+      /* Poll-only path (no webhook events): record this failure so the per-work-item
+       * cap bounds it too. The webhook path already recorded its ci_event, so skip
+       * (avoids double-counting). */
+      if (!from_recorded)
+         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "ci_event", "ci-poll",
+                                 "failed|poll", "", 0);
       return wfe_step_looped();
    }
    default: /* PENDING or NONE/unknown -> park, never advance */

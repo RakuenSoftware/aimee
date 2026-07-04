@@ -128,7 +128,7 @@ int db1_work_item_id_by_pr_ref(const char *pr_ref, char *out, size_t n)
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   static const char *sql = "SELECT work_item_id FROM lifecycle_work_item WHERE pr_ref = ?";
+   static const char *sql = "SELECT work_item_id FROM lifecycle_work_item WHERE pr_ref = ? LIMIT 1";
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;

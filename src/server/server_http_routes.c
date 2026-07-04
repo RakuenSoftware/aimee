@@ -282,6 +282,14 @@ static int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap)
                "{\"error\":\"ci-event webhook disabled: AIMEE_CI_WEBHOOK_SECRET unset\"}");
       return 503; /* fail-closed */
    }
+   /* This route has no capability gate (a machine caller has no attested principal;
+    * the HMAC is its auth). Bound the body BEFORE parsing so an unauthenticated caller
+    * cannot drive unbounded JSON parsing — a CI event is tiny. */
+   if (rq->body_len > 8192)
+   {
+      snprintf(resp, cap, "{\"error\":\"ci-event body too large\"}");
+      return 413;
+   }
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    const char *pr_ref = body ? jo_cstr(body, "pr_ref") : NULL;
    const char *head_sha = body ? jo_cstr(body, "head_sha") : NULL;
@@ -295,6 +303,15 @@ static int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap)
       snprintf(resp, cap, "{\"error\":\"pr_ref, head_sha, status, signature required\"}");
       return 400;
    }
+   /* Bound the fields so the canonical HMAC message never SILENTLY TRUNCATES (a
+    * truncated HMAC input diverges from a client that signed the full fields ->
+    * confusing auth failures) and the dedup key stays well-formed. */
+   if (strlen(pr_ref) >= 256 || strlen(head_sha) >= 128 || strlen(status) >= 16)
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"pr_ref/head_sha/status too long\"}");
+      return 400;
+   }
    /* status enum (unknown -> 400) */
    if (strcmp(status, "passed") != 0 && strcmp(status, "failed") != 0 &&
        strcmp(status, "error") != 0 && strcmp(status, "pending") != 0)
@@ -303,7 +320,8 @@ static int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap)
       snprintf(resp, cap, "{\"error\":\"status must be passed|failed|error|pending\"}");
       return 400;
    }
-   /* integrity: HMAC over the canonical "pr_ref|head_sha|status" */
+   /* integrity: HMAC over the canonical "pr_ref|head_sha|status" (fields length-
+    * bounded above, so this cannot truncate). */
    char canon[512];
    snprintf(canon, sizeof canon, "%s|%s|%s", pr_ref, head_sha, status);
    char expect[65];
@@ -330,11 +348,15 @@ static int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap)
       snprintf(resp, cap, "{\"error\":\"work item unreadable\"}");
       return 404;
    }
-   /* dedup on (status, head_sha): a replayed event is recorded once (idempotent). */
+   /* dedup on (status, head_sha): a replayed event is recorded once (idempotent). The
+    * dedup prefix includes the TRAILING '|' delimiter so a head_sha that is a string
+    * prefix of another cannot false-positive as a duplicate. (A later event with a
+    * DIFFERENT status — e.g. a delayed "passed" after "failed" — is a distinct key, so
+    * it is recorded and wfe_last_ci_outcome's latest-wins read reflects it.) */
    char detail[600];
    snprintf(detail, sizeof detail, "%s|%s|%s", status, head_sha, log_url ? log_url : "");
    char dup_prefix[300];
-   snprintf(dup_prefix, sizeof dup_prefix, "%s|%s", status, head_sha);
+   snprintf(dup_prefix, sizeof dup_prefix, "%s|%s|", status, head_sha);
    int duplicate = 0;
    db1_lifecycle_event_t *evs = NULL;
    int nev = db1_lifecycle_event_list(wid, &evs);
