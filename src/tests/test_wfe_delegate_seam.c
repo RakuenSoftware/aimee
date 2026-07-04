@@ -97,6 +97,24 @@ static int mock_verify(const char *workdir, char *out, size_t n)
 }
 static const wfe_verify_provider_t MOCK_VERIFY = {mock_verify};
 
+/* ---- mock judge provider (PC3 adversarial gate). Scripted: g_judge_refutes[call]
+ * says whether the Nth judgment (reviewer first, then skeptics) refutes. ---- */
+static int g_judge_refutes[16];
+static int g_judge_call;
+static int g_judge_rc; /* -1 = judge could not run */
+static int mock_judge(const char *workdir, const char *lens, char *out, size_t n)
+{
+   (void)workdir;
+   (void)lens;
+   if (g_judge_rc != 0)
+      return -1;
+   int r = (g_judge_call < 16) ? g_judge_refutes[g_judge_call] : 1;
+   g_judge_call++;
+   snprintf(out, n, "{\"refuted\":%s}", r ? "true" : "false");
+   return 0;
+}
+static const wfe_judge_provider_t MOCK_JUDGE = {mock_judge};
+
 static const char *WF = "name: ds\nstart: au\nnodes:\n"
                         "  - id: au\n    block: author.proposal\n    next: pr\n"
                         "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n";
@@ -194,6 +212,49 @@ int main(void)
       assert(wfe_implement_verify_ok(".") == 0);
 
       wfe_set_verify_provider(NULL);
+   }
+
+   /* D2: adversarial gate (PC3) — reviewer + N skeptics; config-gated, majority-refute
+    *     rejects, fail-closed without a provider. */
+   {
+      unsetenv("AIMEE_AUTONOMY_SKEPTICS");
+      assert(wfe_implement_adversarial_ok(".") == 1); /* tier off -> pass */
+
+      setenv("AIMEE_AUTONOMY_SKEPTICS", "3", 1);
+      wfe_set_judge_provider(NULL);
+      assert(wfe_implement_adversarial_ok(".") == 0); /* on + no provider -> fail closed */
+
+      wfe_set_judge_provider(&MOCK_JUDGE);
+      g_judge_rc = 0;
+      /* reviewer accept + 0/3 skeptics refute -> accept */
+      g_judge_call = 0;
+      g_judge_refutes[0] = 0; /* reviewer */
+      g_judge_refutes[1] = g_judge_refutes[2] = g_judge_refutes[3] = 0;
+      assert(wfe_implement_adversarial_ok(".") == 1);
+      /* reviewer accept + 1/3 skeptics refute (< majority 2) -> accept */
+      g_judge_call = 0;
+      g_judge_refutes[0] = 0;
+      g_judge_refutes[1] = 1;
+      g_judge_refutes[2] = g_judge_refutes[3] = 0;
+      assert(wfe_implement_adversarial_ok(".") == 1);
+      /* reviewer accept + 2/3 skeptics refute (>= majority) -> reject */
+      g_judge_call = 0;
+      g_judge_refutes[0] = 0;
+      g_judge_refutes[1] = g_judge_refutes[2] = 1;
+      g_judge_refutes[3] = 0;
+      assert(wfe_implement_adversarial_ok(".") == 0);
+      /* reviewer REFUTES -> reject regardless of skeptics */
+      g_judge_call = 0;
+      g_judge_refutes[0] = 1;
+      assert(wfe_implement_adversarial_ok(".") == 0);
+      /* judge cannot run -> fail closed */
+      g_judge_rc = -1;
+      g_judge_call = 0;
+      g_judge_refutes[0] = 0;
+      assert(wfe_implement_adversarial_ok(".") == 0);
+
+      wfe_set_judge_provider(NULL);
+      unsetenv("AIMEE_AUTONOMY_SKEPTICS");
    }
 
    /* E: per-work-item git worktree (F2) — ensure creates + persists + is

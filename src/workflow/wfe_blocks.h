@@ -96,6 +96,33 @@ typedef struct
 /* Install a verify provider (NULL = implement does not gate on verification). */
 void wfe_set_verify_provider(const wfe_verify_provider_t *p);
 
+/* ---- Adversarial judge seam for the implement manager loop (PC3 / Q2).
+ * On top of the mechanical verify, implement can run a REVIEW + N adversarial
+ * SKEPTIC judgments of the produced change. The wfe library cannot dispatch judge
+ * delegates itself (module-boundary), so it runs them through this registered hook.
+ * The server registers a live provider that dispatches a reviewer/skeptic delegate
+ * and returns its verdict; tests inject a mock. Config-gated (AIMEE_AUTONOMY_SKEPTICS,
+ * default 0 = OFF) so default behavior is unchanged; when ON and no provider is
+ * installed, the tier FAILS CLOSED (refuted). ---- */
+typedef struct
+{
+   /* Judge the change in `workdir` under `lens` ("reviewer" | "skeptic") — the
+    * skeptic lens is prompted to REFUTE. Writes a verdict JSON {"refuted":bool,...}
+    * into out_verdict. Returns 0 if a verdict was produced, -1 if the judge could not
+    * run (treated as REFUTED — fail closed). */
+   int (*judge)(const char *workdir, const char *lens, char *out_verdict, size_t n);
+} wfe_judge_provider_t;
+
+/* Install a judge provider (NULL restores the default fail-closed provider). */
+void wfe_set_judge_provider(const wfe_judge_provider_t *p);
+
+/* The implement ADVERSARIAL gate (PC3): with AIMEE_AUTONOMY_SKEPTICS=K>0, run a
+ * reviewer + K skeptic judgments; accept (1) only if the reviewer did not refute AND
+ * fewer than a majority of skeptics refuted. K==0 -> 1 (tier off, unchanged behavior).
+ * K>0 with no judge provider / an unrunnable judge -> 0 (fail closed). Exposed for the
+ * unit test. */
+int wfe_implement_adversarial_ok(const char *workdir);
+
 /* The implement verify gate: 1 = advance ONLY when the top-level verdict is an
  * explicit "passed"; 0 = block in every other case (no provider, gate-unrunnable,
  * unparseable, or any non-pass verdict) -> FAIL CLOSED. Exposed for the unit test. */

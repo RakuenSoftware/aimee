@@ -327,6 +327,60 @@ void wfe_set_verify_provider(const wfe_verify_provider_t *p)
    g_verify = p;
 }
 
+static const wfe_judge_provider_t *g_judge = NULL;
+
+void wfe_set_judge_provider(const wfe_judge_provider_t *p)
+{
+   g_judge = p;
+}
+
+/* Run one judgment under `lens`; returns 1 if it REFUTED the change (incl. an
+ * unrunnable judge / unparseable verdict -> fail closed = refuted). */
+static int wfe_judge_refuted(const char *workdir, const char *lens)
+{
+   if (!g_judge || !g_judge->judge)
+      return 1; /* no provider -> fail closed */
+   char verdict[4096] = "";
+   if (g_judge->judge(workdir, lens, verdict, sizeof verdict) != 0)
+      return 1; /* could not run -> refuted */
+   cJSON *doc = cJSON_Parse(verdict);
+   if (!doc)
+      return 1; /* unparseable -> refuted */
+   const cJSON *rf = cJSON_GetObjectItemCaseSensitive(doc, "refuted");
+   /* Default to REFUTED unless the verdict explicitly says refuted:false. */
+   int refuted = !(rf && (cJSON_IsFalse(rf) || (cJSON_IsNumber(rf) && rf->valuedouble == 0)));
+   cJSON_Delete(doc);
+   return refuted;
+}
+
+int wfe_implement_adversarial_ok(const char *workdir)
+{
+   const char *sv = getenv("AIMEE_AUTONOMY_SKEPTICS");
+   long k = 0;
+   if (sv && sv[0])
+   {
+      char *e = NULL;
+      long v = strtol(sv, &e, 10);
+      if (e && *e == '\0' && v >= 0)
+         k = v;
+   }
+   if (k <= 0)
+      return 1; /* tier OFF (default) -> unchanged behavior */
+   if (!g_judge || !g_judge->judge)
+      return 0; /* tier ON but no judge -> fail closed */
+   /* Review lens: a refute blocks. */
+   if (wfe_judge_refuted(workdir, "reviewer"))
+      return 0;
+   /* N skeptics (each prompted to refute); accept only if fewer than a majority
+    * refute (a tie of an even K is a REJECT — bias toward safety). */
+   int refutes = 0;
+   for (long i = 0; i < k; i++)
+      if (wfe_judge_refuted(workdir, "skeptic"))
+         refutes++;
+   long majority = k / 2 + 1;
+   return (refutes >= majority) ? 0 : 1;
+}
+
 /* Run the mechanical verify gate on the implemented worktree. Returns 1 to ADVANCE
  * (only when the top-level verdict is an explicit "passed"); 0 to BLOCK in every
  * other case — FAIL CLOSED. Blocking cases: no provider installed (a missing safety
@@ -474,6 +528,11 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
     * stage_attempt and parks max_attempts on exhaustion); a re-dispatched fresh
     * engineer delegate has the verify tool to see + fix the findings. */
    if (!wfe_implement_verify_ok(wd))
+      return with_cost(wfe_step_looped(), cost);
+   /* Adversarial gate (PC3/Q2): with AIMEE_AUTONOMY_SKEPTICS>0, a reviewer + N skeptic
+    * judgments must not refute the change. A refute loops back to implement (bounded
+    * like the mechanical gate). Tier OFF by default -> unchanged behavior. */
+   if (!wfe_implement_adversarial_ok(wd))
       return with_cost(wfe_step_looped(), cost);
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
