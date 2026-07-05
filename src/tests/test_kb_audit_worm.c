@@ -3,6 +3,7 @@
  * that the row hash is BYTE-IDENTICAL to the aimee-server store (shared
  * audit_worm_chain — the cross-engine vector). */
 #include "../db2/db2_test_shim.h"
+#include "artifacts.h" /* db2_audit_event_write — the central kb audit seam */
 #include "audit_worm_chain.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -66,12 +67,40 @@ static void test_tamper_detected(void)
    printf("  PASS: kb_tamper_detected (%s)\n", err);
 }
 
+/* S6: a governed kb action written through the central db2_audit_event_write seam
+ * is dual-written into the WORM store when the capture gate is on. */
+static void test_capture_via_seam(void)
+{
+   /* audit_events.source_artifact_id FKs artifacts(id) — seed the artifacts. */
+   assert(db2_artifact_write("src-cap", "doc", "proposed", "entity", "", "curator", 1.0, "{}") ==
+          0);
+   assert(db2_artifact_write("src-cap2", "doc", "proposed", "user", "", "user", 1.0, "{}") == 0);
+
+   db2_kb_audit_worm_set_enabled(1);
+   long before = db2_kb_audit_count();
+   int rc = db2_audit_event_write("aid-cap", "src-cap", "kb.curator.promote_entity", "tgt-cap",
+                                  "curator", "entity", "", 1.0, 0, NULL, "{}");
+   assert(rc == 0);
+   assert(db2_kb_audit_count() == before + 1); /* captured into WORM */
+   char err[160];
+   assert(db2_kb_audit_verify_chain(err, sizeof err) == 0);
+   /* off gate = no capture */
+   db2_kb_audit_worm_set_enabled(0);
+   long n = db2_kb_audit_count();
+   db2_audit_event_write("aid-cap2", "src-cap2", "docs", "tgt2", "user", "user", "", 1.0, 0, NULL,
+                         "{}");
+   assert(db2_kb_audit_count() == n);
+   db2_kb_audit_worm_set_enabled(1);
+   printf("  PASS: kb_capture_via_seam\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
    test_append_and_verify();
    test_cross_engine_vector();
    test_worm_triggers();
+   test_capture_via_seam();
    test_tamper_detected();
    db2_test_shim_close();
    printf("kb_audit_worm: all tests passed\n");
