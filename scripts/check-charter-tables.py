@@ -26,6 +26,13 @@ import tempfile
 
 CHARTER_TABLES = ("artifacts", "artifact_citations", "artifact_links", "audit_events")
 
+# Sanctioned per-service WORM audit stores (the auditable-worm-audit-store
+# initiative, docs/proposals/pending/auditable-worm-audit-store.md): append-only,
+# hash-chained, tamper-evident stores that are DELIBERATELY separate from the
+# charter audit_events — they are the audit-of-record, not a parallel artifact
+# store. Exempt from the rogue-store check.
+SANCTIONED_AUDIT_TABLES = ("kb_audit_event",)
+
 CREATE_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)", re.IGNORECASE)
 
 # A non-charter table is "rogue" if its name embeds an artifact/citation/audit
@@ -54,7 +61,7 @@ def check(db2_schema: pathlib.Path, db1_schema: pathlib.Path) -> int:
             errors.append(f"charter table '{t}' must live in DB2 only, found in {db1_schema}")
 
     for t in set(db2_tables) | set(db1_tables):
-        if t in CHARTER_TABLES:
+        if t in CHARTER_TABLES or t in SANCTIONED_AUDIT_TABLES:
             continue
         if ROGUE_RE.search(t):
             errors.append(

@@ -306,9 +306,22 @@ static void test_detail_capped(void)
    printf("  test_detail_capped: ok\n");
 }
 
+/* Cross-engine vector: the server (SQLite) store and the kb (Postgres) store hash
+ * a row identically (both call audit_worm_row_hash). This literal is asserted in
+ * test_kb_audit_worm.c too — the two must never drift. */
+static void test_cross_engine_vector(void)
+{
+   char h[65];
+   audit_worm_row_hash(1, "primary", "u", "tool.read", "v1-1", "allow", "", "{}",
+                       AUDIT_WORM_GENESIS_PREV, h);
+   assert(strcmp(h, "3c2adf68ae8f1b704780ffedd32522e06468e34a69205240fbb358a7122ff986") == 0);
+   printf("  test_cross_engine_vector: ok\n");
+}
+
 int main(void)
 {
    mk_tmpdir();
+   test_cross_engine_vector();
    test_metric_snapshot();
    test_detail_capped();
    test_read_page();

@@ -32,19 +32,12 @@
 
 #include <stddef.h>
 
+#include "audit_worm_chain.h" /* AUDIT_WORM_DOMAIN/GENESIS_PREV/DETAIL_MAX + shared chain fns */
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-/* Domain-separation + algorithm tag folded into every row_hash. Bump to version
- * the canonicalization/hash. */
-#define AUDIT_WORM_DOMAIN "aimee.audit.worm.v1"
-/* Genesis prev_hash: 32 zero bytes as 64 lowercase hex chars. */
-#define AUDIT_WORM_GENESIS_PREV "0000000000000000000000000000000000000000000000000000000000000000"
-/* Hard cap on a row's detail payload (bytes); oversized detail is truncated with a
- * marker folded into the hash (R2-8). */
-#define AUDIT_WORM_DETAIL_MAX 16384
 
    /* Open (creating if needed) the WORM store at $AIMEE_HOME/audit/worm-live.db,
     * apply the schema + WORM triggers, and cache the handle. Idempotent. Returns 0

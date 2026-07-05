@@ -14,6 +14,7 @@
 
 #include "aimee_home.h"
 #include "audit_worm.h"
+#include "audit_worm_chain.h"
 #include "cJSON.h"
 #include "dstr.h"
 #include "log.h"
@@ -47,165 +48,20 @@ static const char *WORM_SCHEMA_SQL =
     "CREATE TRIGGER IF NOT EXISTS audit_event_no_delete BEFORE DELETE ON audit_event"
     "  BEGIN SELECT RAISE(ABORT, 'WORM: audit_event is append-only'); END;";
 
-static void hex32(const unsigned char in[32], char out[65])
-{
-   static const char *h = "0123456789abcdef";
-   for (int i = 0; i < 32; i++)
-   {
-      out[2 * i] = h[in[i] >> 4];
-      out[2 * i + 1] = h[in[i] & 0x0f];
-   }
-   out[64] = '\0';
-}
-
 /* row_hash = SHA256( DOMAIN "\n" prev_hash "\n" <length-prefixed fixed fields> ).
  * ts is deliberately NOT hashed (advisory; seq is the sole ordering authority).
  * Length-prefixing (`<byte-len>:<bytes>` per field, fixed order) is injective, so
  * no field value can be confused with a delimiter. */
-static void compute_row_hash(long long seq, const char *actor_role, const char *actor_principal,
-                             const char *action, const char *subject, const char *verdict,
-                             const char *key_id, const char *detail, const char *prev_hash,
-                             char out_hex[65])
-{
-   char seqbuf[32];
-   snprintf(seqbuf, sizeof seqbuf, "%lld", seq);
-   const char *fields[] = {seqbuf,  actor_role, actor_principal, action,
-                           subject, verdict,    key_id,          detail};
-   dstr_t m;
-   dstr_init(&m);
-   dstr_append_str(&m, AUDIT_WORM_DOMAIN);
-   dstr_append_char(&m, '\n');
-   dstr_append_str(&m, prev_hash);
-   dstr_append_char(&m, '\n');
-   for (int i = 0; i < 8; i++)
-   {
-      const char *v = fields[i] ? fields[i] : "";
-      dstr_appendf(&m, "%zu:", strlen(v));
-      dstr_append_str(&m, v);
-   }
-   unsigned char dig[32];
-   wfe_sha256_raw(m.data, dstr_len(&m), dig);
-   dstr_free(&m);
-   hex32(dig, out_hex);
-}
 
 /* HMAC-SHA256 over wfe_sha256_raw (standard construction; the chain key is 32
  * bytes, below the 64-byte block size, so no key pre-hash is needed). */
-static void worm_hmac_sha256(const unsigned char *key, size_t keylen, const unsigned char *msg,
-                             size_t mlen, unsigned char mac[32])
-{
-   unsigned char k[64];
-   memset(k, 0, sizeof k);
-   if (keylen > 64)
-   {
-      unsigned char kh[32];
-      wfe_sha256_raw(key, keylen, kh);
-      memcpy(k, kh, 32);
-   }
-   else
-      memcpy(k, key, keylen);
-   unsigned char ipad[64], opad[64];
-   for (int i = 0; i < 64; i++)
-   {
-      ipad[i] = k[i] ^ 0x36;
-      opad[i] = k[i] ^ 0x5c;
-   }
-   unsigned char *ib = malloc(64 + mlen);
-   unsigned char inner[32];
-   if (!ib)
-   {
-      memset(mac, 0, 32);
-      return;
-   }
-   memcpy(ib, ipad, 64);
-   memcpy(ib + 64, msg, mlen);
-   wfe_sha256_raw(ib, 64 + mlen, inner);
-   free(ib);
-   unsigned char ob[96];
-   memcpy(ob, opad, 64);
-   memcpy(ob + 64, inner, 32);
-   wfe_sha256_raw(ob, 96, mac);
-}
 
 /* Load (creating from CSPRNG on first use) the dedicated chain/checkpoint key —
  * distinct from the args-hash .audit-key (R1-3). key_id = first 16 hex of
  * SHA256(key), so a rotated key surfaces a new id. Returns 0 on success. */
-static int worm_chain_key_load(unsigned char key[32], char key_id[17])
-{
-   char path[1024];
-   snprintf(path, sizeof path, "%s/.audit-chain-key", aimee_home());
-   int fd = open(path, O_RDONLY);
-   if (fd >= 0)
-   {
-      ssize_t n = read(fd, key, 32);
-      close(fd);
-      if (n != 32)
-         return -1;
-   }
-   else
-   {
-      int rf = open("/dev/urandom", O_RDONLY);
-      if (rf < 0)
-         return -1;
-      ssize_t n = read(rf, key, 32);
-      close(rf);
-      if (n != 32)
-         return -1;
-      int wf = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-      if (wf < 0)
-      {
-         /* Lost a create race: another writer made it — read theirs. */
-         int r2 = open(path, O_RDONLY);
-         if (r2 < 0)
-            return -1;
-         ssize_t m = read(r2, key, 32);
-         close(r2);
-         if (m != 32)
-            return -1;
-      }
-      else
-      {
-         if (write(wf, key, 32) != 32)
-         {
-            close(wf);
-            return -1;
-         }
-         close(wf);
-      }
-   }
-   unsigned char kh[32];
-   wfe_sha256_raw(key, 32, kh);
-   static const char *h = "0123456789abcdef";
-   for (int i = 0; i < 8; i++)
-   {
-      key_id[2 * i] = h[kh[i] >> 4];
-      key_id[2 * i + 1] = h[kh[i] & 0x0f];
-   }
-   key_id[16] = '\0';
-   return 0;
-}
 
 /* MAC a checkpoint commits over: the head (hash+seq) it attests, under key_id.
  * Length-prefixed like the row hash so fields are unambiguous. */
-static void worm_ckpt_mac_hex(const unsigned char key[32], const char *head_hash,
-                              long long head_seq, const char *key_id, char out_hex[65])
-{
-   char sb[32];
-   snprintf(sb, sizeof sb, "%lld", head_seq);
-   dstr_t m;
-   dstr_init(&m);
-   dstr_append_str(&m, AUDIT_WORM_DOMAIN "|ckpt|");
-   const char *f[] = {head_hash, sb, key_id};
-   for (int i = 0; i < 3; i++)
-   {
-      dstr_appendf(&m, "%zu:", strlen(f[i]));
-      dstr_append_str(&m, f[i]);
-   }
-   unsigned char mac[32];
-   worm_hmac_sha256(key, 32, (const unsigned char *)m.data, dstr_len(&m), mac);
-   dstr_free(&m);
-   hex32(mac, out_hex);
-}
 
 /* Create every path component up to (not including) the final '/'. */
 static void ensure_parent_dir(const char *path)
@@ -341,8 +197,8 @@ int audit_worm_append(const char *actor_role, const char *actor_principal, const
    strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 
    char row_hash[65];
-   compute_row_hash(seq, actor_role, actor_principal, action, subject, verdict, "", detail, prev,
-                    row_hash);
+   audit_worm_row_hash(seq, actor_role, actor_principal, action, subject, verdict, "", detail, prev,
+                       row_hash);
 
    sqlite3_stmt *ins = NULL;
    if (sqlite3_prepare_v2(db,
@@ -386,7 +242,7 @@ int audit_worm_checkpoint(void)
 {
    unsigned char key[32];
    char key_id[17];
-   if (worm_chain_key_load(key, key_id) != 0)
+   if (audit_worm_chain_key_load(key, key_id) != 0)
       return -1;
 
    pthread_mutex_lock(&g_worm_mu);
@@ -420,7 +276,7 @@ int audit_worm_checkpoint(void)
     * empty head at seq 0. */
    long long head_seq = seq - 1;
    char mac_hex[65];
-   worm_ckpt_mac_hex(key, prev, head_seq, key_id, mac_hex);
+   audit_worm_ckpt_mac(key, prev, head_seq, key_id, mac_hex);
    char detail[256];
    snprintf(detail, sizeof detail, "{\"key_id\":\"%s\",\"mac\":\"%s\"}", key_id, mac_hex);
 
@@ -431,8 +287,8 @@ int audit_worm_checkpoint(void)
    strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 
    char row_hash[65];
-   compute_row_hash(seq, "system", "", "chain.checkpoint", "", "ok", key_id, detail, prev,
-                    row_hash);
+   audit_worm_row_hash(seq, "system", "", "chain.checkpoint", "", "ok", key_id, detail, prev,
+                       row_hash);
 
    sqlite3_stmt *ins = NULL;
    if (sqlite3_prepare_v2(
@@ -540,9 +396,9 @@ static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
          break;
       }
       char rh[65];
-      compute_row_hash(seq, role ? role : "", principal ? principal : "", action ? action : "",
-                       subject ? subject : "", verdict ? verdict : "", key_id ? key_id : "",
-                       detail ? detail : "", prev, rh);
+      audit_worm_row_hash(seq, role ? role : "", principal ? principal : "", action ? action : "",
+                          subject ? subject : "", verdict ? verdict : "", key_id ? key_id : "",
+                          detail ? detail : "", prev, rh);
       if (!stored_row || strcmp(rh, stored_row) != 0)
       {
          if (err)
@@ -558,7 +414,7 @@ static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
       {
          if (!ckey_loaded)
          {
-            if (worm_chain_key_load(ckey, ckey_id) != 0)
+            if (audit_worm_chain_key_load(ckey, ckey_id) != 0)
             {
                if (err)
                   snprintf(err, errlen, "cannot load chain key to verify checkpoint at seq %lld",
@@ -578,7 +434,7 @@ static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
             break;
          }
          char got[65];
-         worm_ckpt_mac_hex(ckey, prev, seq - 1, ckey_id, got);
+         audit_worm_ckpt_mac(ckey, prev, seq - 1, ckey_id, got);
          if (strcmp(got, want) != 0)
          {
             if (err)
