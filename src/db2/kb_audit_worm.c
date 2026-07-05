@@ -8,9 +8,30 @@
 #include <time.h>
 
 #include "audit_worm_chain.h"
+#include "config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
+
+/* Capture gate (S6). Resolved once from config.audit_worm_enabled (default-off)
+ * and cached, so the hot kb-audit seam costs one branch after the first call;
+ * db2_kb_audit_worm_set_enabled() lets the app or a test override. */
+static int g_kb_worm_enabled = -1;
+void db2_kb_audit_worm_set_enabled(int enabled)
+{
+   g_kb_worm_enabled = enabled ? 1 : 0;
+}
+int db2_kb_audit_worm_enabled(void)
+{
+   if (g_kb_worm_enabled < 0)
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof cfg);
+      config_load(&cfg);
+      g_kb_worm_enabled = cfg.audit_worm_enabled ? 1 : 0;
+   }
+   return g_kb_worm_enabled;
+}
 
 static void kb_worm_ts(char out[32])
 {

@@ -23,6 +23,12 @@ extern "C"
    /* Row count (test/introspection). -1 on error. */
    long db2_kb_audit_count(void);
 
+   /* Capture gate: the aimee-kb service enables this at init from
+    * config.audit_worm_enabled; the central kb audit seam (db2_audit_event_write)
+    * dual-writes into the WORM store only when enabled. Default-off. */
+   void db2_kb_audit_worm_set_enabled(int enabled);
+   int db2_kb_audit_worm_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif

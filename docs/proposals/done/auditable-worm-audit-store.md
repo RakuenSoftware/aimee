@@ -1,5 +1,7 @@
 # Proposal: Per-service auditable, verifiable WORM metrics-and-logs store
 
+- **State:** done
+
 ## Thesis
 
 aimee's and its agents' actions must be **fully and verifiably** auditable. Today
@@ -407,3 +409,17 @@ implementation slices:
   the R2-1 uncheckpointed-tail resolution is sound. Design considered converged and
   ready for implementation sign-off; a confirmatory full-panel run is available once
   the roundtable fix (#1094) is deployed to the panel server.
+
+## Close-out (shipped)
+
+All slices merged to `testing`, each default-off behind `audit_worm_enabled`:
+
+- **S0** #1099 — SQLite `audit_event` store: hash-chain, gap-free seq, WORM triggers, synchronous fsync-durable single-writer, dual-write from the governed-action seam.
+- **S1** #1100 — dedicated chain key + first-class MAC checkpoints + `aimee audit verify` (green/amber/red).
+- **S2** #1101 — immutable sealed snapshots (`aimee audit seal`), `chattr +i` with degrade-to-crypto (R2-7); `verify_file`.
+- **S3** #1102 — dashboard/Logs read from the WORM store (`source:"worm"`), retiring the #1092 file band-aid.
+- **S4** #1103 — hash-chained metric snapshots (`aimee audit snapshot`) + 16 KB bounded detail (R2-8).
+- **S5** #1104 — the second per-service store: aimee-kb Postgres `kb_audit_event` (db2) with shared `audit_worm_chain` (byte-identical, pinned cross-engine vector), plpgsql WORM triggers. **Validated on real Postgres 17** (triggers block UPDATE/DELETE/TRUNCATE even for the superuser).
+- **S6** — kb capture: `db2_audit_event_write` dual-writes into the kb WORM store when enabled.
+
+**Carried follow-ups** (each noted in its PR): the privileged sealer sidecar (R2-5) + auto rotation/pruning that bounds the live store; signed out-of-band anchor (ed25519, R2-8) + multi-key rotation cross-signing; automatic checkpoint/snapshot timer; per-action allowlisted `detail` schemas + secret scanning + subject hashing; the full capture-completeness inventory + lint guard beyond the tool-action + kb-audit seams; a kb verify/Logs CLI surface + writer-role provisioning; and flipping defaults on after a deploy-tier live-verify.
