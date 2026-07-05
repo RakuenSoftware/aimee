@@ -106,3 +106,65 @@ AIMEE_BENCH_FAKE_AGENT=1 AIMEE_BENCH_FAKE_GRADER=1 \
   python3 benchmarks/coding/bench_swebench_supervised.py --arms A,C --output /tmp/fake.json
 python3 -m unittest benchmarks.tests.test_bench_swebench_supervised
 ```
+
+---
+
+# Agentic variant (issue #987) — the true, tool-using, Reddit-parity claim
+
+The single-shot benchmark above delegates one diff and reviews it; it is **explicitly barred**
+from being posted as a Reddit head-to-head. The *agentic* variant makes both arms tool-using
+across turns and is the only one permitted to carry the public claim. Design + rulings:
+`docs/proposals/pending/agentic-supervised-swebench.md`. Built slice-by-slice, each
+roundtable-reviewed; every reproducibility-critical function is pure and unit-tested, with the
+live parts (server transport, per-worker container, official grading) as marked stubs.
+
+## Module map
+
+| module | slice | role |
+|---|---|---|
+| `swebench_transport_verify.py` | S0 | 5 token-attribution assertions (primary = `delegation_id` EMPTY; no cross-bill; cache split; primary tools billed) — the blocking transport gate |
+| `swebench_agentic_harness.py` | S1 | per-worker workspace provision at `base_commit`, per-worker OS-resource allocator, canonical secret-redacted patch (`git add -A` → `diff --cached`), loop bounds |
+| `swebench_arm_runner.py` | S2 | arm A runner + shared measurement core: **uncached** primary-token headline, two wall-clocks (total vs work) |
+| `swebench_supervision.py` | S3 | arm C honesty core: hard-capped leak-guarded digests, **deterministic** best-of-N, gated escalation, context fold, tool allowlist |
+| `supervised_report_panels.py` | S4 | BCa CI, Pareto, selection-skill (oracle vs actual), escalation exclusion, context drift, two-wall-clock, arm-parity |
+| `swebench_suite.py` | S5 | run-plan matrix, CT-101 grader lease, grader-retry + flip-detection, prediction dedup |
+| `swebench_claim_gate.py` | S6 | the fail-closed public-claim gate |
+
+## The fail-closed claim gate
+
+The public line ("beats Reddit's −75.5% at no wall-clock penalty") is emitted by
+`swebench_claim_gate.evaluate_claim_gate(b1, b2, independent_review=…)` **only if ALL** hold,
+under the official grader, on **both** Benchmark 1 (Reddit-10) **and** Benchmark 2 (held-out):
+
+1. **Token** — BCa-95 CI lower-bound of the primary-token reduction `> 0`, anchored on **N=1**.
+2. **Wall** — **p95** A→C wall-clock ratio CI upper-bound `≤ 1.0` (vs aimee's own arm-A time,
+   not Reddit's cross-harness minutes).
+3. **Resolution floor** — `resolved_C/total ≥ max(0.7 × resolved_A/total, 0.25)`.
+4. **K ≥ 10** repeats on Benchmark 1.
+5. **Not escalation-dominated** — the arm-C headline set's escalation-excluded fraction `≤ 0.40`.
+6. **Independent reviewer** sign-off (not the harness/worker author).
+
+The report is **published regardless** of the outcome; only the claim *line* is gated. When
+withheld, the summary still reports the honest number, e.g.
+`-78% primary tokens at 1.05x p95 wall-clock — CLAIM WITHHELD (B1[wall] …)`.
+
+## CI fast check (no live aimee, no Docker)
+
+```bash
+python3 -m unittest \
+  benchmarks.tests.test_swebench_transport_verify \
+  benchmarks.tests.test_swebench_agentic_harness \
+  benchmarks.tests.test_swebench_arm_runner \
+  benchmarks.tests.test_swebench_supervision \
+  benchmarks.tests.test_supervised_report_panels \
+  benchmarks.tests.test_swebench_suite \
+  benchmarks.tests.test_swebench_claim_gate
+```
+
+## Live run (needs the .254 fleet + CT 101 real docker)
+
+The live transport, per-worker container, and official grading are marked
+`NotImplementedError` stubs that print the exact wiring step. Wire them against the `.254`
+fleet (`run_agentic_loop`, `run_arm_a`, `run_arm_c_supervised`, `run_suite`) and grade on CT 101
+per the recipe above; feed the records through `supervised_report` + `supervised_report_panels`,
+then `swebench_claim_gate`.
