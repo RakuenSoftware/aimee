@@ -34,6 +34,12 @@ static const builtin_toolset_t BUILTINS[] = {
       "run_background_process", "get_background_output", "kill_background_process",
       "list_background_processes", NULL}},
     {"review", {"readonly", NULL}, {"record_attempt", NULL}},
+    /* Index-only review: the reviewer works from the caller-provided diff (in the
+     * prompt) plus aimee's branch-indexed capabilities — NO filesystem/git tools,
+     * which point at a worktree a remote delegate cannot reach. */
+    {"review_indexed",
+     {NULL},
+     {"code_search", "find_symbol", "search_memory", "search_docs", "record_attempt", NULL}},
     {"script_rpc",
      {NULL},
      {"read_file", "list_files", "grep", "git_status", "git_log", "git_diff", "code_search",
