@@ -224,6 +224,8 @@ const command_t commands[] = {
     {"describe", "Auto-describe projects via agent analysis", cmd_describe, CMD_TIER_ADVANCED},
     {"env", "Detect environment capabilities", cmd_env, CMD_TIER_ADVANCED},
     {"doctor", "Run diagnostic checks on all subsystems", cmd_doctor, CMD_TIER_ADVANCED},
+    {"audit", "Verify/checkpoint the WORM audit store (verify, checkpoint)", cmd_audit,
+     CMD_TIER_ADVANCED},
     {"provider", "Provider profile registry (list, show, models, quota)", cmd_provider,
      CMD_TIER_ADVANCED},
     {"model", "Model capability metadata (list, show, refresh)", cmd_model, CMD_TIER_ADVANCED},

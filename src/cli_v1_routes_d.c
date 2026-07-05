@@ -26,6 +26,8 @@ static const struct
    pt_print_fn fn;
 } pt_print_table[] = {
     {"delegate.roundtable", pt_print_delegate_roundtable},
+    {"audit.verify", pt_print_audit},
+    {"audit.checkpoint", pt_print_audit},
     {"init.run", pt_print_init_run},
     {"migrate.v2", pt_print_migrate_v2},
     {"rules.generate", pt_print_rules_generate},
@@ -583,6 +585,8 @@ static const struct
     {"api.status", "GET", "/v1/api/status"},
     {"attempt.list", "POST", "/v1/attempts/list"},
     {"attempt.record", "POST", "/v1/attempts/record"},
+    {"audit.checkpoint", "POST", "/v1/audit/checkpoint"},
+    {"audit.verify", "GET", "/v1/audit/verify"},
     {"aux.config_show", "GET", "/v1/aux/config"},
     {"aux.test", "POST", "/v1/aux/test"},
     {"blast_radius.preview", "POST", "/v1/blast_radius/preview"},

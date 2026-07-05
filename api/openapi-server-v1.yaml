@@ -2070,6 +2070,14 @@ paths:
     get:
       summary: List configured agents
       responses: { "200": { description: Agent list, content: { application/json: { schema: { type: object } } } } }
+  /audit/verify:
+    get:
+      summary: Verify the WORM audit chain + checkpoint MACs (green/amber/red)
+      responses: { "200": { description: Verify result, content: { application/json: { schema: { type: object } } } } }
+  /audit/checkpoint:
+    post:
+      summary: Append a checkpoint committing the current WORM chain head
+      responses: { "200": { description: Checkpoint result, content: { application/json: { schema: { type: object } } } } }
   /agent/local:
     get:
       summary: List local agents

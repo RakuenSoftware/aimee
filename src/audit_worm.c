@@ -1,4 +1,6 @@
-/* audit_worm.c: per-service WORM audit store (SQLite) — S0. See audit_worm.h. */
+/* audit_worm.c: per-service WORM audit store (SQLite). S0 = store + hash-chain +
+ * triggers; S1 = dedicated chain key + MAC checkpoints + verify. See audit_worm.h. */
+#include <fcntl.h>
 #include <pthread.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -6,9 +8,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "aimee_home.h"
 #include "audit_worm.h"
+#include "cJSON.h"
 #include "dstr.h"
 #include "log.h"
 #include "wfe_def.h" /* wfe_sha256_raw */
@@ -81,6 +85,124 @@ static void compute_row_hash(long long seq, const char *actor_role, const char *
    wfe_sha256_raw(m.data, dstr_len(&m), dig);
    dstr_free(&m);
    hex32(dig, out_hex);
+}
+
+/* HMAC-SHA256 over wfe_sha256_raw (standard construction; the chain key is 32
+ * bytes, below the 64-byte block size, so no key pre-hash is needed). */
+static void worm_hmac_sha256(const unsigned char *key, size_t keylen, const unsigned char *msg,
+                             size_t mlen, unsigned char mac[32])
+{
+   unsigned char k[64];
+   memset(k, 0, sizeof k);
+   if (keylen > 64)
+   {
+      unsigned char kh[32];
+      wfe_sha256_raw(key, keylen, kh);
+      memcpy(k, kh, 32);
+   }
+   else
+      memcpy(k, key, keylen);
+   unsigned char ipad[64], opad[64];
+   for (int i = 0; i < 64; i++)
+   {
+      ipad[i] = k[i] ^ 0x36;
+      opad[i] = k[i] ^ 0x5c;
+   }
+   unsigned char *ib = malloc(64 + mlen);
+   unsigned char inner[32];
+   if (!ib)
+   {
+      memset(mac, 0, 32);
+      return;
+   }
+   memcpy(ib, ipad, 64);
+   memcpy(ib + 64, msg, mlen);
+   wfe_sha256_raw(ib, 64 + mlen, inner);
+   free(ib);
+   unsigned char ob[96];
+   memcpy(ob, opad, 64);
+   memcpy(ob + 64, inner, 32);
+   wfe_sha256_raw(ob, 96, mac);
+}
+
+/* Load (creating from CSPRNG on first use) the dedicated chain/checkpoint key —
+ * distinct from the args-hash .audit-key (R1-3). key_id = first 16 hex of
+ * SHA256(key), so a rotated key surfaces a new id. Returns 0 on success. */
+static int worm_chain_key_load(unsigned char key[32], char key_id[17])
+{
+   char path[1024];
+   snprintf(path, sizeof path, "%s/.audit-chain-key", aimee_home());
+   int fd = open(path, O_RDONLY);
+   if (fd >= 0)
+   {
+      ssize_t n = read(fd, key, 32);
+      close(fd);
+      if (n != 32)
+         return -1;
+   }
+   else
+   {
+      int rf = open("/dev/urandom", O_RDONLY);
+      if (rf < 0)
+         return -1;
+      ssize_t n = read(rf, key, 32);
+      close(rf);
+      if (n != 32)
+         return -1;
+      int wf = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+      if (wf < 0)
+      {
+         /* Lost a create race: another writer made it — read theirs. */
+         int r2 = open(path, O_RDONLY);
+         if (r2 < 0)
+            return -1;
+         ssize_t m = read(r2, key, 32);
+         close(r2);
+         if (m != 32)
+            return -1;
+      }
+      else
+      {
+         if (write(wf, key, 32) != 32)
+         {
+            close(wf);
+            return -1;
+         }
+         close(wf);
+      }
+   }
+   unsigned char kh[32];
+   wfe_sha256_raw(key, 32, kh);
+   static const char *h = "0123456789abcdef";
+   for (int i = 0; i < 8; i++)
+   {
+      key_id[2 * i] = h[kh[i] >> 4];
+      key_id[2 * i + 1] = h[kh[i] & 0x0f];
+   }
+   key_id[16] = '\0';
+   return 0;
+}
+
+/* MAC a checkpoint commits over: the head (hash+seq) it attests, under key_id.
+ * Length-prefixed like the row hash so fields are unambiguous. */
+static void worm_ckpt_mac_hex(const unsigned char key[32], const char *head_hash,
+                              long long head_seq, const char *key_id, char out_hex[65])
+{
+   char sb[32];
+   snprintf(sb, sizeof sb, "%lld", head_seq);
+   dstr_t m;
+   dstr_init(&m);
+   dstr_append_str(&m, AUDIT_WORM_DOMAIN "|ckpt|");
+   const char *f[] = {head_hash, sb, key_id};
+   for (int i = 0; i < 3; i++)
+   {
+      dstr_appendf(&m, "%zu:", strlen(f[i]));
+      dstr_append_str(&m, f[i]);
+   }
+   unsigned char mac[32];
+   worm_hmac_sha256(key, 32, (const unsigned char *)m.data, dstr_len(&m), mac);
+   dstr_free(&m);
+   hex32(mac, out_hex);
 }
 
 /* Create every path component up to (not including) the final '/'. */
@@ -245,6 +367,113 @@ done:
    return rc;
 }
 
+int audit_worm_checkpoint(void)
+{
+   unsigned char key[32];
+   char key_id[17];
+   if (worm_chain_key_load(key, key_id) != 0)
+      return -1;
+
+   pthread_mutex_lock(&g_worm_mu);
+   int rc = -1;
+   if (!g_worm_db && worm_open_locked_default() != 0)
+      goto done;
+   sqlite3 *db = g_worm_db;
+
+   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+      goto done;
+
+   long long seq = 1;
+   char prev[65];
+   snprintf(prev, sizeof prev, "%s", AUDIT_WORM_GENESIS_PREV);
+   sqlite3_stmt *q = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT seq, row_hash FROM audit_event ORDER BY seq DESC LIMIT 1", -1,
+                          &q, NULL) == SQLITE_OK)
+   {
+      if (sqlite3_step(q) == SQLITE_ROW)
+      {
+         seq = sqlite3_column_int64(q, 0) + 1;
+         const unsigned char *ph = sqlite3_column_text(q, 1);
+         if (ph)
+            snprintf(prev, sizeof prev, "%s", (const char *)ph);
+      }
+   }
+   sqlite3_finalize(q);
+
+   /* The checkpoint (row `seq`) attests the current head = the last row before it
+    * (`seq-1`, whose row_hash is `prev`). A genesis checkpoint (seq=1) commits the
+    * empty head at seq 0. */
+   long long head_seq = seq - 1;
+   char mac_hex[65];
+   worm_ckpt_mac_hex(key, prev, head_seq, key_id, mac_hex);
+   char detail[256];
+   snprintf(detail, sizeof detail, "{\"key_id\":\"%s\",\"mac\":\"%s\"}", key_id, mac_hex);
+
+   char ts[32];
+   time_t now = time(NULL);
+   struct tm tmv;
+   gmtime_r(&now, &tmv);
+   strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+
+   char row_hash[65];
+   compute_row_hash(seq, "system", "", "chain.checkpoint", "", "ok", key_id, detail, prev,
+                    row_hash);
+
+   sqlite3_stmt *ins = NULL;
+   if (sqlite3_prepare_v2(
+           db,
+           "INSERT INTO audit_event(seq, ts, actor_role, actor_principal, action, subject,"
+           " verdict, detail, key_id, prev_hash, row_hash)"
+           " VALUES(?,?,'system','','chain.checkpoint','','ok',?,?,?,?)",
+           -1, &ins, NULL) != SQLITE_OK)
+   {
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      goto done;
+   }
+   sqlite3_bind_int64(ins, 1, seq);
+   sqlite3_bind_text(ins, 2, ts, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(ins, 3, detail, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(ins, 4, key_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(ins, 5, prev, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(ins, 6, row_hash, -1, SQLITE_TRANSIENT);
+   int step = sqlite3_step(ins);
+   sqlite3_finalize(ins);
+   if (step != SQLITE_DONE)
+   {
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      goto done;
+   }
+   if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK)
+   {
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      goto done;
+   }
+   rc = 0;
+done:
+   pthread_mutex_unlock(&g_worm_mu);
+   return rc;
+}
+
+/* Extract the "mac" hex string from a checkpoint row's detail JSON into out
+ * (>=65 bytes). Returns 0 on success. */
+static int worm_ckpt_extract_mac(const char *detail, const char *want_key_id, char out[65])
+{
+   cJSON *root = detail ? cJSON_Parse(detail) : NULL;
+   if (!root)
+      return -1;
+   int rc = -1;
+   cJSON *mac = cJSON_GetObjectItemCaseSensitive(root, "mac");
+   cJSON *kid = cJSON_GetObjectItemCaseSensitive(root, "key_id");
+   if (cJSON_IsString(mac) && mac->valuestring && cJSON_IsString(kid) && kid->valuestring &&
+       want_key_id && strcmp(kid->valuestring, want_key_id) == 0)
+   {
+      snprintf(out, 65, "%s", mac->valuestring);
+      rc = 0;
+   }
+   cJSON_Delete(root);
+   return rc;
+}
+
 int audit_worm_verify_chain(char *err, size_t errlen)
 {
    if (err && errlen)
@@ -272,6 +501,9 @@ int audit_worm_verify_chain(char *err, size_t errlen)
    char prev[65];
    snprintf(prev, sizeof prev, "%s", AUDIT_WORM_GENESIS_PREV);
    long long expect = 1;
+   unsigned char ckey[32];
+   char ckey_id[17];
+   int ckey_loaded = 0;
    while (sqlite3_step(q) == SQLITE_ROW)
    {
       long long seq = sqlite3_column_int64(q, 0);
@@ -309,12 +541,81 @@ int audit_worm_verify_chain(char *err, size_t errlen)
          rc = -1;
          break;
       }
+      /* Checkpoint rows additionally carry a MAC over the head they attest; verify
+       * it under the chain key so a forged/altered checkpoint is caught even if its
+       * row_hash was recomputed. `prev` is this checkpoint's head_hash, seq-1 its
+       * head_seq. */
+      if (action && strcmp(action, "chain.checkpoint") == 0)
+      {
+         if (!ckey_loaded)
+         {
+            if (worm_chain_key_load(ckey, ckey_id) != 0)
+            {
+               if (err)
+                  snprintf(err, errlen, "cannot load chain key to verify checkpoint at seq %lld",
+                           seq);
+               rc = -1;
+               break;
+            }
+            ckey_loaded = 1;
+         }
+         char want[65];
+         if (!key_id || strcmp(key_id, ckey_id) != 0 ||
+             worm_ckpt_extract_mac(detail ? detail : "", ckey_id, want) != 0)
+         {
+            if (err)
+               snprintf(err, errlen, "checkpoint at seq %lld has unknown/absent key or MAC", seq);
+            rc = -1;
+            break;
+         }
+         char got[65];
+         worm_ckpt_mac_hex(ckey, prev, seq - 1, ckey_id, got);
+         if (strcmp(got, want) != 0)
+         {
+            if (err)
+               snprintf(err, errlen, "checkpoint MAC mismatch at seq %lld (forged)", seq);
+            rc = -1;
+            break;
+         }
+      }
       snprintf(prev, sizeof prev, "%s", stored_row);
       expect = seq + 1;
    }
    sqlite3_finalize(q);
    pthread_mutex_unlock(&g_worm_mu);
    return rc;
+}
+
+/* Full status verify: chain + checkpoint MACs, plus the amber "uncheckpointed
+ * tail" signal. Returns AUDIT_WORM_VERIFY_GREEN (fully attested), _AMBER (chain
+ * intact but head is beyond the newest checkpoint), or _RED (a break). head_seq /
+ * last_ckpt_seq are filled when non-NULL. */
+int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
+{
+   if (audit_worm_verify_chain(err, errlen) != 0)
+      return AUDIT_WORM_VERIFY_RED;
+   long head = 0, ckpt = 0;
+   pthread_mutex_lock(&g_worm_mu);
+   sqlite3_stmt *q = NULL;
+   if (sqlite3_prepare_v2(g_worm_db,
+                          "SELECT COALESCE(MAX(seq),0),"
+                          " COALESCE(MAX(CASE WHEN action='chain.checkpoint' THEN seq END),0)"
+                          " FROM audit_event",
+                          -1, &q, NULL) == SQLITE_OK &&
+       sqlite3_step(q) == SQLITE_ROW)
+   {
+      head = (long)sqlite3_column_int64(q, 0);
+      ckpt = (long)sqlite3_column_int64(q, 1);
+   }
+   sqlite3_finalize(q);
+   pthread_mutex_unlock(&g_worm_mu);
+   if (head_seq)
+      *head_seq = head;
+   if (last_ckpt_seq)
+      *last_ckpt_seq = ckpt;
+   /* A checkpoint at seq C attests the head at seq C-1, so rows after C-1 are
+    * unattested. Green only when a checkpoint covers the current head. */
+   return (ckpt >= head) ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
 }
 
 long audit_worm_count(void)

@@ -65,6 +65,25 @@ extern "C"
     * S1. */
    int audit_worm_verify_chain(char *err, size_t errlen);
 
+   /* Append a first-class checkpoint row (action="chain.checkpoint") committing the
+    * current chain head under a MAC keyed by the dedicated chain key
+    * ($AIMEE_HOME/.audit-chain-key, created on first use, distinct from .audit-key),
+    * so truncation/rollback past a checkpoint is detectable. 0 on success, -1 on
+    * failure. */
+   int audit_worm_checkpoint(void);
+
+/* audit_worm_verify() status codes. */
+#define AUDIT_WORM_VERIFY_GREEN 0 /* chain + MACs intact and head is checkpoint-attested */
+#define AUDIT_WORM_VERIFY_AMBER                                                                    \
+   1                            /* intact, but rows after the newest checkpoint are unattested     \
+                                 */
+#define AUDIT_WORM_VERIFY_RED 2 /* a break (hash, seq gap, or forged checkpoint MAC) */
+
+   /* Full verify: the chain + every checkpoint MAC, plus the amber
+    * uncheckpointed-tail signal. Returns one of AUDIT_WORM_VERIFY_*; writes a reason
+    * into err on RED and fills head_seq / last_ckpt_seq when non-NULL. */
+   int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
+
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);
 

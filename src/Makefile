@@ -350,7 +350,7 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c server/delegat
            cmd_trajectory.c \
            cmd_slop.c cmd_guardrails.c cmd_job.c cmd_roles.c cmd_skill.c cmd_autopilot.c cmd_trigger.c cmd_run.c cmd_kb.c cmd_kb_export.c kb_export_json.c kb_export_obsidian.c kb/kb_lab.c server/kb_client.c server/kb_client_cache.c server/kb_client_ws.c server/kb_client_docs.c kb/kb_doc_hash.c server/kb_client_index.c server/kb_client_index_parse.c server/kb_client_pdf.c server/kb_client_code_embed.c server/kb_client_memory.c server/kb_client_memory_mutations.c server/kb_client_agent.c server/kb_client_dashboard.c server/kb_client_tasks.c server/kb_client_data.c server/kb_client_tool_registry.c server/kb_client_prospective.c server/kb_client_roadmap.c hud.c server/delegate_depth.c server/delegate_role.c server/delegate_prompt.c server/delegate_routing.c server/delegate_plan.c server/delegate_launch.c server/delegate_economics.c server/delegate_patch_coordinator.c server/delegate_ensemble.c server/delegate_ensemble_review.c server/evidence_replay.c server/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c \
            turn_narration.c dashboard.c dashboard_kb.c trace_analysis.c cmd_session_workflow.c \
-           cmd_provider.c cmd_aux.c
+           cmd_provider.c cmd_aux.c cmd_audit.c
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Pure client (aimee) ---
