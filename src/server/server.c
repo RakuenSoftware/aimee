@@ -1476,6 +1476,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dashboard.audit", handle_dashboard_audit},
     {"audit.verify", handle_audit_verify},
     {"audit.checkpoint", handle_audit_checkpoint},
+    {"audit.seal", handle_audit_seal},
     {"lsp.diagnostics_summary", handle_lsp_diagnostics_summary},
     {"workspace.context", handle_workspace_context},
     {"workspace.add", handle_workspace_add},

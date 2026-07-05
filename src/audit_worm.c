@@ -1,11 +1,13 @@
 /* audit_worm.c: per-service WORM audit store (SQLite). S0 = store + hash-chain +
  * triggers; S1 = dedicated chain key + MAC checkpoints + verify. See audit_worm.h. */
 #include <fcntl.h>
+#include <linux/fs.h> /* FS_IOC_GETFLAGS/SETFLAGS, FS_IMMUTABLE_FL */
 #include <pthread.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -474,30 +476,24 @@ static int worm_ckpt_extract_mac(const char *detail, const char *want_key_id, ch
    return rc;
 }
 
-int audit_worm_verify_chain(char *err, size_t errlen)
+/* Verify a WORM db handle — the live store OR a sealed snapshot — recomputing the
+ * hash-chain and every checkpoint MAC. 0 if intact, -1 on the first break (reason
+ * in err). No locking: the caller owns the handle. */
+static int worm_verify_db(sqlite3 *db, char *err, size_t errlen)
 {
    if (err && errlen)
       err[0] = '\0';
-   pthread_mutex_lock(&g_worm_mu);
-   int rc = 0;
-   if (!g_worm_db && worm_open_locked_default() != 0)
-   {
-      if (err)
-         snprintf(err, errlen, "store not open");
-      pthread_mutex_unlock(&g_worm_mu);
-      return -1;
-   }
    sqlite3_stmt *q = NULL;
-   if (sqlite3_prepare_v2(g_worm_db,
+   if (sqlite3_prepare_v2(db,
                           "SELECT seq, actor_role, actor_principal, action, subject, verdict,"
                           " key_id, detail, prev_hash, row_hash FROM audit_event ORDER BY seq ASC",
                           -1, &q, NULL) != SQLITE_OK)
    {
       if (err)
          snprintf(err, errlen, "query prepare failed");
-      pthread_mutex_unlock(&g_worm_mu);
       return -1;
    }
+   int rc = 0;
    char prev[65];
    snprintf(prev, sizeof prev, "%s", AUDIT_WORM_GENESIS_PREV);
    long long expect = 1;
@@ -582,8 +578,117 @@ int audit_worm_verify_chain(char *err, size_t errlen)
       expect = seq + 1;
    }
    sqlite3_finalize(q);
+   return rc;
+}
+
+int audit_worm_verify_chain(char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   pthread_mutex_lock(&g_worm_mu);
+   if (!g_worm_db && worm_open_locked_default() != 0)
+   {
+      if (err)
+         snprintf(err, errlen, "store not open");
+      pthread_mutex_unlock(&g_worm_mu);
+      return -1;
+   }
+   int rc = worm_verify_db(g_worm_db, err, errlen);
    pthread_mutex_unlock(&g_worm_mu);
    return rc;
+}
+
+/* Verify a sealed snapshot file (read-only) with the same chain + MAC checks. */
+int audit_worm_verify_file(const char *db_path, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   sqlite3 *db = NULL;
+   if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK)
+   {
+      if (err)
+         snprintf(err, errlen, "cannot open sealed segment %s", db_path);
+      if (db)
+         sqlite3_close(db);
+      return -1;
+   }
+   int rc = worm_verify_db(db, err, errlen);
+   sqlite3_close(db);
+   return rc;
+}
+
+/* Best-effort OS immutability for a sealed segment via the FS immutable flag.
+ * Returns 0 if the file is now immutable, 1 if the flag could not be set
+ * (unprivileged / unsupported FS) — the crypto chain + MAC remain the guarantee
+ * (R2-7 degrade-to-crypto-only), -1 if the path can't be opened. */
+static int worm_make_immutable(const char *path)
+{
+   int fd = open(path, O_RDONLY);
+   if (fd < 0)
+      return -1;
+   int flags = 0;
+   if (ioctl(fd, FS_IOC_GETFLAGS, &flags) < 0)
+   {
+      close(fd);
+      return 1; /* FS doesn't support the flag */
+   }
+   flags |= FS_IMMUTABLE_FL;
+   int rc = ioctl(fd, FS_IOC_SETFLAGS, &flags);
+   close(fd);
+   return rc < 0 ? 1 : 0; /* EPERM (no CAP_LINUX_IMMUTABLE) → degraded */
+}
+
+/* Seal an immutable point-in-time snapshot of the store: force a checkpoint (so
+ * the snapshot's head is attested), VACUUM INTO a sealed file
+ * audit/audit-sealed-<hi_seq>.db, then make it OS-immutable (best-effort). Fills
+ * out_path (the sealed file) and *out_immutable (1 if kernel-immutable, 0 if
+ * crypto-only). Returns 0 on a sealed+verifiable snapshot, -1 on failure. The
+ * live store keeps accumulating; automatic rotation/pruning is a follow-up. */
+int audit_worm_seal(char *out_path, size_t out_cap, int *out_immutable)
+{
+   audit_worm_checkpoint(); /* best-effort: attest the head being sealed */
+   pthread_mutex_lock(&g_worm_mu);
+   int rc = -1;
+   char path[1024] = "";
+   if (!g_worm_db && worm_open_locked_default() != 0)
+      goto done;
+   long long hi = 0;
+   sqlite3_stmt *q = NULL;
+   if (sqlite3_prepare_v2(g_worm_db, "SELECT COALESCE(MAX(seq),0) FROM audit_event", -1, &q,
+                          NULL) == SQLITE_OK &&
+       sqlite3_step(q) == SQLITE_ROW)
+      hi = sqlite3_column_int64(q, 0);
+   sqlite3_finalize(q);
+
+   snprintf(path, sizeof path, "%s/audit/audit-sealed-%lld.db", aimee_home(), hi);
+   ensure_parent_dir(path);
+   unlink(
+       path); /* replace a prior (mutable) seal at this head; a +i one blocks — seal then fails */
+   char vsql[1200];
+   snprintf(vsql, sizeof vsql, "VACUUM INTO '%s'", path);
+   char *emsg = NULL;
+   if (sqlite3_exec(g_worm_db, vsql, NULL, NULL, &emsg) != SQLITE_OK)
+   {
+      aimee_log(LOG_ERROR, "audit_worm", "seal VACUUM INTO failed: %s", emsg ? emsg : "(nil)");
+      sqlite3_free(emsg);
+      goto done;
+   }
+   rc = 0;
+done:
+   pthread_mutex_unlock(&g_worm_mu);
+   if (rc != 0)
+      return -1;
+   int imm = worm_make_immutable(path);
+   if (imm < 0)
+      aimee_log(LOG_WARN, "audit_worm", "sealed %s but could not open to set immutable flag", path);
+   else if (imm == 1)
+      aimee_log(LOG_WARN, "audit_worm",
+                "sealed %s crypto-only (no CAP_LINUX_IMMUTABLE / unsupported FS)", path);
+   if (out_path)
+      snprintf(out_path, out_cap, "%s", path);
+   if (out_immutable)
+      *out_immutable = (imm == 0);
+   return 0;
 }
 
 /* Full status verify: chain + checkpoint MACs, plus the amber "uncheckpointed

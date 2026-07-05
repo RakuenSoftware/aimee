@@ -1193,7 +1193,8 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
    }
    if (strcmp(method, "api.status") == 0)
       return marshal_no_args(method);
-   if (strcmp(method, "audit.verify") == 0 || strcmp(method, "audit.checkpoint") == 0)
+   if (strcmp(method, "audit.verify") == 0 || strcmp(method, "audit.checkpoint") == 0 ||
+       strcmp(method, "audit.seal") == 0)
       return marshal_no_args(method);
    if (strcmp(method, "api.enable") == 0)
       return marshal_api_enable(argc, argv);

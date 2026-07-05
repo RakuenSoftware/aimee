@@ -1933,6 +1933,19 @@ void pt_print_audit(const char *method, cJSON *resp)
       printf("audit checkpoint: %s\n", ok ? "ok" : "failed");
       return;
    }
+   if (strstr(method, "seal"))
+   {
+      int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "sealed"));
+      if (!ok)
+      {
+         printf("audit seal: failed\n");
+         return;
+      }
+      int imm = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "immutable"));
+      printf("audit seal: ok — %s (%s)\n", json_str(resp, "path") ? json_str(resp, "path") : "(?)",
+             imm ? "OS-immutable" : "crypto-only (no CAP_LINUX_IMMUTABLE)");
+      return;
+   }
    const char *v = json_str(resp, "verify");
    long head = json_int(resp, "head_seq", 0);
    long ck = json_int(resp, "last_checkpoint_seq", 0);

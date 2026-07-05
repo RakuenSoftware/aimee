@@ -84,6 +84,17 @@ extern "C"
     * into err on RED and fills head_seq / last_ckpt_seq when non-NULL. */
    int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
 
+   /* Verify a sealed snapshot file (read-only) with the same chain + MAC checks.
+    * 0 if intact, -1 on the first break (reason in err). */
+   int audit_worm_verify_file(const char *db_path, char *err, size_t errlen);
+
+   /* Seal an immutable point-in-time snapshot: checkpoint, VACUUM INTO
+    * $AIMEE_HOME/audit/audit-sealed-<hi_seq>.db, then set the OS immutable flag
+    * (best-effort — degrades to crypto-only without CAP_LINUX_IMMUTABLE / on an
+    * unsupported FS). Fills out_path and *out_immutable (1 if kernel-immutable).
+    * Returns 0 on a sealed snapshot, -1 on failure. */
+   int audit_worm_seal(char *out_path, size_t out_cap, int *out_immutable);
+
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);
 

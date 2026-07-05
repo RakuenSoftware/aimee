@@ -178,6 +178,58 @@ static void test_checkpoint_bound_to_chain_key(void)
    printf("  test_checkpoint_bound_to_chain_key: ok (%s)\n", err);
 }
 
+/* Sealing exports an immutable, independently-verifiable snapshot. */
+static void test_seal_snapshot_verifies(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/seal.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-2", "allow", "{}") == 0);
+
+   char sealed[512] = "";
+   int imm = -1;
+   assert(audit_worm_seal(sealed, sizeof sealed, &imm) == 0);
+   assert(sealed[0]);
+   char err[160];
+   assert(audit_worm_verify_file(sealed, err, sizeof err) == 0); /* snapshot verifies green */
+   audit_worm_close();
+   printf("  test_seal_snapshot_verifies: ok (immutable=%d)\n", imm);
+}
+
+/* Tampering a sealed snapshot (when the OS immutable flag isn't enforced) is still
+ * caught by the crypto chain — the guarantee, per R2-7, is the crypto not the flag. */
+static void test_sealed_snapshot_tamper_detected(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/seal2.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   char sealed[512] = "";
+   int imm = -1;
+   assert(audit_worm_seal(sealed, sizeof sealed, &imm) == 0);
+   audit_worm_close();
+
+   if (imm)
+   {
+      printf("  test_sealed_snapshot_tamper_detected: skipped (snapshot is OS-immutable)\n");
+      return;
+   }
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(sealed, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET subject='EVIL' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+   char err[160];
+   assert(audit_worm_verify_file(sealed, err, sizeof err) == -1);
+   assert(strstr(err, "seq 1") != NULL);
+   printf("  test_sealed_snapshot_tamper_detected: ok (%s)\n", err);
+}
+
 int main(void)
 {
    mk_tmpdir();
@@ -187,6 +239,8 @@ int main(void)
    test_tamper_detected_past_triggers();
    test_checkpoint_and_verify_status();
    test_checkpoint_bound_to_chain_key();
+   test_seal_snapshot_verifies();
+   test_sealed_snapshot_tamper_detected();
    printf("all tests passed\n");
    return 0;
 }
