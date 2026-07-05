@@ -2,6 +2,19 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Badge } from '@rakuensoftware/smoothgui';
 import type { BadgeVariant } from '@rakuensoftware/smoothgui';
 
+/* All fields of an audit row, in display order, for the detail modal. */
+const DETAIL_FIELDS: { key: keyof AuditRow; label: string }[] = [
+  { key: 'ts', label: 'Timestamp' },
+  { key: 'verdict', label: 'Verdict' },
+  { key: 'actor', label: 'Actor' },
+  { key: 'tool', label: 'Tool' },
+  { key: 'kind', label: 'Kind' },
+  { key: 'mode', label: 'Guardrail mode' },
+  { key: 'reason_code', label: 'Reason code' },
+  { key: 'args_hash', label: 'Args hash' },
+  { key: 'task_id', label: 'Task id' },
+];
+
 /* The server's own tool-action audit ledger (guardrail verdict on every tool
  * call the agent makes). Server-incurred — distinct from the KB's own logs. */
 interface AuditRow {
@@ -45,6 +58,15 @@ export default function Logs() {
   const [verdict, setVerdict] = useState('all');
   const [actor, setActor] = useState('all');
   const [q, setQ] = useState('');
+  const [selected, setSelected] = useState<AuditRow | null>(null);
+
+  // Close the detail modal on Escape.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,7 +141,14 @@ export default function Logs() {
             </thead>
             <tbody>
               {filtered.map((r, i) => (
-                <tr key={i}>
+                <tr
+                  key={i}
+                  onClick={() => setSelected(r)}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={ev => (ev.currentTarget.style.background = '#f6f9ff')}
+                  onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
+                  title="Click for full detail"
+                >
                   <td style={{ ...td, whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</td>
                   <td style={td}>{esc(r.actor)}</td>
                   <td style={{ ...td, fontFamily: 'monospace' }}>{esc(r.tool)}</td>
@@ -133,6 +162,51 @@ export default function Logs() {
           </table>
         )}
       </div>
+
+      {selected && (
+        <div
+          onClick={() => setSelected(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 30, background: 'rgba(0,0,0,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <div
+            onClick={ev => ev.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 8, maxWidth: 560, width: '100%',
+              maxHeight: '80vh', overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
+              borderBottom: '1px solid #eee', position: 'sticky', top: 0, background: '#fff',
+            }}>
+              <strong style={{ fontSize: 14 }}>Audit entry</strong>
+              <Badge label={esc(selected.verdict)} variant={verdictVariant(selected.verdict)} />
+              <button
+                onClick={() => setSelected(null)}
+                style={{ ...selectStyle, cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                Close
+              </button>
+            </div>
+            <div style={{ padding: '8px 16px 16px' }}>
+              {DETAIL_FIELDS.map(f => {
+                const v = selected[f.key];
+                return (
+                  <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #f4f4f4' }}>
+                    <span style={{ width: 130, flexShrink: 0, color: '#888', fontSize: 12 }}>{f.label}</span>
+                    <span style={{ fontSize: 13, fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>
+                      {v == null || v === '' ? <span style={{ color: '#bbb' }}>—</span> : String(v)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -459,6 +459,56 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /workflow/repo/tree:
+    get:
+      summary: List directories + .md files under the server's local project checkout (composer proposal browser), path-confined
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema: { type: string }
+          description: Relative path under the project root ("" = root); rejects .. / symlink escape
+      responses:
+        "200":
+          description: "{path, entries:[{name,type:dir|file}]}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Path escapes the project root
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Not a directory / not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/repo/file:
+    get:
+      summary: Read one .md file under the confined project root (composer proposal browser)
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+          description: Relative .md path under the project root; rejects .. / symlink escape
+      responses:
+        "200":
+          description: "{path, content, truncated}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Path escapes the project root or is not a .md file
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: File not found / not a regular file
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workflow/items/{id}/events:
     get:
       summary: The item's lifecycle timeline (proposal history), owner-only, paginated by event id
@@ -528,6 +578,86 @@ paths:
               schema: { type: object }
         "404":
           description: Work item not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      summary: Delete a run — auto-abandons an active run first, then removes its rows and proposal file (owner or operator)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: "{id, deleted:true}"
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Not the caller's work item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Work item not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/items/{id}/pause:
+    post:
+      summary: Pause an active run (operator_paused) so the scheduler stops advancing it (owner or operator)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated work-item run-state
+          content:
+            application/json:
+              schema: { type: object }
+        "409":
+          description: Run already finished or already paused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/items/{id}/resume:
+    post:
+      summary: Resume a paused run and wake the scheduler; refuses a run parked at a human gate (owner or operator)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated work-item run-state
+          content:
+            application/json:
+              schema: { type: object }
+        "409":
+          description: Run not paused, already finished, or parked at a human gate (use Approve/Reject)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/items/{id}/stop:
+    post:
+      summary: Stop a run (abandon it); the scheduler reclaims its worktree (owner or operator)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated work-item run-state
+          content:
+            application/json:
+              schema: { type: object }
+        "409":
+          description: Run already finished
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

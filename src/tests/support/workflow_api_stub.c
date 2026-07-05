@@ -76,6 +76,40 @@ int wf_api_proposal(const char *id, char *resp, int cap)
    (void)id;
    return stub(resp, cap);
 }
+int wf_api_item_pause(const char *id, int is_operator, char *resp, int cap)
+{
+   (void)id;
+   (void)is_operator;
+   return stub(resp, cap);
+}
+int wf_api_item_resume(const char *id, int is_operator, char *resp, int cap)
+{
+   (void)id;
+   (void)is_operator;
+   return stub(resp, cap);
+}
+int wf_api_item_stop(const char *id, int is_operator, char *resp, int cap)
+{
+   (void)id;
+   (void)is_operator;
+   return stub(resp, cap);
+}
+int wf_api_item_delete(const char *id, int is_operator, char *resp, int cap)
+{
+   (void)id;
+   (void)is_operator;
+   return stub(resp, cap);
+}
+int wf_api_repo_tree(const char *rel, char *resp, int cap)
+{
+   (void)rel;
+   return stub(resp, cap);
+}
+int wf_api_repo_file(const char *rel, char *resp, int cap)
+{
+   (void)rel;
+   return stub(resp, cap);
+}
 
 /* Autonomous-development intake symbols referenced by rh_dev_submit in
  * server_http_routes.inc. Stubbed so tests that link server_http.o don't pull the

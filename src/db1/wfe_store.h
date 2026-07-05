@@ -115,6 +115,14 @@ int db1_work_item_add_cost(const char *work_item_id, double cost);
 int db1_work_item_set_cost_cap(const char *work_item_id, double cap);
 int db1_work_item_inc_override(const char *work_item_id); /* returns new count, -1 err */
 
+/* Permanently delete a work item and all its history (lifecycle_event +
+ * lifecycle_stage_attempt + lifecycle_work_item rows) under one transaction.
+ * There is no FK cascade, so all three tables are cleared explicitly. Returns
+ * 0 on success (incl. an already-absent item — DELETE is idempotent), -1 on
+ * error. The caller is responsible for any out-of-DB artifacts (proposal file,
+ * worktree). */
+int db1_work_item_delete(const char *work_item_id);
+
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
 int db1_work_item_list(db1_work_item_t **out);
 

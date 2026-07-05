@@ -106,4 +106,16 @@ typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
 
+/* Workflow Actions lifecycle + project-file-browser route adapters + the shared
+ * unsigned-long query-param helper — defined in server_http_config_routes.c
+ * (relocated out of server_http_routes.c to stay under the line-check ceiling).
+ * Referenced by the route table in server_http_routes.c. */
+long rh_query_long(const char *key, long dflt);
+int rh_wf_item_pause(const route_req_t *rq, char *resp, int cap);
+int rh_wf_item_resume(const route_req_t *rq, char *resp, int cap);
+int rh_wf_item_stop(const route_req_t *rq, char *resp, int cap);
+int rh_wf_item_delete(const route_req_t *rq, char *resp, int cap);
+int rh_wf_repo_tree(const route_req_t *rq, char *resp, int cap);
+int rh_wf_repo_file(const route_req_t *rq, char *resp, int cap);
+
 #endif /* SERVER_HTTP_INTERNAL_H */

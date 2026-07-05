@@ -425,6 +425,31 @@ int db1_work_item_clear_pause(const char *wi)
                             wi);
 }
 
+int db1_work_item_delete(const char *wi)
+{
+   if (!wi || !wi[0])
+      return -1;
+   /* No FK cascade: the three lifecycle tables are independent, so remove the
+    * item's rows from each under one transaction (all-or-nothing). Events and
+    * stage-attempts are deleted first, then the item row, so a partial failure
+    * never leaves an item row without its history or vice versa. */
+   if (db1_lifecycle_txn_begin() != 0)
+      return -1;
+   if (exec_bind1_update("DELETE FROM lifecycle_event WHERE work_item_id=?", wi) != 0 ||
+       exec_bind1_update("DELETE FROM lifecycle_stage_attempt WHERE work_item_id=?", wi) != 0 ||
+       exec_bind1_update("DELETE FROM lifecycle_work_item WHERE work_item_id=?", wi) != 0)
+   {
+      db1_lifecycle_txn_rollback();
+      return -1;
+   }
+   if (db1_lifecycle_txn_commit() != 0)
+   {
+      db1_lifecycle_txn_rollback();
+      return -1;
+   }
+   return 0;
+}
+
 int db1_work_item_add_cost(const char *wi, double cost)
 {
    sqlite3 *db = db1_conn();

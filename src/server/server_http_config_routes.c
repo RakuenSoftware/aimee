@@ -30,6 +30,7 @@
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify — resume the autonomy driver */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -280,4 +281,122 @@ int route_role_template_remove(const char *name, char *resp, int cap)
    cJSON_AddStringToObject(o, "role", name);
    cJSON_AddBoolToObject(o, "deleted", 1);
    return emit(resp, cap, o);
+}
+
+/* ── query-param helpers + Workflow Actions route adapters ───────────────────
+ * Relocated here from server_http_routes.c (referenced by that TU's route table
+ * via server_http_internal.h) to keep that file under the line-check ceiling. */
+
+/* Parse an unsigned long query param ("k=v&…") from the request's query string;
+ * returns `dflt` when the key is absent or unparseable. */
+long rh_query_long(const char *key, long dflt)
+{
+   const char *q = server_http_identity_query();
+   size_t klen = strlen(key);
+   for (const char *p = q; p && *p;)
+   {
+      const char *amp = strchr(p, '&');
+      if (strncmp(p, key, klen) == 0 && p[klen] == '=')
+      {
+         char *end = NULL;
+         long v = strtol(p + klen + 1, &end, 10);
+         if (end != p + klen + 1)
+            return v;
+         return dflt;
+      }
+      if (!amp)
+         break;
+      p = amp + 1;
+   }
+   return dflt;
+}
+
+/* One hex digit → value, or -1. */
+static int rh_hex(char c)
+{
+   if (c >= '0' && c <= '9')
+      return c - '0';
+   if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+   if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+   return -1;
+}
+
+/* Read a percent-decoded string query param into `out` ("" if absent). A path may
+ * arrive percent-encoded (encodeURIComponent turns '/' into %2F), so %XX escapes
+ * are decoded; a malformed escape is copied literally. */
+static void rh_query_str(const char *key, char *out, size_t cap)
+{
+   if (cap)
+      out[0] = '\0';
+   const char *q = server_http_identity_query();
+   size_t klen = strlen(key);
+   for (const char *p = q; p && *p;)
+   {
+      const char *amp = strchr(p, '&');
+      if (strncmp(p, key, klen) == 0 && p[klen] == '=')
+      {
+         const char *v = p + klen + 1;
+         const char *end = amp ? amp : v + strlen(v);
+         size_t o = 0;
+         for (const char *s = v; s < end && cap && o + 1 < cap; s++)
+         {
+            int hi, lo;
+            if (*s == '%' && s + 2 < end && (hi = rh_hex(s[1])) >= 0 && (lo = rh_hex(s[2])) >= 0)
+            {
+               out[o++] = (char)((hi << 4) | lo);
+               s += 2;
+            }
+            else
+            {
+               out[o++] = *s;
+            }
+         }
+         if (cap)
+            out[o] = '\0';
+         return;
+      }
+      if (!amp)
+         break;
+      p = amp + 1;
+   }
+}
+
+/* Lifecycle mutations. The route cap (CAP_DASHBOARD_READ) admits owners; operator
+ * status (CAP_WORKFLOW_ADMIN on the connection) lifts the owner-only restriction
+ * inside the wf_api_* handler. */
+#define RH_WF_IS_OPERATOR() ((g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0)
+int rh_wf_item_pause(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_item_pause(rq->id, RH_WF_IS_OPERATOR(), resp, cap);
+}
+int rh_wf_item_resume(const route_req_t *rq, char *resp, int cap)
+{
+   int rc = wf_api_item_resume(rq->id, RH_WF_IS_OPERATOR(), resp, cap);
+   if (rc >= 200 && rc < 300)
+      wfe_scheduler_notify(); /* wake the driver so the resumed run advances now */
+   return rc;
+}
+int rh_wf_item_stop(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_item_stop(rq->id, RH_WF_IS_OPERATOR(), resp, cap);
+}
+int rh_wf_item_delete(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_item_delete(rq->id, RH_WF_IS_OPERATOR(), resp, cap);
+}
+int rh_wf_repo_tree(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   char path[4096];
+   rh_query_str("path", path, sizeof path);
+   return wf_api_repo_tree(path, resp, cap);
+}
+int rh_wf_repo_file(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   char path[4096];
+   rh_query_str("path", path, sizeof path);
+   return wf_api_repo_file(path, resp, cap);
 }

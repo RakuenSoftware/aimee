@@ -726,6 +726,17 @@ int main(void)
              CAP_DASHBOARD_READ);
       assert(server_http_route_caps("GET", "/v1/workflow/items/all") == CAP_WORKFLOW_ADMIN);
       assert(server_http_route_caps("GET", "/v1/workflow/items/wi_x") == CAP_DASHBOARD_READ);
+      /* Lifecycle mutations: route cap admits owners (CAP_DASHBOARD_READ); the
+       * handler re-checks owner-or-operator. The suffix rows must win over the bare
+       * /<id> row, and DELETE /<id> is distinct from GET /<id> by verb. */
+      assert(server_http_route_caps("POST", "/v1/workflow/items/wi_x/pause") == CAP_DASHBOARD_READ);
+      assert(server_http_route_caps("POST", "/v1/workflow/items/wi_x/resume") ==
+             CAP_DASHBOARD_READ);
+      assert(server_http_route_caps("POST", "/v1/workflow/items/wi_x/stop") == CAP_DASHBOARD_READ);
+      assert(server_http_route_caps("DELETE", "/v1/workflow/items/wi_x") == CAP_DASHBOARD_READ);
+      /* Composer project-file browser (read-only). */
+      assert(server_http_route_caps("GET", "/v1/workflow/repo/tree") == CAP_DASHBOARD_READ);
+      assert(server_http_route_caps("GET", "/v1/workflow/repo/file") == CAP_DASHBOARD_READ);
       /* Presence is session-scoped; the streaming routes carry caps too. */
       assert(server_http_route_caps("GET", "/v1/sessions") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/sessions/s1/attach") == CAP_SESSION_READ);

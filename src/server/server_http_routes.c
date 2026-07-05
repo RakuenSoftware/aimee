@@ -841,29 +841,8 @@ static int rh_wf_item(const route_req_t *rq, char *resp, int cap)
 {
    return wf_api_item(rq->id, resp, cap);
 }
-/* Parse an unsigned long query param ("k=v&…") from the request's query string;
- * returns `dflt` when the key is absent or unparseable. */
-static long rh_query_long(const char *key, long dflt)
-{
-   const char *q = server_http_identity_query();
-   size_t klen = strlen(key);
-   for (const char *p = q; p && *p;)
-   {
-      const char *amp = strchr(p, '&');
-      if (strncmp(p, key, klen) == 0 && p[klen] == '=')
-      {
-         char *end = NULL;
-         long v = strtol(p + klen + 1, &end, 10);
-         if (end != p + klen + 1)
-            return v;
-         return dflt;
-      }
-      if (!amp)
-         break;
-      p = amp + 1;
-   }
-   return dflt;
-}
+/* rh_query_long is declared in server_http_internal.h and defined in
+ * server_http_config_routes.c (moved there to keep this TU under the line cap). */
 static int rh_wf_events(const route_req_t *rq, char *resp, int cap)
 {
    long after = rh_query_long("after", 0);
@@ -874,6 +853,11 @@ static int rh_wf_proposal(const route_req_t *rq, char *resp, int cap)
 {
    return wf_api_proposal(rq->id, resp, cap);
 }
+
+/* The Workflow Actions lifecycle (rh_wf_item_pause/resume/stop/delete) and
+ * project-file-browser (rh_wf_repo_tree/file) route adapters are defined in
+ * server_http_config_routes.c (declared in server_http_internal.h) so this TU
+ * stays under the line-check ceiling; the route table below references them. */
 
 /* The POST /v1/rpc bridge was retired once every dispatch method gained a
  * first-class /v1 route (op-parity complete; check-v1-method-coverage reports 0
@@ -2318,7 +2302,21 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/workflow/items/", "/events", RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_events},
     {"GET", "/v1/workflow/items/", "/proposal", RM_PREFIX, NULL, CAP_DASHBOARD_READ,
      rh_wf_proposal},
+    /* Lifecycle mutations. Route cap admits owners (CAP_DASHBOARD_READ); the
+     * handler additionally allows operators (CAP_WORKFLOW_ADMIN) and 403s a
+     * non-owner non-operator. Suffix rows precede the bare /<id> rows. */
+    {"POST", "/v1/workflow/items/", "/pause", RM_PREFIX, NULL, CAP_DASHBOARD_READ,
+     rh_wf_item_pause},
+    {"POST", "/v1/workflow/items/", "/resume", RM_PREFIX, NULL, CAP_DASHBOARD_READ,
+     rh_wf_item_resume},
+    {"POST", "/v1/workflow/items/", "/stop", RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_item_stop},
     {"GET", "/v1/workflow/items/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_item},
+    /* DELETE the bare /<id> — distinct from the GET row by verb; auto-stops an
+     * active run then removes it. */
+    {"DELETE", "/v1/workflow/items/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_item_delete},
+    /* Composer project-file browser (read-only, confined to the local checkout). */
+    {"GET", "/v1/workflow/repo/tree", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_repo_tree},
+    {"GET", "/v1/workflow/repo/file", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_repo_file},
 
     {"GET", "/v1/sessions", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_sessions_list},
     {"POST", "/v1/sessions/", "/attach", RM_PREFIX, NULL, CAP_SESSION_READ, rh_session_attach},

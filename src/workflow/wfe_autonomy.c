@@ -122,13 +122,16 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
    struct timespec ts0;
    clock_gettime(CLOCK_MONOTONIC, &ts0); /* monotonic: immune to NTP/clock jumps */
 
-   /* An item already parked 'stuck' cannot advance without human intervention
-    * (its stage is unresolvable / has no executor). Skip it so the backstop
-    * sweep doesn't re-attempt the doomed advance every cycle; a human resume
-    * clears the pause and lets the next sweep retry. */
+   /* An item parked 'stuck' cannot advance without human intervention (its stage
+    * is unresolvable / has no executor); an item parked 'operator_paused' was
+    * deliberately halted by an operator. Skip both so the backstop sweep doesn't
+    * re-attempt an advance every cycle; a human resume clears the pause and lets
+    * the next sweep retry. */
    {
       db1_work_item_t wi0;
-      if (db1_work_item_get(work_item_id, &wi0) == 1 && strcmp(wi0.pause_reason, "stuck") == 0)
+      if (db1_work_item_get(work_item_id, &wi0) == 1 &&
+          (strcmp(wi0.pause_reason, "stuck") == 0 ||
+           strcmp(wi0.pause_reason, "operator_paused") == 0))
          return 0;
    }
 

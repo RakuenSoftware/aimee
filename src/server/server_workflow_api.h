@@ -60,4 +60,34 @@ int wf_api_events(const char *id, long after, int limit, char *resp, int cap);
  * Returns {proposal_md, truncated}; 404 if the file is missing. */
 int wf_api_proposal(const char *id, char *resp, int cap);
 
+/* Lifecycle mutations on one run. Access = the item's submitter OR an operator
+ * (is_operator, derived from the caller's CAP_WORKFLOW_ADMIN); else 403. Each
+ * returns the updated item row (or an error envelope). `is_operator` non-zero
+ * lifts the owner-only restriction. 404 unknown id, 409 on an invalid transition.
+ *
+ * pause  -- park an active, un-paused run with pause_reason=operator_paused so the
+ *           scheduler stops advancing it.
+ * resume -- clear the pause and (caller then wakes the scheduler). 409 if the run
+ *           is parked at pending_human (that must go through Approve/Reject).
+ * stop   -- set the run terminal (abandoned); the scheduler reclaims its worktree.
+ * delete -- if still active, abandon first, then permanently remove the run's rows
+ *           and best-effort unlink its proposal file. */
+int wf_api_item_pause(const char *id, int is_operator, char *resp, int cap);
+int wf_api_item_resume(const char *id, int is_operator, char *resp, int cap);
+int wf_api_item_stop(const char *id, int is_operator, char *resp, int cap);
+int wf_api_item_delete(const char *id, int is_operator, char *resp, int cap);
+
+/* GET /v1/workflow/repo/tree?path=<rel> -- list immediate directory entries under
+ * the server's local project checkout (root = $AIMEE_WORKFLOW_REPO, else cwd), for
+ * the composer's "load a proposal from the project" browser. Returns {path,
+ * entries:[{name,type:"dir"|"file"}]} with directories + `.md` files only; hidden
+ * dirs and node_modules are skipped. Path-confined via realpath (rejects `..` /
+ * symlink escape): 400 on escape, 404 on a missing dir. */
+int wf_api_repo_tree(const char *rel, char *resp, int cap);
+
+/* GET /v1/workflow/repo/file?path=<rel> -- read one `.md` file under the same
+ * confined project root. Returns {path, content, truncated} (size-capped like the
+ * proposal read). 400 on escape / non-.md, 404 if missing / not a regular file. */
+int wf_api_repo_file(const char *rel, char *resp, int cap);
+
 #endif /* DEC_SERVER_WORKFLOW_API_H */

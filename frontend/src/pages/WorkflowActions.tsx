@@ -81,6 +81,22 @@ async function postJSON<T>(url: string, body: unknown): Promise<{ status: number
   return { status: r.status, data };
 }
 
+// A bare method call (POST/DELETE) with no body — used for the lifecycle actions.
+// Returns the status + parsed body (best effort) like postJSON.
+async function sendAction<T>(url: string, method: "POST" | "DELETE"): Promise<{ status: number; data: T }> {
+  const r = await fetch(url, {
+    method,
+    headers: { "X-CSRF-Token": window._csrf || "" },
+  });
+  let data = {} as T;
+  try {
+    data = (await r.json()) as T;
+  } catch {
+    /* empty body ok */
+  }
+  return { status: r.status, data };
+}
+
 const isTerminal = (s: string) => s === "accepted" || s === "rejected" || s === "abandoned";
 
 // A human status label + tone from the row's state + pause_reason + stage. Derived
@@ -91,6 +107,8 @@ function statusOf(it: Item): { label: string; variant: BadgeVariant } {
   if (it.state === "abandoned") return { label: "abandoned", variant: "neutral" };
   // active:
   switch (it.pause_reason) {
+    case "operator_paused":
+      return { label: `paused · ${it.stage}`, variant: "warning" };
     case "pending_human":
       return { label: `awaiting approval · ${it.stage}`, variant: "warning" };
     case "ci_pending":
@@ -132,6 +150,7 @@ const KIND_LABEL: Record<string, string> = {
   reject_retry: "rejected (retry)",
   override: "overridden",
   rejected: "rejected",
+  abandon: "stopped",
 };
 
 // pr_ref is opaque (a PR number or a URL). Render a link when it looks like one.
@@ -330,7 +349,54 @@ export default function WorkflowActions() {
     [selId, openProposal],
   );
 
+  // Lifecycle control (pause / resume / stop / delete). On success we refresh the
+  // open proposal (or clear the selection after a delete).
+  const [actMsg, setActMsg] = useState("");
+  const [acting, setActing] = useState(false);
+  const doLifecycle = useCallback(
+    async (action: "pause" | "resume" | "stop" | "delete") => {
+      if (!selId || acting) return;
+      if (action === "stop" && !window.confirm("Stop this run? It will be abandoned and cannot be resumed."))
+        return;
+      if (action === "delete" && !window.confirm("Delete this run permanently? Its history and proposal file will be removed."))
+        return;
+      setActMsg("");
+      setActing(true);
+      try {
+        const isDel = action === "delete";
+        const { status: st, data } = await sendAction<{ error?: string }>(
+          isDel
+            ? `/api/workflow/items/${encodeURIComponent(selId)}`
+            : `/api/workflow/items/${encodeURIComponent(selId)}/${action}`,
+          isDel ? "DELETE" : "POST",
+        );
+        if (st >= 200 && st < 300) {
+          if (isDel) {
+            setSelId(null);
+            setDetail(null);
+            refreshList();
+          } else {
+            openProposal(selId); // refresh detail + events after the transition
+          }
+        } else {
+          setActMsg(data.error || `failed (HTTP ${st})`);
+        }
+      } catch {
+        setActMsg("action failed");
+      } finally {
+        setActing(false);
+      }
+    },
+    [selId, acting, refreshList, openProposal],
+  );
+
   const canDecide = !!detail && detail.pause_reason === "pending_human";
+  // Which lifecycle controls apply to the current item.
+  const term = !!detail && isTerminal(detail.state);
+  const paused = !!detail && !term && !!detail.pause_reason;
+  const canPause = !!detail && !term && !detail.pause_reason;
+  const canResume = paused && detail!.pause_reason !== "pending_human";
+  const canStop = !!detail && !term;
 
   return (
     <div style={{ display: "flex", height: "100%", fontFamily: "system-ui" }}>
@@ -435,6 +501,39 @@ export default function WorkflowActions() {
             </div>
             <StatusHeader item={detail} />
 
+            {/* Lifecycle controls: start (resume) / pause / stop / delete. Shown by
+                the item's current state; a run at a human gate uses Approve/Reject
+                (below) rather than resume. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "4px 0 10px" }}>
+              {canResume && (
+                <button onClick={() => void doLifecycle("resume")} disabled={acting} style={btn}>
+                  ▶ Start
+                </button>
+              )}
+              {canPause && (
+                <button onClick={() => void doLifecycle("pause")} disabled={acting} style={btn}>
+                  ⏸ Pause
+                </button>
+              )}
+              {canStop && (
+                <button
+                  onClick={() => void doLifecycle("stop")}
+                  disabled={acting}
+                  style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
+                >
+                  ⏹ Stop
+                </button>
+              )}
+              <button
+                onClick={() => void doLifecycle("delete")}
+                disabled={acting}
+                style={{ ...btn, background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3", marginLeft: "auto" }}
+              >
+                🗑 Delete
+              </button>
+              {actMsg && <span style={{ fontSize: 12, color: "#c00", flexBasis: "100%" }}>{actMsg}</span>}
+            </div>
+
             {canDecide && (
               <Panel title={`Human gate · ${detail.stage}`}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -505,6 +604,61 @@ function Composer({
   const [preview, setPreview] = useState<string | null>(null);
   const [draftErr, setDraftErr] = useState("");
   const busy = drafting || submitting;
+
+  // "Load a proposal from the project": a read-only, path-confined browser over
+  // the server's local checkout. Picking a .md file previews its contents into the
+  // same accept-first preview panel used by the delegate draft, so it never
+  // silently clobbers the body.
+  const [browsing, setBrowsing] = useState(false);
+  const [browsePath, setBrowsePath] = useState("");
+  const [entries, setEntries] = useState<{ name: string; type: "dir" | "file" }[]>([]);
+  const [browseErr, setBrowseErr] = useState("");
+  const [browseLoading, setBrowseLoading] = useState(false);
+
+  const loadTree = async (path: string) => {
+    setBrowseErr("");
+    setBrowseLoading(true);
+    try {
+      const d = await getJSON<{ path: string; entries: { name: string; type: "dir" | "file" }[] }>(
+        `/api/workflow/repo/tree?path=${encodeURIComponent(path)}`,
+      );
+      setBrowsePath(d.path || "");
+      // Directories first, then files; each group alphabetical.
+      const es = (d.entries || []).slice().sort((a, b) =>
+        a.type !== b.type ? (a.type === "dir" ? -1 : 1) : a.name.localeCompare(b.name),
+      );
+      setEntries(es);
+    } catch (e) {
+      setBrowseErr(`could not list: ${(e as Error).message}`);
+      setEntries([]);
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+  const openBrowser = () => {
+    setBrowsing(true);
+    void loadTree(browsePath || "docs/proposals");
+  };
+  const parentPath = (p: string) => {
+    const i = p.lastIndexOf("/");
+    return i > 0 ? p.slice(0, i) : "";
+  };
+  const pickFile = async (name: string) => {
+    const rel = browsePath ? `${browsePath}/${name}` : name;
+    setBrowseErr("");
+    setBrowseLoading(true);
+    try {
+      const d = await getJSON<{ content: string; truncated: boolean }>(
+        `/api/workflow/repo/file?path=${encodeURIComponent(rel)}`,
+      );
+      setPreview(d.content || "");
+      setBrowsing(false);
+    } catch (e) {
+      setBrowseErr(`could not read: ${(e as Error).message}`);
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
 
   const generate = async () => {
     if (drafting) return; // re-entrancy guard (the button is also disabled while busy)
@@ -628,9 +782,80 @@ function Composer({
         <button onClick={() => void generate()} disabled={busy} style={btn}>
           {drafting ? "Drafting…" : "✨ Draft with a delegate"}
         </button>
+        <button onClick={() => (browsing ? setBrowsing(false) : openBrowser())} disabled={busy} style={btn}>
+          {browsing ? "Close browser" : "📂 Load from project"}
+        </button>
         {submitMsg && <span style={{ fontSize: 12, color: "#c00" }}>{submitMsg}</span>}
         {draftErr && <span style={{ fontSize: 12, color: "#c00" }}>{draftErr}</span>}
       </div>
+
+      {browsing && (
+        <div
+          style={{
+            border: "1px solid #d9e2ef",
+            background: "#fbfdff",
+            borderRadius: 6,
+            padding: 10,
+            marginTop: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <strong style={{ fontSize: 13 }}>Project</strong>
+            <span style={{ fontSize: 12, color: "#667", fontFamily: "monospace", overflowWrap: "anywhere" }}>
+              /{browsePath}
+            </span>
+            {browseLoading && <span style={{ fontSize: 11, color: "#aaa" }}>loading…</span>}
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>
+              Pick a .md file to load it as the proposal.
+            </span>
+          </div>
+          {browseErr && <div style={{ fontSize: 12, color: "#c00", marginBottom: 6 }}>{browseErr}</div>}
+          <div style={{ maxHeight: 280, overflow: "auto", border: "1px solid #eef2f7", borderRadius: 4 }}>
+            {browsePath && (
+              <BrowseRow icon="↩" label=".." onClick={() => void loadTree(parentPath(browsePath))} />
+            )}
+            {entries.length === 0 && !browseLoading && (
+              <div style={{ padding: "8px 10px", color: "#999", fontSize: 13 }}>
+                No sub-folders or .md files here.
+              </div>
+            )}
+            {entries.map((e) =>
+              e.type === "dir" ? (
+                <BrowseRow
+                  key={e.name}
+                  icon="📁"
+                  label={e.name}
+                  onClick={() => void loadTree(browsePath ? `${browsePath}/${e.name}` : e.name)}
+                />
+              ) : (
+                <BrowseRow key={e.name} icon="📄" label={e.name} onClick={() => void pickFile(e.name)} />
+              ),
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BrowseRow({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 10px",
+        cursor: "pointer",
+        borderBottom: "1px solid #f4f7fb",
+        fontSize: 13,
+      }}
+      onMouseEnter={(ev) => (ev.currentTarget.style.background = "#eef4ff")}
+      onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
+    >
+      <span style={{ width: 16, textAlign: "center" }}>{icon}</span>
+      <span style={{ overflowWrap: "anywhere" }}>{label}</span>
     </div>
   );
 }

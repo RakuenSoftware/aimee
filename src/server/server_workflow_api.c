@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h> /* PATH_MAX for the confined project-file browser */
 #include <unistd.h>
 #endif
 
@@ -782,6 +783,276 @@ int wf_api_proposal(const char *id, char *resp, int cap)
 
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "proposal_md", buf);
+   cJSON_AddBoolToObject(o, "truncated", truncated);
+   free(buf);
+   return emit(o, resp, cap);
+}
+
+/* ── lifecycle mutations (start / pause / stop / delete) ─────────────────────
+ * All share the same access rule: the item's submitter OR an operator. */
+
+static int item_terminal(const db1_work_item_t *wi)
+{
+   return strcmp(wi->state, "accepted") == 0 || strcmp(wi->state, "rejected") == 0 ||
+          strcmp(wi->state, "abandoned") == 0;
+}
+
+/* The attested principal driving this mutation (for the audit event actor). */
+static const char *wf_actor(void)
+{
+   const char *p = server_http_identity_principal();
+   return (p && p[0]) ? p : "operator";
+}
+
+/* Resolve + owner/operator-gate an item for a mutation. On success fills `wi` and
+ * returns 0; otherwise writes an error envelope and returns the HTTP status. */
+static int wf_load_for_mutation(const char *id, int is_operator, db1_work_item_t *wi, char *resp,
+                                int cap)
+{
+   if (!id || !id[0])
+      return err(resp, cap, 400, "missing work item id");
+   if (db1_work_item_get(id, wi) != 1)
+      return err(resp, cap, 404, "work item not found");
+   if (!is_operator && !wf_owns(wi))
+      return err(resp, cap, 403, "not your work item");
+   return 0;
+}
+
+int wf_api_item_pause(const char *id, int is_operator, char *resp, int cap)
+{
+   db1_work_item_t wi;
+   int rc = wf_load_for_mutation(id, is_operator, &wi, resp, cap);
+   if (rc)
+      return rc;
+   if (item_terminal(&wi))
+      return err(resp, cap, 409, "run already finished");
+   if (wi.pause_reason[0])
+      return err(resp, cap, 409, "run is already paused");
+   if (db1_work_item_set_pause(id, "operator_paused", wi.current_stage) != 0)
+      return err(resp, cap, 500, "could not pause run");
+   db1_lifecycle_event_add(id, wi.current_stage, "pause", wf_actor(), "paused by operator", "", 0);
+   if (db1_work_item_get(id, &wi) != 1)
+      return err(resp, cap, 500, "paused but could not reload");
+   return emit(item_to_json(&wi), resp, cap);
+}
+
+int wf_api_item_resume(const char *id, int is_operator, char *resp, int cap)
+{
+   db1_work_item_t wi;
+   int rc = wf_load_for_mutation(id, is_operator, &wi, resp, cap);
+   if (rc)
+      return rc;
+   if (item_terminal(&wi))
+      return err(resp, cap, 409, "run already finished");
+   if (!wi.pause_reason[0])
+      return err(resp, cap, 409, "run is not paused");
+   /* A run parked at a human gate must be decided via Approve/Reject so the
+    * signed approval is recorded — never silently un-paused here. */
+   if (strcmp(wi.pause_reason, "pending_human") == 0)
+      return err(resp, cap, 409, "run is at a human gate — use Approve or Reject");
+   if (db1_work_item_clear_pause(id) != 0)
+      return err(resp, cap, 500, "could not resume run");
+   db1_lifecycle_event_add(id, wi.current_stage, "resume", wf_actor(), "resumed by operator", "",
+                           0);
+   if (db1_work_item_get(id, &wi) != 1)
+      return err(resp, cap, 500, "resumed but could not reload");
+   return emit(item_to_json(&wi), resp, cap);
+}
+
+int wf_api_item_stop(const char *id, int is_operator, char *resp, int cap)
+{
+   db1_work_item_t wi;
+   int rc = wf_load_for_mutation(id, is_operator, &wi, resp, cap);
+   if (rc)
+      return rc;
+   if (item_terminal(&wi))
+      return err(resp, cap, 409, "run already finished");
+   if (db1_work_item_set_terminal(id, "abandoned") != 0)
+      return err(resp, cap, 500, "could not stop run");
+   db1_lifecycle_event_add(id, wi.current_stage, "abandon", wf_actor(), "stopped by operator", "",
+                           0);
+   if (db1_work_item_get(id, &wi) != 1)
+      return err(resp, cap, 500, "stopped but could not reload");
+   return emit(item_to_json(&wi), resp, cap);
+}
+
+int wf_api_item_delete(const char *id, int is_operator, char *resp, int cap)
+{
+   db1_work_item_t wi;
+   int rc = wf_load_for_mutation(id, is_operator, &wi, resp, cap);
+   if (rc)
+      return rc;
+   /* Auto-stop an in-flight run first: mark it terminal so the scheduler's
+    * orphan-sweep reclaims its worktree before the row disappears. */
+   if (!item_terminal(&wi))
+      db1_work_item_set_terminal(id, "abandoned");
+
+   /* Best-effort unlink the server-minted proposal artifact, confined to
+    * $AIMEE_HOME/workflows/proposals via a dirfd + a slash-free basename (same
+    * race-free confinement as wf_api_proposal). A missing/odd file is ignored —
+    * the row removal is the operation of record. */
+   if (wi.proposal_path[0])
+   {
+      const char *base = path_basename(wi.proposal_path);
+      if (base[0] && !strchr(base, '/') && strcmp(base, ".") != 0 && strcmp(base, "..") != 0)
+      {
+         const char *home = aimee_home();
+         char dir[1024];
+         snprintf(dir, sizeof dir, "%s/workflows/proposals", home ? home : "/tmp");
+         int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+         if (dfd >= 0)
+         {
+            unlinkat(dfd, base, 0); /* best effort */
+            close(dfd);
+         }
+      }
+   }
+
+   if (db1_work_item_delete(id) != 0)
+      return err(resp, cap, 500, "could not delete run");
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "id", id);
+   cJSON_AddBoolToObject(o, "deleted", 1);
+   return emit(o, resp, cap);
+}
+
+/* ── project file browser (composer "load a proposal from the project") ──────
+ * Read-only, confined to the server's local checkout root. */
+
+/* The project root the browser is rooted at: the workflow repo if configured,
+ * else the server's cwd. Returns the realpath'd root in `out` (>= PATH_MAX), or
+ * NULL on failure. */
+static char *wf_repo_root(char resolved[PATH_MAX])
+{
+   const char *root = getenv("AIMEE_WORKFLOW_REPO");
+   if (!root || !root[0])
+      root = ".";
+   return realpath(root, resolved);
+}
+
+/* Resolve `rel` under the project root and confirm the result stays inside it
+ * (blocks `..` and symlink escape). Writes the resolved absolute path to `out`
+ * and returns 0; on escape/nonexistence returns an HTTP status via `err`. */
+static int wf_resolve_confined(const char *rel, char out[PATH_MAX], char *resp, int cap)
+{
+   char root[PATH_MAX];
+   if (!wf_repo_root(root))
+      return err(resp, cap, 500, "project root unavailable");
+   char cand[PATH_MAX];
+   if (!rel || !rel[0])
+      snprintf(cand, sizeof cand, "%s", root);
+   else if ((int)snprintf(cand, sizeof cand, "%s/%s", root, rel) >= (int)sizeof cand)
+      return err(resp, cap, 400, "path too long");
+   if (!realpath(cand, out))
+      return err(resp, cap, 404, "path not found");
+   /* Confinement: `out` must equal root or sit strictly beneath it (root + '/'). */
+   size_t rl = strlen(root);
+   if (strncmp(out, root, rl) != 0 || (out[rl] != '\0' && out[rl] != '/'))
+      return err(resp, cap, 400, "path escapes project root");
+   return 0;
+}
+
+/* Relative path of `abs` beneath realpath'd `root` (for echoing back to the UI).
+ * "" at the root; never leading '/'. */
+static const char *wf_rel_of(const char *abs, const char *root)
+{
+   size_t rl = strlen(root);
+   if (strncmp(abs, root, rl) != 0)
+      return "";
+   const char *r = abs + rl;
+   while (*r == '/')
+      r++;
+   return r;
+}
+
+static int str_ends_with(const char *s, const char *suf)
+{
+   size_t ls = strlen(s), lf = strlen(suf);
+   return ls >= lf && strcmp(s + ls - lf, suf) == 0;
+}
+
+int wf_api_repo_tree(const char *rel, char *resp, int cap)
+{
+   char root[PATH_MAX];
+   if (!wf_repo_root(root))
+      return err(resp, cap, 500, "project root unavailable");
+   char abs[PATH_MAX];
+   int rc = wf_resolve_confined(rel, abs, resp, cap);
+   if (rc)
+      return rc;
+
+   DIR *d = opendir(abs);
+   if (!d)
+      return err(resp, cap, 404, "not a directory");
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "path", wf_rel_of(abs, root));
+   cJSON *arr = cJSON_AddArrayToObject(o, "entries");
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL)
+   {
+      const char *name = e->d_name;
+      if (name[0] == '.')
+         continue; /* skip . / .. and hidden (incl. .git) */
+      if (strcmp(name, "node_modules") == 0)
+         continue;
+      char child[PATH_MAX];
+      if ((int)snprintf(child, sizeof child, "%s/%s", abs, name) >= (int)sizeof child)
+         continue;
+      struct stat stt;
+      if (stat(child, &stt) != 0)
+         continue;
+      int is_dir = S_ISDIR(stt.st_mode);
+      if (!is_dir && !str_ends_with(name, ".md"))
+         continue; /* files: markdown only */
+      cJSON *it = cJSON_CreateObject();
+      cJSON_AddStringToObject(it, "name", name);
+      cJSON_AddStringToObject(it, "type", is_dir ? "dir" : "file");
+      cJSON_AddItemToArray(arr, it);
+   }
+   closedir(d);
+   return emit(o, resp, cap);
+}
+
+int wf_api_repo_file(const char *rel, char *resp, int cap)
+{
+   char root[PATH_MAX];
+   if (!wf_repo_root(root))
+      return err(resp, cap, 500, "project root unavailable");
+   if (!rel || !rel[0])
+      return err(resp, cap, 400, "missing path");
+   if (!str_ends_with(rel, ".md"))
+      return err(resp, cap, 400, "only .md files are readable");
+   char abs[PATH_MAX];
+   int rc = wf_resolve_confined(rel, abs, resp, cap);
+   if (rc)
+      return rc;
+
+   int fd = open(abs, O_RDONLY | O_CLOEXEC);
+   if (fd < 0)
+      return err(resp, cap, 404, "file not found");
+   struct stat stt;
+   if (fstat(fd, &stt) != 0 || !S_ISREG(stt.st_mode))
+   {
+      close(fd);
+      return err(resp, cap, 404, "not a regular file");
+   }
+   char *buf = malloc(WF_PROPOSAL_MAX + 1);
+   if (!buf)
+   {
+      close(fd);
+      return err(resp, cap, 500, "out of memory");
+   }
+   size_t total = 0;
+   ssize_t r;
+   while (total < WF_PROPOSAL_MAX && (r = read(fd, buf + total, WF_PROPOSAL_MAX - total)) > 0)
+      total += (size_t)r;
+   close(fd);
+   buf[total] = '\0';
+   int truncated = (off_t)total < stt.st_size;
+
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "path", wf_rel_of(abs, root));
+   cJSON_AddStringToObject(o, "content", buf);
    cJSON_AddBoolToObject(o, "truncated", truncated);
    free(buf);
    return emit(o, resp, cap);
