@@ -22,11 +22,12 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (137)
+## CLI-settable keys (138)
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `audit_action_enabled` | bool | — |
+| `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
 | `autonomous` | bool | Run autonomously (auto-advance preauthorized gates) vs interactive. |
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
 | `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |

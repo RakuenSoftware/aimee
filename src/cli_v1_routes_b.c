@@ -230,6 +230,19 @@ static cJSON *marshal_delegate_launch(int argc, char **argv)
    int parallel = rpc_get_int(&opts, "parallel", 3);
    if (parallel > 0)
       cJSON_AddNumberToObject(req, "parallel", parallel);
+
+   /* Anchor the coord launch worktree. handle_delegate_launch reads "cwd" as the
+    * git-root anchor (resolution order: caller-supplied cwd first), under which it
+    * creates the .aimee/worktrees/<id> the delegates write into. --workdir lets a
+    * caller target a repo the SERVER can see (e.g. a benchmark checkout on the
+    * remote host) instead of the client's own cwd; default to getcwd() so ordinary
+    * local use is unchanged. */
+   const char *workdir = rpc_get(&opts, "workdir");
+   char cwd_buf[4096];
+   if (workdir && workdir[0])
+      cJSON_AddStringToObject(req, "cwd", workdir);
+   else if (getcwd(cwd_buf, sizeof(cwd_buf)))
+      cJSON_AddStringToObject(req, "cwd", cwd_buf);
    return req;
 }
 

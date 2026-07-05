@@ -685,6 +685,17 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       role = canonical;
    }
 
+   /* A prompt supplied via --prompt-file/--prompt-stdin is the caller-provided
+    * review target (e.g. a diff): review THAT, not the delegate host's cwd. For
+    * review-type roles this also forces the index-only toolset so the delegate
+    * cannot fall back to filesystem reads of a worktree it does not have — it must
+    * use the inline diff plus aimee's branch index. */
+   int caller_provided_target = (prompt_file && prompt_file[0]) || prompt_stdin;
+   if (caller_provided_target && (!explicit_toolset || !explicit_toolset[0]) &&
+       (strcmp(role, "review") == 0 || strcmp(role, "validate") == 0 ||
+        strcmp(role, "diagnose") == 0))
+      explicit_toolset = "review_indexed";
+
    int force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    if (explicit_toolset && explicit_toolset[0])
    {
@@ -1159,8 +1170,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
             "use the parent worktree");
    int delegate_needs_worktree = delegate_allows_writes;
-   effective_prompt =
-       delegate_maybe_append_validation_bundle(role, cwd_for_template, effective_prompt, prompt);
+   effective_prompt = delegate_maybe_append_validation_bundle(
+       role, cwd_for_template, effective_prompt, prompt, caller_provided_target);
    if (source_path_count > 0)
    {
       const char *base = effective_prompt ? effective_prompt : prompt;
@@ -1507,7 +1518,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       delegate_check_file_drift(worktree_path, named_files, named_file_count);
    delegate_apply_review_evidence_guard(
        role, worktree_path[0] ? worktree_path : (original_cwd[0] ? original_cwd : cwd_for_template),
-       &rc, &result);
+       &rc, &result, caller_provided_target);
    delegate_handoff_validation_t handoff_validation;
    memset(&handoff_validation, 0, sizeof(handoff_validation));
    int handoff_checked = 0;

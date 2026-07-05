@@ -660,32 +660,30 @@ int agent_load_config(agent_config_t *cfg)
          }
          else
          {
-            /* Absent key: derive the default from the backing model's intrinsic
-             * tool capability instead of a blanket 0. `tools_enabled` is both a
-             * capability signal and an execution policy; defaulting it to 0 made
-             * every delegate that omits the key look tool-INCAPABLE to the
-             * routing filter (delegate_filter_route_capabilities), so
-             * tool-requiring roles (e.g. `review`) found zero candidates even
-             * though the underlying model (mistral / minimax / openai /
-             * anthropic / …) fully supports tool calls.
+            /* Absent key: default tools ON (opt-out, not opt-in). An agent is
+             * tool-capable unless the operator EXPLICITLY disables it, or unless
+             * the backing model is KNOWN to lack tool support. Defaulting an
+             * unknown model to OFF silently made new/unregistered agents (e.g.
+             * codex/gpt-5.5, provider=chatgpt — absent from the capability table)
+             * look tool-INCAPABLE to the routing filter
+             * (delegate_filter_route_capabilities), so tool-requiring roles
+             * (`code`/`review`/…) rejected them ("no configured model supports
+             * required capabilities (caps=tools)") even though the model runs
+             * tools fine.
              *
-             * Invariants that bound the risk of deriving policy from capability:
+             * Invariants:
              *  - Operator intent is never overridden: an explicit
-             *    "tools_enabled": true|false is honoured verbatim (the branch
-             *    above). This only sets the value when the operator left it
-             *    UNSPECIFIED, so there is no intent to bypass.
+             *    "tools_enabled": true|false is honoured verbatim (branch above).
+             *    This only sets a value the operator left UNSPECIFIED.
              *  - The lookup is total and offline: model_capability_get resolves
-             *    via on-disk overrides/caches and a pure in-code heuristic,
-             *    never the network, and returns 0 for an unknown or empty model.
-             *    It therefore cannot fail or block startup, and an unrecognised
-             *    model fails SAFE to tools-off (conservative default preserved
-             *    exactly where capability is unknown). */
+             *    via on-disk overrides/caches and a pure in-code heuristic, never
+             *    the network. We only force OFF when it POSITIVELY resolves a
+             *    model that lacks MODEL_CAP_TOOLS; an unknown/empty model defaults
+             *    ON. So embedders/rerankers registered with a known non-tool model
+             *    stay off, while any real chat/code delegate is capable by default. */
             model_capability_t mc;
-            ag->tools_enabled =
-                (ag->model[0] && model_capability_get(ag->provider, ag->model, &mc) &&
-                 (mc.flags & MODEL_CAP_TOOLS))
-                    ? 1
-                    : 0;
+            int known = ag->model[0] && model_capability_get(ag->provider, ag->model, &mc);
+            ag->tools_enabled = (known && !(mc.flags & MODEL_CAP_TOOLS)) ? 0 : 1;
          }
 
          v = cJSON_GetObjectItem(a, "recommended_sampling");

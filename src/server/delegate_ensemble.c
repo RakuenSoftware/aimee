@@ -818,7 +818,13 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
 static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const char *task,
                              char **artifact, char **peer_notes, double *cost_usd)
 {
-   if (!artifact || !*artifact || !peer_notes || !*peer_notes)
+   /* Nothing to compress if there is no carryover. The `!*x` checks reject a NULL
+    * string pointer; the `!(*x)[0]` checks also reject an allocated-but-EMPTY
+    * string (round 1, before any artifact/peer notes exist) so a large task can
+    * never provoke a pointless summarize call. */
+   if (!artifact || !*artifact || !(*artifact)[0])
+      return -1;
+   if (!peer_notes || !*peer_notes || !(*peer_notes)[0])
       return -1;
    char *prompt = xasprintf3(
        "Summarize this roundtable context forward so the next participants can continue without "
@@ -1517,7 +1523,14 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                       "observed cost is available",
                       out->cost_usd + preflight, cfg->ensemble_max_cost_usd);
       }
-      if (strlen(artifact) + strlen(peer_notes) + strlen(task) > 22000)
+      /* Compress only the ACCUMULATED CARRYOVER (artifact + peer_notes), never the
+       * task. The task is the fixed, incompressible review target / draft brief;
+       * counting it here made any single-shot review whose target exceeds ~22 KB
+       * trip summarize_forward on round 1 (carryover empty), which burned an
+       * aggregator call against the panel deadline, falsely flagged the run
+       * truncated+degraded, and starved the panelists into an empty (items:0)
+       * result. Carryover only, so a large task passes through to the panel intact. */
+      if (strlen(artifact) + strlen(peer_notes) > 22000)
       {
          if (summarize_forward(acfg, cfg, task, &artifact, &peer_notes, &out->cost_usd) == 0)
          {

@@ -48,6 +48,27 @@ static void test_full_stack_resolves_union(void)
    printf("  code_roles_resolve_edit_file: ok\n");
 }
 
+/* review_indexed gives a reviewer aimee's branch-indexed capabilities and NO
+ * filesystem/git tools, so a caller-provided-diff review cannot fall back to
+ * reading a worktree it does not have. */
+static void test_review_indexed_excludes_filesystem(void)
+{
+   toolset_registry_t reg;
+   toolset_registry_init(&reg);
+   char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
+   char err[TOOLSET_ERROR_MAX] = "";
+   int n = toolset_resolve(&reg, "review_indexed", tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
+   assert(n > 0);
+   assert(has_tool(tools, n, "code_search"));
+   assert(has_tool(tools, n, "find_symbol"));
+   assert(has_tool(tools, n, "search_memory"));
+   assert(!has_tool(tools, n, "read_file"));
+   assert(!has_tool(tools, n, "list_files"));
+   assert(!has_tool(tools, n, "grep"));
+   assert(!has_tool(tools, n, "git_diff"));
+   printf("  review_indexed_excludes_filesystem: ok\n");
+}
+
 static void test_cycle_rejected(void)
 {
    char path[256];
@@ -191,6 +212,7 @@ int main(void)
 {
    printf("test_toolset:\n");
    test_full_stack_resolves_union();
+   test_review_indexed_excludes_filesystem();
    test_cycle_rejected();
    test_unknown_tool_dropped();
    test_core_edit_flows_to_include();

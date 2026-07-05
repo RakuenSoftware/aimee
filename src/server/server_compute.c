@@ -1375,8 +1375,11 @@ void delegate_worker(void *arg)
    platform_setenv("AIMEE_ACTIVE_TOOLSET", saved_toolset_buf);
    if (parent_write_guard_active)
       agent_tools_parent_write_guard_clear();
+   /* Server-initiated delegates review their own worktree (target is not
+    * caller-supplied), so cwd-grounding applies. Threading a request-level
+    * caller-provided-target signal here is a follow-up. */
    delegate_apply_review_evidence_guard(
-       role, delegate_worktree_path[0] ? delegate_worktree_path : cwd, &rc, &result);
+       role, delegate_worktree_path[0] ? delegate_worktree_path : cwd, &rc, &result, 0);
    int delegate_applied_changes = -1;
    char delegate_apply_error[512] = "";
    char delegate_parent_root[MAX_PATH_LEN] = "";

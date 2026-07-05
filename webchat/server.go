@@ -178,7 +178,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 
 	// Aggregate dashboard endpoint — all panels in one server round-trip
 	mux.HandleFunc("/api/dashboard", s.requireAuth(s.handleDashboardAll))
-	mux.HandleFunc("/api/audit", s.requireAuth(s.dataArrayHandler("dashboard.audit")))
+	mux.HandleFunc("/api/audit", s.requireAuth(s.handleAudit))
 
 	// Code-graph visualization (§8): read-only views via aimee-server's index_graph_* MCP tools.
 	mux.HandleFunc("/api/graph/hubs", s.requireAuth(s.handleGraphHubs))
