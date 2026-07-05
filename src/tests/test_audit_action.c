@@ -224,6 +224,178 @@ static void test_value_truncation_semantics(void)
    free(trunc2);
 }
 
+/* ---- audit_command_preview: arg-free command surfacing ------------------- */
+
+static const char *preview(const char *tool, const char *args, char out[256])
+{
+   audit_command_preview(tool, args, out, 256);
+   return out;
+}
+
+static void test_preview_basic_bash(void)
+{
+   char o[256];
+   assert(strcmp(preview("Bash", "{\"command\":\"ls -la /home\"}", o), "ls") == 0);
+   /* absolute path -> basename only (no leaking the containing directory) */
+   assert(strcmp(preview("Bash", "{\"command\":\"/usr/bin/git status\"}", o), "git") == 0);
+   /* ./relative script -> basename */
+   assert(strcmp(preview("Bash", "{\"command\":\"./scripts/deploy.sh --prod\"}", o), "deploy.sh") ==
+          0);
+}
+
+static void test_preview_drops_all_args(void)
+{
+   char o[256];
+   /* the filename argument (potential PII) must never appear */
+   assert(strcmp(preview("Bash", "{\"command\":\"rm /home/virant/.secret_token\"}", o), "rm") == 0);
+   assert(strstr(o, "secret") == NULL);
+   assert(strstr(o, "virant") == NULL);
+   /* a value passed as an arg is dropped, not surfaced */
+   assert(strcmp(preview("Bash", "{\"command\":\"echo hunter2\"}", o), "echo") == 0);
+   assert(strstr(o, "hunter2") == NULL);
+}
+
+static void test_preview_env_assignment_redacted(void)
+{
+   char o[256];
+   /* a leading secret env-assignment is skipped; the real command surfaces */
+   assert(strcmp(preview("Bash", "{\"command\":\"AWS_SECRET_ACCESS_KEY=abc123 aws s3 ls\"}", o),
+                 "aws") == 0);
+   assert(strstr(o, "abc123") == NULL);
+   assert(strstr(o, "AWS_SECRET") == NULL);
+}
+
+static void test_preview_compound_and_pipeline(void)
+{
+   char o[256];
+   assert(strcmp(preview("Bash", "{\"command\":\"cd /x && rm -rf /secret\"}", o), "cd ; rm") == 0);
+   assert(strstr(o, "secret") == NULL);
+   assert(strcmp(preview("Bash", "{\"command\":\"cat /etc/passwd | grep root\"}", o),
+                 "cat ; grep") == 0);
+   /* redirect target (a path arg) is consumed, never surfaced */
+   assert(strcmp(preview("Bash", "{\"command\":\"curl example.com > /tmp/out.bin\"}", o), "curl") ==
+          0);
+   assert(strstr(o, "out.bin") == NULL);
+}
+
+static void test_preview_heredoc_and_newlines(void)
+{
+   char o[256];
+   /* A heredoc/multi-line DATA body must never surface a body token as a command:
+    * a newline is a token separator, not a command boundary. */
+   assert(strcmp(preview("Bash",
+                         "{\"command\":\"cat <<EOF\\njohn.doe@example.com is admin\\nEOF\"}", o),
+                 "cat") == 0);
+   assert(strstr(o, "john") == NULL);
+   assert(strstr(o, "example.com") == NULL);
+   assert(strstr(o, "EOF") == NULL);
+   /* Explicit operators still split commands across line breaks. */
+   assert(strcmp(preview("Bash", "{\"command\":\"ls &&\\n grep x\"}", o), "ls ; grep") == 0);
+}
+
+static void test_preview_compound_constructs(void)
+{
+   char o[256];
+   /* Nothing inside a case…esac is emitted — subject, patterns (incl. `a|b`
+    * alternation), and bodies are all suppressed — so no pattern value can leak.
+    * Commands before and after the case still surface. */
+   assert(
+       strcmp(preview("Bash",
+                      "{\"command\":\"ls; case $x in a|secret_pat_9) c1;; esac; rm -rf /t\"}", o),
+              "ls ; rm") == 0);
+   assert(strstr(o, "secret_pat_9") == NULL);
+   /* reserved words are skipped so the real governed commands surface */
+   assert(strcmp(preview("Bash", "{\"command\":\"if grep x file; then rm /tmp/y; fi\"}", o),
+                 "grep ; rm") == 0);
+   /* a leading file-descriptor on a redirect is not mistaken for the command */
+   assert(strcmp(preview("Bash", "{\"command\":\"2>/tmp/err.log grep needle file\"}", o), "grep") ==
+          0);
+   /* a for-loop's list values (potential PII paths) are never surfaced */
+   audit_command_preview("Bash",
+                         "{\"command\":\"for f in /secret/a.key /secret/b.key; do rm $f; done\"}",
+                         o, sizeof o);
+   assert(strstr(o, "secret") == NULL);
+   assert(strstr(o, "a.key") == NULL);
+   assert(strstr(o, "rm") != NULL);
+   /* keyword OPERANDS are non-commands and must never leak: the case SUBJECT (a
+    * literal value), the loop variable, the function name. */
+   audit_command_preview("Bash", "{\"command\":\"case CUSTOMER_SSN_123 in x) echo ok;; esac\"}", o,
+                         sizeof o);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL); /* case subject (a value) never leaks */
+   audit_command_preview("Bash", "{\"command\":\"function SECRET_NAME { echo ok; }\"}", o,
+                         sizeof o);
+   assert(strstr(o, "SECRET_NAME") == NULL);
+   audit_command_preview("Bash", "{\"command\":\"for SECRET_VAR in a; do ls; done\"}", o, sizeof o);
+   assert(strstr(o, "SECRET_VAR") == NULL);
+   assert(strstr(o, "ls") != NULL);
+}
+
+static void test_preview_expansions_and_defs(void)
+{
+   char o[256];
+   /* heredoc body — even with a shell operator on a body line — never leaks;
+    * scanning stops at the `<<`, so the leading command is still shown. */
+   assert(strcmp(preview("Bash", "{\"command\":\"cat <<EOF\\n;CUSTOMER_SSN_123\\nEOF\"}", o),
+                 "cat") == 0);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL);
+   /* array-assignment VALUES are data, folded into the skipped assignment token */
+   assert(strcmp(preview("Bash", "{\"command\":\"arr=(CUSTOMER_SSN_123); echo ok\"}", o), "echo") ==
+          0);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL);
+   /* function-definition name (`name() {...}`) is not a command and must not leak */
+   audit_command_preview("Bash", "{\"command\":\"SECRET_FUNCTION_NAME() { echo ok; }\"}", o,
+                         sizeof o);
+   assert(strstr(o, "SECRET_FUNCTION_NAME") == NULL);
+   /* a subshell/group is opaque and suppressed (its interior is a command list,
+    * not a program); commands outside it still surface, and no inner path segment
+    * leaks (e.g. the `x` in `/etc/x`) */
+   assert(strcmp(preview("Bash", "{\"command\":\"(rm /etc/SECRET_X && make) ; echo done\"}", o),
+                 "echo") == 0);
+   assert(strstr(o, "SECRET_X") == NULL && strstr(o, "make") == NULL);
+   /* multi-element array assignment values never leak (all inside the paren span) */
+   assert(strcmp(preview("Bash", "{\"command\":\"arr=(SSN_1 SSN_2 SSN_3); ls\"}", o), "ls") == 0);
+   assert(strstr(o, "SSN_") == NULL);
+   audit_command_preview("Bash", "{\"command\":\"$(SECRET_SUB) arg\"}", o, sizeof o);
+   assert(strstr(o, "SECRET_SUB") == NULL);
+   /* command substitution is opaque: a space inside `$(...)` must not split its
+    * data into a command-position token (a bug found by the adversarial battery) */
+   audit_command_preview("Bash", "{\"command\":\"x=$(cat /etc/CUSTOMER_SSN_123); echo ok\"}", o,
+                         sizeof o);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL);
+   assert(strstr(o, "echo") != NULL);
+   /* a backslash-escaped metacharacter keeps the data in the argument word */
+   assert(strcmp(preview("Bash", "{\"command\":\"echo foo\\\\;CUSTOMER_SSN_123\"}", o), "echo") ==
+          0);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL);
+   /* a word-start comment is free-form text, never a command */
+   assert(strcmp(preview("Bash", "{\"command\":\"echo ok; #CUSTOMER_SSN_123\"}", o), "echo") == 0);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL);
+   /* an escaped quote inside a double-quoted arg does not end the arg word, so a
+    * `;` inside it stays data and the trailing value never reaches command pos.
+    * (== "echo" also guards against a malformed literal parsing to empty.) */
+   assert(strcmp(preview("Bash", "{\"command\":\"echo \\\"a\\\\\\\"b; CUSTOMER_SSN_123\\\"\"}", o),
+                 "echo") == 0);
+   assert(strstr(o, "CUSTOMER_SSN_123") == NULL);
+}
+
+static void test_preview_non_shell_and_edge(void)
+{
+   char o[256];
+   /* non-shell tools surface nothing (the row's tool field names the action) */
+   assert(strcmp(preview("Write", "{\"file_path\":\"/x\",\"content\":\"hi\"}", o), "") == 0);
+   assert(strcmp(preview("Read", "{\"file_path\":\"/x\"}", o), "") == 0);
+   /* execute_script IS a shell tool; only its command field is read, not script */
+   assert(
+       strcmp(preview("execute_script", "{\"command\":\"bash\",\"script\":\"rm -rf /secret\"}", o),
+              "bash") == 0);
+   assert(strstr(o, "secret") == NULL);
+   /* best-effort failure paths write "" and never crash */
+   assert(strcmp(preview("Bash", "not json", o), "") == 0);
+   assert(strcmp(preview("Bash", "{\"command\":\"\"}", o), "") == 0);
+   audit_command_preview(NULL, "{}", o, sizeof o);
+   assert(o[0] == '\0');
+}
+
 int main(void)
 {
    test_shape_and_determinism();
@@ -237,6 +409,14 @@ int main(void)
    test_hmac_rfc4231_vectors();
    test_separator_injection_no_collision();
    test_value_truncation_semantics();
+   test_preview_basic_bash();
+   test_preview_drops_all_args();
+   test_preview_env_assignment_redacted();
+   test_preview_compound_and_pipeline();
+   test_preview_heredoc_and_newlines();
+   test_preview_compound_constructs();
+   test_preview_expansions_and_defs();
+   test_preview_non_shell_and_edge();
    printf("test_audit_action: all passed\n");
    return 0;
 }

@@ -216,16 +216,18 @@ static void audit_maybe_rotate_locked(void)
    }
 }
 
-void audit_action_log(const char *actor, const char *tool, const char *args_hash, const char *mode,
-                      const char *reason_code, const char *verdict, long long task_id)
+void audit_action_log(const char *actor, const char *tool, const char *args_hash,
+                      const char *command, const char *mode, const char *reason_code,
+                      const char *verdict, long long task_id)
 {
    char ts[32];
    format_timestamp(ts, sizeof(ts));
 
-   char e_actor[128], e_tool[128], e_hash[96], e_mode[64], e_reason[96], e_verdict[32];
+   char e_actor[128], e_tool[128], e_hash[96], e_cmd[320], e_mode[64], e_reason[96], e_verdict[32];
    audit_json_escape(e_actor, sizeof e_actor, actor);
    audit_json_escape(e_tool, sizeof e_tool, tool);
    audit_json_escape(e_hash, sizeof e_hash, args_hash);
+   audit_json_escape(e_cmd, sizeof e_cmd, command);
    audit_json_escape(e_mode, sizeof e_mode, mode);
    audit_json_escape(e_reason, sizeof e_reason, reason_code);
    audit_json_escape(e_verdict, sizeof e_verdict, verdict);
@@ -238,9 +240,9 @@ void audit_action_log(const char *actor, const char *tool, const char *args_hash
    {
       fprintf(audit_fp,
               "{\"ts\":\"%s\",\"kind\":\"tool_action\",\"actor\":\"%s\",\"tool\":\"%s\","
-              "\"args_hash\":\"%s\",\"mode\":\"%s\",\"reason_code\":\"%s\",\"verdict\":\"%s\","
-              "\"task_id\":%lld}\n",
-              ts, e_actor, e_tool, e_hash, e_mode, e_reason, e_verdict, task_id);
+              "\"args_hash\":\"%s\",\"command\":\"%s\",\"mode\":\"%s\",\"reason_code\":\"%s\","
+              "\"verdict\":\"%s\",\"task_id\":%lld}\n",
+              ts, e_actor, e_tool, e_hash, e_cmd, e_mode, e_reason, e_verdict, task_id);
       fflush(audit_fp);
       audit_maybe_rotate_locked();
    }

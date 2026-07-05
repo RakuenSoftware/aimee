@@ -39,7 +39,8 @@ static void test_row_format(void)
 {
    set_home();
    audit_log_open();
-   audit_action_log("primary", "Write", "v1-abc123", "approve", "read_before_write", "block", 42);
+   audit_action_log("primary", "Write", "v1-abc123", "", "approve", "read_before_write", "block",
+                    42);
    audit_log_close();
 
    char *log = read_audit_log();
@@ -47,6 +48,7 @@ static void test_row_format(void)
    assert(strstr(log, "\"actor\":\"primary\""));
    assert(strstr(log, "\"tool\":\"Write\""));
    assert(strstr(log, "\"args_hash\":\"v1-abc123\""));
+   assert(strstr(log, "\"command\":\"\"")); /* non-shell tool: no command surfaced */
    assert(strstr(log, "\"mode\":\"approve\""));
    assert(strstr(log, "\"reason_code\":\"read_before_write\""));
    assert(strstr(log, "\"verdict\":\"block\""));
@@ -58,7 +60,7 @@ static void test_json_escaping(void)
    set_home();
    audit_log_open();
    /* a tool name carrying a quote + backslash must be escaped, not break JSON */
-   audit_action_log("primary", "We\"ird\\Tool", "v1-0", "approve", "blocked", "block", 0);
+   audit_action_log("primary", "We\"ird\\Tool", "v1-0", "", "approve", "blocked", "block", 0);
    audit_log_close();
 
    char *log = read_audit_log();
@@ -72,11 +74,12 @@ static void test_null_fields_render_empty(void)
 {
    set_home();
    audit_log_open();
-   audit_action_log(NULL, "Read", NULL, NULL, NULL, "allow", 7);
+   audit_action_log(NULL, "Read", NULL, NULL, NULL, NULL, "allow", 7);
    audit_log_close();
 
    char *log = read_audit_log();
    assert(strstr(log, "\"actor\":\"\""));
+   assert(strstr(log, "\"command\":\"\"")); /* NULL command renders as "" */
    assert(strstr(log, "\"reason_code\":\"\""));
    assert(strstr(log, "\"verdict\":\"allow\""));
    assert(strstr(log, "\"tool\":\"Read\""));
@@ -91,7 +94,7 @@ static void test_control_char_escaping(void)
    audit_action_log("primary",
                     "a\tb\rc\x01"
                     "d",
-                    "v1-0", "approve", "blocked", "block", 0);
+                    "v1-0", "", "approve", "blocked", "block", 0);
    audit_log_close();
 
    char *log = read_audit_log();
