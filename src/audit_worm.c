@@ -723,6 +723,57 @@ int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_
    return (ckpt >= head) ? AUDIT_WORM_VERIFY_GREEN : AUDIT_WORM_VERIFY_AMBER;
 }
 
+cJSON *audit_worm_read_page(long offset, long limit, long *total)
+{
+   if (total)
+      *total = 0;
+   if (limit <= 0)
+      limit = 500;
+   if (offset < 0)
+      offset = 0;
+   cJSON *arr = cJSON_CreateArray();
+   pthread_mutex_lock(&g_worm_mu);
+   if (!g_worm_db && worm_open_locked_default() != 0)
+   {
+      pthread_mutex_unlock(&g_worm_mu);
+      return arr;
+   }
+   if (total)
+   {
+      sqlite3_stmt *c = NULL;
+      if (sqlite3_prepare_v2(g_worm_db, "SELECT COUNT(*) FROM audit_event", -1, &c, NULL) ==
+              SQLITE_OK &&
+          sqlite3_step(c) == SQLITE_ROW)
+         *total = (long)sqlite3_column_int64(c, 0);
+      sqlite3_finalize(c);
+   }
+   sqlite3_stmt *q = NULL;
+   if (sqlite3_prepare_v2(g_worm_db,
+                          "SELECT seq, ts, actor_role, actor_principal, action, subject, verdict,"
+                          " detail, key_id FROM audit_event ORDER BY seq DESC LIMIT ? OFFSET ?",
+                          -1, &q, NULL) == SQLITE_OK)
+   {
+      sqlite3_bind_int64(q, 1, limit);
+      sqlite3_bind_int64(q, 2, offset);
+      while (sqlite3_step(q) == SQLITE_ROW)
+      {
+         cJSON *o = cJSON_CreateObject();
+         cJSON_AddNumberToObject(o, "seq", (double)sqlite3_column_int64(q, 0));
+         const char *cols[] = {"ts",      "actor_role", "actor_principal", "action",
+                               "subject", "verdict",    "detail",          "key_id"};
+         for (int i = 0; i < 8; i++)
+         {
+            const unsigned char *v = sqlite3_column_text(q, i + 1);
+            cJSON_AddStringToObject(o, cols[i], v ? (const char *)v : "");
+         }
+         cJSON_AddItemToArray(arr, o);
+      }
+   }
+   sqlite3_finalize(q);
+   pthread_mutex_unlock(&g_worm_mu);
+   return arr;
+}
+
 long audit_worm_count(void)
 {
    pthread_mutex_lock(&g_worm_mu);
