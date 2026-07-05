@@ -216,6 +216,29 @@ func (s *server) agentOpHandler(method string) http.HandlerFunc {
 	}
 }
 
+// handleAudit proxies GET /api/audit -> the PAGINATED dashboard.audit route,
+// forwarding sanitized limit/offset query params and passing the server's
+// {status,data,total,offset,limit} envelope straight through so the Logs page can
+// page an arbitrarily large ledger (the response never overflows the server's
+// per-request buffer).
+func (s *server) handleAudit(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	path := "/v1/dashboard/audit"
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit > 0 || offset > 0 {
+		path = fmt.Sprintf("%s?limit=%d&offset=%d", path, limit, offset)
+	}
+	st, data, err := s.v1Request(ctx, http.MethodGet, path, nil)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil || st != http.StatusOK || len(data) == 0 {
+		fmt.Fprint(w, `{"data":[],"total":0,"offset":0,"limit":0}`)
+		return
+	}
+	w.Write(data)
+}
+
 func (s *server) handleDelegations(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.socketCallForRequest(r, map[string]any{"method": "dashboard.delegations"})
 	w.Header().Set("Content-Type", "application/json")
