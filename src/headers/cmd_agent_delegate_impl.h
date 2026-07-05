@@ -165,7 +165,7 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
  * Returns a heap-allocated string; caller must free.  Returns NULL on failure. */
 char *delegate_build_validation_bundle(const char *cwd);
 char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt);
+                                              const char *fallback_prompt, int target_provided);
 /* Validate Location-backed review snippets against the current checkout.
  * Returns 1 and fills errbuf when a fenced code block following a
  * `Location: `path:line`` marker does not match that file near the cited line,
@@ -173,7 +173,7 @@ char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd,
 int delegate_check_review_evidence_drift(const char *response, const char *repo_root, char *errbuf,
                                          size_t errbuf_size);
 void delegate_apply_review_evidence_guard(const char *role, const char *repo_root, int *rc,
-                                          agent_result_t *result);
+                                          agent_result_t *result, int target_provided);
 
 /* Returns 1 if the worktree at wt_path has any tracked-file diff or
  * untracked-file (vs HEAD), 0 otherwise. Used by the no-op detector to

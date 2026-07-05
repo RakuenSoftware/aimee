@@ -1118,18 +1118,50 @@ char *delegate_build_validation_bundle(const char *cwd)
    return bundle;
 }
 
+/* Guidance appended when the CALLER supplied the review target in the prompt
+ * (--prompt-file / --prompt-stdin), e.g. a diff for an external code review. The
+ * target is the provided content — NOT the delegate host's working directory, which
+ * may be absent, on a different branch, or carry unrelated changes. For surrounding
+ * context the reviewer explores the DEFAULT BRANCH through aimee's own index/memory
+ * (code_search, find_symbol, search_memory, search_docs), which are branch-indexed
+ * and always available, rather than filesystem/git tools against a worktree it does
+ * not have. Returned string is heap-owned. */
+static char *delegate_build_provided_target_block(void)
+{
+   return strdup(
+       "\n\n---\n"
+       "## Review Target & Exploration\n"
+       "review_target: the diff / content provided in the prompt ABOVE is the sole subject of "
+       "this review. Base every finding on it.\n"
+       "no_local_worktree: do NOT run read_file/list_files/grep/git_diff/git_status against a "
+       "local checkout — this delegate has no such worktree for the target; that path is empty, "
+       "stale, or unrelated, and is not the review target.\n"
+       "explore_via_aimee: to inspect surrounding code, callers, or prior context on the DEFAULT "
+       "BRANCH, use aimee's own capabilities — code_search and find_symbol (branch-indexed code), "
+       "search_memory and search_docs (project memory/knowledge). These reflect the committed "
+       "default branch and are always available; prefer them over any filesystem tool.\n"
+       "absence_claims: only assert something is missing if a code_search/find_symbol query for "
+       "it returned no results; cite that query. Never infer absence from an unreadable worktree.\n"
+       "---\n");
+}
+
 char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt)
+                                              const char *fallback_prompt, int target_provided)
 {
    if (!role)
       return owned_prompt;
 
    const char *canonical_role = delegate_role_canonicalize(role);
-   if (strcmp(canonical_role, "review") != 0 && strcmp(canonical_role, "validate") != 0 &&
-       strcmp(canonical_role, "diagnose") != 0)
-      return owned_prompt;
+   int is_review_role = strcmp(canonical_role, "review") == 0 ||
+                        strcmp(canonical_role, "validate") == 0 ||
+                        strcmp(canonical_role, "diagnose") == 0;
 
-   char *bundle = delegate_build_validation_bundle(cwd);
+   /* Caller-supplied target (a diff via --prompt-file/--prompt-stdin) wins: the
+    * provided content is the review subject, so the host-cwd auto-diff bundle is
+    * suppressed (it would review the wrong tree) and the reviewer is pointed at
+    * aimee's branch-indexed capabilities for context instead of the filesystem. */
+   char *bundle = target_provided ? delegate_build_provided_target_block()
+                                  : (is_review_role ? delegate_build_validation_bundle(cwd) : NULL);
    if (!bundle)
       return owned_prompt;
 
@@ -1405,10 +1437,17 @@ static int delegate_response_claims_missing_parent_diff(const char *response)
 }
 
 void delegate_apply_review_evidence_guard(const char *role, const char *repo_root, int *rc,
-                                          agent_result_t *result)
+                                          agent_result_t *result, int target_provided)
 {
    if (!rc || *rc != 0 || !result || !result->response || !result->response[0] || !repo_root ||
        !repo_root[0])
+      return;
+
+   /* When the caller supplied the review target (a diff in the prompt), there is
+    * no host-cwd evidence to drift against — the provided content IS the evidence.
+    * Guarding against the local worktree here would penalize a correct review of
+    * the provided diff, so skip it. */
+   if (target_provided)
       return;
 
    if (!role || (strcmp(role, "review") != 0 && strcmp(role, "validate") != 0 &&

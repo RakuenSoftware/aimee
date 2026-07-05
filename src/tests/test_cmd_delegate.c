@@ -377,12 +377,12 @@ static void test_prompt_plan_requires_prompt_source(void)
 static void test_validation_bundle_appended_for_review_roles(void)
 {
    char *code_prompt = strdup("base prompt");
-   char *unchanged = delegate_maybe_append_validation_bundle("code", ".", code_prompt, NULL);
+   char *unchanged = delegate_maybe_append_validation_bundle("code", ".", code_prompt, NULL, 0);
    assert(unchanged == code_prompt);
    free(unchanged);
 
    char *review_prompt =
-       delegate_maybe_append_validation_bundle("review", ".", NULL, "base prompt");
+       delegate_maybe_append_validation_bundle("review", ".", NULL, "base prompt", 0);
    assert(review_prompt != NULL);
    assert(strstr(review_prompt, "base prompt") == review_prompt);
    assert(strstr(review_prompt, "Validation Evidence Bundle") != NULL);
@@ -393,7 +393,7 @@ static void test_validation_bundle_appended_for_review_roles(void)
    free(review_prompt);
 
    char *diagnose_prompt =
-       delegate_maybe_append_validation_bundle("diagnose", ".", NULL, "base prompt");
+       delegate_maybe_append_validation_bundle("diagnose", ".", NULL, "base prompt", 0);
    assert(diagnose_prompt != NULL);
    assert(strstr(diagnose_prompt, "Validation Evidence Bundle") != NULL);
    assert(strstr(diagnose_prompt, "Directory layout claims") != NULL);
@@ -401,18 +401,42 @@ static void test_validation_bundle_appended_for_review_roles(void)
    free(diagnose_prompt);
 
    char *inspect_prompt =
-       delegate_maybe_append_validation_bundle("inspect", ".", NULL, "base prompt");
+       delegate_maybe_append_validation_bundle("inspect", ".", NULL, "base prompt", 0);
    assert(inspect_prompt != NULL);
    assert(strstr(inspect_prompt, "Validation Evidence Bundle") != NULL);
    assert(strstr(inspect_prompt, "whole relevant source tree") != NULL);
    free(inspect_prompt);
 
-   char *test_prompt = delegate_maybe_append_validation_bundle("test", ".", NULL, "base prompt");
+   char *test_prompt = delegate_maybe_append_validation_bundle("test", ".", NULL, "base prompt", 0);
    assert(test_prompt != NULL);
    assert(strstr(test_prompt, "Validation Evidence Bundle") != NULL);
    assert(strstr(test_prompt, "whole relevant source tree") != NULL);
    free(test_prompt);
    printf("  PASS: test_validation_bundle_appended_for_review_roles\n");
+}
+
+/* When the caller supplies the review target (target_provided=1, e.g. a diff via
+ * --prompt-file), the host-cwd "Validation Evidence Bundle" is suppressed and the
+ * reviewer is pointed at aimee's branch-indexed capabilities instead. */
+static void test_provided_target_suppresses_cwd_bundle(void)
+{
+   char *review =
+       delegate_maybe_append_validation_bundle("review", ".", NULL, "the diff to review", 1);
+   assert(review != NULL);
+   assert(strstr(review, "the diff to review") == review);
+   assert(strstr(review, "Review Target & Exploration") != NULL);
+   assert(strstr(review, "explore_via_aimee") != NULL);
+   assert(strstr(review, "code_search") != NULL);
+   /* the wrong-tree cwd bundle must NOT be present */
+   assert(strstr(review, "Validation Evidence Bundle") == NULL);
+   free(review);
+
+   /* Applies to any role, not just review roles, when a target is provided. */
+   char *coder = delegate_maybe_append_validation_bundle("code", ".", NULL, "base", 1);
+   assert(coder != NULL);
+   assert(strstr(coder, "Review Target & Exploration") != NULL);
+   free(coder);
+   printf("  PASS: test_provided_target_suppresses_cwd_bundle\n");
 }
 
 static void test_review_evidence_drift_detects_reversed_snippet(void)
@@ -563,7 +587,7 @@ static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(voi
    assert(result.response != NULL);
 
    int rc = 0;
-   delegate_apply_review_evidence_guard("review", root, &rc, &result);
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
    assert(rc == 0);
    assert(result.error[0] == '\0');
    free(result.response);
@@ -581,7 +605,7 @@ static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(voi
    assert(result.response != NULL);
 
    rc = 0;
-   delegate_apply_review_evidence_guard("validate", root, &rc, &result);
+   delegate_apply_review_evidence_guard("validate", root, &rc, &result, 0);
    assert(rc == -1);
    assert(strstr(result.error, "delegate evidence drift") != NULL);
    free(result.response);
@@ -619,7 +643,7 @@ static void test_diagnose_evidence_guard_allows_nonreview_snippets(void)
    assert(result.response != NULL);
 
    int rc = 0;
-   delegate_apply_review_evidence_guard("diagnose", root, &rc, &result);
+   delegate_apply_review_evidence_guard("diagnose", root, &rc, &result, 0);
    assert(rc == 0);
    assert(result.error[0] == '\0');
    free(result.response);
@@ -1114,6 +1138,7 @@ int main(void)
    test_prompt_plan_prompt_and_file();
    test_prompt_plan_requires_prompt_source();
    test_validation_bundle_appended_for_review_roles();
+   test_provided_target_suppresses_cwd_bundle();
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
    test_review_evidence_drift_ignores_inline_review_annotation();
