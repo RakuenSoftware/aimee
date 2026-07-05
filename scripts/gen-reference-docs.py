@@ -258,6 +258,8 @@ CFG_KEY_DESC = {
     "provider": "Default model provider.",
     "reasoning_cap_enabled": "Cap the model's reasoning effort.",
     "typed_facts_enabled": "Enable the typed-fact knowledge layer (master gate; default off).",
+    "audit_worm_enabled": "Dual-write governed-action audit rows into the append-only, "
+    "hash-chained WORM store alongside audit.log (default off).",
     "verify_cross_project": "Let `aimee git verify` span other projects.",
     "verify_enabled": "Master gate for `aimee git verify` (default off).",
     "virtual_context_assembly_budget": "Token budget for virtual-context assembly.",
