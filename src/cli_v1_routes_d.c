@@ -574,6 +574,7 @@ static const struct
     {"agent.probe", "POST", "/v1/agent/probe"},
     {"agent.remove", "POST", "/v1/agent/remove"},
     {"agent.roles", "POST", "/v1/agent/roles"},
+    {"agent.set", "POST", "/v1/agent/set"},
     {"agent.setup", "POST", "/v1/agent/setup"},
     {"agent.setup_poll", "POST", "/v1/agent/setup_poll"},
     {"agent.stats", "GET", "/v1/agent/stats"},

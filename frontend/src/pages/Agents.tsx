@@ -86,6 +86,10 @@ export default function Agents() {
     null,
   );
   const [showAdd, setShowAdd] = useState(false);
+  // The agent currently open in the Edit modal (null = closed). ALL mutations —
+  // config fields, roles/personas binding, enable, remove — happen there; the base
+  // list is read-only so a binding can never change from a stray click.
+  const [editing, setEditing] = useState<AgentCfg | null>(null);
   // The known role + persona vocabularies, offered (with "all") when assigning
   // an agent's roles/personas so they match what personas declare.
   const [knownRoles, setKnownRoles] = useState<string[]>([]);
@@ -112,26 +116,6 @@ export default function Agents() {
         .catch(() => setStats({})),
     ]).finally(() => setLoading(false));
   }, []);
-
-  // Persist an agent's roles / personas via the surgical ops; refresh on success.
-  const saveAgentField = useCallback(
-    async (name: string, field: "roles" | "personas", values: string[]) => {
-      try {
-        const res = await postArgs<{ error?: string }>(`/api/agents/${field}`, [
-          name,
-          values.join(","),
-        ]);
-        if (res.error) setStatus({ kind: "err", msg: res.error });
-        else {
-          setStatus({ kind: "ok", msg: `${name} ${field} saved` });
-          refresh();
-        }
-      } catch {
-        setStatus({ kind: "err", msg: `failed to save ${field}` });
-      }
-    },
-    [refresh],
-  );
 
   useEffect(() => {
     refresh();
@@ -165,39 +149,13 @@ export default function Agents() {
     for (const a of agents) void probe(a.name);
   }, [agents, probe]);
 
-  const setEnabled = useCallback(
-    async (name: string, enabled: boolean) => {
-      setStatus(null);
-      try {
-        const res = await postArgs<{ error?: string }>(
-          enabled ? "/api/agents/enable" : "/api/agents/disable",
-          [name],
-        );
-        if (res.error) setStatus({ kind: "err", msg: res.error });
-        else setStatus({ kind: "ok", msg: `${name} ${enabled ? "enabled" : "disabled"}` });
-      } catch {
-        setStatus({ kind: "err", msg: `failed to ${enabled ? "enable" : "disable"} ${name}` });
-      }
-      refresh();
-    },
-    [refresh],
-  );
-
-  const remove = useCallback(
-    async (name: string) => {
-      if (!confirm(`Remove delegate “${name}”? This edits agents.json.`)) return;
-      setStatus(null);
-      try {
-        const res = await postArgs<{ error?: string }>("/api/agents/remove", [name]);
-        if (res.error) setStatus({ kind: "err", msg: res.error });
-        else setStatus({ kind: "ok", msg: `removed ${name}` });
-      } catch {
-        setStatus({ kind: "err", msg: `failed to remove ${name}` });
-      }
-      refresh();
-    },
-    [refresh],
-  );
+  // Keep the modal's view of the agent in sync after a save-triggered refresh so
+  // it reflects the persisted record (and closes cleanly if the agent was removed).
+  useEffect(() => {
+    if (!editing) return;
+    const fresh = agents.find((a) => a.name === editing.name);
+    if (fresh && fresh !== editing) setEditing(fresh);
+  }, [agents, editing]);
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
@@ -254,43 +212,40 @@ export default function Agents() {
             stats={stats[a.name]}
             probe={probes[a.name]}
             onProbe={() => probe(a.name)}
-            onToggle={() => setEnabled(a.name, !a.enabled)}
-            onRemove={() => remove(a.name)}
-            knownRoles={knownRoles}
-            knownPersonas={knownPersonas}
-            onSaveRoles={(v) => saveAgentField(a.name, "roles", v)}
-            onSavePersonas={(v) => saveAgentField(a.name, "personas", v)}
+            onEdit={() => setEditing(a)}
           />
         ))}
       </div>
+
+      {editing && (
+        <AgentEditModal
+          agent={editing}
+          knownRoles={knownRoles}
+          knownPersonas={knownPersonas}
+          onClose={() => setEditing(null)}
+          onSaved={refresh}
+          onStatus={(msg, ok) => setStatus({ kind: ok ? "ok" : "err", msg })}
+        />
+      )}
     </div>
   );
 }
 
-/* ---- one delegate: config + availability + stats ---- */
+/* ---- one delegate: READ-ONLY overview (config + availability + stats). All
+   mutations live in the Edit modal, so no binding can change from this list. ---- */
 
 function AgentCard({
   agent,
   stats,
   probe,
   onProbe,
-  onToggle,
-  onRemove,
-  knownRoles,
-  knownPersonas,
-  onSaveRoles,
-  onSavePersonas,
+  onEdit,
 }: {
   agent: AgentCfg;
   stats?: AgentStats;
   probe?: ProbeState;
   onProbe: () => void;
-  onToggle: () => void;
-  onRemove: () => void;
-  knownRoles: string[];
-  knownPersonas: string[];
-  onSaveRoles: (v: string[]) => void;
-  onSavePersonas: (v: string[]) => void;
+  onEdit: () => void;
 }) {
   const pstate = probe?.status || "idle";
   const dot =
@@ -310,43 +265,32 @@ function AgentCard({
   return (
     <Panel title={agent.name}>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-        {/* left: configuration */}
+        {/* left: configuration (read-only) */}
         <div style={{ flex: "1 1 260px", minWidth: 240 }}>
-          <Field k="provider" v={agent.provider || "—"} />
-          <Field k="model" v={agent.model || "—"} />
-          <Field k="endpoint" v={agent.endpoint || "(cli / none)"} mono />
-          <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0" }}>
-            <span style={{ color: "#888", fontSize: 13 }}>enabled</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 4px" }}>
             <Badge
               label={agent.enabled ? "enabled" : "disabled"}
               variant={agent.enabled ? "success" : "neutral"}
             />
-            <button onClick={onToggle} style={btnSmall}>
-              {agent.enabled ? "disable" : "enable"}
-            </button>
           </div>
+          <Field k="provider" v={agent.provider || "—"} />
+          <Field k="model" v={agent.model || "—"} />
+          <Field k="endpoint" v={agent.endpoint || "(cli / none)"} mono />
           {typeof agent.cost_tier === "number" && (
             <Field k="cost tier" v={String(agent.cost_tier)} />
           )}
           {typeof agent.max_parallel === "number" && agent.max_parallel > 0 && (
             <Field k="max parallel" v={String(agent.max_parallel)} />
           )}
+          {typeof agent.max_turns === "number" && agent.max_turns >= 0 && (
+            <Field k="max turns" v={String(agent.max_turns)} />
+          )}
           {agent.context_window ? (
             <Field k="context" v={`${agent.context_window.toLocaleString()} tok`} />
           ) : null}
-          <ChipEditor
-            label="roles"
-            selected={agent.roles || []}
-            options={knownRoles}
-            onSave={onSaveRoles}
-          />
-          <ChipEditor
-            label="personas"
-            selected={agent.personas || []}
-            options={knownPersonas}
-            emptyHint="(none set = all)"
-            onSave={onSavePersonas}
-          />
+          <Field k="tools" v={agent.tools_enabled ? "enabled" : "disabled"} />
+          <StaticChips label="roles" values={agent.roles || []} />
+          <StaticChips label="personas" values={agent.personas || []} emptyHint="(none = all)" />
         </div>
 
         {/* middle: availability */}
@@ -413,13 +357,250 @@ function AgentCard({
 
       <div style={{ marginTop: 8, borderTop: "1px solid #eee", paddingTop: 8 }}>
         <button
-          onClick={onRemove}
-          style={{ ...btnSmall, color: "#c00", borderColor: "#e0a0a0" }}
+          onClick={onEdit}
+          style={{ ...btnSmall, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
         >
-          Remove delegate
+          Edit
         </button>
       </div>
     </Panel>
+  );
+}
+
+/* ---- per-agent Edit modal: edit ALL aspects; the one place binding changes are
+   made. Saves via a single surgical POST /api/agents/set. ---- */
+
+function AgentEditModal({
+  agent,
+  knownRoles,
+  knownPersonas,
+  onClose,
+  onSaved,
+  onStatus,
+}: {
+  agent: AgentCfg;
+  knownRoles: string[];
+  knownPersonas: string[];
+  onClose: () => void;
+  onSaved: () => void;
+  onStatus: (msg: string, ok: boolean) => void;
+}) {
+  const [provider, setProvider] = useState(agent.provider || "openai");
+  const [model, setModel] = useState(agent.model || "");
+  const [endpoint, setEndpoint] = useState(agent.endpoint || "");
+  const [costTier, setCostTier] = useState(String(agent.cost_tier ?? 0));
+  const [maxTurns, setMaxTurns] = useState(String(agent.max_turns ?? -1));
+  const [maxParallel, setMaxParallel] = useState(String(agent.max_parallel ?? 0));
+  const [contextWindow, setContextWindow] = useState(String(agent.context_window ?? 0));
+  const [tools, setTools] = useState(!!agent.tools_enabled);
+  const [enabled, setEnabled] = useState(!!agent.enabled);
+  const [roles, setRoles] = useState<string[]>(agent.roles || []);
+  const [personas, setPersonas] = useState<string[]>(agent.personas || []);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const cliProvider = provider === "claude" || provider === "claude-code";
+
+  // Esc closes the modal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const save = async () => {
+    setBusy(true);
+    setErr("");
+    // One surgical set carrying every editable field. The server patches only what
+    // is passed; roles empty resets to the default set, personas empty resets to "all".
+    const args = [
+      agent.name,
+      "--provider", provider,
+      "--model", model.trim(),
+      "--endpoint", endpoint.trim(),
+      "--cost-tier", costTier || "0",
+      "--max-turns", maxTurns || "-1",
+      "--max-parallel", maxParallel || "0",
+      "--context-window", contextWindow || "0",
+      "--tools", tools ? "on" : "off",
+      "--enabled", enabled ? "true" : "false",
+      "--roles", roles.join(","),
+      "--personas", personas.join(","),
+    ];
+    if (apiKey.trim()) args.push("--key", apiKey.trim());
+    try {
+      const res = await postArgs<{ error?: string }>("/api/agents/set", args);
+      if (res.error) setErr(res.error);
+      else {
+        onStatus(`${agent.name} saved`, true);
+        onSaved();
+        onClose();
+      }
+    } catch {
+      setErr("save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm(`Remove delegate “${agent.name}”? This edits agents.json.`)) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await postArgs<{ error?: string }>("/api/agents/remove", [agent.name]);
+      if (res.error) setErr(res.error);
+      else {
+        onStatus(`removed ${agent.name}`, true);
+        onSaved();
+        onClose();
+      }
+    } catch {
+      setErr("remove failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 30,
+        background: "rgba(0,0,0,0.35)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        padding: 24,
+        overflow: "auto",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff",
+          borderRadius: 8,
+          maxWidth: 640,
+          width: "100%",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "12px 16px",
+            borderBottom: "1px solid #eee",
+            position: "sticky",
+            top: 0,
+            background: "#fff",
+            borderRadius: "8px 8px 0 0",
+          }}
+        >
+          <strong style={{ fontSize: 15 }}>Edit delegate</strong>
+          <span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{agent.name}</span>
+          <button onClick={onClose} style={{ ...btn, marginLeft: "auto" }}>
+            Close
+          </button>
+        </div>
+
+        <div style={{ padding: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <L label="provider">
+              <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp} disabled={busy}>
+                {(PROVIDERS.includes(provider) ? PROVIDERS : [provider, ...PROVIDERS]).map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </L>
+            <L label="model">
+              <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} disabled={busy} />
+            </L>
+            <L label={cliProvider ? "endpoint (optional for CLI)" : "endpoint"}>
+              <input
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                style={inp}
+                placeholder="https://host:port/v1"
+                disabled={busy}
+              />
+            </L>
+            <L label="cost tier">
+              <input type="number" value={costTier} onChange={(e) => setCostTier(e.target.value)} style={inp} min={0} disabled={busy} />
+            </L>
+            <L label="max turns (-1 = default)">
+              <input type="number" value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} style={inp} disabled={busy} />
+            </L>
+            <L label="max parallel">
+              <input type="number" value={maxParallel} onChange={(e) => setMaxParallel(e.target.value)} style={inp} min={0} disabled={busy} />
+            </L>
+            <L label="context window (tok, 0 = auto)">
+              <input type="number" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} style={inp} min={0} disabled={busy} />
+            </L>
+            <L label="API key (blank = keep current)">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                style={inp}
+                placeholder="sk-…  or  $ENV_VAR"
+                disabled={busy}
+              />
+            </L>
+          </div>
+
+          <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}>
+              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
+              enabled
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}>
+              <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} disabled={busy} />
+              tools enabled
+            </label>
+          </div>
+
+          <ChipSelect label="roles" selected={roles} options={knownRoles} onChange={setRoles} />
+          <ChipSelect
+            label="personas"
+            selected={personas}
+            options={knownPersonas}
+            onChange={setPersonas}
+            emptyHint="(none set = all)"
+          />
+
+          {err && <div style={{ fontSize: 12, color: "#c00", marginTop: 8 }}>{err}</div>}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+            <button
+              onClick={() => void save()}
+              disabled={busy}
+              style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+            >
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button onClick={onClose} disabled={busy} style={btn}>
+              Cancel
+            </button>
+            <button
+              onClick={() => void remove()}
+              disabled={busy}
+              style={{ ...btn, marginLeft: "auto", background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3" }}
+            >
+              Remove delegate
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -536,47 +717,40 @@ function AddDelegate({ onDone }: { onDone: (msg: string, ok: boolean) => void })
 
 /* ---- small presentational helpers ---- */
 
-// Editable multi-select of tokens (roles or personas) as toggleable chips. The
-// "all" wildcard is always offered; free selection from the known vocabulary
-// keeps agents matched to what personas declare. Save appears only when dirty.
-function ChipEditor({
+// Editable multi-select of tokens (roles or personas) as toggleable chips, fully
+// controlled by the parent (the Edit modal saves the whole set on Save). The "all"
+// wildcard is always offered; free selection keeps agents matched to what personas
+// declare.
+function ChipSelect({
   label,
   selected,
   options,
+  onChange,
   emptyHint,
-  onSave,
 }: {
   label: string;
   selected: string[];
   options: string[];
+  onChange: (v: string[]) => void;
   emptyHint?: string;
-  onSave: (v: string[]) => void;
 }) {
-  const [sel, setSel] = useState<string[]>(selected);
-  useEffect(() => setSel(selected), [selected.join(",")]); // resync after a save/refresh
   const all = useMemo(() => {
     const s = new Set<string>(["all", ...options, ...selected]);
     return Array.from(s);
   }, [options.join(","), selected.join(",")]);
-  const dirty = sel.slice().sort().join(",") !== selected.slice().sort().join(",");
   const toggle = (r: string) =>
-    setSel((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
+    onChange(selected.includes(r) ? selected.filter((x) => x !== r) : [...selected, r]);
   return (
-    <div style={{ margin: "6px 0" }}>
+    <div style={{ margin: "10px 0 2px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "#888", fontSize: 12 }}>{label}</span>
-        {dirty && (
-          <button onClick={() => onSave(sel)} style={{ ...btnSmall, padding: "1px 8px" }}>
-            save
-          </button>
-        )}
-        {sel.length === 0 && emptyHint && (
+        {selected.length === 0 && emptyHint && (
           <span style={{ color: "#aaa", fontSize: 11 }}>{emptyHint}</span>
         )}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
         {all.map((r) => {
-          const on = sel.includes(r);
+          const on = selected.includes(r);
           return (
             <button
               key={r}
@@ -593,6 +767,36 @@ function ChipEditor({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// Read-only chips for the base card (roles/personas shown, not editable here).
+function StaticChips({ label, values, emptyHint }: { label: string; values: string[]; emptyHint?: string }) {
+  return (
+    <div style={{ margin: "6px 0" }}>
+      <span style={{ color: "#888", fontSize: 12 }}>{label}</span>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+        {values.length === 0 ? (
+          <span style={{ color: "#aaa", fontSize: 11 }}>{emptyHint || "—"}</span>
+        ) : (
+          values.map((r) => (
+            <span
+              key={r}
+              style={{
+                fontSize: 12,
+                padding: "1px 7px",
+                borderRadius: 4,
+                border: "1px solid #dfe6ef",
+                background: "#f4f7fb",
+                color: "#556",
+              }}
+            >
+              {r}
+            </span>
+          ))
+        )}
       </div>
     </div>
   );

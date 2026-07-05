@@ -2065,6 +2065,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/agent/enable", NULL, RM_EXACT, "agent.enable", 0, rh_dispatch_op},
     {"POST", "/v1/agent/roles", NULL, RM_EXACT, "agent.roles", 0, rh_dispatch_op},
     {"POST", "/v1/agent/personas", NULL, RM_EXACT, "agent.personas", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/set", NULL, RM_EXACT, "agent.set", 0, rh_dispatch_op},
     {"POST", "/v1/agent/disable", NULL, RM_EXACT, "agent.disable", 0, rh_dispatch_op},
     {"POST", "/v1/agent/probe", NULL, RM_EXACT, "agent.probe", 0, rh_dispatch_op},
     {"GET", "/v1/agent/stats", NULL, RM_EXACT, "agent.stats", 0, rh_dispatch_op},

@@ -1063,6 +1063,10 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "agent.personas");
 }
+int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "agent.set");
+}
 int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "agent.disable");

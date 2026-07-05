@@ -2104,6 +2104,11 @@ paths:
       summary: Set the personas an agent may be dispatched as ("all" = every persona)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
+  /agent/set:
+    post:
+      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, roles, personas, enabled, key)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Updated agent record, content: { application/json: { schema: { type: object } } } } }
   /agent/probe:
     post:
       summary: Probe an agent/provider

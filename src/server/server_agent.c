@@ -1026,6 +1026,110 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* agent.set — surgically patch ONLY the fields the caller passed on an existing
+ * agent, preserving everything else (unlike agent.add, which resets the whole
+ * record). Backs the Web GUI's per-agent Edit modal. Args are CLI-style:
+ *   set <name> [--model M] [--endpoint E] [--provider P] [--cost-tier N]
+ *       [--max-turns N] [--max-parallel N] [--context-window N] [--tools on|off]
+ *       [--roles csv] [--personas csv] [--enabled true|false] [--key K]
+ * A flag that is absent leaves that field untouched. */
+int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   char *argv[SERVER_AGENT_MAX_ARGS];
+   int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
+   if (argc < 1 || !argv[0][0])
+      return server_send_error(conn, "agent.set requires name", NULL);
+   /* All --flags carry a value (no bool flags), so each is present iff opt_get
+    * returns non-NULL — that presence check is what makes the patch surgical. */
+   static const char *bool_flags[] = {NULL};
+   opt_parsed_t opts;
+   opt_parse(argc - 1, argv + 1, bool_flags, &opts);
+
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+      return server_send_error(conn, "agents.json not found or invalid", NULL);
+   agent_t *ag = agent_find(&cfg, argv[0]);
+   if (!ag)
+      return server_send_error(conn, "agent not found", NULL);
+
+   char old_model[MAX_MODEL_LEN];
+   snprintf(old_model, sizeof(old_model), "%s", ag->model);
+
+   const char *v;
+   if ((v = opt_get(&opts, "model")) && v[0])
+      snprintf(ag->model, sizeof(ag->model), "%s", v);
+   if ((v = opt_get(&opts, "endpoint")) != NULL)
+      snprintf(ag->endpoint, sizeof(ag->endpoint), "%s", v);
+   if ((v = opt_get(&opts, "provider")) && v[0])
+      snprintf(ag->provider, sizeof(ag->provider), "%s", v);
+   if ((v = opt_get(&opts, "cost-tier")) != NULL)
+      ag->cost_tier = atoi(v);
+   if ((v = opt_get(&opts, "max-turns")) != NULL)
+      ag->max_turns = atoi(v);
+   if ((v = opt_get(&opts, "max-parallel")) != NULL)
+      ag->max_parallel = atoi(v);
+   if ((v = opt_get(&opts, "context-window")) != NULL || (v = opt_get(&opts, "ctx")) != NULL)
+      ag->middleware.context_window = atoi(v);
+   if ((v = opt_get(&opts, "tools")) != NULL)
+   {
+      ag->tools_enabled = (strcmp(v, "on") == 0 || strcmp(v, "true") == 0 || strcmp(v, "1") == 0);
+      ag->inject_respond_tool = ag->tools_enabled ? 1 : 0;
+   }
+   if ((v = opt_get(&opts, "enabled")) != NULL)
+      ag->enabled = (strcmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcmp(v, "on") == 0);
+   if ((v = opt_get(&opts, "roles")) != NULL)
+      server_agent_set_roles_csv(
+          ag,
+          v[0] ? v : "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   if ((v = opt_get(&opts, "personas")) != NULL)
+      server_agent_set_personas_csv(ag, v[0] ? v : "all");
+
+   /* An optional re-key vaults the secret exactly like agent.add (never persisted
+    * to agents.json), gated by the same server-write capability check. */
+   const char *key = opt_get(&opts, "key");
+   if (key && key[0])
+   {
+      if (key[0] == '$')
+      {
+         snprintf(ag->api_key, sizeof(ag->api_key), "%s", key);
+         snprintf(ag->api_key_disk, sizeof(ag->api_key_disk), "%s", key);
+      }
+      else
+      {
+         const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
+         attested_transport_t transport = conn ? conn->attested_transport : ATTEST_NONE;
+         if (!principal && !vault_capability_server_write_allowed(transport, NULL))
+            return server_send_error(
+                conn,
+                "vault: `agent set --key` over a plaintext connection cannot store a credential; "
+                "use a native-TLS (https) or attested local/webchat connection",
+                NULL);
+         vault_status_t vst =
+             principal
+                 ? vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key, (long)time(NULL))
+                 : vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key);
+         if (vst != VAULT_OK)
+            return server_send_error(conn,
+                                     vst == VAULT_ERR_LOCKED
+                                         ? "vault locked: run `aimee vault unlock` before re-keying"
+                                         : "could not store credential in the vault",
+                                     NULL);
+      }
+   }
+
+   if (agent_save_config(&cfg) != 0)
+      return server_send_error(conn, "could not save agents.json", NULL);
+   if (ag->max_parallel > 0)
+      (void)server_agent_set_model_concurrency(ag->model, ag->max_parallel);
+   if (old_model[0] && strcmp(old_model, ag->model) != 0)
+      (void)server_agent_clear_model_concurrency_if_unused(&cfg, old_model);
+
+   cJSON *resp = server_agent_to_json(ag);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

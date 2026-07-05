@@ -92,6 +92,7 @@ var methodRoutes = map[string]methodRoute{
 	"agent.enable":             {http.MethodPost, "/v1/agent/enable"},
 	"agent.disable":            {http.MethodPost, "/v1/agent/disable"},
 	"agent.probe":              {http.MethodPost, "/v1/agent/probe"},
+	"agent.set":                {http.MethodPost, "/v1/agent/set"},
 	"collab_rules.list":        {http.MethodGet, "/v1/collab_rules"},
 	"collab_rules.list_active": {http.MethodGet, "/v1/collab_rules/active"},
 	// Mutations + arg-bearing calls (POST, body carries the args; the server
