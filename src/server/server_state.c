@@ -2210,6 +2210,27 @@ int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* POST /v1/audit/seal: export an immutable, independently-verifiable snapshot of
+ * the WORM store; reports the sealed path and whether OS immutability was set. */
+int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   char path[1024] = "";
+   int immutable = 0;
+   int rc = audit_worm_seal(path, sizeof path, &immutable);
+   cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "sealed", rc == 0);
+   if (rc == 0)
+   {
+      cJSON_AddStringToObject(resp, "path", path);
+      cJSON_AddBoolToObject(resp, "immutable", immutable);
+   }
+   else
+      cJSON_AddStringToObject(resp, "error", "seal failed");
+   return send_and_free(conn, resp);
+}
+
 /* --- LSP diagnostics summary --- */
 
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

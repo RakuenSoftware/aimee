@@ -48,11 +48,29 @@ static void audit_sub_checkpoint(app_ctx_t *ctx, int argc, char **argv)
    exit(1);
 }
 
+static void audit_sub_seal(app_ctx_t *ctx, int argc, char **argv)
+{
+   (void)ctx;
+   (void)argc;
+   (void)argv;
+   char path[1024] = "";
+   int immutable = 0;
+   if (audit_worm_seal(path, sizeof path, &immutable) == 0)
+   {
+      printf("audit seal: ok — %s (%s)\n", path,
+             immutable ? "OS-immutable" : "crypto-only (no CAP_LINUX_IMMUTABLE)");
+      return;
+   }
+   fprintf(stderr, "audit seal: failed\n");
+   exit(1);
+}
+
 static const subcmd_t audit_subcmds[] = {
     {"verify", "Verify the WORM audit chain + checkpoint MACs (exit 0=green, 1=amber, 2=red)",
      audit_sub_verify},
     {"checkpoint", "Append a checkpoint committing the current chain head under the chain key",
      audit_sub_checkpoint},
+    {"seal", "Export an immutable, verifiable snapshot of the WORM store", audit_sub_seal},
     {NULL, NULL, NULL},
 };
 

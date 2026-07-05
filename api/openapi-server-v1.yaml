@@ -2078,6 +2078,10 @@ paths:
     post:
       summary: Append a checkpoint committing the current WORM chain head
       responses: { "200": { description: Checkpoint result, content: { application/json: { schema: { type: object } } } } }
+  /audit/seal:
+    post:
+      summary: Export an immutable, verifiable snapshot of the WORM store
+      responses: { "200": { description: Seal result, content: { application/json: { schema: { type: object } } } } }
   /agent/local:
     get:
       summary: List local agents
