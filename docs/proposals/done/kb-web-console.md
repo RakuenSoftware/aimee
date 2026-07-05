@@ -25,12 +25,31 @@ S2b) live-verified on real Postgres on a `.253` CT:
 - **S6** — enroll-a-client mint enablement, packaging (`Dockerfile.kb-console` +
   the default-off compose `console` profile), docs, and this close-out.
 
-**Deferred / follow-ups** (documented at their call sites): server-side
-JWKS-fetch/SSRF validation on `PUT /v1/config/oidc` (the console's own verifier
-validates at login; break-glass recovers); the curator review queue in the
-governance UI (needs a separate curator-scoped credential); a JSON-array store
-for `admin_values` (currently comma-separated, commas rejected); and the
-kb-side live-config-reload for OIDC (the console re-reads at restart).
+**Follow-up dispositions** (roundtabled 2026-07-05):
+
+- **`admin_values` JSON-array store — DONE.** Stored as a JSON array (with a
+  legacy comma-separated read fallback), so values containing commas round-trip;
+  per-value + total size caps on `PUT`.
+- **Server-side JWKS-fetch/SSRF validation on `PUT /v1/config/oidc` — DROPPED.**
+  The kb does not fetch the operator-supplied `jwks_url` today; adding a fetch
+  would create a persistent SSRF surface (re-fetched on key rotation) for only
+  marginal fail-fast value, while the console's own verifier already fetches +
+  validates the JWKS at login (https-only, no-redirect, body-cap) and break-glass
+  recovers a bad config. If preflight is ever wanted, the console should push a
+  console-validated JWKS bundle — not a kb-side fetch.
+- **Curator review-queue UI — DEFERRED (needs a kb primitive).** `/v1/review` is
+  curator-scope and deliberately **not** in the console-admin allowlist; adding it
+  would collapse the S0 separation-of-duties (a console-admin self-approving the
+  config it holds the keys to). The kb's built-in verifier derives scope from the
+  single configured bearer, so distinct scopes only exist over mTLS today — there
+  is no clean curator-credential path over the console's HTTP+bearer transport.
+  Revisit when the kb gains **multiple scoped bearers** (the clean primitive) or
+  the deployment adopts console→kb mTLS with a curator cert. Interim: work the
+  review queue directly against the kb with a curator credential (runbook in
+  `docs/KB_CONSOLE.md`).
+- **Live-reload of OIDC config — DROPPED.** OIDC changes are operator-rare and a
+  console restart applies them; a hot-reload path (atomic swap, in-flight drain)
+  is significant complexity for no operator-visible gain.
 
 The design text below is the historical record.
 

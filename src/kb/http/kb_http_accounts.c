@@ -186,6 +186,17 @@ static cJSON *csv_to_array(const char *csv)
    return arr;
 }
 
+/* admin_values is stored as a JSON array string; parse it back, falling back to
+ * the legacy comma-separated form so pre-F2 rows still decode. */
+static cJSON *admin_values_to_array(const char *stored)
+{
+   cJSON *parsed = stored && stored[0] ? cJSON_Parse(stored) : NULL;
+   if (cJSON_IsArray(parsed))
+      return parsed; /* transfers ownership */
+   cJSON_Delete(parsed);
+   return csv_to_array(stored ? stored : "");
+}
+
 static int oidc_config_to_json(const db2_console_oidc_t *c, char *out_buf, int out_cap, int status)
 {
    cJSON *root = cJSON_CreateObject();
@@ -193,11 +204,13 @@ static int oidc_config_to_json(const db2_console_oidc_t *c, char *out_buf, int o
    cJSON_AddStringToObject(root, "audience", c->audience);
    cJSON_AddStringToObject(root, "jwks_url", c->jwks_url);
    cJSON_AddStringToObject(root, "admin_claim", c->admin_claim);
-   cJSON_AddItemToObject(root, "admin_values", csv_to_array(c->admin_values));
+   cJSON *vals = admin_values_to_array(c->admin_values);
+   int have_vals = cJSON_GetArraySize(vals) > 0;
+   cJSON_AddItemToObject(root, "admin_values", vals);
    cJSON_AddStringToObject(root, "updated_at", c->updated_at);
    cJSON_AddBoolToObject(root, "configured",
                          c->issuer[0] && c->audience[0] && c->jwks_url[0] && c->admin_claim[0] &&
-                             c->admin_values[0]);
+                             have_vals);
    char *s = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);
    if (!s || strlen(s) >= (size_t)out_cap)
@@ -262,18 +275,18 @@ static int put_oidc_config(const char *body, char *out_buf, int out_cap)
                "{\"error\":\"bad request: issuer and jwks_url must be https\"}");
       return 400;
    }
-   /* Every admin_values element must be a non-empty string with no comma (the
-    * store is comma-separated, so a comma would corrupt the round-trip). */
+   /* Every admin_values element must be a non-empty string (stored as a JSON
+    * array now, so commas within a value round-trip fine). */
    {
       const cJSON *vv = NULL;
       cJSON_ArrayForEach(vv, vals)
       {
-         if (!cJSON_IsString(vv) || !vv->valuestring[0] || strchr(vv->valuestring, ','))
+         if (!cJSON_IsString(vv) || !vv->valuestring[0] || strlen(vv->valuestring) > 128)
          {
             cJSON_Delete(req);
             snprintf(out_buf, (size_t)out_cap,
                      "{\"error\":\"bad request: each admin_values entry must be a non-empty string "
-                     "without commas\"}");
+                     "<= 128 chars\"}");
             return 400;
          }
       }
@@ -285,18 +298,23 @@ static int put_oidc_config(const char *body, char *out_buf, int out_cap)
    snprintf(c.audience, sizeof(c.audience), "%s", aud_s);
    snprintf(c.jwks_url, sizeof(c.jwks_url), "%s", jwks_s);
    snprintf(c.admin_claim, sizeof(c.admin_claim), "%s", claim->valuestring);
-   /* Join admin_values into the comma-separated store form. */
-   size_t vpos = 0;
-   const cJSON *v = NULL;
-   cJSON_ArrayForEach(v, vals)
+   /* Store admin_values as a compact JSON array string. */
+   char *vals_json = cJSON_PrintUnformatted(vals);
+   if (!vals_json)
    {
-      if (!cJSON_IsString(v))
-         continue;
-      int wrote = snprintf(c.admin_values + vpos, sizeof(c.admin_values) - vpos, "%s%s",
-                           vpos ? "," : "", v->valuestring);
-      if (wrote > 0 && (size_t)wrote < sizeof(c.admin_values) - vpos)
-         vpos += (size_t)wrote;
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"internal error: serialize admin_values\"}");
+      return 500;
    }
+   if (strlen(vals_json) >= sizeof(c.admin_values))
+   {
+      free(vals_json);
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"bad request: admin_values too large\"}");
+      return 400;
+   }
+   snprintf(c.admin_values, sizeof(c.admin_values), "%s", vals_json);
+   free(vals_json);
    cJSON_Delete(req);
 
    if (db2_console_oidc_put(&c) != 0)

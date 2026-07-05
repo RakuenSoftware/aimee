@@ -1555,13 +1555,16 @@ static void test_accounts_routes(void)
    /* PUT missing fields -> 400. */
    s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, "{}", 2, buf, sizeof(buf));
    assert(s == 400);
-   /* PUT with a comma in an admin value -> 400 (would corrupt the CSV store). */
+   /* PUT with a comma in an admin value -> now accepted (JSON store) and
+    * round-trips intact. */
    const char *comma =
        "{\"issuer\":\"https://idp\",\"audience\":\"kbc\",\"jwks_url\":\"https://idp/jwks\","
-       "\"admin_claim\":\"groups\",\"admin_values\":[\"a,b\"]}";
+       "\"admin_claim\":\"groups\",\"admin_values\":[\"team,alpha\"]}";
    s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, comma, (int)strlen(comma), buf,
                         sizeof(buf));
-   assert(s == 400);
+   assert(s == 200 && strstr(buf, "\"configured\":true"));
+   s = kb_http_route_ex("GET", "/v1/config/oidc", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"team,alpha\""));
    /* PUT missing audience -> 400. */
    const char *noaud =
        "{\"issuer\":\"https://idp\",\"jwks_url\":\"https://idp/jwks\",\"admin_claim\":\"groups\","

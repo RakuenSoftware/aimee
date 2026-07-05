@@ -135,3 +135,27 @@ binary, a slim runtime). Override `AIMEE_KB_CONSOLE_IMAGE` to pin a published ta
 Configure OIDC login through the **Accounts → OIDC login config** editor (stored in
 the kb's DB2); **restart the console** to apply. Until OIDC is configured the
 console is break-glass-only (drop `$KB_CONSOLE_HOME/.break_glass`, mode 0600).
+
+## The curator review queue (not in the console)
+
+The curator review queue (`GET /v1/review`, `POST /v1/review/{id}/accept|reject`)
+is **not** exposed by the console: it is a **curator-scope** action, and folding it
+into the console-admin credential would break the separation of duties (a
+console-admin could self-approve changes to the very config it administers). The
+kb's built-in verifier derives scope from the single configured bearer, so a
+distinct curator scope only exists over **mTLS** today — there is no clean
+curator-credential path over the console's HTTP+bearer transport.
+
+Until the kb gains multiple scoped bearers, work the review queue directly with a
+curator credential (an mTLS client cert whose CN is `curator:<id>`):
+
+```bash
+# list pending review items
+curl -fsS --cert curator.pem --key curator.key https://aimee-kb:8743/v1/review
+# accept / reject one
+curl -fsS -X POST --cert curator.pem --key curator.key \
+  https://aimee-kb:8743/v1/review/<id>/accept
+```
+
+A console **OIDC config** change (Accounts → OIDC login config) applies on the
+next **console restart** — there is no live reload.
