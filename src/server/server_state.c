@@ -3,8 +3,9 @@
 #include "aimee.h"
 #include "server.h"
 #include "dashboard.h"
-#include "render.h"       /* decision_to_json + db2_decision_log_list */
-#include "audit_ledger.h" /* audit_ledger_read — server-incurred tool-action audit */
+#include "render.h"               /* decision_to_json + db2_decision_log_list */
+#include "audit_ledger.h"         /* audit_ledger_read — server-incurred tool-action audit */
+#include "server_http_identity.h" /* server_http_identity_query — audit pagination params */
 #include "lsp.h"
 #include "platform_path.h"
 #include "workspace.h"
@@ -1884,18 +1885,87 @@ static char *dashboard_decisions_json(void)
    return json ? json : strdup("[]");
 }
 
-/* Server-incurred tool-action audit (guardrail verdicts), most-recent first, capped. */
-static cJSON *dashboard_audit_array(int limit)
+/* Parse an unsigned-long query param ("k=v&…") from the current request's query
+ * string; returns `dflt` when absent or unparseable. Used for audit pagination —
+ * the /v1 GET route carries ?limit=&offset=, captured via the identity query. */
+static long dashboard_query_long(const char *key, long dflt)
+{
+   const char *q = server_http_identity_query();
+   size_t klen = strlen(key);
+   for (const char *p = q; p && *p;)
+   {
+      const char *amp = strchr(p, '&');
+      if (strncmp(p, key, klen) == 0 && p[klen] == '=')
+      {
+         char *end = NULL;
+         long v = strtol(p + klen + 1, &end, 10);
+         if (end != p + klen + 1)
+            return v;
+         return dflt;
+      }
+      if (!amp)
+         break;
+      p = amp + 1;
+   }
+   return dflt;
+}
+
+/* A page of the tool-action audit, most-recent first: `limit` rows starting
+ * `offset` rows back from newest. Sets *total to the full ledger row count so the
+ * client can paginate. Bounded so the serialized page always fits SHTTP_RESP_MAX. */
+static cJSON *dashboard_audit_page(int offset, int limit, int *total)
 {
    cJSON *all = audit_ledger_read(NULL, NULL);
-   if (!all)
-      return cJSON_CreateArray();
-   int n = cJSON_GetArraySize(all);
    cJSON *out = cJSON_CreateArray();
-   for (int i = n - 1; i >= 0 && (limit <= 0 || cJSON_GetArraySize(out) < limit); i--)
+   if (!all)
+   {
+      *total = 0;
+      return out;
+   }
+   int n = cJSON_GetArraySize(all);
+   *total = n;
+   for (int i = n - 1 - offset; i >= 0 && cJSON_GetArraySize(out) < limit; i--)
       cJSON_AddItemToArray(out, cJSON_DetachItemFromArray(all, i));
    cJSON_Delete(all);
    return out;
+}
+
+/* One ledger read → the guardrail verdict-mix SUMMARY (counts over EVERY action,
+ * so the Dashboard pane is no longer capped at a sample). Returns
+ * {total,allow,block,rewrite,approval_required,other}. */
+static cJSON *dashboard_audit_summary(void)
+{
+   cJSON *o = cJSON_CreateObject();
+   int total = 0, allow = 0, block = 0, rewrite = 0, approval = 0, other = 0;
+   cJSON *all = audit_ledger_read(NULL, NULL);
+   if (all)
+   {
+      cJSON *r = NULL;
+      cJSON_ArrayForEach(r, all)
+      {
+         cJSON *v = cJSON_GetObjectItemCaseSensitive(r, "verdict");
+         const char *s = (v && cJSON_IsString(v)) ? v->valuestring : "";
+         total++;
+         if (strcmp(s, "allow") == 0)
+            allow++;
+         else if (strcmp(s, "block") == 0)
+            block++;
+         else if (strcmp(s, "rewrite") == 0)
+            rewrite++;
+         else if (strcmp(s, "approval_required") == 0)
+            approval++;
+         else
+            other++;
+      }
+      cJSON_Delete(all);
+   }
+   cJSON_AddNumberToObject(o, "total", total);
+   cJSON_AddNumberToObject(o, "allow", allow);
+   cJSON_AddNumberToObject(o, "block", block);
+   cJSON_AddNumberToObject(o, "rewrite", rewrite);
+   cJSON_AddNumberToObject(o, "approval_required", approval);
+   cJSON_AddNumberToObject(o, "other", other);
+   return o;
 }
 
 static void readiness_add_step(cJSON *steps, const char *step, const char *status,
@@ -2073,18 +2143,34 @@ int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON_AddItemToObject(resp, "onboard", dashboard_readiness(resp));
 
-   cJSON_AddItemToObject(resp, "audit", dashboard_audit_array(300));
+   /* Verdict-mix counts over the WHOLE ledger (the Guardrail Actions pane), so it
+    * is no longer limited to a capped sample. The full row list is served,
+    * paginated, by dashboard.audit for the Logs page. */
+   cJSON_AddItemToObject(resp, "audit_summary", dashboard_audit_summary());
 
    return send_and_free(conn, resp);
 }
 
-/* dashboard.audit: the server's tool-action audit ledger for the Logs page. */
+/* dashboard.audit: the server's tool-action audit ledger for the Logs page,
+ * PAGINATED (?limit=&offset=, most-recent first) so an arbitrarily large ledger
+ * never overflows the response buffer. Returns {data:[page], total, offset, limit}. */
 int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
+   int limit = (int)dashboard_query_long("limit", 500);
+   if (limit <= 0 || limit > 1000)
+      limit = 500; /* 1000 rows ≈ 180 KB, safely under SHTTP_RESP_MAX */
+   int offset = (int)dashboard_query_long("offset", 0);
+   if (offset < 0)
+      offset = 0;
+   int total = 0;
+   cJSON *page = dashboard_audit_page(offset, limit, &total);
    cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", dashboard_audit_array(5000));
+   cJSON_AddItemToObject(resp, "data", page);
+   cJSON_AddNumberToObject(resp, "total", total);
+   cJSON_AddNumberToObject(resp, "offset", offset);
+   cJSON_AddNumberToObject(resp, "limit", limit);
    return send_and_free(conn, resp);
 }
 

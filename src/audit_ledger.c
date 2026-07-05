@@ -33,10 +33,13 @@ static int ts_in_window(const char *ts, const char *from_ts, const char *to_ts)
    return 1;
 }
 
-/* Read one file's tool_action rows into rows[] (bounded). file_rank orders files
- * chronologically (older first). Returns the number of unparseable lines seen;
- * sets *truncated if the LEDGER_MAX_ROWS cap was hit. */
-static int read_file(const char *path, int file_rank, ledger_row_t *rows, int *nrows,
+/* Read one file's tool_action rows into the `rows[]` RING of size LEDGER_MAX_ROWS.
+ * file_rank orders files chronologically (older first) and the overall read is
+ * chronological, so once `*written` exceeds the ring size each new row overwrites
+ * the OLDEST slot (rows[*written % cap]) — keeping the most-recent LEDGER_MAX_ROWS
+ * rows rather than the oldest. Returns the number of unparseable lines seen; sets
+ * *truncated once the cap is first exceeded (older rows are being dropped). */
+static int read_file(const char *path, int file_rank, ledger_row_t *rows, long *written,
                      const char *from_ts, const char *to_ts, int *truncated)
 {
    FILE *f = fopen(path, "r");
@@ -70,12 +73,6 @@ static int read_file(const char *path, int file_rank, ledger_row_t *rows, int *n
          line[--len] = '\0';
       if (len == 0)
          continue;
-      /* Cap check BEFORE parsing, so a parsed object can never be orphaned. */
-      if (*nrows >= LEDGER_MAX_ROWS)
-      {
-         *truncated = 1;
-         break;
-      }
       /* Strict parse: require the whole line be consumed (require_null_terminated),
        * so trailing garbage or a JSON prefix in a fragment is rejected, not accepted. */
       cJSON *obj = cJSON_ParseWithOpts(line, NULL, 1);
@@ -97,11 +94,21 @@ static int read_file(const char *path, int file_rank, ledger_row_t *rows, int *n
          cJSON_Delete(obj);
          continue;
       }
-      ledger_row_t *r = &rows[(*nrows)++];
+      /* Ring write: overwrite the oldest slot once full so the NEWEST cap rows are
+       * kept. Free the displaced object only now (we have a valid replacement), so
+       * a parse/skip above never orphans a slot. */
+      int pos = (int)(*written % LEDGER_MAX_ROWS);
+      if (*written >= LEDGER_MAX_ROWS)
+      {
+         *truncated = 1;
+         cJSON_Delete(rows[pos].obj);
+      }
+      ledger_row_t *r = &rows[pos];
       r->obj = obj;
       snprintf(r->ts, sizeof r->ts, "%s", ts->valuestring);
       r->file_rank = file_rank;
       r->line_seq = this_seq;
+      (*written)++;
    }
    fclose(f);
    return bad;
@@ -132,7 +139,7 @@ cJSON *audit_ledger_read(const char *from_ts, const char *to_ts)
       cJSON_Delete(out);
       return NULL;
    }
-   int nrows = 0;
+   long written = 0; /* total rows seen; the ring keeps the most-recent MAX of them */
    int bad = 0;
    int truncated = 0;
 
@@ -141,16 +148,18 @@ cJSON *audit_ledger_read(const char *from_ts, const char *to_ts)
 
    /* Chronological order (oldest first): audit.log.N .. audit.log.0, then the
     * current audit.log. file_rank increases with recency so equal-ts rows keep
-    * their chronological order. */
+    * their chronological order. The ring in read_file drops the OLDEST rows on
+    * overflow, so the newest LEDGER_MAX_ROWS always survive. */
    int rank = 0;
    for (int i = LEDGER_MAX_ROTATED; i >= 0; i--)
    {
       snprintf(path, sizeof path, "%s/audit.log.%d", dir, i);
-      bad += read_file(path, rank++, rows, &nrows, from_ts, to_ts, &truncated);
+      bad += read_file(path, rank++, rows, &written, from_ts, to_ts, &truncated);
    }
    snprintf(path, sizeof path, "%s/audit.log", dir);
-   bad += read_file(path, rank, rows, &nrows, from_ts, to_ts, &truncated);
+   bad += read_file(path, rank, rows, &written, from_ts, to_ts, &truncated);
 
+   int nrows = written < LEDGER_MAX_ROWS ? (int)written : LEDGER_MAX_ROWS;
    qsort(rows, (size_t)nrows, sizeof *rows, cmp_row);
    for (int i = 0; i < nrows; i++)
       cJSON_AddItemToArray(out, rows[i].obj); /* transfers ownership (steals the pointer) */

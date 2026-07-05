@@ -52,9 +52,13 @@ const selectStyle: React.CSSProperties = {
   color: '#444', fontSize: 12,
 };
 
+const PAGE = 500; // rows per request (matches the server's dashboard.audit page size)
+
 export default function Logs() {
   const [rows, setRows] = useState<AuditRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [verdict, setVerdict] = useState('all');
   const [actor, setActor] = useState('all');
   const [q, setQ] = useState('');
@@ -68,17 +72,27 @@ export default function Logs() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selected]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Paginated fetch (most-recent first). offset=0 replaces; offset>0 appends the
+  // next older page. The audit ledger can be very large, so it is never loaded in
+  // one shot — the Logs page pulls pages of PAGE rows via "Load more".
+  const fetchPage = useCallback(async (offset: number) => {
+    const setBusy = offset === 0 ? setLoading : setLoadingMore;
+    setBusy(true);
     try {
-      const data = await fetch('/api/audit').then(r => (r.status === 401 ? [] : r.json()));
-      setRows(Array.isArray(data) ? data : []);
+      const r = await fetch(`/api/audit?limit=${PAGE}&offset=${offset}`);
+      const d = r.status === 401 ? { data: [], total: 0 } : await r.json();
+      const page: AuditRow[] = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+      setTotal(typeof d?.total === 'number' ? d.total : page.length);
+      setRows(prev => (offset === 0 ? page : [...prev, ...page]));
     } catch {
-      setRows([]);
+      if (offset === 0) { setRows([]); setTotal(0); }
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }, []);
+
+  const load = useCallback(() => fetchPage(0), [fetchPage]);
+  const loadMore = useCallback(() => fetchPage(rows.length), [fetchPage, rows.length]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -103,6 +117,9 @@ export default function Logs() {
       }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: '#555' }}>Logs</span>
         <span style={{ fontSize: 12, color: '#999' }}>tool-action audit</span>
+        <span style={{ fontSize: 12, color: '#999' }}>
+          loaded {rows.length.toLocaleString()} of {total.toLocaleString()}
+        </span>
         <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
           {(['allow', 'block', 'rewrite', 'approval_required'] as const).map(v => (
             <span key={v} style={{ fontSize: 11, color: '#777' }}>
@@ -160,6 +177,17 @@ export default function Logs() {
               ))}
             </tbody>
           </table>
+        )}
+        {rows.length < total && (
+          <div style={{ padding: 12, textAlign: 'center' }}>
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              style={{ ...selectStyle, cursor: 'pointer', padding: '6px 16px' }}
+            >
+              {loadingMore ? 'Loading…' : `Load ${Math.min(PAGE, total - rows.length).toLocaleString()} more`}
+            </button>
+          </div>
         )}
       </div>
 

@@ -100,15 +100,15 @@ interface Session {
   last_active: string;
 }
 
-// Server-incurred guardrail audit: a verdict on every tool action the agent takes.
-interface AuditRow {
-  ts: string;
-  actor: string;   // primary | delegate
-  tool: string;
-  mode?: string;
-  reason_code?: string;
-  verdict: string; // allow | block | rewrite | approval_required
-  task_id?: number;
+// Verdict-mix counts over the WHOLE audit ledger (server-aggregated in
+// dashboard.all as `audit_summary`), so the Guardrail pane is not sample-capped.
+interface AuditSummary {
+  total: number;
+  allow: number;
+  block: number;
+  rewrite: number;
+  approval_required: number;
+  other: number;
 }
 
 interface OnboardStep {
@@ -140,7 +140,7 @@ interface DashData {
   tokenAudit: TokenAudit[];
   decisions: Decision[];
   sessions: Session[];
-  audit: AuditRow[];
+  auditSummary: AuditSummary;
 }
 
 /* The server (`dashboard.all`) returns some fields in shapes the panels can't
@@ -166,7 +166,7 @@ interface RawDashboard {
   token_audit?: TokenAudit[];
   decisions?: Decision[];
   sessions?: Session[];
-  audit?: AuditRow[];
+  audit_summary?: AuditSummary;
 }
 
 /* ---- Helpers ---- */
@@ -244,7 +244,9 @@ export function toDashData(raw: RawDashboard | null | undefined): DashData {
     tokenAudit: arr<TokenAudit>(r.token_audit),
     decisions: arr<Decision>(r.decisions),
     sessions: arr<Session>(r.sessions),
-    audit: arr<AuditRow>(r.audit),
+    auditSummary: r.audit_summary || {
+      total: 0, allow: 0, block: 0, rewrite: 0, approval_required: 0, other: 0,
+    },
   };
 }
 
@@ -693,16 +695,17 @@ function percentile(sorted: number[], p: number): number {
 }
 
 /* Guardrail Actions — verdict mix over the server's tool-action audit. */
-function GuardrailPanel({ data }: { data: AuditRow[] }) {
-  const counts: Record<string, number> = { allow: 0, block: 0, rewrite: 0, approval_required: 0 };
-  for (const r of data) counts[r.verdict] = (counts[r.verdict] || 0) + 1;
+function GuardrailPanel({ data }: { data: AuditSummary }) {
+  const counts: Record<string, number> = {
+    allow: data.allow, block: data.block, rewrite: data.rewrite, approval_required: data.approval_required,
+  };
   const max = Math.max(1, ...Object.values(counts));
   const colors: Record<string, string> = {
     allow: '#22c55e', block: '#ef4444', rewrite: '#f59e0b', approval_required: '#3b82f6',
   };
   return (
-    <Panel title="Guardrail Actions" count={data.length}>
-      {data.length === 0 ? emptyBody('No tool-action audit yet') : (
+    <Panel title="Guardrail Actions" count={data.total}>
+      {data.total === 0 ? emptyBody('No tool-action audit yet') : (
         <div style={{ padding: '8px 0' }}>
           {Object.keys(counts).map(v => (
             <BarRow key={v} label={v} value={counts[v]} max={max} right={String(counts[v])} color={colors[v] || '#888'} />
@@ -917,7 +920,7 @@ const PANELS: PanelDef[] = [
   { id: 'delegations', title: 'Delegations',      defaultOn: true,  render: d => <DelegationsPanel data={d.delegations} /> },
   { id: 'metrics',     title: 'Metrics',          defaultOn: true,  render: d => <MetricsPanel data={d.metrics} /> },
   { id: 'cost',        title: 'Cost / Tokens',    defaultOn: true,  render: d => <CostPanel data={d.tokenAudit} /> },
-  { id: 'guardrail',   title: 'Guardrail Actions',defaultOn: true,  render: d => <GuardrailPanel data={d.audit} /> },
+  { id: 'guardrail',   title: 'Guardrail Actions',defaultOn: true,  render: d => <GuardrailPanel data={d.auditSummary} /> },
   { id: 'plans',       title: 'Execution Plans',  defaultOn: true,  render: d => <PlansPanel data={d.plans} /> },
   { id: 'traces',      title: 'Traces',           defaultOn: true,  render: d => <TracesPanel data={d.traces} /> },
   // Available to add:
