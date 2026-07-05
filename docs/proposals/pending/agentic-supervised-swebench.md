@@ -1,6 +1,7 @@
 # Proposal: Agentic supervised SWE-bench — a true, tool-using, Reddit-parity claim
 
-- **State:** PENDING — net-new benchmark harness on top of shipped substrate.
+- **State:** PENDING — design only, no code in this PR; a net-new benchmark
+  harness built on existing substrate.
   Directly resolves [issue #987](https://github.com/RakuenSoftware/aimee/issues/987)
   and is the *only* variant permitted to carry a public
   "beats Reddit's −75.5% supervisor-token reduction **at no wall-clock penalty**"
@@ -466,6 +467,21 @@ best-of-N; quantitative R2/R3 invalidation thresholds; firmed R1 recommendation.
 **Not adopted / deferred:** cross-system literature anchoring and inlining the C6
 notes (nits — the write-up will cite external results at publication time, out of
 scope for the harness design).
+
+## Acceptance
+
+The executable shadow of the criteria above (mechanical → integration →
+deployment). The deployment-tier gates are the fail-closed public-claim gate (S6)
+and never auto-claimed.
+
+```yaml acceptance
+- {id: 1, tier: mechanical, check: "python3 -m unittest benchmarks.tests.test_swebench_transport_verify (S0 five ledger-attribution assertions pass in FAKE mode)"}
+- {id: 2, tier: mechanical, check: "python3 -m unittest discover -s benchmarks/tests -p 'test_*.py' (full bench suite green with the new S0 + agentic-arm tests)"}
+- {id: 3, tier: integration, check: "python3 benchmarks/coding/swebench_transport_verify.py --token-db <db> --primary-model gpt-5.5 exits 0 against the live .254 fleet (a transport passes all five assertions)"}
+- {id: 4, tier: integration, check: "S1 per-worker agentic harness provisions an isolated worktree with per-worker venv+port isolation (B1) and emits a git-diff patch for a probe instance"}
+- {id: 5, tier: deployment, check: "official SWE-bench Docker grader on CT 101 returns resolved verdicts for arm A and arm C patches across Benchmark 1 (Reddit-10)"}
+- {id: 6, tier: deployment, check: "S6 claim gate passes on BOTH Benchmark 1 and 2 under the official grader: token-reduction BCa-95 CI lower-bound > 0 (N=1), p95 wall-clock A->C ratio upper-bound <= 1.0, resolution floor resolved_C/total >= max(0.7*resolved_A/total, 0.25)"}
+```
 
 ## Deliverables
 
