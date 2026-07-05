@@ -372,35 +372,13 @@ int harness_memory_hydrate(const char *cwd)
     * below reflects them. */
    int consumed = consume_spills(project, endpoint, bearer);
 
-   /* include_deleted so tombstoned rows come back too — we materialize live rows
-    * and *remove* the on-disk file for each tombstone (DB1 is authoritative). */
-   cJSON *body = cJSON_CreateObject();
-   cJSON_AddStringToObject(body, "project", project);
-   cJSON_AddNumberToObject(body, "include_deleted", 1);
-   char *body_s = cJSON_PrintUnformatted(body);
-   cJSON_Delete(body);
-
-   int status = 0;
-   cJSON *resp = body_s ? cli_http_request(endpoint, "POST", "/v1/harness_memory/list", body_s,
-                                           bearer, 15000, &status)
-                        : NULL;
-   free(body_s);
-   if (!resp || status < 200 || status >= 300)
-   {
-      if (resp)
-         cJSON_Delete(resp);
-      free(endpoint);
-      free(bearer);
-      return (consumed > 0) ? consumed : -1;
-   }
-
-   /* Ensure the memory dir exists and resolve it, so we can confine every write
-    * under the *real* directory (a symlinked component can't redirect us out). */
+   /* Ensure the memory dir exists and resolve it up front, so we can confine
+    * every write under the *real* directory (a symlinked component can't
+    * redirect us out). Needed before we process any page. */
    mkdir_p(memdir);
    char memreal[PATH_MAX];
    if (!hm_realpath(memdir, memreal))
    {
-      cJSON_Delete(resp);
       free(endpoint);
       free(bearer);
       return -1;
@@ -412,65 +390,105 @@ int harness_memory_hydrate(const char *cwd)
     * memory whose file lingers stays "known", so it is never re-imported).
     * known_ok guards completeness: if any insertion fails (OOM), the set is no
     * longer authoritative, so we skip the import pass entirely rather than risk
-    * resurrecting a tombstone we failed to record. */
+    * resurrecting a tombstone we failed to record. list_ok is the same guard for
+    * a failed page — a partial known set must not drive the import. */
    char **known = NULL;
    int nk = 0, kcap = 0, known_ok = 1;
+   int n = 0, removed = 0, list_ok = 1;
 
-   int n = 0, removed = 0;
-   cJSON *mems = cJSON_GetObjectItemCaseSensitive(resp, "memories");
-   cJSON *m = NULL;
-   cJSON_ArrayForEach(m, mems)
+   /* Page through the store (include_deleted so tombstoned rows come back — we
+    * materialize live rows and *remove* the file for each tombstone; DB1 is
+    * authoritative). The full set, bodies included, can exceed one RPC response
+    * buffer, so follow next_offset until has_more is false rather than asking
+    * for everything at once (an over-large single response truncates and 502s,
+    * which used to abort this hydrate before the import pass). */
+   for (int offset = 0;;)
    {
-      const char *name = jstr(m, "name");
-      const char *btext = jstr(m, "body");
-      const char *del = jstr(m, "deleted_at");
-      if (!name || !name[0] || name[0] == '/' || strstr(name, "..")) /* never escape memdir */
-         continue;
-      if (nk == kcap)
+      cJSON *body = cJSON_CreateObject();
+      cJSON_AddStringToObject(body, "project", project);
+      cJSON_AddNumberToObject(body, "include_deleted", 1);
+      cJSON_AddNumberToObject(body, "offset", offset);
+      char *body_s = cJSON_PrintUnformatted(body);
+      cJSON_Delete(body);
+
+      int status = 0;
+      cJSON *resp = body_s ? cli_http_request(endpoint, "POST", "/v1/harness_memory/list", body_s,
+                                              bearer, 15000, &status)
+                           : NULL;
+      free(body_s);
+      if (!resp || status < 200 || status >= 300)
       {
-         int nc = kcap ? kcap * 2 : 32;
-         char **t = realloc(known, (size_t)nc * sizeof(*t));
-         if (t)
-         {
-            known = t;
-            kcap = nc;
-         }
+         if (resp)
+            cJSON_Delete(resp);
+         list_ok = 0;
+         break;
       }
-      if (nk < kcap)
+
+      cJSON *mems = cJSON_GetObjectItemCaseSensitive(resp, "memories");
+      cJSON *m = NULL;
+      cJSON_ArrayForEach(m, mems)
       {
-         char *dup = strdup(name);
-         if (dup)
-            known[nk++] = dup;
+         const char *name = jstr(m, "name");
+         const char *btext = jstr(m, "body");
+         const char *del = jstr(m, "deleted_at");
+         if (!name || !name[0] || name[0] == '/' || strstr(name, "..")) /* never escape memdir */
+            continue;
+         if (nk == kcap)
+         {
+            int nc = kcap ? kcap * 2 : 32;
+            char **t = realloc(known, (size_t)nc * sizeof(*t));
+            if (t)
+            {
+               known = t;
+               kcap = nc;
+            }
+         }
+         if (nk < kcap)
+         {
+            char *dup = strdup(name);
+            if (dup)
+               known[nk++] = dup;
+            else
+               known_ok = 0;
+         }
          else
-            known_ok = 0;
-      }
-      else
-      {
-         known_ok = 0;
-      }
-      char target[PATH_MAX];
-      if ((size_t)snprintf(target, sizeof(target), "%s/%s.md", memdir, name) >= sizeof(target))
-         continue;
-      if (del && del[0]) /* tombstoned: ensure the on-disk file is gone */
-      {
-         if (target_confined(target, memreal) && unlink(target) == 0)
          {
-            removed++;
-            hmem_audit("tombstone-removed", project, name, NULL);
+            known_ok = 0;
          }
-         continue;
+         char target[PATH_MAX];
+         if ((size_t)snprintf(target, sizeof(target), "%s/%s.md", memdir, name) >= sizeof(target))
+            continue;
+         if (del && del[0]) /* tombstoned: ensure the on-disk file is gone */
+         {
+            if (target_confined(target, memreal) && unlink(target) == 0)
+            {
+               removed++;
+               hmem_audit("tombstone-removed", project, name, NULL);
+            }
+            continue;
+         }
+         mkdir_parents(target);
+         if (target_confined(target, memreal) && write_file(target, btext ? btext : "") == 0)
+            n++;
       }
-      mkdir_parents(target);
-      if (target_confined(target, memreal) && write_file(target, btext ? btext : "") == 0)
-         n++;
+
+      cJSON *hm = cJSON_GetObjectItemCaseSensitive(resp, "has_more");
+      cJSON *no = cJSON_GetObjectItemCaseSensitive(resp, "next_offset");
+      int has_more = cJSON_IsBool(hm) && cJSON_IsTrue(hm);
+      int next_offset = cJSON_IsNumber(no) ? (int)no->valuedouble : offset;
+      cJSON_Delete(resp);
+      /* Stop on the last page; the <= guard also prevents an infinite loop if a
+       * misbehaving server never advances the cursor. */
+      if (!has_more || next_offset <= offset)
+         break;
+      offset = next_offset;
    }
-   cJSON_Delete(resp);
 
    /* Import disk-only memory files the store has never seen (pre-existing files,
     * external edits, or fail-open writes whose spill was lost). Skipped when the
-    * known set is incomplete — see known_ok above. */
+    * known set is incomplete — see known_ok / list_ok above. */
    int imported = 0;
-   if (known_ok)
+   if (list_ok && known_ok)
       import_orphans(memreal, memreal, known, nk, project, endpoint, bearer, &imported);
 
    for (int i = 0; i < nk; i++)

@@ -66,6 +66,41 @@ static hmem_row_t mkrow(const char *proj, const char *name, const char *type, co
    return r;
 }
 
+static void test_page_end(void)
+{
+   /* Pure paging math: page boundaries respect the byte budget and always
+    * advance (a single oversized row can't stall the pager). */
+   char big[6000], mid[1000];
+   memset(big, 'x', sizeof(big) - 1);
+   big[sizeof(big) - 1] = '\0';
+   memset(mid, 'y', sizeof(mid) - 1);
+   mid[sizeof(mid) - 1] = '\0';
+
+   hmem_row_t rows[4] = {mkrow("p", "a", "fact", mid), /* rowsz ~= 999 + 512 = 1511 */
+                         mkrow("p", "b", "fact", mid), mkrow("p", "c", "fact", mid),
+                         mkrow("p", "d", "fact", mid)};
+
+   /* generous budget -> whole set fits in one page */
+   assert(hmem_page_end(rows, 4, 0, 1 << 20) == 4);
+
+   /* tight budget (2000): one ~1511-byte row per page, always advancing */
+   assert(hmem_page_end(rows, 4, 0, 2000) == 1);
+   assert(hmem_page_end(rows, 4, 1, 2000) == 2);
+   assert(hmem_page_end(rows, 4, 3, 2000) == 4);
+
+   /* two rows fit under a 3200 budget; the third opens the next page */
+   assert(hmem_page_end(rows, 4, 0, 3200) == 2);
+
+   /* a single row larger than the whole budget still advances by one */
+   hmem_row_t huge[1] = {mkrow("p", "big", "fact", big)}; /* rowsz ~= 6511 > 2000 */
+   assert(hmem_page_end(huge, 1, 0, 2000) == 1);
+
+   /* offset at the end yields an empty final page; NULL/empty inputs are safe */
+   assert(hmem_page_end(rows, 4, 4, 2000) == 4);
+   assert(hmem_page_end(NULL, 0, 0, 2000) == 0);
+   assert(hmem_page_end(rows, 0, 0, 2000) == 0);
+}
+
 static void test_resolve(void)
 {
    char id[256], root[1024];
@@ -172,6 +207,7 @@ int main(void)
 {
    test_sha();
    test_hash();
+   test_page_end();
    test_resolve();
    test_project_key_ok();
    assert(db1_init(":memory:") == 0);

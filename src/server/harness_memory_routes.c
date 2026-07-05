@@ -99,13 +99,32 @@ int handle_hmem_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
-static int respond_rows(server_conn_t *conn, hmem_row_t *rows, int n)
+/* The whole result set (bodies included) can exceed the fixed RPC response
+ * buffer (SHTTP_RESP_MAX, 256 KiB) once a project accumulates enough memories —
+ * the loopback RPC then truncates and the JSON fails to parse (a 502 that, for
+ * `list`, aborts the session-start hydrate before it can import disk-only files).
+ * So serialize a size-bounded page: rows from `offset` until the accumulated
+ * payload approaches the budget, always emitting at least one row so a single
+ * large memory still makes progress (it stays well under 256 KiB in practice).
+ * The caller pages via {offset -> next_offset} until has_more is false. */
+#define HMEM_PAGE_BUDGET (192 * 1024)
+
+static int respond_rows_paged(server_conn_t *conn, hmem_row_t *rows, int n, int offset)
 {
+   if (offset < 0)
+      offset = 0;
+   if (offset > n)
+      offset = n;
+   int end = hmem_page_end(rows, n, offset, HMEM_PAGE_BUDGET);
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_CreateArray();
-   for (int i = 0; i < n; i++)
+   for (int i = offset; i < end; i++)
       cJSON_AddItemToArray(arr, hmem_row_json(&rows[i]));
    cJSON_AddItemToObject(resp, "memories", arr);
+   cJSON_AddNumberToObject(resp, "total", n);
+   cJSON_AddNumberToObject(resp, "offset", offset);
+   cJSON_AddNumberToObject(resp, "next_offset", end);
+   cJSON_AddBoolToObject(resp, "has_more", end < n);
    hmem_rows_free(rows, n);
    return send_and_free(conn, resp);
 }
@@ -117,11 +136,12 @@ int handle_hmem_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (jo_need_str(req, "project", &project) < 0)
       return server_send_error(conn, "missing project", NULL);
    int include_deleted = jo_int(req, "include_deleted", 0);
+   int offset = jo_int(req, "offset", 0);
    hmem_row_t *rows = NULL;
    int n = 0;
    if (hmem_list(project, &rows, &n, include_deleted) != 0)
       return server_send_error(conn, "list failed", NULL);
-   return respond_rows(conn, rows, n);
+   return respond_rows_paged(conn, rows, n, offset);
 }
 
 int handle_hmem_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -130,11 +150,12 @@ int handle_hmem_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *project, *query;
    if (jo_need_str(req, "project", &project) < 0 || jo_need_str(req, "query", &query) < 0)
       return server_send_error(conn, "missing project or query", NULL);
+   int offset = jo_int(req, "offset", 0);
    hmem_row_t *rows = NULL;
    int n = 0;
    if (hmem_search(project, query, &rows, &n) != 0)
       return server_send_error(conn, "search failed", NULL);
-   return respond_rows(conn, rows, n);
+   return respond_rows_paged(conn, rows, n, offset);
 }
 
 int handle_hmem_tombstone(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -251,6 +251,29 @@ int hmem_list(const char *project, hmem_row_t **out, int *n, int include_deleted
    return rc;
 }
 
+int hmem_page_end(const hmem_row_t *rows, int n, int offset, size_t budget)
+{
+   if (!rows || n <= 0)
+      return (offset < 0) ? 0 : (offset > n ? n : offset);
+   if (offset < 0)
+      offset = 0;
+   size_t bytes = 0;
+   int i = offset;
+   for (; i < n; i++)
+   {
+      const hmem_row_t *r = &rows[i];
+      /* Approximate the row's serialized JSON: the variable-length fields plus a
+       * fixed slop for keys, the fixed-width columns, and punctuation. */
+      size_t rowsz = (r->body ? strlen(r->body) : 0) +
+                     (r->description ? strlen(r->description) : 0) +
+                     (r->meta_json ? strlen(r->meta_json) : 0) + 512;
+      if (i > offset && bytes + rowsz > budget)
+         break; /* this row opens the next page */
+      bytes += rowsz;
+   }
+   return i;
+}
+
 int hmem_search(const char *project, const char *query, hmem_row_t **out, int *n)
 {
    if (!project || !query || !out || !n)

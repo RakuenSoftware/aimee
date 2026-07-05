@@ -69,6 +69,13 @@ extern "C"
    /* Substring search over name/description/body of live rows. As hmem_list. */
    int hmem_search(const char *project, const char *query, hmem_row_t **out, int *n);
 
+   /* Exclusive end index of the response page that starts at `offset` and whose
+    * serialized rows fit within `budget` bytes. Always returns at least
+    * offset+1 when rows remain (so a single oversized row still advances and the
+    * pager can't stall). Pure — used by the list/search routes to page a result
+    * set that would otherwise overflow the fixed RPC response buffer. */
+   int hmem_page_end(const hmem_row_t *rows, int n, int offset, size_t budget);
+
    /* Tombstone one live row. Returns 0 (even if already absent) / -1 on error. */
    int hmem_tombstone(const char *project, const char *name);
 
