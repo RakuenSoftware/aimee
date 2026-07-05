@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "audit_worm.h"
+#include "cJSON.h"
 
 static char g_dir[256];
 
@@ -230,9 +231,38 @@ static void test_sealed_snapshot_tamper_detected(void)
    printf("  test_sealed_snapshot_tamper_detected: ok (%s)\n", err);
 }
 
+/* The WORM-backed Logs read returns the newest rows (seq DESC), paginated. */
+static void test_read_page(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/page.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   for (int i = 0; i < 5; i++)
+   {
+      char s[16];
+      snprintf(s, sizeof s, "v1-%d", i);
+      assert(audit_worm_append("primary", "u", "tool.read", s, "allow", "{}") == 0);
+   }
+   long total = 0;
+   cJSON *page = audit_worm_read_page(0, 2, &total);
+   assert(total == 5);
+   assert(cJSON_GetArraySize(page) == 2);
+   cJSON *r0 = cJSON_GetArrayItem(page, 0); /* newest first: seq 5 */
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(r0, "seq")) == 5);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(r0, "subject")), "v1-4") == 0);
+   cJSON_Delete(page);
+   cJSON *page2 = audit_worm_read_page(2, 2, &total); /* offset: seq 3 then 2 */
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetArrayItem(page2, 0), "seq")) == 3);
+   cJSON_Delete(page2);
+   audit_worm_close();
+   printf("  test_read_page: ok\n");
+}
+
 int main(void)
 {
    mk_tmpdir();
+   test_read_page();
    test_append_and_chain();
    test_worm_triggers_block_mutation();
    test_cross_store_determinism();

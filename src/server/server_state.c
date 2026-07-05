@@ -2165,11 +2165,29 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int offset = (int)dashboard_query_long("offset", 0);
    if (offset < 0)
       offset = 0;
-   int total = 0;
-   cJSON *page = dashboard_audit_page(offset, limit, &total);
    cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", page);
-   cJSON_AddNumberToObject(resp, "total", total);
+   /* When the WORM store is enabled it is the tamper-evident source of truth for
+    * the Logs view: read the indexed audit_event rows directly (superseding the
+    * flat audit.log reader from #1092). Fall back to the file reader otherwise. */
+   config_t wcfg;
+   memset(&wcfg, 0, sizeof wcfg);
+   config_load(&wcfg);
+   if (wcfg.audit_worm_enabled)
+   {
+      long wtotal = 0;
+      cJSON *wpage = audit_worm_read_page(offset, limit, &wtotal);
+      cJSON_AddItemToObject(resp, "data", wpage);
+      cJSON_AddNumberToObject(resp, "total", (double)wtotal);
+      cJSON_AddStringToObject(resp, "source", "worm");
+   }
+   else
+   {
+      int total = 0;
+      cJSON *page = dashboard_audit_page(offset, limit, &total);
+      cJSON_AddItemToObject(resp, "data", page);
+      cJSON_AddNumberToObject(resp, "total", total);
+      cJSON_AddStringToObject(resp, "source", "audit.log");
+   }
    cJSON_AddNumberToObject(resp, "offset", offset);
    cJSON_AddNumberToObject(resp, "limit", limit);
    return send_and_free(conn, resp);

@@ -95,6 +95,12 @@ extern "C"
     * Returns 0 on a sealed snapshot, -1 on failure. */
    int audit_worm_seal(char *out_path, size_t out_cap, int *out_immutable);
 
+   /* A page of the newest audit rows (seq DESC) as a cJSON array (caller owns);
+    * fills *total with the full row count. Backs the WORM-sourced Logs/dashboard
+    * read that supersedes the flat audit.log reader. */
+   struct cJSON;
+   struct cJSON *audit_worm_read_page(long offset, long limit, long *total);
+
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);
 
