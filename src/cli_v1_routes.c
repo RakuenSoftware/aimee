@@ -299,6 +299,7 @@ static const struct
     {"audit", "verify", "audit.verify", NULL, NULL, 0},
     {"audit", "checkpoint", "audit.checkpoint", NULL, NULL, 0},
     {"audit", "seal", "audit.seal", NULL, NULL, 0},
+    {"audit", "snapshot", "audit.snapshot", NULL, NULL, 0},
     {"audit", "", "audit.verify", NULL, NULL, 0},
     {"agent", "episodes", "agent.episodes", NULL, "episodes", 0},
     {"agent", "add", "agent.add", NULL, NULL, 300000},

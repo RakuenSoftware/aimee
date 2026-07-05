@@ -293,6 +293,19 @@ int audit_worm_append(const char *actor_role, const char *actor_principal, const
    actor_principal = actor_principal ? actor_principal : "";
    detail = detail ? detail : "";
 
+   /* Bound detail (R2-8): the store is immutable forever, so a runaway payload
+    * would be permanent bloat. Cap at AUDIT_WORM_DETAIL_MAX with a visible marker
+    * folded INTO the hashed value, so the truncation is itself tamper-evident.
+    * Per-action allowlisted schemas + secret scanning are a follow-up. */
+   char detail_capped[AUDIT_WORM_DETAIL_MAX + 96];
+   size_t dlen = strlen(detail);
+   if (dlen > AUDIT_WORM_DETAIL_MAX)
+   {
+      snprintf(detail_capped, sizeof detail_capped, "%.*s\"[worm-truncated %zu bytes]\"",
+               AUDIT_WORM_DETAIL_MAX, detail, dlen - (size_t)AUDIT_WORM_DETAIL_MAX);
+      detail = detail_capped;
+   }
+
    pthread_mutex_lock(&g_worm_mu);
    int rc = -1;
    if (!g_worm_db && worm_open_locked_default() != 0)
@@ -772,6 +785,49 @@ cJSON *audit_worm_read_page(long offset, long limit, long *total)
    sqlite3_finalize(q);
    pthread_mutex_unlock(&g_worm_mu);
    return arr;
+}
+
+int audit_worm_metric_snapshot(void)
+{
+   /* Compute a verdict-mix + total summary over the store, then append it as a
+    * metric.snapshot row so the metrics history is itself hash-chained + verifiable
+    * (a tamper-evident metrics-over-time record). Counts are read outside the append
+    * txn, so a concurrent append may make them off-by-one — acceptable for a
+    * periodic snapshot. */
+   long total = 0, allow = 0, block = 0, rewrite = 0, approval = 0;
+   pthread_mutex_lock(&g_worm_mu);
+   if (!g_worm_db && worm_open_locked_default() != 0)
+   {
+      pthread_mutex_unlock(&g_worm_mu);
+      return -1;
+   }
+   sqlite3_stmt *q = NULL;
+   if (sqlite3_prepare_v2(g_worm_db, "SELECT verdict, COUNT(*) FROM audit_event GROUP BY verdict",
+                          -1, &q, NULL) == SQLITE_OK)
+   {
+      while (sqlite3_step(q) == SQLITE_ROW)
+      {
+         const char *v = (const char *)sqlite3_column_text(q, 0);
+         long n = (long)sqlite3_column_int64(q, 1);
+         total += n;
+         if (v && strcmp(v, "allow") == 0)
+            allow = n;
+         else if (v && strcmp(v, "block") == 0)
+            block = n;
+         else if (v && strcmp(v, "rewrite") == 0)
+            rewrite = n;
+         else if (v && strcmp(v, "approval_required") == 0)
+            approval = n;
+      }
+   }
+   sqlite3_finalize(q);
+   pthread_mutex_unlock(&g_worm_mu);
+
+   char detail[320];
+   snprintf(detail, sizeof detail,
+            "{\"total\":%ld,\"allow\":%ld,\"block\":%ld,\"rewrite\":%ld,\"approval_required\":%ld}",
+            total, allow, block, rewrite, approval);
+   return audit_worm_append("system", "", "metric.snapshot", "", "ok", detail);
 }
 
 long audit_worm_count(void)

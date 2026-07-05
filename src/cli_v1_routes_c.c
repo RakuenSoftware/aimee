@@ -1933,6 +1933,12 @@ void pt_print_audit(const char *method, cJSON *resp)
       printf("audit checkpoint: %s\n", ok ? "ok" : "failed");
       return;
    }
+   if (strstr(method, "snapshot"))
+   {
+      int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "snapshotted"));
+      printf("audit snapshot: %s\n", ok ? "ok" : "failed");
+      return;
+   }
    if (strstr(method, "seal"))
    {
       int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "sealed"));
