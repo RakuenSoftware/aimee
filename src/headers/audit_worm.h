@@ -42,6 +42,9 @@ extern "C"
 #define AUDIT_WORM_DOMAIN "aimee.audit.worm.v1"
 /* Genesis prev_hash: 32 zero bytes as 64 lowercase hex chars. */
 #define AUDIT_WORM_GENESIS_PREV "0000000000000000000000000000000000000000000000000000000000000000"
+/* Hard cap on a row's detail payload (bytes); oversized detail is truncated with a
+ * marker folded into the hash (R2-8). */
+#define AUDIT_WORM_DETAIL_MAX 16384
 
    /* Open (creating if needed) the WORM store at $AIMEE_HOME/audit/worm-live.db,
     * apply the schema + WORM triggers, and cache the handle. Idempotent. Returns 0
@@ -100,6 +103,10 @@ extern "C"
     * read that supersedes the flat audit.log reader. */
    struct cJSON;
    struct cJSON *audit_worm_read_page(long offset, long limit, long *total);
+
+   /* Append a metric.snapshot row (verdict-mix + total over the store), so the
+    * metrics history is hash-chained + verifiable. 0 on success, -1 on failure. */
+   int audit_worm_metric_snapshot(void);
 
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);

@@ -400,6 +400,10 @@ int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "audit.seal");
 }
+int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "audit.snapshot");
+}
 
 /* hooks.session_start invokes session_start_emit (cmd_session_lifecycle.c)
  * which the test does not link. Stub it and the session-id thread-local so

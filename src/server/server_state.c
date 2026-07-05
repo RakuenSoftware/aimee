@@ -2249,6 +2249,20 @@ int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* POST /v1/audit/snapshot: append a hash-chained metric.snapshot row (verdict-mix
+ * + total) — a tamper-evident metrics-over-time record. */
+int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   int rc = audit_worm_metric_snapshot();
+   cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "snapshotted", rc == 0);
+   if (rc != 0)
+      cJSON_AddStringToObject(resp, "error", "snapshot failed");
+   return send_and_free(conn, resp);
+}
+
 /* --- LSP diagnostics summary --- */
 
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

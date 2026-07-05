@@ -2103,6 +2103,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/audit/verify", NULL, RM_EXACT, "audit.verify", 0, rh_dispatch_op},
     {"POST", "/v1/audit/checkpoint", NULL, RM_EXACT, "audit.checkpoint", 0, rh_dispatch_op},
     {"POST", "/v1/audit/seal", NULL, RM_EXACT, "audit.seal", 0, rh_dispatch_op},
+    {"POST", "/v1/audit/snapshot", NULL, RM_EXACT, "audit.snapshot", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/delegations", NULL, RM_EXACT, "dashboard.delegations", 0,
      rh_dispatch_op},
     {"GET", "/v1/dashboard/logs", NULL, RM_EXACT, "dashboard.logs", 0, rh_dispatch_op},
@@ -2132,7 +2133,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/dogfood/tag", NULL, RM_EXACT, "dogfood.tag", 0, rh_dispatch_op},
     {"POST", "/v1/lsp/diagnostics_summary", NULL, RM_EXACT, "lsp.diagnostics_summary", 0,
      rh_dispatch_op},
-
     /* curator.* (queries) / graph.explain / trajectory.batch (op-parity wave 5).
      * Long-running kb.build/ingest/update, graph.sync_code, index.scan,
      * memory.benchmark and curator.synthesize are deliberately NOT inline-

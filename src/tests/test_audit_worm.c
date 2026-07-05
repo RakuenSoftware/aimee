@@ -259,9 +259,58 @@ static void test_read_page(void)
    printf("  test_read_page: ok\n");
 }
 
+/* A metric.snapshot row records the verdict-mix and is hash-chained like any row. */
+static void test_metric_snapshot(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/metric.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u", "tool.write", "v1-2", "block", "{}") == 0);
+   assert(audit_worm_metric_snapshot() == 0);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   long total = 0;
+   cJSON *page = audit_worm_read_page(0, 1, &total);
+   cJSON *r0 = cJSON_GetArrayItem(page, 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(r0, "action")), "metric.snapshot") == 0);
+   const char *d = cJSON_GetStringValue(cJSON_GetObjectItem(r0, "detail"));
+   assert(strstr(d, "\"allow\":1") && strstr(d, "\"block\":1"));
+   cJSON_Delete(page);
+   audit_worm_close();
+   printf("  test_metric_snapshot: ok\n");
+}
+
+/* An oversized detail is capped with a marker; the chain stays intact. */
+static void test_detail_capped(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/cap.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   size_t n = AUDIT_WORM_DETAIL_MAX + 5000;
+   char *big = malloc(n + 1);
+   assert(big);
+   memset(big, 'x', n);
+   big[n] = '\0';
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", big) == 0);
+   free(big);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   long total = 0;
+   cJSON *page = audit_worm_read_page(0, 1, &total);
+   const char *d = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(page, 0), "detail"));
+   assert(strstr(d, "worm-truncated"));
+   assert(strlen(d) < (size_t)AUDIT_WORM_DETAIL_MAX + 200);
+   cJSON_Delete(page);
+   audit_worm_close();
+   printf("  test_detail_capped: ok\n");
+}
+
 int main(void)
 {
    mk_tmpdir();
+   test_metric_snapshot();
+   test_detail_capped();
    test_read_page();
    test_append_and_chain();
    test_worm_triggers_block_mutation();

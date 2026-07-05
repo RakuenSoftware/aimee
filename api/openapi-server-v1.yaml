@@ -2082,6 +2082,10 @@ paths:
     post:
       summary: Export an immutable, verifiable snapshot of the WORM store
       responses: { "200": { description: Seal result, content: { application/json: { schema: { type: object } } } } }
+  /audit/snapshot:
+    post:
+      summary: Append a hash-chained metric.snapshot row
+      responses: { "200": { description: Snapshot result, content: { application/json: { schema: { type: object } } } } }
   /agent/local:
     get:
       summary: List local agents

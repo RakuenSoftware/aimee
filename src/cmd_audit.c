@@ -65,12 +65,27 @@ static void audit_sub_seal(app_ctx_t *ctx, int argc, char **argv)
    exit(1);
 }
 
+static void audit_sub_snapshot(app_ctx_t *ctx, int argc, char **argv)
+{
+   (void)ctx;
+   (void)argc;
+   (void)argv;
+   if (audit_worm_metric_snapshot() == 0)
+   {
+      printf("audit snapshot: ok\n");
+      return;
+   }
+   fprintf(stderr, "audit snapshot: failed\n");
+   exit(1);
+}
+
 static const subcmd_t audit_subcmds[] = {
     {"verify", "Verify the WORM audit chain + checkpoint MACs (exit 0=green, 1=amber, 2=red)",
      audit_sub_verify},
     {"checkpoint", "Append a checkpoint committing the current chain head under the chain key",
      audit_sub_checkpoint},
     {"seal", "Export an immutable, verifiable snapshot of the WORM store", audit_sub_seal},
+    {"snapshot", "Append a hash-chained metric.snapshot row", audit_sub_snapshot},
     {NULL, NULL, NULL},
 };
 
