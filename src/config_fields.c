@@ -84,6 +84,7 @@ const config_field_t config_fields[] = {
     {"wfe_live_forge_enabled", offsetof(config_t, wfe_live_forge_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"audit_action_enabled", offsetof(config_t, audit_action_enabled), sizeof(int), 0, CFG_BOOL},
+    {"audit_worm_enabled", offsetof(config_t, audit_worm_enabled), sizeof(int), 0, CFG_BOOL},
     {"css_render_command", offsetof(config_t, css_render_command),
      sizeof(((config_t *)0)->css_render_command), 0, CFG_STRING},
     {"kb_evidence_emit_enabled", offsetof(config_t, kb_evidence_emit_enabled), sizeof(int), 0,

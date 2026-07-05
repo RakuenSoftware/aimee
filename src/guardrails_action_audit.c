@@ -9,8 +9,11 @@
  * logic stays within the source line budget. */
 #include <string.h>
 
+#include <stdio.h>
+
 #include "aimee.h" /* MODE_APPROVE */
 #include "audit_action.h"
+#include "audit_worm.h"
 #include "config.h"
 #include "guardrails.h"
 #include "log.h"
@@ -30,6 +33,39 @@ static int audit_action_is_enabled(void)
       g_audit_action_enabled = cfg.audit_action_enabled ? 1 : 0;
    }
    return g_audit_action_enabled;
+}
+
+/* Cached audit_worm_enabled (default-off). Same fail-safe read-once pattern as
+ * audit_action_is_enabled: a config_load failure leaves the WORM dual-write OFF. */
+static int g_audit_worm_enabled = -1;
+static int audit_worm_is_enabled(void)
+{
+   if (g_audit_worm_enabled < 0)
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof cfg);
+      config_load(&cfg);
+      g_audit_worm_enabled = cfg.audit_worm_enabled ? 1 : 0;
+   }
+   return g_audit_worm_enabled;
+}
+
+/* Dual-write the same governed-action row into the append-only WORM store. S0:
+ * best-effort — a failure is recoverable audit loss (audit.log stays
+ * authoritative) and never touches the verdict. Structured principal/detail
+ * schemas and fail-closed authority arrive in later slices. */
+static void emit_worm_row(const char *actor, const char *tool_name, const char *args_hash,
+                          const char *mode, const char *reason, const char *verdict,
+                          long long task_id)
+{
+   if (!audit_worm_is_enabled())
+      return;
+   char action[192];
+   snprintf(action, sizeof action, "tool.%s", tool_name ? tool_name : "");
+   char detail[320];
+   snprintf(detail, sizeof detail, "{\"mode\":\"%s\",\"reason\":\"%s\",\"task_id\":%lld}",
+            mode ? mode : "", reason ? reason : "", task_id);
+   audit_worm_append(actor, "", action, args_hash ? args_hash : "", verdict ? verdict : "", detail);
 }
 
 static void emit_action_audit(const char *tool_name, const char *input_json,
@@ -70,6 +106,7 @@ static void emit_action_audit(const char *tool_name, const char *input_json,
    audit_args_hash(tool_name, input_json, args_hash, sizeof args_hash);
    long long task_id = state ? (long long)state->active_task_id : 0;
    audit_action_log(actor, tool_name, args_hash, mode, reason, verdict, task_id);
+   emit_worm_row(actor, tool_name, args_hash, mode, reason, verdict, task_id);
 }
 
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,

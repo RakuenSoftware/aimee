@@ -311,6 +311,12 @@ typedef struct config
     * passive, fail-open, and never changes an enforcement verdict. Set false to
     * opt out. */
    int audit_action_enabled;
+   /* audit_worm_enabled: dual-write each governed-action audit row into the
+    * per-service WORM store (append-only, hash-chained SQLite) alongside the
+    * legacy audit.log. Default-OFF (S0 of the WORM audit-store proposal); the
+    * WORM store is not yet authoritative, so a failed WORM append is recoverable
+    * audit loss, never an enforcement change. */
+   int audit_worm_enabled;
    /* css_render_command: the render backend for the #4-full computed-style oracle.
     * A shell command (like embedding_command) that reads a {"html","css"} JSON
     * object on stdin and writes a computed-style snapshot JSON on stdout. It runs
