@@ -574,6 +574,48 @@ static void test_ensemble_routes_to_distinct_agents(void)
    printf("  test_ensemble_routes_to_distinct_agents: ok\n");
 }
 
+/* Regression: a large review TARGET (the incompressible task) must not trip the
+ * carryover-compression path. Before the fix, `strlen(artifact)+strlen(peer_notes)
+ * +strlen(task) > 22000` counted the task, so any single-shot review whose target
+ * exceeded ~22 KB ran summarize_forward on round 1 (empty carryover) and flagged
+ * the whole run truncated+degraded (and starved the panel). The trigger now counts
+ * carryover only, so a big task passes through clean. */
+static void test_roundtable_large_task_no_size_degrade(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   /* DRAFT mode isolates the SIZE path: the mock panel + aggregator succeed
+    * cleanly (they return a fixed "synthesized answer"), so the only thing a large
+    * task can change is whether the size-triggered summarize_forward at
+    * delegate_ensemble.c fires — which the mode-agnostic 22 KB check governs. */
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1; /* single-shot: no carryover to compress */
+   opts.converge_threshold = 0;
+   opts.deadline_ms = 0;
+
+   size_t n = 30000; /* > 22 KB, so the OLD code summarized + flagged truncated */
+   char *task = malloc(n + 1);
+   assert(task);
+   for (size_t i = 0; i < n; i++)
+      task[i] = (i % 64 == 63) ? '\n' : 'x';
+   task[n] = '\0';
+
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, task, &opts, &result);
+   free(task);
+   assert(rc == 0);
+   /* A large task alone (no carryover on round 1) must NOT trip the compression
+    * path, so the run is neither truncated nor degraded by size. */
+   assert(!result.truncated);
+   assert(!result.degraded);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_large_task_no_size_degrade: ok\n");
+}
+
 static void test_roundtable_parallel_basic(void)
 {
    reset_modes();
@@ -1365,6 +1407,7 @@ int main(void)
    test_ensemble_min_successful_degradation();
    test_ensemble_routes_to_distinct_agents();
    test_roundtable_parallel_basic();
+   test_roundtable_large_task_no_size_degrade();
    test_roundtable_folds_cost_to_parent_session();
    test_roundtable_sequential_uses_named_agents();
    test_roundtable_degrades_on_min_success();
