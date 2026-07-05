@@ -1925,6 +1925,33 @@ void pt_print_kb_status(const char *method, cJSON *resp)
       printf(", %d done last 24h\n", n_done24);
    }
 }
+void pt_print_audit(const char *method, cJSON *resp)
+{
+   if (strstr(method, "checkpoint"))
+   {
+      int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "checkpointed"));
+      printf("audit checkpoint: %s\n", ok ? "ok" : "failed");
+      return;
+   }
+   const char *v = json_str(resp, "verify");
+   long head = json_int(resp, "head_seq", 0);
+   long ck = json_int(resp, "last_checkpoint_seq", 0);
+   long un = json_int(resp, "unattested", 0);
+   if (v && strcmp(v, "green") == 0)
+      printf("audit verify: GREEN — chain + checkpoint MACs intact; head seq %ld attested by "
+             "checkpoint seq %ld\n",
+             head, ck);
+   else if (v && strcmp(v, "amber") == 0)
+      printf("audit verify: AMBER — chain intact; %ld row(s) after checkpoint seq %ld are "
+             "unattested; run 'aimee audit checkpoint'\n",
+             un, ck);
+   else
+   {
+      const char *d = json_str(resp, "detail");
+      printf("audit verify: RED — %s\n", d ? d : "integrity break");
+   }
+}
+
 void pt_print_workers(const char *method, cJSON *resp)
 {
    cJSON *server_bg_obj = cJSON_GetObjectItemCaseSensitive(resp, "server_background");

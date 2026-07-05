@@ -1,6 +1,7 @@
 /* test_audit_worm.c: S0 WORM audit store — chain integrity, gap-free seq,
  * WORM triggers, cross-store determinism, and crypto tamper detection. */
 #include <assert.h>
+#include <fcntl.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -120,6 +121,63 @@ static void test_tamper_detected_past_triggers(void)
    printf("  test_tamper_detected_past_triggers: ok (%s)\n", err);
 }
 
+/* Checkpoints move verify from AMBER (uncheckpointed tail) to GREEN, and back to
+ * AMBER once new rows land after the newest checkpoint. */
+static void test_checkpoint_and_verify_status(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/ck.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1); /* chain key -> g_dir/.audit-chain-key */
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-2", "allow", "{}") == 0);
+
+   long head = 0, ck = 0;
+   char err[160];
+   assert(audit_worm_verify(err, sizeof err, &head, &ck) == AUDIT_WORM_VERIFY_AMBER);
+   assert(head == 2 && ck == 0);
+
+   assert(audit_worm_checkpoint() == 0); /* row seq=3 attests head seq=2 */
+   assert(audit_worm_verify(err, sizeof err, &head, &ck) == AUDIT_WORM_VERIFY_GREEN);
+   assert(head == 3 && ck == 3);
+
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-3", "allow", "{}") == 0);
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_AMBER);
+   audit_worm_close();
+   printf("  test_checkpoint_and_verify_status: ok\n");
+}
+
+/* A checkpoint is bound to the chain key: verifying against a different key (an
+ * attacker who can rewrite the file but lacks the key) is detected as RED. */
+static void test_checkpoint_bound_to_chain_key(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/ckkey.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_checkpoint() == 0);
+   char err[160];
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_GREEN);
+   audit_worm_close();
+
+   /* Swap the chain key for a different one; the checkpoint no longer verifies. */
+   char keypath[400];
+   snprintf(keypath, sizeof keypath, "%s/.audit-chain-key", g_dir);
+   int fd = open(keypath, O_WRONLY | O_TRUNC);
+   assert(fd >= 0);
+   unsigned char bogus[32];
+   memset(bogus, 0xAB, sizeof bogus);
+   assert(write(fd, bogus, sizeof bogus) == (ssize_t)sizeof bogus);
+   close(fd);
+
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(strstr(err, "checkpoint") != NULL);
+   audit_worm_close();
+   printf("  test_checkpoint_bound_to_chain_key: ok (%s)\n", err);
+}
+
 int main(void)
 {
    mk_tmpdir();
@@ -127,6 +185,8 @@ int main(void)
    test_worm_triggers_block_mutation();
    test_cross_store_determinism();
    test_tamper_detected_past_triggers();
+   test_checkpoint_and_verify_status();
+   test_checkpoint_bound_to_chain_key();
    printf("all tests passed\n");
    return 0;
 }

@@ -5,6 +5,7 @@
 #include "dashboard.h"
 #include "render.h"               /* decision_to_json + db2_decision_log_list */
 #include "audit_ledger.h"         /* audit_ledger_read — server-incurred tool-action audit */
+#include "audit_worm.h"           /* audit_worm_verify/checkpoint — WORM audit store */
 #include "server_http_identity.h" /* server_http_identity_query — audit pagination params */
 #include "lsp.h"
 #include "platform_path.h"
@@ -2171,6 +2172,41 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddNumberToObject(resp, "total", total);
    cJSON_AddNumberToObject(resp, "offset", offset);
    cJSON_AddNumberToObject(resp, "limit", limit);
+   return send_and_free(conn, resp);
+}
+
+/* GET /v1/audit/verify: verify the WORM audit store's hash-chain + checkpoint MACs
+ * and report the amber uncheckpointed-tail signal. verify ∈ {green,amber,red}. */
+int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   char err[256] = "";
+   long head = 0, ckpt = 0;
+   int st = audit_worm_verify(err, sizeof err, &head, &ckpt);
+   const char *status =
+       st == AUDIT_WORM_VERIFY_GREEN ? "green" : (st == AUDIT_WORM_VERIFY_AMBER ? "amber" : "red");
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "verify", status);
+   cJSON_AddNumberToObject(resp, "head_seq", head);
+   cJSON_AddNumberToObject(resp, "last_checkpoint_seq", ckpt);
+   cJSON_AddNumberToObject(resp, "unattested", head > ckpt ? head - ckpt : 0);
+   if (st == AUDIT_WORM_VERIFY_RED)
+      cJSON_AddStringToObject(resp, "detail", err[0] ? err : "integrity break");
+   return send_and_free(conn, resp);
+}
+
+/* POST /v1/audit/checkpoint: append a checkpoint committing the current chain head
+ * under the chain-key MAC, bounding the unattested tail. */
+int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   int rc = audit_worm_checkpoint();
+   cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "checkpointed", rc == 0);
+   if (rc != 0)
+      cJSON_AddStringToObject(resp, "error", "checkpoint failed");
    return send_and_free(conn, resp);
 }
 

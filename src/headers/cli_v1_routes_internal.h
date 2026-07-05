@@ -222,6 +222,7 @@ void pt_print_work_release(const char *method, cJSON *resp);
 void pt_print_work_stats(const char *method, cJSON *resp);
 void pt_print_work_sync_proposals(const char *method, cJSON *resp);
 void pt_print_workers(const char *method, cJSON *resp);
+void pt_print_audit(const char *method, cJSON *resp);
 void pt_print_workspace_add(const char *method, cJSON *resp);
 void pt_print_workspace_get(const char *method, cJSON *resp);
 void pt_print_workspace_list(const char *method, cJSON *resp);
