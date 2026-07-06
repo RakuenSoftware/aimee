@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Panel, Badge } from "@rakuensoftware/smoothgui";
+import { FIELD_HELP, SECTION_HELP, RESTART_KEYS } from "./settingsHelp";
 
 /* Settings page: every typed Aimee config option (the config_fields allowlist,
  * e.g. typed_facts_enabled, kb_pdf_*, memory_*, autonomous). Values come from
@@ -113,7 +114,13 @@ export default function Settings() {
   const groups = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const keys = Object.keys(values)
-      .filter((k) => !q || k.toLowerCase().includes(q) || humanize(k).toLowerCase().includes(q))
+      .filter(
+        (k) =>
+          !q ||
+          k.toLowerCase().includes(q) ||
+          humanize(k).toLowerCase().includes(q) ||
+          (FIELD_HELP[k] || "").toLowerCase().includes(q),
+      )
       .sort();
     const byCat: Record<string, string[]> = {};
     for (const k of keys) (byCat[category(k)] ||= []).push(k);
@@ -147,7 +154,8 @@ export default function Settings() {
         )}
       </div>
       <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
-        Changes persist to <code>aimee.yaml</code> and take effect on the next turn.
+        Changes persist to <code>aimee.yaml</code> and take effect on the next turn, unless a row is
+        marked <em>restart</em>. Most options are off by default; each is described below.
       </p>
 
       {!loaded && <div style={{ color: "#888" }}>loading…</div>}
@@ -158,7 +166,12 @@ export default function Settings() {
       <div style={{ display: "grid", gap: 12 }}>
         {groups.map(([cat, keys]) => (
           <Panel key={cat} title={cat} count={keys.length}>
-            <div style={{ display: "grid", gap: 6 }}>
+            {SECTION_HELP[cat] && (
+              <p style={{ fontSize: 12, color: "#777", margin: "0 0 10px", lineHeight: 1.4 }}>
+                {SECTION_HELP[cat]}
+              </p>
+            )}
+            <div style={{ display: "grid", gap: 10 }}>
               {keys.map((k) => (
                 <SettingRow
                   key={k}
@@ -193,13 +206,35 @@ function SettingRow({
   onSave: () => void;
   onReset: () => void;
 }) {
+  const help = FIELD_HELP[fieldKey];
+  const needsRestart = RESTART_KEYS.has(fieldKey);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <label style={{ flex: "1 1 260px", minWidth: 200, fontSize: 13 }} title={fieldKey}>
-        {humanize(fieldKey)}
-        <span style={{ color: "#aaa", fontSize: 11, marginLeft: 6 }}>{fieldKey}</span>
-      </label>
-      <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6 }}>
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ flex: "1 1 300px", minWidth: 220 }}>
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} title={fieldKey}>
+          {humanize(fieldKey)}
+          <span style={{ color: "#aaa", fontSize: 11 }}>{fieldKey}</span>
+          {needsRestart && (
+            <span
+              style={{
+                fontSize: 10,
+                color: "#a60",
+                background: "#fff6e6",
+                border: "1px solid #f0d9a8",
+                borderRadius: 4,
+                padding: "0 5px",
+              }}
+              title="Takes effect only after the server restarts."
+            >
+              restart
+            </span>
+          )}
+        </label>
+        {help && (
+          <div style={{ fontSize: 12, color: "#777", marginTop: 2, lineHeight: 1.4 }}>{help}</div>
+        )}
+      </div>
+      <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
         {typeof value === "boolean" ? (
           <button
             onClick={() => onChange(!value)}
