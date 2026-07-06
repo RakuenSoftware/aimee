@@ -763,8 +763,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
             cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
             const char *hp = (cJSON_IsString(hpj) && hpj->valuestring[0]) ? hpj->valuestring : NULL;
             char mr_msg[1024] = "";
-            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, mr_msg, sizeof(mr_msg)) ==
-                2)
+            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, cli_memory_md_retire(),
+                                      mr_msg, sizeof(mr_msg)) == 2)
             {
                if (cli_hook_client_uses_pretool_json())
                   emit_pretool_deny_json(mr_msg);

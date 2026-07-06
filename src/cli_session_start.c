@@ -116,8 +116,9 @@ static cJSON *ss_retry_post(const char *endpoint, const char *bearer, const char
 /* memory_md_retire config flag, fetched from the server via config.get (the thin
  * CLI does not link the config module). Defaults to 1 (retire on -> skip .md
  * hydration) whenever the server is unreachable or the value is absent, so a
- * fresh/offline session never re-materializes memory files. */
-static int session_start_md_retire(void)
+ * fresh/offline session never re-materializes memory files. Shared with the
+ * cli_main.c remote-only memory guard (declared in cli_session_start.h). */
+int cli_memory_md_retire(void)
 {
    cJSON *req = cJSON_CreateObject();
    if (!req)
@@ -410,7 +411,7 @@ int handle_session_start(int json_output)
     * reaches the configured remote endpoint. */
    {
       char hcwd[4096];
-      if (!session_start_md_retire() && getcwd(hcwd, sizeof(hcwd)))
+      if (!cli_memory_md_retire() && getcwd(hcwd, sizeof(hcwd)))
          harness_memory_hydrate(hcwd);
    }
 
