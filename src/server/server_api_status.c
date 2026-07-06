@@ -107,6 +107,14 @@ static int handle_api_error(server_conn_t *conn, const char *message)
    return rc;
 }
 
+/* Mint a fresh 256-bit (64 hex-char) /v1 bearer into cfg->server_api_bearer_token.
+ * Returns 0 on success, -1 if the RNG failed. Shared by api.enable (mint-if-empty)
+ * and api.rotate_bearer (mint-unconditionally). */
+static int server_api_mint_bearer(config_t *cfg)
+{
+   return platform_random_hex(cfg->server_api_bearer_token, 64) == 0 ? 0 : -1;
+}
+
 /* api.enable: turn on the loopback /v1 listener. Picks a default port and rate
  * limit when unset, mints a bearer token if none is configured, persists the
  * aimee.api.* block, and returns a report that reveals the token once (the
@@ -135,7 +143,7 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int generated = 0;
    if (cfg.server_api_bearer_token[0] == '\0')
    {
-      if (platform_random_hex(cfg.server_api_bearer_token, 64) != 0)
+      if (server_api_mint_bearer(&cfg) != 0)
          return handle_api_error(conn, "failed to generate bearer token");
       generated = 1;
    }
@@ -172,6 +180,40 @@ int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddNumberToObject(resp, "rate_limit_per_min", cfg.server_api_rate_limit_per_min);
    cJSON_AddBoolToObject(resp, "vscode", with_vscode);
    cJSON_AddStringToObject(resp, "report", report);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* api.rotate_bearer: mint a FRESH /v1 bearer unconditionally (replacing any
+ * existing one — e.g. the image-seeded `aimee-local-dev` bootstrap), persist it,
+ * and HOT-SWAP the live listener so the new token authorizes immediately and the
+ * old one stops working at once — no restart, no dual-validity window. This is
+ * the server side of trust-on-first-use enrollment: a thin client connects once
+ * with the bootstrap bearer and calls this to obtain its strong per-deployment
+ * token, which it then uses exclusively. CAP_SESSION_ADMIN-gated (same as
+ * api.enable); reveals the new token once to the authorized caller. */
+int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   config_t cfg;
+   config_load(&cfg);
+   if (server_api_mint_bearer(&cfg) != 0)
+      return handle_api_error(conn, "failed to generate bearer token");
+   if (config_save(&cfg) != 0)
+      return handle_api_error(conn, "failed to persist aimee.api config");
+
+   /* Hot-swap the running listener's bearer. This handler runs on the single
+    * listener thread that also reads the bearer for authorization, so the swap
+    * is serialized against auth checks and needs no lock. After this returns the
+    * bootstrap token no longer authorizes anything. */
+   server_http_set_bearer(cfg.server_api_bearer_token);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "bearer_token", cfg.server_api_bearer_token);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
    return rc;

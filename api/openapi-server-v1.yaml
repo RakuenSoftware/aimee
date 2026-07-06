@@ -2238,6 +2238,11 @@ paths:
       summary: Enable the HTTP API
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Enabled, content: { application/json: { schema: { type: object } } } } }
+  /api/rotate_bearer:
+    post:
+      summary: Mint and hot-swap a fresh /v1 bearer (trust-on-first-use enrollment; retires the bootstrap token)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Rotated, content: { application/json: { schema: { type: object } } } } }
   /api/disable:
     post:
       summary: Disable the HTTP API

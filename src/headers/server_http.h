@@ -133,6 +133,10 @@ extern "C"
    /* Stop the listener and close the socket. Safe if not started. */
    void server_http_stop(void);
 
+   /* Hot-swap the live TCP/TLS bearer without a restart. Call only from a /v1
+    * route handler (serialized on the listener thread). NULL/empty clears it. */
+   void server_http_set_bearer(const char *bearer);
+
    /* Default HTTP socket path: <config_default_dir>/aimee-http.sock. Returns a
     * pointer to a static buffer. */
    const char *server_http_default_path(void);

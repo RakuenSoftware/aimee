@@ -1847,7 +1847,8 @@ $(TESTPREFIX)/unit-test-aimee-client: $(OBJDIR)/tests/test_aimee_client.o $(OBJD
 
 $(TESTPREFIX)/unit-test-cli-remote: $(OBJDIR)/tests/test_cli_remote.o $(OBJDIR)/cli_remote.o \
                                     $(OBJDIR)/aimee_client.o $(OBJDIR)/posix/platform_net.o \
-                                    $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_home.o $(TLS_OBJS)
+                                    $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
+                                    $(TLS_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) $(TLS_LIBS)
 
 $(TESTPREFIX)/unit-test-util-url: $(OBJDIR)/tests/test_util_url.o $(OBJDIR)/util_url.o
