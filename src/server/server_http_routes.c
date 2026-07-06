@@ -45,7 +45,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
-
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
 #include "git_forge_vault.h"  /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
@@ -2096,6 +2095,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/model/refresh", NULL, RM_EXACT, "model.refresh", 0, rh_dispatch_op},
     {"GET", "/v1/api/status", NULL, RM_EXACT, "api.status", 0, rh_dispatch_op},
     {"POST", "/v1/api/enable", NULL, RM_EXACT, "api.enable", 0, rh_dispatch_op},
+    {"POST", "/v1/api/rotate_bearer", NULL, RM_EXACT, "api.rotate_bearer", 0, rh_dispatch_op},
     {"POST", "/v1/api/disable", NULL, RM_EXACT, "api.disable", 0, rh_dispatch_op},
     /* dashboard/insights/identity/dogfood/lsp op-parity wave 4; read views are GET. */
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},

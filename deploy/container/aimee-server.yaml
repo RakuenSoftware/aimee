@@ -12,8 +12,14 @@
 # the server auto-provisions a self-signed cert at $AIMEE_HOME/tls/server.{crt,key}
 # on first start. Mount your own cert there to override.
 #
-# This token is a development default — override it for any real deployment by
-# mounting your own aimee.yaml over /var/lib/aimee/aimee.yaml.
+# `bearer_token: aimee-local-dev` is a ONE-TIME BOOTSTRAP, not a standing
+# credential. The first thin client that connects (`aimee remote set <url>
+# aimee-local-dev`) automatically calls api.rotate_bearer, which mints a strong
+# random per-deployment bearer, hot-swaps it in, and persists it here — the
+# bootstrap token stops working the instant that happens. The exposure window is
+# only "deploy → first client enrolls". To skip the bootstrap entirely, pin your
+# own token out-of-band via the AIMEE_API_BEARER_TOKEN env (a secret store /
+# .gitignore'd per-host .env); an explicit env token disables the TOFU rotation.
 aimee:
   api:
     http_port: 8740

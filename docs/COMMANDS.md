@@ -149,13 +149,24 @@ Useful flags:
 - `aimee server restart`: terminate the running server and spawn a fresh one.
 - `aimee server status` / `server health`: aliases for server health.
 - `aimee workspace add <path>`, `workspace list`, `workspace remove <path>`: manage indexed workspace roots.
-- `aimee remote set <url> [token]`, `remote status`, `remote clear`: point the thin
-  client at a remote `aimee-server` over TCP. `set` persists the target to
-  `<aimee_home>/remote.conf`; `status` shows the resolved transport plus a
-  `GET /v1/health` probe; `clear` reverts to the local Unix socket. Precedence:
-  `--server`/`--server-token=` flags > `AIMEE_SERVER_URL`/`AIMEE_SERVER_TOKEN`
-  env > persisted `remote.conf`. `https://` is supported on Linux/macOS (OpenSSL,
-  cert-verified; `AIMEE_TLS_INSECURE=1` to skip); Windows builds refuse it.
+- `aimee remote set <url> [token]`, `remote enroll`, `remote trust`, `remote status`,
+  `remote clear`: point the thin client at a remote `aimee-server` over TCP. `set`
+  persists the target to `<aimee_home>/remote.conf` and, for `https://`, pins the
+  server's self-signed cert (trust-on-first-use); `status` shows the resolved
+  transport plus a `GET /v1/health` probe; `trust` re-pins after a cert rotation;
+  `clear` reverts to the local Unix socket. Precedence: `--server`/`--server-token=`
+  flags > `AIMEE_SERVER_URL`/`AIMEE_SERVER_TOKEN` env > persisted `remote.conf`.
+  `https://` is supported on Linux/macOS (OpenSSL, cert-verified;
+  `AIMEE_TLS_INSECURE=1` to skip); Windows builds refuse it.
+  - **Bootstrap enrollment:** the aimee-server image seeds a well-known one-time
+    bearer `aimee-local-dev`. Connecting with it (`aimee remote set <url>
+    aimee-local-dev`) auto-runs enrollment: the server mints a strong random
+    per-deployment bearer (`api.rotate_bearer`), the client adopts it in
+    `remote.conf`, and the bootstrap token immediately stops working — so the
+    shared default is never a standing credential. `aimee remote enroll` forces a
+    fresh rotation on the configured remote at any time. To skip the bootstrap
+    entirely, set `AIMEE_API_BEARER_TOKEN` on the server (secret store) to pin your
+    own bearer; an explicit env token disables the auto-rotation.
 - `aimee worktree gc [--days N] [--force] [--dry-run]`: garbage-collect abandoned session worktrees.
 - `aimee work add`, `add-batch`, `claim`, `complete`, `fail`, `list`, `board`, `cancel`, `release`, `clear`, `gc`, `sync-proposals`, `stats`: manage the inter-session work queue.
 - `aimee jobs list [--limit N]`: list recent durable delegate jobs.

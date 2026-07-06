@@ -1308,6 +1308,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"server.health", handle_server_health},
     {"api.status", handle_api_status},
     {"api.enable", handle_api_enable},
+    {"api.rotate_bearer", handle_api_rotate_bearer},
     {"api.disable", handle_api_disable},
     {"insights.overview", handle_insights_overview},
     {"toolset.list", handle_toolset_list},

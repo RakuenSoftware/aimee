@@ -584,6 +584,7 @@ static const struct
     {"agent.stats", "GET", "/v1/agent/stats"},
     {"api.disable", "POST", "/v1/api/disable"},
     {"api.enable", "POST", "/v1/api/enable"},
+    {"api.rotate_bearer", "POST", "/v1/api/rotate_bearer"},
     {"api.status", "GET", "/v1/api/status"},
     {"attempt.list", "POST", "/v1/attempts/list"},
     {"attempt.record", "POST", "/v1/attempts/record"},

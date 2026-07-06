@@ -92,4 +92,17 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
       else if (strcmp(rw_env, "off") == 0)
          cfg->server_api_remote_writes = SERVER_REMOTE_WRITES_OFF;
    }
+
+   /* AIMEE_API_BEARER_TOKEN pins the /v1 bearer from the environment (deploy
+    * truth), overriding the config-file value even when it is absent / read-only
+    * / reseeded — e.g. a containerized server fed the token from a secret store.
+    * Providing an explicit token also opts OUT of trust-on-first-use enrollment:
+    * the operator is managing the bearer, so the client's bootstrap rotation is
+    * moot (the seeded `aimee-local-dev` bootstrap is never in effect). */
+   const char *bearer_env = getenv("AIMEE_API_BEARER_TOKEN");
+   if (bearer_env && bearer_env[0])
+   {
+      strncpy(cfg->server_api_bearer_token, bearer_env, sizeof(cfg->server_api_bearer_token) - 1);
+      cfg->server_api_bearer_token[sizeof(cfg->server_api_bearer_token) - 1] = '\0';
+   }
 }
