@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type workflowSessionInfo struct {
@@ -214,6 +215,93 @@ func (s *server) agentOpHandler(method string) http.HandlerFunc {
 		// resp is map[string]json.RawMessage; the values marshal back verbatim.
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// argsHaveLiteralKey reports whether a CLI-style `agent add` argv carries a
+// LITERAL --key secret (as opposed to a "$ENV" reference, which is not a secret).
+// Only a literal key must be sealed into the vault, so only then is the attested
+// forwarding path required. Handles both "--key VAL" and "--key=VAL".
+func argsHaveLiteralKey(args []string) bool {
+	for i, a := range args {
+		var val string
+		switch {
+		case a == "--key":
+			if i+1 < len(args) {
+				val = args[i+1]
+			}
+		case strings.HasPrefix(a, "--key="):
+			val = strings.TrimPrefix(a, "--key=")
+		default:
+			continue
+		}
+		if v := strings.TrimSpace(val); v != "" && !strings.HasPrefix(v, "$") {
+			return true
+		}
+	}
+	return false
+}
+
+// handleAgentAdd proxies POST /api/agents/add. It mirrors agentOpHandler's
+// {"args":[...]} body, but when the argv carries a LITERAL --key the secret must
+// be sealed server-side. A plain UDS hop authenticates only as the (root) webchat
+// process — an empty, un-writable vault principal — so the seal is refused. That
+// one case is forwarded over the attested webuser channel (v1RequestWebuser:
+// server.token + X-Aimee-Webuser) so aimee-server classifies the caller as
+// webuser:<user>; when that principal holds the vault:write:server capability the
+// key lands in the SHARED server vault. The /v1 bearer never enters webchat. A
+// keyless add / $VAR reference needs no attested identity and takes the plain path.
+func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Args []string `json:"args"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	req := map[string]any{"method": "agent.add"}
+	if body.Args != nil {
+		req["args"] = body.Args
+	}
+
+	if !argsHaveLiteralKey(body.Args) {
+		resp, err := s.socketCallForRequest(r, req)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "encode request")
+		return
+	}
+	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/agent/add", payload)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var msg map[string]json.RawMessage
+	if len(data) > 0 {
+		if uerr := json.Unmarshal(data, &msg); uerr != nil {
+			writeJSONError(w, http.StatusBadGateway, "decode agent.add response")
+			return
+		}
+	}
+	// Surface the server's dispatch error (e.g. the vault refusal) to the UI as
+	// {"error": ...}; the Agents page reads res.error.
+	if rerr := rpcError(msg); rerr != nil {
+		writeJSONError(w, http.StatusBadGateway, rerr.Error())
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("agent add: status %d", st))
+		return
+	}
+	_ = json.NewEncoder(w).Encode(msg)
 }
 
 // handleAudit proxies GET /api/audit -> the PAGINATED dashboard.audit route,
