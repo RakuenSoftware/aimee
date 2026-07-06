@@ -362,13 +362,15 @@ int memory_redirect_check(const char *tool, cJSON *root, const char *cwd, const 
             if (r)
                cJSON_Delete(r);
             int sp = hmem_spill_write(project, name, "archive", content);
-            hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
+            /* Storage-neutral wording: this file links into the DB-free client,
+             * whose build-integrity boundary forbids db1/db2 string leaks. */
+            hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "store unreachable");
             fprintf(stderr, "aimee: memory store unavailable (status %d); %s\n", st,
                     sp == 0 ? "spilled for reconcile" : "spill FAILED — allowing local write");
             return 0; /* fail-open: allow the local write this once */
          }
          cJSON_Delete(r);
-         hmem_audit("redirect-db1", project, name, NULL);
+         hmem_audit("redirect-store", project, name, NULL);
          /* No re-materialize: the .md is retired and never created. */
          snprintf(msg, msg_len,
                   "Saved to aimee memory. Memory files are retired — retrieve with "

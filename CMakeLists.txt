@@ -798,6 +798,10 @@ set(CLI_SRCS
     # the macOS/Windows CMake link fails with undefined hmem_* symbols.
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
+    # cli_main's remote-only hooks-pre path calls memory_redirect_check; the CLI
+    # doesn't link aimee-core, so its definer must build in directly (make links it
+    # via CLIENT_SUPPORT_OBJS). Without it the CLI link fails undefined.
+    ${AIMEE_SRC_DIR}/memory_redirect.c
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
     ${AIMEE_SRC_DIR}/harness_memory_spill.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
