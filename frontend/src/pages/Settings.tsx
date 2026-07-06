@@ -114,13 +114,19 @@ export default function Settings() {
   const groups = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const keys = Object.keys(values)
-      .filter(
-        (k) =>
-          !q ||
+      .filter((k) => {
+        if (!q) return true;
+        const cat = category(k);
+        // Match the key, its label, its help line, and its section (name + intro)
+        // so a section-only term like "governance" or "curation" still finds rows.
+        return (
           k.toLowerCase().includes(q) ||
           humanize(k).toLowerCase().includes(q) ||
-          (FIELD_HELP[k] || "").toLowerCase().includes(q),
-      )
+          (FIELD_HELP[k] || "").toLowerCase().includes(q) ||
+          cat.toLowerCase().includes(q) ||
+          (SECTION_HELP[cat] || "").toLowerCase().includes(q)
+        );
+      })
       .sort();
     const byCat: Record<string, string[]> = {};
     for (const k of keys) (byCat[category(k)] ||= []).push(k);

@@ -4,8 +4,10 @@
  * field's behaviour or default changes. A key with no entry here still renders;
  * it just shows no help line, so the page degrades gracefully for new keys. */
 
-// Fields that only take effect after a server restart (reload_class RESTART in
-// config_fields). The rest apply on the next turn.
+// Fields that only take effect after a server restart. This is the exhaustive
+// set of keys carrying reload_class RELOAD_RESTART in src/config_fields.c (the
+// Postgres pool + the kb API listener bind at startup); every other exposed key
+// applies on the next turn. Keep in sync if a field's reload_class changes.
 export const RESTART_KEYS = new Set<string>(["db2_url", "kb_api_http_port", "kb_api_bearer_token"]);
 
 // One line per section (see category() in Settings.tsx).
