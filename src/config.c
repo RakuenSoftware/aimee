@@ -790,6 +790,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->audit_action_enabled = 1;    /* default-ON: the trajectory_export reader (S3)
                                         shipped, so the passive per-action audit row
                                         is on by default; set false to opt out */
+   cfg->memory_md_retire = 1;        /* default-ON: agent file-memory is retired into
+                                        aimee (no local .md mirrors); set false for
+                                        the legacy re-materialized .md behavior */
    snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty
@@ -1115,6 +1118,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "audit_action_enabled");
    if (cJSON_IsBool(item))
       cfg->audit_action_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "memory_md_retire");
+   if (cJSON_IsBool(item))
+      cfg->memory_md_retire = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "css_render_command");
    if (cJSON_IsString(item) && item->valuestring)

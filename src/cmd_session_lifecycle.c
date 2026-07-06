@@ -228,7 +228,7 @@ static char *build_session_context(const char *client_cwd)
     * agent to aimee memory commands rather than a native store. The generic
     * reminder is always on (operator directive). The stronger '.md files are
     * intercepted / not persisted' claim is only accurate under the retirement
-    * flag (AIMEE_MEMORY_MD_RETIRE), so it is gated on it. */
+    * flag (config memory_md_retire, default-on), so it is gated on it. */
    pos += (size_t)snprintf(
        buf + pos, cap - pos,
        "# Memory (use aimee, not your own store)\n"
@@ -237,8 +237,9 @@ static char *build_session_context(const char *client_cwd)
        "`aimee memory identity <key> <value>` and `aimee memory prefer <key> <value>`.\n"
        "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n");
    {
-      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
-      if (mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y'))
+      config_t mr_cfg;
+      config_load(&mr_cfg);
+      if (mr_cfg.memory_md_retire)
          pos +=
              (size_t)snprintf(buf + pos, cap - pos,
                               "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY "
