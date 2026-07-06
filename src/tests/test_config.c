@@ -2022,6 +2022,32 @@ int main(void)
       cJSON_Delete(root);
    }
 
+   /* AIMEE_API_BEARER_TOKEN env override (config_server_api.c): a deploy-supplied
+    * bearer wins over the config-file value and opts out of TOFU enrollment. */
+   {
+      extern void config_parse_server_api(config_t * cfg, const cJSON *root);
+      config_t c;
+      memset(&c, 0, sizeof c);
+      cJSON *root = cJSON_CreateObject(); /* no "api" block: env is the only source */
+
+      platform_setenv("AIMEE_API_BEARER_TOKEN", "env-strong-abc123");
+      config_parse_server_api(&c, root);
+      assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
+
+      /* Env overrides a pre-existing (e.g. seeded bootstrap) value too. */
+      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "aimee-local-dev");
+      config_parse_server_api(&c, root);
+      assert(strcmp(c.server_api_bearer_token, "env-strong-abc123") == 0);
+
+      /* Without the env, the existing value is left untouched. */
+      platform_unsetenv("AIMEE_API_BEARER_TOKEN");
+      snprintf(c.server_api_bearer_token, sizeof c.server_api_bearer_token, "file-value");
+      config_parse_server_api(&c, root);
+      assert(strcmp(c.server_api_bearer_token, "file-value") == 0);
+
+      cJSON_Delete(root);
+   }
+
    printf("all tests passed\n");
    return 0;
 }

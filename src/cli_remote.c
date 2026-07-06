@@ -8,6 +8,7 @@
 #include "cli_remote.h"
 #include "aimee_client.h"
 #include "aimee_home.h"
+#include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,6 +158,60 @@ static int remote_pin_cert(const char *url, int json_output)
    return 0;
 }
 
+/* The well-known /v1 bearer baked into the aimee-server image. It is a ONE-TIME
+ * bootstrap: the first client to connect with it calls api.rotate_bearer to mint
+ * a strong per-deployment token, which the server then requires exclusively (the
+ * bootstrap stops working the instant it is rotated). See docs/COMMANDS.md. */
+#define AIMEE_BOOTSTRAP_BEARER "aimee-local-dev"
+
+/* Enrollment: over the already-pinned/verified remote (authenticated with the
+ * current — normally bootstrap — bearer), ask the server to rotate to a fresh
+ * strong bearer, persist it to remote.conf (replacing the old token), and adopt
+ * it for the rest of this process. Writes the new token into |out|. Returns 0 on
+ * success, -1 otherwise. Non-fatal to callers: on failure the prior token stays
+ * in place on disk and in effect. */
+static int remote_enroll(const char *url, char *out, size_t out_sz, int json_output)
+{
+   int st = 0;
+   char *body = aimee_client_request("POST", "/v1/api/rotate_bearer", "{}", &st);
+   if (!body || st != 200)
+   {
+      if (st == 401 && !json_output)
+         fprintf(stderr,
+                 "  enroll: the server rejected the bootstrap token (already enrolled by another "
+                 "client?).\n         Copy the strong bearer from the enrolled client into "
+                 "remote.conf, or re-seed the server.\n");
+      free(body);
+      return -1;
+   }
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   cJSON *tok = root ? cJSON_GetObjectItemCaseSensitive(root, "bearer_token") : NULL;
+   if (!cJSON_IsString(tok) || !tok->valuestring || !tok->valuestring[0])
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+   snprintf(out, out_sz, "%s", tok->valuestring);
+   cJSON_Delete(root);
+
+   /* Persist url + the strong token, replacing the bootstrap token on disk, and
+    * adopt it for subsequent requests in this process. */
+   char path[512];
+   remote_conf_path(path, sizeof(path));
+   FILE *f = fopen(path, "w");
+   if (f)
+   {
+      fprintf(f, "%s\n%s\n", url, out);
+      fclose(f);
+   }
+   aimee_client_set_remote(url, out);
+   if (!json_output)
+      printf("  enrolled: rotated the one-time bootstrap token to a strong per-deployment "
+             "bearer\n            (the bootstrap token no longer works against this server).\n");
+   return 0;
+}
+
 static int remote_set(const char *url, const char *token, int json_output)
 {
    if (!url || !*url)
@@ -202,10 +257,22 @@ static int remote_set(const char *url, const char *token, int json_output)
       tls_insecure_restore(saved_insecure);
    }
 
+   /* Trust-on-first-use enrollment: if we connected with the well-known bootstrap
+    * bearer over a verified channel, immediately rotate to a strong per-deployment
+    * token so the shared default never remains a standing credential. Best-effort:
+    * a failure (older server without api.rotate_bearer, already enrolled) leaves the
+    * bootstrap token configured and is reported by remote_enroll. */
+   int enrolled = 0;
+   char strong_token[256] = "";
+   if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0 &&
+       remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+      enrolled = 1;
+
    if (json_output)
-      printf("{\"ok\":true,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s}\n", url,
-             token && *token ? "true" : "false", pinned ? "true" : "false",
-             verified ? "true" : "false");
+      printf("{\"ok\":true,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
+             "\"enrolled\":%s}\n",
+             url, token && *token ? "true" : "false", pinned ? "true" : "false",
+             verified ? "true" : "false", enrolled ? "true" : "false");
    else
    {
       printf("Remote server set to %s%s\n", url, token && *token ? " (with token)" : "");
@@ -303,6 +370,31 @@ static int remote_status(int json_output)
    return reachable ? 0 : 1;
 }
 
+/* Force enrollment on the already-configured remote: rotate the server's /v1
+ * bearer to a fresh strong token and adopt it. Works whether the current token is
+ * the bootstrap default or an already-strong one (rotates regardless). */
+static int remote_enroll_cmd(int json_output)
+{
+   char url[512], token[256];
+   if (!read_remote_conf(url, sizeof(url), token, sizeof(token)) || !url[0])
+   {
+      fprintf(stderr, "aimee: no remote configured; run `aimee remote set <url> [token]` first\n");
+      return 2;
+   }
+   aimee_client_set_remote(url, token[0] ? token : NULL);
+   char strong[256] = "";
+   if (remote_enroll(url, strong, sizeof(strong), json_output) != 0)
+   {
+      if (!json_output)
+         fprintf(stderr, "aimee: enrollment failed (is the remote reachable and the current token "
+                         "valid?)\n");
+      return 1;
+   }
+   if (!json_output)
+      printf("Enrolled: this client now holds a strong per-deployment bearer.\n");
+   return 0;
+}
+
 int cli_remote_cmd(int argc, char **argv, int json_output)
 {
    const char *sub = argc > 0 ? argv[0] : "status";
@@ -312,8 +404,10 @@ int cli_remote_cmd(int argc, char **argv, int json_output)
       return remote_clear(json_output);
    if (strcmp(sub, "trust") == 0)
       return remote_trust(json_output);
+   if (strcmp(sub, "enroll") == 0)
+      return remote_enroll_cmd(json_output);
    if (strcmp(sub, "status") == 0)
       return remote_status(json_output);
-   fprintf(stderr, "usage: aimee remote <set <url> [token] | trust | status | clear>\n");
+   fprintf(stderr, "usage: aimee remote <set <url> [token] | enroll | trust | status | clear>\n");
    return 2;
 }

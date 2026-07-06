@@ -999,6 +999,17 @@ const char *server_http_default_path(void)
    return path;
 }
 
+/* Hot-swap the live TCP/TLS bearer without a restart. Callable only from a /v1
+ * route handler (e.g. api.rotate_bearer), which runs on the single listener
+ * thread that also reads g_bearer for authorization — so the write is serialized
+ * against auth reads and needs no lock. NULL/empty clears the bearer. */
+void server_http_set_bearer(const char *bearer)
+{
+   g_bearer[0] = '\0';
+   if (bearer && bearer[0])
+      snprintf(g_bearer, sizeof(g_bearer), "%s", bearer);
+}
+
 /* Write the whole buffer. Returns the bytes written, or -1 on a write error
  * (used by the live SSE path to detect a client disconnect). Existing callers
  * ignore the return value. */

@@ -5,6 +5,7 @@
 /* promoted cross-TU (former .inc statics) */
 int handle_api_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_api_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_api_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_results(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_eval_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
