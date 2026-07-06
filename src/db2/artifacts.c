@@ -5,6 +5,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "feature_rows.h"
+#include "kb_audit_worm.h"
 #include "kb_mdl.h"
 #include "platform_random.h"
 #include "aimee.h"
@@ -628,7 +629,22 @@ int db2_audit_event_write(const char *id, const char *source_artifact_id,
 
    aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+   int wrote = (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+
+   /* S6: dual-write the governed kb action into the append-only, hash-chained kb
+    * WORM store (the tamper-evident audit of record) when enabled. Best-effort —
+    * the charter audit_events row above stays authoritative during rollout, so a
+    * WORM failure is recoverable audit loss, never a functional change. */
+   if (wrote == 0 && db2_kb_audit_worm_enabled())
+   {
+      char detail[512];
+      snprintf(detail, sizeof detail,
+               "{\"source\":\"%s\",\"scope_kind\":\"%s\",\"scope_id\":\"%s\"}", source_artifact_id,
+               scope_kind ? scope_kind : "", scope_id ? scope_id : "");
+      db2_kb_audit_append(operator_id ? operator_id : "", source_artifact_id, target_surface,
+                          target_id, "ok", detail);
+   }
+   return wrote;
 }
 
 int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,

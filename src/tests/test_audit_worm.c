@@ -1,6 +1,7 @@
 /* test_audit_worm.c: S0 WORM audit store — chain integrity, gap-free seq,
  * WORM triggers, cross-store determinism, and crypto tamper detection. */
 #include <assert.h>
+#include <fcntl.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +9,7 @@
 #include <unistd.h>
 
 #include "audit_worm.h"
+#include "cJSON.h"
 
 static char g_dir[256];
 
@@ -120,13 +122,217 @@ static void test_tamper_detected_past_triggers(void)
    printf("  test_tamper_detected_past_triggers: ok (%s)\n", err);
 }
 
+/* Checkpoints move verify from AMBER (uncheckpointed tail) to GREEN, and back to
+ * AMBER once new rows land after the newest checkpoint. */
+static void test_checkpoint_and_verify_status(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/ck.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1); /* chain key -> g_dir/.audit-chain-key */
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-2", "allow", "{}") == 0);
+
+   long head = 0, ck = 0;
+   char err[160];
+   assert(audit_worm_verify(err, sizeof err, &head, &ck) == AUDIT_WORM_VERIFY_AMBER);
+   assert(head == 2 && ck == 0);
+
+   assert(audit_worm_checkpoint() == 0); /* row seq=3 attests head seq=2 */
+   assert(audit_worm_verify(err, sizeof err, &head, &ck) == AUDIT_WORM_VERIFY_GREEN);
+   assert(head == 3 && ck == 3);
+
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-3", "allow", "{}") == 0);
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_AMBER);
+   audit_worm_close();
+   printf("  test_checkpoint_and_verify_status: ok\n");
+}
+
+/* A checkpoint is bound to the chain key: verifying against a different key (an
+ * attacker who can rewrite the file but lacks the key) is detected as RED. */
+static void test_checkpoint_bound_to_chain_key(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/ckkey.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_checkpoint() == 0);
+   char err[160];
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_GREEN);
+   audit_worm_close();
+
+   /* Swap the chain key for a different one; the checkpoint no longer verifies. */
+   char keypath[400];
+   snprintf(keypath, sizeof keypath, "%s/.audit-chain-key", g_dir);
+   int fd = open(keypath, O_WRONLY | O_TRUNC);
+   assert(fd >= 0);
+   unsigned char bogus[32];
+   memset(bogus, 0xAB, sizeof bogus);
+   assert(write(fd, bogus, sizeof bogus) == (ssize_t)sizeof bogus);
+   close(fd);
+
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(strstr(err, "checkpoint") != NULL);
+   audit_worm_close();
+   printf("  test_checkpoint_bound_to_chain_key: ok (%s)\n", err);
+}
+
+/* Sealing exports an immutable, independently-verifiable snapshot. */
+static void test_seal_snapshot_verifies(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/seal.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-2", "allow", "{}") == 0);
+
+   char sealed[512] = "";
+   int imm = -1;
+   assert(audit_worm_seal(sealed, sizeof sealed, &imm) == 0);
+   assert(sealed[0]);
+   char err[160];
+   assert(audit_worm_verify_file(sealed, err, sizeof err) == 0); /* snapshot verifies green */
+   audit_worm_close();
+   printf("  test_seal_snapshot_verifies: ok (immutable=%d)\n", imm);
+}
+
+/* Tampering a sealed snapshot (when the OS immutable flag isn't enforced) is still
+ * caught by the crypto chain — the guarantee, per R2-7, is the crypto not the flag. */
+static void test_sealed_snapshot_tamper_detected(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/seal2.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   char sealed[512] = "";
+   int imm = -1;
+   assert(audit_worm_seal(sealed, sizeof sealed, &imm) == 0);
+   audit_worm_close();
+
+   if (imm)
+   {
+      printf("  test_sealed_snapshot_tamper_detected: skipped (snapshot is OS-immutable)\n");
+      return;
+   }
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(sealed, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET subject='EVIL' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+   char err[160];
+   assert(audit_worm_verify_file(sealed, err, sizeof err) == -1);
+   assert(strstr(err, "seq 1") != NULL);
+   printf("  test_sealed_snapshot_tamper_detected: ok (%s)\n", err);
+}
+
+/* The WORM-backed Logs read returns the newest rows (seq DESC), paginated. */
+static void test_read_page(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/page.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   for (int i = 0; i < 5; i++)
+   {
+      char s[16];
+      snprintf(s, sizeof s, "v1-%d", i);
+      assert(audit_worm_append("primary", "u", "tool.read", s, "allow", "{}") == 0);
+   }
+   long total = 0;
+   cJSON *page = audit_worm_read_page(0, 2, &total);
+   assert(total == 5);
+   assert(cJSON_GetArraySize(page) == 2);
+   cJSON *r0 = cJSON_GetArrayItem(page, 0); /* newest first: seq 5 */
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(r0, "seq")) == 5);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(r0, "subject")), "v1-4") == 0);
+   cJSON_Delete(page);
+   cJSON *page2 = audit_worm_read_page(2, 2, &total); /* offset: seq 3 then 2 */
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetArrayItem(page2, 0), "seq")) == 3);
+   cJSON_Delete(page2);
+   audit_worm_close();
+   printf("  test_read_page: ok\n");
+}
+
+/* A metric.snapshot row records the verdict-mix and is hash-chained like any row. */
+static void test_metric_snapshot(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/metric.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u", "tool.write", "v1-2", "block", "{}") == 0);
+   assert(audit_worm_metric_snapshot() == 0);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   long total = 0;
+   cJSON *page = audit_worm_read_page(0, 1, &total);
+   cJSON *r0 = cJSON_GetArrayItem(page, 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(r0, "action")), "metric.snapshot") == 0);
+   const char *d = cJSON_GetStringValue(cJSON_GetObjectItem(r0, "detail"));
+   assert(strstr(d, "\"allow\":1") && strstr(d, "\"block\":1"));
+   cJSON_Delete(page);
+   audit_worm_close();
+   printf("  test_metric_snapshot: ok\n");
+}
+
+/* An oversized detail is capped with a marker; the chain stays intact. */
+static void test_detail_capped(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/cap.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   size_t n = AUDIT_WORM_DETAIL_MAX + 5000;
+   char *big = malloc(n + 1);
+   assert(big);
+   memset(big, 'x', n);
+   big[n] = '\0';
+   assert(audit_worm_append("primary", "u", "tool.read", "v1-1", "allow", big) == 0);
+   free(big);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   long total = 0;
+   cJSON *page = audit_worm_read_page(0, 1, &total);
+   const char *d = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(page, 0), "detail"));
+   assert(strstr(d, "worm-truncated"));
+   assert(strlen(d) < (size_t)AUDIT_WORM_DETAIL_MAX + 200);
+   cJSON_Delete(page);
+   audit_worm_close();
+   printf("  test_detail_capped: ok\n");
+}
+
+/* Cross-engine vector: the server (SQLite) store and the kb (Postgres) store hash
+ * a row identically (both call audit_worm_row_hash). This literal is asserted in
+ * test_kb_audit_worm.c too — the two must never drift. */
+static void test_cross_engine_vector(void)
+{
+   char h[65];
+   audit_worm_row_hash(1, "primary", "u", "tool.read", "v1-1", "allow", "", "{}",
+                       AUDIT_WORM_GENESIS_PREV, h);
+   assert(strcmp(h, "3c2adf68ae8f1b704780ffedd32522e06468e34a69205240fbb358a7122ff986") == 0);
+   printf("  test_cross_engine_vector: ok\n");
+}
+
 int main(void)
 {
    mk_tmpdir();
+   test_cross_engine_vector();
+   test_metric_snapshot();
+   test_detail_capped();
+   test_read_page();
    test_append_and_chain();
    test_worm_triggers_block_mutation();
    test_cross_store_determinism();
    test_tamper_detected_past_triggers();
+   test_checkpoint_and_verify_status();
+   test_checkpoint_bound_to_chain_key();
+   test_seal_snapshot_verifies();
+   test_sealed_snapshot_tamper_detected();
    printf("all tests passed\n");
    return 0;
 }

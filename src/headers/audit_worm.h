@@ -32,16 +32,12 @@
 
 #include <stddef.h>
 
+#include "audit_worm_chain.h" /* AUDIT_WORM_DOMAIN/GENESIS_PREV/DETAIL_MAX + shared chain fns */
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-/* Domain-separation + algorithm tag folded into every row_hash. Bump to version
- * the canonicalization/hash. */
-#define AUDIT_WORM_DOMAIN "aimee.audit.worm.v1"
-/* Genesis prev_hash: 32 zero bytes as 64 lowercase hex chars. */
-#define AUDIT_WORM_GENESIS_PREV "0000000000000000000000000000000000000000000000000000000000000000"
 
    /* Open (creating if needed) the WORM store at $AIMEE_HOME/audit/worm-live.db,
     * apply the schema + WORM triggers, and cache the handle. Idempotent. Returns 0
@@ -64,6 +60,46 @@ extern "C"
     * human-readable reason into err (if non-NULL). MAC checkpoints extend this in
     * S1. */
    int audit_worm_verify_chain(char *err, size_t errlen);
+
+   /* Append a first-class checkpoint row (action="chain.checkpoint") committing the
+    * current chain head under a MAC keyed by the dedicated chain key
+    * ($AIMEE_HOME/.audit-chain-key, created on first use, distinct from .audit-key),
+    * so truncation/rollback past a checkpoint is detectable. 0 on success, -1 on
+    * failure. */
+   int audit_worm_checkpoint(void);
+
+/* audit_worm_verify() status codes. */
+#define AUDIT_WORM_VERIFY_GREEN 0 /* chain + MACs intact and head is checkpoint-attested */
+#define AUDIT_WORM_VERIFY_AMBER                                                                    \
+   1                            /* intact, but rows after the newest checkpoint are unattested     \
+                                 */
+#define AUDIT_WORM_VERIFY_RED 2 /* a break (hash, seq gap, or forged checkpoint MAC) */
+
+   /* Full verify: the chain + every checkpoint MAC, plus the amber
+    * uncheckpointed-tail signal. Returns one of AUDIT_WORM_VERIFY_*; writes a reason
+    * into err on RED and fills head_seq / last_ckpt_seq when non-NULL. */
+   int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
+
+   /* Verify a sealed snapshot file (read-only) with the same chain + MAC checks.
+    * 0 if intact, -1 on the first break (reason in err). */
+   int audit_worm_verify_file(const char *db_path, char *err, size_t errlen);
+
+   /* Seal an immutable point-in-time snapshot: checkpoint, VACUUM INTO
+    * $AIMEE_HOME/audit/audit-sealed-<hi_seq>.db, then set the OS immutable flag
+    * (best-effort — degrades to crypto-only without CAP_LINUX_IMMUTABLE / on an
+    * unsupported FS). Fills out_path and *out_immutable (1 if kernel-immutable).
+    * Returns 0 on a sealed snapshot, -1 on failure. */
+   int audit_worm_seal(char *out_path, size_t out_cap, int *out_immutable);
+
+   /* A page of the newest audit rows (seq DESC) as a cJSON array (caller owns);
+    * fills *total with the full row count. Backs the WORM-sourced Logs/dashboard
+    * read that supersedes the flat audit.log reader. */
+   struct cJSON;
+   struct cJSON *audit_worm_read_page(long offset, long limit, long *total);
+
+   /* Append a metric.snapshot row (verdict-mix + total over the store), so the
+    * metrics history is hash-chained + verifiable. 0 on success, -1 on failure. */
+   int audit_worm_metric_snapshot(void);
 
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);

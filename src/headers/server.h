@@ -376,6 +376,10 @@ int handle_dashboard_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON 
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 char *server_agent_list_json(void);
 int handle_workspace_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (138)
+## CLI-settable keys (139)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -128,6 +128,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_kb_neighbour_expand` | bool | Expand recall to KB neighbours. |
 | `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
 | `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
+| `memory_md_retire` | bool | Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
 | `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
 | `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
@@ -233,7 +234,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 145 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 144 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -431,7 +432,7 @@ The binaries read 145 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_MEMORY_MD_RETIRE`, `AIMEE_OCR_URL`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_OCR_URL`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 

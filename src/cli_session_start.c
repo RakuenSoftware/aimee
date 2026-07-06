@@ -113,6 +113,40 @@ static cJSON *ss_retry_post(const char *endpoint, const char *bearer, const char
    return NULL;
 }
 
+/* memory_md_retire config flag, fetched from the server via config.get (the thin
+ * CLI does not link the config module). Defaults to 1 (retire on -> skip .md
+ * hydration) whenever the server is unreachable or the value is absent, so a
+ * fresh/offline session never re-materializes memory files. Shared with the
+ * cli_main.c remote-only memory guard (declared in cli_session_start.h). */
+int cli_memory_md_retire(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return 1;
+   cJSON_AddStringToObject(req, "method", "config.get");
+   cJSON_AddStringToObject(req, "key", "memory_md_retire");
+   cJSON *resp = cli_v1_dispatch(req, 3000); /* remote-aware; NULL on any failure */
+   cJSON_Delete(req);                        /* caller owns req (see cli_v1_dispatch_local usage) */
+   if (!resp)
+   {
+      /* Not silent: a memory_md_retire=false (legacy) operator should see why
+       * hydration was skipped when the config is momentarily unreadable. */
+      fprintf(stderr, "aimee: memory_md_retire unknown (config.get unavailable); "
+                      "defaulting to retire-on, skipping .md hydration\n");
+      return 1;
+   }
+   int retire = 1;
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "value");
+   if (cJSON_IsBool(v))
+      retire = cJSON_IsTrue(v);
+   else if (cJSON_IsNumber(v))
+      retire = (v->valuedouble != 0.0);
+   else if (cJSON_IsString(v) && v->valuestring)
+      retire = !(strcmp(v->valuestring, "false") == 0 || strcmp(v->valuestring, "0") == 0);
+   cJSON_Delete(resp);
+   return retire;
+}
+
 static int handle_session_start_remote(void)
 {
    char *endpoint = cli_v1_client_endpoint();
@@ -363,20 +397,24 @@ int handle_session_start(int json_output)
     * in the environment of the claude subprocess it forks. */
    int nonblocking = (getenv("AIMEE_SESSION_ID") != NULL);
 
+   const char *sock = cli_ensure_server_for_method("hooks.session_start");
+
    /* P4: surface this project's central memory into the local memory dir so a
     * fresh session/agent sees it (best-effort; never blocks session-start).
-    * Skipped under the .md retirement (AIMEE_MEMORY_MD_RETIRE): memory is not
-    * re-materialized as .md files — the agent uses aimee memory recall/search
-    * (the session brief steers it there) instead. */
+    * Skipped under the .md retirement (config memory_md_retire, default-on):
+    * memory is not re-materialized as .md files — the agent uses aimee memory
+    * recall/search (the session brief steers it there) instead. The thin CLI
+    * does not link the config module, so the flag is read from the server via
+    * config.get. This runs AFTER cli_ensure_server_for_method so a co-located
+    * server is up when queried (a legacy memory_md_retire=false operator gets a
+    * reliable answer instead of the unreachable-server fallback); the remote path
+    * reaches the configured remote endpoint. */
    {
-      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
-      int md_retire = mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y');
       char hcwd[4096];
-      if (!md_retire && getcwd(hcwd, sizeof(hcwd)))
+      if (!cli_memory_md_retire() && getcwd(hcwd, sizeof(hcwd)))
          harness_memory_hydrate(hcwd);
    }
 
-   const char *sock = cli_ensure_server_for_method("hooks.session_start");
    if (!sock)
    {
       /* No co-located server. If a remote /v1 endpoint is configured, the thin

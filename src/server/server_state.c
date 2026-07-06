@@ -5,6 +5,7 @@
 #include "dashboard.h"
 #include "render.h"               /* decision_to_json + db2_decision_log_list */
 #include "audit_ledger.h"         /* audit_ledger_read — server-incurred tool-action audit */
+#include "audit_worm.h"           /* audit_worm_verify/checkpoint — WORM audit store */
 #include "server_http_identity.h" /* server_http_identity_query — audit pagination params */
 #include "lsp.h"
 #include "platform_path.h"
@@ -2164,13 +2165,101 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int offset = (int)dashboard_query_long("offset", 0);
    if (offset < 0)
       offset = 0;
-   int total = 0;
-   cJSON *page = dashboard_audit_page(offset, limit, &total);
    cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", page);
-   cJSON_AddNumberToObject(resp, "total", total);
+   /* When the WORM store is enabled it is the tamper-evident source of truth for
+    * the Logs view: read the indexed audit_event rows directly (superseding the
+    * flat audit.log reader from #1092). Fall back to the file reader otherwise. */
+   config_t wcfg;
+   memset(&wcfg, 0, sizeof wcfg);
+   config_load(&wcfg);
+   if (wcfg.audit_worm_enabled)
+   {
+      long wtotal = 0;
+      cJSON *wpage = audit_worm_read_page(offset, limit, &wtotal);
+      cJSON_AddItemToObject(resp, "data", wpage);
+      cJSON_AddNumberToObject(resp, "total", (double)wtotal);
+      cJSON_AddStringToObject(resp, "source", "worm");
+   }
+   else
+   {
+      int total = 0;
+      cJSON *page = dashboard_audit_page(offset, limit, &total);
+      cJSON_AddItemToObject(resp, "data", page);
+      cJSON_AddNumberToObject(resp, "total", total);
+      cJSON_AddStringToObject(resp, "source", "audit.log");
+   }
    cJSON_AddNumberToObject(resp, "offset", offset);
    cJSON_AddNumberToObject(resp, "limit", limit);
+   return send_and_free(conn, resp);
+}
+
+/* GET /v1/audit/verify: verify the WORM audit store's hash-chain + checkpoint MACs
+ * and report the amber uncheckpointed-tail signal. verify ∈ {green,amber,red}. */
+int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   char err[256] = "";
+   long head = 0, ckpt = 0;
+   int st = audit_worm_verify(err, sizeof err, &head, &ckpt);
+   const char *status =
+       st == AUDIT_WORM_VERIFY_GREEN ? "green" : (st == AUDIT_WORM_VERIFY_AMBER ? "amber" : "red");
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "verify", status);
+   cJSON_AddNumberToObject(resp, "head_seq", head);
+   cJSON_AddNumberToObject(resp, "last_checkpoint_seq", ckpt);
+   cJSON_AddNumberToObject(resp, "unattested", head > ckpt ? head - ckpt : 0);
+   if (st == AUDIT_WORM_VERIFY_RED)
+      cJSON_AddStringToObject(resp, "detail", err[0] ? err : "integrity break");
+   return send_and_free(conn, resp);
+}
+
+/* POST /v1/audit/checkpoint: append a checkpoint committing the current chain head
+ * under the chain-key MAC, bounding the unattested tail. */
+int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   int rc = audit_worm_checkpoint();
+   cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "checkpointed", rc == 0);
+   if (rc != 0)
+      cJSON_AddStringToObject(resp, "error", "checkpoint failed");
+   return send_and_free(conn, resp);
+}
+
+/* POST /v1/audit/seal: export an immutable, independently-verifiable snapshot of
+ * the WORM store; reports the sealed path and whether OS immutability was set. */
+int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   char path[1024] = "";
+   int immutable = 0;
+   int rc = audit_worm_seal(path, sizeof path, &immutable);
+   cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "sealed", rc == 0);
+   if (rc == 0)
+   {
+      cJSON_AddStringToObject(resp, "path", path);
+      cJSON_AddBoolToObject(resp, "immutable", immutable);
+   }
+   else
+      cJSON_AddStringToObject(resp, "error", "seal failed");
+   return send_and_free(conn, resp);
+}
+
+/* POST /v1/audit/snapshot: append a hash-chained metric.snapshot row (verdict-mix
+ * + total) — a tamper-evident metrics-over-time record. */
+int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   int rc = audit_worm_metric_snapshot();
+   cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "snapshotted", rc == 0);
+   if (rc != 0)
+      cJSON_AddStringToObject(resp, "error", "snapshot failed");
    return send_and_free(conn, resp);
 }
 

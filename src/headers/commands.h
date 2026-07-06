@@ -251,6 +251,7 @@ void cmd_model(app_ctx_t *ctx, int argc, char **argv);
 
 /* cmd_aux.c */
 void cmd_aux(app_ctx_t *ctx, int argc, char **argv);
+void cmd_audit(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_aux_subcmds(void);
 
 /* cmd_infra.c (webchat, gateway) */

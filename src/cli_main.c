@@ -25,6 +25,7 @@
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
+#include "memory_redirect.h"
 #include <ctype.h>
 #include <signal.h>
 #include <stdio.h>
@@ -744,6 +745,41 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (!sock)
    {
       int deny = client_failopen_subagent_deny(phase, tool_name);
+      /* No co-located server, but a remote store is configured: the full
+       * pre_tool_check needs local session state, yet the memory-file guard can
+       * still run against the remote (memory_redirect captures there). Enforce
+       * it so an agent can't own its own memory bytes even on a remote-only host
+       * (session-start has the analogous handle_session_start_remote path). */
+      if (deny < 0 && strcmp(phase, "pre") == 0 && cli_v1_has_remote_endpoint() && json)
+      {
+         /* memory_redirect_check captures to the configured remote endpoint and
+          * denies the raw write (fail-open spill if the store is unreachable).
+          * pre_tool_check is skipped — it needs local session state. */
+         int rc = 0;
+         cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
+         cJSON *tin = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
+         if (cJSON_IsString(tn) && tn->valuestring[0] && cJSON_IsObject(tin))
+         {
+            cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
+            const char *hp = (cJSON_IsString(hpj) && hpj->valuestring[0]) ? hpj->valuestring : NULL;
+            char mr_msg[1024] = "";
+            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, cli_memory_md_retire(),
+                                      mr_msg, sizeof(mr_msg)) == 2)
+            {
+               if (cli_hook_client_uses_pretool_json())
+                  emit_pretool_deny_json(mr_msg);
+               else
+               {
+                  fprintf(stderr, "aimee: %s\n", mr_msg);
+                  rc = 2;
+               }
+            }
+         }
+         free(stdin_data);
+         cJSON_Delete(json);
+         free(tool_input_heap);
+         return rc;
+      }
       if (deny < 0)
          fprintf(stderr, "aimee: hooks %s: server unavailable — tool call allowed\n", phase);
       free(stdin_data);

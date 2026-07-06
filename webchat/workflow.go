@@ -128,8 +128,12 @@ func (s *server) handleWorkflowSave(w http.ResponseWriter, r *http.Request) {
 //	GET  /api/workflow/items/all          — all items (operator view)
 //	GET  /api/workflow/items/<id>         — one item's run-state (owner-only)
 //	GET  /api/workflow/items/<id>/events  — lifecycle timeline (owner-only, ?after&limit)
-//	GET  /api/workflow/items/<id>/proposal— source markdown (owner-only)
-//	POST /api/workflow/items/<id>/gate    — approve/reject a parked human gate
+//	GET    /api/workflow/items/<id>/proposal— source markdown (owner-only)
+//	POST   /api/workflow/items/<id>/gate    — approve/reject a parked human gate
+//	POST   /api/workflow/items/<id>/pause   — operator-pause an active run
+//	POST   /api/workflow/items/<id>/resume  — resume an operator-paused run
+//	POST   /api/workflow/items/<id>/stop    — abandon (stop) an active run
+//	DELETE /api/workflow/items/<id>         — auto-stop then purge the run
 func (s *server) handleWorkflowItems(w http.ResponseWriter, r *http.Request) {
 	// Exact list routes (no <id> segment).
 	if r.URL.Path == "/api/workflow/items" && r.Method == http.MethodGet {
@@ -171,6 +175,12 @@ func (s *server) handleWorkflowItems(w http.ResponseWriter, r *http.Request) {
 		s.webuserPass(w, r, http.MethodGet, path, nil)
 	case suffix == "/proposal" && r.Method == http.MethodGet:
 		s.webuserPass(w, r, http.MethodGet, "/v1/workflow/items/"+id+"/proposal", nil)
+	// Lifecycle mutations (body-less). The /v1 handlers enforce owner-or-operator
+	// and the legal state transitions; we just forward under the webuser identity.
+	case (suffix == "/pause" || suffix == "/resume" || suffix == "/stop") && r.Method == http.MethodPost:
+		s.webuserPass(w, r, http.MethodPost, "/v1/workflow/items/"+id+suffix, nil)
+	case suffix == "" && r.Method == http.MethodDelete:
+		s.webuserPass(w, r, http.MethodDelete, "/v1/workflow/items/"+id, nil)
 	case suffix == "" && r.Method == http.MethodGet:
 		s.webuserPass(w, r, http.MethodGet, "/v1/workflow/items/"+id, nil)
 	default:

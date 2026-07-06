@@ -106,6 +106,7 @@ CFG_KEY_DESC = {
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
     "claude_cli_delegate_enabled": "Allow delegating to the local Claude CLI agent.",
     "delegate_graph_context_enabled": "Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off).",
+    "memory_md_retire": "Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors.",
     "claude_model": "Default Claude model (empty = CLI default).",
     "gateway_prevent_subagents": "Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off.",
     "gateway_pin_model": "Gateway forces the proxied /v1/messages served model to the configured primary's model, overriding the client-requested model. Default off (the passthrough honors the client model); enable for single-model Anthropic-compatible shims.",

@@ -829,14 +829,15 @@ static int server_memory_intercept(const char *tool, const char *tool_input, con
       return 0;
    }
 
-   /* .md retirement (AIMEE_MEMORY_MD_RETIRE, default-off): store the intercepted
+   /* .md retirement (config memory_md_retire, default-on): store the intercepted
     * write into db1 as a private, non-recallable archive row (kind='archive',
     * tier L1 — outside the recall selectors) and do NOT re-materialize the .md —
     * the file never exists; content lives only in aimee. The agent is steered to
     * `aimee memory` by the session brief. Server owns db1, so write directly. */
    {
-      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
-      if (mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y'))
+      config_t mr_cfg;
+      config_load(&mr_cfg);
+      if (mr_cfg.memory_md_retire)
       {
          /* Project-qualified so identically-named memories from different
           * projects don't collide under this user's UNIQUE(kind,key). */
@@ -1474,6 +1475,10 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dashboard.memory_stats", handle_dashboard_memory_stats},
     {"dashboard.all", handle_dashboard_all},
     {"dashboard.audit", handle_dashboard_audit},
+    {"audit.verify", handle_audit_verify},
+    {"audit.checkpoint", handle_audit_checkpoint},
+    {"audit.seal", handle_audit_seal},
+    {"audit.snapshot", handle_audit_snapshot},
     {"lsp.diagnostics_summary", handle_lsp_diagnostics_summary},
     {"workspace.context", handle_workspace_context},
     {"workspace.add", handle_workspace_add},
