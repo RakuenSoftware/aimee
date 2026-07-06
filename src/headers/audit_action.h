@@ -51,6 +51,23 @@ extern "C"
     * and MUST NOT block a tool on a non-zero return. */
    int audit_args_hash(const char *tool_name, const char *args_json, char *out, size_t out_sz);
 
+   /* Build an ARG-FREE command preview for the audit row's human-readable
+    * "command" field, into `out` (capacity out_sz; always NUL-terminated).
+    *
+    * For a shell tool (Bash / execute_script) it extracts the program basename(s)
+    * invoked from the `command` argument — skipping leading env-assignments and
+    * DROPPING every argument, redirect target, and quoted value — joined with
+    * " ; " (e.g. `cd /x && rm -rf /secret` -> "cd ; rm"). Every emitted token is
+    * filtered through a program-name charset and length-capped, so NO argument
+    * value (path, token, PII, file content) can ever enter the audit log: the
+    * preview is safe-by-construction, not merely redacted.
+    *
+    * For any other tool it writes "" — the row's `tool` field already names the
+    * action and the arguments are never surfaced. Best-effort: on any failure
+    * (unparseable JSON, oversize input, no room) it writes "". */
+   void audit_command_preview(const char *tool_name, const char *args_json, char *out,
+                              size_t out_sz);
+
    /* Ensure the dedicated audit HMAC key exists at $AIMEE_HOME/.audit-key (0600, 32
     * random bytes), provisioning it atomically if absent (mirrors
     * wfe_approval_ensure_key). Call once at server startup so hash time always has

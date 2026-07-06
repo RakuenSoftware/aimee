@@ -104,8 +104,13 @@ static void emit_action_audit(const char *tool_name, const char *input_json,
    char args_hash[AUDIT_ARGS_HASH_LEN];
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash(tool_name, input_json, args_hash, sizeof args_hash);
+   /* Arg-free command preview (shell tools only; "" otherwise). Safe-by-
+    * construction — only program basenames, never an argument value — so it
+    * rides on the same audit_action_enabled gate with no extra PII surface. */
+   char command[288];
+   audit_command_preview(tool_name, input_json, command, sizeof command);
    long long task_id = state ? (long long)state->active_task_id : 0;
-   audit_action_log(actor, tool_name, args_hash, mode, reason, verdict, task_id);
+   audit_action_log(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
    emit_worm_row(actor, tool_name, args_hash, mode, reason, verdict, task_id);
 }
 

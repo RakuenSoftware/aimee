@@ -32,13 +32,16 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 void audit_log(const char *event_type, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 /* Governed-action audit row (per-tool-call). Writes a single structured line
- * {"ts","kind":"tool_action","actor","tool","args_hash","mode","reason_code",
- * "verdict","task_id"} to the SAME audit.log as audit_log (single sink), sharing
- * its mutex + rotation. Distinguished from audit_log rows by the top-level
- * "kind" key. Best-effort/side-effect-only: callers use this off the enforcement
- * path and never gate on it. Any string arg may be NULL (rendered as ""). */
-void audit_action_log(const char *actor, const char *tool, const char *args_hash, const char *mode,
-                      const char *reason_code, const char *verdict, long long task_id);
+ * {"ts","kind":"tool_action","actor","tool","args_hash","command","mode",
+ * "reason_code","verdict","task_id"} to the SAME audit.log as audit_log (single
+ * sink), sharing its mutex + rotation. Distinguished from audit_log rows by the
+ * top-level "kind" key. `command` is the arg-free human-readable command preview
+ * (see audit_command_preview) — never an argument value. Best-effort/
+ * side-effect-only: callers use this off the enforcement path and never gate on
+ * it. Any string arg may be NULL (rendered as ""). */
+void audit_action_log(const char *actor, const char *tool, const char *args_hash,
+                      const char *command, const char *mode, const char *reason_code,
+                      const char *verdict, long long task_id);
 
 /* Last audit event key set by audit_log() on this thread (empty if none since
  * the last reset). Used to derive a governed-action reason_code. */

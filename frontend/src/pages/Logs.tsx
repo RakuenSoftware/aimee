@@ -8,6 +8,7 @@ const DETAIL_FIELDS: { key: keyof AuditRow; label: string }[] = [
   { key: 'verdict', label: 'Verdict' },
   { key: 'actor', label: 'Actor' },
   { key: 'tool', label: 'Tool' },
+  { key: 'command', label: 'Command' },
   { key: 'kind', label: 'Kind' },
   { key: 'mode', label: 'Guardrail mode' },
   { key: 'reason_code', label: 'Reason code' },
@@ -22,6 +23,7 @@ interface AuditRow {
   kind: string;
   actor: string;        // primary | delegate
   tool: string;
+  command?: string;     // arg-free command preview (shell tools; program name only)
   args_hash?: string;
   mode?: string;        // guardrail mode
   reason_code?: string;
@@ -168,7 +170,10 @@ export default function Logs() {
                 >
                   <td style={{ ...td, whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</td>
                   <td style={td}>{esc(r.actor)}</td>
-                  <td style={{ ...td, fontFamily: 'monospace' }}>{esc(r.tool)}</td>
+                  <td style={{ ...td, fontFamily: 'monospace' }}>
+                    {esc(r.tool)}
+                    {r.command ? <span style={{ color: '#999' }}> · {esc(r.command)}</span> : null}
+                  </td>
                   <td style={td}><Badge label={esc(r.verdict)} variant={verdictVariant(r.verdict)} /></td>
                   <td style={{ ...td, color: '#888' }}>{esc(r.mode)}</td>
                   <td style={{ ...td, color: '#888' }}>{esc(r.reason_code)}</td>
