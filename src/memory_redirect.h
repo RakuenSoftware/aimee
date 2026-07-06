@@ -54,9 +54,14 @@ extern "C"
     * the caller (the thin client, where the real cwd / git repo / AIMEE_PROJECT_ID
     * live). This is REQUIRED for a remote server, whose filesystem has neither the
     * client's cwd nor its git repo; when NULL/empty the project is resolved from
-    * cwd as a local-server fallback. */
+    * cwd as a local-server fallback.
+    *
+    * md_retire: when non-zero, the intercepted memory write is stored into aimee's
+    * db1 archive and the .md is NOT re-materialized (the file never exists); when
+    * zero, the legacy behavior stores + re-materializes a local .md mirror. Sourced
+    * from the config flag memory_md_retire by the caller. */
    int memory_redirect_check(const char *tool, cJSON *root, const char *cwd,
-                             const char *project_hint, char *msg, size_t msg_len);
+                             const char *project_hint, int md_retire, char *msg, size_t msg_len);
 
    /* Re-materialize a memory file with aimee's own I/O (atomic temp+rename on
     * POSIX), confined under <home>/<projects_root>/ via realpath so a symlinked
