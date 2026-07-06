@@ -219,7 +219,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
 	mux.HandleFunc("GET /api/agents/stats", s.requireAuth(s.handleAgentStats))
-	mux.HandleFunc("POST /api/agents/add", s.requireAuth(s.agentOpHandler("agent.add")))
+	mux.HandleFunc("POST /api/agents/add", s.requireAuth(s.handleAgentAdd))
 	mux.HandleFunc("POST /api/agents/remove", s.requireAuth(s.agentOpHandler("agent.remove")))
 	mux.HandleFunc("POST /api/agents/enable", s.requireAuth(s.agentOpHandler("agent.enable")))
 	mux.HandleFunc("POST /api/agents/disable", s.requireAuth(s.agentOpHandler("agent.disable")))
