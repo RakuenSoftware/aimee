@@ -214,10 +214,24 @@ static void *kbiw_worker_thread(void *arg)
        * a DB2 lease so the pooled connection is returned to the pool between
        * bursts (WP-C) instead of held for the worker thread's life. */
       db2_lease_begin();
+      long lease_started = (long)time(NULL);
       while (kbiw_claim_and_process() == 1)
       {
          if (ctx->ingest_stop)
             break;
+         /* A cold-start (or post-restart) drain can be thousands of docs, each an
+          * embed — a single burst then pins one pooled connection for minutes and
+          * trips the pool's 300s stuck-lease ceiling (observed: `member N leased
+          * >300000ms` while the corpus re-embeds). Return the connection to the
+          * pool periodically mid-drain so no single lease outlives the ceiling.
+          * Safe between items: each kbiw_claim_and_process commits its own unit,
+          * and pool connections carry no cross-lease state (DISCARD ALL on return). */
+         if ((long)time(NULL) - lease_started >= 120)
+         {
+            db2_lease_end();
+            db2_lease_begin();
+            lease_started = (long)time(NULL);
+         }
       }
       db2_lease_end();
    }
