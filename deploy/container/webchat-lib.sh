@@ -31,23 +31,63 @@ WEBCHAT_GROUP="${AIMEE_WEBCHAT_GROUP:-aimee}"
 # logins against a real OS user, so without this no one can sign in. Unset
 # credentials are tolerated: webchat still serves (login page up), it just has no
 # account until an operator provisions one.
+# Provision (create or update) a single PAM login user in the webchat group.
+# Idempotent: re-runs every start, so accounts persist across container rebuilds
+# without a manual `useradd` (which lives only in the ephemeral container fs).
+webchat_provision_user() {
+    _pu_user="$1"
+    _pu_pass="$2"
+    [ -n "$_pu_user" ] && [ -n "$_pu_pass" ] || return 0
+    getent group "$WEBCHAT_GROUP" >/dev/null 2>&1 || groupadd --system "$WEBCHAT_GROUP"
+    if id "$_pu_user" >/dev/null 2>&1; then
+        # Existing user (e.g. the service account): just ensure group membership.
+        usermod --append --groups "$WEBCHAT_GROUP" "$_pu_user" 2>/dev/null || true
+    else
+        webchat_log "creating login user '$_pu_user'"
+        useradd --create-home --shell /usr/sbin/nologin --groups "$WEBCHAT_GROUP" "$_pu_user"
+    fi
+    printf '%s:%s\n' "$_pu_user" "$_pu_pass" | chpasswd
+    webchat_log "login user '$_pu_user' ready (group $WEBCHAT_GROUP)"
+}
+
+# Additional persistent logins from AIMEE_WEBCHAT_USERS: a list of "user:password"
+# entries separated by commas and/or newlines. Only the FIRST ':' splits, so a
+# password may contain ':' — but not a comma or newline (those delimit entries).
+# Provisioned on every start just like the primary account, so operators can add
+# durable browser logins (e.g. "admin:s3cret") that survive a container rebuild.
+webchat_bootstrap_extra_users() {
+    [ -n "${AIMEE_WEBCHAT_USERS:-}" ] || return 0
+    # Normalize commas to newlines, then provision one entry per line. The pipe
+    # runs the loop in a subshell, which is fine: provisioning mutates the OS
+    # (useradd/chpasswd), not shell state.
+    printf '%s\n' "$AIMEE_WEBCHAT_USERS" | tr ',' '\n' | while IFS= read -r _eu_entry; do
+        _eu_entry="$(printf '%s' "$_eu_entry" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [ -n "$_eu_entry" ] || continue
+        case "$_eu_entry" in
+            *:*) : ;;
+            *)
+                webchat_log "AIMEE_WEBCHAT_USERS: skipping malformed entry (expected user:password)"
+                continue
+                ;;
+        esac
+        webchat_provision_user "${_eu_entry%%:*}" "${_eu_entry#*:}"
+    done
+}
+
+# Create (or update) the bootstrap login accounts from env. PAM authenticates
+# browser logins against real OS users, so without at least one no one can sign
+# in. The primary account (AIMEE_WEBCHAT_USER/PASSWORD) is optional — unset is
+# tolerated (login page still serves) — and AIMEE_WEBCHAT_USERS adds any number
+# of extra persistent accounts.
 webchat_bootstrap_user() {
     _wc_user="${AIMEE_WEBCHAT_USER:-}"
     _wc_pass="${AIMEE_WEBCHAT_PASSWORD:-}"
     if [ -z "$_wc_user" ] || [ -z "$_wc_pass" ]; then
-        webchat_log "AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD unset; skipping login bootstrap (no account can sign in until one is provisioned)"
-        return 0
-    fi
-    getent group "$WEBCHAT_GROUP" >/dev/null 2>&1 || groupadd --system "$WEBCHAT_GROUP"
-    if id "$_wc_user" >/dev/null 2>&1; then
-        # Existing user (e.g. the service account): just ensure group membership.
-        usermod --append --groups "$WEBCHAT_GROUP" "$_wc_user" 2>/dev/null || true
+        webchat_log "AIMEE_WEBCHAT_USER/AIMEE_WEBCHAT_PASSWORD unset; skipping primary login bootstrap (AIMEE_WEBCHAT_USERS may still provision accounts)"
     else
-        webchat_log "creating login user '$_wc_user'"
-        useradd --create-home --shell /usr/sbin/nologin --groups "$WEBCHAT_GROUP" "$_wc_user"
+        webchat_provision_user "$_wc_user" "$_wc_pass"
     fi
-    printf '%s:%s\n' "$_wc_user" "$_wc_pass" | chpasswd
-    webchat_log "login user '$_wc_user' ready (group $WEBCHAT_GROUP)"
+    webchat_bootstrap_extra_users
 }
 
 # Falsy test for the disable toggle: 0/false/no/off (any case) turns the browser
