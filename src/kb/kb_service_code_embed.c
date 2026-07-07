@@ -450,6 +450,18 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          continue;
       }
 
+      /* Return the pool lease before the (slow) embedder round-trip. Each embed
+       * is a network call to the embedder; holding a DB2 lease across the whole
+       * embed loop — thousands of files on a fresh ingest — trips the pool's 300s
+       * stuck-lease ceiling, which is NOT reclaimed and permanently shrinks the
+       * pool until it wedges the drain (observed: a large ~/gow ingest froze the
+       * curator drain, leaving most projects scanned-but-unembedded). This is the
+       * same hazard kb_curator_extract_code already guards before its sidecar/LLM
+       * call. The DB ops bracketing the embed (op_record below; node_key/exists on
+       * the next iteration) re-acquire lazily via db2_conn(); the loop never
+       * touches the initial `conn` after the file rows are read. */
+      db2_lease_release_idle();
+
       /* Embed the deterministic fallback text with the configured embedder
        * (embed_command runs the 0.6B embedder; "builtin" falls back to a stable
        * deterministic vector when no embedder is configured, e.g. in tests). */
