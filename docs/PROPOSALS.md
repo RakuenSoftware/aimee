@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 4 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 10 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — four proposals, none yet implemented.
+The genuinely open work — ten proposals, none yet implemented.
 
 - [Learning-to-rank weight fitting](proposals/pending/learning-to-rank-weight-fitting.md)
   — the KB-hybrid ranker (`kb_ranker.c`) infers with a learned linear model but
@@ -72,6 +72,37 @@ The genuinely open work — four proposals, none yet implemented.
   — the thin client's SessionStart falls back to a recall-only remote path and
   emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
   a thin client gets the full server-assembled brief. Companion to the memory split.
+- [LLM-sidecar productionization — curator extraction + idle reflection](proposals/pending/llm-sidecar-productionization-curator-and-reflection.md)
+  — two intelligence steps ship as full scaffolding but stub the LLM call: curator
+  extraction (all stages present; only the Phase-0 embedding sidecar exists behind
+  `kb_curator_sidecar`) and the idle-reflection scheduler (`kb_reflection.c` runs
+  fully; its own header notes LLM candidate generation is stubbed). Graduate both
+  onto one versioned sidecar contract behind a shadow → canary → default gate on the
+  shipped calibration + bandit rails. **Extract / Synthesize / Judge / Reflect /
+  Gate-Promote.**
+- [Org-data connectors + source ingestion](proposals/pending/org-data-connectors-and-source-ingestion.md)
+  — the missing ingest front door for the every-domain KB: a uniform connector
+  contract plus a first adapter set (issue tracker / chat / doc-wiki / email),
+  incremental sync with supersession, and ingest-time auth + scope + PII/poison
+  enforcement, all feeding the existing Normalize → staged-pipeline → curator path.
+  **Extract (Normalize) / Classify-Score / Enforce / Gate-Promote.**
+- [First-class operator-audit activity surface](proposals/pending/operator-audit-activity-surface.md)
+  — every shareable DB2 row already carries `operator_id` / `content_hash` /
+  timestamps and a WORM ledger records privileged actions, but there is no legible
+  way to read "who did what, in which scope, when"; add an operator-facing audit
+  activity surface over the existing provenance.
+- [Proposal-supersession hygiene](proposals/pending/proposal-supersession-hygiene.md)
+  — `pending/` is only signal if finished or superseded proposals leave it; adds a
+  same-commit move convention plus a documented supersession rule and the reconcile
+  drift class to enforce it.
+- [Standing LoCoMo / LongMemEval benchmark cadence](proposals/pending/standing-benchmark-cadence.md)
+  — acceptance criteria cite absolute retrieval/memory parity numbers but nothing
+  runs the full benchmarks on a schedule; adds a standing benchmark cadence beyond
+  the PR-only `bench-smoke`.
+- [Close out platform phase 7 — v1 API stability tag + distributed-mode validation](proposals/pending/v1-stability-and-distributed-validation.md)
+  — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
+  validation + a v1 API stability tag) is the one remaining piece with no closing
+  artifact.
 
 ## Done (65)
 
