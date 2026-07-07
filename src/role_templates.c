@@ -673,6 +673,10 @@ int role_template_install_defaults(const char *dir)
       FILE *f = fopen(path, "w");
       if (!f)
          return -1;
+      /* Seed a frontmatter block carrying the per-role turn cap so it is visible
+       * and editable under the Personas tab (edited via PUT /v1/role_templates/
+       * <role>). -1 = INFINITE, the default for every role. */
+      fputs("---\nmax_turns: -1\n---\n\n", f);
       fputs(g_defaults[i].content, f);
       fputc('\n', f);
       fclose(f);
