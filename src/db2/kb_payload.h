@@ -106,7 +106,7 @@ extern "C"
 
    /* List up to |max| kb_documents.id values that belong to
     * (project, file_path). Caller materializes the ids before issuing
-    * follow-up writes (db3 point deletes + the bulk DELETE) because
+    * follow-up writes (pgvector point deletes + the bulk DELETE) because
     * libpq only supports one active result per connection. Returns
     * count written (0 on miss / no DB2). */
    int db2_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
@@ -114,7 +114,7 @@ extern "C"
 
    /* DELETE FROM kb_documents WHERE project = ? AND file_path = ?.
     * Best-effort; no return. Caller is responsible for any
-    * accompanying db3 point deletes — those run on the materialized
+    * accompanying pgvector point deletes — those run on the materialized
     * id list returned by db2_kb_documents_list_chunk_ids_for_file. */
    void db2_kb_documents_delete_for_file(const char *project, const char *file_path);
 

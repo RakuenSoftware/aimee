@@ -2,7 +2,7 @@ services:
   # Shared Postgres store for the proxy replicas. A single aimee binary
   # can run against SQLite or Postgres; this compose file demonstrates
   # the two-replica Postgres deployment described in
-  # docs/proposals/accepted/three-db-split-user-shared-vectors.md.
+  # docs/STORAGE_TIERS.md.
   postgres:
     image: postgres:16-alpine
     environment:

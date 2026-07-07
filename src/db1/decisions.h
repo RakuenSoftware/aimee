@@ -4,8 +4,8 @@
  * by memory_scan. Each row references a window_id from the `windows`
  * table. DB1 owns both sides of that relationship.
  *
- * The task-keyed `decision_log` table moved to DB2 per the accepted
- * three-db split proposal. See db2/decision_log.h.
+ * The task-keyed `decision_log` table moved to DB2 per the DB1/DB2
+ * storage split. See db2/decision_log.h.
  *
  * Pure domain API. No backend types or handles in any signature. */
 #ifndef DEC_DB1_DECISIONS_H

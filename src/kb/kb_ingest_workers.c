@@ -1,6 +1,6 @@
 /* kb_ingest_workers.c: aimee-kb's in-process KB ingest driver.
  *
- * aimee-kb owns DB2/DB3, so it claims ingest jobs straight off the DB2 queue
+ * aimee-kb owns DB2, so it claims ingest jobs straight off the DB2 queue
  * (db2_kb_ingest_queue_claim_next, which uses FOR UPDATE SKIP LOCKED and is
  * safe for concurrent claimers) and runs the full build in-process —
  * kb_build() (compute + store) then canonical_index_scan_project(). No RPC
