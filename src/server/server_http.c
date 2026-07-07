@@ -264,6 +264,19 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    return 0;
 }
 
+int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
+                               const char *path)
+{
+   if (!is_tcp || !live_bearer || strcmp(live_bearer, AIMEE_BOOTSTRAP_BEARER) != 0)
+      return 0; /* UDS, or already rotated to a strong token -> gate off */
+   const char *pin = getenv("AIMEE_API_BEARER_TOKEN");
+   if (pin && pin[0])
+      return 0; /* operator pinned the bearer -> opted out of TOFU */
+   if (method && path && strcmp(method, "POST") == 0 && strcmp(path, "/v1/api/rotate_bearer") == 0)
+      return 0; /* the one route the bootstrap may reach: mint the strong token */
+   return 1;    /* refuse: enrollment required */
+}
+
 #define SHTTP_RATE_WINDOW_SECS 60
 
 int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
@@ -1463,6 +1476,26 @@ void handle_conn(int fd, int is_tcp)
                                        "configured bearer token\",\"type\":\"server_error\"}}";
          send_response(fd, az, msg, request_id);
          LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, az, request_id);
+         return;
+      }
+
+      /* Trust-on-first-use enforcement: while the live /v1 bearer is still the
+       * well-known image-seeded bootstrap, the ONLY route permitted on the TCP
+       * listener is rotating it to a strong per-deployment token. Auth already
+       * passed, so the caller presented the bootstrap; refuse every other route
+       * so the pre-set default can never perform a real operation — it exists
+       * solely to mint the real bearer, after which g_bearer no longer equals the
+       * bootstrap and this gate self-disables. Closes the "a network-published
+       * server keeps accepting the public default bearer" hole. */
+      if (server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
+      {
+         send_response(fd, 401,
+                       "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
+                       "before use: POST /v1/api/rotate_bearer (aimee remote enroll)\",\"type\":"
+                       "\"enrollment_required\"}}",
+                       request_id);
+         LOG_INFO("server.http", "%s %s -> 401 (enrollment_required) req_id=%s", method, path,
+                  request_id);
          return;
       }
    }
