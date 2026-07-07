@@ -643,6 +643,17 @@ static void test_agent_adapter_registry(void)
    assert(agent_adapter_supports(codex, AGENT_ADAPTER_CAP_PRIMARY_CONVERSATION));
    assert(agent_adapter_supports(codex, AGENT_ADAPTER_CAP_DIRECT_HTTP));
 
+   /* Regression guard (codex-oauth was registered as a tmux-CLI agent instead of
+    * HTTP): the OAuth-CLI register path shapes the codex agent from THIS adapter,
+    * so its HTTP fields must stay populated — otherwise the registered agent has
+    * no reachable endpoint and degrades to the tmux/CLI backend, which then masks
+    * local HTTP synth delegates at the same tier (see
+    * test_local_synth_not_masked_by_tmux_codex). */
+   assert(codex->default_endpoint && codex->default_endpoint[0]);
+   assert(strstr(codex->default_endpoint, "codex") != NULL);
+   assert(codex->default_model && codex->default_model[0]);
+   assert(codex->auth_type && strcmp(codex->auth_type, "codex-oauth") == 0);
+
    const agent_adapter_t *mistral = agent_adapter_for_provider("mistral");
    assert(mistral != NULL);
    assert(strcmp(mistral->name, "mistral") == 0);
@@ -657,6 +668,94 @@ static void test_agent_adapter_registry(void)
 
    snprintf(ag.backend, sizeof(ag.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
    assert(agent_adapter_agent_is_direct(&ag) == 0);
+}
+
+/* Regression guard for the codex-tmux misregistration that hid the local synth
+ * delegate. agent_route() prefers a tmux-CLI backend over HTTP peers at the
+ * cheapest tier (the "has_tmux" filter, mirrored in agent_route_with_caps_inner).
+ * When codex was wrongly filed as a tmux-CLI agent at cost_tier 0, that filter
+ * excluded the local HTTP synth delegate (gpu-mid) from every default route, so
+ * it was never used. Case A reproduces the mask; Case B proves that codex in its
+ * correct HTTP (chatgpt) shape leaves the local synth routable. */
+static void test_local_synth_not_masked_by_tmux_codex(void)
+{
+   /* Fake `tmux` and `codex` on PATH so a codex tmux-CLI agent is genuinely
+    * available_for_routing (tmux availability requires both binaries on PATH). */
+   char fake_bin[MAX_PATH_LEN];
+   snprintf(fake_bin, sizeof(fake_bin), "%s/aimee-test-route-bin-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(fake_bin) != NULL);
+   const char *fakes[] = {"tmux", "codex"};
+   for (size_t i = 0; i < sizeof(fakes) / sizeof(fakes[0]); i++)
+   {
+      char p[MAX_PATH_LEN];
+      snprintf(p, sizeof(p), "%s/%s", fake_bin, fakes[i]);
+      FILE *f = fopen(p, "w");
+      assert(f != NULL);
+      fputs("#!/bin/sh\nexit 0\n", f);
+      fclose(f);
+      assert(chmod(p, 0700) == 0);
+   }
+   const char *old_path_env = getenv("PATH");
+   char *old_path = old_path_env ? strdup(old_path_env) : NULL;
+   size_t path_len = strlen(fake_bin) + 2 + (old_path ? strlen(old_path) : 0);
+   char *new_path = malloc(path_len);
+   assert(new_path != NULL);
+   snprintf(new_path, path_len, "%s:%s", fake_bin, old_path ? old_path : "");
+   setenv("PATH", new_path, 1);
+   free(new_path);
+
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   snprintf(cfg.default_agent, sizeof(cfg.default_agent), "gpu-mid");
+
+   /* Local HTTP synth delegate at the cheapest tier. Empty provider => keyless =>
+    * available_for_routing, matching a no-auth local endpoint. */
+   agent_t *synth = &cfg.agents[0];
+   snprintf(synth->name, sizeof(synth->name), "gpu-mid");
+   snprintf(synth->roles[0], sizeof(synth->roles[0]), "execute");
+   synth->role_count = 1;
+   synth->cost_tier = 0;
+   synth->enabled = 1;
+   synth->tools_enabled = 1;
+
+   /* Peer codex at the same cheapest tier. */
+   agent_t *codex = &cfg.agents[1];
+   snprintf(codex->name, sizeof(codex->name), "codex");
+   snprintf(codex->roles[0], sizeof(codex->roles[0]), "execute");
+   codex->role_count = 1;
+   codex->cost_tier = 0;
+   codex->enabled = 1;
+   codex->tools_enabled = 1;
+
+   /* Case A — the bug: codex mis-filed as tmux-CLI. has_tmux fires at tier 0 and
+    * excludes the HTTP synth entirely, so the router can only pick the tmux peer. */
+   snprintf(codex->backend, sizeof(codex->backend), "%s", AGENT_BACKEND_TMUX_CLI);
+   snprintf(codex->cli_kind, sizeof(codex->cli_kind), "codex");
+   snprintf(codex->cli_cmd, sizeof(codex->cli_cmd), "codex");
+   assert(agent_is_available_for_routing(synth) == 1);
+   assert(agent_is_available_for_routing(codex) == 1); /* tmux + codex on PATH */
+   agent_t *routed_a = agent_route(&cfg, "execute");
+   assert(routed_a == codex); /* synth masked by the tmux peer */
+   assert(routed_a != synth);
+
+   /* Case B — the fix: codex in its correct HTTP (chatgpt) shape. No tmux backend
+    * at the cheapest tier, so the local synth (the default agent) is routable. */
+   codex->backend[0] = '\0';
+   codex->cli_kind[0] = '\0';
+   codex->cli_cmd[0] = '\0';
+   snprintf(codex->provider, sizeof(codex->provider), "chatgpt");
+   snprintf(codex->auth_type, sizeof(codex->auth_type), "codex-oauth");
+   assert(agent_route(&cfg, "execute") == synth);
+
+   if (old_path)
+   {
+      setenv("PATH", old_path, 1);
+      free(old_path);
+   }
+   else
+      unsetenv("PATH");
+   printf("  PASS: test_local_synth_not_masked_by_tmux_codex\n");
 }
 
 static void test_provider_cli_shell_exec_uses_argv_not_shell(void)
@@ -2148,9 +2247,10 @@ static void test_session_isolation_guard(void)
    const char *primary = "/some/repo/src/x.c";
    const char *worktree = "/some/repo/.aimee/worktrees/ab12/main/src/x.c";
 
-   /* (1) Default off (no aimee.yaml): never blocks, even on the primary checkout. */
+   /* (1) Default ON (no aimee.yaml): a primary-checkout target is blocked, since
+    *     session-worktree isolation is required by default. */
    remove(cfg);
-   assert(agent_tools_session_isolation_blocks(primary, NULL) == 0);
+   assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
 
    /* (2) Explicit false: still no block. */
    FILE *f = fopen(cfg, "w");
@@ -2208,6 +2308,7 @@ int main(void)
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
    test_agent_adapter_registry();
+   test_local_synth_not_masked_by_tmux_codex();
    test_provider_cli_shell_exec_uses_argv_not_shell();
    test_provider_cli_shell_timeout_covers_prompt_write();
    test_codex_oauth_auth_resolution();

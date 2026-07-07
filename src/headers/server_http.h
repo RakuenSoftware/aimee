@@ -53,6 +53,16 @@ extern "C"
    int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
                              const char *api_key_header, int has_session_key);
 
+   /* Trust-on-first-use gate (pure — unit-testable). Returns 1 when an authorized
+    * TCP request must be REFUSED because the live listener bearer is still the
+    * one-time bootstrap default (AIMEE_BOOTSTRAP_BEARER) and the route is not the
+    * rotation endpoint — so the pre-set bearer can only mint the strong token and
+    * never perform a real operation. Returns 0 (allow) for UDS, once the bearer
+    * has been rotated (live_bearer != bootstrap), for the rotate_bearer route
+    * itself, or when the operator pinned AIMEE_API_BEARER_TOKEN (TOFU opt-out). */
+   int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *method,
+                                  const char *path);
+
    /* Fixed-window per-bearer rate limiter (pure — unit-testable). State is a
     * single 60s window the caller owns. limit_per_min <= 0 disables limiting
     * (always returns 0). `now` is epoch seconds. Returns 0 when the request is

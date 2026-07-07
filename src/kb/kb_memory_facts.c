@@ -39,8 +39,9 @@
  * from the seed ontology (rel_types.c) at run time — this is the autonomous
  * reconciliation step (proposal §7): the model is bound to relations the write
  * gate already treats as durable, so an extracted fact commits ACTIVE and
- * recallable instead of being stranded as a provisional Class-C edge. Relations
- * outside the list fall to "other" and are left for the auto-promote tail. */
+ * recallable instead of being stranded as a provisional Class-C edge. When no
+ * seed relation fits, the model emits its own concise predicate (never a generic
+ * catch-all), which stays a distinguishable provisional candidate for §7.2. */
 #define MF_SYSTEM_PROMPT_TMPL                                                                      \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \

@@ -1311,7 +1311,45 @@ int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    return server_send_ok(conn, jo_ok());
 }
 
-/* Register the now-authenticated vendor CLI as a server-side tmux-CLI agent. */
+/* Configure an authenticated codex vendor as a DIRECT-HTTP `chatgpt` agent — the
+ * Responses-wire driver, authenticating with the vaulted, auto-refreshing
+ * codex-oauth token — rather than a tmux-CLI agent. Only claude runs the vendor
+ * CLI over tmux; codex is HTTP and needs no tmux session. Endpoint/model/
+ * provider/auth are single-sourced from the codex direct adapter (agent_adapter.c)
+ * so this stays in lockstep with the `agent add --provider codex` shape. */
+static void sagent_configure_http_codex_agent(agent_t *ag, const char *name)
+{
+   const agent_adapter_t *ad = agent_adapter_for_name("codex");
+   memset(ag, 0, sizeof(*ag));
+   snprintf(ag->name, MAX_AGENT_NAME, "%s", name);
+   snprintf(ag->provider, sizeof(ag->provider), "%s", ad ? ad->provider : "chatgpt");
+   snprintf(ag->auth_type, sizeof(ag->auth_type), "%s", ad ? ad->auth_type : "codex-oauth");
+   snprintf(ag->endpoint, sizeof(ag->endpoint), "%s",
+            (ad && ad->default_endpoint) ? ad->default_endpoint
+                                         : "https://chatgpt.com/backend-api/codex");
+   snprintf(ag->model, sizeof(ag->model), "%s",
+            (ad && ad->default_model) ? ad->default_model : "gpt-5.5");
+   ag->backend[0] = '\0'; /* HTTP: no CLI/tmux backend */
+   ag->cost_tier = 0;     /* codex subscription */
+   ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
+   ag->timeout_ms = 600000;
+   ag->enabled = 1;
+   ag->tools_enabled = 1;
+   ag->max_turns = -1;
+   ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
+   /* gpt-5.5/codex is absent from the model capability table, so an auto-detect
+    * would resolve 0 and drop this agent from min-context fleets (e.g. review).
+    * Pin the real gpt-5-codex window explicitly (the middleware field capability
+    * routing and the agent listing both read). */
+   ag->middleware.context_window = 272000;
+   /* Full capable delegate role set (matches `agent add` default): a coding
+    * delegate must take code/execute work, not just summarize/format/draft. */
+   server_agent_set_roles_csv(
+       ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+}
+
+/* Register the now-authenticated vendor: codex as a direct-HTTP `chatgpt` agent
+ * (vaulted codex-oauth token), claude as a server-side tmux-CLI agent. */
 static void sagent_cli_oauth_register(cli_oauth_vendor_t v)
 {
    agent_config_t acfg;
@@ -1325,9 +1363,14 @@ static void sagent_cli_oauth_register(cli_oauth_vendor_t v)
          return;
       ag = &acfg.agents[acfg.agent_count++];
    }
-   /* cli_kind/cli_cmd run the server-installed CLI over tmux (no HTTP endpoint).
-    * cost_tier 0 for codex (subscription), 1 for claude. */
-   sagent_configure_tmux_cli_agent(ag, name, name, name, name, v == CLI_OAUTH_CODEX ? 0 : 1);
+   /* codex authenticates over HTTP with the vaulted codex-oauth token (the
+    * Responses-wire `chatgpt` driver); only claude runs the vendor CLI over tmux.
+    * Filing both as tmux-CLI (the prior behavior) left codex trying to open a
+    * tmux session it never needs — "failed to create tmux session for codex". */
+   if (v == CLI_OAUTH_CODEX)
+      sagent_configure_http_codex_agent(ag, name);
+   else
+      sagent_configure_tmux_cli_agent(ag, name, name, name, name, 1);
    ag->is_server_hosted = 1; /* distinct from a client-only claude (panel gate) */
    agent_save_config(&acfg);
 }

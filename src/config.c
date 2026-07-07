@@ -288,6 +288,8 @@ static const config_schema_entry_t config_schema[] = {
     {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
     {"gateway_pin_model", SCHEMA_BOOL, 0},
     {"css_style_graph_enabled", SCHEMA_BOOL, 0},
+    {"audit_action_enabled", SCHEMA_BOOL, 0},
+    {"audit_worm_enabled", SCHEMA_BOOL, 0},
     {"css_render_command", SCHEMA_STRING, 0},
     {"typed_facts_enabled", SCHEMA_BOOL, 0},
     {"kb_pdf_ingest_enabled", SCHEMA_BOOL, 0},
@@ -700,7 +702,11 @@ static void config_set_defaults(config_t *cfg)
     * per-result model-visible tool-output cap (see agent_tool_output_cap()). */
    cfg->tool_output_max_bytes = 0;
    cfg->ingress_compress_min_chars = 80;
-   cfg->require_session_worktree = 0;
+   /* Default ON: each mutating session must run in its own isolated worktree+branch
+    * (.aimee/worktrees/...), never the shared primary checkout. Concurrent aimee
+    * sessions sharing one checkout collide on a single git HEAD. Explicit
+    * `require_session_worktree: false` bypasses (see cli_attention_guard.c). */
+   cfg->require_session_worktree = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -1125,6 +1131,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "audit_action_enabled");
    if (cJSON_IsBool(item))
       cfg->audit_action_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "audit_worm_enabled");
+   if (cJSON_IsBool(item))
+      cfg->audit_worm_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "memory_md_retire");
    if (cJSON_IsBool(item))

@@ -821,8 +821,10 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(root, "tool_output_max_bytes", cfg->tool_output_max_bytes);
    if (cfg->ingress_max_raw_scans != 0)
       cJSON_AddNumberToObject(root, "ingress_max_raw_scans", cfg->ingress_max_raw_scans);
-   if (cfg->require_session_worktree)
-      cJSON_AddBoolToObject(root, "require_session_worktree", 1);
+   /* Default-on: persist only the non-default (disabled) state, writing the real
+    * value so an explicit opt-out survives save+reload. */
+   if (!cfg->require_session_worktree)
+      cJSON_AddBoolToObject(root, "require_session_worktree", 0);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */
@@ -852,6 +854,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "wfe_live_forge_enabled", 1);
    if (!cfg->audit_action_enabled) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "audit_action_enabled", 0);
+   if (cfg->audit_worm_enabled) /* default-off: persist only the opt-in (enable) */
+      cJSON_AddBoolToObject(root, "audit_worm_enabled", 1);
    if (!cfg->memory_md_retire) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "memory_md_retire", 0);
    /* default-on render backend: persist only a non-default value (a custom command
