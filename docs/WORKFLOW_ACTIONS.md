@@ -3,7 +3,7 @@
 The **Workflow Actions** page (aimee web UI, left nav → 📝 Workflow Actions) carries a change from
 an empty editor to a merged PR: **author** a proposal (from scratch or
 delegate-drafted), hand it to the **autonomous-development** engine to implement, and
-**watch** it — a scrollable status/history you can scroll back through to see
+**watch** it, a scrollable status/history you can scroll back through to see
 everything that happened.
 
 It is deliberately a thin surface over machinery that already exists: the wfe
@@ -21,19 +21,19 @@ proposal is still just *markdown + a `lifecycle_work_item`*; its history *is* th
 
 ## User flow
 
-1. **Author** — click **+ New proposal**. Fill in a title, a Markdown body (a
+1. **Author**: click **+ New proposal**. Fill in a title, a Markdown body (a
    Goal / Motivation / Approach / Risks / Tests scaffold is pre-filled), pick a
    workflow (the picker is populated from the saved workflow definitions,
    `GET /api/workflow/defs`; it defaults to `build`, the standard end-to-end
    proposal→PR→merge workflow), and optionally a repo. Optionally click
    **✨ Draft with a delegate** to have a delegate expand your title + notes into a
    polished proposal, previewed for you to accept.
-2. **Submit** — posts the proposal to the autonomous-development intake. The page
+2. **Submit**: posts the proposal to the autonomous-development intake. The page
    switches to the new run's status view.
-3. **Watch** — the detail view shows the current stage, a lifecycle badge, cumulative
+3. **Watch**: the detail view shows the current stage, a lifecycle badge, cumulative
    vs. cap cost, a PR link, and a **scrollable timeline** of every lifecycle event.
    It polls while the run is active and stops at a terminal state.
-4. **Decide** — when the run parks at a human gate, **Approve / Reject** in place.
+4. **Decide**: when the run parks at a human gate, **Approve / Reject** in place.
 
 ---
 
@@ -50,7 +50,7 @@ browser ──/api/*──▶ webchat (Go)  ──/v1/*, UDS──▶ aimee-serv
 - The Go webchat proxies each `/api/*` call to the C server's `/v1/*` HTTP surface
   over a trusted unix socket, asserting the caller's identity with the
   `X-Aimee-Webuser` header + `server.token` bearer (`v1RequestWebuser`). This is how
-  the C server resolves the caller's `webuser:<subject>` principal — which the
+  the C server resolves the caller's `webuser:<subject>` principal, which the
   read endpoints use for ownership scoping (below).
 - The C server owns all state. Submitting writes the proposal markdown to
   `$AIMEE_HOME/edit-workflows/workflow-actions/wi-*.md` and a `lifecycle_work_item` row; the wfe
@@ -79,13 +79,13 @@ All C routes are in `src/server/server_http_routes.inc`; handlers in
   stage, state, mode, pause_reason, repo`) plus additive `proposal_name`, `pr_ref`,
   `submitter`, `cum_cost_usd`, `work_item_max_cost_usd`, `override_count`. Additive
   only, so the Edit Workflows page (which reads the same endpoint) is unaffected.
-- **Timeline** — `{events:[{id, stage, kind, actor, detail, cost_usd, created_at}],
+- **Timeline**: `{events:[{id, stage, kind, actor, detail, cost_usd, created_at}],
   next_after}`, oldest-first, paginated by `?after=<event id>&limit=<n≤200>`
   (default 200). `next_after` is the id of the **last returned** event, so the page
   fetches the tail once and polls with `after=next_after` to append only new events.
   Correctness rests on the scheduler being single-writer-per-item (concurrency 1) and
-  event ids being monotonic — so `id > after` never skips or duplicates a row.
-- **Proposal read-back** — `{proposal_md, truncated}`. The file is read **race-free**:
+  event ids being monotonic, so `id > after` never skips or duplicates a row.
+- **Proposal read-back**: `{proposal_md, truncated}`. The file is read **race-free**:
   the fixed proposals dir is opened, then `openat(dirfd, basename, O_NOFOLLOW)`. Since
   `proposal_path` is a flat, server-minted file in one directory, there are no
   mid-path components to race and no symlink is followed (`ELOOP → 403`). Non-regular
@@ -101,14 +101,14 @@ All C routes are in `src/server/server_http_routes.inc`; handlers in
 - Request `{prompt, model?}`; response `{text, agent}` where `text` is the generated
   proposal markdown and `agent` is the **name of the configured delegate** that
   produced it (the caller's `model` preference if it named a usable non-CLI delegate,
-  otherwise the default or first eligible one — surfaced so the operator can see who
+  otherwise the default or first eligible one, surfaced so the operator can see who
   drafted it). `handle_agent_draft` (`server_agent.c`) runs one **tool-free** LLM
   completion via `agent_generate` (below) and returns the text.
   `CAP_DELEGATE` is satisfied by the `agent.*` capability prefix
   (`src/server/server_auth.c`).
 - The call is **synchronous**: there is no async job to orphan. A worker thread runs
   the single completion to completion (bounded by the model and the draft token cap)
-  and returns — if the browser gives up, the worker still finishes that one
+  and returns. If the browser gives up, the worker still finishes that one
   completion; nothing lingers as a pollable job. Because an LLM completion can exceed
   the webchat default 10 s timeout, the proxy uses `v1RequestWebuserT` (a
   timeout-parameterized variant of `v1RequestWebuser`, `webchat/vault.go`) with a 95 s
@@ -134,7 +134,7 @@ All C routes are in `src/server/server_http_routes.inc`; handlers in
   must string-equal the caller's `server_http_identity_principal()` (`webuser:<subj>`).
   A NULL/empty `submitter` (CLI/legacy/system rows) is owned by nobody, so those reads
   fail closed. This is why the Go proxies use `v1RequestWebuser` (not the un-attested
-  `v1Request`) — otherwise the principal would be empty and every read would 403.
+  `v1Request`), otherwise the principal would be empty and every read would 403.
 - **List scoping.** `GET /v1/workflow/items` returns only the caller's own rows; the
   unscoped operator view is a separate route, `GET /v1/workflow/items/all`, statically
   gated by `CAP_WORKFLOW_ADMIN`. The `/all` route is deliberately *not* owner-filtered,
@@ -143,24 +143,24 @@ All C routes are in `src/server/server_http_routes.inc`; handlers in
 - **How capabilities are acquired.** Browser users authenticate to the webchat; the
   webchat→server hop is over the filesystem-trusted UDS, and the C server treats that
   channel as the operator (this is the established single-trusted-operator webchat
-  model — the same one that guards the vault and the workflow gate). The per-route
+  model, the same one that guards the vault and the workflow gate). The per-route
   `CAP_*` values are the transport/route gates; the *per-user* narrowing that matters
   for this feature is the in-handler ownership check on `submitter`, which is why the
   proxies must forward the webuser identity.
 - **Path confinement.** The proposal read-back is dirfd + `openat(O_NOFOLLOW)` on a
-  server-minted basename — no traversal, no symlink follow, no TOCTOU (details above).
+  server-minted basename: no traversal, no symlink follow, no TOCTOU (details above).
 - **Delegate drafting is tool-free.** `agent_generate` (`src/server/agent_runtime.c`)
   selects a single **non-CLI** (HTTP-provider) delegate and calls the plain-completion
   **`agent_execute()` directly**. The tool-execution loop lives only in the *separate*
-  `agent_execute_with_tools_for_role()`, which `agent_generate` never calls — so a
+  `agent_execute_with_tools_for_role()`, which `agent_generate` never calls, so a
   draft returns text and nothing else, regardless of the agent's `tools_enabled`: no
   tools, no worktree, no writes, no repo access. It refuses if only CLI (agentic)
   agents exist. The user's title/notes are the *subject*, framed by a fixed system
   prompt that tells the model to treat them as data. **Residual risk (bounded, not
   zero):** because there are no tools there is no *server-side* side effect, but the
   model can still produce misleading or malicious *markdown* (e.g. a phishing link) in
-  the draft. That draft is shown as a preview and the user must explicitly accept it —
-  the human reviewer owns the same trust judgment they would for any hand-written
+  the draft. That draft is shown as a preview and the user must explicitly accept it.
+  The human reviewer owns the same trust judgment they would for any hand-written
   proposal. The rendered preview cannot inject script (it goes through the escaping
   `renderMd`, below), and an accepted draft only becomes a normal proposal the user
   then submits.
@@ -168,7 +168,7 @@ All C routes are in `src/server/server_http_routes.inc`; handlers in
   there is *no* `CAP_WORKFLOW_ADMIN` override for `/events`, `/proposal`, or the
   single-item GET. An admin's extra reach is the `/all` *list* only (item rows, which
   do not include event `detail` or the proposal body). Consequently
-  **`lifecycle_event.detail`** — served verbatim, not sanitized in v1 — is visible only
+  **`lifecycle_event.detail`** (served verbatim, not sanitized in v1) is visible only
   to the **owner** of the item. (Cross-user admin inspection of another user's timeline
   or proposal is deliberately deferred; use the CLI/DB for that.)
 
@@ -185,9 +185,9 @@ basenames are opened.
 - **Timeline polling.** Keyed on the selected id alone; each tick appends only events
   past the cursor (idempotent: it filters `id > lastId`), and the interval self-stops
   once the item reaches a **terminal** `state`. The terminal set is exactly the
-  non-`active` values of the authoritative work-item `state` enum —
+  non-`active` values of the authoritative work-item `state` enum:
   `active | accepted | rejected | abandoned` (`db1_work_item_t`; see
-  [`AUTONOMOUS_DEVELOPMENT.md`](AUTONOMOUS_DEVELOPMENT.md)) — i.e. `accepted`,
+  [`AUTONOMOUS_DEVELOPMENT.md`](AUTONOMOUS_DEVELOPMENT.md)), i.e. `accepted`,
   `rejected`, `abandoned`. A **parked** run is *not* a separate state: it stays
   `active` with a non-empty `pause_reason` (`pending_human`, `failed`,
   `budget_exceeded`, …), so the page keeps polling it every ~4 s (an operator can still
@@ -200,13 +200,13 @@ basenames are opened.
   the shared `renderMd`. It is not a general HTML sanitizer: it escapes the raw source
   (`&`, `<`, `>`) and then emits only a fixed, closed set of tags (headings,
   paragraphs, lists, blockquotes, inline emphasis/code, fenced code, and `<a>` links
-  restricted to `http(s)` targets) — so no author-supplied HTML, event handler, or
+  restricted to `http(s)` targets), so no author-supplied HTML, event handler, or
   `javascript:`/SVG payload reaches the DOM. Practically: LLM- or user-authored
   markdown cannot inject script into the page.
 - **Composer draft.** The in-progress draft is persisted in `localStorage`
   (`aimee_proposal_draft`), restored on mount, and cleared on a successful submit and
   on logout (`App.tsx`). `localStorage` is origin-wide, so a draft persists on the
-  device until one of those clears runs — the cross-account protection is "logout
+  device until one of those clears runs. The cross-account protection is "logout
   clears it," not per-user isolation. A server-side per-user draft store is a noted
   non-goal.
 - **Draft-with-a-delegate** shows the result as a **preview**; the body is replaced
@@ -222,17 +222,17 @@ basenames are opened.
 
 Built slice-by-slice, each design-and-code roundtable-reviewed before merge:
 
-- **Slice 0 — backend read surfaces** (PR #954): the timeline/proposal/enriched-item
+- **Slice 0: backend read surfaces** (PR #954): the timeline/proposal/enriched-item
   endpoints + owner scoping. Behavioral unit tests in `test_wfe_webapi.c`
   (ownership allow+deny, pagination cursor, proposal read-back, symlink→403,
   `/all` enrichment).
-- **Slice 1 — Workflow Actions page + Edit Workflows de-scope** (PR #956): the list + status/
+- **Slice 1: Workflow Actions page + Edit Workflows de-scope** (PR #956): the list + status/
   history detail; removes the Runs/Run-state/gate panels from Edit Workflows.
-- **Slice 2 — author-from-scratch composer** (PR #959): the composer + client-side
+- **Slice 2: author-from-scratch composer** (PR #959): the composer + client-side
   draft; removes the Submit-proposal panel from Edit Workflows. (This PR also repaired
-  pre-existing `testing` breakage from an unrelated merge — a clang-format violation
+  pre-existing `testing` breakage from an unrelated merge, a clang-format violation
   and an `audit_args_hash`/`wfe_sha256_raw` test-link `undefined reference`.)
-- **Slice 3 — delegate-assisted drafting** (PR #963): `agent_generate` + `/v1/agent/draft`
+- **Slice 3: delegate-assisted drafting** (PR #963): `agent_generate` + `/v1/agent/draft`
   + the composer's Draft button.
 
 PRs (github.com/RakuenSoftware/aimee): [#954](https://github.com/RakuenSoftware/aimee/pull/954),
@@ -254,10 +254,10 @@ The page is read/UI only; the behavior it drives is governed by existing config:
 - **Autonomous execution** is governed by the wfe engine
   ([`AUTONOMOUS_DEVELOPMENT.md`](AUTONOMOUS_DEVELOPMENT.md)). Notably the **live forge
   is default-off** (`wfe_live_forge_enabled`): with it off, a run advances and parks at
-  gates without pushing a real PR — which is the safe default for exercising the page.
+  gates without pushing a real PR, which is the safe default for exercising the page.
 - **Submit** is bounded by the intake's existing caps (a 1 MB proposal body cap and the
   intake-auth per-principal rate/concurrency limits); the user-supplied `repo` is
-  handled by the same `/v1/dev/submit` intake that the CLI uses — its validation and
+  handled by the same `/v1/dev/submit` intake that the CLI uses; its validation and
   authorization are the intake's concern, unchanged by this feature.
 - **To exercise it end to end** on a running instance: open `/workflow-actions`, **+ New
   proposal**, optionally **Draft with a delegate**, **Submit**, then watch the timeline

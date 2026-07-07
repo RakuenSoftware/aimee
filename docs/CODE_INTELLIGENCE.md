@@ -55,7 +55,7 @@ A thin client needs a configured remote and an indexed project for this. Plain
 
 ## How the AI uses it
 
-The graph is a tool surface for the primary agent and its delegates, not just a CLI. Before
+The graph is a tool surface for the primary agent and its delegates, not only a CLI. Before
 an edit the AI looks up callers and blast radius, and it fetches exact code spans by symbol
 instead of loading whole files into context. That is what lets it work from your code, keep
 its context small, and stop rediscovering the codebase on every session. Code search is a

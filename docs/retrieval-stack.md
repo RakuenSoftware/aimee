@@ -14,8 +14,8 @@ keyword gap or a repo boundary that plain vector search would miss.
 
 ## The embedder
 
-Embedding and reranking are baked into the `aimee-kb-*` tier images — Qwen3-Embedding + an
-Ettin cross-encoder reranker — and served over HTTP (`/embed`, `/embed_batch`, `/rerank` on
+Embedding and reranking are baked into the `aimee-kb-*` tier images (Qwen3-Embedding + an
+Ettin cross-encoder reranker) and served over HTTP (`/embed`, `/embed_batch`, `/rerank` on
 the gateway `:8742`). The KB calls them; it runs no model. See
 [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md) for the tiers and
 [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md) for pointing the KB at one. (The reranker emits a
@@ -30,7 +30,7 @@ Two embedding widths ship:
 
 The 4B/2560 tier has better recall on large or meaning-heavy corpora; the 0.6B/1024 tier is
 the low-footprint default. The retrieval pipeline (hybrid search, reranking, fusion) is
-identical either way — only the model sizes differ.
+identical either way. Only the model sizes differ.
 
 ### Switching tiers
 
@@ -44,7 +44,7 @@ AIMEE_EMBEDDING_DIM=2560   # or embedding_dim: 2560 in aimee.yaml
 Both GPU tiers are 2560-dim, so moving between `gpu-small` and `gpu-mid` needs no re-embed.
 Moving between 1024 and 2560 is a model-identity **and** width change: on an **empty** DB
 just set the dim; on a **populated** one it's a drop-and-rebuild re-embed (the `halfvec`
-columns are sized to `embedding_dim`), which the `kb_meta` drift guard enforces — see
+columns are sized to `embedding_dim`), which the `kb_meta` drift guard enforces. See
 [Switching embedders on an existing database](#switching-embedders-on-an-existing-database).
 
 ## Configuration

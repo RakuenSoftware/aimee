@@ -7,13 +7,13 @@ holds no state and proxies to `aimee-server` over its `/v1` HTTP surface.
 
 ## Design principle: server-incurred metrics only
 
-The dashboard shows **things aimee-server incurs** — its delegations, tool
+The dashboard shows **things aimee-server incurs**: its delegations, tool
 calls, token spend, guardrail verdicts, configured agents, active sessions, and
 readiness. It deliberately does **not** monitor `aimee-kb`-internal events
 (memory-curation audits, KB decision logs). **`aimee-kb` has its own dashboard**
 for those; duplicating them here would blur the boundary between the two
-services. The one exception is a state overview the server relies on — the
-**Memory** panel (tier counts) — which is available but off by default.
+services. The one exception is a state overview the server relies on, the
+**Memory** panel (tier counts), which is available but off by default.
 
 A field is "server-incurred" if the server's own agents/workflows produce it,
 even when the record is physically stored behind the KB (e.g. delegate token
@@ -28,7 +28,7 @@ clean 3-column layout; you add more from a catalog via **⚙ Customize**.
 
 ### Logs (`/logs`)
 
-The server's **tool-action audit ledger** — one row per tool call the agent
+The server's **tool-action audit ledger**: one row per tool call the agent
 makes, with the guardrail **verdict** (`allow` / `block` / `rewrite` /
 `approval_required`), the actor (`primary` / `delegate`), the tool, mode, and
 reason. Filter by verdict, actor, or tool name. This is `aimee-server`'s own
@@ -38,11 +38,11 @@ KB's logs.
 ## Panels
 
 Every panel is derived from data the server incurs. Panels marked *default* are
-shown out of the box; the rest are opt-in via **⚙ Customize**.
+shown by default; the rest are opt-in via **⚙ Customize**.
 
 | Panel | Default | Source |
 |-------|:------:|--------|
-| Readiness | ✓ | Synthesized health report (`onboard`) — DB/agents/delegations/LSP |
+| Readiness | ✓ | Synthesized health report (`onboard`): DB/agents/delegations/LSP |
 | Agents | ✓ | Configured provider roster (`agents`) |
 | Active Sessions | ✓ | Live webchat sessions (injected by webchat) |
 | Delegations | ✓ | Recent delegations (`delegations`) with human-formatted latency |
@@ -59,7 +59,7 @@ shown out of the box; the rest are opt-in via **⚙ Customize**.
 | Failures | — | Recent unsuccessful delegations (from `delegations`) |
 | Provider Mix | — | Configured agents grouped by provider (from `agents`) |
 | Confidence | — | Average delegate confidence per role (from `delegations`) |
-| Memory | — | Memory tier/kind counts (`memory_stats.tier_kinds`) — a KB state overview |
+| Memory | — | Memory tier/kind counts (`memory_stats.tier_kinds`), a KB state overview |
 | LSP Health | — | LSP diagnostics summary (`lsp`) |
 
 Latency is rendered human-readably (`482ms`, `4.7s`, `2m 7s`), not raw
