@@ -157,7 +157,7 @@ owner when someone is ready to pick it up.
   pluggable-db proposal sitting in `pending/` after being deleted by
   its successor is how `pending/` becomes stale signal. Worth a short
   `CONTRIBUTING.md` addition alongside the PR template.
-- **First-class operator audit surface:** the data is all there
+- **Dedicated operator audit surface:** the data is all there
   (`operator_id` on every shareable row, `content_hash`, timestamps),
   but a CLI verb rendering per-operator / per-scope activity in a
   legible way does not exist. Flagged as a known gap in the

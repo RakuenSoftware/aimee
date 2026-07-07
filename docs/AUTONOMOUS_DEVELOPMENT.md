@@ -256,7 +256,7 @@ Honest scope of the current implementation (the design allows for more):
 | autonomy driver (`wfe_autonomy`) | advances machine gates, parks at human gates, never forges approval |
 | turn registry / server-owned turns | a run survives client disconnect (the foundation) |
 
-**Invariants** (by construction): aimee never self-initiates; the primary manages
+**Invariants**: aimee never self-initiates; the primary manages
 while delegates do the work; rejected work is re-delegated; **all** autonomous
 action flows through the workflow engine, there is no side-channel that takes an
 autonomous action outside the engine's gates, budget, and audit.

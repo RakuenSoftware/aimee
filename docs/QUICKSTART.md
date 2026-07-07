@@ -35,9 +35,9 @@ By default this brings up **two** services. The browser webchat runs *inside* th
 |---------|-----------|------|
 | `aimee-server-kb` | Both aimee binaries (server and kb), the browser webchat UI, and a bundled CPU inference gateway (embed, rerank, synth) in one container | `8743` (server `/v1`, native TLS self signed; plaintext `8740` loopback only), `8741` (kb `/v1`), `8443` (webchat HTTPS, self signed) |
 | `postgres` | `pgvector/pgvector:pg16`, DB2 (`aimee_shared`) for knowledge and vectors | internal |
-| `llm` *(optional)* | Standalone curator LLM sidecar (Gemma 3n E4B via `llama.cpp`). Off by default — the bundled gateway already serves embed, rerank, and synth. Enable it with `--profile external-llm` for a lean `WITH_LLM=0` image, or to bring your own curator GGUF (point `LLM_ENDPOINT` at it). | internal |
+| `llm` *(optional)* | Standalone curator LLM sidecar (Gemma 3n E4B via `llama.cpp`). Off by default, since the bundled gateway already serves embed, rerank, and synth. Enable it with `--profile external-llm` for a lean `WITH_LLM=0` image, or to bring your own curator GGUF (point `LLM_ENDPOINT` at it). | internal |
 
-The kb auto-applies its DB2 schema (tables plus the `pg_trgm` and `vector` extensions) on first boot. The first `--build` takes a few minutes to compile the binaries; the CPU inference model weights are pulled in prebuilt (baked into the image), not downloaded at boot, so later starts are fast. To also run the standalone curator LLM sidecar — for a lean `WITH_LLM=0` image or a custom curator GGUF — add the profile: `docker compose -f compose.combined.yaml --profile external-llm up --build -d`.
+The kb auto-applies its DB2 schema (tables plus the `pg_trgm` and `vector` extensions) on first boot. The first `--build` takes a few minutes to compile the binaries; the CPU inference model weights are pulled in prebuilt (baked into the image), not downloaded at boot, so later starts are fast. To also run the standalone curator LLM sidecar (for a lean `WITH_LLM=0` image or a custom curator GGUF), add the profile: `docker compose -f compose.combined.yaml --profile external-llm up --build -d`.
 
 ### 1.2 Verify it's healthy
 
@@ -56,7 +56,7 @@ If the server endpoints return `200` and `kb/status` reports the DB and vector s
 
 ### 1.3 Browser webchat
 
-The browser UI is a first-class surface and is **on by default**. Open **https://localhost:8443** (accept the self-signed cert) and log in with the default account `aimee` / `aimee-local-dev`. Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` for anything beyond local dev, or set `AIMEE_WEBCHAT_ENABLED=0` in the compose file to turn it off.
+The browser UI is **on by default**. Open **https://localhost:8443** (accept the self-signed cert) and log in with the default account `aimee` / `aimee-local-dev`. Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` for anything beyond local dev, or set `AIMEE_WEBCHAT_ENABLED=0` in the compose file to turn it off.
 
 > Webchat is built into the image by default, from both published images and a from-source `docker compose build`, its frontend dependency (`@rakuensoftware/smoothgui`) is vendored in-repo, so the build needs no credentials. Build with `--build-arg WITH_WEBCHAT=0` to ship the server+kb services only.
 

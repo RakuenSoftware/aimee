@@ -77,7 +77,7 @@ configs are blocked before the AI can touch them. Known anti patterns raise warn
 Planning mode freezes every write until you are ready. Each session runs in its own git
 worktree, so two sessions never step on each other.
 
-**A browser workspace, not just a backend.** aimee ships its own browser UI, `aimee-webchat`:
+**A browser workspace.** aimee ships its own browser UI, `aimee-webchat`:
 chat, a live view of your code as a graph, a git project manager that clones repos and holds
 per host tokens, a full in app VS Code editor, and dashboards over what the server is doing.
 No terminal required. See [Dashboard & Logs](docs/DASHBOARD.md).
@@ -178,14 +178,14 @@ mode-0600, rotated audit ledger: `{ts, actor, tool, mode, reason_code, verdict, 
 The `reason_code` is a stable event key, never free form prose, so nothing user bearing is
 persisted. `args_hash` is a keyed HMAC-SHA256 over a per tool allowlist projection of the
 arguments: keyed so low entropy arguments cannot be recovered from the public log by
-dictionary attack, allowlisted by construction so a new tool or a new argument can never
+dictionary attack, allowlisted so a new tool or a new argument can never
 silently leak a secret or PII value into an append only log, and versioned. Auditing is
-**fail open by construction** — the log write happens after the verdict is decided, so a
+fail open: the log write happens after the verdict is decided, so a
 logging failure can never flip an allow to a block. The ledger is replayable:
 `trajectory_export` interleaves the governed actions back into the session timeline by
 timestamp, and the operator console exposes the feed at `/v1/audit/actions`.
 
-Alongside the action ledger, aimee keeps **decision records** — governable "we decided X
+Alongside the action ledger, aimee keeps **decision records**: governable "we decided X
 because Y" entries carrying status, rationale, alternatives, a revisit date, what they
 supersede, the author, and the policy they bind. At most one decision is active per scope
 (enforced by a database unique index, not just by the writer), superseding one flips the
@@ -194,9 +194,9 @@ existing recall and curator sweeps rather than rotting silently. Human sign off 
 sensitive actions are HMAC-SHA256 signed and non forgeable. Both surfaces are live in the
 [KB Console](docs/KB_CONSOLE.md) (`/v1/decisions`, `/v1/audit/actions`).
 
-Retrieval has a parallel, opt in audit chain: every KB grounded answer is reconstructible —
-which sources grounded it, at which content hashed version, and whether the answer is
-entailed by that evidence — read back through `/v1/audit/{trace,provenance,fidelity}`.
+Retrieval has a parallel, opt in audit chain: every KB grounded answer is reconstructible.
+Read back which sources grounded it, at which content hashed version, and whether the answer
+is entailed by that evidence, through `/v1/audit/{trace,provenance,fidelity}`.
 
 ### The context economizer
 
@@ -204,14 +204,14 @@ aimee runs a context economizer over both the delegate turn loop and, optionally
 primary `/v1` path, gated by a master switch and split into two tiers. The **safe tier**
 is default on: deterministic tool output condensation (keep the failing test, elide the
 passing ones; keep compiler diagnostics, drop progress), size based compression of oversized
-tool results, and folding old turn history into a rolling skeleton — recent context is never
+tool results, and folding old turn history into a rolling skeleton. Recent context is never
 touched, and the full output is spilled to disk for recovery. A measurement ledger records
 the reduction opportunity even when a lever is off, so the master switch off state provably
 reduces to zero.
 
 The **aggressive tier** is opt in and off by default: it applies the reduction to the live
 inbound request so the primary agent's own tokens shrink too. It is compress only, and
-guarded by a per session circuit breaker — if a reduced request draws an error the session
+guarded by a per session circuit breaker. If a reduced request draws an error, the session
 falls back to the pristine payload and disables reduction for its remaining turns, so one bad
 reduction can never persistently break live traffic. aimee never dispatches a reduced payload
 it cannot restore to the byte identical original. See [Settings](docs/SETTINGS.md) and
@@ -336,7 +336,7 @@ works the same way. Switch tools any time. Your memory and context stay.
 - **Team knowledge.** One shared kb distills what your whole organization knows, behind
   scoped accounts, OIDC sign on, and a per principal encrypted vault.
 - **A UI when you want one.** A browser workspace with chat, a code graph explorer, git
-  project management, an in app VS Code editor, and server dashboards — no terminal required.
+  project management, an in app VS Code editor, and server dashboards. No terminal required.
 - **Yours to run.** C services, single digit millisecond hot paths, and an inference stack
   you can run entirely on your own hardware.
 
@@ -410,9 +410,9 @@ Focused references:
 | [Workflows](docs/WORKFLOWS.md) | The composable dev lifecycle workflow engine, block catalog, and authoring |
 | [Workflow Actions](docs/WORKFLOW_ACTIONS.md) | The web page to author a proposal, run it autonomously, and watch its status/history |
 | [Dashboard & Logs](docs/DASHBOARD.md) | The web Dashboard's server-incurred metric panels, customization, the Logs (tool-action audit) tab, and the panel data architecture |
-| [Settings](docs/SETTINGS.md) | The web page for the server's typed runtime config — economizer levers, autonomous-dev knobs, tool-output condensation, and how each maps to `aimee.yaml` |
+| [Settings](docs/SETTINGS.md) | The web page for the server's typed runtime config: economizer levers, autonomous-dev knobs, tool-output condensation, and how each maps to `aimee.yaml` |
 | [Context economizer](docs/features/context-fold.md) | The two-tier token-reduction pipeline: history fold, tool-output condensation, size compression, the freeze cost guardrail, and the live-primary gateway mutation with its per-session circuit breaker |
-| [KB Console](docs/KB_CONSOLE.md) | The operator console's trust model and surfaces — Accounts (enroll/revoke/scopes/OIDC) and Governance (decision records, the policy-verdict action audit) |
+| [KB Console](docs/KB_CONSOLE.md) | The operator console's trust model and surfaces: Accounts (enroll/revoke/scopes/OIDC) and Governance (decision records, the policy-verdict action audit) |
 | [Workspace Management](docs/WORKSPACES.md) | Multi repo workspaces and session isolation |
 | [Security Model](docs/SECURITY.md) | Threat model, trust boundaries, capability system |
 | [Webchat git security](docs/WEBCHAT_GIT_SECURITY.md) | How webchat handles a webuser's git forge token at rest, in transit to git, and in the in browser editor, and where exposure is and is not closed |

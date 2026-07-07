@@ -250,7 +250,7 @@ Key properties:
   serializes heavyweight inference to bound resource use.
 - **Transport.** Clients reach the server over its `/v1` HTTP surface: the
   always-on `~/.config/aimee/aimee-http.sock` Unix socket, plus an optional
-  localhost TCP listener. Dispatch methods use first-class `/v1` routes; the
+  localhost TCP listener. Dispatch methods use dedicated `/v1` routes; the
   generic `POST /v1/rpc` endpoint is retired. Streaming chat uses
   `POST /v1/chat/stream`, whose body is a sequence of newline-delimited aimee
   events terminated by a final status object. (The legacy newline-delimited
@@ -352,7 +352,7 @@ It is a thin client: it holds no database and proxies everything to
 ## 8a. The kb console service
 
 `aimee-kb-console` (`kb-console/*.go` + the second `frontend/` SPA) is a standalone
-Go thin-client for administering a **shared/company `aimee-kb`** — dashboard,
+Go thin-client for administering a **shared/company `aimee-kb`**: dashboard,
 accounts (client enrollment, certificate revocation, scopes, OIDC config), and
 governance (decision records, the policy-verdict action audit). Unlike webchat it
 fronts the **kb `/v1` directly** (so it works with no colocated `aimee-server`) and
