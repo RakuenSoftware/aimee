@@ -407,6 +407,11 @@ static cJSON *kb_service_health_object(void)
 
    cJSON_AddBoolToObject(resp, "maintenance_enabled", cfg.kb_maintenance_enabled);
 
+   /* Typed-facts capability (proposal §8): the KB advertises its own typed-facts
+    * state so aimee-server can gate per-turn fact injection on it WITHOUT owning
+    * the config. The server never reads typed_facts_enabled itself. */
+   cJSON_AddBoolToObject(resp, "typed_facts_enabled", cfg.typed_facts_enabled ? 1 : 0);
+
    return resp;
 }
 

@@ -45,6 +45,10 @@ int kb_client_health(kb_health_t *out);
  * is unreachable or returns non-2xx. Used by `aimee kb curator status` to read
  * the curator block (richer than the flat kb_health_t snapshot). */
 char *kb_client_health_json(void);
+
+/* Cached read of the KB's advertised typed-facts state (proposal §8). aimee-server
+ * gates per-turn fact injection on this instead of owning typed_facts_enabled. */
+int kb_client_typed_facts_enabled(void);
 /* §2c: POST /v1/reembed; raw response JSON (caller frees) or NULL on transport
  * failure; *status_out (optional) gets the HTTP status. target_dim>0 pins the
  * reset target (bypasses the embedder probe); clear_maintenance!=0 instead just

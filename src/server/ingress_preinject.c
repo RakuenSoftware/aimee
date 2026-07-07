@@ -443,12 +443,13 @@ char *ingress_preinject_build(const char *query, int request_disabled)
 
    config_t cfg;
    config_load(&cfg);
-   /* The envelope carries two independently-gated layers: the code/memory
-    * preview block (ingress_preinject_enabled, aimed at coding agents) and the
-    * typed-fact block (typed_facts_enabled). Build if EITHER is on, so typed
-    * facts surface in turns without requiring the heavier preview machinery. */
+   /* The envelope carries two independently-gated layers: the code/memory preview
+    * block (ingress_preinject_enabled, aimed at coding agents) and the typed-fact
+    * block. Typed facts are KB-OWNED (proposal §8): aimee-server does NOT read its
+    * own typed_facts_enabled — it asks the KB (cached capability) so the KB is the
+    * single source of truth. Build if EITHER layer is on. */
    int preview_on = cfg.ingress_preinject_enabled;
-   int facts_on = cfg.typed_facts_enabled;
+   int facts_on = kb_client_typed_facts_enabled();
    if (!preview_on && !facts_on)
       return NULL;
    int configured_budget = cfg.ingress_preinject_assembly_budget > 0
