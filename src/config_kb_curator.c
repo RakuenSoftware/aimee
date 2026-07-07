@@ -31,6 +31,10 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_extract_prompt_version[0] = '\0';
    cfg->kb_curator_embed_model_version[0] = '\0';
    cfg->kb_curator_invalidation_notify_socket[0] = '\0';
+   /* kb.typed_facts.* autonomous reconciliation (§7.2): auto-promote recurrent
+    * provisional relations by default so novel-tail facts become durable. */
+   cfg->kb_typed_facts_auto_promote_enabled = 1;
+   cfg->kb_typed_facts_promote_threshold = 3;
    cfg->kb_curator_extract_code_enabled = 1;
    cfg->kb_curator_resolve_entities_enabled = 1;
    cfg->kb_curator_index_narrative_enabled = 1;
@@ -122,6 +126,21 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       return 0;
    if (!cJSON_IsObject(kb))
       return config_issue("\"kb\" expected object, got %s", jo_type_name(kb));
+
+   /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (§7.2/§8). Parsed
+    * before the kb.curator early-return so it applies even without a curator block. */
+   const cJSON *tf = cJSON_GetObjectItemCaseSensitive(kb, "typed_facts");
+   if (tf)
+   {
+      if (!cJSON_IsObject(tf))
+         return config_issue("\"kb.typed_facts\" expected object, got %s", jo_type_name(tf));
+      const cJSON *ap = cJSON_GetObjectItemCaseSensitive(tf, "auto_promote");
+      if (ap && cJSON_IsBool(ap))
+         cfg->kb_typed_facts_auto_promote_enabled = cJSON_IsTrue(ap) ? 1 : 0;
+      const cJSON *pt = cJSON_GetObjectItemCaseSensitive(tf, "promote_threshold");
+      if (pt && cJSON_IsNumber(pt) && pt->valueint > 0)
+         cfg->kb_typed_facts_promote_threshold = pt->valueint;
+   }
 
    const cJSON *curator = cJSON_GetObjectItemCaseSensitive(kb, "curator");
    if (!curator)

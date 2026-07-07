@@ -412,6 +412,9 @@ typedef struct config
     * this so an arbitrary client model name is not forwarded and rejected upstream. */
    int gateway_pin_model;
    int typed_facts_enabled;         /* typed-fact knowledge layer master gate (default off) */
+   /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (proposal §7.2/§8). */
+   int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional relations */
+   int kb_typed_facts_promote_threshold;    /* observations before auto-promote (default 3) */
    int kb_pdf_ingest_enabled;       /* structured-pdf: route PDF uploads through the geometry
                                        extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
    int kb_pdf_vector_enabled;       /* structured-pdf Phase A: embed PDF chunks into the isolated
