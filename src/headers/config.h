@@ -23,6 +23,13 @@
 /* Server execution pool defaults */
 #define CONFIG_DEFAULT_BACKGROUND_THREADS 2
 #define CONFIG_DEFAULT_SESSION_THREADS    4
+/* The well-known /v1 bearer baked into the aimee-server image — a ONE-TIME
+ * bootstrap, never a standing credential. While the live listener bearer still
+ * equals this value the server refuses every TCP /v1 route except
+ * POST /v1/api/rotate_bearer, so the pre-set token can only mint the strong
+ * per-deployment bearer and never perform a real operation. Shared by the server
+ * (enforcement) and the thin client (auto-enroll). */
+#define AIMEE_BOOTSTRAP_BEARER "aimee-local-dev"
 /* Raised from 2 -> 4 now that DB2 connections are bounded by the connection pool
  * (db2_connection_pool_size), not 1:1 with worker threads. */
 #define CONFIG_DEFAULT_KB_WORKER_THREADS 4

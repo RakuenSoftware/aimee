@@ -544,6 +544,27 @@ int main(void)
       assert(server_http_authorize(0, "secret", NULL, NULL, 1) == 0);
    }
 
+   /* --- server_http_bootstrap_gate: the one-time bootstrap bearer may ONLY
+    *     rotate itself; every other TCP route is refused until it is rotated. --- */
+   {
+      unsetenv("AIMEE_API_BEARER_TOKEN"); /* TOFU active */
+      const char *BOOT = "aimee-local-dev";
+      /* Bootstrap still live: real routes refused (1), rotate_bearer allowed (0). */
+      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 1);
+      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/config/set") == 1);
+      assert(server_http_bootstrap_gate(1, BOOT, "POST", "/v1/api/rotate_bearer") == 0);
+      /* GET on the rotate path is not the rotate op -> still refused. */
+      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/api/rotate_bearer") == 1);
+      /* UDS is exempt (local trust). */
+      assert(server_http_bootstrap_gate(0, BOOT, "GET", "/v1/config") == 0);
+      /* Once rotated to a strong bearer, the gate is off for every route. */
+      assert(server_http_bootstrap_gate(1, "deadbeef-strong-token", "GET", "/v1/config") == 0);
+      /* Operator-pinned bearer opts out of TOFU even if it equals the bootstrap. */
+      setenv("AIMEE_API_BEARER_TOKEN", BOOT, 1);
+      assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 0);
+      unsetenv("AIMEE_API_BEARER_TOKEN");
+   }
+
    /* --- typed SSE framing: embedded newlines become repeated data: lines --- */
    {
       char frame[256];
