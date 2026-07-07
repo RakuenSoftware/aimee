@@ -108,6 +108,27 @@ static void test_build_url(void)
    assert(strcmp(url, "https://api.anthropic.com/v1/messages") == 0);
    assert(strstr(url, "messages") != NULL);
 
+   /* Anthropic host root normalizes to /v1/messages */
+   snprintf(agent.endpoint, sizeof(agent.endpoint), "https://api.anthropic.com");
+   assert(delegate_build_url(d, &agent, url, sizeof(url)) == 0);
+   assert(strcmp(url, "https://api.anthropic.com/v1/messages") == 0);
+
+   /* Anthropic-compatible gateway with a path-prefixed base: /v1 must still be
+    * inserted (regression: this previously produced .../anthropic/messages -> 404). */
+   snprintf(agent.endpoint, sizeof(agent.endpoint), "https://api.minimax.io/anthropic");
+   assert(delegate_build_url(d, &agent, url, sizeof(url)) == 0);
+   assert(strcmp(url, "https://api.minimax.io/anthropic/v1/messages") == 0);
+
+   /* A path-prefixed base that already carries /v1 stays idempotent (no double /v1). */
+   snprintf(agent.endpoint, sizeof(agent.endpoint), "https://api.minimax.io/anthropic/v1");
+   assert(delegate_build_url(d, &agent, url, sizeof(url)) == 0);
+   assert(strcmp(url, "https://api.minimax.io/anthropic/v1/messages") == 0);
+
+   /* An endpoint already pointing at .../messages is left untouched. */
+   snprintf(agent.endpoint, sizeof(agent.endpoint), "https://api.minimax.io/anthropic/v1/messages");
+   assert(delegate_build_url(d, &agent, url, sizeof(url)) == 0);
+   assert(strcmp(url, "https://api.minimax.io/anthropic/v1/messages") == 0);
+
    /* ChatGPT: .../responses */
    snprintf(agent.endpoint, sizeof(agent.endpoint), "https://api.openai.com/v1");
    d = delegate_driver_get("chatgpt");
