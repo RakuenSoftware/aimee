@@ -507,7 +507,8 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
          /* KB-owned master gate — the sole persisted home for typed_facts_enabled
           * (the legacy root-level emit is removed in config_save.c). */
          cJSON_AddBoolToObject(tf, "enabled", cfg->typed_facts_enabled ? 1 : 0);
-         cJSON_AddBoolToObject(tf, "auto_promote", cfg->kb_typed_facts_auto_promote_enabled ? 1 : 0);
+         cJSON_AddBoolToObject(tf, "auto_promote",
+                               cfg->kb_typed_facts_auto_promote_enabled ? 1 : 0);
          if (cfg->kb_typed_facts_promote_threshold != 3)
             cJSON_AddNumberToObject(tf, "promote_threshold", cfg->kb_typed_facts_promote_threshold);
       }

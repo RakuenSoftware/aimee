@@ -47,9 +47,10 @@
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
    "\"confidence\":0.0}]}. Each fact is a stable subject-relation-object triple "                  \
    "grounded strictly in the note. For relation, choose the single nearest fit "                   \
-   "from these canonical predicates when one reasonably applies: %s. If NONE fits, "                \
-   "emit a concise snake_case predicate of your own (e.g. drives, founded, mentors) "               \
-   "— NEVER a generic catch-all such as \"other\"/\"unknown\"/\"misc\". subject is the entity the " \
+   "from these canonical predicates when one reasonably applies: %s. If NONE fits, "               \
+   "emit a concise snake_case predicate of your own (e.g. drives, founded, mentors) "              \
+   "— NEVER a generic catch-all such as \"other\"/\"unknown\"/\"misc\". subject is the entity "  \
+   "the "                                                                                          \
    "fact is about (use \"user\" for the note's author when it is first-person). "                  \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
    "state, feelings, plans, and one-off events. If the note asserts no durable "                   \

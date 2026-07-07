@@ -126,7 +126,7 @@ int kb_handle_ingest(int fd, cJSON *req)
    int use_all =
        !cJSON_IsString(ws_j) || !ws_j->valuestring[0] || strcmp(ws_j->valuestring, "all") == 0;
 
-   char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
+   char (*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
    if (!projects)
       return kb_send_error(fd, "out of memory");
 

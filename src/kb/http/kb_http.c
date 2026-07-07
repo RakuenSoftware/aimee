@@ -1543,7 +1543,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int force = json_bool(body, "force", 0);
       int use_all = !workspace[0] || strcmp(workspace, "all") == 0;
 
-      char(*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
+      char (*projects)[MAX_PATH_LEN] = calloc(MAX_DISCOVERED_PROJECTS, MAX_PATH_LEN);
       if (!projects)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
