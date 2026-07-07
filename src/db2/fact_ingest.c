@@ -52,19 +52,16 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
 
    int requests_sensitive = memory_pii_turn_requests_sensitive(query);
 
+   /* §4: a retraction turn corrects rather than asserts — retract the named
+    * attribute about the user (a user retraction always wins; an imprecise attr
+    * safely no-ops). This stays synchronous: it is a cheap Postgres write, no LLM.
+    * Fact EXTRACTION is offline-only (the memory_facts drain runs pattern + LLM),
+    * so we do NOT run db2_fact_ingest_text() on the turn hot path. */
    if (memory_pattern_is_retraction(query))
    {
-      /* §4: a retraction turn corrects rather than asserts. Retract the named
-       * attribute about the user; a user retraction always wins. An imprecise attr
-       * safely no-ops (retract only affects facts that exist). */
       char attr[128];
       if (memory_pattern_possessive_attr(query, attr, sizeof(attr)))
          (void)db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER);
-   }
-   else
-   {
-      /* §6 write: extract facts from the turn and route them through the gate. */
-      (void)db2_fact_ingest_text(query, FACT_AUTHORITY_USER, 1);
    }
 
    /* §7 read: the user's facts + facts about any entity named in the turn,

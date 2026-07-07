@@ -36,7 +36,10 @@ static int audit_action_is_enabled(void)
 }
 
 /* Cached audit_worm_enabled (default-off). Same fail-safe read-once pattern as
- * audit_action_is_enabled: a config_load failure leaves the WORM dual-write OFF. */
+ * audit_action_is_enabled: a config_load failure leaves the WORM dual-write OFF.
+ * Persisted like audit_action (config.c load + config_save opt-in), so the value
+ * survives a restart; the reload reapplier below clears the cache so a live
+ * config.set / SIGHUP also takes effect without one. */
 static int g_audit_worm_enabled = -1;
 static int audit_worm_is_enabled(void)
 {
@@ -48,6 +51,22 @@ static int audit_worm_is_enabled(void)
       g_audit_worm_enabled = cfg.audit_worm_enabled ? 1 : 0;
    }
    return g_audit_worm_enabled;
+}
+
+/* Clear both cached gates so the next audit call re-reads config. Runs after a
+ * reload publishes the new snapshot (registered via config_reload_register_
+ * reapplier), so a config.set / SIGHUP applies live instead of needing a restart. */
+static void audit_gate_reload_reapplier(const config_t *old_cfg, const config_t *new_cfg)
+{
+   (void)old_cfg;
+   (void)new_cfg;
+   g_audit_action_enabled = -1;
+   g_audit_worm_enabled = -1;
+}
+
+void guardrails_action_audit_register_reload(void)
+{
+   config_reload_register_reapplier(audit_gate_reload_reapplier);
 }
 
 /* Dual-write the same governed-action row into the append-only WORM store. S0:
