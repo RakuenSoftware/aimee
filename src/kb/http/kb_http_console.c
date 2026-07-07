@@ -234,6 +234,10 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
    }
    config_t cfg;
    config_load(&cfg);
+   /* KB-owned master enable/disable for the whole typed-facts layer. */
+   const cJSON *en = cJSON_GetObjectItemCaseSensitive(req, "enabled");
+   if (en && cJSON_IsBool(en))
+      cfg.typed_facts_enabled = cJSON_IsTrue(en) ? 1 : 0;
    const cJSON *ap = cJSON_GetObjectItemCaseSensitive(req, "auto_promote");
    if (ap && cJSON_IsBool(ap))
       cfg.kb_typed_facts_auto_promote_enabled = cJSON_IsTrue(ap) ? 1 : 0;
@@ -248,6 +252,7 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
    }
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "ok", 1);
+   cJSON_AddBoolToObject(resp, "enabled", cfg.typed_facts_enabled ? 1 : 0);
    cJSON_AddBoolToObject(resp, "auto_promote", cfg.kb_typed_facts_auto_promote_enabled ? 1 : 0);
    cJSON_AddNumberToObject(resp, "promote_threshold", cfg.kb_typed_facts_promote_threshold);
    char *s = cJSON_PrintUnformatted(resp);
@@ -261,6 +266,25 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
    snprintf(out_buf, (size_t)out_cap, "%s", s);
    free(s);
    return 200;
+}
+
+/* A relation name is safe iff it is a non-empty lower snake_case token within
+ * REL_TYPE_NAME_MAX (the ontology's canonical form). Rejects oversized/malformed
+ * input at the route boundary before it reaches the ontology helpers. */
+static int tf_relation_name_ok(const char *s)
+{
+   if (!s || !s[0])
+      return 0;
+   size_t n = strlen(s);
+   if (n >= REL_TYPE_NAME_MAX)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      char c = s[i];
+      if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+         return 0;
+   }
+   return 1;
 }
 
 /* POST /v1/console/typed_facts/relation — operator action on a provisional
@@ -279,6 +303,13 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action and relation are required\"}");
+      return 400;
+   }
+   if (!tf_relation_name_ok(rel) || (target && target[0] && !tf_relation_name_ok(target)))
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"relation/target must be lower snake_case within REL_TYPE_NAME_MAX\"}");
       return 400;
    }
    int rc;

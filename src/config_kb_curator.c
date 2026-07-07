@@ -134,6 +134,12 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
    {
       if (!cJSON_IsObject(tf))
          return config_issue("\"kb.typed_facts\" expected object, got %s", jo_type_name(tf));
+      /* KB-owned master gate: kb.typed_facts.enabled aliases typed_facts_enabled so
+       * the whole layer is enabled/disabled from the KB config surface (and the
+       * console), keeping aimee-server out of the loop. */
+      const cJSON *en = cJSON_GetObjectItemCaseSensitive(tf, "enabled");
+      if (en && cJSON_IsBool(en))
+         cfg->typed_facts_enabled = cJSON_IsTrue(en) ? 1 : 0;
       const cJSON *ap = cJSON_GetObjectItemCaseSensitive(tf, "auto_promote");
       if (ap && cJSON_IsBool(ap))
          cfg->kb_typed_facts_auto_promote_enabled = cJSON_IsTrue(ap) ? 1 : 0;

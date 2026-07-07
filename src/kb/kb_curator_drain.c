@@ -216,6 +216,13 @@ static void *drain_thread_main(void *arg)
             int nc = db2_ontology_eval_candidates(thr, cands, KB_ONTO_PROMOTE_BATCH);
             for (int i = 0; i < nc; i++)
             {
+               /* Never promote a generic catch-all bucket to active: it would make
+                * low-quality "misc" facts durable and can't be reconciled to a
+                * real predicate. The extractor is instructed not to emit these,
+                * but exclude them defensively. */
+               if (strcmp(cands[i], "other") == 0 || strcmp(cands[i], "unknown") == 0 ||
+                   strcmp(cands[i], "misc") == 0 || strcmp(cands[i], "unspecified") == 0)
+                  continue;
                if (db2_ontology_approve(cands[i]) == 0)
                   aimee_log(LOG_INFO, "kb.ontology.promote",
                             "auto-promoted relation '%s' to active (>= %d observations)",
