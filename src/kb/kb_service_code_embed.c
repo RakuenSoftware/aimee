@@ -402,6 +402,18 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
 
    for (int i = 0; i < row_count && embedded < effective_max; i++)
    {
+      /* Return the pool lease at the top of every iteration so this loop never
+       * pins a connection across more than one file's work. Two shapes would
+       * otherwise trip the pool's 300s stuck-lease ceiling and wedge the drain:
+       *  - the embed round-trip (memory_embed_text below), one slow network call
+       *    per file on a fresh ingest; and
+       *  - the STEADY STATE, where every file is already embedded so the loop only
+       *    computes node_key + checks exists-by-hash and `continue`s — thousands of
+       *    checks per poll, every poll, all under one held lease.
+       * The per-file DB lookups re-acquire lazily via db2_conn(); no-op inside an
+       * explicit lease scope. Mirrors kb_curator_extract_code's guard. */
+      db2_lease_release_idle();
+
       char node_key[GRAPH_ENDPOINT_MAX];
       if (db2_entity_node_key_file(project, rows[i].path, node_key, sizeof(node_key)) != 0)
          continue;
@@ -449,18 +461,6 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
                                   "code payload too large to encode");
          continue;
       }
-
-      /* Return the pool lease before the (slow) embedder round-trip. Each embed
-       * is a network call to the embedder; holding a DB2 lease across the whole
-       * embed loop — thousands of files on a fresh ingest — trips the pool's 300s
-       * stuck-lease ceiling, which is NOT reclaimed and permanently shrinks the
-       * pool until it wedges the drain (observed: a large ~/gow ingest froze the
-       * curator drain, leaving most projects scanned-but-unembedded). This is the
-       * same hazard kb_curator_extract_code already guards before its sidecar/LLM
-       * call. The DB ops bracketing the embed (op_record below; node_key/exists on
-       * the next iteration) re-acquire lazily via db2_conn(); the loop never
-       * touches the initial `conn` after the file rows are read. */
-      db2_lease_release_idle();
 
       /* Embed the deterministic fallback text with the configured embedder
        * (embed_command runs the 0.6B embedder; "builtin" falls back to a stable
