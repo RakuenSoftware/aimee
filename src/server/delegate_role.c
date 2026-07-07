@@ -1,4 +1,5 @@
 #include "delegate_role.h"
+#include "role_templates.h" /* role_template_max_turns (per-role cap) */
 
 #include <string.h>
 
@@ -106,13 +107,14 @@ void delegate_apply_max_turns_override(agent_config_t *cfg, int max_turns)
 
 int delegate_default_max_turns_for_role(const char *role)
 {
-   /* Every role defaults to -1 = INFINITE. Per-role turn caps are no longer
-    * hardcoded here: they are operator configuration, edited per-role under the
-    * Personas tab (persona role config), so an unconfigured role is unbounded.
-    * A configured positive value flows through delegate_apply_max_turns_policy as
-    * a cap; -1 leaves the role unbounded. */
-   (void)role;
-   return -1;
+   /* The per-role turn cap is operator configuration: the `max_turns:` frontmatter
+    * of the role template (edited under the Personas tab), defaulting to -1 =
+    * INFINITE. A configured positive value flows through
+    * delegate_apply_max_turns_policy as a cap; -1 leaves the role unbounded. No
+    * hardcoded per-role caps. */
+   if (!role || !role[0])
+      return -1;
+   return role_template_max_turns(delegate_role_canonicalize(role));
 }
 
 int delegate_final_after_turns_for_role(const char *role)
