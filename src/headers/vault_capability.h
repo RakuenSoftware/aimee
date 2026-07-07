@@ -46,6 +46,20 @@ extern "C"
     * holds vault:write:server. The single source of truth for the gate. */
    int vault_capability_server_write_allowed(attested_transport_t transport, const char *principal);
 
+   /* May a connection with this attested transport seal an agent's OWN api key into
+    * the shared server vault (`agent add`/`agent set --key`)? A delegate defined in
+    * agents.json is SHARED server config whose key resolves from the server vault at
+    * run time (agent_config.c agent_vault_get), so it must land there for the agent
+    * to work for every connection and autonomous turn — a per-user vault entry can't
+    * serve those and is LOCKED on a fresh install. Sealing a delegate's OWN key is
+    * no broader than adding the delegate (both shared-config writes the same request
+    * performs), so this needs NO vault:write:server grant — deliberately WIDER than
+    * vault_capability_server_write_allowed, which still gates the arbitrary-cred
+    * `vault set --server`. Returns 1 for native-TLS bearer, mTLS client,
+    * server.token-trusted webchat, and local UDS; 0 for plaintext TCP bearer (D2b:
+    * never mint a server credential over an unencrypted channel) and un-attested. */
+   int vault_agent_key_server_seal_allowed(attested_transport_t transport);
+
    /* Test seam: override the store path (NULL resets to the default). */
    void vault_capability_set_path_for_test(const char *path);
 
