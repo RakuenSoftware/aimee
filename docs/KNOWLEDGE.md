@@ -164,7 +164,7 @@ aimee agent list                              # configured delegates + slots
 | Speed | Sub-10ms session start and hook checks |
 
 See the [Architecture](ARCHITECTURE.md) for how `aimee-server` (hot path, DB1) and
-`aimee-kb` (knowledge, DB2/DB3) split this work, and the [Manual](../MANUAL.md) for
+`aimee-kb` (knowledge, DB2) split this work, and the [Manual](../MANUAL.md) for
 the day-to-day commands.
 
 ---

@@ -94,7 +94,7 @@ C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wa
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
-# docs/proposals/accepted/three-db-split-user-shared-vectors.md.
+# docs/STORAGE_TIERS.md.
 PQ_CFLAGS := $(shell pkg-config --cflags libpq 2>$(NULLDEV))
 PQ_LIB    := $(shell pkg-config --libs libpq 2>$(NULLDEV))
 ifeq ($(strip $(PQ_LIB)),)
@@ -299,7 +299,7 @@ CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---
-# See docs/proposals/accepted/three-db-pin-backends.md. Files in src/db1/
+# See docs/STORAGE_TIERS.md. Files in src/db1/
 # are the only ones that include <sqlite3.h> for DB1; callers in the rest
 # of the tree call typed domain functions declared in db1/*.h and never
 # see a handle. db1/*_mock.c are alternative implementations linked by

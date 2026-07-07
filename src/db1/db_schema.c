@@ -1,7 +1,6 @@
 /* DB1 (SQLite) idempotent schema bootstrap — single CREATE-IF-NOT-EXISTS
  * pass called at DB1 open time. The DB2 half of the split lives in
- * db2/db_schema.c. See
- * docs/proposals/accepted/three-db-split-user-shared-vectors.md. */
+ * db2/db_schema.c. See docs/STORAGE_TIERS.md. */
 
 #include "db_schema.h"
 

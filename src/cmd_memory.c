@@ -2,7 +2,7 @@
  * subcommand family. Individual subcommand handlers live in:
  *   cmd_memory_core.c   — CRUD, stats, task/decide, link/tag
  *   cmd_memory_embed.c  — embed, reembed, diagnose, answer, eval suite
- *   db3/cmd_memory_vector.c — reindex/repair/rebuild/reconcile/verify + workflows
+ *   cmd_memory_vector.c — reindex/repair/rebuild/reconcile/verify + workflows
  */
 #include "aimee.h"
 #include "cmd_review.h"

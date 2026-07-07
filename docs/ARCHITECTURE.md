@@ -129,7 +129,7 @@ Key consequences of the split:
   appropriate for the KB scope is reflected or promoted from DB1/server flows
   into DB2.
 - **The vector tier is inside DB2.** It was originally a separate Qdrant sidecar
-  (informally "DB3") and was folded into Postgres as the `vector` (pgvector)
+  and was folded into Postgres as the `vector` (pgvector)
   extension. Vectors share the same connection and transaction domain as the
   rows they embed, no separate service.
 - **The boundary is compile-enforced.** `aimee-server` is built with

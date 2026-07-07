@@ -233,9 +233,8 @@ typedef struct
 
 /* Database connection settings for the explicit two-store architecture:
  * DB1 = local user store (sqlite), DB2 = shared knowledge store (postgres
- * + pgvector). See docs/proposals/done/three-db-split-user-shared-vectors.md
- * for the original split; the DB3 vector tier was folded into DB2 via
- * pgvector in #1575. */
+ * + pgvector). See docs/STORAGE_TIERS.md. (The vector tier was folded
+ * into DB2 as pgvector in #1575.) */
 #define CONFIG_DB2_URL_LEN 512
 
 typedef struct config
