@@ -244,6 +244,10 @@ int route_role_template_show(const char *name, char *resp, int cap)
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "role", name);
    cJSON_AddStringToObject(o, "content", raw);
+   /* Surface the per-role turn cap structurally so the Personas tab can render it
+    * as a dedicated field (edited via the `max_turns:` frontmatter in `content`).
+    * -1 = infinite, the default. */
+   cJSON_AddNumberToObject(o, "max_turns", role_template_max_turns(name));
    free(raw);
    return emit(resp, cap, o);
 }

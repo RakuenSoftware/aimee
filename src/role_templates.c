@@ -436,6 +436,56 @@ static char *str_replace_all(const char *haystack, const char *needle, const cha
    return result;
 }
 
+/* Strip a leading YAML frontmatter block (---\n ... \n---) in place, so role
+ * metadata (e.g. max_turns) in a template file never leaks into the built prompt.
+ * A template without frontmatter is left untouched. */
+static void rt_strip_frontmatter(char *s)
+{
+   if (!s || strncmp(s, "---", 3) != 0)
+      return;
+   if (s[3] != '\n' && !(s[3] == '\r' && s[4] == '\n'))
+      return; /* opening --- must be its own line */
+   char *close = strstr(s + 3, "\n---");
+   if (!close)
+      return;
+   char *p = close + 4; /* past "\n---" */
+   while (*p == '-')
+      p++;
+   while (*p == '\r' || *p == '\n')
+      p++;
+   memmove(s, p, strlen(p) + 1);
+}
+
+/* Read an optional `max_turns:` from a role template's leading frontmatter.
+ * Returns the configured value, or -1 (INFINITE — the default cap for every role)
+ * when there is no template, no frontmatter, or no max_turns key. Reads the
+ * user-level template (config_default_dir()/role_templates/<role>.md) — the file
+ * the Personas GUI edits. */
+int role_template_max_turns(const char *role)
+{
+   if (!role || !role[0])
+      return -1;
+   char path[ROLE_TEMPLATE_PATH_MAX];
+   snprintf(path, sizeof(path), "%s/role_templates/%s.md", config_default_dir(), role);
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return -1;
+   char buf[4096];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   if (strncmp(buf, "---", 3) != 0)
+      return -1;
+   char *close = strstr(buf + 3, "\n---");
+   char *limit = close ? close : buf + n;
+   for (char *p = buf; p < limit; p++)
+   {
+      if ((p == buf || p[-1] == '\n') && strncmp(p, "max_turns:", 10) == 0)
+         return atoi(p + 10);
+   }
+   return -1;
+}
+
 char *role_template_build(const char *project_root, const char *role, const char *task,
                           const char *context)
 {
@@ -476,6 +526,10 @@ char *role_template_build(const char *project_root, const char *role, const char
 
    if (!raw)
       return NULL;
+
+   /* Drop any leading frontmatter (role metadata like max_turns) before it can
+    * reach the prompt. */
+   rt_strip_frontmatter(raw);
 
    /* Substitute {{TASK}} */
    const char *task_val = (task && task[0]) ? task : "(see context)";
@@ -619,6 +673,10 @@ int role_template_install_defaults(const char *dir)
       FILE *f = fopen(path, "w");
       if (!f)
          return -1;
+      /* Seed a frontmatter block carrying the per-role turn cap so it is visible
+       * and editable under the Personas tab (edited via PUT /v1/role_templates/
+       * <role>). -1 = INFINITE, the default for every role. */
+      fputs("---\nmax_turns: -1\n---\n\n", f);
       fputs(g_defaults[i].content, f);
       fputc('\n', f);
       fclose(f);
