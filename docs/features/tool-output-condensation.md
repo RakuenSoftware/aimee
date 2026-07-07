@@ -1,17 +1,17 @@
 # Tool-output condensation (deterministic command-aware)
 
-Tool output — test-runner logs, compiler/linter dumps, build progress — is the largest and
+Tool output (test-runner logs, compiler/linter dumps, build progress) is the largest and
 most signal-sparse contributor to a coding agent's context. Most of that volume is not
 signal: progress bars, passing-test transcripts, boilerplate, repeated lines.
 
 **Tool-output condensation** is a context-economizer lever that condenses **recognized**
 command output at the tool-execution seam, using **deterministic, command-aware rules** (no
 LLM, so it is ~free). It knows that a test runner's value is its *failures*, a compiler's is
-its *diagnostics*, and drops the rest — **losslessly**: the full raw output is spilled to
+its *diagnostics*, and drops the rest, **losslessly**: the full raw output is spilled to
 disk and a recovery pointer is left in the condensed result, so nothing is destroyed.
 
-It is **default-ON** (unified-economizer P1c — a safe-tier lever: lossless-on-demand,
-fail-open, no-over-reduction) and complements — does not replace — the size-based
+It is **default-ON** (unified-economizer P1c, a safe-tier lever: lossless-on-demand,
+fail-open, no-over-reduction) and complements (does not replace) the size-based
 `reduce.compress`, which stays the fallback for unrecognized output. Set
 `reduce.command_filter=false` to opt out.
 
@@ -23,7 +23,7 @@ reduce:
 ```
 
 Turn it on from the web UI (**⚙️ Settings → `reduce.command_filter`**, see
-[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical to today** — the seam falls through to the size-based `reduce.compress`.
+[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical to today**: the seam falls through to the size-based `reduce.compress`.
 
 ## What it does
 
@@ -33,7 +33,7 @@ before the size-based compression:
 1. **Recognize** the command. Compound/piped/substituted lines and unknown commands pass
    through unchanged (fail-open). Common wrappers are unwrapped (`env`, `sudo`, `time`,
    `npx`, `uv run`, `poetry run`, `pnpm exec`, …). `xargs`, `make`, shell scripts, and **any
-   path-prefixed invocation** (`./git`, `/tmp/cargo`) are treated as opaque — a family rule
+   path-prefixed invocation** (`./git`, `/tmp/cargo`) are treated as opaque. A family rule
    only ever applies to a bare command name.
 2. **Condense** by family:
    - **Test runners** (`pytest`/`jest`/`vitest`/`ctest`/`cargo|go|npm|… test`): keep the
@@ -45,7 +45,7 @@ before the size-based compression:
    `<aimee_home>/tool-spills/<ref>.out` (temp → `fsync` → rename → dir `fsync`, mode `0600`,
    so a partial write is never promoted) and the condensed result ends with a pointer
    carrying the opaque `ref`. The agent retrieves the full original with the first-class
-   **`tool_output_get`** tool (P2) — one recovery handle, not a raw filesystem path. The
+   **`tool_output_get`** tool (P2): one recovery handle, not a raw filesystem path. The
    spill store is kept under a 64 MB budget by oldest-first (mtime) eviction.
 
 ## Safety contract
@@ -57,7 +57,7 @@ before the size-based compression:
 - **Never hide a failure.** A test runner or build with a **non-zero exit and no recognized
   failure line** passes through verbatim rather than risk eliding the cause.
 - **Fail-open everywhere.** An unrecognized command, an over-ceiling body (> 2 MB), or any
-  filter error degrades to the size-based `reduce.compress` — never a crash or a dropped
+  filter error degrades to the size-based `reduce.compress`, never a crash or a dropped
   result.
 - **No masquerade.** A path-prefixed command whose basename matches a known tool (`./git`)
   never inherits that tool's family filter.
@@ -71,15 +71,15 @@ before the size-based compression:
 Process-wide counters accumulate realized savings **and recovery cost** on live traffic
 ([`tool_condense_stats_snapshot`](../../src/tool_condense.c)): `recognized`, `applied`,
 `applied_raw` vs `applied_final` bytes, per-family (`test`, `diag`) counts, and the
-**recovery-cost** side — `recovered` (successful `tool_output_get` page-backs) and
+**recovery-cost** side: `recovered` (successful `tool_output_get` page-backs) and
 `recovered_bytes` (bytes re-injected). Two derived fields make the promotion-gate metric
 explicit:
 
 - `saved_bytes` = `applied_raw − applied_final` (gross condensation saving);
 - **`net_saved_bytes`** = `saved_bytes − recovered_bytes` (**net of recovery**).
 
-`net_saved_bytes` is the honest measure: if the agent keeps paging spilled output back in,
-`recovered_bytes` rises toward `saved_bytes` and the net collapses — the signal that the
+`net_saved_bytes` is the net after recovery: if the agent keeps paging spilled output back in,
+`recovered_bytes` rises toward `saved_bytes` and the net collapses, the signal that the
 lever is not net-saving on that workload. Each condensation logs its `raw→final` delta and
 each recall logs `tool_output_get recovered N bytes` under the `tool_condense` module, so the
 two sides are greppable together. (This precise per-call channel exists because

@@ -223,7 +223,7 @@ auto-retried without new input (a CI log or a roundtable verdict).
 
 ## Current limitations
 
-Honest scope of the current implementation (the design allows for more):
+Scope of the current implementation (the design allows for more):
 
 - **Submit takes `proposal_md`, `workflow`, `repo` only.** Per-run `limits` and
   gate **preauthorization** are not yet accepted at `/v1/dev/submit`; gates are

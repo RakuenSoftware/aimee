@@ -51,7 +51,7 @@ credentials live in the server's **sealed vault**; see
   figure/table/page crops into a content-addressed blob store served by the
   access-gated, audited `pdf_open_asset` (`kb_pdf_assets_enabled`), and OCR
   scanned PDFs through the same citation path with an asset-only fallback
-  (`kb_pdf_ocr_enabled`). Each layer degrades cleanly when its sidecar/binary is
+  (`kb_pdf_ocr_enabled`). Each layer degrades when its sidecar/binary is
   absent. See [STRUCTURED_PDF.md](STRUCTURED_PDF.md).
 
 - **Server-sealed credential vault (single store)**: agent/delegate API keys and

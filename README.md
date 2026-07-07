@@ -160,7 +160,7 @@ is traceable to the exact place on the page rather than to an unlocatable paraph
 of that spine the KB optionally recognises table cells (structured `{row, col, text}`
 lookups), renders visual crops of figures, tables, and pages into a content addressed store,
 and OCRs scanned or image only pages back through the same citation path. Each layer is its
-own opt in and degrades cleanly to the one below when its dependency is absent, and every
+own opt in and degrades to the one below when its dependency is absent, and every
 read surface honours the same document level access control as the text spine. See
 [Structured PDF](docs/STRUCTURED_PDF.md).
 

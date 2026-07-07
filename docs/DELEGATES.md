@@ -122,7 +122,7 @@ aimee agent probe gemma
 ```
 
 > **Registering the deployment's own `aimee-kb-*` synth:** use the gateway port and the
-> `aimee-synth` alias, not a raw GGUF filename —
+> `aimee-synth` alias, not a raw GGUF filename:
 > `aimee agent local local-synth http://<gw>:8742/v1 --model aimee-synth --provider openai`.
 > The gateway runs auth-off on the internal bridge (`auth_type: none`). See
 > [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).

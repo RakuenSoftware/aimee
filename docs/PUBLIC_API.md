@@ -156,7 +156,7 @@ it downloads a portable Temurin JRE and the pinned `openapi-generator-cli` jar
 into `~/.cache/aimee-sdkgen` (no root required). Regenerating from an unchanged
 spec is a **byte-for-byte no-op**, so regeneration is deterministic.
 
-Two gates keep SDKs honest:
+Two gates guard the SDKs:
 
 - `scripts/check-sdk-parity.py`: every `operationId` in the spec is covered by
   every generated SDK (`make sdk-parity-check`). Run after `make gen-sdks` in the
@@ -193,7 +193,7 @@ KB_BEARER_TOKEN=<token-if-remote> \
   src/tests/test_v1_third_party.sh
 ```
 
-It skips gracefully (exit 0, SKIP) when no service is reachable, so it is safe
+It skips (exit 0, SKIP) when no service is reachable, so it is safe
 in CI; point it at a deployed aimee-kb to validate the stability contract.
 
 ---
