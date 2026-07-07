@@ -14,6 +14,8 @@
 #include "db2/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
 #include "db2/memory_query.h"    /* db2_memory_get */
 #include "db2/rel_types_store.h" /* db2_fact_commit */
+#include "db2/fact_ingest.h"     /* db2_fact_ingest_text (offline pattern extraction) */
+#include "rel_types.h"           /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
 #include "memory.h"              /* memory_t */
 #include "memory_ontology.h"     /* NODE_* */
 
@@ -33,16 +35,43 @@
  * facts -- not transient state, opinions, or one-off events. relation is a short
  * snake_case predicate; object is the value. Conservative by design: an empty
  * list is the right answer when the text asserts no durable fact. */
-#define MF_SYSTEM_PROMPT                                                                           \
+/* Extraction prompt template. The `%s` is filled with the canonical relation list
+ * from the seed ontology (rel_types.c) at run time — this is the autonomous
+ * reconciliation step (proposal §7): the model is bound to relations the write
+ * gate already treats as durable, so an extracted fact commits ACTIVE and
+ * recallable instead of being stranded as a provisional Class-C edge. Relations
+ * outside the list fall to "other" and are left for the auto-promote tail. */
+#define MF_SYSTEM_PROMPT_TMPL                                                                      \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
    "\"confidence\":0.0}]}. Each fact is a stable subject-relation-object triple "                  \
-   "grounded strictly in the note. relation is a short snake_case predicate "                      \
-   "(e.g. works_as, lives_in, owns, prefers, is_a, born_in). subject is the "                      \
-   "entity the fact is about (use \"user\" for the note's author when it is "                      \
-   "first-person). confidence is 0..1. Extract only durable, generalizable "                       \
-   "facts; skip transient state, feelings, plans, and one-off events. If the "                     \
-   "note asserts no durable fact, return an empty list. No prose, no markdown."
+   "grounded strictly in the note. relation MUST be exactly one of these canonical "               \
+   "predicates — choose the single nearest fit for each fact: %s. Use \"other\" "                  \
+   "ONLY when no listed predicate is a reasonable fit. subject is the entity the "                 \
+   "fact is about (use \"user\" for the note's author when it is first-person). "                  \
+   "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
+   "state, feelings, plans, and one-off events. If the note asserts no durable "                   \
+   "fact, return an empty list. No prose, no markdown."
+
+/* Build the extraction system prompt, binding the model to the canonical relation
+ * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays
+ * in lockstep with the write gate — no second copy of the relation list. */
+static void mf_build_system_prompt(char *buf, size_t cap)
+{
+   char rels[768];
+   size_t p = 0;
+   int n = rel_types_seed_count();
+   for (int i = 0; i < n && p < sizeof(rels) - 1; i++)
+   {
+      const rel_type_def_t *d = rel_types_seed_at(i);
+      if (!d || !d->rel_type || !d->rel_type[0])
+         continue;
+      p += (size_t)snprintf(rels + p, sizeof(rels) - p, "%s%s", p ? ", " : "", d->rel_type);
+   }
+   if (!p) /* defensive: an empty seed would leave the model unconstrained */
+      snprintf(rels, sizeof(rels), "works_for, has_role, lives_in, born_in");
+   snprintf(buf, cap, MF_SYSTEM_PROMPT_TMPL, rels);
+}
 
 typedef struct
 {
@@ -203,6 +232,12 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
       return 0;
    }
 
+   /* Deterministic pattern-first extraction, moved off the synchronous store/turn
+    * path to the drain: high-precision regex triples committed idempotently. Runs
+    * before the LLM pass so obvious facts ("my name is X") still land even if the
+    * LLM sidecar is unavailable or the job later exhausts its retries. */
+   (void)db2_fact_ingest_text(mem.content, FACT_AUTHORITY_USER, 1);
+
    cJSON *req = cJSON_CreateObject();
    if (!req)
       return -1;
@@ -212,9 +247,12 @@ static int mf_process_one(const config_t *cfg, const mf_job_t *job)
    if (!request_json)
       return -1;
 
+   char sys_prompt[2560];
+   mf_build_system_prompt(sys_prompt, sizeof(sys_prompt));
+
    char err[MF_ERRBUF] = "";
-   char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, MF_SYSTEM_PROMPT,
-                                   request_json, "", MF_LLM_OUT_CAP, err, sizeof(err));
+   char *resp = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json, "",
+                                   MF_LLM_OUT_CAP, err, sizeof(err));
    free(request_json);
    if (!resp)
    {

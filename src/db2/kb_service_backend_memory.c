@@ -1188,17 +1188,15 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
    }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "id", (double)out.id);
-   /* typed-fact population on ingest (gated, best-effort): inline high-precision
-    * pattern write + a queued "memory_facts" job for the drain's LLM extractor. */
+   /* typed-fact population on ingest: enqueue a "memory_facts" job so the drain
+    * mines this memory offline (pattern + LLM). Extraction is offline-only — no
+    * synchronous fact work on the store hot path; the drain's pattern pass now
+    * captures the high-precision triples the old inline call did. */
    {
       config_t tf_cfg;
       config_load(&tf_cfg);
-      if (tf_cfg.typed_facts_enabled)
-      {
-         (void)db2_typed_fact_ingress(content ? content : "", NULL, 0);
-         if (out.id > 0)
-            (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
-      }
+      if (tf_cfg.typed_facts_enabled && out.id > 0)
+         (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
    }
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)
