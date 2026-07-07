@@ -17,6 +17,9 @@ struct acl_entry
 
 static const struct acl_entry CONSOLE_ADMIN_ACL[] = {
     {"GET", "/v1/console/overview"},
+    {"GET", "/v1/console/typed_facts"},
+    {"POST", "/v1/console/typed_facts/config"},
+    {"POST", "/v1/console/typed_facts/relation"},
     {"POST", "/v1/enroll"},
     {"GET", "/v1/enrollments"},
     {"POST", "/v1/enrollments/{id}/revoke"},

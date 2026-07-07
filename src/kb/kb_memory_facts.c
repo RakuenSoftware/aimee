@@ -39,15 +39,17 @@
  * from the seed ontology (rel_types.c) at run time — this is the autonomous
  * reconciliation step (proposal §7): the model is bound to relations the write
  * gate already treats as durable, so an extracted fact commits ACTIVE and
- * recallable instead of being stranded as a provisional Class-C edge. Relations
- * outside the list fall to "other" and are left for the auto-promote tail. */
+ * recallable instead of being stranded as a provisional Class-C edge. When no
+ * seed relation fits, the model emits its own concise predicate (never a generic
+ * catch-all), which stays a distinguishable provisional candidate for §7.2. */
 #define MF_SYSTEM_PROMPT_TMPL                                                                      \
    "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
    "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
    "\"confidence\":0.0}]}. Each fact is a stable subject-relation-object triple "                  \
-   "grounded strictly in the note. relation MUST be exactly one of these canonical "               \
-   "predicates — choose the single nearest fit for each fact: %s. Use \"other\" "                  \
-   "ONLY when no listed predicate is a reasonable fit. subject is the entity the "                 \
+   "grounded strictly in the note. For relation, choose the single nearest fit "                   \
+   "from these canonical predicates when one reasonably applies: %s. If NONE fits, "                \
+   "emit a concise snake_case predicate of your own (e.g. drives, founded, mentors) "               \
+   "— NEVER a generic catch-all such as \"other\"/\"unknown\"/\"misc\". subject is the entity the " \
    "fact is about (use \"user\" for the note's author when it is first-person). "                  \
    "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
    "state, feelings, plans, and one-off events. If the note asserts no durable "                   \
