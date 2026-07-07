@@ -860,7 +860,14 @@ static int model_is_cpu_only(const char *model)
 static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *root)
 {
    int accel = !model_is_cpu_only(cfg->kb_curator_provider_model);
-   if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled"))
+   /* typed_facts_enabled is now KB-owned (kb.typed_facts.enabled). Only apply the
+    * accel-derived default when it is set by NEITHER the KB section nor the legacy
+    * root key — otherwise this would clobber the operator's explicit value. */
+   const cJSON *kb = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "kb");
+   const cJSON *kb_tf = kb ? cJSON_GetObjectItemCaseSensitive(kb, "typed_facts") : NULL;
+   int tf_explicit = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled") ||
+                     (kb_tf && cJSON_GetObjectItemCaseSensitive(kb_tf, "enabled"));
+   if (!tf_explicit)
       cfg->typed_facts_enabled = accel;
    if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite") &&
        !cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite_enabled"))
