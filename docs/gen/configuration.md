@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (139)
+## CLI-settable keys (141)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -92,6 +92,8 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
 | `kb_evidence_emit_enabled` | bool | Emit evidence records from KB ingest. |
+| `kb_fusion_mode` | string | KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha. |
+| `kb_fusion_static_alpha` | float | Lexical/dense blend weight (0-1) for the static_alpha fusion mode. |
 | `kb_mining_enabled` | bool | Enable background KB mining. |
 | `kb_mining_min_poll_s` | int | Minimum interval (s) between KB mining polls. |
 | `kb_pdf_assets_enabled` | bool | Render structured-PDF figure/table crops to the content-addressed blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm). |

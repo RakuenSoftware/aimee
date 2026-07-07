@@ -13,10 +13,11 @@ import (
 // aimee.yaml and take effect on the next turn (the server reloads config per
 // request).
 type settingField struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Type  string `json:"type"` // "bool" | "int"
-	Help  string `json:"help,omitempty"`
+	Key     string   `json:"key"`
+	Label   string   `json:"label"`
+	Type    string   `json:"type"` // "bool" | "int" | "enum"
+	Help    string   `json:"help,omitempty"`
+	Options []string `json:"options,omitempty"` // allowed values when Type=="enum"
 }
 
 var settingsAllow = []settingField{
@@ -30,6 +31,9 @@ var settingsAllow = []settingField{
 		Help: "Lower reasoning effort on simple turns."},
 	{Key: "max_iterations", Label: "Max iterations", Type: "int",
 		Help: "Tool-use loop ceiling per turn (0 = default)."},
+	{Key: "kb_fusion_mode", Label: "Retrieval fusion mode", Type: "enum",
+		Options: []string{"rrf", "static_alpha", "dynamic_alpha"},
+		Help:    "How lexical + dense KB search results are blended. dynamic_alpha adapts the weight per query (boost exact-token queries); rrf is the safe default."},
 }
 
 func settingAllowed(key string) bool {

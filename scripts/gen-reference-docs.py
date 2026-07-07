@@ -181,6 +181,8 @@ CFG_KEY_DESC = {
     "kb_api_bearer_token": "Bearer token for the aimee-kb API.",
     "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
+    "kb_fusion_mode": "KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha.",
+    "kb_fusion_static_alpha": "Lexical/dense blend weight (0-1) for the static_alpha fusion mode.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",
     "kb_pdf_vector_enabled": "Embed structured-PDF chunks into the isolated kb_pdf_embeddings "
