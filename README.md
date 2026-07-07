@@ -1,12 +1,22 @@
 # aimee
 
-**Your AI has no memory, no map of your code, and no brakes. Every session it starts blind,
-bills you to relearn your repo, and can still overwrite your `.env`.**
+aimee has two parts.
 
-**aimee fixes all of it, and goes further.** One memory across every tool. Your whole
-codebase as a live graph. Any model, any provider. Cheap delegates for the grunt work.
-Guardrails it cannot write past. Hand it a proposal and it ships the change itself: design,
-build, review, PR. Your context follows you anywhere. Nothing locks you in.
+**aimee-kb** is a general purpose knowledge base for a whole corpus of knowledge, whether
+that's a specific genre of knowledge, a company knowledge base, or a team's knowledge base.
+
+**aimee-server** is an assistant to a human. It learns how to work best with that human,
+learns and understands their expectations, and follows them. It is a general purpose
+assistant. It started as a coding assistant, and coding is still what it does best. It is
+*very strong* there, especially on multi-repo and large-repo work.
+
+**Your AI has no memory, no map of your work, and no brakes. Every session it starts blind,
+bills you to catch it up again, and can still overwrite your `.env`.**
+
+**aimee fixes all of it, and goes further.** One memory across every tool. Your knowledge and
+your code as one live graph. Any model, any provider. Cheap delegates for the grunt work.
+Guardrails it cannot write past. Workflows that run a whole job start to finish, with review
+panels and your sign-off built in. Your context follows you anywhere. Nothing locks you in.
 
 The memory and the code index are a **hybrid vector-graph**: vector recall fused with a typed
 knowledge graph and your code's call graph, ranked together. That is why it surfaces what the
@@ -67,9 +77,10 @@ on your hardware with no outside API calls, and the same local model doubles as 
 delegate. Swap the model tier with a single image, or run the CPU build for retrieval on any
 box. See [kb LLM backends](docs/KB_LLM_BACKENDS.md).
 
-**Autonomous development.** Hand aimee a written proposal and it runs the job unattended:
-design, plan, implement, review, open the PR. The primary agent manages, a panel of models
-reviews the work, and the delegates do the building. See
+**Workflows.** Compose a job out of typed steps and aimee runs it start to finish: the
+delegates do the work, review panels check it, and it parks at a human gate wherever you want
+the final say. The `build` workflow ships as the default, taking a written proposal all the
+way to a PR, and you can edit it or author your own. See [Workflows](docs/WORKFLOWS.md) and
 [Autonomous Development](docs/AUTONOMOUS_DEVELOPMENT.md).
 
 **Guardrails and isolation.** Sensitive files like `.env`, private keys, and production
