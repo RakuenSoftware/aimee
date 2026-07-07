@@ -7,22 +7,24 @@ How to point `aimee-kb` at the model backend that does its **embedding**,
 
 `aimee-kb` is a thin DB2 / curator service. It **never** runs an LLM or embedder
 in-process. It *calls* one over HTTP. Inference lives in a separate **`aimee-kb-*`
-tier image** (`aimee-kb-cpu` / `aimee-kb-gpu-small` / `aimee-kb-gpu-mid`, the unified
-Vulkan llama.cpp stack, deployed as the SmoothNAS `aimee-llm` plugin) or any external
+tier image** (`aimee-kb-cpu` / `aimee-kb-gpu-small` / `aimee-kb-gpu-mid` / `aimee-kb-gpu-large`,
+the unified Vulkan llama.cpp stack, deployed as the SmoothNAS `aimee-llm` plugin) or any external
 OpenAI-compatible endpoint. You only ever give the kb a **URL**. The tiers themselves are
 documented in [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Tiers: what each backend provides
 
-| Backend | Embedding / reranking | Synthesis | Embedding dim |
-| --- | --- | --- | --- |
-| **`aimee-kb-cpu`** (default) | Qwen3-Emb-0.6B + ettin-68m | **Tier-A** only (gemma-4-E4B, CPU) | **1024** |
-| **`aimee-kb-gpu-small`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 12B) | **2560** (set explicitly) |
-| **`aimee-kb-gpu-mid`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 26B-A4B) | **2560** (set explicitly) |
-| **External LLM** | per the endpoint | per the endpoint | per the endpoint |
+| Backend | Embedding / reranking | Synthesis | Embedding dim | Pull size |
+| --- | --- | --- | --- | --- |
+| **`aimee-kb-cpu`** (default) | Qwen3-Emb-0.6B + ettin-68m | **Tier-A** only (gemma-4-E4B, CPU) | **1024** | ~6.5 GB |
+| **`aimee-kb-gpu-small`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 12B) | **2560** (set explicitly) | ~11.4 GB |
+| **`aimee-kb-gpu-mid`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 26B-A4B, 24 GB card, 2 slots) | **2560** (set explicitly) | ~17.8 GB |
+| **`aimee-kb-gpu-large`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (same 26B-A4B, 32 GB card, 4 slots × 256 K) | **2560** (set explicitly) | ~17.8 GB |
+| **External LLM** | per the endpoint | per the endpoint | per the endpoint | — |
 
-`gpu-small` and `gpu-mid` share the 2560-dim embedder, so a KB moves between them with no
-re-embed. Pick by synth need, not by the KB.
+`gpu-small`, `gpu-mid`, and `gpu-large` share the 2560-dim embedder, so a KB moves between them
+with no re-embed. `gpu-large` is byte-identical to `gpu-mid` bar `SYNTH_SLOTS=4` (4 concurrent
+agents for a 32 GB card). Pick by synth need + card size, not by the KB.
 
 *Tier-A* = mechanical extract/index passes. *Tier-B* = reasoning passes (judge,
 resolve-entities, contradictions, **synthesize**, promote). A small CPU model is

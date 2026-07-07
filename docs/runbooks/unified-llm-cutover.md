@@ -9,9 +9,10 @@ the images build, serve `/embed`+`/rerank`(ettin encoder + gateway
 head)+`/v1/chat/completions`, and offload to the AMD 7900 XTX via Vulkan (`-ngl 99`).
 
 > **Naming update (post-cutover):** the images built here were renamed
-> `aimee-llm-cpu`/`aimee-llm-gpu` → `aimee-kb-cpu`/`aimee-kb-gpu-small`, and a third GPU
-> tier `aimee-kb-gpu-mid` (Gemma 4 26B-A4B) was added; `aimee-llm` is now only the plugin
-> name. The steps below keep the original names as a record, for the current tiers and
+> `aimee-llm-cpu`/`aimee-llm-gpu` → `aimee-kb-cpu`/`aimee-kb-gpu-small`, and two more GPU
+> tiers were added — `aimee-kb-gpu-mid` (Gemma 4 26B-A4B, 24 GB card) and `aimee-kb-gpu-large`
+> (same synth, 32 GB card, `SYNTH_SLOTS=4`); `aimee-llm` is now only the plugin name. The
+> steps below keep the original names as a record, for the current tiers, image sizes, and
 > build-args see [../AIMEE_KB_SYNTH_TIERS.md](../AIMEE_KB_SYNTH_TIERS.md).
 
 ## 0. What changes
@@ -39,14 +40,14 @@ release (no in-image rollback flag); a post-cutover revert is a deploy-tag rollb
 
 CI builds + publishes both tiers as part of the normal release cycle:
 - **main:** `.github/workflows/publish-images.yml` (via `auto-release.yml`) builds
-  `aimee-kb-cpu` + `aimee-kb-gpu-small` + `aimee-kb-gpu-mid` on every release and tags them
-  `:<version>` + `:latest`. They are in both the `build` and the `merge` matrices; the
-  merge step applies the tags, so a build that pushes only by digest leaves `tags:null`.
-  (`gpu-mid` is amd64-only.)
+  `aimee-kb-cpu` + `aimee-kb-gpu-small` + `aimee-kb-gpu-mid` + `aimee-kb-gpu-large` on every
+  release and tags them `:<version>` + `:latest`. They are in both the `build` and the `merge`
+  matrices; the merge step applies the tags, so a build that pushes only by digest leaves
+  `tags:null`. (`gpu-mid` and `gpu-large` are amd64-only.)
 - **testing:** `.github/workflows/publish-llm-testing.yml` builds `cpu` + `gpu-small` on
   `testing` pushes that touch `Dockerfile.aimee-llm` or the gateway/supervisor scripts,
-  tagged `:testing` (+ `:testing-<sha>`, amd64). `gpu-mid` is dispatch-only
-  (`build_kb_gpu_mid=true`): a tested-but-unreleased image for `.254`.
+  tagged `:testing` (+ `:testing-<sha>`, amd64). `gpu-mid` and `gpu-large` are dispatch-only
+  (`build_kb_gpu_mid=true` / `build_kb_gpu_large=true`): tested-but-unreleased images for `.254`.
 
 To build out-of-band (e.g. on a PVE CT with docker):
 

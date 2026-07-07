@@ -6,12 +6,12 @@ The `aimee-kb-*` image is the unified Vulkan llama.cpp stack: one runtime servin
 **synth model** (and its runtime profile); embed + rerank are identical within a
 CPU/GPU class, so a KB stays byte-portable when you swap the GPU synth tier.
 
-| Image | Embed / Rerank | Synth | Runtime |
-|---|---|---|---|
-| `aimee-kb-cpu` | Qwen3-Emb-0.6B / ettin-68m (1024-dim) | gemma-4-E4B (**Tier A only**) | CPU (`NGL=0`) |
-| `aimee-kb-gpu-small` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 12B** `qat-UD-Q4_K_XL` | GPU, dense, FA+K8V4 — 16 GB |
-| `aimee-kb-gpu-mid` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | GPU, MoE (4B active), FA+K8V4, fully resident, 2 slots — 24 GB |
-| `aimee-kb-gpu-large` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | Same GGUF as `gpu-mid`, 4 slots — 32 GB |
+| Image | Embed / Rerank | Synth | Runtime (target card) | Pull size |
+|---|---|---|---|---|
+| `aimee-kb-cpu` | Qwen3-Emb-0.6B / ettin-68m (1024-dim) | gemma-4-E4B (**Tier A only**) | CPU (`NGL=0`) | ~6.5 GB |
+| `aimee-kb-gpu-small` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 12B** `qat-UD-Q4_K_XL` | GPU, dense, FA+K8V4 — 16 GB | ~11.4 GB |
+| `aimee-kb-gpu-mid` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | GPU, MoE (4B active), FA+K8V4, fully resident, 2 slots — 24 GB | ~17.8 GB |
+| `aimee-kb-gpu-large` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | Same GGUF as `gpu-mid`, 4 slots — 32 GB | ~17.8 GB |
 
 `gpu-large` is byte-identical to `gpu-mid` (same synth GGUF/revision/SHA + MoE/FA profile);
 it only bakes `SYNTH_SLOTS=4` instead of `2`, so a 32 GB card runs **4 concurrent agents**
@@ -21,6 +21,12 @@ so even 4×256 K KV stays ~28.5 GiB — validated against the 24 GB `gpu-mid` ca
 22.4/24 GiB). `gpu-small`, `gpu-mid`, and `gpu-large` share the **same embedder + reranker**
 (2560-dim), so a KB embedded on one is byte-compatible with the others — switching the synth
 tier is a plugin **image swap**, no re-embed.
+
+**Image size** (amd64, compressed pull from ghcr): `cpu` ~6.5 GB, `gpu-small` ~11.4 GB,
+`gpu-mid` / `gpu-large` **~17.8 GB**. The mid/large image bakes ~19.3 GB of GGUFs
+(embed 4.28 GB + rerank 0.79 GB + synth 14.25 GB) → ~20 GB uncompressed on disk. `gpu-large`
+carries the *same* layers as `gpu-mid` (only the `SYNTH_SLOTS=4` env differs), so it is the
+same size — allow ~20 GB free disk on the host per GPU image, plus transient build headroom.
 
 ## Tier-A vs Tier-B synthesis
 
