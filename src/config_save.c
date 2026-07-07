@@ -852,6 +852,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "wfe_live_forge_enabled", 1);
    if (!cfg->audit_action_enabled) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "audit_action_enabled", 0);
+   if (cfg->audit_worm_enabled) /* default-off: persist only the opt-in (enable) */
+      cJSON_AddBoolToObject(root, "audit_worm_enabled", 1);
    if (!cfg->memory_md_retire) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "memory_md_retire", 0);
    /* default-on render backend: persist only a non-default value (a custom command

@@ -288,6 +288,8 @@ static const config_schema_entry_t config_schema[] = {
     {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
     {"gateway_pin_model", SCHEMA_BOOL, 0},
     {"css_style_graph_enabled", SCHEMA_BOOL, 0},
+    {"audit_action_enabled", SCHEMA_BOOL, 0},
+    {"audit_worm_enabled", SCHEMA_BOOL, 0},
     {"css_render_command", SCHEMA_STRING, 0},
     {"typed_facts_enabled", SCHEMA_BOOL, 0},
     {"kb_pdf_ingest_enabled", SCHEMA_BOOL, 0},
@@ -1118,6 +1120,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "audit_action_enabled");
    if (cJSON_IsBool(item))
       cfg->audit_action_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "audit_worm_enabled");
+   if (cJSON_IsBool(item))
+      cfg->audit_worm_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "memory_md_retire");
    if (cJSON_IsBool(item))
