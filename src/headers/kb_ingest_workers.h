@@ -3,7 +3,7 @@
 
 /* kb_ingest_workers.h: aimee-kb's in-process KB ingest driver.
  *
- * aimee-kb owns DB2/DB3 directly, so it claims ingest jobs from the DB2
+ * aimee-kb owns DB2 directly, so it claims ingest jobs from the DB2
  * queue itself (db2_kb_ingest_queue_claim_next) and runs the full build
  * in-process (kb_build + canonical_index_scan_project) — no RPC round-trip
  * back to a server-side compute pool. This replaces the former

@@ -27,8 +27,8 @@ retroactive-review pattern the curator depends on.
 
 ### Storage-boundary enforcement
 
-The original three-tier split (DB1 sqlite / DB2 postgres / DB3 qdrant)
-landed; the DB3 vector tier was then folded into DB2 as a pgvector
+The DB1 sqlite / DB2 postgres storage split landed; the vector tier,
+originally a separate Qdrant sidecar, was folded into DB2 as a pgvector
 extension (#1575) so vectors live in the same Postgres instance as the
 rest of DB2 knowledge. The active work is no longer subsystem migration
 planning; it is boundary enforcement and cleanup. Each storage tier
@@ -157,11 +157,11 @@ owner when someone is ready to pick it up.
   pluggable-db proposal sitting in `pending/` after being deleted by
   its successor is how `pending/` becomes stale signal. Worth a short
   `CONTRIBUTING.md` addition alongside the PR template.
-- **First-class operator audit surface:** the data is all there
+- **Dedicated operator audit surface:** the data is all there
   (`operator_id` on every shareable row, `content_hash`, timestamps),
   but a CLI verb rendering per-operator / per-scope activity in a
-  legible way does not exist. Flagged in the three-db-split
-  Known Weaknesses section.
+  legible way does not exist. Flagged as a known gap in the
+  DB1/DB2 storage-boundary work.
 - **Distributed-mode auth design:** the deep-curator token lifecycle
   is deliberately minimum-viable (opaque bearer, config-file seeded,
   per-token audit). OIDC, short-lived tokens with refresh, per-user

@@ -12,7 +12,7 @@ credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
 - **Dashboard overhaul + Logs tab**: the web UI **Dashboard** is now a customizable
-  grid of **server-incurred** metric panels — delegations, per-role metrics, token/cost,
+  grid of **server-incurred** metric panels: delegations, per-role metrics, token/cost,
   guardrail actions, agents, active sessions, readiness, plus opt-in panels (success by
   agent, latency percentiles, top tools, cache efficiency, failures, provider mix,
   confidence). Toggle/reorder panels via **⚙ Customize** (persisted per-browser); latency
@@ -21,24 +21,26 @@ credentials live in the server's **sealed vault**; see
   ledger (`aimee-kb` keeps its own dashboard for KB-internal events). See
   [DASHBOARD.md](DASHBOARD.md).
 - **Web Settings page for the full typed config**: the web UI **⚙️ Settings** page
-  (`/settings`) edits every allowlisted runtime config field — grouped, filterable, with
-  per-field save/reset — over the same `config.show`/`config.set` surface as the CLI. Newly
+  (`/settings`) edits every allowlisted runtime config field (grouped, filterable, with
+  per-field save/reset) over the same `config.show`/`config.set` surface as the CLI. Newly
   exposed groups: the context-economizer levers (`reduce.*`) and the autonomous-development
   pipeline knobs (`autonomy.*`, previously environment-only; a change applies on the next
   server start, and an exported `AIMEE_AUTONOMY_*` still overrides). Secrets and endpoints
   are deliberately not in the allowlist. See [SETTINGS.md](SETTINGS.md).
 - **Tool-output condensation** (default-ON, `reduce.command_filter`): a deterministic,
   command-aware context-economizer lever that condenses recognized command output at the
-  delegate tool seam — test-runner failures and compiler diagnostics kept, passing
-  transcripts and build progress dropped — with the full output spilled for lossless
+  delegate tool seam (test-runner failures and compiler diagnostics kept, passing
+  transcripts and build progress dropped), with the full output spilled for lossless
   recovery. Fail-open and byte-identical when off. Toggle it in the web Settings page. See
   [features/tool-output-condensation.md](features/tool-output-condensation.md).
-- **Self-hosted GPU inference tiers**: the `aimee-kb` inference image ships three tiers you
-  swap with one plugin image. `aimee-kb-cpu` runs retrieval on any host, `aimee-kb-gpu-small`
-  bakes a Gemma 4 12B synth, and `aimee-kb-gpu-mid` bakes a Gemma 4 26B-A4B synth that fits a
-  24 GB card fully resident. The GPU tiers build on a Mesa 25 base so RADV uses the RDNA3
-  matrix cores. The local synth also registers as a free delegate. See
-  [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
+- **Self-hosted GPU inference tiers**: the `aimee-kb` inference image ships four tiers you
+  swap with one plugin image. `aimee-kb-cpu` runs retrieval on any host (~6.5 GB image),
+  `aimee-kb-gpu-small` bakes a Gemma 4 12B synth (~11.4 GB, 16 GB card), `aimee-kb-gpu-mid`
+  bakes a Gemma 4 26B-A4B synth that fits a 24 GB card fully resident (~17.8 GB, 2 slots),
+  and `aimee-kb-gpu-large` reuses that same synth on a 32 GB card with 4 concurrent agents at
+  the full 256 K window (same ~17.8 GB image, only `SYNTH_SLOTS=4`). The GPU tiers build on a
+  Mesa 25 base so RADV uses the RDNA3 matrix cores. The local synth also registers as a free
+  delegate. See [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 - **Cross-repo code graph**: the symbol and call graph resolves dependency edges across the
   repositories in your workspace, so blast radius and caller lookups cross repo boundaries.
   Ask in three directions: what a project depends on, what depends on it, or both. See
@@ -51,7 +53,7 @@ credentials live in the server's **sealed vault**; see
   figure/table/page crops into a content-addressed blob store served by the
   access-gated, audited `pdf_open_asset` (`kb_pdf_assets_enabled`), and OCR
   scanned PDFs through the same citation path with an asset-only fallback
-  (`kb_pdf_ocr_enabled`). Each layer degrades cleanly when its sidecar/binary is
+  (`kb_pdf_ocr_enabled`). Each layer degrades when its sidecar/binary is
   absent. See [STRUCTURED_PDF.md](STRUCTURED_PDF.md).
 
 - **Server-sealed credential vault (single store)**: agent/delegate API keys and
@@ -103,7 +105,7 @@ credentials live in the server's **sealed vault**; see
 
 Delegation defaults and the roundtable, see [DELEGATES.md](DELEGATES.md).
 
-- **Delegates work out of the box**: a default agent roster, the ensemble panel,
+- **Delegates work by default**: a default agent roster, the ensemble panel,
   and `remote_writes=full` ship seeded, so `aimee delegate …` and the roundtable
   run on a fresh install with no setup.
 - **Roundtable runs through the delegate core**: `aimee delegate aggregate`

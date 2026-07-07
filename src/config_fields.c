@@ -99,6 +99,13 @@ const config_field_t config_fields[] = {
      sizeof(((config_t *)0)->memory_query_expansion_mode), 0, CFG_STRING},
     {"memory_query_expansion_k", offsetof(config_t, memory_query_expansion_k), sizeof(int), 0,
      CFG_INT},
+    /* KB retrieval fusion: rrf (default) | static_alpha | dynamic_alpha. Settable so
+     * an operator can pick a mode from the GUI/CLI; kb_search_fused reads it as the
+     * default when no per-request fusion_mode override is supplied. */
+    {"kb_fusion_mode", offsetof(config_t, kb_fusion_mode), sizeof(((config_t *)0)->kb_fusion_mode),
+     0, CFG_STRING},
+    {"kb_fusion_static_alpha", offsetof(config_t, kb_fusion_static_alpha), sizeof(double), 0,
+     CFG_FLOAT},
     {"autonomous", offsetof(config_t, autonomous), sizeof(int), 1, CFG_BOOL},
     {"cross_verify", offsetof(config_t, cross_verify), sizeof(int), 1, CFG_BOOL},
     {"ecomode", offsetof(config_t, ecomode), sizeof(int), 1, CFG_BOOL},

@@ -2,7 +2,7 @@
 
 The **Settings** page (aimee web UI, left nav → ⚙️ Settings, route `/settings`) is a typed
 editor over the server's runtime configuration. It exposes **every allowlisted config
-field** — the same `config.show` / `config.set` surface the `aimee config` CLI uses — as a
+field** (the same `config.show` / `config.set` surface the `aimee config` CLI uses) as a
 grouped, filterable form with per-field **Save** and **Reset**.
 
 It is a thin surface over machinery that already exists: each control maps 1:1 to a
@@ -17,7 +17,7 @@ request), unless noted otherwise below.
   /api/config/set {key,value}` → `config.set` (the server validates the key against
   `config_fields` and persists `aimee.yaml`). The webchat proxy (`webchat/config_api.go`)
   is the only network hop; there are no server changes per field.
-- **Control inference:** the control type is inferred from the value's JSON type — a
+- **Control inference:** the control type is inferred from the value's JSON type: a
   **boolean → toggle**, a **number → number field**, a **string → text field**. Grouping is
   by the dotted key prefix (e.g. everything under `reduce.` forms one section).
 - **Quick panel:** a smaller gear dropdown in the top bar (`SettingsPanel`) surfaces the
@@ -25,7 +25,7 @@ request), unless noted otherwise below.
   iterations). The full page is the comprehensive home for everything else.
 
 > **Allowlist, not raw config.** The page can only read/write keys in `config_fields`.
-> Sensitive values — endpoints, `*_key_cmd`, `db2_url`, and **secrets** — are deliberately
+> Sensitive values (endpoints, `*_key_cmd`, `db2_url`, and **secrets**) are deliberately
 > *not* in that allowlist and never appear here. In particular the CI-webhook secret
 > (`AIMEE_CI_WEBHOOK_SECRET`) is an environment secret, not a Settings field.
 
@@ -33,7 +33,7 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer — two-tier switches (`economizer.*`) + levers (`reduce.*`)
+### Context economizer: two-tier switches (`economizer.*`) + levers (`reduce.*`)
 
 The economizer has two **tier switches** that gate the individual `reduce.*` levers, plus the
 levers themselves. All are booleans except the two numeric tuning knobs. Defaults in
@@ -42,8 +42,8 @@ parentheses.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | **`economizer.enabled`** | **on** | **Master switch.** Off = one kill-switch: every reducer is forced off (measurement keeps running and reports zero, proving the kill). The safe tier stays on under it by the levers' own defaults. |
-| `economizer.aggressive` | off | **Opt-in ceiling for the aggressive tier** (live **primary** `/v1` mutation). `reduce.gateway_mutate` activates only with **`economizer.enabled` AND `economizer.aggressive` AND** the lever itself — the aggressive flag alone never turns on a live-traffic mutator. |
-| **`reduce.command_filter`** | **on** | **Tool-output condensation** — deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
+| `economizer.aggressive` | off | **Opt-in ceiling for the aggressive tier** (live **primary** `/v1` mutation). `reduce.gateway_mutate` activates only with **`economizer.enabled` AND `economizer.aggressive` AND** the lever itself; the aggressive flag alone never turns on a live-traffic mutator. |
+| **`reduce.command_filter`** | **on** | **Tool-output condensation**: deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
 | `reduce.gateway_mutate` | off | Apply the economizer to the live inbound `/v1` request so the **primary** agent's tokens are reduced too. See [Economizer gateway mutation](features/economizer-gateway-mutation.md). |
 | `reduce.compress` | on | Size-based compression of oversized tool-result bodies. |
 | `reduce.history_fold` | on | Fold old turn history into a rolling skeleton. |
@@ -53,10 +53,10 @@ parentheses.
 | `reduce.gateway_session_disable_ttl_ms` | 3600000 | Gateway-mutation circuit-breaker window (ms). Must be > 0. |
 | `reduce.freeze_guard_horizon` | 1 | Expected reuse turns for the freeze break-even estimate. |
 
-`reduce.gateway_seam` is intentionally **not** on the page — it is synthesized from
+`reduce.gateway_seam` is intentionally **not** on the page. It is synthesized from
 `gateway_mutate` and its persistence is explicit-gated; toggle `gateway_mutate` instead.
 
-### Autonomous-development pipeline — `autonomy.*`
+### Autonomous-development pipeline: `autonomy.*`
 
 The autonomous-development knobs were historically environment-only (`AIMEE_AUTONOMY_*`).
 They are now typed config fields on the Settings page. A `config` value is **bridged to the
@@ -99,8 +99,8 @@ behavior, safety contract, and observability.
 
 ## When a change takes effect
 
-- **Immediately (next turn):** the economizer `reduce.*` levers and most other fields — the
+- **Immediately (next turn):** the economizer `reduce.*` levers and most other fields. The
   server reloads config per request.
-- **On next server start:** the `autonomy.*` knobs — they are bridged to `AIMEE_AUTONOMY_*`
+- **On next server start:** the `autonomy.*` knobs: they are bridged to `AIMEE_AUTONOMY_*`
   environment variables at startup so the workflow engine (which reads them across a module
   boundary) sees them; an explicitly-set env var always wins.

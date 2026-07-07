@@ -10,9 +10,9 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"
-#include "vault_service.h"    /* vault_service_set / set_server, VAULT_API_KEY_CRED */
-#include "vault_capability.h" /* vault_capability_server_write_allowed (single server-write gate) */
-#include "server_cli_oauth.h" /* server-hosted OAuth CLI agent setup */
+#include "vault_service.h"    /* vault_service_set_server, VAULT_API_KEY_CRED */
+#include "vault_capability.h" /* vault_agent_key_server_seal_allowed (agent-key server-vault gate) */
+#include "server_cli_oauth.h"     /* server-hosted OAuth CLI agent setup */
 #include "provider_cli_adapter.h" /* provider_cli_adapter_get: declared CLI caps */
 #include "config.h"               /* config_load / config_t */
 #include <pthread.h>
@@ -632,46 +632,23 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       else
       {
-         /* Where the client-supplied key lands depends on whether the conn may mint
-          * a SHARED server credential (vault_capability_server_write_allowed — the
-          * single gate handle_vault_set_server also uses):
-          *  - authorized to server-write (native-TLS+bearer, OR a capability-granted
-          *    principal: an attested webchat webuser:/UDS uid: holding
-          *    vault:write:server) -> the server-owned vault, so the key works for
-          *    ALL connections/delegate turns automatically. This is how an attested
-          *    webchat user provisions a delegate key over the HTTPS GUI without the
-          *    /v1 bearer ever entering webchat — the grant is the audited, revocable
-          *    authority.
-          *  - any other per-user principal (UDS uid: / webchat webuser: WITHOUT the
-          *    grant) -> the caller's own dual-access vault (requires it unlocked).
-          *  - no principal and not server-write-authorized (plaintext TCP, or an
-          *    un-attested conn e.g. UDS uid 0) -> REFUSED (D2b); never write the
-          *    secret to agents.json. */
-         const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
+         /* A delegate's key is SHARED server config: seal it into the server vault
+          * (see vault_agent_key_server_seal_allowed) so it works for every connection and
+          * every autonomous turn from a default install — no unlock, no grant. Only
+          * an un-attested / plaintext-TCP conn is refused (D2b). */
          attested_transport_t transport = conn ? conn->attested_transport : ATTEST_NONE;
-         int server_write = vault_capability_server_write_allowed(transport, principal);
-         if (!server_write && !principal)
+         if (!vault_agent_key_server_seal_allowed(transport))
             return server_send_error(
                 conn,
                 "vault: `agent add --key` over a plaintext connection cannot store a credential; "
                 "use a native-TLS (https) connection, or an attested local/webchat connection",
                 NULL);
-         vault_status_t vst = server_write
-                                  ? vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key)
-                                  : vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key,
-                                                      (long)time(NULL));
+         vault_status_t vst = vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key);
          if (vst != VAULT_OK)
-         {
-            if (vst == VAULT_ERR_LOCKED)
-               return server_send_error(
-                   conn, "vault locked: run `aimee vault unlock` before adding a key", NULL);
             return server_send_error(conn, "could not store credential in the vault", NULL);
-         }
          /* A server-vault write (shared credential) is a minting event: audit it
-          * identically to handle_vault_set_server so it is never silent. A per-user
-          * dual-access write is the caller's own vault. */
-         if (server_write)
-            vault_audit_server_write(conn, ag->name, VAULT_API_KEY_CRED, key);
+          * identically to handle_vault_set_server so it is never silent. */
+         vault_audit_server_write(conn, ag->name, VAULT_API_KEY_CRED, key);
          ag->api_key[0] = '\0';      /* the secret lives only in the vault */
          ag->api_key_disk[0] = '\0'; /* and nothing goes to agents.json */
       }
@@ -1101,27 +1078,20 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       else
       {
-         const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
+         /* Re-keying a delegate: seal into the shared server vault exactly as
+          * `agent add` does (vault_agent_key_server_seal_allowed), so a default install
+          * works with no unlock/grant. Only un-attested / plaintext-TCP is refused. */
          attested_transport_t transport = conn ? conn->attested_transport : ATTEST_NONE;
-         int server_write = vault_capability_server_write_allowed(transport, principal);
-         if (!server_write && !principal)
+         if (!vault_agent_key_server_seal_allowed(transport))
             return server_send_error(
                 conn,
                 "vault: `agent set --key` over a plaintext connection cannot store a credential; "
                 "use a native-TLS (https) or attested local/webchat connection",
                 NULL);
-         vault_status_t vst = server_write
-                                  ? vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key)
-                                  : vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key,
-                                                      (long)time(NULL));
+         vault_status_t vst = vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key);
          if (vst != VAULT_OK)
-            return server_send_error(conn,
-                                     vst == VAULT_ERR_LOCKED
-                                         ? "vault locked: run `aimee vault unlock` before re-keying"
-                                         : "could not store credential in the vault",
-                                     NULL);
-         if (server_write)
-            vault_audit_server_write(conn, ag->name, VAULT_API_KEY_CRED, key);
+            return server_send_error(conn, "could not store credential in the vault", NULL);
+         vault_audit_server_write(conn, ag->name, VAULT_API_KEY_CRED, key);
       }
    }
 

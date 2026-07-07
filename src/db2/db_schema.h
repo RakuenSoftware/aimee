@@ -2,8 +2,7 @@
 #define DEC_DB2_DB_SCHEMA_H 1
 
 /* DB2 (Postgres) idempotent schema bootstrap. The DB1 (SQLite) half
- * of the split lives in db1/db_schema.h. See
- * docs/proposals/accepted/three-db-split-user-shared-vectors.md. */
+ * of the split lives in db1/db_schema.h. See docs/STORAGE_TIERS.md. */
 
 #include <stddef.h>
 

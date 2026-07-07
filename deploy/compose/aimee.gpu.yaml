@@ -18,6 +18,12 @@ services:
       # sliding-window attention (5 local layers windowed to 1024 : 1 global), so the
       # 128K KV is dominated by the few global layers (~2-3GB), not all-layers-x-128K —
       # well under 24GB. 256K would still fit with KV-cache quantization if ever needed.
+      #
+      # Tier picks (override AIMEE_LLM_IMAGE + AIMEE_LLM_SYNTH_CTX per card):
+      #   gpu-small (16GB): ...-gpu-small,  CTX 131072  (1 × 128K)
+      #   gpu-mid   (24GB): ...-gpu-mid,    CTX 262144   (2 × 128K, SLOTS=2)
+      #   gpu-large (32GB): ...-gpu-large,  CTX 1048576  (4 × 256K, SLOTS=4) — each of
+      #     4 agents gets the full native 256K window; ~28.5GiB used, ~3.5GB headroom.
       AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
     devices:
       - "/dev/dri:/dev/dri"

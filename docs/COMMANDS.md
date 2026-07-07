@@ -162,7 +162,7 @@ Useful flags:
     bearer `aimee-local-dev`. Connecting with it (`aimee remote set <url>
     aimee-local-dev`) auto-runs enrollment: the server mints a strong random
     per-deployment bearer (`api.rotate_bearer`), the client adopts it in
-    `remote.conf`, and the bootstrap token immediately stops working — so the
+    `remote.conf`, and the bootstrap token immediately stops working, so the
     shared default is never a standing credential. `aimee remote enroll` forces a
     fresh rotation on the configured remote at any time. To skip the bootstrap
     entirely, set `AIMEE_API_BEARER_TOKEN` on the server (secret store) to pin your

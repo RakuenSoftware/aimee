@@ -1,5 +1,5 @@
 /* DB2 (Postgres) idempotent schema bootstrap.
- * See docs/proposals/accepted/three-db-split-user-shared-vectors.md. */
+ * See docs/STORAGE_TIERS.md. */
 
 #include "db_schema.h"
 #include "db_postgres.h"

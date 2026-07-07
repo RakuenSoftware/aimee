@@ -223,7 +223,7 @@ auto-retried without new input (a CI log or a roundtable verdict).
 
 ## Current limitations
 
-Honest scope of the current implementation (the design allows for more):
+Scope of the current implementation (the design allows for more):
 
 - **Submit takes `proposal_md`, `workflow`, `repo` only.** Per-run `limits` and
   gate **preauthorization** are not yet accepted at `/v1/dev/submit`; gates are
@@ -256,7 +256,7 @@ Honest scope of the current implementation (the design allows for more):
 | autonomy driver (`wfe_autonomy`) | advances machine gates, parks at human gates, never forges approval |
 | turn registry / server-owned turns | a run survives client disconnect (the foundation) |
 
-**Invariants** (by construction): aimee never self-initiates; the primary manages
+**Invariants**: aimee never self-initiates; the primary manages
 while delegates do the work; rejected work is re-delegated; **all** autonomous
 action flows through the workflow engine, there is no side-channel that takes an
 autonomous action outside the engine's gates, budget, and audit.

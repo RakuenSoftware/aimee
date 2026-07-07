@@ -1,7 +1,7 @@
 # `/v1` op-parity buildout: route→method map and wave plan
 
 > Working tracker for **P1 / WP1.x / WP1.fin** of the aimee `/v1` hub-migration plan.
-> Goal: **every NDJSON RPC method gets a first-class `/v1` HTTP route** (or a
+> Goal: **every NDJSON RPC method gets a dedicated `/v1` HTTP route** (or a
 > documented, deliberate exclusion). The generic `POST /v1/rpc` passthrough is
 > retired; this buildout gave each method a dedicated, self-documenting,
 > OpenAPI-listed route.
@@ -9,7 +9,7 @@
 ## Mechanism (already landed: WP0.2, #2531)
 
 The `/v1` surface is a declarative table in
-`src/server/server_http_routes.inc`. Adding a first-class route is:
+`src/server/server_http_routes.inc`. Adding a dedicated route is:
 
 1. **One table row.** For a single-response method that takes a **JSON-object
    body**, the row is `{"POST", "/v1/<family>/<verb>", NULL, RM_EXACT,
@@ -43,13 +43,13 @@ The `/v1` surface is a declarative table in
   `GET /v1/models`, `GET /v1/kb/status`, backed by `route_json_provider`) are a
   *different* curated surface and coexist with the per-method routes below.
 
-## Deliberate exclusions (NOT given a first-class route)
+## Deliberate exclusions (NOT given a dedicated route)
 
 | Method(s) | Why |
 |---|---|
-| `hooks.pre`, `hooks.post`, `hooks.session_start` | Internal harness lifecycle hooks; now first-class privileged routes at `/v1/hooks/*`, gated by `CAP_TOOL_EXECUTE`. |
-| `runner.poll`, `runner.respond` | Already first-class (`/v1/runner/*`, workspace detached reverse channel). |
-| `primary.get/set/clear` | Already first-class via `/v1/sessions/{id}/primary`. |
+| `hooks.pre`, `hooks.post`, `hooks.session_start` | Internal harness lifecycle hooks; now dedicated privileged routes at `/v1/hooks/*`, gated by `CAP_TOOL_EXECUTE`. |
+| `runner.poll`, `runner.respond` | Already dedicated (`/v1/runner/*`, workspace detached reverse channel). |
+| `primary.get/set/clear` | Already dedicated via `/v1/sessions/{id}/primary`. |
 | `tool.execute` | Internal tool-execution path at `/v1/tools/execute` (workspace plane); gated by `CAP_TOOL_EXECUTE`, not a public verb. |
 
 > **Inline-dispatch latency budget.** Dispatch-op routes run inline on the
@@ -61,7 +61,7 @@ The `/v1` surface is a declarative table in
 > they are routed **async** via `rh_dispatch_op_async`: the POST returns a
 > queued run handle and a detached worker drives the loopback RPC to completion;
 > poll status/result at `GET /v1/runs/{id}`. So they keep the listener free
-> while still being first-class `/v1` routes.
+> while still being dedicated `/v1` routes.
 
 `server.health`/`server.info` and `model.list` overlap the existing
 `/v1/health`, `/v1/version`, `/v1/models` read-views; the owning wave maps them
@@ -69,7 +69,7 @@ to the existing route (no duplicate) and notes it.
 
 ## Family → wave map
 
-Counts are methods needing a *new* first-class route (after exclusions). Each
+Counts are methods needing a *new* dedicated route (after exclusions). Each
 wave is one delegated packet (`aimee delegate code --persona engineer --verify
 "cd src && make server-api-conformance-check && make unit-tests"`), with the
 registry + handler files + `--files` preloaded. **Waves are serialized** (each

@@ -250,6 +250,17 @@ int vault_capability_server_write_allowed(attested_transport_t transport, const 
    return attested && vault_capability_has(principal);
 }
 
+int vault_agent_key_server_seal_allowed(attested_transport_t transport)
+{
+   /* See the header for the rationale: an agent's OWN key is shared server config,
+    * so ANY attested confidential channel may seal it — no per-principal grant, and
+    * so no store lookup here. Wider than the server-write gate above (which still
+    * requires a grant for UDS/webchat) and also admits a verified mTLS client. Only
+    * a plaintext TCP bearer (D2b) and an un-attested conn are refused. */
+   return transport == ATTEST_TLS_BEARER || transport == ATTEST_MTLS_CLIENT ||
+          transport == ATTEST_WEBCHAT_TRUSTED || transport == ATTEST_UDS_PEERCRED;
+}
+
 int vault_capability_has(const char *principal)
 {
    if (!principal_valid(principal))

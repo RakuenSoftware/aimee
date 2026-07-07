@@ -2,7 +2,7 @@
 
 Rotate the server-sealed master key that protects the credential vault (D13 of the
 [cred-vault-consolidation](../proposals/done/cred-vault-consolidation.md) proposal).
-**Operator-gated, offline maintenance op** — never automatic.
+**Operator-gated, offline maintenance op**: never automatic.
 
 ## 0. What this does (and does not)
 
@@ -11,7 +11,7 @@ The 32-byte `.server-master.key` lives `0600` beside the vault at
 wraps every server-decryptable credential's data-encryption key (DEK):
 
 - the **server principal** (`server`) holds the server KEK as its **primary** wrap
-  (`wrapped_dek`) — these are the shared delegate keys (minimax/mistral/glm/codex…);
+  (`wrapped_dek`). These are the shared delegate keys (minimax/mistral/glm/codex…);
 - every **user principal** that has a dual-access entry holds it in `wrapped_dek_server`.
 
 Rotation mints a fresh master key and **re-wraps** those DEKs from the old server KEK to the
@@ -27,7 +27,7 @@ Trust boundary is unchanged: the new master key is still a `0600` file on the se
 ## 1. Why it is offline
 
 `aimee-server` caches one process-wide server KEK. A *live* rotation would leave autonomous
-decrypts failing for the window between re-wrapping a credential and swapping the key — every
+decrypts failing for the window between re-wrapping a credential and swapping the key. Every
 delegate would 401 mid-rotation. So rotation runs with the **server stopped**, against the
 on-disk vault, and exits.
 
@@ -35,10 +35,10 @@ on-disk vault, and exits.
 
 - **Server stopped.** `--rotate-master-key` refuses to run if an `aimee-server` instance is
   live for the default socket (the server caches the old KEK and could write a credential
-  under it during the re-wrap window — see §1). Stop the server first.
+  under it during the re-wrap window; see §1). Stop the server first.
 - **`AIMEE_HOME` permissions.** The pre-rotation backup is written under `AIMEE_HOME` as a
   `0700` directory of `0600` files, but it inherits the *parent* directory's reachability.
-  Ensure `AIMEE_HOME` is writable only by the server's runtime UID — otherwise the backup
+  Ensure `AIMEE_HOME` is writable only by the server's runtime UID; otherwise the backup
   (which holds old-key ciphertext) sits in a directory others can traverse.
 
 ## 3. Procedure
@@ -70,7 +70,7 @@ rm -rf /var/lib/aimee/.vault.rotate-bak.12345
 - **Atomic + reversible.** The entire `.vault/` is copied to `.vault.rotate-bak.<pid>` (0700)
   **before** any mutation. If any principal's re-wrap fails (wrong key / tamper) **or** the
   new master key cannot be persisted, the vault is **restored from that backup** and the
-  command aborts non-zero with the vault unchanged — never a new-wrapped vault under an old
+  command aborts non-zero with the vault unchanged, never a new-wrapped vault under an old
   master, nor the reverse.
 - **Crash mid-run.** The new master key is written **last** (atomic tmp+rename+fsync), only
   after every re-wrap has succeeded. A crash before that leaves the old master + old wraps

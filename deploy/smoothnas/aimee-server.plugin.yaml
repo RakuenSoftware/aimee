@@ -90,6 +90,16 @@ services:
         default: ""
         secret: true
         description: PAM login password for the browser UI (set alongside the user).
+      # Optional: additional persistent browser logins beyond the primary above.
+      # Comma- and/or newline-separated "user:password" entries (only the first
+      # ':' splits, so a password may contain ':' but not a comma/newline). Each
+      # is provisioned on every start, so extra accounts survive a plugin update.
+      - key: AIMEE_WEBCHAT_USERS
+        type: string
+        label: Additional webchat logins
+        default: ""
+        secret: true
+        description: 'Extra PAM logins as "user:password" entries, comma-separated (e.g. admin:s3cret,laura:pw).'
       # Optional: point the kb synthesis / curator passes at an OpenAI-compatible
       # endpoint. Blank = disabled.
       - key: LLM_ENDPOINT

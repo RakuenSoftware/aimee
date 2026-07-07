@@ -1,6 +1,6 @@
 /* kb_ingest_workers.c: aimee-kb's in-process KB ingest driver.
  *
- * aimee-kb owns DB2/DB3, so it claims ingest jobs straight off the DB2 queue
+ * aimee-kb owns DB2, so it claims ingest jobs straight off the DB2 queue
  * (db2_kb_ingest_queue_claim_next, which uses FOR UPDATE SKIP LOCKED and is
  * safe for concurrent claimers) and runs the full build in-process —
  * kb_build() (compute + store) then canonical_index_scan_project(). No RPC
@@ -24,6 +24,7 @@
 #include "log.h"
 #include "workspace.h"
 
+#include "db2/db2.h" /* db2_lease_release_idle */
 #include "db2/canonical_index.h"
 #include "db2/kb_runtime_state.h"
 #include "db2/kb_service_backend.h"
@@ -213,10 +214,24 @@ static void *kbiw_worker_thread(void *arg)
        * a DB2 lease so the pooled connection is returned to the pool between
        * bursts (WP-C) instead of held for the worker thread's life. */
       db2_lease_begin();
+      long lease_started = (long)time(NULL);
       while (kbiw_claim_and_process() == 1)
       {
          if (ctx->ingest_stop)
             break;
+         /* A cold-start (or post-restart) drain can be thousands of docs, each an
+          * embed — a single burst then pins one pooled connection for minutes and
+          * trips the pool's 300s stuck-lease ceiling (observed: `member N leased
+          * >300000ms` while the corpus re-embeds). Return the connection to the
+          * pool periodically mid-drain so no single lease outlives the ceiling.
+          * Safe between items: each kbiw_claim_and_process commits its own unit,
+          * and pool connections carry no cross-lease state (DISCARD ALL on return). */
+         if ((long)time(NULL) - lease_started >= 120)
+         {
+            db2_lease_end();
+            db2_lease_begin();
+            lease_started = (long)time(NULL);
+         }
       }
       db2_lease_end();
    }
@@ -555,6 +570,11 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       char embed_text[4096];
       kb_async_make_embed_text(chunks[ci].heading_path, chunks[ci].content, embed_text,
                                sizeof(embed_text));
+      /* Drop the pool lease before the (slow) embedder round-trip so a long
+       * doc-ingest loop can't pin a connection past the 300s stuck-lease ceiling
+       * and wedge the drain. No-op inside an explicit lease scope; DB writes below
+       * re-acquire lazily. See kb_curator_extract_code / kb_service_code_embed. */
+      db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
       int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
       if (dim > 0)
@@ -709,6 +729,10 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
    {
       char embed_text[4096];
       kb_async_make_embed_text(rows[i].heading, rows[i].content, embed_text, sizeof(embed_text));
+      /* Drop the pool lease before the embedder round-trip (see above): this
+       * backfill loop embeds up to max_chunks per project across every project,
+       * so holding the lease across it trips the stuck-lease ceiling. */
+      db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
       int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
       if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)

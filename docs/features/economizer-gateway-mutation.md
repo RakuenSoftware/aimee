@@ -1,8 +1,8 @@
 # Economizer gateway mutation (primary-agent context reduction)
 
 The context economizer reduces the **delegate** (sub-agent) turn loop by default. The
-inbound `/v1` **gateway** — the path that serves the **primary** agent, including
-Claude-Code-through-aimee and Codex-through-aimee — historically ran the economizer in
+inbound `/v1` **gateway** (the path that serves the **primary** agent, including
+Claude-Code-through-aimee and Codex-through-aimee) historically ran the economizer in
 **shadow** (`measure_only`): it measured the reduction opportunity but never applied it.
 
 **Gateway mutation** makes the gateway *apply* the reduced messages to the live request,
@@ -19,7 +19,7 @@ reduce:
   gateway_session_disable_ttl_ms: 3600000  # NEW: circuit-breaker window (1h). MUST be > 0.
 ```
 
-- `gateway_mutate: true` **implies** `gateway_seam` — config load auto-enables the shadow
+- `gateway_mutate: true` **implies** `gateway_seam`: config load auto-enables the shadow
   seam **in memory** (never rewriting your file) and logs one WARN, so the shadow baseline
   the validation gates compare against always exists.
 - `gateway_session_disable_ttl_ms` **must be > 0**. `0`/negative is a **startup-fatal**
@@ -35,11 +35,11 @@ reduce:
 - **Streaming** (`/v1/messages` stream:true): the HTTP 200 is committed to the client on
   the first byte, so there is **no mid-stream retry**. The reduced stream is sent; if an
   **invalid-request-class** SSE error frame (`invalid_request_error` / `request_too_large`)
-  is seen — inspected at the SSE decoder layer and forwarded unchanged — the session is
+  is seen (inspected at the SSE decoder layer and forwarded unchanged), the session is
   disabled for **subsequent** turns. Rate-limit / overloaded / auth frames are forwarded
   **without** disabling. The current turn always completes as the upstream delivered it.
 - **OpenAI `/v1/responses` streaming** buffers upstream (via the same buffered path) then
-  replays as SSE, so it inherits the **buffered** treatment — including the 4xx
+  replays as SSE, so it inherits the **buffered** treatment, including the 4xx
   restore-resend. aimee has no true token-by-token upstream streaming for the OpenAI
   primary path, so there is no OpenAI-specific streaming disable-only code.
 
@@ -48,7 +48,7 @@ reduce:
 Mutation is attempted only for a **resolvable per-identity session key**, derived (in
 order) from a validated `aimee-session-id` header (`== SHA-256(auth_identity)[0..16)`),
 else `SHA-256(bearer)[0..16)`. A request with **neither** is a pristine passthrough that
-writes **no** disable state — so one caller's failure can never disable reduction for an
+writes **no** disable state, so one caller's failure can never disable reduction for an
 unrelated caller. Disable state is a bounded (10k), TTL'd, process-local set.
 
 ## Safety contract

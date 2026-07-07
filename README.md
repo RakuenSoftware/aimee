@@ -1,12 +1,22 @@
 # aimee
 
-**Your AI has no memory, no map of your code, and no brakes. Every session it starts blind,
-bills you to relearn your repo, and can still overwrite your `.env`.**
+aimee has two parts.
 
-**aimee fixes all of it, and goes further.** One memory across every tool. Your whole
-codebase as a live graph. Any model, any provider. Cheap delegates for the grunt work.
-Guardrails it cannot write past. Hand it a proposal and it ships the change itself: design,
-build, review, PR. Your context follows you anywhere. Nothing locks you in.
+**aimee-kb** is a general purpose knowledge base for a whole corpus of knowledge, whether
+that's a specific genre of knowledge, a company knowledge base, or a team's knowledge base.
+
+**aimee-server** is an assistant to a human. It learns how to work best with that human,
+learns and understands their expectations, and follows them. It is a general purpose
+assistant. It started as a coding assistant, and coding is still what it does best. It is
+*very strong* there, especially on multi-repo and large-repo work.
+
+**Your AI has no memory, no map of your work, and no brakes. Every session it starts blind,
+bills you to catch it up again, and can still overwrite your `.env`.**
+
+**aimee fixes all of it, and goes further.** One memory across every tool. Your knowledge and
+your code as one live graph. Any model, any provider. Cheap delegates for the grunt work.
+Guardrails it cannot write past. Workflows that run a whole job start to finish, with review
+panels and your sign-off built in. Your context follows you anywhere. Nothing locks you in.
 
 The memory and the code index are a **hybrid vector-graph**: vector recall fused with a typed
 knowledge graph and your code's call graph, ranked together. That is why it surfaces what the
@@ -43,21 +53,58 @@ back instead of raw content, so you save twice, on the delegate and on the prima
 context. aimee also compresses what each turn sends upstream, so even your main model's bill
 drops. It tracks cost and success per delegate and routes better over time.
 
+**Tokens cut on both ends.** A context economizer works in two tiers. The safe tier
+runs by default: it deterministically condenses tool output (keeps the failing test,
+elides the passing ones; keeps compiler errors, drops progress spam), compresses oversized
+results, and folds stale turn history into a rolling skeleton, with the full output spilled
+to disk for recovery. The aggressive tier is opt in: it applies the same reduction to the
+live primary request so your main model's own bill drops too, compress only, behind a per
+session circuit breaker that never dispatches anything it cannot restore. See
+[Settings](docs/SETTINGS.md).
+
+**A tamper evident record of every action.** Each governed tool call runs through one choke
+point that decides allow, rewrite, or block, and writes that verdict to an append only,
+mode-0600, rotated audit ledger: who acted, which tool, the mode, a stable reason code, and
+a keyed HMAC digest of the arguments, keyed so a low entropy argument cannot be recovered
+from the log and allowlisted so a new tool can never leak a secret into it. Human sign off
+gates are HMAC-SHA256 signed and non forgeable. Decision records capture what you decided,
+why, what it supersedes, and when to revisit it, one active per scope. See
+[Security Model](docs/SECURITY.md) and [KB Console](docs/KB_CONSOLE.md).
+
 **Run the models yourself.** aimee ships a self hosted inference stack: embeddings,
 reranking, and synthesis baked into one CPU or GPU container. The knowledge base curates entirely
 on your hardware with no outside API calls, and the same local model doubles as a free
 delegate. Swap the model tier with a single image, or run the CPU build for retrieval on any
 box. See [kb LLM backends](docs/KB_LLM_BACKENDS.md).
 
-**Autonomous development.** Hand aimee a written proposal and it runs the job unattended:
-design, plan, implement, review, open the PR. The primary agent manages, a panel of models
-reviews the work, and the delegates do the building. See
+**Workflows.** Compose a job out of typed steps and aimee runs it start to finish: the
+delegates do the work, review panels check it, and it parks at a human gate wherever you want
+the final say. The `build` workflow ships as the default, taking a written proposal all the
+way to a PR, and you can edit it or author your own. See [Workflows](docs/WORKFLOWS.md) and
 [Autonomous Development](docs/AUTONOMOUS_DEVELOPMENT.md).
 
 **Guardrails and isolation.** Sensitive files like `.env`, private keys, and production
 configs are blocked before the AI can touch them. Known anti patterns raise warnings.
 Planning mode freezes every write until you are ready. Each session runs in its own git
 worktree, so two sessions never step on each other.
+
+**A browser workspace.** aimee ships its own browser UI, `aimee-webchat`:
+chat, a live view of your code as a graph, a git project manager that clones repos and holds
+per host tokens, a full in app VS Code editor, and dashboards over what the server is doing.
+No terminal required. See [Dashboard & Logs](docs/DASHBOARD.md).
+
+**Ready for a team.** Multi user accounts with scoped tokens, OIDC single sign on, optional
+mutual TLS client identity, and a per principal encrypted credential vault so one user's git
+token or provider key is never readable by another. See [Security Model](docs/SECURITY.md).
+
+**Documents become evidence.** Ingest a PDF and every retrieved snippet carries the page and
+bounding box it came from, so an answer traces back to the exact spot on the page. Table
+cells, figure crops, and OCR of scanned pages layer on top. See
+[Structured PDF](docs/STRUCTURED_PDF.md).
+
+**A roundtable of models.** Fan a task out to a panel and synthesize one answer, or run a
+bounded multi round draft-or-review where several models critique and converge. The same
+mechanism staffs the reviews in autonomous development. See [Personas](docs/personas.md).
 
 ## The problem
 
@@ -116,11 +163,70 @@ graph instead of reading the files over again. The graph is cross repo: one depe
 repository you work across, so a change in a shared library shows its blast radius in the
 services that consume it. See [Code intelligence](docs/CODE_INTELLIGENCE.md).
 
+### Documents as coordinate anchored evidence
+
+aimee-kb can ingest a PDF as coordinate anchored evidence instead of a flat blob of text.
+Every retrieved snippet carries the page number and bounding box it came from, so an answer
+is traceable to the exact place on the page rather than to an unlocatable paraphrase. On top
+of that spine the KB optionally recognises table cells (structured `{row, col, text}`
+lookups), renders visual crops of figures, tables, and pages into a content addressed store,
+and OCRs scanned or image only pages back through the same citation path. Each layer is its
+own opt in and degrades to the one below when its dependency is absent, and every
+read surface honours the same document level access control as the text spine. See
+[Structured PDF](docs/STRUCTURED_PDF.md).
+
 ### Guardrails
 
 Before every edit, aimee classifies the target. Sensitive files like `.env`, credentials,
 and private keys are blocked before the AI touches them. Known anti patterns trigger
 warnings. Planning mode locks all writes until you are ready.
+
+### Governance and a tamper evident action ledger
+
+Every governed tool call passes through one choke point (`pre_tool_check`) that computes an
+allow, rewrite, or block verdict and records that verdict to a single append only,
+mode-0600, rotated audit ledger: `{ts, actor, tool, mode, reason_code, verdict, args_hash}`.
+The `reason_code` is a stable event key, never free form prose, so nothing user bearing is
+persisted. `args_hash` is a keyed HMAC-SHA256 over a per tool allowlist projection of the
+arguments: keyed so low entropy arguments cannot be recovered from the public log by
+dictionary attack, allowlisted so a new tool or a new argument can never
+silently leak a secret or PII value into an append only log, and versioned. Auditing is
+fail open: the log write happens after the verdict is decided, so a
+logging failure can never flip an allow to a block. The ledger is replayable:
+`trajectory_export` interleaves the governed actions back into the session timeline by
+timestamp, and the operator console exposes the feed at `/v1/audit/actions`.
+
+Alongside the action ledger, aimee keeps **decision records**: governable "we decided X
+because Y" entries carrying status, rationale, alternatives, a revisit date, what they
+supersede, the author, and the policy they bind. At most one decision is active per scope
+(enforced by a database unique index, not just by the writer), superseding one flips the
+prior in the same transaction, and a decision past its revisit date resurfaces on the
+existing recall and curator sweeps rather than rotting silently. Human sign off gates on
+sensitive actions are HMAC-SHA256 signed and non forgeable. Both surfaces are live in the
+[KB Console](docs/KB_CONSOLE.md) (`/v1/decisions`, `/v1/audit/actions`).
+
+Retrieval has a parallel, opt in audit chain: every KB grounded answer is reconstructible.
+Read back which sources grounded it, at which content hashed version, and whether the answer
+is entailed by that evidence, through `/v1/audit/{trace,provenance,fidelity}`.
+
+### The context economizer
+
+aimee runs a context economizer over both the delegate turn loop and, optionally, the live
+primary `/v1` path, gated by a master switch and split into two tiers. The **safe tier**
+is default on: deterministic tool output condensation (keep the failing test, elide the
+passing ones; keep compiler diagnostics, drop progress), size based compression of oversized
+tool results, and folding old turn history into a rolling skeleton. Recent context is never
+touched, and the full output is spilled to disk for recovery. A measurement ledger records
+the reduction opportunity even when a lever is off, so the master switch off state provably
+reduces to zero.
+
+The **aggressive tier** is opt in and off by default: it applies the reduction to the live
+inbound request so the primary agent's own tokens shrink too. It is compress only, and
+guarded by a per session circuit breaker. If a reduced request draws an error, the session
+falls back to the pristine payload and disables reduction for its remaining turns, so one bad
+reduction can never persistently break live traffic. aimee never dispatches a reduced payload
+it cannot restore to the byte identical original. See [Settings](docs/SETTINGS.md) and
+[Tool output condensation](docs/features/tool-output-condensation.md).
 
 ### Delegation that cuts your bill
 
@@ -137,14 +243,26 @@ aimee delegate review "Review this PR"     # routes to cheapest capable delegate
 aimee delegate code --tools "Add tests"    # delegate with file read/write access
 ```
 
+When one model is not enough, run a **roundtable**: fan a task out to a panel and have an
+aggregator synthesize a single answer (`aimee delegate aggregate`), or run a bounded
+multi round draft-or-review where several models critique each other and converge, with cost
+and round caps (`aimee delegate roundtable --mode draft|review`). This is the same panel that
+staffs the reviews in autonomous development, and it composes from your configured
+[personas](docs/personas.md).
+
+```bash
+aimee delegate aggregate "Design an idempotent retry scheme"     # Mixture-of-Agents fan-out + synthesis
+aimee delegate roundtable "Review this design" --mode review     # bounded multi-round critique
+```
+
 ### Run your own inference
 
 aimee ships the retrieval and synthesis stack as one container: a Vulkan llama.cpp runtime
 serving embeddings, reranking, and synthesis from models baked into the image. Run it on a
 GPU and the knowledge base curates locally with no API calls, and the local model registers
-as a free delegate the roundtable and the primary can call. Three tiers cover the range: a
-CPU build for retrieval on any host, and two GPU builds whose synth model you pick with a
-single image swap, no re-embed. See [kb LLM backends](docs/KB_LLM_BACKENDS.md) and
+as a free delegate the roundtable and the primary can call. Four tiers cover the range: a
+CPU build for retrieval on any host, and three GPU builds (for 16, 24, and 32 GB cards) whose
+synth model you pick with a single image swap, no re-embed. See [kb LLM backends](docs/KB_LLM_BACKENDS.md) and
 [synth tiers](docs/AIMEE_KB_SYNTH_TIERS.md).
 
 ### Session isolation
@@ -173,6 +291,30 @@ Provider config is in the
 [Manual](MANUAL.md#25-integrations). The memory, guardrails, and delegation are the same on
 every front end, because they live in the server and kb, not the tool.
 
+### A browser workspace
+
+aimee ships its own browser UI, `aimee-webchat`, so you never need a terminal to use it. It
+is a thin, stateless client that proxies to `aimee-server`, with one tab per tool: **Chat**
+against any configured model; a **Graph** explorer that renders your indexed code as a live
+symbol and call graph; **Projects** to clone git repos over HTTPS or SSH form URLs; a full
+in app **VS Code editor** (a per user `code-server` the server supervises and reverse proxies)
+opened on the selected project; **Workflow Actions** to author a proposal and watch it run
+autonomously; and a **Dashboard** plus a **Logs** tab that show the server's delegations, tool
+calls, token spend, guardrail verdicts, and active sessions at a glance. See
+[Dashboard & Logs](docs/DASHBOARD.md) and [Workspace Management](docs/WORKSPACES.md).
+
+### Built for a team
+
+aimee is single user on a laptop and multi user on a server without changing the model.
+Clients enroll as accounts with **scoped tokens** (a request outside a token's grant is
+denied with `403`); the browser console authenticates with **OIDC single sign on**; the
+remote `/v1` path can require **mutual TLS** client identity; and every user's git tokens,
+provider keys, and OAuth credentials live only in a **per principal encrypted vault**, sealed
+by a server master key so one tenant can never read another's secret or files. The vault's
+master key rotates through an operator gated, offline runbook. See
+[Security Model](docs/SECURITY.md), [KB Console](docs/KB_CONSOLE.md), and
+[Webchat git security](docs/WEBCHAT_GIT_SECURITY.md).
+
 ## Works with what you already use
 
 | Tool | Integration | Run on any model | Setup |
@@ -194,12 +336,18 @@ works the same way. Switch tools any time. Your memory and context stay.
   compound into a knowledge base.
 - **No lock-in.** Run any turn on any provider's model, or your own, and switch with one
   command.
-- **Lower bills.** Cheapest capable delegate routing keeps the primary's context small,
-  upstream compression trims every turn, and local and subscription delegates cost nothing
-  extra.
+- **Lower bills.** Cheapest capable delegate routing keeps the primary's context small, the
+  context economizer trims every turn on both the delegate and the primary path, and local
+  and subscription delegates cost nothing extra.
 - **Fewer mistakes.** Sensitive file blocking, anti pattern warnings, and planning mode
   catch problems before the AI writes them.
-- **Team knowledge.** One shared kb distills what your whole organization knows.
+- **Provable and governable.** Every governed action lands in a tamper evident, keyed-HMAC
+  audit ledger, decisions are recorded with rationale and a revisit trigger, and KB grounded
+  answers are reconstructible back to their sources.
+- **Team knowledge.** One shared kb distills what your whole organization knows, behind
+  scoped accounts, OIDC sign on, and a per principal encrypted vault.
+- **A UI when you want one.** A browser workspace with chat, a code graph explorer, git
+  project management, an in app VS Code editor, and server dashboards. No terminal required.
 - **Yours to run.** C services, single digit millisecond hot paths, and an inference stack
   you can run entirely on your own hardware.
 
@@ -273,7 +421,9 @@ Focused references:
 | [Workflows](docs/WORKFLOWS.md) | The composable dev lifecycle workflow engine, block catalog, and authoring |
 | [Workflow Actions](docs/WORKFLOW_ACTIONS.md) | The web page to author a proposal, run it autonomously, and watch its status/history |
 | [Dashboard & Logs](docs/DASHBOARD.md) | The web Dashboard's server-incurred metric panels, customization, the Logs (tool-action audit) tab, and the panel data architecture |
-| [Settings](docs/SETTINGS.md) | The web page for the server's typed runtime config — economizer levers, autonomous-dev knobs, tool-output condensation, and how each maps to `aimee.yaml` |
+| [Settings](docs/SETTINGS.md) | The web page for the server's typed runtime config: economizer levers, autonomous-dev knobs, tool-output condensation, and how each maps to `aimee.yaml` |
+| [Context economizer](docs/features/context-fold.md) | The two-tier token-reduction pipeline: history fold, tool-output condensation, size compression, the freeze cost guardrail, and the live-primary gateway mutation with its per-session circuit breaker |
+| [KB Console](docs/KB_CONSOLE.md) | The operator console's trust model and surfaces: Accounts (enroll/revoke/scopes/OIDC) and Governance (decision records, the policy-verdict action audit) |
 | [Workspace Management](docs/WORKSPACES.md) | Multi repo workspaces and session isolation |
 | [Security Model](docs/SECURITY.md) | Threat model, trust boundaries, capability system |
 | [Webchat git security](docs/WEBCHAT_GIT_SECURITY.md) | How webchat handles a webuser's git forge token at rest, in transit to git, and in the in browser editor, and where exposure is and is not closed |

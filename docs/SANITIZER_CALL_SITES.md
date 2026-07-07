@@ -16,7 +16,7 @@ kind guards it. It is enforced by `scripts/check-sanitizer-callsites.py` (run fr
   agent-visible string, via `sanitize_for_prompt`. No ad-hoc escaping elsewhere.
 - **Two layers.** Structured kinds (`SANITIZE_FILE_PATH`, `SANITIZE_SYMBOL_LABEL`,
   `SANITIZE_SOURCE_LOCATION`, `SANITIZE_COMMUNITY_NAME`) are strict-validated and
-  **rejected** on control/markup — a caller must fail closed on `SANITIZE_REJECTED`.
+  **rejected** on control/markup. A caller must fail closed on `SANITIZE_REJECTED`.
   Free-text kinds are defanged in place and never rejected.
 - **Status is load-bearing.** A security-sensitive renderer must branch on the
   returned `sanitize_status_t` (`OK` / `TRUNCATED` / `REJECTED`), not ignore it.

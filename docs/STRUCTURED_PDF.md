@@ -4,8 +4,8 @@ aimee-kb can ingest a PDF as **coordinate-anchored evidence** instead of a flat
 blob of text. Every retrieved snippet carries the page and bounding box it came
 from, so an answer can be traced back to the exact place on the page. On top of
 that spine the KB optionally recognises **table cells**, renders **visual crops**
-of figures/tables/pages, and **OCRs scanned pages** — each behind its own
-capability flag, each degrading cleanly to the layer below when its dependency is
+of figures/tables/pages, and **OCRs scanned pages**, each behind its own
+capability flag, each degrading to the layer below when its dependency is
 absent.
 
 Everything here lives entirely in **aimee-kb** (the personal `aimee-server` holds only
@@ -27,8 +27,8 @@ separate opt-in.
 
 Every read surface honours the **same access control** as the spine
 (`document_key`-level check + quarantine), and table cells / crops are gated at read
-time by a join to the authoritative document — never by a cached flag. Structured-PDF
-content is reachable **only** through these `pdf_*` tools — it is deliberately kept out
+time by a join to the authoritative document, never by a cached flag. Structured-PDF
+content is reachable **only** through these `pdf_*` tools. It is deliberately kept out
 of the general `/v1/search` (both the vector path and the convention/derived-artifact
 sweeps), so a PDF cannot leak into an unscoped search.
 
@@ -39,9 +39,9 @@ sweeps), so a PDF cannot leak into an unscoped search.
 Each capability is a config flag (set with `aimee config set <key> <value>` or in
 `aimee.yaml`); the recognition layers also need a local sidecar or poppler binary.
 **Defaults are off.** Two kinds of dependency: the **poppler binaries**
-(`pdftotext`, `pdftoppm`) are *hard* — if a flag that needs one is on but the binary
+(`pdftotext`, `pdftoppm`) are *hard*: if a flag that needs one is on but the binary
 is missing, that step **errors** (e.g. a PDF upload returns an extraction error)
-rather than silently degrading; the **sidecars/embedder** are *soft* — when absent
+rather than silently degrading; the **sidecars/embedder** are *soft*: when absent
 the feature degrades to the layer below (see [Degradation](#degradation)).
 
 ```bash
@@ -77,12 +77,12 @@ sidecars, with `pdftotext` + `pdftoppm` installed in the aimee-kb image.
 ### The sidecars
 
 TSR and OCR are **optional local HTTP sidecars**, deployed the same way as the
-embedder/reranker — a service aimee-kb POSTs to. Despite the `_command` suffix
+embedder/reranker, a service aimee-kb POSTs to. Despite the `_command` suffix
 (inherited from `embedding_command`), `tsr_command` / `ocr_command` take the
 sidecar's **HTTP URL**, not a binary path (the `AIMEE_TSR_URL` / `AIMEE_OCR_URL`
 env vars are the fallback).
 
-These sidecars must be **deployed inside the KB trust perimeter** — the operator runs
+These sidecars must be **deployed inside the KB trust perimeter**: the operator runs
 them with no external network and no document-content retention. That is a deploy-time
 obligation, not something aimee enforces at runtime: aimee-kb hands the sidecar
 document-derived content (page text/geometry, or a rendered page image), so a sidecar
@@ -91,15 +91,15 @@ that egresses or retains is a data-exposure path. aimee never links or bundles t
 `pdftotext` and `pdftoppm` are operator-installed poppler binaries run as hardened
 subprocesses (separate process, `RLIMIT_CPU/AS/FSIZE`, a wall-clock deadline + output
 byte-cap, `setsid` + process-group kill on timeout, and `0600` scratch unlinked on
-every path — `RLIMIT_AS` is what bounds an image/decompression-bomb before output is
+every path. `RLIMIT_AS` is what bounds an image/decompression-bomb before output is
 written). aimee never links or bundles them either.
 
 ---
 
 ## Uploading
 
-`POST /v1/kb/docs` (multipart) with `file`, a `scope` (project), and — **required** for
-a PDF under `kb_pdf_ingest_enabled` — a `sensitivity_class` of `public`, `internal`, or
+`POST /v1/kb/docs` (multipart) with `file`, a `scope` (project), and (**required** for
+a PDF under `kb_pdf_ingest_enabled`) a `sensitivity_class` of `public`, `internal`, or
 `restricted` (a PDF upload with a missing/invalid class is a 400, no rows written). A
 `.pdf` whose bytes are not a real PDF (no `%PDF-` header) is rejected. A document's
 identity is `(scope, document_key)` where `document_key` is its file path, so
@@ -128,7 +128,7 @@ The upload response reports what was ingested, including the §D status:
 - `text_layer` ∈ `native` (real text layer) | `ocr` (recovered by the OCR sidecar) |
   `none` (scanned, no text recovered).
 - `asset_only` is `true` when a scanned PDF yielded **no text** but **did** yield
-  visual crops — so an operator is never misled into thinking a scanned contract is
+  visual crops, so an operator is never misled into thinking a scanned contract is
   text-searchable. Re-uploading once OCR is deployed upgrades it in place.
 
 ---
@@ -146,18 +146,18 @@ are withheld).
 | `pdf_open_neighbors` | `GET /v1/pdf/neighbors` | The prev/next reading-order chunks of a hit |
 | `pdf_inspect_structure` | `GET /v1/pdf/structure` | The document's chunk/page outline |
 | `pdf_lookup_table` | `GET /v1/pdf/lookup_table` | Recognised table cells `{row, col, text, tsr_confidence}` + a `tsr_status` marker (`ran` \| `not_a_table` \| `unavailable`) |
-| `pdf_list_assets` | `GET /v1/pdf/assets` | A document's visual crops — each an **opaque `asset_id`** + page/bbox/kind/caption |
+| `pdf_list_assets` | `GET /v1/pdf/assets` | A document's visual crops, each an **opaque `asset_id`** + page/bbox/kind/caption |
 | `pdf_open_asset` | `GET /v1/pdf/open_asset` | One crop's image bytes (base64) for an opaque `asset_id` |
 | — | `POST /v1/pdf/quarantine` | Owner-only: confirm (release) or reject (purge) a pending restricted document |
 
 ### Answerability
 
-`pdf_search_chunks` returns a per-query-over-corpus **answerability** judgment —
-"given *this* query, how well can the KB answer it" — as a `score ∈ [0,1]` plus a
+`pdf_search_chunks` returns a per-query-over-corpus **answerability** judgment
+("given *this* query, how well can the KB answer it") as a `score ∈ [0,1]` plus a
 `label ∈ {NONE, LOW, MEDIUM, HIGH}` (default cutoffs `<0.15`→NONE, `<0.40`→LOW,
 `<0.66`→MEDIUM, else HIGH; config-overridable). It is a **KB-side shared signal**,
 deliberately a
-*distinct field* from any server-side per-user confidence tier — clients must not
+*distinct field* from any server-side per-user confidence tier. Clients must not
 conflate the two. The combiner is a documented deterministic function of query-scoped
 inputs (top relevance, query-term coverage, hit saturation) so the same `(query,
 corpus state)` always yields the same score.
@@ -172,13 +172,13 @@ corpus state)` always yields the same score.
   scope; the `document_key` is the access unit.
 - **PDF vectors are structurally isolated.** PDF chunk embeddings live in a
   **dedicated `kb_pdf_embeddings` relation that the general `/v1/search` transport
-  never reads** — isolation by schema/module boundary, not a runtime `WHERE` filter
+  never reads**: isolation by schema/module boundary, not a runtime `WHERE` filter
   (which would be a classification, not an access, boundary). A `quarantine_state`
   predicate rides inside the PDF surface as defense-in-depth.
 - **Table cells and crops gate on the live document.** `lookup_table`,
   `open_asset`, and the asset list resolve through a join to the authoritative
   `kb_documents` row (`doc_kind='pdf'` + quarantine + project, bound to the real
-  `file_path`) — a guessed/foreign/withheld key returns empty, never the cached
+  `file_path`). A guessed/foreign/withheld key returns empty, never the cached
   denormalised value.
 - **The blob store never exposes the hash.** Crops are content-addressed by sha256
   (free dedup), but the sha is a **KB-internal identifier**: never returned to a
@@ -187,7 +187,7 @@ corpus state)` always yields the same score.
   row id** (never the hash), which applies the document ACL and writes a structured
   access audit log entry (allowed/denied) before streaming bytes. (Today that entry
   is a structured log line; a durable/WORM, hash-chained audit store is a tracked
-  enhancement — see the limits below.) Content-addressed dedup never widens access —
+  enhancement; see the limits below.) Content-addressed dedup never widens access. The
   gating is on the per-document asset row, not the shared bytes.
 - **Sidecars are not an egress path.** TSR/OCR and `pdftoppm` run inside the
   perimeter with no external network and no content retention.
@@ -212,7 +212,7 @@ errors that step.
 | `kb_pdf_assets_enabled` off | No visual crops; text retrieval unaffected |
 | `kb_pdf_assets_enabled` on, `pdftoppm` **absent** | No crops are produced (rendering fails best-effort); text/ingest unaffected (hard dep, but non-fatal here) |
 | `kb_pdf_ocr_enabled` off (or OCR sidecar unreachable) on a scanned PDF | Ingested **asset-only** if crops were rendered (`text_layer='none'`, `asset_only=true`); otherwise text-less with no crops (`text_layer='none'`, `asset_only=false`) |
-| `kb_pdf_ocr_enabled` on, sidecar recovers text | Text + geometry ingest transparently — same chunks/regions/citations as native text (`text_layer='ocr'`) |
+| `kb_pdf_ocr_enabled` on, sidecar recovers text | Text + geometry ingest transparently, same chunks/regions/citations as native text (`text_layer='ocr'`) |
 
 ---
 

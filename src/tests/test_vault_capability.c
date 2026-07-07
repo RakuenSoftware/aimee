@@ -48,6 +48,17 @@ int main(void)
    assert(vault_capability_server_write_allowed(ATTEST_UDS_PEERCRED, "uid:1000") == 0);
    assert(vault_capability_server_write_allowed(ATTEST_UDS_PEERCRED, "") == 0);
 
+   /* the agent-key server-seal gate: purely transport-based, NO grant needed
+    * (deliberately wider than the server-write gate above), so a default install
+    * seals a GUI/CLI-added delegate key without provisioning a capability first.
+    * uid:1000 is NOT granted, yet its UDS transport is still allowed here. */
+   assert(vault_agent_key_server_seal_allowed(ATTEST_TLS_BEARER) == 1);
+   assert(vault_agent_key_server_seal_allowed(ATTEST_MTLS_CLIENT) == 1);
+   assert(vault_agent_key_server_seal_allowed(ATTEST_WEBCHAT_TRUSTED) == 1); /* the HTTPS GUI */
+   assert(vault_agent_key_server_seal_allowed(ATTEST_UDS_PEERCRED) == 1);    /* local CLI */
+   assert(vault_agent_key_server_seal_allowed(ATTEST_TCP_BEARER) == 0);      /* D2b: plaintext */
+   assert(vault_agent_key_server_seal_allowed(ATTEST_NONE) == 0);
+
    /* validation: empty / NULL / multi-line principals are rejected */
    assert(vault_capability_grant("") == -1);
    assert(vault_capability_grant(NULL) == -1);
@@ -56,6 +67,7 @@ int main(void)
 
    vault_capability_set_path_for_test(NULL);
    unlink(path);
-   printf("PASS: vault_capability grant/revoke/has/list + whole-line + validation\n");
+   printf("PASS: vault_capability grant/revoke/has/list + whole-line + validation + "
+          "agent-key server-seal gate\n");
    return 0;
 }

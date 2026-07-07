@@ -15,9 +15,12 @@ human approval gates.
 > tested, and reachable: `POST /v1/dev/submit` seeds a proposal, creates an
 > autonomous work item on the chosen workflow (default `build`), and the
 > scheduler drives it server-side. See
-> [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md). What's still missing is a
-> general per-workflow trigger: no `aimee workflow run` command and no Run button
-> for an arbitrary (non-`build`) run. See [Limitations](#current-limitations).
+> [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md). The chosen `workflow` is
+> authoritative, so **any** saved workflow starts this way, not only `build`.
+> What's still missing is a trigger *outside* the proposal path: no
+> `aimee workflow run` command and no Run button on **Edit Workflows** to start a
+> saved workflow without submitting a proposal. See
+> [Limitations](#current-limitations).
 
 ## Mental model
 
@@ -236,20 +239,21 @@ the API):
 
 These are real today and worth knowing before you lean on workflows:
 
-1. **Only the autonomous-development trigger is wired.** `POST /v1/dev/submit`
-   creates and starts a run via `wfe_work_item_create` + the scheduler (see
-   [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). There is still no general
-   per-workflow trigger, no `aimee workflow run` command and no Run button to kick
-   off an arbitrary saved workflow from the UI. You can author, validate, save, and
-   inspect any workflow; only `build`-style autonomous runs (submitted from the
-   Workflow Actions tab) start today.
+1. **Runs start only from the proposal-submit path.** `POST /v1/dev/submit` (the
+   **Workflow Actions** tab) resolves the workflow and starts a run through the
+   scheduler (see [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). The
+   `workflow` field is authoritative, so **any** saved workflow starts this way, not
+   just `build` — the tab's picker is populated from every saved definition
+   (`GET /api/workflow/defs`). What's missing is a trigger *outside* that path: no
+   `aimee workflow run <name>` command and no Run button on the **Edit Workflows**
+   page, and every run is still framed as a proposal (`proposal_md` is required).
 2. **Run-in-a-specific-project isn't wired.** A work-item has a `repo` field, but
    the per-step blocks resolve their working directory from
    `$AIMEE_WORKFLOW_REPO`/cwd rather than the work-item's `repo`, so binding a run
    to a UI-selected project is incomplete.
 3. **Composer ergonomics.** New steps are added disconnected; you wire order in
-   the inspector. There is no run/visualize-progress view because runs can't be
-   started from the UI yet.
+   the inspector. The **Edit Workflows** page has no live run/progress view — you
+   start and watch runs on the separate **Workflow Actions** tab.
 
 ## See also
 
