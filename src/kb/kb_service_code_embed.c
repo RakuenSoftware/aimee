@@ -7,6 +7,7 @@
 #include "kb_service_code_embed.h"
 #include "aimee.h" /* EMBED_MAX_DIM */
 #include "db2/code_index_ops.h"
+#include "db2/kb_runtime_state.h" /* db2_kb_runtime_state_get/set — change short-circuit */
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 #include "../db2/entity_nodes.h"
@@ -315,6 +316,54 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       return 0;
    }
 
+   /* Per-project change short-circuit for the default "changed_files" pass. The
+    * drain calls this for EVERY project EVERY poll; without a cheap early-out it
+    * loads all files and checks each against the vector store — thousands of ops
+    * per poll, holding a pool connection long enough to trip the stuck-lease
+    * reaper (the "flapping" pool member) and starving the deep curator. The
+    * git-SHA short-circuit in the scan handler is never recorded for detached
+    * (thin-client) workspaces, so nothing else stops the re-scan. Compute a
+    * signature over the project's files + the active embed dim and skip the whole
+    * pass when it matches the last fully-embedded signature. Only for the implicit
+    * changed_files scope (paths==NULL); explicit path lists / "all" always run. */
+   char sig_now[160] = "";
+   if (!paths && !dry_run && strcmp(out->scope, "changed_files") == 0)
+   {
+      int sc_dim = db2_embedding_dim();
+      if (sc_dim <= 0 || sc_dim > CE_EMBED_MAX_DIM)
+         sc_dim = 1024;
+      static const char *sig_sql = "SELECT count(*), coalesce(md5(string_agg(id::text || ':' || "
+                                   "hash, ',' ORDER BY id)), '') "
+                                   "FROM files WHERE project_id = ?1";
+      aimee_pg_stmt_t *sst = aimee_pg_prepare(conn, sig_sql, err, sizeof(err));
+      if (sst)
+      {
+         aimee_pg_bind_int64(sst, "?1", proj_id);
+         if (aimee_pg_step(sst, err, sizeof(err)) == AIMEE_PG_ROW)
+         {
+            int64_t fcount = aimee_pg_column_int64(sst, 0);
+            const char *fhash = aimee_pg_column_text(sst, 1);
+            snprintf(sig_now, sizeof(sig_now), "%lld:%d:%s", (long long)fcount, sc_dim,
+                     fhash ? fhash : "");
+         }
+         aimee_pg_finalize(sst);
+      }
+      if (sig_now[0])
+      {
+         char sig_key[320];
+         snprintf(sig_key, sizeof(sig_key), "code_embed_sig:%s", project);
+         char stored_sig[160] = "";
+         if (db2_kb_runtime_state_get(sig_key, stored_sig, sizeof(stored_sig)) == 0 &&
+             strcmp(stored_sig, sig_now) == 0)
+         {
+            /* Nothing changed since the last fully-embedded pass — skip entirely. */
+            out->accepted = 1;
+            snprintf(out->job_id, sizeof(out->job_id), "code-embeddings:%s:0", project);
+            return 0;
+         }
+      }
+   }
+
    /* Collect files to embed. */
    static const char *files_sql = "SELECT id, path, hash FROM files WHERE project_id = ?1";
    st = aimee_pg_prepare(conn, files_sql, err, sizeof(err));
@@ -491,6 +540,17 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          embedded++;
          batch_num++;
       }
+   }
+
+   /* Record the fully-embedded signature so the next poll skips this project when
+    * nothing changed — but only when the WHOLE file set was loaded this pass. A
+    * load capped at effective_max leaves files unprocessed, so it must re-run
+    * (and its signature stays unrecorded / stale until it fully catches up). */
+   if (sig_now[0] && row_count < effective_max)
+   {
+      char sig_key[320];
+      snprintf(sig_key, sizeof(sig_key), "code_embed_sig:%s", project);
+      db2_kb_runtime_state_set(sig_key, sig_now);
    }
 
    free(rows);
