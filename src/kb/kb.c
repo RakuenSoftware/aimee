@@ -1137,16 +1137,15 @@ static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
  * RRF merge in kb_search_gather degenerates to a re-rank of one input
  * list — still a valid combined score.  Future work: add a sparse / BM25
  * vector index and route this leg through it for true hybrid retrieval. */
-static int lexical_search_via_vector(const char *project, const char *query,
-                                     const char *embedding_cmd, kb_result_t *out, int max)
+/* Lexical (FTS/term-match) retrieval leg for kb_search_fused. This is a genuine
+ * term search over kb_documents.kb_fts_tsv, NOT another dense search: previously
+ * it embedded the query and called the same pgvector search as vec_search, so the
+ * two legs were byte-for-byte identical and alpha_merge collapsed to the identity
+ * (rrf/static_alpha/dynamic_alpha all produced the same ranking). With a real
+ * lexical leg the two signals diverge and the fusion modes become meaningful. */
+static int lexical_search_fts(const char *project, const char *query, kb_result_t *out, int max)
 {
-   if (!project || !query || !query[0] || !out || max <= 0)
-      return 0;
-   const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
-
-   float qvec[EMBED_MAX_DIM];
-   int qdim = memory_embed_text(query, effective_cmd, qvec, EMBED_MAX_DIM);
-   if (qdim <= 0)
+   if (!query || !query[0] || !out || max <= 0)
       return 0;
 
    int64_t ids[MAX_LEXICAL_RESULTS * 2];
@@ -1154,8 +1153,7 @@ static int lexical_search_via_vector(const char *project, const char *query,
    int cap = (int)(sizeof(ids) / sizeof(ids[0]));
    if (max * 2 < cap)
       cap = max * 2;
-   int n_hits = pgvec_kb_vector_search_project(project, qvec, qdim, cap, ids, scores,
-                                               (int)(sizeof(ids) / sizeof(ids[0])));
+   int n_hits = db2_kb_documents_fts_search(project, query, ids, scores, cap);
    if (n_hits <= 0)
       return 0;
 
@@ -1611,7 +1609,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
       return safe_strdup("error: out of memory");
    }
 
-   int n_lex = lexical_search_via_vector(proj, query, effective_cmd, lex_res, MAX_LEXICAL_RESULTS);
+   int n_lex = lexical_search_fts(proj, query, lex_res, MAX_LEXICAL_RESULTS);
 
    /* Dense search is mandatory; the lexical vector leg complements it. */
    float qvec[EMBED_MAX_DIM];

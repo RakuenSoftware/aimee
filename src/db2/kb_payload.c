@@ -275,6 +275,59 @@ int db2_kb_documents_hll_sources_for_hash(const char *project, const char *file_
    return n;
 }
 
+int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
+                                double *scores, int max)
+{
+   if (!ids || !scores || max <= 0)
+      return -1;
+   if (!query || !query[0])
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* True lexical (term/FTS) leg over the generated 'simple'-config tsvector
+    * (schema.sql: kb_fts_tsv = to_tsvector('simple', content || heading_path),
+    * GIN-indexed as kb_fts_gin). This is deliberately NOT the dense pgvector
+    * search: the two legs must diverge so alpha fusion has a real lexical-vs-
+    * semantic signal to arbitrate. websearch_to_tsquery handles quoted phrases /
+    * operators, so quoted/identifier queries lean on exact term match. */
+   const int filter_project = (project && project[0]) ? 1 : 0;
+   static const char *sql_proj =
+       "SELECT id, ts_rank(kb_fts_tsv, websearch_to_tsquery('simple', ?1)) AS r"
+       " FROM kb_documents"
+       " WHERE kb_fts_tsv @@ websearch_to_tsquery('simple', ?1) AND project = ?2"
+       " ORDER BY r DESC LIMIT ?3";
+   static const char *sql_all =
+       "SELECT id, ts_rank(kb_fts_tsv, websearch_to_tsquery('simple', ?1)) AS r"
+       " FROM kb_documents"
+       " WHERE kb_fts_tsv @@ websearch_to_tsquery('simple', ?1)"
+       " ORDER BY r DESC LIMIT ?2";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, filter_project ? sql_proj : sql_all, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", query);
+   if (filter_project)
+   {
+      aimee_pg_bind_text(st, "?2", project);
+      aimee_pg_bind_int(st, "?3", max);
+   }
+   else
+      aimee_pg_bind_int(st, "?2", max);
+
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      ids[n] = aimee_pg_column_int64(st, 0);
+      scores[n] = aimee_pg_column_double(st, 1);
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int db2_kb_async_enqueue(const char *kind, int64_t document_id, const char *project)
 {
    if (!kind || !*kind || document_id <= 0)
