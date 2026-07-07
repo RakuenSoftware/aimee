@@ -1,7 +1,8 @@
 # Proposal: Org-data connectors — the source-ingestion on-ramp for the every-domain KB
 
-- **State:** PENDING — design only. Adds the missing *front door* to the shipped
-  ingest pipeline: a connector layer that pulls documents from the systems where an
+- **State:** PENDING — design only, no code in this PR. Adds the missing
+  *front door* to the existing ingest pipeline: a connector layer that pulls
+  documents from the systems where an
   organization's non-code knowledge actually lives (issue trackers, chat, email,
   doc stores, wikis) and hands them to the existing Normalize → curator →
   promote pipeline. Builds on **Ingest Lab and Strategy-Aware Chunking** (Accepted,

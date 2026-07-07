@@ -1,7 +1,8 @@
 # Proposal: LLM-sidecar productionization — graduate curator extraction and idle reflection from stub to production
 
-- **State:** PENDING — design only. Finishes two already-shipped-but-stubbed
-  intelligence steps that ride the shared `kb_curator_sidecar` mechanism. Adds no
+- **State:** PENDING — design only, no code in this PR. Finalises two
+  scaffolded-but-stubbed intelligence steps that ride the shared
+  `kb_curator_sidecar` mechanism. Adds no
   new subsystem: it wires the existing curator extract/synthesize/judge stages and
   the existing idle-reflection scheduler onto a production sidecar, behind a
   calibrated gate. Continuation of **Deep Curator: Doc and Code Extraction**
