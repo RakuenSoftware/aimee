@@ -358,7 +358,7 @@ Every supported client now speaks `https://`, each using its platform's native t
 | macOS, prebuilt `aimee-macos-universal` or source build | Yes | Secure Transport, Keychain |
 | Windows, prebuilt or `install.ps1` build | Yes | Schannel, Windows certificate store |
 
-For per-client cryptographic identity (not just a shared bearer), the server also supports **mTLS client certificates**, clients present a cert from `<aimee_home>/tls/client.{crt,key}` and the server maps it to a `cert:<CN>` principal. Issue and manage them with the `aimee cert` CLI (`/v1/cert/issue|list|revoke`); see the [Manual](../MANUAL.md) for setup.
+For per-client cryptographic identity (beyond a shared bearer), the server also supports **mTLS client certificates**, clients present a cert from `<aimee_home>/tls/client.{crt,key}` and the server maps it to a `cert:<CN>` principal. Issue and manage them with the `aimee cert` CLI (`/v1/cert/issue|list|revoke`); see the [Manual](../MANUAL.md) for setup.
 
 ## Next steps
 

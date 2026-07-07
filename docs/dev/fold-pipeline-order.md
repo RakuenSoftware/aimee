@@ -13,26 +13,26 @@ slice.
 Six steps per turn in `agent_execute_with_tools_internal()`
 (`src/posix/agent_runtime.c`); step 1 is pre-stage input, steps 2–6 are actions:
 
-1. **raw DB1 transcript** — append-only `messages` cJSON array (never mutated).
-2. **session compaction** — `maybe_compact_before_request()` (≈`agent_runtime.c:677`).
-3. **[FOLD PASS — P2]** — runtime calls `context_fold_view(messages, sys, &budget,
+1. **raw DB1 transcript**: append-only `messages` cJSON array (never mutated).
+2. **session compaction**: `maybe_compact_before_request()` (≈`agent_runtime.c:677`).
+3. **[FOLD PASS, P2]**: runtime calls `context_fold_view(messages, sys, &budget,
    cfg, &out)`, which **produces and returns** the synthetic skeleton pair +
    Coordinate Closet (§2) as a view, non-destructively (`messages` untouched), then
    exits. The fold function does not touch prefix state.
-4. **provider-shape normalization** — runtime renders the step-3 view into the active
+4. **provider-shape normalization**: runtime renders the step-3 view into the active
    provider shape (Anthropic content blocks / OpenAI `tool_calls` / Gemini `parts`)
    into a **runtime-owned byte buffer**, with the **atomic tool-pair** rule (a
    `tool_use`+`tool_result` fold together or not at all; folded regions are plain
    non-tool text). This is a deterministic 1:1 render, not a semantic rewrite.
-5. **cache-prefix registration + single hash** — runtime registers the step-4
+5. **cache-prefix registration + single hash**: runtime registers the step-4
    buffer `(ptr,len)` via `payload_rewrite_register_span()`, then the canonical
    prefix-hash wrapper (`track_anthropic_payload_rewrite()` and its
    `track_{openai,gemini}_payload_rewrite` siblings, all delegating into
    `payload_rewrite.c`, ≈`agent_runtime.c:698`) hashes the registered spans **once**.
-6. **request build** — `agent_build_request_*()` (≈`agent_runtime.c:699`).
+6. **request build**: `agent_build_request_*()` (≈`agent_runtime.c:699`).
 
 Invariant: step 3's output is **semantically frozen**; step 4 is a deterministic
-1:1 render; the exact post-step-4 bytes are what step 5 registers and hashes — no
+1:1 render; the exact post-step-4 bytes are what step 5 registers and hashes: no
 semantic change *and* no byte change is permitted between steps 4 and 5. "Rewrite"
 means semantic mutation; rendering at step 4 is not a rewrite. The fold pass MUST
 sit at step 3 (after compaction, before the step-5 hash).
@@ -60,12 +60,12 @@ void payload_rewrite_spans_reset(payload_rewrite_state_t *st);
 
 - `fnv1a_update` stays `static` in `payload_rewrite.c`.
 - The registered span is the **post-step-4** (provider-shape-normalized) serialized
-  bytes — exactly what is sent — so the hash matches what the provider caches.
+  bytes (exactly what is sent) so the hash matches what the provider caches.
   `agent_runtime.c` owns that buffer; the fold (step 3) only produces a view and
   exits. Lifetime: register after step 4, hash at step 5, `spans_reset()` at the top
-  of the next turn — no use-after-free / double-free.
+  of the next turn. No use-after-free / double-free.
 - The pending `ingress-compression-and-cache-alignment` work registers the envelope
-  span through the same API — **serialized convergence**: the shared span-registry
+  span through the same API, **serialized convergence**: the shared span-registry
   PR lands first, then the fold and ingress features layer on it. Never two writers.
 
 ## CI single-owner enforcement

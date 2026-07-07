@@ -44,7 +44,7 @@ before the size-based compression:
 3. **Spill + point.** The full raw output is **atomically** written to
    `<aimee_home>/tool-spills/<ref>.out` (temp → `fsync` → rename → dir `fsync`, mode `0600`,
    so a partial write is never promoted) and the condensed result ends with a pointer
-   carrying the opaque `ref`. The agent retrieves the full original with the first-class
+   carrying the opaque `ref`. The agent retrieves the full original with the dedicated
    **`tool_output_get`** tool (P2): one recovery handle, not a raw filesystem path. The
    spill store is kept under a 64 MB budget by oldest-first (mtime) eviction.
 
@@ -83,7 +83,7 @@ explicit:
 lever is not net-saving on that workload. Each condensation logs its `raw→final` delta and
 each recall logs `tool_output_get recovered N bytes` under the `tool_condense` module, so the
 two sides are greppable together. (This precise per-call channel exists because
-`tool_output_get` is the single first-class recovery handle from P2; `history_fold`/`compress`
+`tool_output_get` is the single dedicated recovery handle from P2; `history_fold`/`compress`
 recovery via fold-recall remains best-effort, not byte-exact.)
 
 ## Scope & rollout
@@ -97,7 +97,7 @@ The **default-ON** flip landed in unified-economizer **P1c**, justified by the d
 gate (lossless-on-demand + fail-open + a no-over-reduction audit); it replaces the old lossy
 32 KB read-cap truncation with lossless-recoverable condensation.
 
-The first-class **`tool_output_get`** retrieval tool + the atomic-write / bounded-eviction
+The dedicated **`tool_output_get`** retrieval tool + the atomic-write / bounded-eviction
 recovery contract landed in unified-economizer **P2**.
 
 **Carried follow-ups** (not yet shipped): the **primary-agent** surface (a client-side

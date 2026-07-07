@@ -461,7 +461,7 @@ Practical notes:
   aimee config set provider claude                          # use it as the primary
   ```
 
-  (`aimee agent setup` is reserved for the four first-class providers, `openai`,
+  (`aimee agent setup` is reserved for the four built-in providers, `openai`,
   `anthropic`, `codex-oauth`, `claude-oauth`, so add a tmux-cli claude with
   `agent add --provider claude`.) The thin-client routing is automatic when the
   workspace is `detached`.
