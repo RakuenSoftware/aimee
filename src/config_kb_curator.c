@@ -479,7 +479,9 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_cross_repo_review_queue_max != 5000;
    curator_any = curator_any || cross_repo_nondefault;
    int evidence_any = !cfg->kb_evidence_embed_enabled || cfg->kb_evidence_embed_batch != 32;
-   if (!curator_any && !evidence_any)
+   int typed_facts_any =
+       !cfg->kb_typed_facts_auto_promote_enabled || cfg->kb_typed_facts_promote_threshold != 3;
+   if (!curator_any && !evidence_any && !typed_facts_any)
       return;
 
    cJSON *kb = cJSON_GetObjectItemCaseSensitive(root, "kb");
@@ -487,6 +489,20 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
       kb = cJSON_AddObjectToObject(root, "kb");
    if (!kb)
       return;
+
+   /* kb.typed_facts.* — autonomous reconciliation knobs (§7.2/§8). auto_promote is
+    * default-on, so emit it whenever anything here is non-default; promote_threshold
+    * only when it differs from the built-in, so a clean install writes nothing. */
+   if (typed_facts_any)
+   {
+      cJSON *tf = cJSON_AddObjectToObject(kb, "typed_facts");
+      if (tf)
+      {
+         cJSON_AddBoolToObject(tf, "auto_promote", cfg->kb_typed_facts_auto_promote_enabled ? 1 : 0);
+         if (cfg->kb_typed_facts_promote_threshold != 3)
+            cJSON_AddNumberToObject(tf, "promote_threshold", cfg->kb_typed_facts_promote_threshold);
+      }
+   }
 
    if (curator_any)
    {
