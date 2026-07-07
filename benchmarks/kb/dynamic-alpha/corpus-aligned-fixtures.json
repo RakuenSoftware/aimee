@@ -1,0 +1,15 @@
+{
+  "description": "Corpus-aligned self-labeled query set for the live .254 aimee doc corpus (2966 docs, all embedded). Every expected doc exists + has an embedding, so this exercises the doc fusion path (FTS lexical + dense) with no dependency on the deep-curator synthesis. positive = identifier/exact-token queries where dynamic_alpha's high-alpha lexical boost should help; false_positive_guard = prose queries where dynamic must not regress the dense leg.",
+  "fixtures": [
+    {"id": "id_synth_tiers", "query": "AIMEE_KB_SYNTH_TIERS synth tiers vulkan image", "shape": "positive", "expected_top_path_substring": "AIMEE_KB_SYNTH_TIERS.md"},
+    {"id": "id_economizer", "query": "economizer gateway mutation primary-agent context reduction", "shape": "positive", "expected_top_path_substring": "economizer-gateway-mutation.md"},
+    {"id": "id_context_fold", "query": "deterministic context folding fixed window", "shape": "positive", "expected_top_path_substring": "context-fold.md"},
+    {"id": "id_embedder_sweep", "query": "embedder sweep and selection", "shape": "positive", "expected_top_path_substring": "embedder-sweep.md"},
+    {"id": "id_fold_pipeline", "query": "fold pipeline-order spike rolling-fold", "shape": "positive", "expected_top_path_substring": "fold-pipeline-order.md"},
+    {"id": "id_code_intel", "query": "code intelligence symbol and call graph index", "shape": "positive", "expected_top_path_substring": "CODE_INTELLIGENCE.md"},
+    {"id": "sem_context_window", "query": "how does the agent keep a long session within a fixed context budget", "shape": "false_positive_guard", "expected_top_path_substring": "context-fold.md"},
+    {"id": "sem_compat", "query": "which operating systems and integrations are supported", "shape": "false_positive_guard", "expected_top_path_substring": "COMPATIBILITY.md"},
+    {"id": "sem_delegates", "query": "how is the default roster of delegate agents set up out of the box", "shape": "false_positive_guard", "expected_top_path_substring": "DELEGATES.md"},
+    {"id": "sem_autonomous", "query": "hand the system a proposal and it builds the change end to end", "shape": "false_positive_guard", "expected_top_path_substring": "AUTONOMOUS_DEVELOPMENT.md"}
+  ]
+}

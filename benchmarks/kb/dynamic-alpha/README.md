@@ -6,6 +6,23 @@ Measures whether the `dynamic_alpha` fusion mode improves retrieval over the
 expected to be a *mixed* result: win on lexical/identifier queries without
 regressing semantic ones.
 
+## ⚠️ Key finding (2026-07-07): the fusion is currently degenerate
+
+Running this harness against the live `.254` KB (fully embedded, `kb_ranker_enabled=0`)
+produced **identical top-5 orderings across `rrf`, `static_alpha`, and `dynamic_alpha`
+for all 32 queries** (10 corpus-aligned + 22 probe). Root cause, verified in code:
+`kb_search_fused`'s "lexical" leg (`lexical_search_via_vector`) is a **duplicate of
+the dense leg** — both call `pgvec_kb_vector_search_project` with the same query
+embedding; the FTS index (`kb_fts_tsv`) is never queried. So `alpha_merge` collapses
+to identity (`(1-α)·x + α·x = x`) and no fusion mode can differ. See
+`docs/proposals/pending/fusion-lexical-leg-is-duplicate-dense.md`. **Until the
+lexical leg is a real FTS/BM25 signal, treat mode A/B as N/A, not "no benefit."**
+
+- `corpus-aligned-fixtures.json` — self-labeled queries whose targets exist + are
+  embedded on the aimee corpus (`--fixtures` this for a run that actually resolves).
+- `probe_diff.py` — runs candidate queries across modes and flags where the top
+  result differs (the tool that surfaced the 0/32 result).
+
 ## Run
 
 ```sh
