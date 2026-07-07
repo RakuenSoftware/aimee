@@ -122,6 +122,19 @@ recall.
 - Corpus Vector Index Strategy:
   pgvector HNSW by default, pgvectorscale diskann as an opt-in scale-up;
   memory vectors stay HNSW. **New.**
+- [LLM-Sidecar Productionization: Curator Extraction and Idle Reflection](proposals/pending/llm-sidecar-productionization-curator-and-reflection.md):
+  graduates the two shipped-but-stubbed intelligence steps — curator LLM
+  extraction (all stages ship; only the Phase-0 embedding sidecar exists) and
+  the idle-reflection scheduler (runs fully; LLM candidate generation stubbed) —
+  onto one versioned sidecar contract, behind a shadow → canary → default gate
+  on the shipped calibration + bandit rails. Extract / Synthesize / Judge /
+  Reflect / Gate-Promote. **New.**
+- [Org-Data Connectors and Source Ingestion](proposals/pending/org-data-connectors-and-source-ingestion.md):
+  the missing ingest front door for the every-domain KB — a uniform connector
+  contract plus a first adapter set (issue tracker / chat / doc-wiki / email),
+  incremental sync with supersession, and ingest-time auth + scope + PII/poison
+  enforcement, all feeding the shipped Normalize → staged-pipeline → curator
+  path. Extract (Normalize) / Classify-Score / Enforce / Gate-Promote. **New.**
 
 ### Retrieval (Recall / Rerank / Rank-Fuse)
 
