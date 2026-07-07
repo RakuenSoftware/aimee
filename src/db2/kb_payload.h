@@ -76,6 +76,13 @@ extern "C"
    int db2_kb_documents_hll_sources_for_hash(const char *project, const char *file_hash,
                                              sketch_hll_t *out);
 
+   /* Lexical (FTS) retrieval over kb_documents.kb_fts_tsv — the term-matching
+    * leg for kb_search_fused, distinct from the dense pgvector leg. Fills ids +
+    * ts_rank scores (best first, up to max), scoped by project when non-empty.
+    * Returns the count, 0 for no matches / empty query, -1 on SQL / conn error. */
+   int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
+                                   double *scores, int max);
+
    /* INSERT OR IGNORE a kb_async_jobs row: (kind, document_id, project,
     * status='pending'). Used by kb_build to enqueue an async embedding
     * job for a freshly-inserted chunk. Returns 0 on success, -1 on
