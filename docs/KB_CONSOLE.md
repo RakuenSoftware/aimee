@@ -33,14 +33,14 @@ not merely "semi-trusted".
   `/v1/config/oidc`, `/v1/scopes`, `/v1/decisions` (+ sub-actions), and
   `/v1/audit/actions`. A compromised console is bounded to that allowlist. It may
   mint client enrollments, but the kb **refuses to mint an owner or privileged
-  scope for a console-admin caller** — the requested scope must be a proper
-  `<kind>:<id>` and the kind may not be `owner`/`console-admin`/`curator` — so the
+  scope for a console-admin caller**: the requested scope must be a proper
+  `<kind>:<id>` and the kind may not be `owner`/`console-admin`/`curator`, so the
   console cannot escalate by minting. `/v1/review` is **not** in the set: review
   accept/reject is a separate `curator` scope. (The console is on the kb's compose
   network, so other services on it can reach the console port, but every action
-  still requires a valid console session — OIDC or break-glass.)
+  still requires a valid console session: OIDC or break-glass.)
 - **Deny-by-default proxy.** `/api/*` maps 1:1 to the allowlisted `/v1` routes and
-  re-checks the same allowlist in Go (`acl.go`) before forwarding — defence in
+  re-checks the same allowlist in Go (`acl.go`) before forwarding, defence in
   depth with the kb's server-side check. The browser's own token is never
   forwarded; only the console-admin bearer, server-side.
 - **Login = OIDC primary.** The console verifies a browser-presented OIDC JWT
@@ -56,9 +56,9 @@ not merely "semi-trusted".
 - **Sessions + CSRF.** Cookies are `HttpOnly; Secure; SameSite=Strict`; every
   mutating `/api/*` call requires the per-session CSRF token in an `X-CSRF-Token`
   header, compared server-side to the session's stored token (a synchronizer-token
-  pattern — the `SameSite=Strict` cookie is the primary CSRF defence, the header is
+  pattern: the `SameSite=Strict` cookie is the primary CSRF defence, the header is
   defence-in-depth). Login is rate-limited per source IP. A
-  session is bound to `(iss, sub)` — not `sub` alone — so it is not portable
+  session is bound to `(iss, sub)`, not `sub` alone, so it is not portable
   across IdPs, and revoking a principal's enrollment invalidates its sessions.
   Idle (30 min) and absolute (8 h) timeouts apply. The SQLite session DB is mode
   0600.
@@ -76,7 +76,7 @@ not merely "semi-trusted".
 ## Certificate revocation semantics (S2a)
 
 Revoking an enrollment (`POST /v1/enrollments/{id}/revoke`) sets `revoked_at` in
-DB2 — the **source of truth** — and the mTLS seam rejects a revoked client cert on
+DB2 (the **source of truth**) and the mTLS seam rejects a revoked client cert on
 its next request (matched by the sha256 fingerprint of the cert DER). Two deliberate
 trade-offs:
 
@@ -87,7 +87,7 @@ trade-offs:
   checked before the DB. Every fail-open is logged (throttled) as a `WARN`.
 - **Single-instance cache.** The is-revoked cache is per-process with a 30 s TTL; a
   revoke is reflected immediately in the process that served it. Running multiple kb
-  instances means a revoke can take up to the TTL to be seen by the others — run a
+  instances means a revoke can take up to the TTL to be seen by the others. Run a
   single kb instance, or shorten the TTL, for a tight revocation window.
 
 Certs issued before S2a (no enrollment row) are **backfilled** as `legacy` rows on
@@ -111,12 +111,12 @@ JSON
 kb-console -kb https://aimee-kb:8741 -cred console.cred -oidc oidc.json
 ```
 
-Without an OIDC file the console runs **break-glass-only** — create
+Without an OIDC file the console runs **break-glass-only**: create
 `$KB_CONSOLE_HOME/.break_glass` (0600) to enable the recovery login.
 
 ## Deploy (compose)
 
-The console is a **default-off** compose service under the `console` profile — a
+The console is a **default-off** compose service under the `console` profile. A
 stock `docker compose up` never starts it. To enable it:
 
 ```bash
@@ -143,7 +143,7 @@ is **not** exposed by the console: it is a **curator-scope** action, and folding
 into the console-admin credential would break the separation of duties (a
 console-admin could self-approve changes to the very config it administers). The
 kb's built-in verifier derives scope from the single configured bearer, so a
-distinct curator scope only exists over **mTLS** today — there is no clean
+distinct curator scope only exists over **mTLS** today. There is no clean
 curator-credential path over the console's HTTP+bearer transport.
 
 Until the kb gains multiple scoped bearers, work the review queue directly with a
@@ -158,4 +158,4 @@ curl -fsS -X POST --cert curator.pem --key curator.key \
 ```
 
 A console **OIDC config** change (Accounts → OIDC login config) applies on the
-next **console restart** — there is no live reload.
+next **console restart**. There is no live reload.
