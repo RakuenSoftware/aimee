@@ -2148,9 +2148,10 @@ static void test_session_isolation_guard(void)
    const char *primary = "/some/repo/src/x.c";
    const char *worktree = "/some/repo/.aimee/worktrees/ab12/main/src/x.c";
 
-   /* (1) Default off (no aimee.yaml): never blocks, even on the primary checkout. */
+   /* (1) Default ON (no aimee.yaml): a primary-checkout target is blocked, since
+    *     session-worktree isolation is required by default. */
    remove(cfg);
-   assert(agent_tools_session_isolation_blocks(primary, NULL) == 0);
+   assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
 
    /* (2) Explicit false: still no block. */
    FILE *f = fopen(cfg, "w");

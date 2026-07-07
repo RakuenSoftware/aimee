@@ -700,7 +700,11 @@ static void config_set_defaults(config_t *cfg)
     * per-result model-visible tool-output cap (see agent_tool_output_cap()). */
    cfg->tool_output_max_bytes = 0;
    cfg->ingress_compress_min_chars = 80;
-   cfg->require_session_worktree = 0;
+   /* Default ON: each mutating session must run in its own isolated worktree+branch
+    * (.aimee/worktrees/...), never the shared primary checkout. Concurrent aimee
+    * sessions sharing one checkout collide on a single git HEAD. Explicit
+    * `require_session_worktree: false` bypasses (see cli_attention_guard.c). */
+   cfg->require_session_worktree = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
