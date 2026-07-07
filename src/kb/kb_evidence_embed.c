@@ -11,6 +11,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
+#include "db2/db2.h" /* db2_lease_release_idle */
 #include "db2/artifacts.h"
 #include "db2/evidence_vectors.h"
 #include "log.h"
@@ -125,6 +126,10 @@ int kb_evidence_embed_one(const char *embed_cmd)
       return 1;
    }
 
+   /* Drop the pool lease before the embedder round-trip so the evidence-embed
+    * drain can't pin a connection past the 300s stuck-lease ceiling (see
+    * kb_curator_extract_code / kb_service_code_embed). No-op in a lease scope. */
+   db2_lease_release_idle();
    float vec[EVIDENCE_EMBED_DIM];
    int dim = memory_embed_text(content, model, vec, EVIDENCE_EMBED_DIM);
    if (dim != EVIDENCE_EMBED_DIM)
