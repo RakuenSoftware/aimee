@@ -4,7 +4,7 @@
 Emits one static const char * per schema file so each tier's db_schema.c
 can apply its schema directly through a single idempotent
 CREATE-IF-NOT-EXISTS pass. See
-docs/proposals/accepted/three-db-split-user-shared-vectors.md.
+docs/STORAGE_TIERS.md.
 """
 import json
 import sys

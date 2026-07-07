@@ -1,5 +1,5 @@
 /* cmd_memory_internal.h: shared among the cmd_memory_* translation units
- * (cmd_memory.c + cmd_memory_core.c + cmd_memory_embed.c + db3/cmd_memory_vector.c).
+ * (cmd_memory.c + cmd_memory_core.c + cmd_memory_embed.c + cmd_memory_vector.c).
  * Not a public API. */
 #ifndef DEC_CMD_MEMORY_INTERNAL_H
 #define DEC_CMD_MEMORY_INTERNAL_H 1
@@ -97,7 +97,7 @@ void mem_audit(app_ctx_t *ctx, int argc, char **argv);
 void mem_calibrate(app_ctx_t *ctx, int argc, char **argv);
 void mem_benchmark(app_ctx_t *ctx, int argc, char **argv);
 
-/* db3/cmd_memory_vector.c — reindex/repair/rebuild/reconcile/verify + workflows */
+/* cmd_memory_vector.c — reindex/repair/rebuild/reconcile/verify + workflows */
 void mem_reindex(app_ctx_t *ctx, int argc, char **argv);
 void mem_repair(app_ctx_t *ctx, int argc, char **argv);
 void mem_reconcile(app_ctx_t *ctx, int argc, char **argv);

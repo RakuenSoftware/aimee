@@ -1,6 +1,6 @@
 /* db2/decision_log.h: task-keyed decision log — DB2 subsystem.
  *
- * Per the accepted three-db split proposal, decision_log lives in DB2
+ * Per the DB1/DB2 storage split, decision_log lives in DB2
  * alongside notes and shareable task state. The per-window `decisions`
  * audit table remains in DB1 (db1/decisions.h).
  *

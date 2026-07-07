@@ -5,7 +5,7 @@
 #
 # Satisfies the two-replica acceptance criterion from the DB2 Postgres
 # design tracked in
-# docs/proposals/accepted/three-db-split-user-shared-vectors.md.
+# docs/STORAGE_TIERS.md.
 #
 # Requires docker + docker compose on PATH. Not run by `make test` —
 # invoke manually or from CI where docker is available.

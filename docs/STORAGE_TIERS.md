@@ -21,6 +21,6 @@ shared by multiple servers. Shared deployments should receive only information
 appropriate for that shared scope, through the memory, learning, reflection, and
 KB APIs that promote or reflect local server evidence into durable knowledge.
 
-The vector tier was originally a separate Qdrant sidecar (DB3); it was folded
+The vector tier was originally a separate Qdrant sidecar; it was folded
 into DB2 as a pgvector extension in #1575, vectors live in the same Postgres
 instance as the rest of DB2 and need no separate connection or service.

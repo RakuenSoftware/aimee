@@ -1,5 +1,5 @@
 /* libpq-backed implementation for DB2, the shared knowledge tier. See
- * docs/proposals/accepted/three-db-split-user-shared-vectors.md. */
+ * docs/STORAGE_TIERS.md. */
 
 #include "db_postgres.h"
 #include <ctype.h>

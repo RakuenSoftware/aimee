@@ -1,5 +1,5 @@
 /* kb_service_workers.c: kb_service socket init/shutdown.
- * aimee-kb owns DB2/DB3 and now drives KB ingest in-process via the worker
+ * aimee-kb owns DB2 and now drives KB ingest in-process via the worker
  * pool in kb_ingest_workers.c, alongside its KB maintenance, reflection,
  * curation, and mining background loops. */
 

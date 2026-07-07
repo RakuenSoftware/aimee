@@ -3,8 +3,7 @@
 
 /* DB1 (SQLite) idempotent schema bootstrap. Single CREATE-IF-NOT-EXISTS
  * pass; safe to call on an already-initialized database. The DB2 half
- * lives in db2/db_schema.h. See
- * docs/proposals/accepted/three-db-split-user-shared-vectors.md. */
+ * lives in db2/db_schema.h. See docs/STORAGE_TIERS.md. */
 
 #include <stddef.h>
 

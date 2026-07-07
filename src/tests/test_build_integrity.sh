@@ -856,7 +856,7 @@ _group_integ() {
     # The CLI client (aimee) is a DB-free thin wrapper — no DB libraries allowed.
     # aimee-webchat is now a full HTTP server process with its own SQLite session
     # store (PAM auth sessions, rate-limit state); it may link sqlite but must not
-    # contain aimee DB1/DB2/DB3 API strings (aimee_db_, kb_client, etc.).
+    # contain aimee DB1/DB2 API strings (aimee_db_, kb_client, etc.).
     storage_string_leaks=""
     for bin in "$INTEG_BINARY"; do
         leaks=$(strings "$bin" 2>/dev/null | \

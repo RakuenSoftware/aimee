@@ -29,7 +29,7 @@
 
 /* Bootstrap the DB2 postgres connection during `aimee init`. This is the
  * non-interactive "is the database reachable + healthy" gate documented
- * in docs/proposals/pending/three-db-pin-backends.md. We do not provision
+ * in docs/STORAGE_TIERS.md. We do not provision
  * a postgres role/database here (those typically need superuser privileges
  * and platform-specific commands); we only run db2_init against the
  * configured db2_url and report a clear remediation if it fails.
