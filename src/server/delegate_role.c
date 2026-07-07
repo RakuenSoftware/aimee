@@ -106,16 +106,12 @@ void delegate_apply_max_turns_override(agent_config_t *cfg, int max_turns)
 
 int delegate_default_max_turns_for_role(const char *role)
 {
-   if (!role || !role[0])
-      return -1;
-
-   role = delegate_role_canonicalize(role);
-   if (strcmp(role, "review") == 0)
-      return 20;
-   if (strcmp(role, "validate") == 0 || strcmp(role, "search") == 0)
-      return 12;
-   if (strcmp(role, "diagnose") == 0)
-      return 16;
+   /* Every role defaults to -1 = INFINITE. Per-role turn caps are no longer
+    * hardcoded here: they are operator configuration, edited per-role under the
+    * Personas tab (persona role config), so an unconfigured role is unbounded.
+    * A configured positive value flows through delegate_apply_max_turns_policy as
+    * a cap; -1 leaves the role unbounded. */
+   (void)role;
    return -1;
 }
 
