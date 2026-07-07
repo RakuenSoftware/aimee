@@ -260,9 +260,9 @@ aimee delegate roundtable "Review this design" --mode review     # bounded multi
 aimee ships the retrieval and synthesis stack as one container: a Vulkan llama.cpp runtime
 serving embeddings, reranking, and synthesis from models baked into the image. Run it on a
 GPU and the knowledge base curates locally with no API calls, and the local model registers
-as a free delegate the roundtable and the primary can call. Three tiers cover the range: a
-CPU build for retrieval on any host, and two GPU builds whose synth model you pick with a
-single image swap, no re-embed. See [kb LLM backends](docs/KB_LLM_BACKENDS.md) and
+as a free delegate the roundtable and the primary can call. Four tiers cover the range: a
+CPU build for retrieval on any host, and three GPU builds (for 16, 24, and 32 GB cards) whose
+synth model you pick with a single image swap, no re-embed. See [kb LLM backends](docs/KB_LLM_BACKENDS.md) and
 [synth tiers](docs/AIMEE_KB_SYNTH_TIERS.md).
 
 ### Session isolation
