@@ -206,6 +206,7 @@ int main(void)
        * defaults on, so set it off; promote_threshold defaults 3, so set 7). */
       cfg.kb_typed_facts_auto_promote_enabled = 0;
       cfg.kb_typed_facts_promote_threshold = 7;
+      cfg.typed_facts_enabled = 1; /* KB-owned master gate: persisted as kb.typed_facts.enabled */
       snprintf(cfg.kb_curator_judge_command, sizeof(cfg.kb_curator_judge_command), "judge --json");
       snprintf(cfg.kb_curator_synthesize_command, sizeof(cfg.kb_curator_synthesize_command),
                "synth --json");
@@ -433,6 +434,7 @@ int main(void)
       assert(cfg2.kb_curator_synthesize_k == 4);
       assert(cfg2.kb_typed_facts_auto_promote_enabled == 0);
       assert(cfg2.kb_typed_facts_promote_threshold == 7);
+      assert(cfg2.typed_facts_enabled == 1);
       assert(strcmp(cfg2.kb_curator_judge_command, "judge --json") == 0);
       assert(strcmp(cfg2.kb_curator_synthesize_command, "synth --json") == 0);
       assert(strcmp(cfg2.kb_curator_provider_base_url, "http://curator:8080/v1") == 0);
