@@ -1,26 +1,38 @@
 # Proposal: LLM-sidecar productionization — graduate curator extraction and idle reflection from stub to production
 
-- **State:** PENDING — design only, no code in this PR. Finalises two
+- **State:** PENDING — design only, no code in this PR. Finalises three
   scaffolded-but-stubbed intelligence steps that ride the shared
-  `kb_curator_sidecar` mechanism. Adds no
-  new subsystem: it wires the existing curator extract/synthesize/judge stages and
-  the existing idle-reflection scheduler onto a production sidecar, behind a
-  calibrated gate. Continuation of **Deep Curator: Doc and Code Extraction**
+  `kb_curator_sidecar` / offline-extractor mechanism. Adds no new **durability**
+  subsystem: it wires the existing curator extract/synthesize/judge stages, the
+  existing idle-reflection scheduler, and the existing `memory_facts` drain onto a
+  production sidecar behind a calibrated gate, and reuses the shipped `rel_types`
+  write gate and ontology-evolution machinery for reconciliation. The one genuinely
+  new surface is the KB-owned Typed Facts console panel (§8). Continuation of
+  **Deep Curator: Doc and Code Extraction**
   (Accepted, Phase 0 shipped — `scripts/embed-minilm.py` MiniLM-L6-v2 embedding
   sidecar) and the **Cross-Source Learning** substrate (Done). Does **not**
   re-propose the curator stage machine, the reflection scheduler, the promotion
   pipeline, calibration, or the sidecar-invocation shim — all shipped; it makes the
-  LLM step they were built around real.
+  LLM step they were built around real. Extended (2026-07-07) to fold in the
+  **memory typed-fact path** (`kb_memory_facts.c`), which rides the same offline
+  extractor: move its extraction fully offline, default it on, add **autonomous
+  ontology reconciliation** so extracted facts actually become durable and
+  recallable (not just logged), and surface the whole subsystem — observe,
+  fine-tune, and alter behaviour — in **aimee-kb's web console**, backed by
+  **KB-owned config**. aimee-server owns none of it.
 - **Author:** JBailes
 - **Date:** 2026-07-07
 - **Charter roles:** Extract (structured entity/fact/decision/relationship
-  extraction from docs and code), Synthesize (reflection candidate generation +
-  higher-order knowledge), Judge (quality gate before durable), Reflect
-  (idle-time consolidation), Calibrate (per-surface promotion thresholds already
-  fitted — this feeds them real candidates), Gate-Promote (staged rollout of the
-  sidecar's output), Evaluate-Optimize (shadow → canary → default via the bandit
-  substrate). Cites the Architecture Charter; this proposal lives entirely inside
-  the charter's Extract/Synthesize/Judge/Reflect spine.
+  extraction from docs, code, and remembered notes), Reconcile (map free-form
+  extracted relations onto the canonical `rel_types` ontology, and auto-promote
+  the genuinely novel tail so facts become durable without a human), Synthesize
+  (reflection candidate generation + higher-order knowledge), Judge (quality gate
+  before durable), Reflect (idle-time consolidation), Calibrate (per-surface
+  promotion thresholds already fitted — this feeds them real candidates and drives
+  autonomous ontology promotion), Gate-Promote (staged rollout of the sidecar's
+  output), Evaluate-Optimize (shadow → canary → default via the bandit substrate).
+  Cites the Architecture Charter; this proposal lives entirely inside the charter's
+  Extract/Reconcile/Synthesize/Judge/Reflect spine.
 
 ## Thesis
 
@@ -49,11 +61,28 @@ on two steps that are **scaffolded but stubbed today**:
    deduplication run fully."* So aimee reflects **structurally** today; it does not
    yet **synthesize**.
 
-Both stubs share one dependency: a production LLM sidecar with a stable contract.
-This proposal defines that contract once, graduates both consumers onto it behind
-a calibrated shadow→canary→default gate, and closes the two operational-validation
-items those stages left open. When it lands, the §1/§3 claims become true in the
-build, not just in the architecture.
+3. **Memory typed-fact extraction — runs, but nothing lands.** The `memory_facts`
+   drain (`kb_memory_facts.c`, on `kb_curator_drain.c`) already runs the LLM
+   extractor (`kb_curator_llm_run`, `MF_SYSTEM_PROMPT`) offline over stored
+   memories. But two things keep it from being real: (a) a redundant *synchronous*
+   pattern pass still fires on the store/turn hot path (`db2_typed_fact_ingress` →
+   `db2_fact_ingest_text` in `kb_service_backend_memory.c` / `fact_ingest.c`); and
+   (b) the extractor emits **free-form** relations that miss the seed ontology, so
+   the write gate stages them provisional and **no durable, recallable fact is
+   written**. Validated on the .254 stack (2026-07-07): a note storing
+   `is_cto_of` / `drives` / `has_office_in` logged *"memory 7 → 3 typed facts"*
+   while `typed_facts` stayed empty, `rel_types` held all three as
+   `status=provisional`, and recall returned nothing. Extraction happens; usable
+   facts do not. And none of it is observable or tunable by an operator.
+
+These steps share one dependency: a production LLM extractor, run offline, whose
+output is **reconciled** to a canonical ontology before the promotion gate. This
+proposal defines the sidecar contract once, graduates all three consumers onto it
+behind a calibrated shadow→canary→default gate, makes the memory typed-fact path
+offline-and-default-on with autonomous reconciliation, surfaces the whole
+subsystem as **KB-owned** config + an aimee-kb console panel, and closes the two
+operational-validation items those stages left open. When it lands, the §1/§3
+claims become true in the build, not just in the architecture.
 
 ## Goal
 
@@ -74,6 +103,17 @@ build, not just in the architecture.
    proposals (Working-Profile, Dogfood Autolabel) get their first real
    candidate stream from this, closing their "unshipped operational artifacts"
    remainder on a real calendar.
+6. **Memory typed facts, offline and default-on** — extraction (pattern + LLM)
+   runs entirely on the `memory_facts` drain; the store/turn hot path keeps only
+   cheap Postgres retraction + recall. `typed_facts_enabled` defaults **on** on
+   every backend (including CPU-only E4B), because nothing is synchronous LLM.
+7. **Autonomous ontology reconciliation** — extracted relations are reconciled to
+   the canonical ontology (constrain-the-extractor + auto-promote the novel tail)
+   **by default**, so facts become durable and recallable with no operator action.
+8. **KB-owned, GUI-tunable** — every knob (enable, reconciliation mode, thresholds,
+   ontology) lives in **aimee-kb** config and its web console — observe, fine-tune,
+   and alter behaviour there. **aimee-server knows nothing about typed facts**; its
+   per-turn injection just asks the KB and renders whatever the KB returns.
 
 ## §0 What already exists (so we don't rebuild it)
 
@@ -173,6 +213,73 @@ produces that stream — the first end-to-end pass of the promotion + retroactiv
 review loop is a curator/reflection candidate cohort moving shadow→default. Their
 close-by deadlines become achievable, not hypothetical.
 
+## §6 Memory typed facts — offline, default-on, KB-owned
+
+- **Extraction fully offline.** The `memory_facts` drain already runs the LLM
+  extractor off the hot path; fold the remaining synchronous **pattern** pass
+  (`memory_extract_patterns` via `db2_fact_ingest_text`) into the drain too, so the
+  store/turn path (`kb_service_backend_memory.c`, `fact_ingest.c`) does **zero**
+  synchronous extraction — it only enqueues the `memory_facts` job. Retraction
+  stays synchronous (a cheap Postgres write, corrections take effect immediately);
+  recall stays synchronous (`db2_fact_recall_in_query`, a Postgres read). Penalty:
+  a fact stated in the current turn is recallable one drain-cycle later, not
+  same-turn — an accepted trade for a cross-turn memory.
+- **Default on, every backend.** `typed_facts_enabled` defaults **on** and is no
+  longer tied to the `accel` signal (`config_apply_inference_backend_defaults`):
+  since extraction is offline and recall is a DB read, there is no per-turn LLM
+  cost on CPU-only E4B/E2B either. HyDE query rewrite — genuine per-turn LLM work —
+  stays accel-gated and is untouched.
+- **KB-owned.** The flag and every reconciliation/tuning knob live in **aimee-kb**
+  config (a `kb.typed_facts.*` section) and the KB console (§8). aimee-server has
+  **no** typed-fact gate: `ingress_preinject` calls the KB facts endpoint
+  (`kb_client_memory_facts`), which returns facts or empty from the KB's own
+  config. (Validation 2026-07-07: enabling it on aimee-server did nothing because
+  the KB never saw the setting — this removes that split-brain by design.)
+
+## §7 Autonomous ontology reconciliation
+
+The write gate (`db2_fact_commit`, `rel_types_store.c`) only makes a fact durable
+and recallable when its relation is **active** in the ontology; a free-form
+relation is staged as a `provisional` `rel_type` plus a low-confidence Class-C
+edge in `entity_edges` and never surfaces on recall. The extractor
+(`MF_SYSTEM_PROMPT`) emits free-form snake_case, so on a bare system **every fact
+is provisional** (the .254 evidence above). A human cannot be the one mapping
+`is_cto_of → has_role`; aimee reconciles autonomously, **on by default**:
+
+1. **Constrain the extractor.** Pass the seed ontology (`SEED_ONTOLOGY[]`,
+   `rel_types.c`: `works_for`, `has_role`, `lives_in`, …) into the extraction
+   prompt and instruct the model to map to the **nearest canonical** relation,
+   using an `OTHER` fallback only when nothing fits. Most facts then commit
+   `ACCEPT` → active → recallable immediately, with no promotion wait.
+2. **Auto-promote the novel tail.** Genuinely out-of-ontology relations that recur
+   across sources are promoted `provisional → active` by the existing
+   ontology-evolution machinery, run **by default** on a calibrated threshold
+   (reuse the shipped Bayesian-calibration substrate, §0). The ontology grows
+   itself; the `OTHER`-bucket is drained over time rather than lost.
+
+The default path needs no operator input. Every parameter — the ontology set,
+the reconciliation mode, the promotion threshold, the confidence floor — is an
+override exposed in §8, never a prerequisite.
+
+## §8 aimee-kb console — observe, fine-tune, alter behaviour (KB-owned)
+
+The KB console today is a single `/v1/console/overview` (`kb_http_console.c`). Add
+a **Typed Facts** panel, KB-served and backed entirely by KB config —
+aimee-server renders and knows nothing:
+
+- **Observe.** Durable vs provisional facts; the live ontology (seed + learned);
+  promotion candidates with their supporting evidence; drain throughput and lag.
+- **Fine-tune.** Promotion threshold, confidence floor, ontology extensions and
+  relation aliases.
+- **Alter behaviour.** Enable/disable; reconciliation mode
+  (`constrain-extractor` / `auto-promote` / `both` / `off`); ontology auto-growth
+  on/off.
+- **Act.** Promote, map, or reject a provisional relation by hand.
+
+Every control round-trips through `kb.typed_facts.*` KB config and is equally
+settable headless (same keys, no GUI required). aimee-server is not in the loop
+for any of it.
+
 ## Acceptance criteria
 
 1. **Contract.** `sidecar_contract_version` schema documented; both consumers emit
@@ -192,6 +299,17 @@ close-by deadlines become achievable, not hypothetical.
 6. **Validation-pending, stated as such.** Real-corpus precision/usefulness numbers
    are a dogfood deliverable (§5); this proposal ships the plumbing + fixtures and
    reports corpus-scale quality as *validation-pending*, not done.
+7. **Offline + default-on (KB).** With `typed_facts_enabled` at its default, a
+   fresh KB on any backend (including CPU-only E4B) extracts with **zero**
+   synchronous LLM on the store/turn path (proven by timing a store), and
+   `aimee config` on aimee-server exposes no typed-fact knob at all.
+8. **Reconciliation yields recallable facts.** On a fixture note, an extracted
+   fact commits with a canonical (or auto-promoted) relation as an **active** edge
+   and is returned by recall — proven end-to-end on the .254 stack, not merely
+   "N facts logged." (This is the exact failure §7 fixes.)
+9. **KB console.** The Typed Facts panel observes durable/provisional facts and the
+   ontology, and its fine-tune / alter / act controls round-trip through
+   `kb.typed_facts.*`; aimee-server has no equivalent surface.
 
 ## Explicitly out of scope / does not re-propose
 
@@ -201,5 +319,10 @@ close-by deadlines become achievable, not hypothetical.
   sibling proposal `org-data-connectors-and-source-ingestion.md`; this proposal
   makes extraction real, that one makes the corpus wide. They compose but ship
   independently.
-- Any change to the typed-fact ontology or write gate — relationship candidates
-  ride the existing `rel_types` gate unchanged.
+- **A new ontology store or a rewrite of the write gate.** Reconciliation (§7)
+  reuses the existing `rel_types` gate (`db2_fact_commit`), the seed ontology
+  (`SEED_ONTOLOGY[]`), and the shipped ontology-evolution / calibration machinery
+  verbatim. What is new is *feeding* the gate canonical relations (extractor
+  constraint) and *running* provisional→active promotion on by default — the gate
+  and the durability contract themselves are unchanged. Free-form relations are no
+  longer silently stranded as provisional; that is the whole point.

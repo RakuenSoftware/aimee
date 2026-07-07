@@ -323,7 +323,9 @@ typedef struct config
     * per-service WORM store (append-only, hash-chained SQLite) alongside the
     * legacy audit.log. Default-OFF (S0 of the WORM audit-store proposal); the
     * WORM store is not yet authoritative, so a failed WORM append is recoverable
-    * audit loss, never an enforcement change. */
+    * audit loss, never an enforcement change. Persisted as an opt-in (config.c
+    * load + config_save), so an enabled deployment survives a restart; the global
+    * default stays OFF. */
    int audit_worm_enabled;
    /* css_render_command: the render backend for the #4-full computed-style oracle.
     * A shell command (like embedding_command) that reads a {"html","css"} JSON

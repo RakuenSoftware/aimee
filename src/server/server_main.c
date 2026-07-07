@@ -9,6 +9,7 @@
 #include "git_host_cred.h"
 #include "git_host_resolve.h"
 #include "git_ops.h"
+#include "guardrails.h"
 #include "workspace.h"
 #include "kb_client_cache.h"
 #include "kb_client_ws.h"
@@ -252,6 +253,10 @@ static int run_server(const char *socket_path, log_level_t log_level)
    context_engine_register_compactor();
    if (cfg.context_engine[0])
       context_engine_set_active(cfg.context_engine);
+
+   /* Clear the cached audit_action/audit_worm gates on config reload so a live
+    * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
+   guardrails_action_audit_register_reload();
    {
       char perr[256] = {0};
       plugin_loader_discover_all(perr, sizeof(perr));

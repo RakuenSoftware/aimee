@@ -239,6 +239,10 @@ int main(void)
       /* css_style_graph now defaults on; set off to prove the opt-out round-trips
        * (default-on save-guard regression class). */
       cfg.css_style_graph_enabled = 0;
+      /* audit_worm_enabled defaults off; set on to prove the opt-in persists
+       * (regression: it was allowlist-settable but had no config_save/load path,
+       * so an enabled deployment silently reverted to off on restart). */
+      cfg.audit_worm_enabled = 1;
       /* css_render_command defaults non-empty; set empty to prove the disable
        * override round-trips (string default-on save-guard: save must emit the
        * non-default empty, not drop it and silently re-default on reload). */
@@ -449,6 +453,7 @@ int main(void)
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
       assert(cfg2.css_style_graph_enabled == 0);  /* opt-out survives save/reload */
+      assert(cfg2.audit_worm_enabled == 1);       /* opt-in survives save/reload */
       assert(cfg2.css_render_command[0] == '\0'); /* disable (empty) survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
