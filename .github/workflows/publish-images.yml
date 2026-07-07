@@ -82,18 +82,24 @@ jobs:
           # the 0.6b embedder + 400m reranker.
           - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b", reranker_arg: "RERANKER_MODEL=cross-encoder/ettin-reranker-1b-v1" }
           # The unified aimee-kb container (one Vulkan llama.cpp + the gateway serving
-          # embed+rerank+synth, models baked in). THREE tiers differ only by the SYNTH
+          # embed+rerank+synth, models baked in). FOUR tiers differ only by the SYNTH
           # model + its runtime profile (embed/rerank identical within a class):
           #   aimee-kb-cpu       defaults: 0.6B emb + ettin-68m + gemma-4-E4B (CPU)
-          #   aimee-kb-gpu-small 4B/400m + Gemma-4-12B qat-UD-Q4_K_XL (dense, FA+K8V4)
+          #   aimee-kb-gpu-small 4B/400m + Gemma-4-12B qat-UD-Q4_K_XL (dense, FA+K8V4; 16GB)
           #   aimee-kb-gpu-mid   4B/400m + Gemma-4-26B-A4B qat-UD-Q4_K_XL (MoE, 4B active,
           #                      FA+K8V4; ~14GB fits 24GB fully-resident → N_CPU_MOE=0;
-          #                      GGUF pinned by HF rev+sha256)
-          # gpu-small/gpu-mid share the 2560-dim embedder so a KB is portable across the
+          #                      GGUF pinned by HF rev+sha256; SLOTS=2 → deploy 2×128K)
+          #   aimee-kb-gpu-large IDENTICAL to gpu-mid (same 26B-A4B GGUF/profile) but
+          #                      SLOTS=4 for 32GB cards → deploy 4×256K (each agent the
+          #                      full native 262144 window; Gemma's windowed KV keeps
+          #                      even 4×256K under ~28.5GiB, validated vs the 24GB mid card)
+          # gpu-small/mid/large share the 2560-dim embedder so a KB is portable across the
           # synth swap. amd64 GPU host runs the x64 Vulkan binary; NGL set at deploy.
           - { name: aimee-kb-cpu, dockerfile: Dockerfile.aimee-llm }
           - { name: aimee-kb-gpu-small, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF\nSYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=9586f3257bc62bd179767241c7ec0f66bc2a314a\nSYNTH_SHA256=cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165\nSYNTH_FA=on" }
           - { name: aimee-kb-gpu-mid, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-26B-A4B-it-qat-GGUF\nSYNTH_FILE=gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=02749a7b272109255a4c559a80894d3d9777574c\nSYNTH_SHA256=dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e\nSYNTH_FA=on\nSYNTH_MOE=1\nSYNTH_N_CPU_MOE=0\nSYNTH_SLOTS=2" }
+          # gpu-large: same GGUF as gpu-mid, only SYNTH_SLOTS=4 (24GB→32GB card headroom).
+          - { name: aimee-kb-gpu-large, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-26B-A4B-it-qat-GGUF\nSYNTH_FILE=gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=02749a7b272109255a4c559a80894d3d9777574c\nSYNTH_SHA256=dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e\nSYNTH_FA=on\nSYNTH_MOE=1\nSYNTH_N_CPU_MOE=0\nSYNTH_SLOTS=4" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -154,10 +160,10 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        # aimee-kb-gpu-mid (Gemma-4-26B-A4B, ~14GB) is amd64-only: arm64 would bake a
-        # non-runnable x64 Vulkan binary and double the build/disk cost. Skip it on arm64
+        # aimee-kb-gpu-mid/large (Gemma-4-26B-A4B, ~14GB) are amd64-only: arm64 would bake a
+        # non-runnable x64 Vulkan binary and double the build/disk cost. Skip them on arm64
         # -> the merge job emits a single-arch amd64 manifest (it tolerates count>=1).
-        if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
+        if: ${{ !((matrix.image.name == 'aimee-kb-gpu-mid' || matrix.image.name == 'aimee-kb-gpu-large') && matrix.platform.arch == 'arm64') }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context || '.' }}
@@ -174,8 +180,8 @@ jobs:
           # layer cache. Same exclusion for the aimee-kb-* tiers: they BAKE multi-GB
           # GGUFs (Qwen3-Embedding + gemma) into the image, so caching those layers
           # would likewise blow the 10 GB GHA budget and evict the C-image caches.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-kb-gpu-large' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-kb-gpu-large' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
@@ -200,13 +206,13 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
-        if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
+        if: ${{ !((matrix.image.name == 'aimee-kb-gpu-mid' || matrix.image.name == 'aimee-kb-gpu-large') && matrix.platform.arch == 'arm64') }}
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
-        if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
+        if: ${{ !((matrix.image.name == 'aimee-kb-gpu-mid' || matrix.image.name == 'aimee-kb-gpu-large') && matrix.platform.arch == 'arm64') }}
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
@@ -221,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-kb-cpu, aimee-kb-gpu-small, aimee-kb-gpu-mid, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-kb-cpu, aimee-kb-gpu-small, aimee-kb-gpu-mid, aimee-kb-gpu-large, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"

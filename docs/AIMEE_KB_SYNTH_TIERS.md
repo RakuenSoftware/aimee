@@ -2,19 +2,25 @@
 
 The `aimee-kb-*` image is the unified Vulkan llama.cpp stack: one runtime serving
 **embeddings** (`/embed`), **reranking** (`/rerank`), and **synthesis**
-(`/v1/chat/completions`) from baked-in GGUFs. Three published tiers differ only in the
+(`/v1/chat/completions`) from baked-in GGUFs. Four published tiers differ only in the
 **synth model** (and its runtime profile); embed + rerank are identical within a
 CPU/GPU class, so a KB stays byte-portable when you swap the GPU synth tier.
 
 | Image | Embed / Rerank | Synth | Runtime |
 |---|---|---|---|
 | `aimee-kb-cpu` | Qwen3-Emb-0.6B / ettin-68m (1024-dim) | gemma-4-E4B (**Tier A only**) | CPU (`NGL=0`) |
-| `aimee-kb-gpu-small` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 12B** `qat-UD-Q4_K_XL` | GPU, dense, FA+K8V4 |
-| `aimee-kb-gpu-mid` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | GPU, MoE (4B active), FA+K8V4, fully resident |
+| `aimee-kb-gpu-small` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 12B** `qat-UD-Q4_K_XL` | GPU, dense, FA+K8V4 — 16 GB |
+| `aimee-kb-gpu-mid` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | GPU, MoE (4B active), FA+K8V4, fully resident, 2 slots — 24 GB |
+| `aimee-kb-gpu-large` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | Same GGUF as `gpu-mid`, 4 slots — 32 GB |
 
-`gpu-small` and `gpu-mid` share the **same embedder + reranker** (2560-dim), so a KB
-embedded on one is byte-compatible with the other. Switching the synth tier is a
-plugin **image swap**, no re-embed.
+`gpu-large` is byte-identical to `gpu-mid` (same synth GGUF/revision/SHA + MoE/FA profile);
+it only bakes `SYNTH_SLOTS=4` instead of `2`, so a 32 GB card runs **4 concurrent agents**
+each with the model's full native **256 K** window (deploy `AIMEE_LLM_SYNTH_CTX=1048576`).
+Gemma-4 uses interleaved sliding-window attention (only 5 of 30 layers are full-attention),
+so even 4×256 K KV stays ~28.5 GiB — validated against the 24 GB `gpu-mid` card (2×128 K =
+22.4/24 GiB). `gpu-small`, `gpu-mid`, and `gpu-large` share the **same embedder + reranker**
+(2560-dim), so a KB embedded on one is byte-compatible with the others — switching the synth
+tier is a plugin **image swap**, no re-embed.
 
 ## Tier-A vs Tier-B synthesis
 
@@ -25,8 +31,8 @@ The curator synthesizes in two tiers:
   synthesize, promote.
 
 `aimee-kb-cpu` runs **Tier A only**. Its gemma-4-E4B synth is not wired as a Tier-B provider (a weak model would poison the graph), so a CPU-only deployment gets retrieval + Tier-A
-synthesis and nothing more. **Tier B needs a GPU tier (`gpu-small` / `gpu-mid`) or an
-external LLM.** With no Tier-B provider the reasoning passes are skipped, not errored. Full
+synthesis and nothing more. **Tier B needs a GPU tier (`gpu-small` / `gpu-mid` / `gpu-large`)
+or an external LLM.** With no Tier-B provider the reasoning passes are skipped, not errored. Full
 config surface: [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md).
 
 ## Package names
@@ -35,8 +41,8 @@ Two image families share the `aimee-kb` prefix. Keep them straight:
 
 - **`aimee-kb`** (no suffix): the KB service (DB2 + curator). Runs no model; it calls one
   over HTTP. See [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md).
-- **`aimee-kb-{cpu,gpu-small,gpu-mid}`**: the inference tiers in this doc (embed + rerank +
-  synth), built from `Dockerfile.aimee-llm`, deployed as the SmoothNAS `aimee-llm` plugin.
+- **`aimee-kb-{cpu,gpu-small,gpu-mid,gpu-large}`**: the inference tiers in this doc (embed +
+  rerank + synth), built from `Dockerfile.aimee-llm`, deployed as the SmoothNAS `aimee-llm` plugin.
 
 Retired names: `aimee-llm-cpu`/`aimee-llm-gpu` were the old tier names (now
 `aimee-kb-cpu`/`aimee-kb-gpu-small`); `aimee-embedder`/`aimee-embedder-4b` were the
@@ -75,8 +81,8 @@ independent callers, one automatic, one an explicit operator step:
 
 | Env | Default (per tier) | Meaning |
 |---|---|---|
-| `AIMEE_LLM_SYNTH_CTX` | 32768 baked; the gpu-mid plugin sets `262144` (2 × 128 K) | synth context window |
-| `AIMEE_LLM_SYNTH_SLOTS` | 1 (2 on gpu-mid) | `--parallel` concurrent slots |
+| `AIMEE_LLM_SYNTH_CTX` | 32768 baked; gpu-mid deploys `262144` (2 × 128 K), gpu-large `1048576` (4 × 256 K) | synth context window (total across slots) |
+| `AIMEE_LLM_SYNTH_SLOTS` | 1 (2 on gpu-mid, 4 on gpu-large) | `--parallel` concurrent slots |
 | `AIMEE_LLM_SYNTH_FA` | `off` cpu / `on` gpu | flash-attention (required for quantized V-cache) |
 | `AIMEE_LLM_SYNTH_KV_K` / `_KV_V` | `q8_0` / `q4_0` (K8V4) | KV cache quant on the gpu tiers |
 | `AIMEE_LLM_SYNTH_MOE` | `1` on gpu-mid | enable the `--n-cpu-moe` expert-offload knob |

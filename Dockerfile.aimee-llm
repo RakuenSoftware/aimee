@@ -5,7 +5,8 @@
 # Two published images (operator-directed: models baked in, not runtime-fetched —
 # turnkey, reproducible, no HF dependency at run time):
 #   aimee-kb-cpu       (defaults): Qwen3-Embedding-0.6B + ettin-68m + gemma-4-E4B
-#   aimee-kb-gpu-small/mid (build args): 4B + ettin-400m + gemma-4-12B OR gemma-4-26B-A4B
+#   aimee-kb-gpu-small/mid/large (build args): 4B + ettin-400m + gemma-4-12B (small,
+#     16GB) OR gemma-4-26B-A4B (mid=24GB SLOTS=2 / large=32GB SLOTS=4 — same GGUF)
 # The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
 # Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (CPU image defaults 0).
 #

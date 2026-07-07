@@ -36,7 +36,10 @@ services:
       #   aimee-kb-gpu-small  Gemma-4-12B synth (dense; fits 16GB+)
       #   aimee-kb-gpu-mid    Gemma-4-26B-A4B synth (MoE, 4B active; ~14GB fits a 24GB
       #                       card fully GPU-resident, baked AIMEE_LLM_SYNTH_N_CPU_MOE=0)
+      #   aimee-kb-gpu-large  SAME 26B-A4B GGUF as gpu-mid but baked SYNTH_SLOTS=4 for a
+      #                       32GB card — deploy AIMEE_LLM_SYNTH_CTX=1048576 (4 × 256K)
       # aimee-kb-cpu is the CPU tier (1024-dim; NGL=0). See docs/AIMEE_KB_SYNTH_TIERS.md.
+      # This .254 plugin stays on gpu-mid (its card is 24GB); gpu-large is for 32GB hosts.
       image: ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest
     container:
       restartPolicy: unless-stopped

@@ -10,10 +10,10 @@
 # server-code push would be wasteful. So it triggers ONLY on the aimee-kb
 # sources (the Dockerfile + the gateway/supervisor scripts).
 #
-# Tiers built every push: aimee-kb-cpu + aimee-kb-gpu-small (Gemma). The
-# aimee-kb-gpu-mid (Gemma-4-26B-A4B, ~14GB) is dispatch-only. amd64 only (the .254
-# deploy target); the release pipeline owns
-# multi-arch.
+# Tiers built every push: aimee-kb-cpu + aimee-kb-gpu-small (Gemma). The big MoE
+# tiers aimee-kb-gpu-mid and aimee-kb-gpu-large (both Gemma-4-26B-A4B, ~14GB; they
+# differ ONLY in baked SYNTH_SLOTS, 2 vs 4) are dispatch-only. amd64 only (the .254
+# deploy target); the release pipeline owns multi-arch.
 name: Publish testing aimee-llm
 
 on:
@@ -28,7 +28,11 @@ on:
   workflow_dispatch:
     inputs:
       build_kb_gpu_mid:
-        description: "Also build the aimee-kb-gpu-mid (Gemma-4-26B-A4B synth, ~14GB)"
+        description: "Also build the aimee-kb-gpu-mid (Gemma-4-26B-A4B synth, ~14GB, SLOTS=2)"
+        type: boolean
+        default: false
+      build_kb_gpu_large:
+        description: "Also build the aimee-kb-gpu-large (same 26B-A4B synth, ~14GB, SLOTS=4, 32GB card)"
         type: boolean
         default: false
 
@@ -175,3 +179,76 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-mid:testing
             ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-mid:testing-${{ env.SHA7 }}
+
+  # aimee-kb-gpu-large (Gemma-4-26B-A4B synth, ~14GB MoE): byte-identical to gpu-mid
+  # except baked SYNTH_SLOTS=4 (24GB→32GB card headroom; deploy at 4×256K). Same
+  # dispatch-only + /mnt-relocation + df pre-flight rationale as build-kb-gpu-mid.
+  build-kb-gpu-large:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_kb_gpu_large
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner + short sha
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reclaim toolchains AND relocate docker's data-root to the larger /mnt disk
+      # BEFORE buildx is created, so buildkit writes the ~14GB model layers there
+      # (mirrors publish-images.yml's aimee-kb-leg fix, commit f26cf76).
+      - name: Free disk + move docker storage to /mnt
+        run: |
+          echo "before:"; df -h / /mnt
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/local/share/boost
+          sudo docker image prune --all --force || true
+          sudo systemctl stop docker docker.socket || true
+          sudo mkdir -p /mnt/docker
+          printf '{ "data-root": "/mnt/docker" }\n' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker || true
+          echo "after:"; df -h / /mnt
+
+      # Fail fast if /mnt can't hold the image's transient footprint instead of dying
+      # mid-build with ENOSPC after the model download.
+      - name: Pre-flight disk check
+        run: |
+          avail=$(df --output=avail -BG /mnt | tail -1 | tr -dc '0-9')
+          echo "/mnt available: ${avail}GB"
+          if [ "${avail:-0}" -lt 80 ]; then
+            echo "::error::/mnt has only ${avail}GB free; need >=80GB for the kb-gpu-large build"; exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push aimee-kb-gpu-large:testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.aimee-llm
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          build-args: |
+            EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF
+            EMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf
+            RERANK_REPO=cross-encoder/ettin-reranker-400m-v1
+            SYNTH_REPO=unsloth/gemma-4-26B-A4B-it-qat-GGUF
+            SYNTH_FILE=gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+            SYNTH_REVISION=02749a7b272109255a4c559a80894d3d9777574c
+            SYNTH_SHA256=dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e
+            SYNTH_FA=on
+            SYNTH_MOE=1
+            SYNTH_N_CPU_MOE=0
+            SYNTH_SLOTS=4
+          tags: |
+            ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-large:testing
+            ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-large:testing-${{ env.SHA7 }}

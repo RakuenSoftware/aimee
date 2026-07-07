@@ -39,8 +39,10 @@ case "${AIMEE_LLM_STUB:-}" in
     # synth MODEL + its runtime profile is baked per TIER (build-args -> ENV):
     #   aimee-kb-cpu       gemma-4-E4B     (dense, CPU)
     #   aimee-kb-gpu-small gemma-4-12B     (dense, GPU, FA+K8V4)
-    #   aimee-kb-gpu-mid   Qwen3.6-35B-A3B (MoE, GPU, FA+K8V4 + static --n-cpu-moe
-    #                      expert-offload so the 22GB synth co-fits embed+rerank on 24GB)
+    #   aimee-kb-gpu-mid   gemma-4-26B-A4B (MoE, GPU, FA+K8V4, fully resident on 24GB;
+    #                      SYNTH_SLOTS=2 -> deploy 2x128K)
+    #   aimee-kb-gpu-large gemma-4-26B-A4B (SAME GGUF/profile as mid, SYNTH_SLOTS=4 for
+    #                      32GB cards -> deploy 4x256K; Gemma windowed KV keeps ~28.5GiB)
     # The gemma tiers leave FA/MoE unset -> identical to prior behaviour. AIMEE_LLM_
     # SYNTH_LOCAL=0 still lets an operator disable the local synth and forward via
     # AIMEE_LLM_SYNTH_URL instead.
