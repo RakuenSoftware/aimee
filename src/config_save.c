@@ -821,8 +821,10 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(root, "tool_output_max_bytes", cfg->tool_output_max_bytes);
    if (cfg->ingress_max_raw_scans != 0)
       cJSON_AddNumberToObject(root, "ingress_max_raw_scans", cfg->ingress_max_raw_scans);
-   if (cfg->require_session_worktree)
-      cJSON_AddBoolToObject(root, "require_session_worktree", 1);
+   /* Default-on: persist only the non-default (disabled) state, writing the real
+    * value so an explicit opt-out survives save+reload. */
+   if (!cfg->require_session_worktree)
+      cJSON_AddBoolToObject(root, "require_session_worktree", 0);
    if (cfg->typed_facts_enabled)
       cJSON_AddBoolToObject(root, "typed_facts_enabled", 1);
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */

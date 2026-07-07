@@ -233,12 +233,14 @@ static void test_isolation_enforcement(void)
    "{\"session_id\":\"isotest\",\"tool_name\":\"Read\","                                           \
    "\"tool_input\":{\"file_path\":\"/home/u/repo/src/x.c\"}}"
 
-   /* (1) Inert by default: no config -> mutating op on the primary checkout allowed. */
+   /* (1) Default ON: with no config, a mutating op on the primary checkout is
+    *     BLOCKED — session-worktree isolation is required by default so two aimee
+    *     sessions cannot collide on one shared git HEAD. */
    rm_path(cfgpath);
    g_stdin_json = EDIT_PRIMARY_HOOK;
-   assert(handle_attention_guard() == 0);
+   assert(handle_attention_guard() == 2);
 
-   /* (2) Explicit false also disabled. */
+   /* (2) Explicit false disables the guard (opt-out). */
    write_config("require_session_worktree: false\n");
    assert(handle_attention_guard() == 0);
 

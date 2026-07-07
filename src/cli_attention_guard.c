@@ -465,20 +465,25 @@ static int attn_parse_require_session_worktree(const char *buf, int *out)
 
 static int attn_config_require_session_worktree(void)
 {
+   /* Default ON: session-worktree isolation is required unless an operator
+    * explicitly sets `require_session_worktree: false`. Two aimee sessions
+    * sharing one checkout collide on a single git HEAD — one session's
+    * `git checkout <branch>` moves the branch the other is mutating, cross-
+    * contaminating commits. Failing closed to isolation (each session in its own
+    * `.aimee/worktrees/...` worktree+branch) is the only safe default. */
    const char *home = aimee_home();
    if (!home || !home[0])
-      return 0;
+      return 1; /* no resolvable home -> fail closed to isolation */
 
    char path[1024];
    snprintf(path, sizeof(path), "%s/aimee.yaml", home);
 
    char *buf = NULL;
    if (!attn_read_file(path, &buf))
-      return 0;
+      return 1; /* no config file -> default ON */
 
-   int value = 0;
-   if (!attn_parse_require_session_worktree(buf, &value))
-      value = 0;
+   int value = 1; /* default ON; only an explicit key overrides */
+   (void)attn_parse_require_session_worktree(buf, &value);
    free(buf);
    return value;
 }
