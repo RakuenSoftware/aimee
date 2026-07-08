@@ -559,7 +559,7 @@ blocks:
 
 ### Run-level controls (not in the definition)
 
-- **Per-stage loop cap** — a gate that loops back via `on_fail` is retried at most `20` times (`WFE_MAX_ATTEMPTS`) before the run parks; fixed, not configurable.
+- **Per-stage loop cap** — a node that loops back via `on_fail` is retried at most `max_iters` times (per-node param, default `20`); on the cap its `on_max` policy resolves the loop: `human` parks (default), `fail` is a terminal reject, `pass` forces the flow forward via `on_pass`/`next`.
 - **Gate-override cap** — a parked human gate may be overridden at most `2` times (`WFE_MAX_OVERRIDES`) before the run is forced terminal.
 - **Cost cap** — an optional per-work-item USD ceiling set at run creation (`work_item_max_cost_usd`); the engine parks the run when cumulative cost reaches it.
 - **Trigger / autonomy mode** — `interactive` vs `autonomous`, set when the run is created.

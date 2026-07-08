@@ -789,9 +789,9 @@ def parse_block_catalog():
 
 
 def parse_engine_consts():
-    eng = (SRC / "workflow" / "wfe_engine.c").read_text(encoding="utf-8")
+    dfn = (SRC / "workflow" / "wfe_def.h").read_text(encoding="utf-8")
     auto = (SRC / "workflow" / "wfe_autonomy.h").read_text(encoding="utf-8")
-    att = re.search(r'#define\s+WFE_MAX_ATTEMPTS\s+(\d+)', eng)
+    att = re.search(r'#define\s+WFE_DEFAULT_MAX_ITERS\s+(\d+)', dfn)
     ovr = re.search(r'#define\s+WFE_MAX_OVERRIDES\s+(\d+)', auto)
     return (att.group(1) if att else "?"), (ovr.group(1) if ovr else "?")
 
@@ -861,9 +861,10 @@ def render_workflow(catalog, consts):
         "",
         "### Run-level controls (not in the definition)",
         "",
-        f"- **Per-stage loop cap** — a gate that loops back via `on_fail` is retried "
-        f"at most `{max_att}` times (`WFE_MAX_ATTEMPTS`) before the run parks; fixed, "
-        "not configurable.",
+        f"- **Per-stage loop cap** — a node that loops back via `on_fail` is retried at "
+        f"most `max_iters` times (per-node param, default `{max_att}`); on the cap its "
+        f"`on_max` policy resolves the loop: `human` parks (default), `fail` is a "
+        f"terminal reject, `pass` forces the flow forward via `on_pass`/`next`.",
         f"- **Gate-override cap** — a parked human gate may be overridden at most "
         f"`{max_ovr}` times (`WFE_MAX_OVERRIDES`) before the run is forced terminal.",
         "- **Cost cap** — an optional per-work-item USD ceiling set at run creation "
