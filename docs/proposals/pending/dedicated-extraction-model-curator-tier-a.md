@@ -1,6 +1,6 @@
 # Proposal: a dedicated extraction model for the curator Tier-A
 
-- **State:** PENDING — design/idea only, no code in this PR. Follows the shipped
+- **State:** PENDING — design/idea only, no code in this PR. Follows a prior
   fix that disables the reasoning pass for Tier-A curator stages
   (`provider_def_t.disable_thinking`). That fix made mechanical extraction
   *correct and cheap on the model we already run*; this proposal asks the next
