@@ -215,8 +215,25 @@ static int mf_commit_facts(const char *llm_json)
       if (!subject[0] || !relation[0] || !object[0] || conf < MF_CONF_FLOOR)
          continue;
 
-      fact_gate_verdict_t v = db2_fact_commit(subject, mf_subject_kind(subject), relation, object,
-                                              NODE_OTHER, FACT_AUTHORITY_MODEL, 1);
+      /* The extractor supplies no node kinds, so guess: subject via
+       * mf_subject_kind, object OTHER (unknown). But the kind gate REJECTS a
+       * seed relation whose endpoint kind mismatches its ontology def (e.g.
+       * works_for wants tail=ORG) — a wrong guess silently drops every such
+       * fact. For a known seed relation, take the endpoint kinds the relation
+       * itself implies (its def's canonical kinds) whenever the guess is not
+       * already allowed; novel relations keep the guess (not kind-checked). */
+      memory_node_kind_t subj_kind = mf_subject_kind(subject);
+      memory_node_kind_t obj_kind = NODE_OTHER;
+      const rel_type_def_t *sdef = rel_types_seed_lookup(relation);
+      if (sdef)
+      {
+         if (!rel_type_kind_allowed(sdef, 1, subj_kind) && sdef->head_kind_count > 0)
+            subj_kind = sdef->head_kinds[0];
+         if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
+            obj_kind = sdef->tail_kinds[0];
+      }
+      fact_gate_verdict_t v =
+          db2_fact_commit(subject, subj_kind, relation, object, obj_kind, FACT_AUTHORITY_MODEL, 1);
       if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
          committed++;
    }
