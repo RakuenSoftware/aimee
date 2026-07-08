@@ -423,9 +423,10 @@ typedef struct config
     * model, P1). Single-model Anthropic-compatible shims (llama.cpp/vLLM) enable
     * this so an arbitrary client model name is not forwarded and rejected upstream. */
    int gateway_pin_model;
-   int typed_facts_enabled;         /* typed-fact knowledge layer master gate (default off) */
+   int typed_facts_enabled; /* typed-fact knowledge layer master gate (default off) */
    /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (proposal §7.2/§8). */
-   int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional relations */
+   int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional
+                                               relations */
    int kb_typed_facts_promote_threshold;    /* observations before auto-promote (default 3) */
    int kb_pdf_ingest_enabled;       /* structured-pdf: route PDF uploads through the geometry
                                        extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
@@ -1568,6 +1569,11 @@ typedef struct config
    int kb_curator_promote_entity_enabled;
    int kb_curator_promote_min_sources;
    char kb_curator_extract_command[512];
+   /* Comma-separated stage-name order for the curator pipeline (GUI reorder).
+    * Empty = registry (default) order. Validated against the dependency DAG; an
+    * invalid order falls back to registry order with a WARN. Opt-in: unset changes
+    * nothing. See docs/proposals/pending/user-configurable-curator-pipeline.md. */
+   char kb_curator_stage_order[512];
    int kb_curator_extract_max_tokens;
    int kb_curator_max_attempts;
    /* Curator LLM provider (curator-llm-backend §2), operator-owned and kb-level
