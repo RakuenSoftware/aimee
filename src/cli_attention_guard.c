@@ -565,18 +565,20 @@ static void attn_lexical_normalize(const char *path, char *out, size_t out_n)
 }
 
 /* Returns 1 iff `norm` (an already lexically-normalized path) is inside a
- * managed session worktree. Matches the two canonical managed locations:
+ * managed session worktree. Matches the canonical managed locations:
  *   "/.aimee/worktrees/"  — aimee's own launcher + delegate worktrees
  *   "/.claude/worktrees/" — Claude Code's native worktrees (EnterWorktree)
- * Both are isolated worktrees on a branch off the default branch — the exact
- * isolation this guard requires — so a Claude Code session working in its own
- * worktree is honoured, not blocked. Deliberately the full "/worktrees/" path,
+ *   "/.codex/worktrees/"  — Codex's native worktrees
+ * All are isolated worktrees on a branch off the default branch — the exact
+ * isolation this guard requires — so a Claude Code / Codex session working in its
+ * own worktree is honoured, not blocked. Deliberately the full "/worktrees/" path,
  * NOT the looser "/.aimee-" / "/.claude" prefixes, which would false-match
  * unrelated dirs like "/home/u/.aimee-notes/..." or "~/.claude/". */
 static int attn_path_in_managed_worktree(const char *norm)
 {
    return norm && (strstr(norm, "/.aimee/worktrees/") != NULL ||
-                   strstr(norm, "/.claude/worktrees/") != NULL);
+                   strstr(norm, "/.claude/worktrees/") != NULL ||
+                   strstr(norm, "/.codex/worktrees/") != NULL);
 }
 
 /* Pure decision for the session-isolation guard (testable in isolation).
