@@ -17,6 +17,9 @@ import Editor from './pages/Editor';
 import { SessionProvider, useSessions } from './SessionContext';
 import SettingsPanel from './components/SettingsPanel';
 import TabTutorial from './components/TabTutorial';
+import SetupChip from './components/SetupChip';
+import SetupWizard from './components/SetupWizard';
+import { OPEN_WIZARD_EVENT } from './setup/setupState';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -173,7 +176,15 @@ function LogoutButton() {
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const location = useLocation();
+
+  // The setup chip / "Re-run setup" dispatch this event to open the wizard.
+  useEffect(() => {
+    const openWizard = () => setWizardOpen(true);
+    window.addEventListener(OPEN_WIZARD_EVENT, openWizard);
+    return () => window.removeEventListener(OPEN_WIZARD_EVENT, openWizard);
+  }, []);
 
   useEffect(() => {
     fetch('/api/chat/session')
@@ -213,6 +224,7 @@ export default function App() {
         >
           <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18 }}>aimee</span>
           <SessionTabBar />
+          <SetupChip />
           <SettingsPanel />
           <LogoutButton />
         </header>
@@ -265,6 +277,7 @@ export default function App() {
           </main>
         </div>
       </div>
+      <SetupWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
       <Toast />
     </SessionProvider>
   );
