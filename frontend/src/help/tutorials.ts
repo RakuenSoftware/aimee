@@ -81,6 +81,15 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     ],
     seeAlso: '/agents',
   },
+  '/roles': {
+    title: 'Roles',
+    body: [
+      'The shared ROLE vocabulary — each role’s name, its delegate system-prompt template,',
+      'and its per-role turn cap (max_turns, -1 = infinite).',
+      'Roles are the routing key matched between personas and agents.',
+    ],
+    seeAlso: '/personas',
+  },
   '/projects': {
     title: 'Projects',
     body: [
@@ -98,6 +107,15 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
       'For understanding the codebase’s shape — off the agent’s hot path.',
     ],
     seeAlso: '/editor',
+  },
+  '/pipeline': {
+    title: 'Pipeline',
+    body: [
+      'The curator pipeline: its stages grouped by resource lane (LLM vs INDEX), in run order.',
+      'Toggle a stage’s enable flag — writes through config; the KB picks it up on next load.',
+      'Lane/order/labels mirror the C stage registry; the enable state is live from config.',
+    ],
+    seeAlso: '/dashboard',
   },
   '/editor': {
     title: 'Editor',
