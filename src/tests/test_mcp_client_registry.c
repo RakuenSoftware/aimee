@@ -416,7 +416,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 50
+#define MCP_TOOLS_GOLDEN_COUNT 52
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -430,6 +430,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "delegate_status {job_id} req:job_id\n"                                                         \
    "describe_tool {name} req:name\n"                                                               \
    "diagnose {command,content,diagnosis_id,hypothesis_id,rank,source,stance,symptom} "             \
+   "req:command\n"                                                                                 \
+   "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} "              \
    "req:command\n"                                                                                 \
    "ensemble_review {brief,diff,rounds,turns} req:diff\n"                                          \
    "epistemic_directive "                                                                          \
@@ -479,15 +481,15 @@ static void test_osv_offline_cache_miss_allows(void)
    "search_docs {max_results,query} req:query\n"                                                   \
    "search_memory {filter,query} req:query\n"                                                      \
    "send_message {target,text} req:target,text\n"                                                  \
-   "session "                                                                                      \
-   "{around_message_id,assignments,chain_id,channel,command,id,include_sources,limit,message,"     \
-   "query,reason,session_id,speaker,template,window} req:command\n"                                \
+   "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
+   "req:command\n"                                                                                 \
    "skill_manage "                                                                                 \
    "{absorbed_into,action,content,cwd,file_path,name,new_string,old_string,replace_all} "          \
    "req:action,name\n"                                                                             \
    "store_workflow {project,rule,signal_type} req:rule,signal_type\n"                              \
    "task_list {limit,session_id,state} req:\n"                                                     \
-   "work {command,status_filter} req:command\n"
+   "work {command,status_filter} req:command\n"                                                    \
+   "workflow_run {proposal_md,repo,workflow} req:proposal_md\n"
 
 /* --- mcp_build_tools_list surface net ---
  * Pins the full set of built-in tools and each tool's schema SHAPE (sorted

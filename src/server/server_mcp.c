@@ -29,7 +29,7 @@
 #include "server_mcp_process.h"
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
-#include "server_mcp_workflows.h"
+#include "server_mcp_ensemble.h"
 #include "wfe_advance_exec.h"  /* advance_request interactive-driver executor (S2) */
 #include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
 #include "server_mcp_gateway.h"
@@ -1771,9 +1771,9 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       content = handler(&call);
    }
-   else if (server_mcp_is_workflow_tool(tool))
+   else if (server_mcp_is_ensemble_tool(tool))
    {
-      int rc = server_mcp_handle_workflow_tool(conn, tool, jargs, &content, &structured);
+      int rc = server_mcp_handle_ensemble_tool(conn, tool, jargs, &content, &structured);
       if (rc != 0)
       {
          if (owns_jargs)

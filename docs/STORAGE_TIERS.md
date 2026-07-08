@@ -5,7 +5,7 @@ backends.
 
 | Tier | Ownership | Contents |
 |------|-----------|----------|
-| DB1 | `src/db1/` | Local user and session information, credentials, checkpoints, workflow sessions, local caches, local interaction/learning signals, and other same-user state. Backed by SQLite, owned by the local `aimee-server`. |
+| DB1 | `src/db1/` | Local user and session information, credentials, checkpoints, multi-agent ensembles, local caches, local interaction/learning signals, and other same-user state. Backed by SQLite, owned by the local `aimee-server`. |
 | DB2 | `src/db2/` | Durable knowledge for the configured KB scope: memories, rules, KB metadata, task and decision records, code index metadata, coordination records, and the dense vector indexes for that knowledge (pgvector extension, in-process). Backed by Postgres, owned by `aimee-kb`, and deployable as either a local single-user KB or a shared KB. |
 
 Code outside a tier must call typed APIs instead of depending on a tier's

@@ -6,11 +6,14 @@
 #include <string.h>
 
 #include "aimee_home.h"
+#include "aimee_client.h"
 #include "cli_client.h"
+#include "cJSON.h"
 #include "wfe_def.h"
 
 #ifndef _WIN32
 #include <dirent.h>
+#include <unistd.h>
 #endif
 
 static void print_accepts_builtin(wfe_block_type_t t)
@@ -210,14 +213,307 @@ static int cmd_new(const char *path)
    return 0;
 }
 
+/* --- run / status: talk to aimee-server (unlike the local-only subcommands) --- */
+
+static const char *jstr(const cJSON *o, const char *k)
+{
+   cJSON *x = o ? cJSON_GetObjectItemCaseSensitive((cJSON *)o, k) : NULL;
+   return cJSON_IsString(x) ? x->valuestring : "";
+}
+
+/* Read a whole file (or stdin when path is "-" or NULL) into a heap buffer. */
+static char *slurp_file_or_stdin(const char *path)
+{
+   FILE *f = (!path || strcmp(path, "-") == 0) ? stdin : fopen(path, "rb");
+   if (!f)
+      return NULL;
+   size_t cap = 65536, len = 0;
+   char *buf = malloc(cap);
+   if (!buf)
+   {
+      if (f != stdin)
+         fclose(f);
+      return NULL;
+   }
+   size_t n;
+   while ((n = fread(buf + len, 1, cap - len - 1, f)) > 0)
+   {
+      len += n;
+      if (len + 1 >= cap)
+      {
+         cap *= 2;
+         char *nb = realloc(buf, cap);
+         if (!nb)
+         {
+            free(buf);
+            if (f != stdin)
+               fclose(f);
+            return NULL;
+         }
+         buf = nb;
+      }
+   }
+   buf[len] = '\0';
+   if (f != stdin)
+      fclose(f);
+   return buf;
+}
+
+/* GET /v1/workflow/items/<id>; *out is the parsed body (caller frees), *status the
+ * HTTP status. Returns -1 on transport failure. */
+static int wf_item_get(const char *id, cJSON **out, int *status)
+{
+   char path[256];
+   snprintf(path, sizeof path, "/v1/workflow/items/%s", id);
+   char *resp = aimee_client_request("GET", path, NULL, status);
+   if (!resp)
+      return -1;
+   *out = cJSON_Parse(resp);
+   free(resp);
+   return 0;
+}
+
+/* Poll the run until it leaves the "active" state (terminal or parked at a gate),
+ * printing each state/stage transition. */
+static int wf_watch(const char *id)
+{
+   char last[128] = "";
+   for (;;)
+   {
+      cJSON *it = NULL;
+      int st = 0;
+      if (wf_item_get(id, &it, &st) != 0)
+      {
+         fprintf(stderr, "workflow status: server unavailable\n");
+         return 1;
+      }
+      if (st != 200)
+      {
+         const char *m = jstr(it, "error");
+         fprintf(stderr, "workflow status: %s (status %d)\n", m[0] ? m : "error", st);
+         cJSON_Delete(it);
+         return 1;
+      }
+      const char *state = jstr(it, "state");
+      const char *stage = jstr(it, "stage");
+      char cur[128];
+      snprintf(cur, sizeof cur, "%s|%s", state, stage);
+      if (strcmp(cur, last) != 0)
+      {
+         printf("  %-12s stage=%s\n", state, stage);
+         snprintf(last, sizeof last, "%s", cur);
+      }
+      int active = strcmp(state, "active") == 0;
+      cJSON_Delete(it);
+      if (!active)
+         return 0;
+#ifndef _WIN32
+      sleep(2);
+#endif
+   }
+}
+
+static int cmd_run(int argc, char **argv, int json_output)
+{
+   const char *workflow = NULL, *proposal_file = NULL, *message = NULL, *repo = "";
+   int watch = 0, want_stdin = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      const char *a = argv[i];
+      if (strcmp(a, "--proposal") == 0 && i + 1 < argc)
+         proposal_file = argv[++i];
+      else if (strncmp(a, "--proposal=", 11) == 0)
+         proposal_file = a + 11;
+      else if ((strcmp(a, "--message") == 0 || strcmp(a, "-m") == 0) && i + 1 < argc)
+         message = argv[++i];
+      else if (strncmp(a, "--message=", 10) == 0)
+         message = a + 10;
+      else if (strcmp(a, "--repo") == 0 && i + 1 < argc)
+         repo = argv[++i];
+      else if (strncmp(a, "--repo=", 7) == 0)
+         repo = a + 7;
+      else if (strcmp(a, "--watch") == 0)
+         watch = 1;
+      else if (strcmp(a, "-") == 0)
+         want_stdin = 1;
+      else if (a[0] != '-' && !workflow)
+         workflow = a;
+   }
+   if (!workflow)
+   {
+      fprintf(stderr, "usage: aimee workflow run <name> [--proposal <file>|- | --message <text>]"
+                      " [--repo <path>] [--watch]\n");
+      return 2;
+   }
+
+   char *owned = NULL;
+   const char *proposal = NULL;
+   if (message)
+      proposal = message;
+   else if (proposal_file)
+      proposal = owned = slurp_file_or_stdin(proposal_file);
+   else if (want_stdin)
+      proposal = owned = slurp_file_or_stdin("-");
+   if (!proposal || !proposal[0])
+   {
+      fprintf(stderr, "workflow run: a proposal is required "
+                      "(--proposal <file>, --message <text>, or '-' for stdin)\n");
+      free(owned);
+      return 2;
+   }
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "workflow", workflow);
+   cJSON_AddStringToObject(req, "proposal_md", proposal);
+   if (repo && repo[0])
+      cJSON_AddStringToObject(req, "repo", repo);
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   free(owned);
+
+   int st = 0;
+   char *resp = aimee_client_request("POST", "/v1/dev/submit", body, &st);
+   free(body);
+   if (!resp)
+   {
+      fprintf(stderr, "workflow run: server unavailable (is aimee-server running?)\n");
+      return 1;
+   }
+   cJSON *r = cJSON_Parse(resp);
+   free(resp);
+   if (st != 200)
+   {
+      const char *m = jstr(r, "error");
+      fprintf(stderr, "workflow run: %s (status %d)\n", m[0] ? m : "failed", st);
+      cJSON_Delete(r);
+      return 1;
+   }
+   char id_copy[128];
+   snprintf(id_copy, sizeof id_copy, "%s", jstr(r, "work_item_id"));
+   if (json_output)
+   {
+      char *s = cJSON_PrintUnformatted(r);
+      printf("%s\n", s ? s : "{}");
+      free(s);
+   }
+   else
+   {
+      printf("work_item_id: %s\n", id_copy);
+      printf("workflow:     %s\n", jstr(r, "workflow"));
+      printf("state:        %s\n", jstr(r, "state"));
+      if (!watch)
+         fprintf(stderr, "watch it with: aimee workflow status %s --watch\n", id_copy);
+   }
+   cJSON_Delete(r);
+   if (watch && id_copy[0])
+      return wf_watch(id_copy);
+   return 0;
+}
+
+static void wf_print_item(const cJSON *it)
+{
+   printf("  id:       %s\n", jstr(it, "id"));
+   printf("  workflow: %s (%s)\n", jstr(it, "workflow"), jstr(it, "version"));
+   printf("  state:    %s\n", jstr(it, "state"));
+   printf("  stage:    %s\n", jstr(it, "stage"));
+   if (jstr(it, "pause_reason")[0])
+      printf("  paused:   %s\n", jstr(it, "pause_reason"));
+   if (jstr(it, "repo")[0])
+      printf("  repo:     %s\n", jstr(it, "repo"));
+   if (jstr(it, "pr_ref")[0])
+      printf("  pr:       %s\n", jstr(it, "pr_ref"));
+   cJSON *cost = cJSON_GetObjectItemCaseSensitive((cJSON *)it, "cum_cost_usd");
+   if (cJSON_IsNumber(cost))
+      printf("  cost:     $%.2f\n", cost->valuedouble);
+}
+
+static int cmd_status(int argc, char **argv, int json_output)
+{
+   const char *id = NULL;
+   int watch = 0, events = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--watch") == 0)
+         watch = 1;
+      else if (strcmp(argv[i], "--events") == 0)
+         events = 1;
+      else if (argv[i][0] != '-' && !id)
+         id = argv[i];
+   }
+   if (!id)
+   {
+      fprintf(stderr, "usage: aimee workflow status <id> [--watch] [--events]\n");
+      return 2;
+   }
+   if (watch)
+      return wf_watch(id);
+
+   cJSON *it = NULL;
+   int st = 0;
+   if (wf_item_get(id, &it, &st) != 0)
+   {
+      fprintf(stderr, "workflow status: server unavailable (is aimee-server running?)\n");
+      return 1;
+   }
+   if (st != 200)
+   {
+      const char *m = jstr(it, "error");
+      fprintf(stderr, "workflow status: %s (status %d)\n", m[0] ? m : "not found", st);
+      cJSON_Delete(it);
+      return 1;
+   }
+   if (json_output)
+   {
+      char *s = cJSON_PrintUnformatted(it);
+      printf("%s\n", s ? s : "{}");
+      free(s);
+   }
+   else
+   {
+      wf_print_item(it);
+   }
+   cJSON_Delete(it);
+
+   if (events && !json_output)
+   {
+      char path[256];
+      snprintf(path, sizeof path, "/v1/workflow/items/%s/events", id);
+      int est = 0;
+      char *resp = aimee_client_request("GET", path, NULL, &est);
+      if (resp && est == 200)
+      {
+         cJSON *eo = cJSON_Parse(resp);
+         cJSON *arr = eo ? cJSON_GetObjectItemCaseSensitive(eo, "events") : NULL;
+         if (cJSON_IsArray(arr))
+         {
+            printf("\n  events:\n");
+            cJSON *e = NULL;
+            cJSON_ArrayForEach(e, arr)
+            {
+               printf("    %-19s %-12s %-10s %s\n", jstr(e, "created_at"), jstr(e, "stage"),
+                      jstr(e, "kind"), jstr(e, "detail"));
+            }
+         }
+         cJSON_Delete(eo);
+      }
+      free(resp);
+   }
+   return 0;
+}
+
 static void usage(void)
 {
-   fprintf(stderr, "Usage: aimee workflow <subcommand>\n"
-                   "  blocks                 list the composable block catalog\n"
-                   "  validate <file.yaml>   typed-graph validate a workflow\n"
-                   "  show <file.yaml>       print the canonical form + version\n"
-                   "  list                   list workflows under $AIMEE_HOME/workflows\n"
-                   "  new <file.yaml>        scaffold a starter workflow\n");
+   fprintf(stderr,
+           "Usage: aimee workflow <subcommand>\n"
+           "  blocks                 list the composable block catalog\n"
+           "  validate <file.yaml>   typed-graph validate a workflow\n"
+           "  show <file.yaml>       print the canonical form + version\n"
+           "  list                   list workflows under $AIMEE_HOME/workflows\n"
+           "  new <file.yaml>        scaffold a starter workflow\n"
+           "  run <name> [--proposal <file>|- | --message <text>] [--repo <path>] [--watch]\n"
+           "                         start a saved workflow run (needs aimee-server)\n"
+           "  status <id> [--watch] [--events]\n"
+           "                         show a run's status (needs aimee-server)\n");
 }
 
 int cmd_workflow_client_run(int argc, char **argv, int json_output)
@@ -262,6 +558,10 @@ int cmd_workflow_client_run(int argc, char **argv, int json_output)
       }
       return cmd_new(argv[1]);
    }
+   if (strcmp(sub, "run") == 0)
+      return cmd_run(argc - 1, argv + 1, json_output);
+   if (strcmp(sub, "status") == 0)
+      return cmd_status(argc - 1, argv + 1, json_output);
    usage();
    return 2;
 }

@@ -1,10 +1,10 @@
-#ifndef DEC_SERVER_MCP_WORKFLOWS_H
-#define DEC_SERVER_MCP_WORKFLOWS_H 1
+#ifndef DEC_SERVER_MCP_ENSEMBLE_H
+#define DEC_SERVER_MCP_ENSEMBLE_H 1
 
 #include "server.h"
 
-int server_mcp_is_workflow_tool(const char *tool);
-int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON *args,
+int server_mcp_is_ensemble_tool(const char *tool);
+int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON *args,
                                     cJSON **content_out, cJSON **structured_out);
 cJSON *server_mcp_compact_context(const char *session_id);
 cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args);

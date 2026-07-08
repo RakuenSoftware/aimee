@@ -32,7 +32,7 @@
 #include "server_mcp_process.h"
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
-#include "server_mcp_workflows.h"
+#include "server_mcp_ensemble.h"
 #include "wfe_advance_exec.h"  /* advance_request interactive-driver executor (S2) */
 #include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
 #include "server_mcp_gateway.h"
@@ -1339,6 +1339,47 @@ static cJSON *mcph_advance_request(struct mcp_call *c)
    return text_content(outbuf);
 }
 
+/* workflow_run: start a saved workflow run from a written proposal. Shares the
+ * capped/audited intake (dev_submit_run) with POST /v1/dev/submit; the run is
+ * bound to this connection's principal. Async — returns the work_item_id; the
+ * run advances server-side. */
+static cJSON *mcph_workflow_run(struct mcp_call *c)
+{
+   cJSON *jwf = cJSON_GetObjectItemCaseSensitive(c->jargs, "workflow");
+   cJSON *jprop = cJSON_GetObjectItemCaseSensitive(c->jargs, "proposal_md");
+   cJSON *jrepo = cJSON_GetObjectItemCaseSensitive(c->jargs, "repo");
+   const char *workflow = (cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring : NULL;
+   const char *proposal = cJSON_IsString(jprop) ? jprop->valuestring : "";
+   const char *repo = cJSON_IsString(jrepo) ? jrepo->valuestring : "";
+   const char *submitter = (c->conn && c->conn->vault_principal[0]) ? c->conn->vault_principal : "";
+
+   cJSON *out = NULL;
+   char err[256] = "";
+   int st = dev_submit_run(proposal, workflow, repo, submitter, &out, err, sizeof err);
+   if (st != 200 || !out)
+   {
+      cJSON_Delete(out);
+      char msg[320];
+      snprintf(msg, sizeof msg, "workflow_run failed (%d): %s", st, err[0] ? err : "unknown error");
+      return text_content(msg);
+   }
+   /* Read the summary fields before handing `out` to the structured channel. */
+   cJSON *ji = cJSON_GetObjectItemCaseSensitive(out, "work_item_id");
+   cJSON *jw = cJSON_GetObjectItemCaseSensitive(out, "workflow");
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(out, "state");
+   const char *id = cJSON_IsString(ji) ? ji->valuestring : "";
+   const char *wf = cJSON_IsString(jw) ? jw->valuestring : "";
+   const char *state = cJSON_IsString(js) ? js->valuestring : "";
+   char msg[320];
+   snprintf(msg, sizeof msg, "Started workflow '%s' — work_item_id %s (state: %s).", wf, id, state);
+   cJSON *content = text_content(msg);
+   if (c->structured)
+      *c->structured = out; /* transfer ownership to the structured channel */
+   else
+      cJSON_Delete(out);
+   return content;
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ── */
 
 static const struct
@@ -1433,6 +1474,8 @@ static const struct
     {"pdf_open_asset", mcph_pdf_open_asset},
     /* Primary-as-manager S2 interactive driver */
     {"advance_request", mcph_advance_request},
+    /* Start a saved workflow-engine run from a written proposal */
+    {"workflow_run", mcph_workflow_run},
 };
 
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

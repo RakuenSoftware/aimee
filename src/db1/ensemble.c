@@ -1,5 +1,5 @@
-/* db1/workflow_session.c: JSON-backed templated multi-agent workflow sessions. */
-#include "workflow_session.h"
+/* db1/ensemble.c: JSON-backed templated multi-agent ensembles. */
+#include "ensemble.h"
 #include "db1_internal.h"
 #include "config.h"
 #include "dstr.h"
@@ -30,7 +30,7 @@ typedef struct
 {
    cJSON *template_json;
    cJSON *context_json;
-   workflow_session_info_t info;
+   ensemble_info_t info;
 } wf_loaded_session_t;
 
 typedef struct
@@ -86,7 +86,7 @@ static const wf_builtin_template_t g_builtin_templates[] = {
 static void wf_set_err(char *err, size_t errlen, const char *msg)
 {
    if (err && errlen > 0)
-      snprintf(err, errlen, "%s", msg ? msg : "workflow session error");
+      snprintf(err, errlen, "%s", msg ? msg : "ensemble error");
 }
 
 static cJSON *wf_get_phases(cJSON *root)
@@ -258,7 +258,7 @@ static char *wf_build_prompt(cJSON *tmpl, cJSON *context, int phase_idx, int tur
    dstr_init(&out);
    dstr_appendf(&out, "Phase: %s\nAgent: %s\nRole: %s\n", phase_name ? phase_name : "?",
                 agent ? agent : "?", role ? role : "?");
-   if (db1_workflow_role_needs_dissent(role))
+   if (db1_ensemble_role_needs_dissent(role))
    {
       dstr_append_str(&out,
                       "\nProvide your own independent analysis. Do not repeat or defer to "
@@ -275,7 +275,7 @@ static char *wf_build_prompt(cJSON *tmpl, cJSON *context, int phase_idx, int tur
    return dstr_steal(&out);
 }
 
-static int wf_fill_info_from_template(workflow_session_info_t *out, cJSON *tmpl)
+static int wf_fill_info_from_template(ensemble_info_t *out, cJSON *tmpl)
 {
    if (!out || !tmpl)
       return -1;
@@ -307,7 +307,7 @@ static int wf_load_session_row(int id, wf_loaded_session_t *loaded, char *err, s
 
    const char *sql = "SELECT id, template_name, channel, status, current_phase, current_turn, "
                      "expected_agent, expected_role, paused_reason, template_json, context_json, "
-                     "created_at, updated_at FROM workflow_sessions WHERE id = ?";
+                     "created_at, updated_at FROM ensembles WHERE id = ?";
    sqlite3_stmt *stmt = prep_stmt(sql);
    if (!stmt)
    {
@@ -319,7 +319,7 @@ static int wf_load_session_row(int id, wf_loaded_session_t *loaded, char *err, s
    if (sqlite3_step(stmt) != SQLITE_ROW)
    {
       sqlite3_finalize(stmt);
-      snprintf(err, errlen, "workflow session %d not found", id);
+      snprintf(err, errlen, "ensemble %d not found", id);
       return -1;
    }
 
@@ -369,7 +369,7 @@ static int wf_load_session_row(int id, wf_loaded_session_t *loaded, char *err, s
       cJSON_Delete(loaded->context_json);
       loaded->template_json = NULL;
       loaded->context_json = NULL;
-      wf_set_err(err, errlen, "workflow session stored invalid JSON");
+      wf_set_err(err, errlen, "ensemble stored invalid JSON");
       return -1;
    }
 
@@ -392,11 +392,11 @@ static int wf_store_session(const wf_loaded_session_t *loaded, char *err, size_t
    char *ctx_raw = cJSON_PrintUnformatted(loaded->context_json);
    if (!ctx_raw)
    {
-      wf_set_err(err, errlen, "failed to serialize workflow session context");
+      wf_set_err(err, errlen, "failed to serialize ensemble context");
       return -1;
    }
 
-   const char *sql = "UPDATE workflow_sessions "
+   const char *sql = "UPDATE ensembles "
                      "SET status = ?, current_phase = ?, current_turn = ?, expected_agent = ?, "
                      "expected_role = ?, paused_reason = ?, context_json = ?, "
                      "updated_at = datetime('now') WHERE id = ?";
@@ -441,29 +441,36 @@ static void wf_append_context(cJSON *context, const char *sender, const char *te
    cJSON_AddItemToArray(context, msg);
 }
 
-int db1_workflow_template_path(const char *project_root, const char *name, char *buf, size_t bufsz)
+int db1_ensemble_template_path(const char *project_root, const char *name, char *buf, size_t bufsz)
 {
    struct stat st;
 
    if (!name || !name[0] || !buf || bufsz == 0)
       return -1;
 
-   if (project_root && project_root[0])
+   /* Prefer ensemble_templates/; fall back to the legacy session_templates/ dir
+    * so project-local templates authored before the rename keep resolving. */
+   static const char *const dirs[] = {"ensemble_templates", "session_templates"};
+
+   for (size_t d = 0; d < sizeof(dirs) / sizeof(dirs[0]); d++)
    {
-      snprintf(buf, bufsz, "%s/session_templates/%s.json", project_root, name);
+      if (project_root && project_root[0])
+      {
+         snprintf(buf, bufsz, "%s/%s/%s.json", project_root, dirs[d], name);
+         if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+            return 0;
+      }
+
+      snprintf(buf, bufsz, "%s/%s/%s.json", config_default_dir(), dirs[d], name);
       if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
          return 0;
    }
-
-   snprintf(buf, bufsz, "%s/session_templates/%s.json", config_default_dir(), name);
-   if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
-      return 0;
 
    buf[0] = '\0';
    return -1;
 }
 
-cJSON *db1_workflow_template_load(const char *project_root, const char *name, char *err,
+cJSON *db1_ensemble_template_load(const char *project_root, const char *name, char *err,
                                   size_t errlen)
 {
    char path[MAX_PATH_LEN];
@@ -471,11 +478,11 @@ cJSON *db1_workflow_template_load(const char *project_root, const char *name, ch
    dstr_init(&raw);
    cJSON *root = NULL;
 
-   if (db1_workflow_template_path(project_root, name, path, sizeof(path)) == 0)
+   if (db1_ensemble_template_path(project_root, name, path, sizeof(path)) == 0)
    {
       if (dstr_read_file(&raw, path) != 0)
       {
-         snprintf(err, errlen, "failed to read session template '%s'", path);
+         snprintf(err, errlen, "failed to read ensemble template '%s'", path);
          dstr_free(&raw);
          return NULL;
       }
@@ -494,14 +501,14 @@ cJSON *db1_workflow_template_load(const char *project_root, const char *name, ch
       }
       if (!root)
       {
-         snprintf(err, errlen, "session template '%s' not found", name ? name : "");
+         snprintf(err, errlen, "ensemble template '%s' not found", name ? name : "");
          return NULL;
       }
    }
 
    if (!cJSON_IsObject(root))
    {
-      wf_set_err(err, errlen, "invalid session template JSON");
+      wf_set_err(err, errlen, "invalid ensemble template JSON");
       cJSON_Delete(root);
       return NULL;
    }
@@ -509,7 +516,7 @@ cJSON *db1_workflow_template_load(const char *project_root, const char *name, ch
    cJSON *phases = wf_get_phases(root);
    if (!phases || cJSON_GetArraySize(phases) == 0)
    {
-      wf_set_err(err, errlen, "session template requires at least one phase");
+      wf_set_err(err, errlen, "ensemble template requires at least one phase");
       cJSON_Delete(root);
       return NULL;
    }
@@ -517,7 +524,7 @@ cJSON *db1_workflow_template_load(const char *project_root, const char *name, ch
    return root;
 }
 
-int db1_workflow_role_needs_dissent(const char *role)
+int db1_ensemble_role_needs_dissent(const char *role)
 {
    static const char *roles[] = {"reviewer", "red_team", "critic", "challenger", "against", NULL};
    if (!role)
@@ -530,11 +537,10 @@ int db1_workflow_role_needs_dissent(const char *role)
    return 0;
 }
 
-int db1_workflow_session_create(const char *project_root, const char *template_name,
-                                const char *channel, cJSON *assignments, int *out_id, char *err,
-                                size_t errlen)
+int db1_ensemble_create(const char *project_root, const char *template_name, const char *channel,
+                        cJSON *assignments, int *out_id, char *err, size_t errlen)
 {
-   cJSON *tmpl = db1_workflow_template_load(project_root, template_name, err, errlen);
+   cJSON *tmpl = db1_ensemble_template_load(project_root, template_name, err, errlen);
    if (!tmpl)
       return -1;
 
@@ -551,7 +557,7 @@ int db1_workflow_session_create(const char *project_root, const char *template_n
       free(tmpl_raw);
       free(assign_raw);
       cJSON_Delete(tmpl);
-      wf_set_err(err, errlen, "failed to serialize workflow template");
+      wf_set_err(err, errlen, "failed to serialize ensemble template");
       return -1;
    }
 
@@ -560,7 +566,7 @@ int db1_workflow_session_create(const char *project_root, const char *template_n
    const char *expected_role = wf_json_string(first, "role");
 
    const char *sql =
-       "INSERT INTO workflow_sessions (template_name, channel, status, current_phase, "
+       "INSERT INTO ensembles (template_name, channel, status, current_phase, "
        "current_turn, expected_agent, expected_role, paused_reason, template_json, "
        "assignments_json, context_json, created_at, updated_at) "
        "VALUES (?, ?, 'active', 0, 0, ?, ?, '', ?, ?, '[]', datetime('now'), datetime('now'))";
@@ -597,8 +603,8 @@ int db1_workflow_session_create(const char *project_root, const char *template_n
    return 0;
 }
 
-int db1_workflow_session_get(int id, workflow_session_info_t *out, char **prompt_out,
-                             char **context_out, char *err, size_t errlen)
+int db1_ensemble_get(int id, ensemble_info_t *out, char **prompt_out, char **context_out, char *err,
+                     size_t errlen)
 {
    wf_loaded_session_t loaded;
    if (wf_load_session_row(id, &loaded, err, errlen) != 0)
@@ -618,9 +624,9 @@ int db1_workflow_session_get(int id, workflow_session_info_t *out, char **prompt
    return 0;
 }
 
-int db1_workflow_session_pause(int id, const char *reason, char *err, size_t errlen)
+int db1_ensemble_pause(int id, const char *reason, char *err, size_t errlen)
 {
-   const char *sql = "UPDATE workflow_sessions SET status = 'paused', paused_reason = ?, "
+   const char *sql = "UPDATE ensembles SET status = 'paused', paused_reason = ?, "
                      "updated_at = datetime('now') WHERE id = ?";
    sqlite3_stmt *stmt = prep_stmt(sql);
    if (!stmt)
@@ -634,15 +640,14 @@ int db1_workflow_session_pause(int id, const char *reason, char *err, size_t err
    sqlite3_finalize(stmt);
    if (rc != SQLITE_DONE || sqlite3_changes(db1_conn()) == 0)
    {
-      snprintf(err, errlen, "workflow session %d not found", id);
+      snprintf(err, errlen, "ensemble %d not found", id);
       return -1;
    }
    return 0;
 }
 
-int db1_workflow_session_advance(int id, const char *sender, const char *text,
-                                 workflow_session_info_t *out, char **prompt_out, char *err,
-                                 size_t errlen)
+int db1_ensemble_advance(int id, const char *sender, const char *text, ensemble_info_t *out,
+                         char **prompt_out, char *err, size_t errlen)
 {
    wf_loaded_session_t loaded;
    if (wf_load_session_row(id, &loaded, err, errlen) != 0)
@@ -651,7 +656,7 @@ int db1_workflow_session_advance(int id, const char *sender, const char *text,
    if (strcmp(loaded.info.status, "complete") == 0)
    {
       wf_loaded_session_free(&loaded);
-      wf_set_err(err, errlen, "workflow session is already complete");
+      wf_set_err(err, errlen, "ensemble is already complete");
       return -1;
    }
    if (!sender || !sender[0])
@@ -728,7 +733,7 @@ int db1_workflow_session_advance(int id, const char *sender, const char *text,
    if (wf_fill_info_from_template(&loaded.info, loaded.template_json) != 0)
    {
       wf_loaded_session_free(&loaded);
-      wf_set_err(err, errlen, "failed to resolve next workflow turn");
+      wf_set_err(err, errlen, "failed to resolve next ensemble turn");
       return -1;
    }
 
@@ -752,8 +757,7 @@ int db1_workflow_session_advance(int id, const char *sender, const char *text,
    return 0;
 }
 
-int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, char *err,
-                              size_t errlen)
+int db1_ensemble_list(ensemble_info_t **out, int *out_count, char *err, size_t errlen)
 {
    if (!out || !out_count)
    {
@@ -766,7 +770,7 @@ int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, cha
    const char *sql =
        "SELECT id, template_name, channel, status, current_phase, current_turn, expected_agent, "
        "expected_role, paused_reason, template_json, created_at, updated_at "
-       "FROM workflow_sessions ORDER BY id";
+       "FROM ensembles ORDER BY id";
    sqlite3_stmt *stmt = prep_stmt(sql);
    if (!stmt)
    {
@@ -776,7 +780,7 @@ int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, cha
 
    int cap = 8;
    int n = 0;
-   workflow_session_info_t *arr = calloc((size_t)cap, sizeof(*arr));
+   ensemble_info_t *arr = calloc((size_t)cap, sizeof(*arr));
    if (!arr)
    {
       sqlite3_finalize(stmt);
@@ -790,7 +794,7 @@ int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, cha
       if (n >= cap)
       {
          int new_cap = cap * 2;
-         workflow_session_info_t *grown = realloc(arr, (size_t)new_cap * sizeof(*arr));
+         ensemble_info_t *grown = realloc(arr, (size_t)new_cap * sizeof(*arr));
          if (!grown)
          {
             free(arr);
@@ -803,7 +807,7 @@ int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, cha
          cap = new_cap;
       }
 
-      workflow_session_info_t *info = &arr[n];
+      ensemble_info_t *info = &arr[n];
       info->id = sqlite3_column_int(stmt, 0);
       snprintf(info->template_name, sizeof(info->template_name), "%s",
                (const char *)sqlite3_column_text(stmt, 1)
@@ -864,8 +868,7 @@ int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, cha
    return 0;
 }
 
-int db1_workflow_session_find_current_by_channel(const char *channel, int *out_id, char *err,
-                                                 size_t errlen)
+int db1_ensemble_find_current_by_channel(const char *channel, int *out_id, char *err, size_t errlen)
 {
    if (!channel || !channel[0] || !out_id)
    {
@@ -873,7 +876,7 @@ int db1_workflow_session_find_current_by_channel(const char *channel, int *out_i
       return -1;
    }
 
-   const char *sql = "SELECT id FROM workflow_sessions WHERE channel = ? "
+   const char *sql = "SELECT id FROM ensembles WHERE channel = ? "
                      "ORDER BY CASE status "
                      "  WHEN 'active' THEN 0 "
                      "  WHEN 'paused' THEN 1 "
@@ -896,7 +899,7 @@ int db1_workflow_session_find_current_by_channel(const char *channel, int *out_i
 
    if (rc != SQLITE_ROW || id <= 0)
    {
-      snprintf(err, errlen, "workflow session for channel '%s' not found", channel);
+      snprintf(err, errlen, "ensemble for channel '%s' not found", channel);
       return -1;
    }
 
@@ -904,8 +907,8 @@ int db1_workflow_session_find_current_by_channel(const char *channel, int *out_i
    return 0;
 }
 
-cJSON *db1_workflow_session_info_to_json(const workflow_session_info_t *info,
-                                         const char *prompt_text, const char *context_text)
+cJSON *db1_ensemble_info_to_json(const ensemble_info_t *info, const char *prompt_text,
+                                 const char *context_text)
 {
    if (!info)
       return NULL;
