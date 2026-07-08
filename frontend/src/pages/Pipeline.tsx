@@ -22,6 +22,7 @@ type Stage = {
   order: number;
   config_key: string | null;
 };
+type Preset = { name: string; description: string; enabled: string[] };
 
 const csrf = () => ({ "X-CSRF-Token": window._csrf || "" });
 
@@ -45,6 +46,7 @@ const DEFAULT_DESC = "Active whenever an embedder is configured (no individual t
 
 export default function Pipeline() {
   const [stages, setStages] = useState<Stage[]>([]);
+  const [presets, setPresets] = useState<Preset[]>([]);
   const [cfg, setCfg] = useState<Record<string, Val>>({});
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string>("");
@@ -54,14 +56,15 @@ export default function Pipeline() {
     Promise.all([
       fetch("/api/curator/stages", { method: "POST", headers: { "Content-Type": "application/json", ...csrf() }, body: "{}" })
         .then((r) => r.json())
-        .then((d: { stages?: Stage[] }) => d.stages || [])
-        .catch(() => [] as Stage[]),
+        .then((d: { stages?: Stage[]; presets?: Preset[] }) => ({ stages: d.stages || [], presets: d.presets || [] }))
+        .catch(() => ({ stages: [] as Stage[], presets: [] as Preset[] })),
       fetch("/api/config", { headers: csrf() })
         .then((r) => r.json())
         .then((d: { config?: Record<string, Val> }) => d.config || {})
         .catch(() => ({} as Record<string, Val>)),
-    ]).then(([s, c]) => {
-      setStages([...s].sort((a, b) => a.order - b.order));
+    ]).then(([sp, c]) => {
+      setStages([...sp.stages].sort((a, b) => a.order - b.order));
+      setPresets(sp.presets);
       setCfg(c);
       setLoaded(true);
     });
@@ -79,6 +82,30 @@ export default function Pipeline() {
       setStatus({ kind: "err", msg: error || `save failed (${st})` });
     }
   }, []);
+
+  // Apply a preset: enable its listed config keys, disable every other toggleable
+  // stage. One config.set per stage, in parallel; embedder-gated stages (no
+  // config_key) are untouched.
+  const applyPreset = useCallback(async (p: Preset) => {
+    setBusy(`preset:${p.name}`);
+    const on = new Set(p.enabled);
+    const targets = stages.filter((s) => s.config_key);
+    const results = await Promise.all(
+      targets.map((s) => postJSON("/api/config/set", { key: s.config_key, value: on.has(s.config_key as string) })),
+    );
+    setBusy("");
+    setCfg((prev) => {
+      const next = { ...prev };
+      for (const s of targets) next[s.config_key as string] = on.has(s.config_key as string);
+      return next;
+    });
+    const failed = results.filter((r) => r.error || r.status < 200 || r.status >= 300).length;
+    setStatus(
+      failed
+        ? { kind: "err", msg: `preset "${p.name}" applied with ${failed} error(s)` }
+        : { kind: "ok", msg: `preset "${p.name}" applied` },
+    );
+  }, [stages]);
 
   const isOn = (k: string) => cfg[k] === true || cfg[k] === 1;
 
@@ -131,6 +158,26 @@ export default function Pipeline() {
         take effect on the KB's next config load. Stages run in two resource lanes concurrently, and this
         view is generated live from the backend stage registry.
       </p>
+      {presets.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>Presets:</span>
+          {presets.map((p) => (
+            <button
+              key={p.name}
+              disabled={busy === `preset:${p.name}`}
+              onClick={() => applyPreset(p)}
+              title={p.description}
+              style={{
+                padding: "5px 12px", fontSize: 13, borderRadius: 14, cursor: "pointer",
+                border: "1px solid #cbd5e1", background: busy === `preset:${p.name}` ? "#eef" : "#f8fafc",
+              }}
+            >
+              {p.name}
+            </button>
+          ))}
+          <span style={{ fontSize: 12, color: "#999" }}>apply a profile, then fine-tune below</span>
+        </div>
+      )}
       {(["llm", "index"] as Lane[]).map((lane) => {
         const meta = LANE_META[lane];
         const laneStages = stages.filter((s) => s.lane === lane);

@@ -916,6 +916,7 @@ static int kb_handle_curator_stages(int fd, cJSON *req)
    (void)req;
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "stages", kb_curator_stages_json());
+   cJSON_AddItemToObject(resp, "presets", kb_curator_presets_json());
    int rc = kb_send_response(fd, resp);
    cJSON_Delete(resp);
    return rc;
