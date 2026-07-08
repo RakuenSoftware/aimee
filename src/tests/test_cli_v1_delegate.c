@@ -191,6 +191,17 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    assert(strstr(prompt->valuestring, path) != NULL);
    cJSON_Delete(req);
 
+   /* Preload-only invocation (no positional prompt): the preload still becomes
+    * the prompt. Exercises the base == "" branch. */
+   char *argv_only[] = {"--context-file", path};
+   cJSON *req_only = marshal_delegate_roundtable(2, argv_only);
+   assert(req_only != NULL);
+   const cJSON *p_only = cJSON_GetObjectItem(req_only, "prompt");
+   assert(cJSON_IsString(p_only));
+   assert(strstr(p_only->valuestring, "# Source Packet: Preloaded Context") != NULL);
+   assert(strstr(p_only->valuestring, "ROUNDTABLE_PRELOAD_MARKER_77") != NULL);
+   cJSON_Delete(req_only);
+
    /* No preload flags => prompt is unchanged (no spurious Source Packet). */
    char *argv2[] = {"a plain roundtable prompt with no preload flags"};
    cJSON *req2 = marshal_delegate_roundtable(1, argv2);
