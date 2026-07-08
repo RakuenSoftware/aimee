@@ -165,6 +165,45 @@ static void test_delegate_roundtable_invalid_brief_json_exits(void)
    printf("  PASS: test_delegate_roundtable_invalid_brief_json_exits\n");
 }
 
+/* Regression guard: the roundtable marshaller must fold --context-file preloads
+ * into the prompt as well. It previously dropped them, so the panel received no
+ * context and stalled looping for it. Mirrors
+ * test_delegate_context_file_folded_into_prompt for the roundtable path. */
+static void test_delegate_roundtable_context_file_folded_into_prompt(void)
+{
+   char path[] = "/tmp/aimee_rt_ctx_test_XXXXXX";
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   const char *marker = "ROUNDTABLE_PRELOAD_MARKER_77 review_block_body";
+   assert(write(fd, marker, strlen(marker)) == (ssize_t)strlen(marker));
+   close(fd);
+
+   char *argv[] = {"critique the block above", "--context-file", path};
+   cJSON *req = marshal_delegate_roundtable(3, argv);
+   assert(req != NULL);
+   const cJSON *prompt = cJSON_GetObjectItem(req, "prompt");
+   assert(cJSON_IsString(prompt));
+   /* Original prompt text preserved... */
+   assert(strstr(prompt->valuestring, "critique the block above") != NULL);
+   /* ...and the file contents are injected. */
+   assert(strstr(prompt->valuestring, "ROUNDTABLE_PRELOAD_MARKER_77") != NULL);
+   assert(strstr(prompt->valuestring, "Source Packet: Preloaded Context") != NULL);
+   assert(strstr(prompt->valuestring, path) != NULL);
+   cJSON_Delete(req);
+
+   /* No preload flags => prompt is unchanged (no spurious Source Packet). */
+   char *argv2[] = {"a plain roundtable prompt with no preload flags"};
+   cJSON *req2 = marshal_delegate_roundtable(1, argv2);
+   assert(req2 != NULL);
+   const cJSON *p2 = cJSON_GetObjectItem(req2, "prompt");
+   assert(cJSON_IsString(p2));
+   assert(strcmp(p2->valuestring, "a plain roundtable prompt with no preload flags") == 0);
+   cJSON_Delete(req2);
+
+   unlink(path);
+   printf("  PASS: test_delegate_roundtable_context_file_folded_into_prompt\n");
+}
+
 static cJSON *marshal_delegate_with_stdin(int argc, char **argv, const char *input)
 {
    int old_stdin = dup(STDIN_FILENO);
@@ -1260,6 +1299,7 @@ int main(void)
    test_delegate_persona_marshaled();
    test_delegate_roundtable_brief_marshaled();
    test_delegate_roundtable_invalid_brief_json_exits();
+   test_delegate_roundtable_context_file_folded_into_prompt();
    test_delegate_prompt_stdin_marshaled();
    test_delegate_status_multiple_ids_marshaled();
    test_delegate_log_rejects_ignored_args();

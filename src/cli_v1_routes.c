@@ -1858,8 +1858,27 @@ cJSON *marshal_delegate_roundtable(int argc, char **argv)
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("delegate.roundtable");
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
+   /* Fold --context-file / --files / --context-dir / --context preloads into the
+    * prompt, exactly as marshal_delegate() does. Without this the roundtable panel
+    * never receives the referenced files and stalls looping for context. */
+   char *prompt = (opts.pos_count > 0 && opts.positional[0]) ? strdup(opts.positional[0]) : NULL;
+   char *preload = marshal_build_preload_context(&opts);
+   if (preload)
+   {
+      const char *base = (prompt && prompt[0]) ? prompt : "";
+      size_t cap = strlen(base) + strlen(preload) + 64;
+      char *combined = malloc(cap);
+      if (combined)
+      {
+         snprintf(combined, cap, "%s\n\n# Source Packet: Preloaded Context\n%s", base, preload);
+         free(prompt);
+         prompt = combined;
+      }
+      free(preload);
+   }
+   if (prompt && prompt[0])
+      cJSON_AddStringToObject(req, "prompt", prompt);
+   free(prompt);
    const char *mode = rpc_get(&opts, "mode");
    if (mode)
       cJSON_AddStringToObject(req, "mode", mode);
