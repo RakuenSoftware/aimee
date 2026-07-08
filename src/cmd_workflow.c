@@ -176,12 +176,19 @@ static const char *TEMPLATE = "name: %s\n"
                               "          - architect\n"
                               "      quorum: 2\n"
                               "      max_rounds: 6\n"
-                              "    on_pass: done\n"
+                              "      max_iters: 3\n"
+                              "      on_max: fail\n"
+                              "    on_pass: pr\n"
                               "    on_fail: draft\n"
+                              "  - id: pr\n"
+                              "    block: pr.open\n"
+                              "    in:\n"
+                              "      src: draft.out\n"
+                              "    next: done\n"
                               "  - id: done\n"
                               "    block: merge\n"
                               "    in:\n"
-                              "      pr: draft.out\n";
+                              "      pr: pr.out\n";
 
 static int cmd_new(const char *path)
 {

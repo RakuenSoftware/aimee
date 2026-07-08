@@ -138,6 +138,27 @@ typedef enum
 wfe_gate_reject_t wfe_gate_reject_target(const wfe_def_t *def, const char *gate_id,
                                          char *out_target, size_t out_n);
 
+/* ---- Generic loop cap (max_iters / on_max) ----
+ * Any node may bound how many times it is re-entered via a loop-back. The cap
+ * comes from params.max_iters (positive int; default WFE_DEFAULT_MAX_ITERS).
+ * On reaching the cap the engine resolves per params.on_max:
+ *   "human" (default) -> pause for a human
+ *   "fail"            -> terminal `rejected`
+ *   "pass"            -> proceed forward as if advanced (via on_pass/next) */
+#define WFE_DEFAULT_MAX_ITERS 20
+typedef enum
+{
+   WFE_ON_MAX_HUMAN = 0, /* default: pause for a human when the cap is hit */
+   WFE_ON_MAX_FAIL,      /* terminal `rejected` when the cap is hit */
+   WFE_ON_MAX_PASS       /* proceed forward (on_pass/next) as if the node advanced */
+} wfe_on_max_t;
+
+/* Per-node loop cap: params.max_iters if a positive int, else WFE_DEFAULT_MAX_ITERS. */
+int wfe_node_max_iters(const wfe_node_t *n);
+/* Per-node cap-resolution policy: params.on_max ("pass"/"fail"/"human"),
+ * defaulting to WFE_ON_MAX_HUMAN. */
+wfe_on_max_t wfe_node_on_max(const wfe_node_t *n);
+
 /* ---- Validate (wfe_validate.c). Returns 0 on success; nonzero + err set. ---- */
 int wfe_def_validate(const wfe_def_t *def, char *err, size_t errlen);
 
