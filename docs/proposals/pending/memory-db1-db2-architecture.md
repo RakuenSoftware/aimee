@@ -1,5 +1,9 @@
 # Proposal: Memory architecture — retire `.md` memory; db1 = user, db2 = organization
 
+- **State:** in progress — Phase 1 (db1 user store + recall merge + capture) and migration
+  Slices 1/3/4 are live on `testing`; one acceptance criterion remains (§2 Slice 5 subsystem
+  removal), which is operator-gated. See "Implementation status (as-built)" below.
+
 ## Thesis
 
 Aimee's durable memory today is fragmented and mis-scoped:
@@ -287,3 +291,106 @@ migration **cannot be safely automated end-to-end** — it is operator-gated at 
    interception can be removed without dropping writes.
 5. **Subsystem removal** — delete `harness_memory_*`/`memory_redirect`/routes/tests/docs, gated on
    (2)+(3)+(4) confirmed, after a read-only compatibility window.
+
+## Implementation status (as-built — 2026-07-08)
+
+Verified against `origin/testing` @ `d76cdfef`. The proposal is substantially shipped; the sole
+remaining acceptance criterion is **Removal** (§2 Slice 5), which is operator-gated by design.
+
+| Proposal item | Status | Where |
+|---|---|---|
+| §3 db1 user-memory store + schema (OQ1) | **Shipped** | new `user_memories` table + `src/db1/user_memory.c`; PR #1040. OQ1 resolved: a **clean new table** (not a repurposed `harness_memory`), mirroring db2's tier/kind/lifecycle discipline. |
+| §3 recall reads both db1 ⊕ db2, merged | **Shipped** | `kb_client_memory_recall_json_ex` merges db1 identity/preferences on top of the kb (db2) bundle in aimee-server (the 1:1 per-user seam); `db1_user_memory_merge_into_array`. PR #1040. |
+| §4 explicit capture routes by scope | **Shipped** | `aimee memory identity` / `aimee memory prefer` → db1 (key `identity:`/`pref:`, tier L2); `aimee rules +` → db2. PR #1045. |
+| §4 tier-gate (curated captures surface without `--tier`) | **Shipped** | capture writes tier L2, inside the recall selector band. PR #1045. |
+| Precedence (§3 / R2 lattice) — user capture overrides a conflicting soft org default | **Shipped (identity/prefs)** | merge de-dups on `key` and inserts the db1 row first ("db1 wins"), tagging `scope:user`. Hard org rules remain a separate always-on section (`memory_context.c` §7), so they are never suppressed. |
+| §2 Slice 1 — migration inventory | **Shipped** | `scripts/harness-memory-inventory.py` (read-only). PR #1046. |
+| §2 Slice 3 — `.md` → db1 archive migration | **Shipped** | `scripts/harness-memory-migrate.py` (safe default: all → db1 private `archive`/L1, source retained, dry-run default) + `aimee memory archive`. PR #1047. |
+| §2 Slice 4 — replacement write path (interception → db1) | **Shipped, default-ON** | config `memory_md_retire` (**default-on**): a memory-`.md` Write is denied and stored as a private non-recallable db1 `archive:<project>/<name>` row; session-start hydrate skipped; brief steers the agent to aimee memory. PRs #1048, later default-on flip. |
+| **§2 Slice 5 — subsystem removal + CI guard** | **NOT done — operator-gated** | the `harness_memory_*` subsystem, `memory_redirect` legacy branch, `server/harness_memory_routes.c`, the `harness_memory.*` RPC ops, tests, and docs still exist. See runbook below. |
+| §4 Phase 4 — feedback→durable db2 rules, promotion, gated extraction, quarantine review | **NOT done (default-off scope)** | OQ5 (ship default-off now vs. hold for calibration) remains open. |
+
+### Open questions — resolution
+- **OQ1 (db1 schema):** RESOLVED — a clean `user_memories` table, not a repurposed `harness_memory`.
+- **OQ2 (Active Context scope):** the shipped merge covers identity + preferences (always user/db1);
+  Active Context remains per-item as designed and is not yet split into a db1 half.
+- **OQ3 (migration fidelity):** RESOLVED by the safe default — migration sends **all** `.md` to db1
+  private `archive` (non-recallable), source retained; operator promotes to org later. No automated
+  scope guess, no data loss.
+- **OQ4 (precedence):** RESOLVED for the shipped scope — user capture wins over a same-`key` org row;
+  hard org rules are a separate, non-overridable section.
+- **OQ5 (Phase-4 extraction default):** **OPEN** — operator decision.
+
+### Remaining step: §2 Slice 5 subsystem-removal runbook (operator-gated)
+
+Removal is the last acceptance criterion. It is intentionally **not executed autonomously** because
+the proposal (R2/R3) gates it on **operator per-file classification** of any historical `.md` content
+and on operator confirmation that the migration ran on the live deployment, and because the
+interception seam (remote client → server pre-hook → db1) can only be end-to-end validated on the
+live stack, not in an offline build. When the operator is ready:
+
+1. **Confirm migration on the live db1** — run `scripts/harness-memory-migrate.py --apply` (safe:
+   all → db1 `archive`, source retained), then verify by content-hash + key-set that every
+   `harness_memory` / `.md` row produced a db1 archive row. `.md` source files are retained (never
+   deleted) until step 5.
+2. **Separate the replacement write path from the legacy subsystem FIRST.**
+   `src/memory_redirect.{c,h}` is **NOT** legacy — it is the shipped replacement interception/write
+   path (#1048) that stores intercepted memory into db1. It must be **preserved**. Before any
+   deletion, split it so its `md_retire`-on db1-archive path has no compile/link dependency on the
+   legacy hydration/spill/watch modules (today it pulls in `harness_memory_common`/`_audit` for
+   `hmem_audit`/`hmem_resolve_project` — move those helpers it still needs into a small retained
+   unit, or inline them, so the legacy files can be deleted without breaking the replacement path).
+3. **Delete the legacy subsystem code** (reachable only when `memory_md_retire` is off, now the
+   deprecated legacy mode): `src/db1/harness_memory.{c,h}`,
+   `src/harness_memory_{scope,spill,hydrate,watch}.{c,h}` (and `_common`/`_audit` once the
+   replacement path no longer needs them), `src/server/harness_memory_routes.c`; drop the
+   `harness_memory.*` RPC ops (`server/server.c` dispatch table) and their auth caps — retiring an
+   RPC via a `GONE` contract (respond `method gone` for one release) rather than a bare removal so
+   an older client gets a clear error, not a silent 404; make `memory_md_retire` unconditional in
+   `memory_redirect.c` (drop the `md_retire`-off branch); drop the hydrate-skip conditional in
+   `cli_session_start.c`.
+4. **Remove the build + test entries**: the legacy `harness_memory*` glue in `src/Makefile`
+   (`DB1_SRCS`, `CLI_SRCS`, `SERVER_SRCS`) — **keep `user_memory.c` and `memory_redirect.c`**; the
+   `unit-test-harness-memory*` targets in `src/tests/Rules.mk`, the CMake registrations, and the six
+   `test_harness_memory*` files (keep the merge/precedence assertions that live in
+   `test_harness_memory.c` by moving them to a retained `test_user_memory.c`).
+5. **Add the CI guard** (`scripts/check-md-store-retired.py`, wired into a `*-check` Makefile target
+   like the existing `check-*.py` guards). Use an **allowlist** contract: the guard fails if any file
+   outside the known replacement path (`memory_redirect.c`) calls a `.md`-materializing entry point
+   (`harness_memory_hydrate`/`_watch`/`_spill` re-render), so the retirement can't silently regress
+   and the removal stays enforced — the "CI guard enforces it" half of the criterion.
+6. **Read-only compatibility window, then delete `.md` sources** — only after steps 1–5 are confirmed
+   on the live deployment, per the reversibility gate.
+
+Verify each step with `cd src && make -j all server` and the memory unit tests (all green at time of
+writing). Full end-to-end validation of the interception change requires the live `.254` stack
+(**validation-pending** until then). `scripts/harness-memory-inventory.py --worklist` produces the
+operator classification worklist (path / frontmatter-type / scope-signal / suggested-disposition +
+a blank operator-decision column) that gates step 1.
+
+### §4 Phase 4 — split by risk (roundtable R4)
+
+The design roundtable flagged that shipping §4 as a single default-off switch under-gates
+cross-user state mutation. Split it:
+
+- **§4a — extraction → quarantine (safe to ship default-off).** The gated LLM pass proposes user
+  preferences/identity (→ db1) and org conventions (→ db2) into a **quarantine** queue only; nothing
+  reaches a brief until an operator `approve`s it via the review surface. Extraction is hard-capped at
+  `soft`, passes the confidence/PII gates, and each row carries a TTL so an unreviewed proposal
+  expires rather than lingering. This is calibratable behind the operator enable.
+- **§4b — promotion → durable org rules (requires a separate, strict operator gate + audit trail).**
+  Consolidating recurring db2 episodes into durable org `rules` mutates shared, multi-user state, so
+  it stays behind its own operator gate with a WORM audit entry per promotion — never auto-enabled by
+  the §4a switch.
+
+### Acceptance-criteria status checklist
+
+- [x] Scope routing: `aimee memory identity`→db1, `aimee rules +`→db2 (unit-tested).
+- [x] Recall merge: db1 identity + db2 rule appear in one bundle, correctly sectioned (unit-tested).
+- [x] Precedence: a user capture overrides a same-key org row in the merged brief (unit-tested);
+      hard org rules stay in a separate, non-overridable section. *(Roundtable R2: extend explicit
+      lattice/dedup unit coverage — see `test_harness_memory.c` merge assertions.)*
+- [x] Migration: a sample `.md` set imports into db1 archive by the safe default with no content loss.
+- [x] Tier policy: a freshly-captured preference surfaces in recall without a manual `--tier`.
+- [ ] **Removal: after §2, no code path reads/writes the `.md` store; CI guard enforces it.**
+      *(Operator-gated — see runbook above. This is the only open criterion.)*

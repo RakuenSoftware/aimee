@@ -18,10 +18,20 @@ content_hash is a length-prefixed server-side tuple not replicated here).
 
 Usage:
   harness-memory-inventory.py [--memory-dir DIR] [--project KEY] [--json]
+  harness-memory-inventory.py --worklist   # CSV worklist for operator classification
+
+`--worklist` emits the operator classification worklist (Proposal 2 §2 Slice 5,
+step 1 gate) as CSV on stdout: one row per .md memory with path, frontmatter
+type, scope signal, a NON-BINDING suggested disposition, and a blank
+`operator_decision` column the operator fills with user|org|archive|drop. The
+suggestion is only a hint — per the design roundtable, scope is not mechanically
+derivable, so the operator's decision column is authoritative and the migration
+writes nothing until it is filled.
 
 Nothing here mutates state; safe to run repeatedly.
 """
 import argparse
+import csv
 import json
 import os
 import subprocess
@@ -77,6 +87,47 @@ def scope_signal(meta):
     return f"unknown ({t or 'no-type'})"
 
 
+def suggested_disposition(meta):
+    """NON-BINDING hint from the frontmatter type. The operator's decision
+    column overrides this; the migration never acts on the suggestion alone."""
+    t = (meta.get("type") or "").lower()
+    if t in ("user", "feedback"):
+        return "user (db1)"
+    if t in ("reference",):
+        return "org (db2)?"
+    if t in ("project",):
+        return "review: user-or-org"
+    return "review: unknown"
+
+
+def worklist_rows(memory_dir):
+    """One dict per .md memory for the operator classification CSV."""
+    out = []
+    for root, _dirs, files in os.walk(memory_dir):
+        for f in sorted(files):
+            if not f.endswith(".md"):
+                continue
+            path = os.path.join(root, f)
+            rel = os.path.relpath(path, memory_dir)
+            name = rel[:-3]
+            if name == "MEMORY":
+                continue
+            try:
+                text = open(path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            meta, first = parse_frontmatter(text)
+            out.append({
+                "name": name,
+                "frontmatter_type": meta.get("type", ""),
+                "scope_signal": scope_signal(meta),
+                "suggested_disposition": suggested_disposition(meta),
+                "operator_decision": "",  # operator fills: user|org|archive|drop
+                "first_line": first[:120],
+            })
+    return sorted(out, key=lambda r: r["name"])
+
+
 def inventory_local(memory_dir):
     rows = []
     for root, _dirs, files in os.walk(memory_dir):
@@ -127,11 +178,22 @@ def main():
         "~/.claude/projects/-home-virant-dev-aimee/memory"))
     ap.add_argument("--project", default="")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--worklist", action="store_true",
+                    help="emit the operator classification worklist as CSV on stdout")
     a = ap.parse_args()
 
     if not os.path.isdir(a.memory_dir):
         print(f"harness-memory-inventory: no memory dir at {a.memory_dir}", file=sys.stderr)
         return 1
+
+    if a.worklist:
+        cols = ["name", "frontmatter_type", "scope_signal", "suggested_disposition",
+                "operator_decision", "first_line"]
+        w = csv.DictWriter(sys.stdout, fieldnames=cols)
+        w.writeheader()
+        for r in worklist_rows(a.memory_dir):
+            w.writerow(r)
+        return 0
 
     local = inventory_local(a.memory_dir)
     server = fetch_server_rows(a.project)

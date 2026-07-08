@@ -200,6 +200,40 @@ static void test_user_memory(void)
    assert(found_orgonly); /* org-only row survives the merge */
    cJSON_Delete(arr);
 
+   /* Preferences section merges by the SAME db1-wins rule (production merges
+    * both identity AND preferences — kb_client_memory_recall_json_ex). A db1
+    * preference overrides a same-key soft org default (R2 lattice: user capture
+    * outranks a soft org default), and an org-only preference survives. */
+   cJSON *parr = cJSON_CreateArray();
+   cJSON *porg1 = cJSON_CreateObject();
+   cJSON_AddStringToObject(porg1, "key", "pref:no-attr"); /* collides with db1 */
+   cJSON_AddStringToObject(porg1, "text", "org default: attribution allowed");
+   cJSON_AddStringToObject(porg1, "scope", "org");
+   cJSON_AddItemToArray(parr, porg1);
+   cJSON *porg2 = cJSON_CreateObject();
+   cJSON_AddStringToObject(porg2, "key", "pref:org-style");
+   cJSON_AddStringToObject(porg2, "scope", "org");
+   cJSON_AddItemToArray(parr, porg2);
+
+   db1_user_memory_merge_into_array(parr, DB1_USER_RECALL_PREFERENCES, "user preference");
+
+   assert(cJSON_GetArraySize(parr) == 2); /* db1 pref + org-only; org dup replaced */
+   cJSON *pfirst = cJSON_GetArrayItem(parr, 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(pfirst, "key")), "pref:no-attr") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(pfirst, "scope")), "user") == 0);
+   /* db1 preference wins over the conflicting soft org default. */
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(pfirst, "text")), "updated") == 0);
+   int found_orgstyle = 0;
+   cJSON *pit = NULL;
+   cJSON_ArrayForEach(pit, parr)
+   {
+      const char *k = cJSON_GetStringValue(cJSON_GetObjectItem(pit, "key"));
+      if (k && strcmp(k, "pref:org-style") == 0)
+         found_orgstyle = 1;
+   }
+   assert(found_orgstyle); /* org-only preference survives the merge */
+   cJSON_Delete(parr);
+
    printf("test_user_memory: PASS\n");
 }
 
