@@ -28,7 +28,7 @@ type Stage = {
   config_key: string | null;
   requires: string[];
 };
-type Preset = { name: string; description: string; enabled: string[] };
+type Preset = { name: string; description: string; enabled: string[]; builtin?: boolean };
 
 const csrf = () => ({ "X-CSRF-Token": window._csrf || "" });
 
@@ -129,6 +129,50 @@ export default function Pipeline() {
         : { kind: "ok", msg: `preset "${p.name}" applied` },
     );
   }, [stages]);
+
+  // User presets are stored as a JSON array in the kb_curator_user_presets config
+  // string; the GUI reads/edits it and persists via config.set (no bespoke op).
+  const readUserPresets = useCallback((): Preset[] => {
+    const raw = cfg.kb_curator_user_presets;
+    if (typeof raw !== "string" || !raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? (arr as Preset[]) : [];
+    } catch {
+      return [];
+    }
+  }, [cfg]);
+
+  const writeUserPresets = useCallback(async (list: Preset[], okMsg: string) => {
+    setBusy("user-presets");
+    const { status: st, error } = await postJSON("/api/config/set", {
+      key: "kb_curator_user_presets",
+      value: JSON.stringify(list),
+    });
+    setBusy("");
+    if (st >= 200 && st < 300 && !error) {
+      setStatus({ kind: "ok", msg: okMsg });
+      refresh();
+    } else {
+      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    }
+  }, [refresh]);
+
+  const saveCurrentAsPreset = useCallback(async () => {
+    const name = window.prompt("Save the current stage toggles as a preset named:")?.trim();
+    if (!name) return;
+    const enabled = stages
+      .filter((s) => s.config_key && (cfg[s.config_key] === true || cfg[s.config_key] === 1))
+      .map((s) => s.config_key as string);
+    const list = readUserPresets().filter((p) => p.name !== name);
+    list.push({ name, description: "User preset", enabled, builtin: false });
+    await writeUserPresets(list, `preset "${name}" saved`);
+  }, [stages, cfg, readUserPresets, writeUserPresets]);
+
+  const deletePreset = useCallback(async (name: string) => {
+    const list = readUserPresets().filter((p) => p.name !== name);
+    await writeUserPresets(list, `preset "${name}" deleted`);
+  }, [readUserPresets, writeUserPresets]);
 
   const persistOrder = useCallback(async (arr: Stage[]) => {
     const order = arr.map((s) => s.name).join(",");
@@ -243,26 +287,50 @@ export default function Pipeline() {
         (dependencies are enforced). Changes persist to aimee.yaml and take effect on the KB's next
         config load. This view is generated live from the backend stage registry.
       </p>
-      {presets.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>Presets:</span>
-          {presets.map((p) => (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>Presets:</span>
+        {presets.map((p) => (
+          <span key={p.name} style={{ display: "inline-flex", alignItems: "center" }}>
             <button
-              key={p.name}
               disabled={busy === `preset:${p.name}`}
               onClick={() => applyPreset(p)}
               title={p.description}
               style={{
-                padding: "5px 12px", fontSize: 13, borderRadius: 14, cursor: "pointer",
-                border: "1px solid #cbd5e1", background: busy === `preset:${p.name}` ? "#eef" : "#f8fafc",
+                padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #cbd5e1",
+                borderRadius: p.builtin === false ? "14px 0 0 14px" : 14,
+                background: busy === `preset:${p.name}` ? "#eef" : "#f8fafc",
               }}
             >
               {p.name}
             </button>
-          ))}
-          <span style={{ fontSize: 12, color: "#999" }}>apply a profile, then fine-tune below</span>
-        </div>
-      )}
+            {p.builtin === false && (
+              <button
+                disabled={busy === "user-presets"}
+                onClick={() => deletePreset(p.name)}
+                title={`Delete preset "${p.name}"`}
+                style={{
+                  padding: "5px 8px", fontSize: 13, borderRadius: "0 14px 14px 0", cursor: "pointer",
+                  border: "1px solid #cbd5e1", borderLeft: "none", background: "#f8fafc", color: "#b00",
+                }}
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+        <button
+          disabled={busy === "user-presets"}
+          onClick={saveCurrentAsPreset}
+          title="Save the current stage toggles as a named preset"
+          style={{
+            padding: "5px 12px", fontSize: 13, borderRadius: 14, cursor: "pointer",
+            border: "1px dashed #cbd5e1", background: "#fff", color: "#555",
+          }}
+        >
+          ＋ Save current
+        </button>
+        <span style={{ fontSize: 12, color: "#999" }}>apply a profile, save your own, then fine-tune below</span>
+      </div>
       {(["llm", "index"] as Lane[]).map((lane) => {
         const meta = LANE_META[lane];
         const laneStages = stages.filter((s) => s.lane === lane);

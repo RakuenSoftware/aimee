@@ -475,7 +475,50 @@ cJSON *kb_curator_presets_json(void)
       for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save))
          cJSON_AddItemToArray(keys, cJSON_CreateString(tok));
       cJSON_AddItemToObject(o, "enabled", keys);
+      cJSON_AddBoolToObject(o, "builtin", 1);
       cJSON_AddItemToArray(arr, o);
+   }
+   /* Append user-defined presets from kb.curator.user_presets (a JSON array string
+    * the GUI edits via config.set). Marked builtin:false so the GUI shows them as
+    * deletable. Malformed entries are skipped; capped so a bad config can't blow up
+    * the response. */
+   config_t cfg;
+   config_load(&cfg);
+   if (cfg.kb_curator_user_presets[0])
+   {
+      cJSON *ups = cJSON_Parse(cfg.kb_curator_user_presets);
+      if (ups && cJSON_IsArray(ups))
+      {
+         int count = 0;
+         cJSON *up = NULL;
+         cJSON_ArrayForEach(up, ups)
+         {
+            if (count >= 64)
+               break;
+            if (!cJSON_IsObject(up))
+               continue;
+            cJSON *nm = cJSON_GetObjectItemCaseSensitive(up, "name");
+            cJSON *en = cJSON_GetObjectItemCaseSensitive(up, "enabled");
+            if (!cJSON_IsString(nm) || !nm->valuestring || !cJSON_IsArray(en))
+               continue;
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "name", nm->valuestring);
+            cJSON *dsc = cJSON_GetObjectItemCaseSensitive(up, "description");
+            cJSON_AddStringToObject(o, "description",
+                                    (cJSON_IsString(dsc) && dsc->valuestring) ? dsc->valuestring
+                                                                              : "User preset");
+            cJSON *keys = cJSON_CreateArray();
+            cJSON *k = NULL;
+            cJSON_ArrayForEach(k, en) if (cJSON_IsString(k) && k->valuestring)
+                cJSON_AddItemToArray(keys, cJSON_CreateString(k->valuestring));
+            cJSON_AddItemToObject(o, "enabled", keys);
+            cJSON_AddBoolToObject(o, "builtin", 0);
+            cJSON_AddItemToArray(arr, o);
+            count++;
+         }
+      }
+      if (ups)
+         cJSON_Delete(ups);
    }
    return arr;
 }
