@@ -198,7 +198,8 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    assert(req_only != NULL);
    const cJSON *p_only = cJSON_GetObjectItem(req_only, "prompt");
    assert(cJSON_IsString(p_only));
-   assert(strstr(p_only->valuestring, "# Source Packet: Preloaded Context") != NULL);
+   /* With no positional prompt, the preload IS the prompt: no leading blank lines. */
+   assert(strncmp(p_only->valuestring, "# Source Packet: Preloaded Context", 34) == 0);
    assert(strstr(p_only->valuestring, "ROUNDTABLE_PRELOAD_MARKER_77") != NULL);
    cJSON_Delete(req_only);
 
