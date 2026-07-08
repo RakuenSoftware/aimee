@@ -265,7 +265,8 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
                    " AND relation=?2 AND target<>?3 AND edge_class='semantic'"
                    " AND superseded_at='' AND suppressed=0"
                  : "UPDATE entity_edges SET superseded_at=?4 WHERE source=?1 AND relation=?2"
-                   " AND target<>?3 AND edge_class='semantic' AND superseded_at='' AND suppressed=0";
+                   " AND target<>?3 AND edge_class='semantic' AND superseded_at='' AND "
+                   "suppressed=0";
          aimee_pg_stmt_t *us = aimee_pg_prepare(conn, upd, err, sizeof(err));
          if (us)
          {

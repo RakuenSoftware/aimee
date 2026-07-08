@@ -322,7 +322,7 @@ int rel_type_is_functional(const char *rel_type)
    if (!rel_type)
       return 0;
    static const char *const functional[] = {
-       "lives_in", "born_in",  "age",      "located_in", "has_hostname",
+       "lives_in", "born_in",   "age",      "located_in",    "has_hostname",
        "spouse",   "works_for", "has_role", "device_has_ip",
    };
    for (size_t i = 0; i < sizeof(functional) / sizeof(functional[0]); i++)
