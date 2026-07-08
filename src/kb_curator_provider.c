@@ -115,5 +115,11 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
    out->api_key = api_key[0] ? api_key : NULL; /* keyless local endpoint => no bearer */
    out->wire = PROVIDER_WIRE_OPENAI_CHAT;
    out->temperature = -1.0; /* let the provider default */
+   /* Tier-A is mechanical, grammar-constrained extraction/indexing — it does not
+    * need (and is hurt by) a reasoning model's chain-of-thought: the reasoning pass
+    * adds latency at drain volume and, worse, can consume the output budget so the
+    * JSON answer comes back truncated/empty (observed: memory-fact extraction landed
+    * 0 facts). Skip thinking for Tier-A; Tier-B (judge/synthesize) keeps it. */
+   out->disable_thinking = (kb_curator_stage_tier(stage) == KB_CURATOR_TIER_A);
    return 1;
 }

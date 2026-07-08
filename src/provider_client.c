@@ -43,6 +43,19 @@ struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJS
    if (def->max_tokens > 0)
       cJSON_AddNumberToObject(req, "max_tokens", def->max_tokens);
 
+   /* Skip the model's reasoning pass for mechanical stages (see provider_def_t
+    * .disable_thinking). Sent as the jinja chat-template kwarg understood by
+    * llama.cpp (--jinja) / vLLM; other endpoints ignore the extra field. */
+   if (def->disable_thinking)
+   {
+      cJSON *ctk = cJSON_CreateObject();
+      if (ctk)
+      {
+         cJSON_AddBoolToObject(ctk, "enable_thinking", 0);
+         cJSON_AddItemToObject(req, "chat_template_kwargs", ctk);
+      }
+   }
+
    if (json_schema)
    {
       cJSON *schema_copy = cJSON_Duplicate(json_schema, 1);

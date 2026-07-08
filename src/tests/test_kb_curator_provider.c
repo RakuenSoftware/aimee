@@ -63,6 +63,7 @@ static void test_tier_a_resolves(void)
    assert(strcmp(def.model, "gemma-4-e4b") == 0);
    assert(def.api_key == NULL); /* empty key => no bearer */
    assert(def.wire == PROVIDER_WIRE_OPENAI_CHAT);
+   assert(def.disable_thinking == 1); /* Tier-A skips the reasoning pass */
 
    /* Tier-B still idle (no weak fallback to the Tier-A default). */
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &def) == 0);
@@ -85,10 +86,12 @@ static void test_tier_b_resolves(void)
    provider_def_t a, b;
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_CODE, &a) == 1);
    assert(strcmp(a.model, "small") == 0 && a.api_key == NULL);
+   assert(a.disable_thinking == 1); /* Tier-A: reasoning off */
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 1);
    assert(strcmp(b.base_url, "https://api.big/v1") == 0);
    assert(strcmp(b.model, "big-32b") == 0);
    assert(b.api_key && strcmp(b.api_key, "sk-secret") == 0);
+   assert(b.disable_thinking == 0); /* Tier-B keeps its reasoning pass */
    printf("kb_curator_provider: tier-A and tier-B resolve independently ok\n");
 }
 

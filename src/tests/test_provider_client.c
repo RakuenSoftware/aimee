@@ -42,6 +42,8 @@ static void test_build_basic(void)
    assert(!cJSON_GetObjectItemCaseSensitive(req, "temperature"));
    assert(!cJSON_GetObjectItemCaseSensitive(req, "max_tokens"));
    assert(!cJSON_GetObjectItemCaseSensitive(req, "response_format"));
+   /* disable_thinking defaults off => no chat_template_kwargs. */
+   assert(!cJSON_GetObjectItemCaseSensitive(req, "chat_template_kwargs"));
 
    cJSON_Delete(req);
    cJSON_Delete(msgs);
@@ -56,6 +58,7 @@ static void test_build_options_and_schema(void)
        .wire = PROVIDER_WIRE_OPENAI_CHAT,
        .temperature = 0.2,
        .max_tokens = 512,
+       .disable_thinking = 1,
    };
    cJSON *msgs = two_messages();
    cJSON *schema = cJSON_CreateObject();
@@ -67,6 +70,11 @@ static void test_build_options_and_schema(void)
    assert(cJSON_IsNumber(temp) && temp->valuedouble > 0.19 && temp->valuedouble < 0.21);
    cJSON *mt = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
    assert(cJSON_IsNumber(mt) && mt->valueint == 512);
+   /* disable_thinking => chat_template_kwargs.enable_thinking:false */
+   cJSON *ctk = cJSON_GetObjectItemCaseSensitive(req, "chat_template_kwargs");
+   assert(ctk);
+   cJSON *et = cJSON_GetObjectItemCaseSensitive(ctk, "enable_thinking");
+   assert(cJSON_IsBool(et) && !cJSON_IsTrue(et));
 
    cJSON *rf = cJSON_GetObjectItemCaseSensitive(req, "response_format");
    assert(rf);
