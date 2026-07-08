@@ -1574,6 +1574,11 @@ typedef struct config
     * invalid order falls back to registry order with a WARN. Opt-in: unset changes
     * nothing. See docs/proposals/pending/user-configurable-curator-pipeline.md. */
    char kb_curator_stage_order[512];
+   /* User-defined curator presets as a JSON array string:
+    * [{"name":"...","enabled":["kb_curator_..._enabled",...]}]. Merged with the
+    * built-in presets on the curator.stages endpoint; the GUI saves/deletes named
+    * profiles here via config.set (flat string, no bespoke op). Empty = none. */
+   char kb_curator_user_presets[4096];
    int kb_curator_extract_max_tokens;
    int kb_curator_max_attempts;
    /* Curator LLM provider (curator-llm-backend §2), operator-owned and kb-level
