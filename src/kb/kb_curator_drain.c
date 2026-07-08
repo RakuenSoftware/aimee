@@ -120,6 +120,43 @@ static int kb_cross_repo_meta_rebuild(const config_t *cfg)
    return 0;
 }
 
+/* Projection-graph sweep (INDEX/CPU lane): publish a fresh typed-edge generation
+ * per CHANGED project (content-addressed -- an unchanged project is skipped), so
+ * `workspace add` materializes the code_projection_edges layer with no manual
+ * `aimee graph sync-code`. Pure DB2 (reads files/terms/code_calls), no embedder/
+ * LLM -- so it runs on the CPU/index lane, off the GPU/LLM thread. When a project
+ * changed this cycle (the content-addressed `built` signal), it also does the
+ * incremental cross-repo metadata refresh (H0c identities, H0d routes, build_deps,
+ * distinctiveness model) to keep the structural-edge gate fresh. Idempotent and
+ * cheap when nothing changed. Gated on kb_curator_projection_graph_enabled
+ * (default on); cross_repo refresh additionally gated on
+ * kb_curator_cross_repo_graph_enabled. */
+static void kb_curator_projection_sweep(const config_t *cfg)
+{
+   if (!cfg->kb_curator_projection_graph_enabled)
+      return;
+   project_info_t projects[128];
+   int np = index_list_projects(projects, 128);
+   int built = 0;
+   int64_t total = 0;
+   for (int i = 0; i < np; i++)
+   {
+      int rebuilt = 0;
+      int64_t edges = kb_graph_build_project_if_changed(projects[i].name, &rebuilt);
+      if (rebuilt)
+      {
+         built++;
+         if (edges > 0)
+            total += edges;
+      }
+   }
+   if (built > 0)
+      aimee_log(LOG_INFO, "kb.graph.projection",
+                "published %lld edge(s) across %d changed project(s)", (long long)total, built);
+   if (built > 0 && cfg->kb_curator_cross_repo_graph_enabled)
+      kb_cross_repo_meta_rebuild(cfg);
+}
+
 /* Curator pipeline registry: the ordered stages the drain flows work through,
  * replacing the old hardcoded if-chain that starved downstream stages behind the
  * extract backlog. Each stage has a per-pass budget and a resource lane -- LLM
@@ -398,46 +435,10 @@ static void *drain_thread_main(void *arg)
        * drain-ingested docs are never curated. Idempotent, self-gated. */
       kb_curator_queue_docs_all_projects(cfg.kb_curator_extract_docs_enabled);
 
-      /* Code projection-graph drain — publish a fresh typed-edge generation per
-       * CHANGED project (content-addressed: an unchanged project is skipped), so
-       * `workspace add` materializes the code_projection_edges layer with no manual
-       * `aimee graph sync-code`. Pure DB2 (reads files/terms/code_calls), no
-       * embedder/LLM. Gated on its own flag (default on); independent of the curator
-       * pipeline below. */
-      if (cfg.kb_curator_projection_graph_enabled)
-      {
-         project_info_t projects[128];
-         int np = index_list_projects(projects, 128);
-         int built = 0;
-         int64_t total = 0;
-         for (int i = 0; i < np; i++)
-         {
-            int rebuilt = 0;
-            int64_t edges = kb_graph_build_project_if_changed(projects[i].name, &rebuilt);
-            if (rebuilt)
-            {
-               built++;
-               if (edges > 0)
-                  total += edges;
-            }
-         }
-         if (built > 0)
-            aimee_log(LOG_INFO, "kb.graph.projection",
-                      "published %lld edge(s) across %d changed project(s)", (long long)total,
-                      built);
-
-         /* Incremental cross-repo metadata refresh: a project changed this cycle
-          * (the content-addressed `built` signal), so rebuild the H0c identities,
-          * H0d routes, and the distinctiveness model to keep the structural-edge
-          * gate fresh without a manual recompute. Idempotent; on a multi-poll
-          * catch-up the rebuild repeats once per poll-with-changes (set-based, no
-          * LLM — correctness-safe; coalescing to one rebuild at quiescence is a
-          * possible future optimization). The flag here also gates the resolver
-          * (cross_repo_deps.c) and the cold-start backfill above: disabling it
-          * turns off precision gating AND route population together. */
-         if (built > 0 && cfg.kb_curator_cross_repo_graph_enabled)
-            kb_cross_repo_meta_rebuild(&cfg);
-      }
+      /* Code projection-graph + incremental cross-repo metadata refresh moved to
+       * the CPU/index lane (kb_curator_projection_sweep, driven by
+       * kb_curator_index_lane_main) so this pure-DB2 O(projects) sweep drains
+       * concurrently with -- rather than blocking -- the GPU/LLM pass here. */
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the
        * scheduler, never on the capture hot path. Off by default. */
@@ -530,6 +531,10 @@ static void *kb_curator_index_lane_main(void *arg)
       opts.max_tokens =
           cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+
+      /* Pure-DB2 projection-graph + cross-repo refresh once per poll, ahead of the
+       * INDEX queue drain -- content-addressed, so cheap when nothing changed. */
+      kb_curator_projection_sweep(&cfg);
 
       int r = 0, drained = 0;
       while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
