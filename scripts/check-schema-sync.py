@@ -108,7 +108,7 @@ DB1_ONLY_TABLES = {
     "work_queue_log",
     "wc_channel_messages",
     "wc_channels",
-    "workflow_sessions",
+    "ensembles",
     "working_memory",
     "working_profile_observations_local",
     "working_profile_promotion_progress",

@@ -1299,7 +1299,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          snprintf(authority_root, sizeof(authority_root), "%s", worktree_path);
       else if (getcwd(authority_root, sizeof(authority_root)) == NULL)
          authority_root[0] = '\0';
-      delegate_source_authority_env_set((const char (*)[MAX_PATH_LEN])source_paths,
+      delegate_source_authority_env_set((const char(*)[MAX_PATH_LEN])source_paths,
                                         source_path_count, authority_root);
    }
 
