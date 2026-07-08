@@ -165,7 +165,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
              agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
          agent_apply_runtime_config(ag);
          ag->ablation = cfg->ablation;
-         ag->write_enforce = use_tools && delegate_role_is_write(role) ? 1 : 0;
+         ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
          int rc;
          if (use_tools)
             rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
@@ -203,7 +203,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
           agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
       agent_apply_runtime_config(ag);
       ag->ablation = cfg->ablation;
-      ag->write_enforce = use_tools && delegate_role_is_write(role) ? 1 : 0;
+      ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
 
       char *hint = agent_uses_mistral_delegate_path(ag)
                        ? NULL
@@ -277,7 +277,7 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
  * with a delegate"). Deliberately NOT the agentic delegate path: it selects a
  * single non-CLI (HTTP-provider) agent — preferring `agent_name` if given, else
  * the default, else the first enabled non-CLI agent — clones it, forces
- * write_enforce off, and calls the plain-completion agent_execute() directly.
+ * write_capable off, and calls the plain-completion agent_execute() directly.
  * No provider-CLI, no exec role, no worktree, no tools: the model can only return
  * text. Returns 0 on success (out->response holds the text), -1 otherwise.
  * Provider-CLI agents are refused as drafters precisely because they are agentic. */
@@ -317,7 +317,7 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
                            * agent_t holds only fixed-size buffers, so a shallow copy
                            * owns no shared pointers. */
    agent_apply_runtime_config(&local);
-   local.write_enforce = 0; /* belt-and-suspenders; not the primary safeguard */
+   local.write_capable = 0; /* belt-and-suspenders; not the primary safeguard */
    /* THE tool-safety guarantee: this calls agent_execute() directly — the plain
     * single request->response completion path that has NO tool loop at all. Tool
     * execution lives only in the separate agent_execute_with_tools_for_role(),
@@ -356,13 +356,13 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    }
 
    /* Clone before mutating: each worker owns its agent_t copy, so runtime-config
-    * / ablation / write_enforce writes never race on the shared struct. Rate-limit
+    * / ablation / write_capable writes never race on the shared struct. Rate-limit
     * and provider-health accounting stay on the process-wide provider_catalog_*
     * tables (keyed by agent name), so siblings still see each other's signals. */
    agent_t local = *src;
    agent_apply_runtime_config(&local);
    local.ablation = cfg->ablation;
-   local.write_enforce = 0; /* ensemble references answer a prompt; no write tools */
+   local.write_capable = 0; /* ensemble references answer a prompt; no write tools */
 
    int rc = agent_execute(&local, system_prompt, user_prompt, max_tokens, temperature, out);
    if (rc == 0)
@@ -405,7 +405,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    }
    agent_apply_runtime_config(ag);
    ag->ablation = cfg->ablation;
-   ag->write_enforce = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+   ag->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
    char *hint = (agent_tools_role_current_code_only(role) || agent_uses_mistral_delegate_path(ag))
                     ? NULL
@@ -452,7 +452,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
             aimee_log(LOG_DEBUG, "agent", "skipping DOWN agent '%s' in fallback", fb->name);
             continue;
          }
-         fb->write_enforce = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+         fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
          free(out->response);
          out->response = NULL;

@@ -40,7 +40,6 @@ struct cJSON;
 #define AGENT_DEFAULT_MAX_TOKENS   0
 #define MAX_EXEC_ROLES             8
 #define MAX_EXEC_PROMPT_LEN        4096
-#define AGENT_DEFAULT_MAX_TURNS    20
 #define AGENT_BACKEND_TMUX_CLI     "tmux-cli"
 #define AGENT_BACKEND_PROVIDER_CLI "provider-cli"
 #define AGENT_BACKEND_CLI_STDIO    "cli-stdio" /* legacy config alias */
@@ -244,8 +243,9 @@ typedef struct
    int recommended_sampling;
    agent_ablation_flags_t ablation;
    int max_turns;
-   int write_enforce; /* 1 = warn at WRITE_ENFORCE_WARN_TURN and fail at WRITE_ENFORCE_FAIL_TURN
-                       * if no write tool has been called; 0 = disabled */
+   int write_capable; /* 1 = write-capable delegate (grants the codex workspace-write
+                       * sandbox; see cli_codex.c); 0 = read-only. No longer imposes a
+                       * turn cap — the role's max_turns is the sole turn constraint. */
    int max_parallel;
    char exec_roles[MAX_EXEC_ROLES][32];
    int exec_role_count;

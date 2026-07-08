@@ -329,6 +329,14 @@ void agent_tools_parent_write_guard_set(const char *r, const char *w)
 void agent_tools_parent_write_guard_clear(void)
 {
 }
+void agent_tools_write_capable_set(int capable)
+{
+   (void)capable;
+}
+int agent_tools_readonly_delegate_blocks(void)
+{
+   return 0;
+}
 
 int pre_tool_check(const char *tool_name, const char *tool_input, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg, size_t msg_len)
