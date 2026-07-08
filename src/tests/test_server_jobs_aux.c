@@ -7,6 +7,31 @@
 #include "server.h"
 #include "cJSON.h"
 
+#include <sys/stat.h> /* mkdir */
+/* agent_job_to_json() serializes default_max_turns = delegate_default_max_turns_for_role
+ * (role_template_max_turns), which reads the role_templates dir under
+ * config_default_dir() (-1 when absent). The handler tests assert default_max_turns==20
+ * for a review job, so point config_default_dir at a temp dir and lay down the template. */
+static char g_roles_dir[256];
+const char *config_default_dir(void)
+{
+   return g_roles_dir;
+}
+static void setup_role_templates(void)
+{
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-jobsaux-XXXXXX");
+   assert(mkdtemp(g_roles_dir));
+   char sub[512];
+   snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
+   assert(mkdir(sub, 0700) == 0);
+   char path[600];
+   snprintf(path, sizeof(path), "%s/review.md", sub);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fprintf(f, "---\nmax_turns: 20\n---\nbody\n");
+   fclose(f);
+}
+
 static cJSON *g_last_response = NULL;
 static char g_last_error[256];
 
@@ -265,6 +290,7 @@ static void test_aux_handlers(void)
 
 int main(void)
 {
+   setup_role_templates();
    assert(db1_init(":memory:") == 0);
    printf("test_server_jobs_aux\n");
    test_jobs_handlers();

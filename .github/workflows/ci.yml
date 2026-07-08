@@ -53,7 +53,12 @@ jobs:
           echo "::endgroup::"
       - name: Install clang-format
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q clang-format-19
       - name: Check formatting
         run: cd src && make lint
@@ -75,7 +80,12 @@ jobs:
           echo "::endgroup::"
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
@@ -115,7 +125,12 @@ jobs:
           echo "::endgroup::"
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
@@ -163,7 +178,12 @@ jobs:
             "$img"
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev postgresql-client
@@ -192,7 +212,12 @@ jobs:
           echo "::endgroup::"
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
@@ -394,7 +419,12 @@ jobs:
           echo "::endgroup::"
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
@@ -419,7 +449,12 @@ jobs:
           echo "::endgroup::"
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
@@ -517,7 +552,12 @@ jobs:
           df -h / | tail -1
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
+          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
+          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
+          # hard — though none of our packages come from them. Drop them, then retry
+          # update with backoff so a transient mirror hiccup doesn't fail the job.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           sudo apt-get install -y -q gcc make git \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
       - name: Build + run the opt-in tree-sitter test
