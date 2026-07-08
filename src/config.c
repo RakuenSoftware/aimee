@@ -628,14 +628,13 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
             "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
-   /* The LLM-backed memory features (typed-fact extract/inject + HyDE query
-    * rewrite) default OFF here; config_apply_inference_backend_defaults() below
-    * flips them ON when the active inference model is an accelerated backend
-    * (external model or a larger local model) rather than the CPU-only Gemma
-    * E4B/E2B fallback, which is too slow for per-turn LLM work. An explicit
-    * value in the config always wins. HyDE mode defaults on so the rewrite, once
-    * enabled, generates a hypothetical answer. */
-   cfg->typed_facts_enabled = 0;
+   /* Typed-fact extraction runs fully OFFLINE (the memory_facts drain), so it costs
+    * nothing per turn and defaults ON on every backend -- including the CPU-only
+    * Gemma E4B/E2B fallback. HyDE query rewrite is still per-turn LLM work, so it
+    * defaults OFF here and config_apply_inference_backend_defaults() flips it ON only
+    * for an accelerated backend. An explicit config value always wins. HyDE mode
+    * defaults on so the rewrite, once enabled, generates a hypothetical answer. */
+   cfg->typed_facts_enabled = 1;
    cfg->memory_rewrite_enabled = 0;
    cfg->memory_rewrite_hyde = 1;
    /* Replayable-evidence roundtable verification (Part A): default-on. config_t
@@ -866,15 +865,9 @@ static int model_is_cpu_only(const char *model)
 static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *root)
 {
    int accel = !model_is_cpu_only(cfg->kb_curator_provider_model);
-   /* typed_facts_enabled is now KB-owned (kb.typed_facts.enabled). Only apply the
-    * accel-derived default when it is set by NEITHER the KB section nor the legacy
-    * root key — otherwise this would clobber the operator's explicit value. */
-   const cJSON *kb = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "kb");
-   const cJSON *kb_tf = kb ? cJSON_GetObjectItemCaseSensitive(kb, "typed_facts") : NULL;
-   int tf_explicit = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled") ||
-                     (kb_tf && cJSON_GetObjectItemCaseSensitive(kb_tf, "enabled"));
-   if (!tf_explicit)
-      cfg->typed_facts_enabled = accel;
+   /* typed_facts_enabled now defaults ON unconditionally (offline extraction, see
+    * config_reset); the backend gate below governs only the per-turn HyDE rewrite.
+    * An explicit kb.typed_facts.enabled / typed_facts_enabled still wins via parse. */
    if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite") &&
        !cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite_enabled"))
       cfg->memory_rewrite_enabled = accel;
