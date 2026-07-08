@@ -1,118 +1,111 @@
-/* test_curator_pipeline.c: kb_curator_pipeline_run_pass scheduling — the guard for
- * the starvation fix. Mock stages verify every enabled stage advances each pass
- * (no downstream starvation), disabled/lane-filtered stages skip, a per-pass budget
- * drains a stage's queue, and a stage error stops the pass. No DB. */
+/* test_curator_pipeline.c: end-to-end curator chain over the sqlite shim. Drives
+ * the REAL passes in sequence — resolve_entities -> index_code_unit ->
+ * link_artifacts -> /v1/implements — proving a doc-concept resolves through to
+ * the code that implements it. Embedding/pgvector are stubbed (the chain is
+ * graph/SQL, not vector, dependent). */
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include <sqlite3.h>
+
 #include "aimee.h"
-#include "kb/kb_curator_pipeline.h"
+#include "db2_test_shim.h"
+#include "../kb/kb_curator_resolve_entities.h"
+#include "../kb/kb_curator_index_code_unit.h"
+#include "../kb/kb_curator_link_artifacts.h"
+#include "../kb_curator_serve.h"
 
-static int q_a, q_b, n_a, n_b, n_err, n_off;
+/* ── stubs: embedding + vector sinks (return "unavailable"/no-op) ─────────── */
+int memory_embed_text(const char *t, const char *c, float *o, int d)
+{
+   (void)t;
+   (void)c;
+   (void)o;
+   (void)d;
+   return 0;
+}
+int pgvec_curator_entity_upsert(int64_t p, const float *v, int d, const char *sk, const char *si,
+                                const char *cn, const char *aid, const char *pl)
+{
+   (void)p;
+   (void)v;
+   (void)d;
+   (void)sk;
+   (void)si;
+   (void)cn;
+   (void)aid;
+   (void)pl;
+   return 0;
+}
+int pgvec_curator_entity_search(const char *sk, const char *si, const float *v, int d, int lim,
+                                int64_t *ids, double *sc, int max)
+{
+   (void)sk;
+   (void)si;
+   (void)v;
+   (void)d;
+   (void)lim;
+   (void)ids;
+   (void)sc;
+   (void)max;
+   return 0;
+}
+int pgvec_curator_code_unit_upsert(int64_t p, const float *iv, const float *sv, const float *bv,
+                                   int d, const char *aid, const char *fp, const char *dk,
+                                   const char *sig, const char *bh, const char *pl)
+{
+   (void)p;
+   (void)iv;
+   (void)sv;
+   (void)bv;
+   (void)d;
+   (void)aid;
+   (void)fp;
+   (void)dk;
+   (void)sig;
+   (void)bh;
+   (void)pl;
+   return 0;
+}
 
-static int run_a(const kb_curator_extract_opts_t *o)
+static void seed(sqlite3 *db, const char *sql)
 {
-   (void)o;
-   n_a++;
-   if (q_a > 0)
-   {
-      q_a--;
-      return 1;
-   }
-   return 0;
-}
-static int run_b(const kb_curator_extract_opts_t *o)
-{
-   (void)o;
-   n_b++;
-   if (q_b > 0)
-   {
-      q_b--;
-      return 1;
-   }
-   return 0;
-}
-static int run_err(const kb_curator_extract_opts_t *o)
-{
-   (void)o;
-   n_err++;
-   return -1;
-}
-static int run_off(const kb_curator_extract_opts_t *o)
-{
-   (void)o;
-   n_off++;
-   return 0;
-}
-static int en_true(const config_t *c)
-{
-   (void)c;
-   return 1;
-}
-static int en_false(const config_t *c)
-{
-   (void)c;
-   return 0;
-}
-static void reset(void)
-{
-   q_a = q_b = n_a = n_b = n_err = n_off = 0;
+   assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
 }
 
 int main(void)
 {
-   printf("test_curator_pipeline:\n");
-   kb_curator_extract_opts_t opts;
-   memset(&opts, 0, sizeof(opts));
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
 
-   const kb_curator_stage_desc_t st[] = {
-       {"a", "a", en_true, run_a, 1, KB_CURATOR_LANE_LLM},
-       {"b", "b", en_true, run_b, 32, KB_CURATOR_LANE_INDEX},
-       {"off", "off", en_false, run_off, 1, KB_CURATOR_LANE_INDEX},
-   };
+   /* extract's output: a proposed entity mention + a proposed code_unit whose
+    * domain_concepts name that entity, with the code_unit's source file cited. */
+   seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
+            " ('ent','entity','proposed','project','projA',"
+            "'{\"name\":\"pgvector\",\"context\":\"vector store\"}'),"
+            " ('cu','code_unit','proposed','project','projA',"
+            "'{\"summary\":\"hnsw search\",\"domain_concepts\":[\"pgvector\"]}')");
+   seed(db, "INSERT INTO artifact_citations (artifact_id,source_kind,source_id)"
+            " VALUES ('cu','kb_file','src/vec.c')");
 
-   /* 1: enabled stages advance; disabled skip; INDEX budget drains its queue. */
-   reset();
-   q_a = 1;
-   q_b = 5;
-   int r = kb_curator_pipeline_run_pass(st, 3, -1, NULL, &opts, NULL);
-   assert(r == 1);
-   assert(n_a == 1 && q_a == 0); /* LLM stage: one unit this pass */
-   assert(n_b == 6 && q_b == 0); /* INDEX stage: budget 32 drained 5 (6th call idle) */
-   assert(n_off == 0);           /* disabled skipped */
-   printf("  PASS: enabled advance, disabled skip, INDEX budget drains\n");
+   /* 1. resolve_entities commits the entity mention. */
+   assert(kb_curator_resolve_entities_one(NULL) == 1);
+   /* 2. index_code_unit commits the code_unit. */
+   assert(kb_curator_index_code_unit_one(NULL) == 1);
+   /* 3. link_artifacts wires code_unit --mentions--> entity by concept name. */
+   assert(kb_curator_link_artifacts_one(NULL) == 1);
 
-   /* 2: idle pass returns 0. */
-   reset();
-   r = kb_curator_pipeline_run_pass(st, 3, -1, NULL, &opts, NULL);
-   assert(r == 0);
-   printf("  PASS: idle pass returns 0\n");
+   /* 4. /v1/implements turns the topic into the implementing code unit. */
+   char buf[4096];
+   int n = kb_curator_implements_json("pgvector", buf, sizeof(buf));
+   assert(n == 1);
+   assert(strstr(buf, "\"cu\"") && strstr(buf, "src/vec.c") && strstr(buf, "hnsw search"));
 
-   /* 3: lane filter runs only the matching lane (per-lane worker). */
-   reset();
-   q_a = 1;
-   q_b = 3;
-   r = kb_curator_pipeline_run_pass(st, 3, KB_CURATOR_LANE_INDEX, NULL, &opts, NULL);
-   assert(r == 1);
-   assert(n_a == 0); /* LLM stage filtered out */
-   assert(q_b == 0); /* INDEX stage drained */
-   printf("  PASS: lane filter isolates a lane\n");
-
-   /* 4: a stage error stops the pass; later stages skip; returns -1. */
-   reset();
-   q_a = 1;
-   q_b = 5;
-   const kb_curator_stage_desc_t ste[] = {
-       {"a", "a", en_true, run_a, 1, KB_CURATOR_LANE_LLM},
-       {"err", "err", en_true, run_err, 1, KB_CURATOR_LANE_LLM},
-       {"b", "b", en_true, run_b, 32, KB_CURATOR_LANE_INDEX},
-   };
-   r = kb_curator_pipeline_run_pass(ste, 3, -1, NULL, &opts, NULL);
-   assert(r == -1);
-   assert(n_a == 1 && n_err == 1 && n_b == 0); /* stopped at the error */
-   printf("  PASS: stage error stops the pass\n");
-
-   printf("test_curator_pipeline: all tests passed\n");
+   db2_test_shim_close();
+   printf("  end-to-end: resolve -> index -> link -> /v1/implements OK\n");
+   printf("curator_pipeline: all tests passed\n");
    return 0;
 }
