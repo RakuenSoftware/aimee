@@ -326,6 +326,45 @@ static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
      KB_CURATOR_LANE_INDEX},
 };
 
+/* Producer->consumer dependency DAG for the curator stages: a stage may not be
+ * ordered before a prerequisite in the SAME lane (cross-lane prereqs are advisory
+ * -- the two lanes run concurrently, so cross-lane order is not enforceable). The
+ * reorder validator enforces the same-lane edges; the GUI surfaces the full list
+ * via `requires`. Single source of truth for the constraints. See
+ * docs/proposals/pending/user-configurable-curator-pipeline.md. */
+static const struct
+{
+   const char *stage;
+   const char *reqs; /* comma-separated prerequisite stage names */
+} CURATOR_STAGE_DEPS[] = {
+    {"resolve_entities", "extract_docs"}, {"index_narrative", "extract_docs"},
+    {"index_claims", "extract_docs"},     {"detect_contradictions", "index_claims"},
+    {"index_code_unit", "extract_code"},  {"link_artifacts", "extract_docs,extract_code"},
+    {"synthesize", "index_claims"},       {"promote_entity", "resolve_entities"},
+    {"embed_evidence", "index_claims"},   {"cross_repo_graph", "projection_graph"},
+};
+
+/* Prerequisite string for a stage (comma-separated), or "" if none. */
+static const char *kb_curator_stage_reqs(const char *name)
+{
+   for (size_t i = 0; i < sizeof(CURATOR_STAGE_DEPS) / sizeof(CURATOR_STAGE_DEPS[0]); i++)
+      if (strcmp(CURATOR_STAGE_DEPS[i].stage, name) == 0)
+         return CURATOR_STAGE_DEPS[i].reqs;
+   return "";
+}
+
+/* Add a "requires":[...] array (from the DAG) to a stage JSON object. */
+static void kb_curator_add_requires(cJSON *o, const char *name)
+{
+   cJSON *reqs = cJSON_CreateArray();
+   char buf[128];
+   snprintf(buf, sizeof(buf), "%s", kb_curator_stage_reqs(name));
+   char *save = NULL;
+   for (char *t = strtok_r(buf, ",", &save); t; t = strtok_r(NULL, ",", &save))
+      cJSON_AddItemToArray(reqs, cJSON_CreateString(t));
+   cJSON_AddItemToObject(o, "requires", reqs);
+}
+
 /* Option B (single source of truth): expose the stage registry as data so the
  * Pipeline GUI renders from the running backend instead of a hand-kept mirror.
  * Returns a fresh cJSON array [{name,label,lane,budget,order,config_key}]; the
@@ -357,6 +396,7 @@ cJSON *kb_curator_stages_json(void)
          snprintf(key, sizeof(key), "kb_curator_%s_enabled", st->name);
          cJSON_AddStringToObject(o, "config_key", key);
       }
+      kb_curator_add_requires(o, st->name);
       cJSON_AddItemToArray(arr, o);
    }
    /* The projection-graph + cross-repo refresh run on the INDEX lane via
@@ -371,6 +411,7 @@ cJSON *kb_curator_stages_json(void)
       cJSON_AddNumberToObject(o, "budget", 1);
       cJSON_AddNumberToObject(o, "order", (double)n);
       cJSON_AddStringToObject(o, "config_key", "kb_curator_projection_graph_enabled");
+      kb_curator_add_requires(o, "projection_graph");
       cJSON_AddItemToArray(arr, o);
    }
    {
@@ -381,6 +422,7 @@ cJSON *kb_curator_stages_json(void)
       cJSON_AddNumberToObject(o, "budget", 1);
       cJSON_AddNumberToObject(o, "order", (double)(n + 1));
       cJSON_AddStringToObject(o, "config_key", "kb_curator_cross_repo_graph_enabled");
+      kb_curator_add_requires(o, "cross_repo_graph");
       cJSON_AddItemToArray(arr, o);
    }
    return arr;
@@ -436,6 +478,114 @@ cJSON *kb_curator_presets_json(void)
       cJSON_AddItemToArray(arr, o);
    }
    return arr;
+}
+
+/* Lane of a registry stage by name, or -1 if not a CURATOR_STAGES entry. */
+static int kb_curator_stage_lane_of(const char *name)
+{
+   for (size_t i = 0; i < sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]); i++)
+      if (strcmp(CURATOR_STAGES[i].name, name) == 0)
+         return (int)CURATOR_STAGES[i].lane;
+   return -1;
+}
+
+/* Validate a comma-separated stage order against the same-lane dependency DAG:
+ * every listed stage must appear after its same-lane prerequisites, and those
+ * prerequisites must themselves be listed (an omitted prereq would fall to the end
+ * in registry order, i.e. after its dependent). Cross-lane prereqs are advisory
+ * (the lanes run concurrently) and not checked. Unknown names are ignored. Returns
+ * 1 valid, 0 invalid (fills `err`). */
+static int kb_curator_order_valid(const char *order, char *err, size_t err_sz)
+{
+   if (err && err_sz)
+      err[0] = '\0';
+   if (!order || !order[0])
+      return 1;
+   char buf[512];
+   snprintf(buf, sizeof(buf), "%s", order);
+   const char *names[64];
+   int npos = 0;
+   char *save = NULL;
+   for (char *t = strtok_r(buf, ",", &save); t && npos < 64; t = strtok_r(NULL, ",", &save))
+   {
+      while (*t == ' ')
+         t++;
+      names[npos++] = t;
+   }
+   for (int i = 0; i < npos; i++)
+   {
+      int lane = kb_curator_stage_lane_of(names[i]);
+      if (lane < 0)
+         continue;
+      char rbuf[128];
+      snprintf(rbuf, sizeof(rbuf), "%s", kb_curator_stage_reqs(names[i]));
+      char *rsave = NULL;
+      for (char *req = strtok_r(rbuf, ",", &rsave); req; req = strtok_r(NULL, ",", &rsave))
+      {
+         if (kb_curator_stage_lane_of(req) != lane)
+            continue; /* cross-lane: advisory only */
+         int rpos = -1;
+         for (int j = 0; j < npos; j++)
+            if (strcmp(names[j], req) == 0)
+            {
+               rpos = j;
+               break;
+            }
+         if (rpos < 0 || rpos > i)
+         {
+            if (err && err_sz)
+               snprintf(err, err_sz, "stage '%s' must come after prerequisite '%s' (same lane)",
+                        names[i], req);
+            return 0;
+         }
+      }
+   }
+   return 1;
+}
+
+/* Build the stage array the lane workers iterate: kb_curator_stage_order when set
+ * AND valid (listed stages first in that order, then any unlisted in registry
+ * order), else the registry order. Fail-safe: an invalid order logs one WARN and
+ * falls back to registry order, so a bad config can never corrupt the pipeline.
+ * Fills `out` (capacity `max`); returns the count. */
+static size_t kb_curator_ordered_stages(const config_t *cfg, kb_curator_stage_desc_t *out,
+                                        size_t max)
+{
+   size_t n = sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]);
+   size_t reg = n < max ? n : max;
+   for (size_t i = 0; i < reg; i++)
+      out[i] = CURATOR_STAGES[i];
+   const char *order = cfg->kb_curator_stage_order;
+   if (!order[0])
+      return reg;
+   char err[160];
+   if (!kb_curator_order_valid(order, err, sizeof(err)))
+   {
+      aimee_log(LOG_WARN, "kb.curator.order",
+                "ignoring invalid kb_curator_stage_order (%s); using registry order", err);
+      return reg;
+   }
+   int used[32] = {0};
+   size_t k = 0;
+   char buf[512];
+   snprintf(buf, sizeof(buf), "%s", order);
+   char *save = NULL;
+   for (char *t = strtok_r(buf, ",", &save); t && k < max; t = strtok_r(NULL, ",", &save))
+   {
+      while (*t == ' ')
+         t++;
+      for (size_t i = 0; i < n; i++)
+         if (!used[i] && strcmp(CURATOR_STAGES[i].name, t) == 0)
+         {
+            out[k++] = CURATOR_STAGES[i];
+            used[i] = 1;
+            break;
+         }
+   }
+   for (size_t i = 0; i < n && k < max; i++)
+      if (!used[i])
+         out[k++] = CURATOR_STAGES[i];
+   return k;
 }
 
 static void *drain_thread_main(void *arg)
@@ -584,6 +734,12 @@ static void *drain_thread_main(void *arg)
           cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
 
+      /* Stage order for this poll: kb_curator_stage_order when set + valid, else
+       * registry order (fail-safe). Built once per poll so an invalid order WARNs
+       * at most once, not once per drained job. */
+      kb_curator_stage_desc_t ordered[16];
+      size_t nordered = kb_curator_ordered_stages(&cfg, ordered, 16);
+
       /* Drain a batch of curator jobs back-to-back. Each iteration runs ONE job
        * from the highest-priority non-empty stage (the rc chain below). Draining a
        * batch per poll — rather than one job then re-running the catch-up sweep +
@@ -600,9 +756,8 @@ static void *drain_thread_main(void *arg)
          /* This (main) worker drives the LLM lane; the CPU index lane runs on its own
           * thread (kb_curator_index_lane_main) so indexing does not wait behind each
           * multi-second extraction. */
-         int r = kb_curator_pipeline_run_pass(CURATOR_STAGES,
-                                              sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]),
-                                              KB_CURATOR_LANE_LLM, &cfg, &opts, curator_set_status);
+         int r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_LLM, &cfg, &opts,
+                                              curator_set_status);
          if (r < 0)
          {
             /* Stage error: stop the batch; the top-of-loop sleep backs off before
@@ -649,13 +804,16 @@ static void *kb_curator_index_lane_main(void *arg)
        * INDEX queue drain -- content-addressed, so cheap when nothing changed. */
       kb_curator_projection_sweep(&cfg);
 
+      /* Same stage-order resolution as the LLM lane; run_pass filters to this lane. */
+      kb_curator_stage_desc_t ordered[16];
+      size_t nordered = kb_curator_ordered_stages(&cfg, ordered, 16);
+
       int r = 0, drained = 0;
       while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
       {
          db2_lease_release_idle();
-         r = kb_curator_pipeline_run_pass(
-             CURATOR_STAGES, sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]),
-             KB_CURATOR_LANE_INDEX, &cfg, &opts, curator_index_set_status);
+         r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_INDEX, &cfg, &opts,
+                                          curator_index_set_status);
          if (r != 1)
             break; /* 0 = INDEX queues empty; <0 = a stage errored */
          drained++;

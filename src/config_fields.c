@@ -321,6 +321,8 @@ const config_field_t config_fields[] = {
      * nested kb.curator.* YAML the KB reads on its next load. */
     {"kb_curator_extract_docs_enabled", offsetof(config_t, kb_curator_extract_docs_enabled),
      sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_stage_order", offsetof(config_t, kb_curator_stage_order),
+     sizeof(((config_t *)0)->kb_curator_stage_order), 0, CFG_STRING},
     {"kb_curator_extract_code_enabled", offsetof(config_t, kb_curator_extract_code_enabled),
      sizeof(int), 0, CFG_BOOL},
     {"kb_curator_resolve_entities_enabled", offsetof(config_t, kb_curator_resolve_entities_enabled),
