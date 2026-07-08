@@ -38,6 +38,7 @@
 #include "aimee.h"
 #include "config.h"
 #include "kb_background.h"
+#include "cJSON.h"
 #include "log.h"
 
 #include <pthread.h>
@@ -324,6 +325,66 @@ static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
     {"embed_evidence", "embed evidence", en_evidence_embed, stage_embed_evidence, 1,
      KB_CURATOR_LANE_INDEX},
 };
+
+/* Option B (single source of truth): expose the stage registry as data so the
+ * Pipeline GUI renders from the running backend instead of a hand-kept mirror.
+ * Returns a fresh cJSON array [{name,label,lane,budget,order,config_key}]; the
+ * caller owns it. `config_key` is the aimee.yaml flag the GUI toggles via
+ * config.set: embed_code/ingest_docs are gated on the embedder command (no
+ * individual flag) so they report null (read-only); embed_evidence uses
+ * kb_evidence_embed_enabled; every other stage uses kb_curator_<name>_enabled
+ * (the en_* predicate convention above). */
+cJSON *kb_curator_stages_json(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   size_t n = sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]);
+   for (size_t i = 0; i < n; i++)
+   {
+      const kb_curator_stage_desc_t *st = &CURATOR_STAGES[i];
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "name", st->name);
+      cJSON_AddStringToObject(o, "label", st->label);
+      cJSON_AddStringToObject(o, "lane", st->lane == KB_CURATOR_LANE_LLM ? "llm" : "index");
+      cJSON_AddNumberToObject(o, "budget", st->budget);
+      cJSON_AddNumberToObject(o, "order", (double)i);
+      if (strcmp(st->name, "embed_code") == 0 || strcmp(st->name, "ingest_docs") == 0)
+         cJSON_AddNullToObject(o, "config_key");
+      else if (strcmp(st->name, "embed_evidence") == 0)
+         cJSON_AddStringToObject(o, "config_key", "kb_evidence_embed_enabled");
+      else
+      {
+         char key[96];
+         snprintf(key, sizeof(key), "kb_curator_%s_enabled", st->name);
+         cJSON_AddStringToObject(o, "config_key", key);
+      }
+      cJSON_AddItemToArray(arr, o);
+   }
+   /* The projection-graph + cross-repo refresh run on the INDEX lane via
+    * kb_curator_projection_sweep (batch sweeps, not per-item CURATOR_STAGES
+    * entries) -- but they ARE user-togglable pipeline steps, so surface them for
+    * the GUI too, after the registry stages. */
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "name", "projection_graph");
+      cJSON_AddStringToObject(o, "label", "projection graph");
+      cJSON_AddStringToObject(o, "lane", "index");
+      cJSON_AddNumberToObject(o, "budget", 1);
+      cJSON_AddNumberToObject(o, "order", (double)n);
+      cJSON_AddStringToObject(o, "config_key", "kb_curator_projection_graph_enabled");
+      cJSON_AddItemToArray(arr, o);
+   }
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "name", "cross_repo_graph");
+      cJSON_AddStringToObject(o, "label", "cross-repo graph");
+      cJSON_AddStringToObject(o, "lane", "index");
+      cJSON_AddNumberToObject(o, "budget", 1);
+      cJSON_AddNumberToObject(o, "order", (double)(n + 1));
+      cJSON_AddStringToObject(o, "config_key", "kb_curator_cross_repo_graph_enabled");
+      cJSON_AddItemToArray(arr, o);
+   }
+   return arr;
+}
 
 static void *drain_thread_main(void *arg)
 {
