@@ -155,9 +155,10 @@ static void test_guard_enforcement(void)
    assert(handle_attention_guard() == 0); /* used 1 -> allow, count 2 */
    assert(handle_attention_guard() == 2); /* used 2 >= cap -> block */
 
-   /* (4) AIMEE_GUARD=0 bypasses even with a cap hit. */
+   /* (4) The removed AIMEE_GUARD env bypass no longer disables the guard: an
+    * agent cannot set an env var to escape the cap. Still blocked at the cap. */
    setenv("AIMEE_GUARD", "0", 1);
-   assert(handle_attention_guard() == 0);
+   assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
 
    rm_path(logpath);
@@ -192,6 +193,15 @@ static void test_session_isolation_decision(void)
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "src/x.c", primary_cwd) == 1);
    assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, wt_cwd) == 0);
    assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, primary_cwd) == 1);
+
+   /* Claude Code's native worktrees (/.claude/worktrees/) are equally isolated
+    * branches and are honoured too (target path OR cwd). */
+   const char *cc_wt = "/home/u/repo/.claude/worktrees/feat/src/x.c";
+   const char *cc_wt_cwd = "/home/u/repo/.claude/worktrees/feat";
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, cc_wt, primary_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cc_wt_cwd) == 0);
+   /* The loose "/.claude" prefix (e.g. ~/.claude/) is NOT a managed worktree. */
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/x.c", primary_cwd) == 1);
 
    /* The loose "/.aimee-" prefix is NOT treated as a managed worktree (only the
     * canonical "/.aimee/worktrees/" counts) — avoids false-matching e.g. a
@@ -256,10 +266,11 @@ static void test_isolation_enforcement(void)
    g_stdin_json = READ_PRIMARY_HOOK;
    assert(handle_attention_guard() == 0);
 
-   /* (6) AIMEE_GUARD=0 bypasses even a blockable mutating op. */
+   /* (6) The AIMEE_GUARD env bypass was removed: setting it does NOT disable the
+    * guard, so an agent cannot escape isolation via an env var. Still blocked. */
    setenv("AIMEE_GUARD", "0", 1);
    g_stdin_json = EDIT_PRIMARY_HOOK;
-   assert(handle_attention_guard() == 0);
+   assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
 
    rm_path(cfgpath);
