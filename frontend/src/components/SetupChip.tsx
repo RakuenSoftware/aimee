@@ -39,6 +39,9 @@ export default function SetupChip() {
 
   // Auto-open the wizard once per page load when unconfigured and not dismissed.
   const autoOpened = useRef(false);
+  // Reset the once-per-session auto-open guard when the active session changes,
+  // so a freshly-selected unconfigured session can auto-open the wizard too.
+  useEffect(() => { autoOpened.current = false; }, [active?.id]);
   useEffect(() => {
     if (readiness && !readiness.ready && !isDismissed() && !autoOpened.current) {
       autoOpened.current = true;
