@@ -178,6 +178,89 @@ static void curator_index_set_status(const char *label)
    kb_background_set("curator.index", label);
 }
 
+/* -- Phase 3: per-project CPU sweeps as INDEX-lane stages --------------------
+ * These wrap the embed/ingest/graph drains that previously ran inline in the main
+ * (LLM) thread's poll loop. As INDEX-lane registry stages they run on the CPU
+ * index-lane worker -- concurrent with GPU extraction -- and are toggleable like
+ * any other stage. Each config_loads for the embedder command + project list (as
+ * kb_curator_queue_docs_for_project does) and returns 1=did work / 0=idle. */
+static int en_embedder(const config_t *c)
+{
+   return c->embedding_command[0] != '\0';
+}
+static int en_evidence_embed(const config_t *c)
+{
+   return c->kb_evidence_embed_enabled;
+}
+
+static int stage_embed_code(const kb_curator_extract_opts_t *opts)
+{
+   (void)opts;
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.embedding_command[0])
+      return 0;
+   project_info_t projects[128];
+   int np = index_list_projects(projects, 128);
+   int total = 0;
+   for (int i = 0; i < np; i++)
+   {
+      kb_code_embed_result_t r;
+      memset(&r, 0, sizeof(r));
+      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) == 0)
+         total += (int)r.embedded;
+   }
+   if (total > 0)
+      aimee_log(LOG_DEBUG, "kb.code.embed", "embedded %d code/doc vector(s) across %d project(s)",
+                total, np);
+   return total > 0 ? 1 : 0;
+}
+
+static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
+{
+   (void)opts;
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.embedding_command[0])
+      return 0;
+   project_info_t projects[128];
+   int np = index_list_projects(projects, 128);
+   int total = 0;
+   for (int i = 0; i < np; i++)
+   {
+      int e = kb_doc_refresh(projects[i].name, cfg.embedding_command, 200);
+      if (e > 0)
+         total += e;
+      int b = kb_doc_embed_backfill(projects[i].name, cfg.embedding_command, 200);
+      if (b > 0)
+         total += b;
+   }
+   if (total > 0)
+      aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)", total,
+                np);
+   /* dim-change re-embed clears its maintenance marker once the backfill has caught
+    * up (a pass that embedded nothing means every chunk has a vector). */
+   if (total == 0 && db2_reembed_in_progress_get(NULL, NULL) == 1)
+   {
+      db2_reembed_in_progress_clear();
+      aimee_log(LOG_INFO, "kb.reembed",
+                "dim-change re-embed reconciled (doc corpus); cleared maintenance");
+   }
+   return total > 0 ? 1 : 0;
+}
+
+static int stage_embed_evidence(const kb_curator_extract_opts_t *opts)
+{
+   (void)opts;
+   config_t cfg;
+   config_load(&cfg);
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
+   if (n > 0)
+      aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
+   return n > 0 ? 1 : 0;
+}
+
 static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
     {"extract_docs", "extract docs", en_extract_docs, kb_curator_extract_one, 1,
      KB_CURATOR_LANE_LLM},
@@ -199,6 +282,10 @@ static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
      KB_CURATOR_LANE_LLM},
     {"promote_entity", "promote entity", en_promote_entity, kb_curator_promote_entity_one, 1,
      KB_CURATOR_LANE_LLM},
+    {"embed_code", "embed code", en_embedder, stage_embed_code, 1, KB_CURATOR_LANE_INDEX},
+    {"ingest_docs", "ingest docs", en_embedder, stage_ingest_docs, 1, KB_CURATOR_LANE_INDEX},
+    {"embed_evidence", "embed evidence", en_evidence_embed, stage_embed_evidence, 1,
+     KB_CURATOR_LANE_INDEX},
 };
 
 static void *drain_thread_main(void *arg)
@@ -253,17 +340,6 @@ static void *drain_thread_main(void *arg)
           kb_cross_repo_meta_rebuild(&cfg) == 0)
          cross_repo_cold_start_pending = 0;
 
-      /* Evidence-vector embed drain — runs every poll, independent of the
-       * curator extract gates (it fills evidence_vectors for the neighbourhood
-       * builder; the builtin embedder needs no external sidecar). */
-      if (cfg.kb_evidence_embed_enabled)
-      {
-         const char *embed_cmd = config_embedding_command(&cfg, NULL);
-         int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
-         if (n > 0)
-            aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
-      }
-
       /* Governance decision revisit sweep — runs every poll (P1). Flips active
        * decisions past their revisit_when to 'revisit_due' so they resurface.
        * Reuses this existing drain — no new scheduler. */
@@ -314,68 +390,6 @@ static void *drain_thread_main(void *arg)
                             "auto-promoted relation '%s' to active (>= %d observations)", cands[i],
                             thr);
             }
-         }
-      }
-
-      /* Code-vector embed drain — pipeline stage 2 (the 0.6B embedder), runs
-       * every poll. Indexing (the structural scan) populates the `files` table
-       * for everything ingested — code AND docs/config; this embeds those rows
-       * into code_embeddings via the configured embedder, incrementally: the
-       * "changed_files" scope skips any file whose content_hash already matches,
-       * so a poll with nothing new is cheap, and a fresh 23k-file ingest catches
-       * up over a handful of polls (max_points caps each project per poll). It is
-       * gated only on an embedder being configured — no external LLM, no curator
-       * gate — so embeddings appear automatically right after ingest. */
-      if (cfg.embedding_command[0])
-      {
-         project_info_t projects[128];
-         int np = index_list_projects(projects, 128);
-         int total = 0;
-         for (int i = 0; i < np; i++)
-         {
-            kb_code_embed_result_t r;
-            memset(&r, 0, sizeof(r));
-            if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) == 0)
-               total += (int)r.embedded;
-         }
-         if (total > 0)
-            aimee_log(LOG_DEBUG, "kb.code.embed",
-                      "embedded %d code/doc vector(s) across %d project(s)", total, np);
-      }
-
-      /* KB-docs ingest drain — the in-ingest replacement for `kb build`. For
-       * each indexed project, chunk + embed prose/doc files (markdown, rst, txt,
-       * …) into the curated kb_documents layer, reading content from DB2
-       * file_contents (no disk). Bounded per poll; backfills then idles cheaply.
-       * Same embedder gate as the code drain. */
-      if (cfg.embedding_command[0])
-      {
-         project_info_t projects[128];
-         int np = index_list_projects(projects, 128);
-         int total = 0;
-         for (int i = 0; i < np; i++)
-         {
-            int e = kb_doc_refresh(projects[i].name, cfg.embedding_command, 200);
-            if (e > 0)
-               total += e;
-            /* Self-heal chunks that exist but lost their embedding (partial
-             * ingest, late embedder, or a vector-store dim reset). */
-            int b = kb_doc_embed_backfill(projects[i].name, cfg.embedding_command, 200);
-            if (b > 0)
-               total += b;
-         }
-         if (total > 0)
-            aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)",
-                      total, np);
-         /* §2c: a dim-change re-embed clears its `maintenance` marker once the
-          * doc-embed backfill has caught up — a pass that embedded nothing means
-          * every chunk now has a vector at the new dim (the doc corpus reconciled).
-          * The TTL->degraded fallback (health) covers a backfill that never drains. */
-         if (total == 0 && db2_reembed_in_progress_get(NULL, NULL) == 1)
-         {
-            db2_reembed_in_progress_clear();
-            aimee_log(LOG_INFO, "kb.reembed",
-                      "dim-change re-embed reconciled (doc corpus); cleared maintenance");
          }
       }
 
