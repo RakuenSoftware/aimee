@@ -372,3 +372,26 @@ wfe_gate_reject_t wfe_gate_reject_target(const wfe_def_t *def, const char *gate_
    }
    return WFE_GATE_REJECT_RETRY;
 }
+
+int wfe_node_max_iters(const wfe_node_t *n)
+{
+   const cJSON *m =
+       (n && n->params) ? cJSON_GetObjectItemCaseSensitive(n->params, "max_iters") : NULL;
+   if (cJSON_IsNumber(m) && m->valueint > 0)
+      return m->valueint;
+   return WFE_DEFAULT_MAX_ITERS;
+}
+
+wfe_on_max_t wfe_node_on_max(const wfe_node_t *n)
+{
+   const cJSON *o =
+       (n && n->params) ? cJSON_GetObjectItemCaseSensitive(n->params, "on_max") : NULL;
+   if (cJSON_IsString(o) && o->valuestring)
+   {
+      if (strcmp(o->valuestring, "fail") == 0)
+         return WFE_ON_MAX_FAIL;
+      if (strcmp(o->valuestring, "pass") == 0)
+         return WFE_ON_MAX_PASS;
+   }
+   return WFE_ON_MAX_HUMAN;
+}
