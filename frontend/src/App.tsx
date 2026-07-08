@@ -16,6 +16,7 @@ import Graph from './pages/Graph';
 import Editor from './pages/Editor';
 import { SessionProvider, useSessions } from './SessionContext';
 import SettingsPanel from './components/SettingsPanel';
+import TabTutorial from './components/TabTutorial';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -239,8 +240,10 @@ export default function App() {
               </NavLink>
             ))}
           </nav>
-          {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve. */}
-          <main style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+          {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve.
+           * position:relative anchors the per-tab tutorial overlay/"?" button. */}
+          <main style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+            <TabTutorial route={location.pathname} />
             <ErrorBoundary key={location.pathname}>
               <Routes>
                 <Route path="/chat" element={<Chat />} />
