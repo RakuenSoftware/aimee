@@ -46,6 +46,9 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
       assert(strcmp(cfg.provider, "claude") == 0);
+      /* kb.typed_facts.* autonomous reconciliation defaults (§7.2/§8). */
+      assert(cfg.kb_typed_facts_auto_promote_enabled == 1);
+      assert(cfg.kb_typed_facts_promote_threshold == 3);
       assert(strcmp(cfg.guardrail_mode, "approve") == 0);
       /* §5 hybrid RRF weights + rank constant default to equal weights / k=60,
        * and the §7 blast-radius advisory is opt-in (off). */
@@ -199,6 +202,11 @@ int main(void)
       cfg.kb_curator_promote_min_sources = 5;
       cfg.kb_curator_synthesize_enabled = 1;
       cfg.kb_curator_synthesize_k = 4;
+      /* kb.typed_facts.* (§8): non-default values must round-trip (auto_promote
+       * defaults on, so set it off; promote_threshold defaults 3, so set 7). */
+      cfg.kb_typed_facts_auto_promote_enabled = 0;
+      cfg.kb_typed_facts_promote_threshold = 7;
+      cfg.typed_facts_enabled = 1; /* KB-owned master gate: persisted as kb.typed_facts.enabled */
       snprintf(cfg.kb_curator_judge_command, sizeof(cfg.kb_curator_judge_command), "judge --json");
       snprintf(cfg.kb_curator_synthesize_command, sizeof(cfg.kb_curator_synthesize_command),
                "synth --json");
@@ -428,6 +436,9 @@ int main(void)
       assert(cfg2.kb_curator_promote_min_sources == 5);
       assert(cfg2.kb_curator_synthesize_enabled == 1);
       assert(cfg2.kb_curator_synthesize_k == 4);
+      assert(cfg2.kb_typed_facts_auto_promote_enabled == 0);
+      assert(cfg2.kb_typed_facts_promote_threshold == 7);
+      assert(cfg2.typed_facts_enabled == 1);
       assert(strcmp(cfg2.kb_curator_judge_command, "judge --json") == 0);
       assert(strcmp(cfg2.kb_curator_synthesize_command, "synth --json") == 0);
       assert(strcmp(cfg2.kb_curator_provider_base_url, "http://curator:8080/v1") == 0);

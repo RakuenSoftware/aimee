@@ -15,6 +15,7 @@
 #include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
 #include "db2/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
 #include "db2/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
+#include "db2/ontology_evolution.h"  /* db2_ontology_eval_candidates/_approve (§7.2 auto-promote) */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"
@@ -53,6 +54,12 @@
  * starve the synth stages to one job per poll. Bounded so the catch-up + config
  * reload still get a turn each poll (both progress). */
 #define CURATOR_DRAIN_BATCH 16
+
+/* §7.2 autonomous ontology promotion: a provisional relation is auto-promoted to
+ * active once it has recurred at least this many times (default; operator override
+ * kb.typed_facts.promote_threshold). BATCH bounds promotions per poll. */
+#define KB_ONTO_PROMOTE_DEFAULT_THRESHOLD 3
+#define KB_ONTO_PROMOTE_BATCH             32
 
 /* Rebuild the corpus-derived cross-repo precision metadata (precision-hardening
  * H0/H1): the H0c repo-identity index, the H0d inter-repo structural-route
@@ -193,6 +200,35 @@ static void *drain_thread_main(void *arg)
          int n = kb_memory_facts_drain(&cfg, 8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
+
+         /* §7.2 autonomous ontology reconciliation: promote provisional relations
+          * (novel predicates the extractor's "other" fallback staged) to active
+          * once they have recurred >= threshold times across sources, so facts
+          * using them become durable/recallable WITHOUT a human approving each.
+          * Default-on with typed facts; the threshold is operator-tunable via
+          * kb.typed_facts.promote_threshold (§8), falling back to the built-in. */
+         if (cfg.kb_typed_facts_auto_promote_enabled)
+         {
+            int thr = cfg.kb_typed_facts_promote_threshold > 0
+                          ? cfg.kb_typed_facts_promote_threshold
+                          : KB_ONTO_PROMOTE_DEFAULT_THRESHOLD;
+            char cands[KB_ONTO_PROMOTE_BATCH][REL_TYPE_NAME_MAX];
+            int nc = db2_ontology_eval_candidates(thr, cands, KB_ONTO_PROMOTE_BATCH);
+            for (int i = 0; i < nc; i++)
+            {
+               /* Never promote a generic catch-all bucket to active: it would make
+                * low-quality "misc" facts durable and can't be reconciled to a
+                * real predicate. The extractor is instructed not to emit these,
+                * but exclude them defensively. */
+               if (strcmp(cands[i], "other") == 0 || strcmp(cands[i], "unknown") == 0 ||
+                   strcmp(cands[i], "misc") == 0 || strcmp(cands[i], "unspecified") == 0)
+                  continue;
+               if (db2_ontology_approve(cands[i]) == 0)
+                  aimee_log(LOG_INFO, "kb.ontology.promote",
+                            "auto-promoted relation '%s' to active (>= %d observations)", cands[i],
+                            thr);
+            }
+         }
       }
 
       /* Code-vector embed drain — pipeline stage 2 (the 0.6B embedder), runs

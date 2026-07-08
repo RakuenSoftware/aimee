@@ -31,6 +31,10 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_extract_prompt_version[0] = '\0';
    cfg->kb_curator_embed_model_version[0] = '\0';
    cfg->kb_curator_invalidation_notify_socket[0] = '\0';
+   /* kb.typed_facts.* autonomous reconciliation (§7.2): auto-promote recurrent
+    * provisional relations by default so novel-tail facts become durable. */
+   cfg->kb_typed_facts_auto_promote_enabled = 1;
+   cfg->kb_typed_facts_promote_threshold = 3;
    cfg->kb_curator_extract_code_enabled = 1;
    cfg->kb_curator_resolve_entities_enabled = 1;
    cfg->kb_curator_index_narrative_enabled = 1;
@@ -122,6 +126,27 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       return 0;
    if (!cJSON_IsObject(kb))
       return config_issue("\"kb\" expected object, got %s", jo_type_name(kb));
+
+   /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (§7.2/§8). Parsed
+    * before the kb.curator early-return so it applies even without a curator block. */
+   const cJSON *tf = cJSON_GetObjectItemCaseSensitive(kb, "typed_facts");
+   if (tf)
+   {
+      if (!cJSON_IsObject(tf))
+         return config_issue("\"kb.typed_facts\" expected object, got %s", jo_type_name(tf));
+      /* KB-owned master gate: kb.typed_facts.enabled aliases typed_facts_enabled so
+       * the whole layer is enabled/disabled from the KB config surface (and the
+       * console), keeping aimee-server out of the loop. */
+      const cJSON *en = cJSON_GetObjectItemCaseSensitive(tf, "enabled");
+      if (en && cJSON_IsBool(en))
+         cfg->typed_facts_enabled = cJSON_IsTrue(en) ? 1 : 0;
+      const cJSON *ap = cJSON_GetObjectItemCaseSensitive(tf, "auto_promote");
+      if (ap && cJSON_IsBool(ap))
+         cfg->kb_typed_facts_auto_promote_enabled = cJSON_IsTrue(ap) ? 1 : 0;
+      const cJSON *pt = cJSON_GetObjectItemCaseSensitive(tf, "promote_threshold");
+      if (pt && cJSON_IsNumber(pt) && pt->valueint > 0)
+         cfg->kb_typed_facts_promote_threshold = pt->valueint;
+   }
 
    const cJSON *curator = cJSON_GetObjectItemCaseSensitive(kb, "curator");
    if (!curator)
@@ -460,7 +485,9 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_cross_repo_review_queue_max != 5000;
    curator_any = curator_any || cross_repo_nondefault;
    int evidence_any = !cfg->kb_evidence_embed_enabled || cfg->kb_evidence_embed_batch != 32;
-   if (!curator_any && !evidence_any)
+   int typed_facts_any = cfg->typed_facts_enabled || !cfg->kb_typed_facts_auto_promote_enabled ||
+                         cfg->kb_typed_facts_promote_threshold != 3;
+   if (!curator_any && !evidence_any && !typed_facts_any)
       return;
 
    cJSON *kb = cJSON_GetObjectItemCaseSensitive(root, "kb");
@@ -468,6 +495,24 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
       kb = cJSON_AddObjectToObject(root, "kb");
    if (!kb)
       return;
+
+   /* kb.typed_facts.* — autonomous reconciliation knobs (§7.2/§8). auto_promote is
+    * default-on, so emit it whenever anything here is non-default; promote_threshold
+    * only when it differs from the built-in, so a clean install writes nothing. */
+   if (typed_facts_any)
+   {
+      cJSON *tf = cJSON_AddObjectToObject(kb, "typed_facts");
+      if (tf)
+      {
+         /* KB-owned master gate — the sole persisted home for typed_facts_enabled
+          * (the legacy root-level emit is removed in config_save.c). */
+         cJSON_AddBoolToObject(tf, "enabled", cfg->typed_facts_enabled ? 1 : 0);
+         cJSON_AddBoolToObject(tf, "auto_promote",
+                               cfg->kb_typed_facts_auto_promote_enabled ? 1 : 0);
+         if (cfg->kb_typed_facts_promote_threshold != 3)
+            cJSON_AddNumberToObject(tf, "promote_threshold", cfg->kb_typed_facts_promote_threshold);
+      }
+   }
 
    if (curator_any)
    {

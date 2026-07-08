@@ -201,7 +201,26 @@ static void delegate_payload_rewrite_track(cJSON *messages, const char *system_p
 
 static int anthropic_build_url(const agent_t *agent, char *url, size_t url_len)
 {
-   return openai_join_endpoint(agent->endpoint, "/messages", url, url_len);
+   /* The Anthropic Messages API always lives at <base>/v1/messages. Unlike the
+    * OpenAI join, the /v1 version segment is part of the operation path rather
+    * than the caller-supplied base, so we insert it for ANY base that does not
+    * already carry it — not only bare host roots (which is all
+    * openai_join_endpoint would handle). This lets anthropic-compatible
+    * gateways be registered with a path-prefixed base (e.g.
+    * https://api.minimax.io/anthropic) without hand-baking /v1 into the
+    * endpoint; without it the join produced .../anthropic/messages -> 404. */
+   char base[MAX_ENDPOINT_LEN];
+
+   trim_trailing_slashes(agent->endpoint, base, sizeof(base));
+   if (!base[0])
+      return -1;
+   if (url_has_suffix(base, "/messages")) /* already a full messages URL */
+      snprintf(url, url_len, "%s", base);
+   else if (url_has_suffix(base, "/v1")) /* base already carries the version */
+      snprintf(url, url_len, "%s/messages", base);
+   else
+      snprintf(url, url_len, "%s/v1/messages", base);
+   return 0;
 }
 
 static cJSON *anthropic_build_request(const agent_t *agent, cJSON *messages, cJSON *tools,

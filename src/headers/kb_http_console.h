@@ -8,6 +8,7 @@
 
 /* Handle a console route under /v1/console. Returns the HTTP status if (method,
  * path) is a console route, or -1 if it is not (so the caller continues). */
-int kb_http_console_route(const char *method, const char *path, char *out_buf, int out_cap);
+int kb_http_console_route(const char *method, const char *path, const char *body, char *out_buf,
+                          int out_cap);
 
 #endif /* KB_HTTP_CONSOLE_H */

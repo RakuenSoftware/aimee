@@ -702,7 +702,11 @@ static void config_set_defaults(config_t *cfg)
     * per-result model-visible tool-output cap (see agent_tool_output_cap()). */
    cfg->tool_output_max_bytes = 0;
    cfg->ingress_compress_min_chars = 80;
-   cfg->require_session_worktree = 0;
+   /* Default ON: each mutating session must run in its own isolated worktree+branch
+    * (.aimee/worktrees/...), never the shared primary checkout. Concurrent aimee
+    * sessions sharing one checkout collide on a single git HEAD. Explicit
+    * `require_session_worktree: false` bypasses (see cli_attention_guard.c). */
+   cfg->require_session_worktree = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -862,7 +866,14 @@ static int model_is_cpu_only(const char *model)
 static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *root)
 {
    int accel = !model_is_cpu_only(cfg->kb_curator_provider_model);
-   if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled"))
+   /* typed_facts_enabled is now KB-owned (kb.typed_facts.enabled). Only apply the
+    * accel-derived default when it is set by NEITHER the KB section nor the legacy
+    * root key — otherwise this would clobber the operator's explicit value. */
+   const cJSON *kb = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "kb");
+   const cJSON *kb_tf = kb ? cJSON_GetObjectItemCaseSensitive(kb, "typed_facts") : NULL;
+   int tf_explicit = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled") ||
+                     (kb_tf && cJSON_GetObjectItemCaseSensitive(kb_tf, "enabled"));
+   if (!tf_explicit)
       cfg->typed_facts_enabled = accel;
    if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite") &&
        !cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite_enabled"))

@@ -8,6 +8,7 @@
 #include "cli_remote.h"
 #include "aimee_client.h"
 #include "aimee_home.h"
+#include "config.h" /* AIMEE_BOOTSTRAP_BEARER */
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,14 +98,31 @@ static int read_remote_conf(char *url, size_t url_sz, char *token, size_t token_
    return url[0] != '\0';
 }
 
+/* remote_enroll is defined below; forward-declare for the load-time auto-enroll. */
+static int remote_enroll(const char *url, char *out, size_t out_sz, int json_output);
+
 void cli_remote_load_persisted(void)
 {
    /* A --server flag or AIMEE_SERVER_URL already wins; don't override it. */
    if (aimee_client_remote_active(NULL, 0))
       return;
    char url[512], token[256];
-   if (read_remote_conf(url, sizeof(url), token, sizeof(token)) && url[0])
-      aimee_client_set_remote(url, token[0] ? token : NULL);
+   if (!read_remote_conf(url, sizeof(url), token, sizeof(token)) || !url[0])
+      return;
+   aimee_client_set_remote(url, token[0] ? token : NULL);
+
+   /* Trust-on-first-use: if the persisted token is still the one-time bootstrap
+    * bearer, rotate it to a strong per-deployment token and persist it NOW —
+    * before any command transacts real work — so the pre-set default is never
+    * used for a real operation. The server enforces the same rule (bootstrap can
+    * only call rotate_bearer), so this keeps the client seamless. Best-effort +
+    * quiet; on failure the bootstrap stays and the next invocation retries. Only
+    * runs while the bootstrap is held, so the cost is one-time. */
+   if (strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0)
+   {
+      char strong[256];
+      remote_enroll(url, strong, sizeof(strong), 1 /* quiet */);
+   }
 }
 
 static void remote_ca_path(char *out, size_t out_sz)
@@ -158,11 +176,9 @@ static int remote_pin_cert(const char *url, int json_output)
    return 0;
 }
 
-/* The well-known /v1 bearer baked into the aimee-server image. It is a ONE-TIME
- * bootstrap: the first client to connect with it calls api.rotate_bearer to mint
- * a strong per-deployment token, which the server then requires exclusively (the
- * bootstrap stops working the instant it is rotated). See docs/COMMANDS.md. */
-#define AIMEE_BOOTSTRAP_BEARER "aimee-local-dev"
+/* AIMEE_BOOTSTRAP_BEARER (the well-known one-time bootstrap /v1 bearer) is shared
+ * from config.h — the server enforces that it can only rotate itself. See
+ * docs/COMMANDS.md. */
 
 /* Enrollment: over the already-pinned/verified remote (authenticated with the
  * current — normally bootstrap — bearer), ask the server to rotate to a fresh

@@ -34,6 +34,11 @@ int role_template_install_defaults(const char *dir);
  * '-'; non-empty; no path separators or leading dot). Guards write/delete. */
 int role_template_name_valid(const char *role);
 
+/* Per-role turn cap from the role template's `max_turns:` frontmatter, or -1
+ * (INFINITE — the default for every role) when unset. Edited under the Personas
+ * tab. */
+int role_template_max_turns(const char *role);
+
 /* Return the RAW template body for `role` (placeholders intact, not built):
  * project file -> user file -> built-in default. Heap (caller frees), or NULL
  * if no such role. */

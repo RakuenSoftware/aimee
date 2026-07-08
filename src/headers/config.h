@@ -3,6 +3,9 @@
 
 #include "sandbox.h"
 #include "prompts.h" /* aimee_mode_t */
+#include <stdint.h>  /* int64_t (used below) — keep config.h self-contained so any
+                      * includer (e.g. cli_remote.c on MinGW) compiles regardless of
+                      * include order. */
 #include <stdlib.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <unistd.h>
@@ -23,6 +26,13 @@
 /* Server execution pool defaults */
 #define CONFIG_DEFAULT_BACKGROUND_THREADS 2
 #define CONFIG_DEFAULT_SESSION_THREADS    4
+/* The well-known /v1 bearer baked into the aimee-server image — a ONE-TIME
+ * bootstrap, never a standing credential. While the live listener bearer still
+ * equals this value the server refuses every TCP /v1 route except
+ * POST /v1/api/rotate_bearer, so the pre-set token can only mint the strong
+ * per-deployment bearer and never perform a real operation. Shared by the server
+ * (enforcement) and the thin client (auto-enroll). */
+#define AIMEE_BOOTSTRAP_BEARER "aimee-local-dev"
 /* Raised from 2 -> 4 now that DB2 connections are bounded by the connection pool
  * (db2_connection_pool_size), not 1:1 with worker threads. */
 #define CONFIG_DEFAULT_KB_WORKER_THREADS 4
@@ -414,6 +424,9 @@ typedef struct config
     * this so an arbitrary client model name is not forwarded and rejected upstream. */
    int gateway_pin_model;
    int typed_facts_enabled;         /* typed-fact knowledge layer master gate (default off) */
+   /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (proposal §7.2/§8). */
+   int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional relations */
+   int kb_typed_facts_promote_threshold;    /* observations before auto-promote (default 3) */
    int kb_pdf_ingest_enabled;       /* structured-pdf: route PDF uploads through the geometry
                                        extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
    int kb_pdf_vector_enabled;       /* structured-pdf Phase A: embed PDF chunks into the isolated

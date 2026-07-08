@@ -197,7 +197,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`ingress`** — _Ingress (proxy frontends) behavior._ Keys: `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`
 - **`integrity`** — _Integrity gate._ Keys: `dry_run`, `enabled`
 - **`intelligence`** — _Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects._ Keys: `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
-- **`kb`** — _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `code_hybrid`, `connection_pool_size`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `reembed_on_dim_change`, `search_max_results`, `worker_count`
+- **`kb`** — _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `code_hybrid`, `connection_pool_size`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `reembed_on_dim_change`, `search_max_results`, `typed_facts`, `worker_count`
 - **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `router`, `synthesize`
 - **`lsp_servers`** — _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
 - **`mcp`** — _MCP integration (e.g. OSV)._ Keys: `osv`
@@ -236,7 +236,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 145 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 144 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -262,7 +262,6 @@ The binaries read 145 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_API_ENDPOINT` | Override the `/v1` API endpoint used by the client RPC layer. |
 | `AIMEE_ATTACH_ID` | Presence attach id used when joining an existing session. |
 | `AIMEE_EFFORT` | Reasoning-effort hint for the session/model. |
-| `AIMEE_GUARD` | Attention-guard control; set to bypass the guard hook. |
 | `AIMEE_HOOK_CLIENT` | Identifies the calling hook client (e.g. claude/codex) for hook routing. |
 | `AIMEE_MODE` | Operating-mode override (e.g. interactive / autonomous). |
 | `AIMEE_MODEL` | Override the primary model for the session. |

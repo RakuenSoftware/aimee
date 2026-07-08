@@ -14,6 +14,36 @@
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
 
+/* role_template_max_turns() (via delegate_role.o, reached by the max-turns policy)
+ * reads the role_templates dir under config_default_dir() and parses `max_turns:`
+ * frontmatter (-1 when absent). Point it at a temp dir and lay down the templates
+ * the policy assertions expect (note: the "test" role canonicalizes to validate). */
+static char g_roles_dir[256];
+const char *config_default_dir(void)
+{
+   return g_roles_dir;
+}
+static void write_role_template(const char *canonical, int max_turns)
+{
+   char path[512];
+   snprintf(path, sizeof(path), "%s/role_templates/%s.md", g_roles_dir, canonical);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fprintf(f, "---\nmax_turns: %d\n---\nbody\n", max_turns);
+   fclose(f);
+}
+static void setup_role_templates(void)
+{
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-cmddel-XXXXXX");
+   assert(mkdtemp(g_roles_dir));
+   char sub[512];
+   snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
+   assert(mkdir(sub, 0700) == 0);
+   write_role_template("review", 20);
+   write_role_template("validate", 12); /* "test" -> validate */
+   write_role_template("diagnose", 16);
+}
+
 /* Pull in only the declarations we need. */
 int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 
@@ -1122,6 +1152,7 @@ static void test_inline_acp_agent_no_args_and_guards(void)
 int main(void)
 {
    printf("test_cmd_delegate\n");
+   setup_role_templates();
    test_depth_zero_when_env_unset();
    test_depth_increments_from_env();
    test_depth_blocked_at_limit();

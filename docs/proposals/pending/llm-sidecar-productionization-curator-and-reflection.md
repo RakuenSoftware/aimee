@@ -265,20 +265,27 @@ override exposed in §8, never a prerequisite.
 
 The KB console today is a single `/v1/console/overview` (`kb_http_console.c`). Add
 a **Typed Facts** panel, KB-served and backed entirely by KB config —
-aimee-server renders and knows nothing:
+aimee-server renders and knows nothing. Scoped to a shippable **core** now, with a
+richer surface deferred:
 
-- **Observe.** Durable vs provisional facts; the live ontology (seed + learned);
-  promotion candidates with their supporting evidence; drain throughput and lag.
-- **Fine-tune.** Promotion threshold, confidence floor, ontology extensions and
-  relation aliases.
-- **Alter behaviour.** Enable/disable; reconciliation mode
-  (`constrain-extractor` / `auto-promote` / `both` / `off`); ontology auto-growth
-  on/off.
-- **Act.** Promote, map, or reject a provisional relation by hand.
+**Core (this PR):**
+- **Observe** (`GET /v1/console/typed_facts`) — the KB-owned config (enabled,
+  auto_promote, promote_threshold) plus the provisional-relation promotion review
+  queue (each candidate's observation count, ready-flag, status).
+- **Alter behaviour + fine-tune** (`POST /v1/console/typed_facts/config`) —
+  `enabled`, `auto_promote`, `promote_threshold`, round-tripped through
+  `kb.typed_facts.*` and equally settable headless (same keys, no GUI required).
+- **Act** (`POST /v1/console/typed_facts/relation`) — promote / map / reject a
+  provisional relation by hand (the shipped ontology-evolution verbs), with the
+  relation/target validated to the canonical `rel_type` form at the route boundary.
 
-Every control round-trips through `kb.typed_facts.*` KB config and is equally
-settable headless (same keys, no GUI required). aimee-server is not in the loop
-for any of it.
+**Deferred (follow-on PR):** durable-vs-provisional fact counts, the live ontology
+listing + per-candidate supporting evidence, and drain throughput/lag on the
+observe surface; and the additional `kb.typed_facts.*` knobs (reconciliation mode,
+confidence floor, ontology extensions/aliases, ontology auto-growth). These extend
+the same routes and config section; nothing about aimee-server changes.
+
+aimee-server is not in the loop for any of it.
 
 ## Acceptance criteria
 
@@ -307,9 +314,11 @@ for any of it.
    fact commits with a canonical (or auto-promoted) relation as an **active** edge
    and is returned by recall — proven end-to-end on the .254 stack, not merely
    "N facts logged." (This is the exact failure §7 fixes.)
-9. **KB console.** The Typed Facts panel observes durable/provisional facts and the
-   ontology, and its fine-tune / alter / act controls round-trip through
-   `kb.typed_facts.*`; aimee-server has no equivalent surface.
+9. **KB console (core).** The Typed Facts panel observes the KB-owned config +
+   promotion review queue, and its enable / auto_promote / promote_threshold / act
+   (approve, map, reject) controls round-trip through `kb.typed_facts.*`;
+   aimee-server has no equivalent surface. (Richer observe metrics + the extra
+   knobs are the deferred follow-on in §8.)
 
 ## Explicitly out of scope / does not re-propose
 

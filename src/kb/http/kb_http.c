@@ -708,7 +708,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * zeroed = owner, consistent with everything open.) */
    if (!vr.scope_kind[0] || strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
    {
-      int cr = kb_http_console_route(method, path, out_buf, out_cap);
+      int cr = kb_http_console_route(method, path, body, out_buf, out_cap);
       if (cr >= 0)
          return cr;
       int ar = kb_http_accounts_route(method, path, query_string, body, out_buf, out_cap);

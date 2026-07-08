@@ -130,6 +130,38 @@ char *kb_client_health_json(void)
    return body;
 }
 
+/* Cached read of the KB's advertised typed-facts capability (proposal §8).
+ * aimee-server gates per-turn fact injection on THIS instead of owning
+ * typed_facts_enabled itself — the KB is the single source of truth. Short TTL so
+ * a facts-off deployment does not fetch /v1/health every turn; a console/config
+ * change is picked up within the TTL. Benign cross-thread race on the cache (worst
+ * case: a couple of extra fetches). On transport failure the last-known value (or
+ * off) is kept, so a briefly-unreachable KB never spuriously injects. */
+int kb_client_typed_facts_enabled(void)
+{
+   static int cached = -1; /* -1 = never fetched */
+   static time_t fetched_at = 0;
+   const int TTL_S = 15;
+   time_t now = time(NULL);
+   if (cached >= 0 && (now - fetched_at) < TTL_S)
+      return cached;
+   int v = cached >= 0 ? cached : 0;
+   char *h = kb_client_health_json();
+   if (h)
+   {
+      cJSON *j = cJSON_Parse(h);
+      free(h);
+      if (j)
+      {
+         v = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "typed_facts_enabled")) ? 1 : 0;
+         cJSON_Delete(j);
+      }
+   }
+   cached = v;
+   fetched_at = now;
+   return v;
+}
+
 /* §2c: POST /v1/reembed {confirm, force, dry_run} — the dim-change reset. Returns
  * the raw response JSON (caller frees), or NULL on transport failure; *status_out
  * (optional) gets the HTTP status. A long timeout covers the DROP + schema re-apply. */

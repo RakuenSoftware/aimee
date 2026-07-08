@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "../headers/role_templates.h"
+#include "../headers/config.h" /* config_default_dir */
 
 /* --- Helpers --- */
 
@@ -370,6 +371,36 @@ static void test_write_read_delete(void)
    assert(role_template_delete("triage") == 0);
 }
 
+static void test_role_max_turns_frontmatter(void)
+{
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/role_templates", config_default_dir());
+   char mkcmd[600];
+   snprintf(mkcmd, sizeof(mkcmd), "mkdir -p '%s'", dir);
+   assert(system(mkcmd) == 0);
+
+   /* A max_turns frontmatter is read, and stripped from the built prompt. */
+   char path[600];
+   snprintf(path, sizeof(path), "%s/capped.md", dir);
+   write_file(path, "---\nmax_turns: 7\n---\n\nYou are a capped delegate. {{TASK}}\n");
+   assert(role_template_max_turns("capped") == 7);
+   char *built = role_template_build(NULL, "capped", "do it", NULL);
+   assert(built);
+   assert(strstr(built, "max_turns") == NULL); /* frontmatter stripped */
+   assert(strstr(built, "---") == NULL);
+   assert(strstr(built, "You are a capped delegate. do it") != NULL);
+   free(built);
+
+   /* No frontmatter => -1 (INFINITE, the default). */
+   snprintf(path, sizeof(path), "%s/plain.md", dir);
+   write_file(path, "You are a plain delegate. {{TASK}}\n");
+   assert(role_template_max_turns("plain") == -1);
+
+   /* Unknown role => -1. */
+   assert(role_template_max_turns("nonexistent_role_zzz") == -1);
+   printf("  test_role_max_turns_frontmatter: ok\n");
+}
+
 int main(void)
 {
    /* Isolate config_default_dir() so write/delete and user-dir scans do not
@@ -397,6 +428,7 @@ int main(void)
    test_install_defaults();
    test_install_defaults_null_dir();
    test_write_read_delete();
+   test_role_max_turns_frontmatter();
    printf("role_templates: all tests passed\n");
    return 0;
 }

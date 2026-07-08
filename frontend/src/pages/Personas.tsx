@@ -67,6 +67,21 @@ const ta: React.CSSProperties = {
 };
 const nameOk = (s: string) => /^[a-z0-9][a-z0-9_-]*$/i.test(s);
 
+/* Upsert `max_turns` into a role template's YAML frontmatter so the dedicated
+ * field and the raw body stay consistent on save. -1 = infinite. */
+function withMaxTurns(body: string, mt: number): string {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+  const m = body.match(fm);
+  if (m) {
+    let inner = m[1];
+    inner = /^max_turns:.*$/m.test(inner)
+      ? inner.replace(/^max_turns:.*$/m, `max_turns: ${mt}`)
+      : `max_turns: ${mt}\n${inner}`;
+    return body.replace(fm, `---\n${inner}\n---\n\n`);
+  }
+  return `---\nmax_turns: ${mt}\n---\n\n${body}`;
+}
+
 type Status = { kind: "ok" | "err"; msg: string } | null;
 
 export default function Personas() {
@@ -76,6 +91,7 @@ export default function Personas() {
   const [roles, setRoles] = useState<string[]>([]);
   const [roleSel, setRoleSel] = useState<string | null>(null);
   const [roleBody, setRoleBody] = useState("");
+  const [roleMaxTurns, setRoleMaxTurns] = useState<number>(-1); // -1 = infinite
 
   const refreshRoles = useCallback(() => {
     getJSON<{ role_templates?: string[] }>("/api/roles")
@@ -86,15 +102,19 @@ export default function Personas() {
   const openRole = useCallback((name: string) => {
     setRoleSel(name);
     setRoleBody("");
-    getJSON<{ content?: string }>(`/api/roles/${encodeURIComponent(name)}`)
-      .then((d) => setRoleBody(d.content || ""))
+    setRoleMaxTurns(-1);
+    getJSON<{ content?: string; max_turns?: number }>(`/api/roles/${encodeURIComponent(name)}`)
+      .then((d) => {
+        setRoleBody(d.content || "");
+        setRoleMaxTurns(typeof d.max_turns === "number" ? d.max_turns : -1);
+      })
       .catch(() => setRoleBody(""));
   }, []);
 
   const saveRole = async () => {
     if (!roleSel) return;
     const { status: st } = await sendJSON("PUT", `/api/roles/${encodeURIComponent(roleSel)}`, {
-      content: roleBody,
+      content: withMaxTurns(roleBody, roleMaxTurns),
     });
     if (st >= 200 && st < 300) {
       setStatus({ kind: "ok", msg: `role “${roleSel}” saved` });
@@ -111,6 +131,7 @@ export default function Personas() {
     }
     setRoleSel(name);
     setRoleBody(`You are a ${name} delegate. Your mission is to …\n`);
+    setRoleMaxTurns(-1);
   };
 
   const deleteRole = async () => {
@@ -237,6 +258,20 @@ export default function Personas() {
                 {roleSel} — what it does (delegate system-prompt template)
               </label>
               <textarea rows={12} style={ta} value={roleBody} onChange={(e) => setRoleBody(e.target.value)} />
+              <label style={{ ...lbl, marginTop: 8 }}>
+                Max turns per delegate run (−1 = infinite, the default)
+              </label>
+              <input
+                type="number"
+                min={-1}
+                step={1}
+                style={{ ...ta, height: "auto" }}
+                value={roleMaxTurns}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setRoleMaxTurns(Number.isFinite(v) ? v : -1);
+                }}
+              />
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button onClick={saveRole} style={btn}>
                   Save role

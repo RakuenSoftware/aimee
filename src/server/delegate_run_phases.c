@@ -79,7 +79,7 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
    dlm.tool_calls = result->tool_calls;
    dlm.success = (rc == 0);
    dlm.error = result->error[0] ? result->error : NULL;
-   dlm.max_turns_limit = max_turns > 0 ? max_turns : 30;
+   dlm.max_turns_limit = max_turns > 0 ? max_turns : 0; /* 0 = unlimited (default -1) */
    dlm.write_enforce_fired = dlm.error && strstr(dlm.error, "write_enforce") ? 1 : 0;
    dlm.had_writes = dlm.write_enforce_fired ? (strstr(dlm.error, "no Write or Edit") ? 0 : 1)
                                             : (rc == 0 ? 1 : 0);
