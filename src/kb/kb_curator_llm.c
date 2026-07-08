@@ -40,8 +40,8 @@ static cJSON *build_messages(const char *system_prompt, const char *request_json
 }
 
 char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const char *system_prompt,
-                         const char *request_json, const char *fallback_command, int out_cap,
-                         char *errbuf, size_t errlen)
+                         const char *request_json, cJSON *json_schema, const char *fallback_command,
+                         int out_cap, char *errbuf, size_t errlen)
 {
    if (errbuf && errlen)
       errbuf[0] = '\0';
@@ -60,7 +60,7 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
       /* provider_client_complete zeroes out on entry, but zero-init here too so
        * provider_completion_free is unconditionally safe regardless of the callee. */
       provider_completion_t out = {0};
-      int rc = provider_client_complete(&def, msgs, NULL, &out, errbuf, errlen);
+      int rc = provider_client_complete(&def, msgs, json_schema, &out, errbuf, errlen);
       cJSON_Delete(msgs);
       if (rc != 0)
       {
