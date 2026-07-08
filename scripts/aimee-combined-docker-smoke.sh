@@ -104,6 +104,21 @@ if [[ "$DO_UP" == 1 ]]; then
   done
 fi
 
+# Bootstrap-bearer enrollment: the image seeds `aimee-local-dev`, which the server
+# now honours ONLY for POST /v1/api/rotate_bearer. Rotate once to the strong token
+# and use it for every check below (mirrors a real client's first connect).
+if [[ "$BEARER" == "aimee-local-dev" ]]; then
+  bold "==> Enrolling: rotate the one-time bootstrap bearer"
+  rotated="$(curl -fsS -k --max-time 20 "${AUTH[@]}" -X POST "${SERVER_URL}/v1/api/rotate_bearer" -d '{}' 2>/dev/null \
+             | sed -n 's/.*"bearer_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [[ -n "$rotated" ]]; then
+    BEARER="$rotated"; AUTH=(-H "Authorization: Bearer ${BEARER}")
+    green "    enrolled: bootstrap bearer rotated to a strong per-deployment token"
+  else
+    red "    FAIL  enrollment: could not rotate the bootstrap bearer"; FAIL=$((FAIL + 1))
+  fi
+fi
+
 bold "==> Server-native surface at ${SERVER_URL}"
 check "GET /v1/health"  '"service":"aimee-server"' "${SERVER_URL}/v1/health"
 check "GET /v1/version" 'version'                  "${SERVER_URL}/v1/version"
