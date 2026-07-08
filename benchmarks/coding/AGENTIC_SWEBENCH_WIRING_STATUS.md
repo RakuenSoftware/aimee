@@ -57,6 +57,26 @@ tool-row assertion). Fully unit-tested.
 4. **The claim gate is human-gated by design** (S6 criterion 6: an independent reviewer who did not
    author the harness) — it can never be auto-satisfied autonomously.
 
+## Multi-provider roundtable review (6 providers, 0 failed) — fixes applied
+
+A full-panel `aimee delegate aggregate` review of the wiring plan (codex, GLM-5.2, MiniMax-M3,
+mistral, mimo-v2.5-pro, gpu-mid) flagged two real honesty issues, both **fixed**:
+
+- **Hallucination gap (biggest risk).** A response-text ```diff the agent *wrote* but never
+  *applied* must not be graded. **Fix:** in co-located mode the graded patch is the actual
+  filesystem diff (`git diff base_commit`) only; a response-text diff is tagged
+  `patch_source="response_text"` and `AgenticResult.authoritative` is False (never graded). If the
+  workspace is clean the record grades nothing (`patch_source="none"`). Proven by
+  `TestHallucinationGapGuard` (the claimed "lie" diff is excluded; the real FS edit is graded).
+- **Attribution fragility.** Prefer EXACT `delegation_id` matching (captured from
+  `delegation_spawns`) over the job-id `LIKE '%-<job_id>'` heuristic; the LIKE remains a fallback
+  when capture is unavailable. Records now carry `patch_source` for reporter exclusion.
+
+Panel items that are **validation-pending** (need the real ledger to confirm): arm-A token
+granularity (does the transport emit a `token_audit` row per internal sub-turn under one
+`delegation_id`? — the exact-delegation sum captures however many rows exist, but the per-sub-turn
+emission itself is unconfirmed); and that $0-priced worker dispatches still emit realized rows.
+
 ## Why the proposal is NOT moved to `done`
 
 Acceptance criteria #5 and #6 are deployment-tier: the official graded suite on CT 101 across

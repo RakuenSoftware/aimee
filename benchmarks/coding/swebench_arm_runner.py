@@ -146,12 +146,17 @@ def _fake_arm_a_record(instance, primary_model):
 
 
 # ------------------------------------------------------------ token assembly ---
-def primary_tokens_by_jobs(token_db: str, primary_model: str, job_ids: list) -> PrimaryTokens:
-    """PrimaryTokens for a LIVE agentic run: sum the primary's realized turns over its dispatch
-    job_ids (delegation_id ends in `-<job_id>`). This is the deployment attribution (NON-EMPTY
-    delegation_id, job-id partitioned) — `primary_token_totals` above stays for the EMPTY-polarity
-    FAKE/theoretical path (swebench_live_attribution FINDING 1)."""
-    uncached, cached, output, turns = T.read_realized_by_jobs(token_db, primary_model, job_ids)
+def primary_tokens_by_jobs(token_db: str, primary_model: str, job_ids: list,
+                           delegation_ids: list | None = None) -> PrimaryTokens:
+    """PrimaryTokens for a LIVE agentic run. PREFERS exact delegation_id matching (when the dispatch
+    captured a delegation_id from delegation_spawns); falls back to the job-id `LIKE '%-<job_id>'`
+    scoping (PR #986) when capture was unavailable. This is the deployment attribution (NON-EMPTY
+    delegation_id) — `primary_token_totals` stays for the EMPTY-polarity FAKE/theoretical path."""
+    dids = [d for d in (delegation_ids or []) if d]
+    if dids:
+        uncached, cached, output, turns = T.read_realized_by_delegations(token_db, dids)
+    else:
+        uncached, cached, output, turns = T.read_realized_by_jobs(token_db, primary_model, job_ids)
     return PrimaryTokens(input_uncached=uncached, input_cached=cached, output=output, turns=turns)
 
 
@@ -173,7 +178,8 @@ def run_arm_a(instance: dict, primary_model: str, *, token_db: str, base_repo: s
                              base_repo=base_repo, token_db=token_db, aimee_bin=aimee_bin,
                              dispatch=dispatch)
     t1 = now()
-    tok = primary_tokens_by_jobs(token_db, primary_model, [res.job_id])
+    tok = primary_tokens_by_jobs(token_db, primary_model, [res.job_id],
+                                 delegation_ids=[res.delegation_id])
     wall = WallClock(t0=t0, first_work=t0, t1=t1)  # single dispatch: queue folded into work
     rec = build_arm_record(
         instance_id, "A", primary_model, tokens=tok, worker_in=0, worker_out=0, wall=wall,
@@ -183,6 +189,7 @@ def run_arm_a(instance: dict, primary_model: str, *, token_db: str, base_repo: s
     # The secret-redacted patch text is needed by the official grader (build_predictions); the
     # record already carries only the fingerprint for the ledger, so attach the patch explicitly.
     rec["patch"] = res.patch
+    rec["patch_source"] = res.patch_source   # "workspace" (graded) | "response_text" (non-authoritative)
     rec["job_id"] = res.job_id
     rec["agent"] = res.agent
     return rec

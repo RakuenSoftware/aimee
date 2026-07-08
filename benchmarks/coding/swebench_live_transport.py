@@ -297,6 +297,22 @@ def read_realized_by_jobs(token_db: str, model: str, job_ids: list) -> tuple[int
         return (0, 0, 0, 0)
 
 
+def read_realized_by_delegations(token_db: str, delegation_ids: list) -> tuple[int, int, int, int]:
+    """(input_uncached, input_cached, output, rows) over EXACT delegation_ids — the precise
+    attribution when the dispatch's delegation_id was captured from delegation_spawns. Preferred
+    over the job-id `LIKE '%-<job_id>'` heuristic (which relies on the trailing segment being the
+    job_id and can over-match a malformed id); the LIKE stays as a fallback when capture failed."""
+    dids = [d for d in (delegation_ids or []) if d]
+    if not token_db or not dids or not Path(token_db).exists():
+        return (0, 0, 0, 0)
+    try:
+        con = sqlite3.connect(token_db)
+        t = LA.realized_totals(con, dids)
+        return (t.input_uncached, t.input_cached, t.output, t.rows)
+    except Exception:
+        return (0, 0, 0, 0)
+
+
 def read_worker_tokens_by_jobs(token_db: str, job_ids: list) -> tuple[int, int]:
     """(input, output) summed over the workers' dispatch job_ids, MODEL-AGNOSTIC (arm-C workers
     span many models). Priced $0 downstream — reported only for the honesty panel."""

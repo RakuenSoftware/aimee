@@ -162,6 +162,22 @@ class TestDelegationCaptureAndSplit(unittest.TestCase):
         self.assertEqual(split["primary_output"], 200)
         self.assertEqual(split["worker_output"], 80)
 
+    def test_exact_delegation_read_ignores_lookalike_ids(self):
+        # Exact delegation_id matching must NOT pull in a different id that merely shares a suffix
+        # (the fragility the LIKE '%-<job_id>' heuristic risks).
+        con = self._db()
+        con.execute(f"INSERT INTO {LA.AUDIT} VALUES(1,'deleg-a-b-3','realized',1000,100,200,0,'')")
+        con.execute(f"INSERT INTO {LA.AUDIT} VALUES(2,'deleg-a-b-13','realized',9999,9999,0,0,'')")
+        con.commit()
+        import tempfile, os
+        fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+        disk = sqlite3.connect(path); con.backup(disk); disk.close()
+        uncached, cached, output, rows = T.read_realized_by_delegations(path, ["deleg-a-b-3"])
+        os.unlink(path)
+        self.assertEqual(rows, 1)                    # only the exact id, not deleg-a-b-13
+        self.assertEqual(uncached, 800)              # 1000 - 200 cache_read
+        self.assertEqual(output, 100)
+
     def test_supervisor_tool_call_rows_zero_when_no_tools(self):
         con = self._db()
         con.execute(f"INSERT INTO {LA.AUDIT} VALUES(1,'sup','realized',100,20,0,0,'')")

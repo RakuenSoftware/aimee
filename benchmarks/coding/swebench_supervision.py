@@ -431,9 +431,10 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     first_work = t0  # workers dispatched immediately; queue folded into work for a single round
 
     # Candidates + leak-guarded digests (the ONLY thing the supervisor sees).
-    candidates, digests, worker_jobs, redactions = [], [], [], 0
+    candidates, digests, worker_jobs, redactions, sources = [], [], [], 0, {}
     for w, res in worker_results:
         redactions += res.redactions
+        sources[w] = res.patch_source
         if res.job_id is not None:
             worker_jobs.append(res.job_id)
         if res.patch.strip():
@@ -454,8 +455,14 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     # H1 runtime assertion: the tools-OFF supervisor must have ZERO tool rows (structural no-code).
     sup_tool_rows = T.supervisor_tool_call_rows(token_db, sup.delegation_id) if sup.delegation_id else -1
 
-    tok = R.primary_tokens_by_jobs(token_db, primary_model, [sup.job_id])
-    worker_in, worker_out = T.read_worker_tokens_by_jobs(token_db, worker_jobs)
+    tok = R.primary_tokens_by_jobs(token_db, primary_model, [sup.job_id],
+                                   delegation_ids=[sup.delegation_id])
+    worker_dids = [res.delegation_id for _, res in worker_results if res.delegation_id]
+    if worker_dids:
+        wi, wc, wo, _ = T.read_realized_by_delegations(token_db, worker_dids)
+        worker_in, worker_out = wi + wc, wo
+    else:
+        worker_in, worker_out = T.read_worker_tokens_by_jobs(token_db, worker_jobs)
     esc = EscalationState()
     # Gated escalation (R3): only when NO worker produced a candidate. A separate, bounded,
     # attributed read-enabled dispatch; its output is re-digested before it could reach the frame.
@@ -472,6 +479,7 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
             if epatch.strip():
                 best = Candidate(worker_id=f"{primary_agent}@escalate", diff=epatch,
                                  verify=VerifyEnum.NOT_RUN, turns=e.api_calls)
+                sources[f"{primary_agent}@escalate"] = "response_text"
 
     wall = R.WallClock(t0=t0, first_work=first_work, t1=t1)
     escalation_dominated = is_escalation_dominated(esc.escalation_tokens, tok.input_uncached)
@@ -483,6 +491,7 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
         invalid=(best is None) or escalation_dominated)
     rec.update({
         "patch": best.diff if best else "",   # secret-redacted patch for the official grader
+        "patch_source": sources.get(best.worker_id, "none") if best else "none",
         "n_candidates": len(candidates),
         "selected_worker": best.worker_id if best else None,
         "supervisor_job_id": sup.job_id,

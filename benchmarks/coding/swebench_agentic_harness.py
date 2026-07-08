@@ -365,6 +365,16 @@ class AgenticResult:
     status: str
     api_calls: int
     error: str = ""
+    patch_source: str = "none"      # "workspace" | "response_text" | "none"
+    returned_diff: str = ""          # the diff text the delegate CLAIMED (diagnostic only)
+
+    @property
+    def authoritative(self) -> bool:
+        """A patch is graded-authoritative ONLY when it came from the co-located workspace's actual
+        filesystem state (`git diff`). A response-text diff is a CLAIM the agent may not have applied
+        — grading it would decouple 'resolved' from the filesystem (the roundtable's hallucination-
+        gap risk), so it is never authoritative."""
+        return self.patch_source == "workspace" and bool(self.patch.strip())
 
     @property
     def ok(self) -> bool:
@@ -409,19 +419,27 @@ def run_agentic_loop(instance: dict, env: WorkerEnv, budget: LoopBudget, *, arm:
         persona="engineer", tools=True, worktree=branch, max_turns=budget.max_turns,
         timeout_ms=int(budget.max_wall_s * 1000), token_db=token_db, session_id=session_id)
 
-    # Prefer the byte-stable workspace diff when the delegate edited a co-located checkout; else
-    # fall back to the delegate's returned diff text (the proven PR #986 path).
-    patch, redactions = "", 0
+    returned_diff = extract_diff_from_text(outcome.result)   # what the delegate CLAIMED (diagnostic)
+    patch, redactions, source = "", 0, "none"
     ws = Path(env.workspace)
-    if base_repo and (ws / ".git").exists():
-        try:
-            patch, redactions = extract_patch(env.workspace, base_commit)
-        except (PatchError, ProvisionError, subprocess.CalledProcessError):
-            patch = ""
-    if not patch.strip():
-        patch, redactions = scan_and_redact_secrets(extract_diff_from_text(outcome.result))
+    if base_repo:
+        # Co-located mode: the ACTUAL filesystem diff is the ONLY graded source (anti hallucination-
+        # gap — a response-text diff the agent never applied must never be graded). If git diff
+        # yields nothing, the extraction failed; we do NOT fall back to the claimed text.
+        if (ws / ".git").exists():
+            try:
+                patch, redactions = extract_patch(env.workspace, base_commit)
+                source = "workspace" if patch.strip() else "none"
+            except (PatchError, ProvisionError, subprocess.CalledProcessError):
+                patch, source = "", "none"
+    else:
+        # Degraded/dev mode (no co-located workspace): the returned text is all there is. Flag it
+        # NON-AUTHORITATIVE so the reporter can exclude it from the graded headline.
+        patch, redactions = scan_and_redact_secrets(returned_diff)
+        source = "response_text" if patch.strip() else "none"
 
     status = outcome.status if outcome.job_id is not None else "error"
     return AgenticResult(patch=patch, redactions=redactions, job_id=outcome.job_id,
                          delegation_id=outcome.delegation_id, agent=outcome.agent_name or (worker or ""),
-                         status=status, api_calls=outcome.api_calls, error=outcome.error)
+                         status=status, api_calls=outcome.api_calls, error=outcome.error,
+                         patch_source=source, returned_diff=returned_diff)
