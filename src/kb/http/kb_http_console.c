@@ -161,8 +161,7 @@ static int console_typed_facts(char *out_buf, int out_cap)
 {
    config_t cfg;
    config_load(&cfg);
-   int thr =
-       cfg.kb_typed_facts_promote_threshold > 0 ? cfg.kb_typed_facts_promote_threshold : 3;
+   int thr = cfg.kb_typed_facts_promote_threshold > 0 ? cfg.kb_typed_facts_promote_threshold : 3;
 
    cJSON *root = cJSON_CreateObject();
    if (!root)
