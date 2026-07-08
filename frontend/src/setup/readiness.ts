@@ -1,0 +1,101 @@
+/* Setup readiness — a PURE function over the values GET /api/config returns
+ * (config.show). It classifies the minimum steps needed for a working turn so the
+ * header chip and the wizard share one definition of "ready". No network, no DOM:
+ * unit-tested under vitest's node env.
+ *
+ * MVP scope: readiness is inferred client-side from config values (and whether the
+ * active session has a project bound). A server-side GET /api/setup/state that can
+ * additionally ping DB2/the provider is a documented follow-up. */
+
+import { FIELD_HELP } from '../pages/settingsHelp';
+
+export type StepId = 'provider' | 'embedding' | 'db2' | 'kb_api' | 'project';
+
+/* The config keys readiness inspects. Exported so a test can assert each one is a
+ * real, documented config field (a key rename in settingsHelp.ts that we miss
+ * would otherwise silently break a rule). `project` has no config key — it comes
+ * from the session bundle — so it is deliberately absent here. */
+export const READINESS_KEYS = [
+  'provider',
+  'embedding_command',
+  'embedding_endpoint',
+  'db2_url',
+  'kb_api_http_port',
+] as const;
+
+export interface StepStatus {
+  ok: boolean;
+  detail: string;
+  /** Optional steps do not block overall readiness. */
+  optional?: boolean;
+}
+
+export interface Readiness {
+  ready: boolean;
+  steps: Record<StepId, StepStatus>;
+}
+
+function asStr(cfg: Record<string, unknown>, key: string): string {
+  const v = cfg[key];
+  if (typeof v === 'string') return v.trim();
+  if (v == null) return '';
+  return String(v).trim();
+}
+
+function asNum(cfg: Record<string, unknown>, key: string): number {
+  const v = cfg[key];
+  if (typeof v === 'number') return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Classify the setup steps. `hasProject` comes from the active session (the
+ * config has no project field). */
+export function computeReadiness(cfg: Record<string, unknown>, hasProject: boolean): Readiness {
+  const provider = asStr(cfg, 'provider');
+  const embCmd = asStr(cfg, 'embedding_command');
+  const embEndpoint = asStr(cfg, 'embedding_endpoint');
+  const db2 = asStr(cfg, 'db2_url');
+  const kbPort = asNum(cfg, 'kb_api_http_port');
+
+  const steps: Record<StepId, StepStatus> = {
+    provider: {
+      ok: provider !== '',
+      detail: provider !== '' ? `primary: ${provider}` : 'no primary provider set',
+    },
+    embedding: {
+      // A real embedder is a command or an endpoint; blank means the built-in
+      // 384-dim hash fallback, which only works in a test setup.
+      ok: embCmd !== '' || embEndpoint !== '',
+      detail: embCmd !== '' || embEndpoint !== '' ? 'embedder configured' : 'built-in hash fallback (test-only)',
+    },
+    db2: {
+      ok: db2 !== '',
+      detail: db2 !== '' ? 'shared store configured' : 'no DB2 URL set',
+    },
+    kb_api: {
+      ok: kbPort > 0,
+      detail: kbPort > 0 ? `listening on port ${kbPort}` : 'disabled (port 0)',
+      optional: true,
+    },
+    project: {
+      ok: hasProject,
+      detail: hasProject ? 'project connected' : 'no project connected',
+    },
+  };
+
+  const ready = (Object.values(steps) as StepStatus[]).every((s) => s.ok || s.optional);
+  return { ready, steps };
+}
+
+/** How many REQUIRED steps are still incomplete (optional steps excluded). Drives
+ * the "Setup — N left" chip; 0 ⇒ chip hidden. */
+export function stepsRemaining(r: Readiness): number {
+  return (Object.values(r.steps) as StepStatus[]).filter((s) => !s.ok && !s.optional).length;
+}
+
+/** Guard used by the grounding test: every READINESS_KEYS entry must be a real
+ * documented field. Kept here so the invariant lives next to the keys. */
+export function readinessKeysAreDocumented(): boolean {
+  return READINESS_KEYS.every((k) => k in FIELD_HELP);
+}
