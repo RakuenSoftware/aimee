@@ -313,6 +313,24 @@ static int is_known_kind(memory_node_kind_t k)
    return 0;
 }
 
+/* Single-valued (functional) relations: a new object supersedes/replaces the prior
+ * for the same subject (via correction_behavior). Kept explicit in one place so the
+ * set is reviewed together; multi-valued relations (knows, member_of, parent_of,
+ * child_of, also_known_as, ...) accumulate and are absent here. */
+int rel_type_is_functional(const char *rel_type)
+{
+   if (!rel_type)
+      return 0;
+   static const char *const functional[] = {
+       "lives_in", "born_in",   "age",      "located_in",    "has_hostname",
+       "spouse",   "works_for", "has_role", "device_has_ip",
+   };
+   for (size_t i = 0; i < sizeof(functional) / sizeof(functional[0]); i++)
+      if (strcmp(rel_type, functional[i]) == 0)
+         return 1;
+   return 0;
+}
+
 int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_kind_t kind)
 {
    if (!def)

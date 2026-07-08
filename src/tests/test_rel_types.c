@@ -68,6 +68,23 @@ static void test_kind_allowed(void)
    printf("  PASS: test_kind_allowed\n");
 }
 
+static void test_functional_classification(void)
+{
+   /* Single-valued: a new object supersedes the prior (commit-time §4 correction). */
+   assert(rel_type_is_functional("lives_in") == 1);
+   assert(rel_type_is_functional("works_for") == 1);
+   assert(rel_type_is_functional("born_in") == 1);
+   assert(rel_type_is_functional("has_role") == 1);
+   assert(rel_type_is_functional("device_has_ip") == 1);
+   /* Multi-valued: objects accumulate, no correction. */
+   assert(rel_type_is_functional("knows") == 0);
+   assert(rel_type_is_functional("member_of") == 0);
+   assert(rel_type_is_functional("also_known_as") == 0);
+   assert(rel_type_is_functional("parent_of") == 0);
+   assert(rel_type_is_functional(NULL) == 0);
+   printf("  PASS: test_functional_classification\n");
+}
+
 static void test_enum_text(void)
 {
    assert(correction_behavior_from_text("immutable") == CORR_IMMUTABLE);
@@ -96,6 +113,7 @@ int main(void)
    test_normalize();
    test_seed_lookup_case_insensitive();
    test_kind_allowed();
+   test_functional_classification();
    test_enum_text();
    test_governance_rel_types();
    printf("rel_types: all tests passed\n");
