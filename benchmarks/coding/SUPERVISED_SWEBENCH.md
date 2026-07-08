@@ -122,8 +122,10 @@ live parts (server transport, per-worker container, official grading) as marked 
 
 | module | slice | role |
 |---|---|---|
-| `swebench_transport_verify.py` | S0 | 5 token-attribution assertions (primary = `delegation_id` EMPTY; no cross-bill; cache split; primary tools billed) — the blocking transport gate |
-| `swebench_agentic_harness.py` | S1 | per-worker workspace provision at `base_commit`, per-worker OS-resource allocator, canonical secret-redacted patch (`git add -A` → `diff --cached`), loop bounds |
+| `swebench_transport_verify.py` | S0 | 5 FAKE-mode token-attribution assertions (theoretical EMPTY-polarity model — **superseded live** by the delegate transport; kept as the CI gate) |
+| `swebench_live_attribution.py` | S0-live | the **corrected** deployment model + `run_live_matrix` (L1–L4 over the real `delegation_spawns`/`token_audit`, job-id partitioned) |
+| `swebench_live_transport.py` | S0–S5 | the live `aimee delegate` transport: argv build (tools ⇒ worktree), dispatch/poll (injectable runner), job-id token split, supervisor-tool-row assertion |
+| `swebench_agentic_harness.py` | S1 | per-worker workspace provision at `base_commit`, per-worker OS-resource allocator, canonical secret-redacted patch (`git add -A` → `diff --cached`), loop bounds, **`run_agentic_loop`** (live) |
 | `swebench_arm_runner.py` | S2 | arm A runner + shared measurement core: **uncached** primary-token headline, two wall-clocks (total vs work) |
 | `swebench_supervision.py` | S3 | arm C honesty core: hard-capped leak-guarded digests, **deterministic** best-of-N, gated escalation, context fold, tool allowlist |
 | `supervised_report_panels.py` | S4 | BCa CI, Pareto, selection-skill (oracle vs actual), escalation exclusion, context drift, two-wall-clock, arm-parity |
@@ -153,6 +155,8 @@ withheld, the summary still reports the honest number, e.g.
 ```bash
 python3 -m unittest \
   benchmarks.tests.test_swebench_transport_verify \
+  benchmarks.tests.test_swebench_live_transport \
+  benchmarks.tests.test_swebench_live_attribution \
   benchmarks.tests.test_swebench_agentic_harness \
   benchmarks.tests.test_swebench_arm_runner \
   benchmarks.tests.test_swebench_supervision \
@@ -161,10 +165,60 @@ python3 -m unittest \
   benchmarks.tests.test_swebench_claim_gate
 ```
 
-## Live run (needs the .254 fleet + CT 101 real docker)
+## Live transport (the corrected, deployment-verified model)
 
-The live transport, per-worker container, and official grading are marked
-`NotImplementedError` stubs that print the exact wiring step. Wire them against the `.254`
-fleet (`run_agentic_loop`, `run_arm_a`, `run_arm_c_supervised`, `run_suite`) and grade on CT 101
-per the recipe above; feed the records through `supervised_report` + `supervised_report_panels`,
-then `swebench_claim_gate`.
+The live paths are **wired** on the `aimee delegate` transport (`swebench_live_transport.py`),
+which supersedes the theoretical `/v1/runs` + EMPTY-delegation-polarity model. This is not a
+choice — a live 2026-07-05 run (`swebench_live_attribution.py`) established that the real fleet
+emits almost no EMPTY-delegation rows, so the harness runs **both** the primary and the workers as
+`aimee delegate` jobs and distinguishes them by **which delegation_id (job_id) it dispatched**:
+
+- **Dispatch:** `aimee delegate <role> --via <agent> --tools --worktree <branch> --json --durable`.
+  A tools-enabled dispatch **must** carry `--worktree` (FINDING 4: the parent-worktree write-guard
+  silently blocks a plain `--tools` delegate). `build_delegate_argv` enforces this.
+- **Attribution:** a dispatch's `delegation_id` ends in `-<job_id>` (the CLI job_id), so primary
+  tokens = `SUM(token_audit WHERE model=<primary> AND usage_kind='realized' AND delegation_id LIKE
+  '%-<job_id>')`, headline = `prompt − cache_read` (uncached). Reuses PR #986 job-id scoping.
+- **Arm A** = one `code --tools --worktree` primary dispatch (its own multi-turn loop runs
+  internally); tokens read by its job_id.
+- **Arm C** (Option A, roundtable 2026-07-08) = N concurrent `code --tools --worktree` **worker**
+  dispatches (priced $0) + **one tools-OFF** `review` **supervisor** dispatch over capped,
+  leak-guarded digests. "No raw code" is **structural** (the supervisor has no tool loop). The
+  submitted patch is chosen by the **pure, deterministic** `select_best_of_n` (reproducible); the
+  supervisor's tokens are the arm-C headline. Runtime gate: `supervisor_tool_call_rows` must be 0.
+- **Patch:** preferred from the co-located workspace (`git diff <base_commit>`, byte-stable), else
+  the delegate's returned ```diff (both secret-redacted).
+
+## Live run (needs the fleet + CT 101 real docker)
+
+```python
+from benchmarks.coding import swebench_suite as Q
+# Prep instances first (swebench_supervised_prep.py) into <regions_dir>/<instance-set>/.
+out = Q.run_suite(only=["b1_reddit10"], token_db="$AIMEE_HOME/aimee.db",
+                  regions_dir="benchmarks/results/swebench_supervised/regions",
+                  workers=["GLM-5.2","MiniMax-M3","mistral-medium-3-5","mimo-v2.5-pro","gpu-mid"],
+                  primary_agent="codex", primary_model="gpt-5.5",
+                  base_repos={"django/django": "/path/to/django/clone", ...})
+# out["records_by_run"] -> supervised_report + supervised_report_panels -> swebench_claim_gate.
+```
+
+**S0 live gate** (run on the ledger host, or a host with a readable copy of the aimee.db):
+
+```python
+from benchmarks.coding.swebench_live_attribution import run_live_matrix
+r = run_live_matrix(db_path="$AIMEE_HOME/aimee.db", primary_agent="codex", worker="GLM-5.2")
+assert r["passed"]   # L1-L4 over the real delegation_spawns/token_audit schema
+```
+
+### Deployment prerequisites (validation-pending until run on real hardware)
+
+1. **Grading host.** The official grader (`swebench.harness.run_evaluation`) needs **real docker +
+   python3.11**. The `.253/.254` host docker is the **LXC2Docker shim** (mangles stock images) and
+   host python is too new → grade on **CT 101** (real docker, py3.11) only. `official_grade_fn`
+   derives resolved ids from the harness report (`resolved_ids`).
+2. **Workspace co-location.** Arm-A/C workers edit a repo checked out at `base_commit`; that
+   workspace must be co-located with where the delegate executes (server-side on the fleet). Pass
+   `base_repos` mapping each repo → its base clone; `provision_workspace` builds the per-worker
+   worktree.
+3. **Ledger access.** Token attribution reads `token_db` on the fleet host; the client-only box
+   sees the fleet via the gateway but not the ledger file.

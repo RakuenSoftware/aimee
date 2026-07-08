@@ -302,14 +302,126 @@ def workspace_fingerprint(repo: str, base_commit: str, patch: str) -> str:
     return h.hexdigest()[:16]
 
 
-# ------------------------------------------------------------ LIVE stubs -------
-# The following need a live server / .254 workspace / container / grader and are NOT exercised in
-# CI. They fail honestly with the exact wiring to do, mirroring S0's stub discipline.
+# ------------------------------------------------------------ agentic loop -----
+# S1 live wiring (roundtable 2026-07-05 + arm-C transport ruling 2026-07-08). A tools-using
+# delegate runs its OWN explore/edit/test loop server-side under ONE dispatch; the loop bound is
+# handed to the delegate as --max-turns/--timeout. The diff is taken from the provisioned
+# workspace (`git diff base_commit`, byte-stable) when the workspace is co-located with the
+# delegate, else from the delegate's returned unified diff (the proven PR #986 text path). Both
+# paths run scan_and_redact_secrets. Attribution is by the dispatch's job_id (delegation_id ends
+# in `-<job_id>`), captured here so the caller can read tokens without touching the filesystem.
+_DIFF_LINE = re.compile(r"^(diff --git |index |--- |\+\+\+ |@@ |[ +\-\\]|rename |similarity |"
+                        r"new file |deleted file |old mode |new mode |Binary )")
+
+
+def extract_diff_from_text(text: str) -> str:
+    """Pull a unified diff out of a delegate's response and STOP at the first non-diff line so
+    trailing prose is never submitted as a patch. Mirrors bench_swebench_supervised._extract_diff
+    (the merged single-shot extractor) so the agentic arm and the single-shot arm agree."""
+    if not text:
+        return ""
+    m = re.search(r"```diff\s*\n(.*?)```", text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.startswith("diff --git ") or ln.startswith("--- ")), None)
+    if start is None:
+        return ""
+    out = []
+    for ln in lines[start:]:
+        if ln == "" or _DIFF_LINE.match(ln):
+            out.append(ln)
+        else:
+            break
+    return "\n".join(out).strip()
+
+
+def agentic_prompt(instance: dict, *, arm: str) -> str:
+    """The bounded problem statement handed to a tools-using delegate. It gets the issue text and
+    (when the prep extracted one) the focal file/region as a hint, and is told to edit the repo
+    in its workspace and END by emitting the full unified diff (```diff fenced) so the harness can
+    extract a patch even when it cannot read the delegate's server-side worktree."""
+    repo = instance.get("repo", "the repository")
+    problem = instance.get("problem") or instance.get("problem_statement", "")
+    focal = instance.get("file", "")
+    region = instance.get("region", "")
+    hint = f"\n\nThe fix likely touches `{focal}`.\n```python\n{region}\n```" if region else ""
+    return (f"You are fixing a bug in {repo}. Explore the checked-out repository in your "
+            f"workspace, make the minimal edit that resolves the issue, and (if you can) run the "
+            f"relevant tests.\n\n## Issue\n{problem}{hint}\n\nWhen done, output the COMPLETE fix as "
+            f"a single unified git diff in a ```diff fenced block (a/ and b/ prefixes, correct "
+            f"context lines). Do not commit; leave the working tree dirty.")
+
+
+@dataclass
+class AgenticResult:
+    """One worker/primary agentic run: the emitted patch + attribution handles + loop telemetry."""
+    patch: str
+    redactions: int
+    job_id: int | None
+    delegation_id: str | None
+    agent: str
+    status: str
+    api_calls: int
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "done" and not self.error and bool(self.patch.strip())
+
+
+def worktree_branch(instance_id: str, arm: str, worker_idx: int) -> str:
+    """Deterministic per-(instance,arm,worker) worktree branch (F2 isolation naming)."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "-", f"{instance_id}-{arm}-{worker_idx}")
+    return f"aimee/wi/swebench-{safe}"
+
+
 def run_agentic_loop(instance: dict, env: WorkerEnv, budget: LoopBudget, *, arm: str,
-                     worker: str | None = None) -> str:
-    raise NotImplementedError(
-        "live agentic loop not wired. arm C: dispatch a tools-enabled `code`/`execute` delegate "
-        "against a server-side .254 workspace (Q3 option a), poll to a bounded terminal, extract "
-        "`git -C <ws> diff <base_commit>`. arm A: drive the same loop via the S0 /v1/runs "
-        "transport. In-loop tests default OFF (Q1 c); isolation via per-worker container or the "
-        "venv+EnvAllocator fallback (Q2).")
+                     worker: str | None = None, base_repo: str | None = None,
+                     token_db: str = "", session_id: str = "", worker_idx: int = 0,
+                     aimee_bin: str = "aimee", role: str = "code",
+                     dispatch=None) -> AgenticResult:
+    """Live per-instance agentic loop, shared by arm A (primary drives) and arm C (worker drives).
+
+    Provisions an isolated workspace at base_commit (when `base_repo` is given and co-located with
+    the delegate), dispatches ONE tools-enabled `code` delegate on a per-worker worktree branch
+    (FINDING 4: tools need --worktree), polls to a bounded terminal, and extracts a canonical,
+    secret-redacted patch — preferring the workspace diff, falling back to the delegate's returned
+    diff text. `dispatch` is injected (default: the live transport) so CI drives a fake fleet.
+
+    Returns an AgenticResult; a fleet/patch failure is recorded on it, never raised."""
+    from benchmarks.coding import swebench_live_transport as _T
+    if dispatch is None:
+        dispatch = _T.dispatch_and_wait
+    instance_id = instance["instance_id"]
+    base_commit = instance.get("base_commit", "")
+    branch = worktree_branch(instance_id, arm, worker_idx)
+
+    if base_repo:
+        try:
+            provision_workspace(base_repo, base_commit, env.workspace)
+        except ProvisionError as e:
+            return AgenticResult("", 0, None, None, worker or "", "error", 0, error=str(e))
+
+    outcome = dispatch(
+        role, agentic_prompt(instance, arm=arm), aimee_bin=aimee_bin, via=worker,
+        persona="engineer", tools=True, worktree=branch, max_turns=budget.max_turns,
+        timeout_ms=int(budget.max_wall_s * 1000), token_db=token_db, session_id=session_id)
+
+    # Prefer the byte-stable workspace diff when the delegate edited a co-located checkout; else
+    # fall back to the delegate's returned diff text (the proven PR #986 path).
+    patch, redactions = "", 0
+    ws = Path(env.workspace)
+    if base_repo and (ws / ".git").exists():
+        try:
+            patch, redactions = extract_patch(env.workspace, base_commit)
+        except (PatchError, ProvisionError, subprocess.CalledProcessError):
+            patch = ""
+    if not patch.strip():
+        patch, redactions = scan_and_redact_secrets(extract_diff_from_text(outcome.result))
+
+    status = outcome.status if outcome.job_id is not None else "error"
+    return AgenticResult(patch=patch, redactions=redactions, job_id=outcome.job_id,
+                         delegation_id=outcome.delegation_id, agent=outcome.agent_name or (worker or ""),
+                         status=status, api_calls=outcome.api_calls, error=outcome.error)

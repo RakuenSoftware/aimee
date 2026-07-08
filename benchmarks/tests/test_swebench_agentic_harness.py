@@ -188,11 +188,61 @@ class TestFingerprint(unittest.TestCase):
                             H.workspace_fingerprint("r", "c", "y"))
 
 
-class TestLiveStubHonesty(unittest.TestCase):
-    def test_run_agentic_loop_is_marked_stub(self):
-        with self.assertRaises(NotImplementedError):
-            H.run_agentic_loop({}, H.EnvAllocator("/r").allocate("i", "A", 0),
-                               H.LoopBudget(), arm="A")
+class TestAgenticPromptAndDiff(unittest.TestCase):
+    def test_prompt_includes_issue_and_diff_instruction(self):
+        p = H.agentic_prompt({"repo": "django/django", "problem": "TZ bug",
+                              "file": "django/utils/tz.py", "region": "def now(): pass"}, arm="C")
+        self.assertIn("TZ bug", p)
+        self.assertIn("django/utils/tz.py", p)
+        self.assertIn("```diff", p)
+
+    def test_extract_diff_from_fenced_block(self):
+        txt = "prose\n```diff\ndiff --git a/x b/x\n+ok\n```\ntrailing"
+        self.assertEqual(H.extract_diff_from_text(txt), "diff --git a/x b/x\n+ok")
+
+    def test_extract_diff_stops_at_prose(self):
+        txt = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n+ok\nNow some prose."
+        out = H.extract_diff_from_text(txt)
+        self.assertIn("+ok", out)
+        self.assertNotIn("prose", out)
+
+    def test_worktree_branch_is_deterministic_and_safe(self):
+        b = H.worktree_branch("django__django-12908", "C", 2)
+        self.assertEqual(b, H.worktree_branch("django__django-12908", "C", 2))
+        self.assertTrue(b.startswith("aimee/wi/swebench-"))
+        self.assertNotIn(" ", b)
+
+
+class TestRunAgenticLoopLive(unittest.TestCase):
+    def test_loop_extracts_patch_from_returned_diff(self):
+        from benchmarks.coding import swebench_live_transport as LT
+
+        def fake_dispatch(role, prompt, **kw):
+            self.assertEqual(role, "code")
+            self.assertTrue(kw["tools"] and kw["worktree"])   # FINDING 4
+            return LT.DispatchOutcome(job_id=9, status="done",
+                                      result="```diff\ndiff --git a/f b/f\n+patch\n```",
+                                      agent_name="GLM-5.2", delegation_id="deleg-1-2-9",
+                                      api_calls=3, polls=1)
+
+        env = H.EnvAllocator("/tmp/wsx").allocate("i", "C", 0)
+        res = H.run_agentic_loop({"instance_id": "i", "repo": "x/y", "base_commit": "0" * 40,
+                                  "problem": "b"}, env, H.LoopBudget(), arm="C", worker="GLM-5.2",
+                                 base_repo="", dispatch=fake_dispatch)
+        self.assertTrue(res.ok)
+        self.assertIn("+patch", res.patch)
+        self.assertEqual(res.job_id, 9)
+        self.assertEqual(res.delegation_id, "deleg-1-2-9")
+
+    def test_failed_dispatch_is_recorded_not_raised(self):
+        from benchmarks.coding import swebench_live_transport as LT
+        fake = lambda role, prompt, **kw: LT.DispatchOutcome(None, "error", "", "", None, 0, 0,
+                                                             error="no job_id")
+        env = H.EnvAllocator("/tmp/wsx").allocate("i", "A", 0)
+        res = H.run_agentic_loop({"instance_id": "i", "base_commit": "0" * 40}, env,
+                                 H.LoopBudget(), arm="A", dispatch=fake)
+        self.assertFalse(res.ok)
+        self.assertEqual(res.status, "error")
 
 
 if __name__ == "__main__":

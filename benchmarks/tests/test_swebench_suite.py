@@ -123,10 +123,72 @@ class TestPredictions(unittest.TestCase):
         self.assertEqual([p["instance_id"] for p in preds], ["i2"])
 
 
-class TestLiveStub(unittest.TestCase):
-    def test_run_suite_is_marked_stub(self):
-        with self.assertRaises(NotImplementedError):
-            Q.run_suite(token_db="/x", aimee_bin="./aimee")
+class TestLoadInstances(unittest.TestCase):
+    def test_missing_regions_returns_empty(self):
+        self.assertEqual(Q.load_instances("reddit10", "/no/such/dir"), [])
+
+
+class TestResolvedIdsFromReport(unittest.TestCase):
+    def test_resolved_ids_list_shape(self):
+        self.assertEqual(Q.resolved_ids_from_report({"resolved_ids": ["a", "b"]}), {"a", "b"})
+
+    def test_per_instance_dict_shape(self):
+        rep = {"django__x": {"resolved": True}, "sympy__y": {"resolved": False}}
+        self.assertEqual(Q.resolved_ids_from_report(rep), {"django__x"})
+
+    def test_empty_or_bad(self):
+        self.assertEqual(Q.resolved_ids_from_report({}), set())
+        self.assertEqual(Q.resolved_ids_from_report(None), set())
+
+
+class TestRunSuiteOrchestration(unittest.TestCase):
+    """Drive run_suite with INJECTED fake arm-runners + grader + loader (no fleet/docker): assert
+    it runs cells, grades, sets resolved, and aggregates K repeats with flip detection."""
+
+    def _fake_instances(self, spec):
+        return [{"instance_id": "django__django-1", "repo": "django/django", "base_commit": "0" * 40},
+                {"instance_id": "sympy__sympy-2", "repo": "sympy/sympy", "base_commit": "0" * 40}]
+
+    def test_only_b3_runs_and_grades(self):
+        seen = {"a": 0, "c": 0, "graded": []}
+
+        def fake_a(inst, primary, **kw):
+            seen["a"] += 1
+            return {"instance_id": inst["instance_id"], "arm": "A", "patch": "diff --git a/x b/x\n",
+                    "supervisor_input_tokens": 10, "supervisor_output_tokens": 2,
+                    "worker_input_tokens": 0, "worker_output_tokens": 0, "wall_s": 1.0,
+                    "resolved": None, "n_workers": 1, "invalid": False, "compaction": False}
+
+        def fake_c(inst, **kw):
+            seen["c"] += 1
+            return {"instance_id": inst["instance_id"], "arm": "C", "patch": "diff --git a/x b/x\n",
+                    "supervisor_input_tokens": 3, "supervisor_output_tokens": 1,
+                    "worker_input_tokens": 100, "worker_output_tokens": 50, "wall_s": 2.0,
+                    "resolved": None, "n_workers": 3, "invalid": False, "compaction": False}
+
+        def fake_grade(preds, run_id, **kw):
+            seen["graded"].append(run_id)
+            # Resolve the django instance only; flip it off on odd repeats to exercise flip flag.
+            return {p["instance_id"] for p in preds if "django" in p["instance_id"]}
+
+        out = Q.run_suite(only=["b3_parallelism"], arm_a_runner=fake_a, arm_c_runner=fake_c,
+                          grade_fn=fake_grade, instances_loader=self._fake_instances)
+        # b3 is arm C only, N in {1,2,4,8}, K=3 -> 12 cells, each 2 instances.
+        self.assertEqual(seen["a"], 0)
+        self.assertEqual(seen["c"], 12 * 2)
+        self.assertEqual(len(seen["graded"]), 12)
+        # every cell graded -> resolved set on records
+        recs = [r for rs in out["records_by_run"].values() for r in rs]
+        self.assertTrue(all(r["resolved"] is not None for r in recs))
+        # aggregate present with majority-vote per instance
+        self.assertTrue(out["aggregate"])
+        self.assertIn("report", out)
+
+    def test_skips_cells_with_no_instances(self):
+        out = Q.run_suite(only=["b1_reddit10"], arm_a_runner=lambda *a, **k: {},
+                          arm_c_runner=lambda *a, **k: {}, grade_fn=lambda *a, **k: set(),
+                          instances_loader=lambda spec: [])
+        self.assertTrue(all(c.get("skipped") == "no_instances" for c in out["cells"]))
 
 
 if __name__ == "__main__":

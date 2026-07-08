@@ -28,9 +28,16 @@ Ratified rulings baked in:
 """
 from __future__ import annotations
 
+import json
+import os
+import random
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
+
+_FAKE = os.environ.get("AIMEE_BENCH_FAKE_AGENT") == "1"
 
 # ------------------------------------------------------------ enums ------------
 class VerifyEnum(str, Enum):
@@ -336,11 +343,171 @@ def tool_allowed(tool: str, *, escalated: bool = False) -> bool:
     return False
 
 
-# ------------------------------------------------------------ live stub --------
-def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, redirect: bool = False):
-    raise NotImplementedError(
-        "live arm-C supervision loop not wired: dispatch N tools-enabled workers on isolated "
-        "workspaces (S1), build capped leak-guarded digests each turn (build_digest), keep the "
-        "supervisor context bounded (ContextWindow), select deterministically (select_best_of_n), "
-        "escalate only on the gated triggers, and read primary tokens via the S0 polarity + S2 "
-        "arm-runner accounting. The optional LLM-supervisor selection is a separate ablation.")
+# ------------------------------------------------------------ supervisor turn --
+# Option A (roundtable 2026-07-08): the supervisor is dispatched as a delegate with TOOLS OFF, so
+# "no raw code" is a STRUCTURAL guarantee (no tool loop) rather than an allowlist. Its input is the
+# capped, leak-guarded digest frame; its tokens ARE the arm-C primary headline. The actual submitted
+# patch is chosen by the PURE, deterministic select_best_of_n() (reproducible) — the LLM turn's
+# stated preference is parsed and logged but never overrides the deterministic selection.
+def supervisor_prompt(instance: dict, frame: str, candidate_ids: list[str]) -> str:
+    problem = instance.get("problem") or instance.get("problem_statement", "")
+    ids = ", ".join(candidate_ids) or "(none)"
+    return ("You are supervising a team of engineers fixing a bug. You may read ONLY the capped "
+            "progress digests below (worker id, state, verify result, and a short candidate diff) "
+            "— you have NO access to the source. Decide which candidate best resolves the issue.\n\n"
+            f"## Issue\n{problem}\n\n## Worker digests\n{frame}\n\n"
+            f"Candidate worker ids: {ids}\n\nRespond with ONLY a JSON object: "
+            '{"action":"select","worker_id":"<id>","rationale":"<=15 words"} '
+            '(or {"action":"escalate","rationale":"..."} if no candidate is viable).')
+
+
+def parse_supervisor_decision(text: str) -> dict:
+    """Parse the supervisor's JSON decision (PURE). Falls back to {'action':'select','worker_id':None}
+    on malformed output (H3) so a parse failure degrades to the deterministic selector, never a crash."""
+    if text:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                d = json.loads(m.group(0))
+                if isinstance(d, dict) and d.get("action") in ("select", "escalate", "redirect"):
+                    return {"action": d["action"], "worker_id": d.get("worker_id"),
+                            "rationale": str(d.get("rationale", ""))[:120]}
+            except Exception:
+                pass
+    return {"action": "select", "worker_id": None, "rationale": "parse_error"}
+
+
+def _pick_workers(pool: list[str], n: int, seed: str) -> list[str]:
+    """N DISTINCT workers for one instance, seeded for reproducibility (matches PR #986 M6)."""
+    rng = random.Random(seed)
+    p = list(pool)
+    rng.shuffle(p)
+    return p[:min(n, len(p))]
+
+
+def _worker_turn(res, worker_id: str) -> WorkerTurn:
+    """Build a WorkerTurn from an agentic result. verify=NOT_RUN: in-loop tests default OFF (Q1);
+    the OFFICIAL grader is the sole resolution source (run later), so the digest never claims a
+    verify it did not run."""
+    state = WorkerState.DONE if (res.status == "done" and res.patch.strip()) else WorkerState.FAILED
+    added = sum(1 for ln in res.patch.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+    deleted = sum(1 for ln in res.patch.splitlines() if ln.startswith("-") and not ln.startswith("---"))
+    return WorkerTurn(worker_id=worker_id, turn_index=0, state=state, action_label=f"agentic loop ({res.api_calls} calls)",
+                      unified_diff=res.patch, verify=VerifyEnum.NOT_RUN, added=added, deleted=deleted)
+
+
+# ------------------------------------------------------------ live arm C -------
+def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocator, budget,
+                         token_db: str = "", base_repo: str | None = None, primary_agent: str = "codex",
+                         primary_model: str = "gpt-5.5", seed: int = 1729, redirect: bool = False,
+                         aimee_bin: str = "aimee", dispatch=None, max_concurrency: int = 8) -> dict:
+    """Live arm-C supervision run for one instance (Option A). Dispatches N tools-enabled worker
+    agentic loops CONCURRENTLY (each in its own worktree — the fleet-parallelism that answers
+    Reddit's serial-worker wall-clock), builds capped leak-guarded digests, runs ONE tools-OFF
+    supervisor turn over the digest frame (its tokens = the primary headline), and selects the
+    submitted patch DETERMINISTICALLY with select_best_of_n. Worker tokens are read separately and
+    priced $0. `dispatch` is injected so CI drives a fake fleet; `resolved` is set later by S5."""
+    from benchmarks.coding import swebench_agentic_harness as H
+    from benchmarks.coding import swebench_arm_runner as R
+    from benchmarks.coding import swebench_live_transport as T
+    if _FAKE:
+        return _fake_arm_c_record(instance, primary_model, n)
+    if dispatch is None:
+        dispatch = T.dispatch_and_wait
+
+    instance_id = instance["instance_id"]
+    picks = _pick_workers(workers, n, f"{seed}:{instance_id}")
+    t0 = time.perf_counter()
+
+    def _run_worker(idx_worker):
+        idx, w = idx_worker
+        env = allocator.allocate(instance_id, "C", idx)
+        return w, H.run_agentic_loop(instance, env, budget, arm="C", worker=w, base_repo=base_repo,
+                                     token_db=token_db, worker_idx=idx, aimee_bin=aimee_bin,
+                                     dispatch=dispatch)
+
+    with ThreadPoolExecutor(max_workers=min(max_concurrency, max(1, len(picks)))) as ex:
+        worker_results = list(ex.map(_run_worker, list(enumerate(picks))))
+    first_work = t0  # workers dispatched immediately; queue folded into work for a single round
+
+    # Candidates + leak-guarded digests (the ONLY thing the supervisor sees).
+    candidates, digests, worker_jobs, redactions = [], [], [], 0
+    for w, res in worker_results:
+        redactions += res.redactions
+        if res.job_id is not None:
+            worker_jobs.append(res.job_id)
+        if res.patch.strip():
+            candidates.append(Candidate(worker_id=w, diff=res.patch, verify=VerifyEnum.NOT_RUN,
+                                        turns=res.api_calls))
+        digests.append(build_digest(_worker_turn(res, w)))
+    frame, _frame_rejected = serialize_supervisor_frame(digests)
+
+    # Deterministic submitted patch (reproducible authority).
+    best = select_best_of_n(candidates)
+
+    # Supervisor turn: tools OFF, digests-only -> the primary headline spend.
+    sup = dispatch("review", supervisor_prompt(instance, frame, [c.worker_id for c in candidates]),
+                   via=primary_agent, tools=False, token_db=token_db, aimee_bin=aimee_bin)
+    decision = parse_supervisor_decision(sup.result)
+    t1 = time.perf_counter()
+
+    # H1 runtime assertion: the tools-OFF supervisor must have ZERO tool rows (structural no-code).
+    sup_tool_rows = T.supervisor_tool_call_rows(token_db, sup.delegation_id) if sup.delegation_id else -1
+
+    tok = R.primary_tokens_by_jobs(token_db, primary_model, [sup.job_id])
+    worker_in, worker_out = T.read_worker_tokens_by_jobs(token_db, worker_jobs)
+    esc = EscalationState()
+    # Gated escalation (R3): only when NO worker produced a candidate. A separate, bounded,
+    # attributed read-enabled dispatch; its output is re-digested before it could reach the frame.
+    if not candidates and base_repo:
+        trig = esc.should_escalate(all_failed=True, made_progress=False)
+        if trig != EscalationTrigger.NONE and esc.escalations < 3:
+            branch = H.worktree_branch(instance_id, "C-esc", 0)
+            e = dispatch("code", H.agentic_prompt(instance, arm="C"), via=primary_agent, tools=True,
+                         worktree=branch, token_db=token_db, aimee_bin=aimee_bin,
+                         max_turns=budget.max_turns, timeout_ms=int(budget.max_wall_s * 1000))
+            e_in, _ = T.read_worker_tokens_by_jobs(token_db, [e.job_id])
+            esc.record_escalation(e_in)
+            epatch = H.scan_and_redact_secrets(H.extract_diff_from_text(e.result))[0]
+            if epatch.strip():
+                best = Candidate(worker_id=f"{primary_agent}@escalate", diff=epatch,
+                                 verify=VerifyEnum.NOT_RUN, turns=e.api_calls)
+
+    wall = R.WallClock(t0=t0, first_work=first_work, t1=t1)
+    escalation_dominated = is_escalation_dominated(esc.escalation_tokens, tok.input_uncached)
+    rec = R.build_arm_record(
+        instance_id, "C", primary_model, tokens=tok, worker_in=worker_in, worker_out=worker_out,
+        wall=wall, resolved=None, patch=best.diff if best else "",
+        base_commit=instance.get("base_commit", ""), repo=instance.get("repo", ""),
+        n_workers=len(picks), redactions=redactions, escalations=esc.escalations,
+        invalid=(best is None) or escalation_dominated)
+    rec.update({
+        "patch": best.diff if best else "",   # secret-redacted patch for the official grader
+        "n_candidates": len(candidates),
+        "selected_worker": best.worker_id if best else None,
+        "supervisor_job_id": sup.job_id,
+        "supervisor_decision": decision["action"],
+        "supervisor_tool_rows": sup_tool_rows,   # MUST be 0 (or -1 if db unreadable) — H1 gate
+        "escalation_tokens": esc.escalation_tokens,
+        "escalation_dominated": escalation_dominated,
+        "candidate_health_ok": len(candidates) >= -(-n // 2),  # >= ceil(n/2)
+    })
+    return rec
+
+
+def _fake_arm_c_record(instance: dict, primary_model: str, n: int) -> dict:
+    from benchmarks.coding import swebench_arm_runner as R
+    from benchmarks.coding import swebench_transport_verify as V
+    iid = instance["instance_id"]
+    rows = V._fake_rows("pass", primary_model, "glm-5.2")
+    tok = R.primary_token_totals(rows, primary_model)
+    wall = R.WallClock(t0=0.0, first_work=0.4, t1=8.0)
+    rec = R.build_arm_record(iid, "C", primary_model, tokens=tok, worker_in=1200, worker_out=5000,
+                             wall=wall, resolved=True, patch="diff --git a/x b/x\n+ok\n",
+                             base_commit=instance.get("base_commit", "0" * 40),
+                             repo=instance.get("repo", "x/y"), n_workers=n)
+    rec.update({"patch": "diff --git a/x b/x\n+ok\n", "n_candidates": n,
+                "selected_worker": "glm-5.2", "supervisor_job_id": 1, "supervisor_decision": "select",
+                "supervisor_tool_rows": 0, "escalation_tokens": 0, "escalation_dominated": False,
+                "candidate_health_ok": True})
+    return rec

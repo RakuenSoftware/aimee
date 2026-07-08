@@ -172,10 +172,70 @@ class TestToolAllowlist(unittest.TestCase):
         self.assertFalse(S.tool_allowed("exfiltrate"))
 
 
-class TestLiveStubHonesty(unittest.TestCase):
-    def test_run_arm_c_is_marked_stub(self):
-        with self.assertRaises(NotImplementedError):
-            S.run_arm_c_supervised({}, workers=["w1"], n=1)
+class TestSupervisorDecisionParsing(unittest.TestCase):
+    def test_valid_select(self):
+        d = S.parse_supervisor_decision('{"action":"select","worker_id":"glm","rationale":"clean"}')
+        self.assertEqual(d["action"], "select")
+        self.assertEqual(d["worker_id"], "glm")
+
+    def test_escalate(self):
+        self.assertEqual(S.parse_supervisor_decision('{"action":"escalate"}')["action"], "escalate")
+
+    def test_malformed_falls_back_to_deterministic(self):
+        d = S.parse_supervisor_decision("not json")
+        self.assertEqual(d["action"], "select")
+        self.assertIsNone(d["worker_id"])
+        self.assertEqual(d["rationale"], "parse_error")
+
+    def test_prompt_has_no_source_only_digests(self):
+        p = S.supervisor_prompt({"problem": "bug"}, "[w1 t0 done/PASS +1-0 edit]\ndiff...", ["w1"])
+        self.assertIn("NO access to the source", p)
+        self.assertIn("bug", p)
+
+
+class TestRunArmCLive(unittest.TestCase):
+    """Drive the real arm-C loop with an injected fake fleet: N concurrent worker dispatches, a
+    tools-OFF supervisor turn, deterministic selection, schema-valid record."""
+
+    def setUp(self):
+        # Force the LIVE path regardless of a global AIMEE_BENCH_FAKE_AGENT.
+        self._orig = S._FAKE
+        S._FAKE = False
+        self.addCleanup(lambda: setattr(S, "_FAKE", self._orig))
+
+    def test_arm_c_selects_and_supervises(self):
+        from benchmarks.coding import swebench_agentic_harness as H
+        from benchmarks.coding import swebench_live_transport as LT
+
+        calls = {"worker": 0, "supervisor": 0}
+
+        def fake_dispatch(role, prompt, **kw):
+            if role == "review":                       # the supervisor turn
+                calls["supervisor"] += 1
+                self.assertFalse(kw.get("tools"))      # Option A: supervisor tools OFF
+                return LT.DispatchOutcome(100, "done", '{"action":"select","worker_id":"w1"}',
+                                          "codex", "deleg-s-1-100", 2, 1)
+            calls["worker"] += 1                        # a worker agentic loop
+            self.assertTrue(kw.get("tools") and kw.get("worktree"))
+            wid = kw.get("via")
+            return LT.DispatchOutcome(10 + calls["worker"], "done",
+                                      f"```diff\ndiff --git a/{wid} b/{wid}\n+fix\n```",
+                                      wid, f"deleg-w-1-{10 + calls['worker']}", 3, 1)
+
+        inst = {"instance_id": "sympy__sympy-1", "repo": "sympy/sympy", "base_commit": "0" * 40,
+                "problem": "bug"}
+        rec = S.run_arm_c_supervised(inst, workers=["w1", "w2", "w3"], n=2,
+                                     allocator=H.EnvAllocator("/tmp/c"), budget=H.LoopBudget(),
+                                     primary_agent="codex", primary_model="gpt-5.5",
+                                     dispatch=fake_dispatch)
+        self.assertEqual(rec["arm"], "C")
+        self.assertEqual(calls["worker"], 2)           # n=2 workers dispatched
+        self.assertEqual(calls["supervisor"], 1)       # exactly one supervisor turn
+        self.assertEqual(rec["n_candidates"], 2)
+        self.assertIsNotNone(rec["selected_worker"])
+        self.assertEqual(rec["supervisor_decision"], "select")
+        self.assertFalse(rec["invalid"])
+        self.assertIsNone(rec["resolved"])             # graded later by S5
 
 
 if __name__ == "__main__":
