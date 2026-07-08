@@ -10,6 +10,7 @@ import WorkflowActions from './pages/WorkflowActions';
 import Agents from './pages/Agents';
 import Personas from './pages/Personas';
 import Roles from './pages/Roles';
+import Pipeline from './pages/Pipeline';
 import Settings from './pages/Settings';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
@@ -81,6 +82,7 @@ const NAV_ITEMS: Tab[] = [
   { label: 'Roles', icon: '🎬', route: '/roles' },
   { label: 'Projects', icon: '📁', route: '/projects' },
   { label: 'Graph', icon: '🕸️', route: '/graph' },
+  { label: 'Pipeline', icon: '🧩', route: '/pipeline' },
   { label: 'Editor', icon: '🖥️', route: '/editor' },
   { label: 'Settings', icon: '⚙️', route: '/settings' },
 ];
@@ -268,6 +270,7 @@ export default function App() {
                 <Route path="/delegates" element={<Navigate to="/agents" replace />} />
                 <Route path="/personas" element={<Personas />} />
                 <Route path="/roles" element={<Roles />} />
+                <Route path="/pipeline" element={<Pipeline />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />

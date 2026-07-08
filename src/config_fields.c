@@ -316,6 +316,35 @@ const config_field_t config_fields[] = {
     {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
     {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
     {NULL, 0, 0, 0, CFG_STRING},
+    /* Curator pipeline stage gates (kb.curator.*) — exposed so the GUI pipeline editor
+     * can toggle stages. Flat config_t fields; config_save reserializes them into the
+     * nested kb.curator.* YAML the KB reads on its next load. */
+    {"kb_curator_extract_docs_enabled", offsetof(config_t, kb_curator_extract_docs_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_extract_code_enabled", offsetof(config_t, kb_curator_extract_code_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_resolve_entities_enabled", offsetof(config_t, kb_curator_resolve_entities_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_index_narrative_enabled", offsetof(config_t, kb_curator_index_narrative_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_index_claims_enabled", offsetof(config_t, kb_curator_index_claims_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_detect_contradictions_enabled",
+     offsetof(config_t, kb_curator_detect_contradictions_enabled), sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_index_code_unit_enabled", offsetof(config_t, kb_curator_index_code_unit_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_link_artifacts_enabled", offsetof(config_t, kb_curator_link_artifacts_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_projection_graph_enabled", offsetof(config_t, kb_curator_projection_graph_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_synthesize_enabled", offsetof(config_t, kb_curator_synthesize_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_promote_entity_enabled", offsetof(config_t, kb_curator_promote_entity_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_curator_cross_repo_graph_enabled", offsetof(config_t, kb_curator_cross_repo_graph_enabled),
+     sizeof(int), 0, CFG_BOOL},
+    {"kb_evidence_embed_enabled", offsetof(config_t, kb_evidence_embed_enabled), sizeof(int), 0,
+     CFG_BOOL},
 };
 #pragma GCC diagnostic pop
 
