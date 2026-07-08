@@ -4,6 +4,7 @@
 #include "entity_edges.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "../headers/rel_types.h" /* correction_behavior + rel_type_is_functional (§4) */
 
 #include <stddef.h>
 #include <stdio.h>
@@ -230,6 +231,53 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
    gmtime_r(&now_t, &now_tm);
    char asserted_at[32];
    strftime(asserted_at, sizeof(asserted_at), "%Y-%m-%d %H:%M:%S", &now_tm);
+   /* §4 correction/supersede for contradictory objects. For a FUNCTIONAL
+    * (single-valued) relation, a new object contradicts any prior object for the
+    * same subject+relation; apply the relation's correction_behavior. The exact
+    * triple was already handled (bumped) above, so any prior row here asserts a
+    * DIFFERENT object. Multi-valued relations accumulate (no correction). */
+   if (rel_type_is_functional(relation))
+   {
+      const rel_type_def_t *rdef = rel_types_seed_lookup(relation);
+      correction_behavior_t corr = rdef ? rdef->correction_behavior : CORR_SUPERSEDE;
+      if (corr == CORR_IMMUTABLE)
+      {
+         static const char *chk =
+             "SELECT 1 FROM entity_edges WHERE source=?1 AND relation=?2 AND target<>?3"
+             " AND edge_class='semantic' AND superseded_at='' AND suppressed=0 LIMIT 1";
+         aimee_pg_stmt_t *cs = aimee_pg_prepare(conn, chk, err, sizeof(err));
+         if (cs)
+         {
+            aimee_pg_bind_text(cs, "?1", source);
+            aimee_pg_bind_text(cs, "?2", relation);
+            aimee_pg_bind_text(cs, "?3", target);
+            int have_prior = (aimee_pg_step(cs, err, sizeof(err)) == AIMEE_PG_ROW);
+            aimee_pg_finalize(cs);
+            if (have_prior)
+               return 0; /* immutable fact is fixed: drop the contradicting new object */
+         }
+      }
+      else
+      {
+         const char *upd =
+             (corr == CORR_HARD_DELETE)
+                 ? "UPDATE entity_edges SET suppressed=1, superseded_at=?4 WHERE source=?1"
+                   " AND relation=?2 AND target<>?3 AND edge_class='semantic'"
+                   " AND superseded_at='' AND suppressed=0"
+                 : "UPDATE entity_edges SET superseded_at=?4 WHERE source=?1 AND relation=?2"
+                   " AND target<>?3 AND edge_class='semantic' AND superseded_at='' AND suppressed=0";
+         aimee_pg_stmt_t *us = aimee_pg_prepare(conn, upd, err, sizeof(err));
+         if (us)
+         {
+            aimee_pg_bind_text(us, "?1", source);
+            aimee_pg_bind_text(us, "?2", relation);
+            aimee_pg_bind_text(us, "?3", target);
+            aimee_pg_bind_text(us, "?4", asserted_at);
+            (void)aimee_pg_step(us, err, sizeof(err));
+            aimee_pg_finalize(us);
+         }
+      }
+   }
 
    static const char *ins =
        "INSERT INTO entity_edges (source, relation, target, weight,"
