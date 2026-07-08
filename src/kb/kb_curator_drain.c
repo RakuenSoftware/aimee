@@ -27,6 +27,7 @@
 #include "kb_curator_link_artifacts.h"
 #include "kb_curator_synthesize.h"
 #include "kb_curator_promote.h"
+#include "kb_curator_pipeline.h"
 #include "kb_evidence_embed.h"
 #include "kb_memory_facts.h"
 #include "kb_learning_synth.h"
@@ -115,6 +116,82 @@ static int kb_cross_repo_meta_rebuild(const config_t *cfg)
        routes, bdeps, bsym);
    return 0;
 }
+
+/* Curator pipeline registry: the ordered stages the drain flows work through,
+ * replacing the old hardcoded if-chain that starved downstream stages behind the
+ * extract backlog. Each stage has a per-pass budget and a resource lane -- LLM
+ * (GPU) stages run one unit/pass; INDEX (CPU embed/SQL) stages drain their queue
+ * each pass so a freshly-extracted document's claims are indexed + contradiction-
+ * checked promptly. Data-driven so a GUI can toggle/reorder and per-lane workers
+ * can each drain one lane. */
+static int en_extract_docs(const config_t *c)
+{
+   return c->kb_curator_extract_docs_enabled;
+}
+static int en_extract_code(const config_t *c)
+{
+   return c->kb_curator_extract_code_enabled;
+}
+static int en_resolve_entities(const config_t *c)
+{
+   return c->kb_curator_resolve_entities_enabled;
+}
+static int en_index_narrative(const config_t *c)
+{
+   return c->kb_curator_index_narrative_enabled;
+}
+static int en_index_claims(const config_t *c)
+{
+   return c->kb_curator_index_claims_enabled;
+}
+static int en_detect_contradictions(const config_t *c)
+{
+   return c->kb_curator_detect_contradictions_enabled;
+}
+static int en_index_code_unit(const config_t *c)
+{
+   return c->kb_curator_index_code_unit_enabled;
+}
+static int en_link_artifacts(const config_t *c)
+{
+   return c->kb_curator_link_artifacts_enabled;
+}
+static int en_synthesize(const config_t *c)
+{
+   return c->kb_curator_synthesize_enabled;
+}
+static int en_promote_entity(const config_t *c)
+{
+   return c->kb_curator_promote_entity_enabled;
+}
+
+static void curator_set_status(const char *label)
+{
+   kb_background_set("curator", label);
+}
+
+static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
+    {"extract_docs", "extract docs", en_extract_docs, kb_curator_extract_one, 1,
+     KB_CURATOR_LANE_LLM},
+    {"extract_code", "extract code", en_extract_code, kb_curator_extract_code_unit_one, 1,
+     KB_CURATOR_LANE_LLM},
+    {"resolve_entities", "resolve entities", en_resolve_entities, kb_curator_resolve_entities_one,
+     1, KB_CURATOR_LANE_LLM},
+    {"index_narrative", "index narrative", en_index_narrative, kb_curator_index_narrative_one, 32,
+     KB_CURATOR_LANE_INDEX},
+    {"index_claims", "index claims", en_index_claims, kb_curator_index_claims_one, 64,
+     KB_CURATOR_LANE_INDEX},
+    {"detect_contradictions", "detect contradictions", en_detect_contradictions,
+     kb_curator_detect_contradictions_one, 1, KB_CURATOR_LANE_INDEX},
+    {"index_code_unit", "index code_unit", en_index_code_unit, kb_curator_index_code_unit_one, 32,
+     KB_CURATOR_LANE_INDEX},
+    {"link_artifacts", "link artifacts", en_link_artifacts, kb_curator_link_artifacts_one, 8,
+     KB_CURATOR_LANE_INDEX},
+    {"synthesize", "synthesize topic", en_synthesize, kb_curator_synthesize_one, 1,
+     KB_CURATOR_LANE_LLM},
+    {"promote_entity", "promote entity", en_promote_entity, kb_curator_promote_entity_one, 1,
+     KB_CURATOR_LANE_LLM},
+};
 
 static void *drain_thread_main(void *arg)
 {
@@ -384,68 +461,22 @@ static void *drain_thread_main(void *arg)
           * doesn't pin one past the stuck-lease ceiling (it's re-acquired lazily
           * by the next stage); cheap no-op when nothing is held. */
          db2_lease_release_idle();
-         int rc = 0;
-         if (cfg.kb_curator_extract_docs_enabled)
+         int r = kb_curator_pipeline_run_pass(CURATOR_STAGES,
+                                              sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]),
+                                              -1 /* all lanes */, &cfg, &opts, curator_set_status);
+         if (r < 0)
          {
-            kb_background_set("curator", "extract docs");
-            rc = kb_curator_extract_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_extract_code_enabled)
-         {
-            kb_background_set("curator", "extract code");
-            rc = kb_curator_extract_code_unit_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_resolve_entities_enabled)
-         {
-            kb_background_set("curator", "resolve entities");
-            rc = kb_curator_resolve_entities_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_index_narrative_enabled)
-         {
-            kb_background_set("curator", "index narrative");
-            rc = kb_curator_index_narrative_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_index_claims_enabled)
-         {
-            kb_background_set("curator", "index claims");
-            rc = kb_curator_index_claims_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_detect_contradictions_enabled)
-         {
-            kb_background_set("curator", "detect contradictions");
-            rc = kb_curator_detect_contradictions_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_index_code_unit_enabled)
-         {
-            kb_background_set("curator", "index code_unit");
-            rc = kb_curator_index_code_unit_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_link_artifacts_enabled)
-         {
-            kb_background_set("curator", "link artifacts");
-            rc = kb_curator_link_artifacts_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_synthesize_enabled)
-         {
-            kb_background_set("curator", "synthesize topic");
-            rc = kb_curator_synthesize_one(&opts);
-         }
-         if (rc == 0 && cfg.kb_curator_promote_entity_enabled)
-         {
-            kb_background_set("curator", "promote entity");
-            rc = kb_curator_promote_entity_one(&opts);
-         }
-
-         if (rc == 1)
-         {
-            drained++; /* job processed — drain the next one without re-sweeping */
-            continue;
-         }
-         if (rc < 0)
             /* Stage error: stop the batch; the top-of-loop sleep backs off before
              * the next poll so a persistently-failing stage can't spin hot. */
-            aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error; backing off");
-         break; /* rc==0 (all queues empty) or rc<0 (error): end this poll's batch */
+            aimee_log(LOG_WARN, "kb.curator.drain", "curator stage returned error; backing off");
+            break;
+         }
+         if (r == 1)
+         {
+            drained++; /* pass did work -- run another before re-sweeping */
+            continue;
+         }
+         break; /* all stage queues empty */
       }
       if (drained > 0)
          aimee_log(LOG_DEBUG, "kb.curator.drain", "drained %d job(s) this poll", drained);
