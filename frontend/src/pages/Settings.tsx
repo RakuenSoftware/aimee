@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Panel, Badge } from "@rakuensoftware/smoothgui";
 import { FIELD_HELP, SECTION_HELP, RESTART_KEYS } from "./settingsHelp";
 import { resetAll as resetTutorials } from "../help/tutorialState";
+import { setDismissed as setSetupDismissed, requestOpenWizard } from "../setup/setupState";
 
 /* Settings page: every typed Aimee config option (the config_fields allowlist,
  * e.g. typed_facts_enabled, kb_pdf_*, memory_*, autonomous). Values come from
@@ -157,6 +158,16 @@ export default function Settings() {
           title="Show the per-tab tutorial overlays again"
         >
           Replay tab tutorials
+        </button>
+        <button
+          onClick={() => {
+            setSetupDismissed(false);
+            requestOpenWizard();
+          }}
+          style={btn}
+          title="Re-open the first-run setup wizard"
+        >
+          Re-run setup
         </button>
         {status && (
           <span
