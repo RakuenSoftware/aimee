@@ -416,6 +416,7 @@ Focused references:
 | [Structured PDF](docs/STRUCTURED_PDF.md) | Coordinate anchored PDF evidence: text and geometry citations, table cells, visual crops, and OCR. The capability flags, retrieval surface, and access model. |
 | [Code intelligence](docs/CODE_INTELLIGENCE.md) | The symbol and call graph, cross-repo dependencies, blast radius, graph audits, and how the AI queries it |
 | [Setting Up Delegates](docs/DELEGATES.md) | Configure delegate agents for task offloading |
+| [Ensembles](docs/ENSEMBLE.md) | A panel of agents: the aggregate (Mixture-of-Agents), roundtable, and templated-session modes, one `aimee ensemble` verb, and how they compose |
 | [Autonomous Development](docs/AUTONOMOUS_DEVELOPMENT.md) | Hand aimee a proposal and it builds the change end to end via the workflow engine |
 | [Personas](docs/personas.md) | Built in and custom agent identities, delegate policy, and how personas staff reviews |
 | [Workflows](docs/WORKFLOWS.md) | The composable dev lifecycle workflow engine, block catalog, and authoring |
