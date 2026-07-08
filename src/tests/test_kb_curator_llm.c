@@ -57,7 +57,7 @@ static void test_provider_path(void)
    char err[256];
    char *resp =
        kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "be-a-curator", "{\"topic\":\"t\"}",
-                          "" /* no fallback */, 16384, err, sizeof(err));
+                          NULL, "" /* no fallback */, 16384, err, sizeof(err));
    assert(resp != NULL);
    assert(strcmp(resp, "{\"synthesis\":\"ok\"}") == 0);
    assert(strcmp(g_seen_url, "http://big/v1/chat/completions") == 0);
@@ -81,8 +81,8 @@ static void test_provider_error(void)
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
 
    char err[256] = "";
-   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", "", 16384, err,
-                                   sizeof(err));
+   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384,
+                                   err, sizeof(err));
    assert(resp == NULL);
    assert(err[0] != '\0');
    mock_agent_http_reset();
@@ -102,8 +102,8 @@ static void test_idle_when_unconfigured(void)
    snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "small");
 
    char err[256] = "";
-   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", "", 16384, err,
-                                   sizeof(err));
+   char *resp = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, "sys", "{}", NULL, "", 16384,
+                                   err, sizeof(err));
    assert(resp == NULL);
    assert(err[0] != '\0'); /* "no curator provider or command configured" */
    printf("kb_curator_llm: idle when tier unconfigured (no tier-A fallback) ok\n");
