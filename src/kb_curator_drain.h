@@ -5,8 +5,10 @@
 
 typedef struct
 {
-   pthread_t thread;
+   pthread_t thread;       /* LLM lane (GPU): extract/resolve/synthesize + sweeps */
+   pthread_t index_thread; /* INDEX lane (CPU): embed/index + contradiction SQL */
    int active;
+   int index_active;
    volatile int stop;
 } kb_curator_drain_ctx_t;
 

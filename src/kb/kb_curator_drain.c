@@ -48,6 +48,9 @@
 #include <unistd.h>
 
 #define DRAIN_POLL_SECS 5
+/* Index lane (CPU) idle backoff. It loops hot while a backlog remains, so this only
+ * paces polling once its queues are empty. */
+#define INDEX_LANE_POLL_SECS 2
 /* Max synthesis ops processed per poll — each is an LLM round-trip. */
 #define SYNTH_DRAIN_BATCH 4
 /* Max curator jobs (extract/synth/…) drained back-to-back per poll. The per-poll
@@ -168,6 +171,11 @@ static int en_promote_entity(const config_t *c)
 static void curator_set_status(const char *label)
 {
    kb_background_set("curator", label);
+}
+
+static void curator_index_set_status(const char *label)
+{
+   kb_background_set("curator.index", label);
 }
 
 static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
@@ -461,9 +469,12 @@ static void *drain_thread_main(void *arg)
           * doesn't pin one past the stuck-lease ceiling (it's re-acquired lazily
           * by the next stage); cheap no-op when nothing is held. */
          db2_lease_release_idle();
+         /* This (main) worker drives the LLM lane; the CPU index lane runs on its own
+          * thread (kb_curator_index_lane_main) so indexing does not wait behind each
+          * multi-second extraction. */
          int r = kb_curator_pipeline_run_pass(CURATOR_STAGES,
                                               sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]),
-                                              -1 /* all lanes */, &cfg, &opts, curator_set_status);
+                                              KB_CURATOR_LANE_LLM, &cfg, &opts, curator_set_status);
          if (r < 0)
          {
             /* Stage error: stop the batch; the top-of-loop sleep backs off before
@@ -484,6 +495,46 @@ static void *drain_thread_main(void *arg)
    }
 
    kb_background_clear("curator");
+   return NULL;
+}
+
+static void *kb_curator_index_lane_main(void *arg)
+{
+   kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
+   /* CPU/index lane: embed claims/narrative/code + contradiction SQL, on its own
+    * thread so it drains concurrently with the GPU/LLM lane instead of waiting behind
+    * each multi-second extraction. Loops hot while a backlog remains; backs off a
+    * short interval when its queues are empty. */
+   while (!ctx->stop)
+   {
+      config_t cfg;
+      config_load(&cfg);
+      kb_curator_extract_opts_t opts;
+      memset(&opts, 0, sizeof(opts));
+      snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
+               cfg.kb_curator_extract_command);
+      opts.max_tokens =
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+
+      int r = 0, drained = 0;
+      while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
+      {
+         db2_lease_release_idle();
+         r = kb_curator_pipeline_run_pass(
+             CURATOR_STAGES, sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]),
+             KB_CURATOR_LANE_INDEX, &cfg, &opts, curator_index_set_status);
+         if (r != 1)
+            break; /* 0 = INDEX queues empty; <0 = a stage errored */
+         drained++;
+      }
+      kb_background_clear("curator.index");
+      db2_lease_release_idle();
+      if (ctx->stop)
+         break;
+      if (r != 1) /* idle or error: back off; a hit batch cap loops hot */
+         sleep(INDEX_LANE_POLL_SECS);
+   }
    return NULL;
 }
 
@@ -523,14 +574,31 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
    {
       aimee_log(LOG_WARN, "kb.curator.drain", "failed to start drain thread");
    }
+   if (pthread_create(&ctx->index_thread, NULL, kb_curator_index_lane_main, ctx) == 0)
+   {
+      ctx->index_active = 1;
+      aimee_log(LOG_INFO, "kb.curator.drain", "index-lane thread started");
+   }
+   else
+   {
+      aimee_log(LOG_WARN, "kb.curator.drain", "failed to start index-lane thread");
+   }
 }
 
 void kb_curator_drain_shutdown(kb_curator_drain_ctx_t *ctx)
 {
-   if (!ctx || !ctx->active)
+   if (!ctx || (!ctx->active && !ctx->index_active))
       return;
    ctx->stop = 1;
-   pthread_join(ctx->thread, NULL);
-   ctx->active = 0;
-   aimee_log(LOG_DEBUG, "kb.curator.drain", "drain thread stopped");
+   if (ctx->active)
+   {
+      pthread_join(ctx->thread, NULL);
+      ctx->active = 0;
+   }
+   if (ctx->index_active)
+   {
+      pthread_join(ctx->index_thread, NULL);
+      ctx->index_active = 0;
+   }
+   aimee_log(LOG_DEBUG, "kb.curator.drain", "drain threads stopped");
 }
