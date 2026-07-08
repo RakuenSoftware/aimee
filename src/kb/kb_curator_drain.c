@@ -278,13 +278,6 @@ static void *drain_thread_main(void *arg)
             int b = kb_doc_embed_backfill(projects[i].name, cfg.embedding_command, 200);
             if (b > 0)
                total += b;
-            /* Backfill: queue extract_doc curation for docs that entered
-             * kb_documents via this drain (kb_doc_refresh) rather than the
-             * ingest-route hook (kb_http) -- otherwise drain-ingested docs are
-             * never curated (no claims/narrative). Idempotent: dedups against
-             * existing extract_doc jobs, so it queues the backlog once then idles. */
-            if (cfg.kb_curator_extract_docs_enabled)
-               (void)kb_curator_queue_docs_for_project(projects[i].name);
          }
          if (total > 0)
             aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)",
@@ -300,6 +293,11 @@ static void *drain_thread_main(void *arg)
                       "dim-change re-embed reconciled (doc corpus); cleared maintenance");
          }
       }
+
+      /* Backfill: queue extract_doc curation for docs that entered kb_documents
+       * via the drain (kb_doc_refresh) rather than the ingest-route hook -- else
+       * drain-ingested docs are never curated. Idempotent, self-gated. */
+      kb_curator_queue_docs_all_projects(cfg.kb_curator_extract_docs_enabled);
 
       /* Code projection-graph drain — publish a fresh typed-edge generation per
        * CHANGED project (content-addressed: an unchanged project is skipped), so

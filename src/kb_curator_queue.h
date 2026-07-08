@@ -8,6 +8,12 @@
  * Returns count of rows enqueued, -1 on fatal error. */
 int kb_curator_queue_docs_for_project(const char *project);
 
+/* Backfill sweep: enqueue extract_doc jobs for EVERY indexed project's un-jobbed
+ * docs. The curator drain calls this so docs ingested via the drain
+ * (kb_doc_refresh) -- not only the ingest route -- get curated. No-op when
+ * extract_docs_enabled is 0; per-project dedup makes it idempotent. */
+void kb_curator_queue_docs_all_projects(int extract_docs_enabled);
+
 /* Queue one extract_code_unit job when the curator code gate is enabled. */
 int kb_curator_queue_code_unit(const char *project, const char *file_path, const char *symbol,
                                int line);
