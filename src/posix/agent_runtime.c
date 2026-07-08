@@ -36,22 +36,6 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include "write_enforce.h"
-
-static int is_write_tool_name(const char *name)
-{
-   if (!name || !name[0])
-      return 0;
-   char lower[64];
-   size_t n = strlen(name);
-   if (n >= sizeof(lower))
-      n = sizeof(lower) - 1;
-   for (size_t k = 0; k < n; k++)
-      lower[k] = (char)tolower((unsigned char)name[k]);
-   lower[n] = '\0';
-   return strstr(lower, "write") != NULL || strstr(lower, "edit") != NULL ||
-          strcmp(lower, "mutate") == 0;
-}
 
 static void finish_final_tool_violation(agent_result_t *out, const agent_t *agent,
                                         const char *attempted_tool, const char *partial_text,
@@ -676,8 +660,7 @@ native_provider_http:
     * hints across turns. Honored only when fold_recall_enabled. */
    fold_recall_index_t agent_fold_recall;
    fold_recall_index_init(&agent_fold_recall);
-   int api_call_count = 0;    /* cumulative provider API calls; published via heartbeat */
-   int write_calls_total = 0; /* cumulative write/edit tool calls; used by write_enforce */
+   int api_call_count = 0; /* cumulative provider API calls; published via heartbeat */
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
    int degenerate_retry_count = 0;
@@ -1548,8 +1531,6 @@ native_provider_http:
                db1_agent_job_heartbeat_ext(dj, "", api_call_count);
          }
          total_calls++;
-         if (is_write_tool_name(parsed.calls[i].name))
-            write_calls_total++;
 
          /* Track consecutive tool errors for mw_stall_detect */
          if (result_str && strncmp(result_str, "error", 5) == 0)
@@ -1664,84 +1645,6 @@ native_provider_http:
          /* Adaptive refresh: after many tool calls, refresh more often */
          if (total_calls > 10 && refresh_interval > 3)
             refresh_interval = 3;
-      }
-
-      /* write_enforce: for write roles, ensure the loop makes visible
-       * progress (a Write or Edit) within the budget. The dispatcher sets
-       * agent->write_enforce based on the delegated role; read-only roles may
-       * legitimately spend the whole run inspecting and reporting. */
-      if (agent->write_enforce && write_calls_total == 0)
-      {
-         if (turn == WRITE_ENFORCE_WARN_TURN)
-         {
-            LOG_WARN("agent",
-                     "write_enforce: turn %d complete, no write/edit calls yet — "
-                     "injecting correction",
-                     turn + 1);
-            cJSON *correction = cJSON_CreateObject();
-            cJSON_AddStringToObject(correction, "role", "user");
-            cJSON_AddStringToObject(correction, "content",
-                                    "You have not written or edited any files yet. "
-                                    "Your next action must be an edit_file or write_file tool "
-                                    "call. For a small change to an existing file, call edit_file "
-                                    "with old_string/new_string — you do not need to reproduce the "
-                                    "whole file. To create a file or rewrite it wholesale, call "
-                                    "write_file. "
-                                    "If your task prompt contains anchor text or exact code "
-                                    "snippets, treat them as current source authority unless a "
-                                    "read_file result from the same delegate worktree proves they "
-                                    "changed later. Call edit_file now.");
-            cJSON_AddItemToArray(messages, correction);
-         }
-         else if (turn == WRITE_ENFORCE_STRONG_WARN_TURN)
-         {
-            LOG_WARN("agent",
-                     "[write-stall] turn %d complete, no write/edit calls — "
-                     "injecting strong warning",
-                     turn + 1);
-            cJSON *correction = cJSON_CreateObject();
-            cJSON_AddStringToObject(correction, "role", "user");
-            cJSON_AddStringToObject(correction, "content",
-                                    "[WRITE ENFORCEMENT] You have now spent 10 turns without "
-                                    "writing any file. You MUST call edit_file or write_file on "
-                                    "your very next tool call or this delegation will be aborted. "
-                                    "For a small change to an existing file, call edit_file with "
-                                    "old_string/new_string now. "
-                                    "If your prompt contains anchor text (the old_string), "
-                                    "use it as current source authority unless a same-worktree "
-                                    "read_file result proves it changed later. Call edit_file or "
-                                    "write_file NOW.");
-            cJSON_AddItemToArray(messages, correction);
-         }
-         else if (turn == WRITE_ENFORCE_FINAL_WARN_TURN)
-         {
-            LOG_WARN("agent",
-                     "[write-stall] turn %d complete, no write/edit calls — "
-                     "FINAL warning before abort next turn",
-                     turn + 1);
-            cJSON *correction = cJSON_CreateObject();
-            cJSON_AddStringToObject(correction, "role", "user");
-            cJSON_AddStringToObject(correction, "content",
-                                    "[WRITE ENFORCEMENT — FINAL WARNING] You have one turn left. "
-                                    "If your next action is not an edit_file or write_file tool "
-                                    "call, this delegation will be aborted with the work you have "
-                                    "produced so far. Stop reading. Edit the file now with "
-                                    "edit_file (old_string/new_string).");
-            cJSON_AddItemToArray(messages, correction);
-         }
-         else if (turn == WRITE_ENFORCE_FAIL_TURN)
-         {
-            LOG_WARN("agent", "write_enforce: turn %d complete, no write/edit calls — aborting",
-                     turn + 1);
-            snprintf(out->error, sizeof(out->error),
-                     "write_enforce: %d turns elapsed with no Write or Edit tool calls; "
-                     "delegate appears stuck in discovery. Use --files <path> for file-scoped "
-                     "edits or --context <symbols> for symbol-scoped edits to pre-load relevant "
-                     "code before spawning.",
-                     turn + 1);
-            agent_free_parsed_response(&parsed);
-            break;
-         }
       }
 
       agent_free_parsed_response(&parsed);

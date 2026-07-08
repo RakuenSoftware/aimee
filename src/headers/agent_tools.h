@@ -91,6 +91,14 @@ const char *agent_tools_parent_write_guard_root(void);
 const char *agent_tools_parent_write_guard_write_root(void);
 int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd);
 
+/* Read-only-delegate gate (backend-agnostic write capability). A delegate that
+ * is not write-capable (see the write_capable field, derived once at dispatch
+ * from role + write policy) is blocked from ALL file writes on the native tool
+ * backend — the same read-only posture the codex sandbox enforces for the CLI
+ * backend. Set once per delegation at the write-guard seam; reset by _clear. */
+void agent_tools_write_capable_set(int capable);
+int agent_tools_readonly_delegate_blocks(void);
+
 /* Session-isolation backstop (Layer 2, opt-in via require_session_worktree):
  * returns 1 to BLOCK a server-side agent write whose normalized target is not
  * inside an aimee-managed worktree, else 0. No-op (returns 0) unless the

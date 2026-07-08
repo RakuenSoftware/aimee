@@ -1198,6 +1198,24 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strcmp(result, "allowed") == 0);
    free(result);
 
+   /* Read-only-delegate gate (write_capable): a delegate that is not
+    * write-capable is refused ALL writes — even inside its own worktree, where
+    * the parent-write guard would otherwise permit them. Mirrors the codex
+    * read-only sandbox for the native tool backend. */
+   agent_tools_write_capable_set(0);
+   assert(agent_tools_readonly_delegate_blocks() == 1);
+   result = tool_write_file(worktree_file, "blocked-readonly");
+   assert(result != NULL);
+   assert(strstr(result, "read-only delegate") != NULL);
+   free(result);
+   /* Restoring write capability re-permits the same worktree write. */
+   agent_tools_write_capable_set(1);
+   assert(agent_tools_readonly_delegate_blocks() == 0);
+   result = tool_write_file(worktree_file, "allowed");
+   assert(result != NULL);
+   assert(strstr(result, "error:") == NULL);
+   free(result);
+
    run_cmd_set_cwd(worktree);
    result = tool_bash("pwd", 5000);
    run_cmd_set_cwd(NULL);

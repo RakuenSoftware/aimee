@@ -1266,6 +1266,11 @@ void delegate_worker(void *arg)
     * per-model/provider limiter. */
    compute_ctx_release_budget(cctx);
 
+   /* Single-sourced read-only gate: a non-write-capable delegate is refused ALL
+    * native-tool file writes, mirroring the codex read-only sandbox. Set
+    * UNCONDITIONALLY (before the cwd-dependent parent-write guard) so a pooled
+    * worker thread never inherits a prior delegate's capability. */
+   agent_tools_write_capable_set(delegate_allows_writes);
    if (cwd[0])
    {
       const char *write_root = delegate_worktree_path[0] ? delegate_worktree_path : NULL;
@@ -1373,6 +1378,9 @@ void delegate_worker(void *arg)
       }
    }
    platform_setenv("AIMEE_ACTIVE_TOOLSET", saved_toolset_buf);
+   /* Reset the read-only gate unconditionally so the next user of this pooled
+    * worker thread is not left in a prior delegate's (possibly read-only) state. */
+   agent_tools_write_capable_set(1);
    if (parent_write_guard_active)
       agent_tools_parent_write_guard_clear();
    /* Server-initiated delegates review their own worktree (target is not

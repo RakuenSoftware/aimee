@@ -229,6 +229,10 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
       return safe_strdup("error: missing or empty 'old_string' parameter");
    if (!new_string)
       new_string = "";
+   /* Fail fast for a read-only delegate: the edit's write-back routes through
+    * the gated tool_write_file, but reject up front so we don't read/process. */
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
 
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
@@ -456,7 +460,11 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
    {
       const char *new_str = (nw && cJSON_IsString(nw)) ? nw->valuestring : "";
       int replace_all = (ra && cJSON_IsBool(ra)) ? cJSON_IsTrue(ra) : 0;
-      if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
+      if (agent_tools_readonly_delegate_blocks())
+      {
+         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+      }
+      else if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
       {
          result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
       }
@@ -495,7 +503,11 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
    else
    {
       const char *content_str = c && cJSON_IsString(c) ? c->valuestring : "";
-      if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
+      if (agent_tools_readonly_delegate_blocks())
+      {
+         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+      }
+      else if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
       {
          result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
       }

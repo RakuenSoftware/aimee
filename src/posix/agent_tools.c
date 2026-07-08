@@ -1227,6 +1227,8 @@ char *tool_write_file(const char *path, const char *content)
    const char *err = validate_file_path(actual_path, resolved, sizeof(resolved));
    if (err)
       return safe_strdup(err);
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
    if (agent_tools_parent_write_guard_blocks(actual_path, NULL))
       return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
 
