@@ -386,6 +386,58 @@ cJSON *kb_curator_stages_json(void)
    return arr;
 }
 
+/* Built-in curator presets (v1): named enabled-sets of stage config keys. The GUI
+ * applies a preset by enabling the listed keys and disabling the rest. Backend-
+ * defined so they stay in step with the stage set (single source of truth); the
+ * user-defined/saved presets the product owner wants are a planned follow-up that
+ * will extend this list from stored config rather than replace it. Returns a fresh
+ * cJSON array [{name,description,enabled:[config_key,...]}]; caller owns it. */
+cJSON *kb_curator_presets_json(void)
+{
+   static const struct
+   {
+      const char *name;
+      const char *desc;
+      const char *keys; /* comma-separated config keys enabled by this preset */
+   } PRESETS[] = {
+       {"full", "Every curated stage — docs, code, contradictions, and graph.",
+        "kb_curator_extract_docs_enabled,kb_curator_extract_code_enabled,"
+        "kb_curator_resolve_entities_enabled,kb_curator_index_narrative_enabled,"
+        "kb_curator_index_claims_enabled,kb_curator_detect_contradictions_enabled,"
+        "kb_curator_index_code_unit_enabled,kb_curator_link_artifacts_enabled,"
+        "kb_curator_synthesize_enabled,kb_curator_promote_entity_enabled,"
+        "kb_evidence_embed_enabled,kb_curator_projection_graph_enabled,"
+        "kb_curator_cross_repo_graph_enabled"},
+       {"docs-only",
+        "Document knowledge: extract, resolve, index, detect contradictions, synthesize.",
+        "kb_curator_extract_docs_enabled,kb_curator_resolve_entities_enabled,"
+        "kb_curator_index_narrative_enabled,kb_curator_index_claims_enabled,"
+        "kb_curator_detect_contradictions_enabled,kb_curator_synthesize_enabled,"
+        "kb_curator_promote_entity_enabled,kb_evidence_embed_enabled"},
+       {"code-only",
+        "Code knowledge: extract code units, index, link, projection + cross-repo graph.",
+        "kb_curator_extract_code_enabled,kb_curator_index_code_unit_enabled,"
+        "kb_curator_link_artifacts_enabled,kb_curator_projection_graph_enabled,"
+        "kb_curator_cross_repo_graph_enabled"},
+   };
+   cJSON *arr = cJSON_CreateArray();
+   for (size_t i = 0; i < sizeof(PRESETS) / sizeof(PRESETS[0]); i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "name", PRESETS[i].name);
+      cJSON_AddStringToObject(o, "description", PRESETS[i].desc);
+      cJSON *keys = cJSON_CreateArray();
+      char buf[1024];
+      snprintf(buf, sizeof(buf), "%s", PRESETS[i].keys);
+      char *save = NULL;
+      for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save))
+         cJSON_AddItemToArray(keys, cJSON_CreateString(tok));
+      cJSON_AddItemToObject(o, "enabled", keys);
+      cJSON_AddItemToArray(arr, o);
+   }
+   return arr;
+}
+
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;

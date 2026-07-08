@@ -27,4 +27,8 @@ void kb_curator_drain_shutdown(kb_curator_drain_ctx_t *ctx);
 struct cJSON;
 struct cJSON *kb_curator_stages_json(void);
 
+/* Built-in curator presets (named enabled-sets of stage config keys) for the
+ * Pipeline GUI. Returns a fresh cJSON array the caller owns (cJSON_Delete). */
+struct cJSON *kb_curator_presets_json(void);
+
 #endif /* DEC_KB_CURATOR_DRAIN_H */
