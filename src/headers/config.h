@@ -3,6 +3,9 @@
 
 #include "sandbox.h"
 #include "prompts.h" /* aimee_mode_t */
+#include <stdint.h>  /* int64_t (used below) — keep config.h self-contained so any
+                      * includer (e.g. cli_remote.c on MinGW) compiles regardless of
+                      * include order. */
 #include <stdlib.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <unistd.h>

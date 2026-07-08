@@ -4,6 +4,40 @@
 #include <string.h>
 #include "delegate_role.h"
 #include "agent_types.h"
+#include <stdlib.h>   /* mkdtemp */
+#include <sys/stat.h> /* mkdir */
+
+/* role_template_max_turns() (reached via delegate_default_max_turns_for_role) reads
+ * <config_default_dir()>/role_templates/<canonical-role>.md and parses `max_turns:`
+ * from its frontmatter, returning -1 when the file is absent. Stub config_default_dir
+ * at a temp dir and lay down the templates the inspection-policy assertions expect
+ * (note: the "test" role canonicalizes to "validate"). */
+static char g_roles_dir[256];
+const char *config_default_dir(void)
+{
+   return g_roles_dir;
+}
+static void write_role_template(const char *canonical, int max_turns)
+{
+   char path[512];
+   snprintf(path, sizeof(path), "%s/role_templates/%s.md", g_roles_dir, canonical);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fprintf(f, "---\nmax_turns: %d\n---\nbody\n", max_turns);
+   fclose(f);
+}
+static void setup_role_templates(void)
+{
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-roles-XXXXXX");
+   assert(mkdtemp(g_roles_dir));
+   char sub[512];
+   snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
+   assert(mkdir(sub, 0700) == 0);
+   write_role_template("review", 20);
+   write_role_template("validate", 12); /* "test" -> validate */
+   write_role_template("diagnose", 16);
+   /* no code.md -> role_template_max_turns returns -1 for "code" */
+}
 
 static void test_canonical_roles_unchanged(void)
 {
@@ -234,6 +268,7 @@ static void test_auto_tools_policy(void)
 int main(void)
 {
    printf("test_delegate_role\n");
+   setup_role_templates();
    test_canonical_roles_unchanged();
    test_implement_maps_to_code();
    test_build_maps_to_code();

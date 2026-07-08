@@ -59,7 +59,7 @@
  * active once it has recurred at least this many times (default; operator override
  * kb.typed_facts.promote_threshold). BATCH bounds promotions per poll. */
 #define KB_ONTO_PROMOTE_DEFAULT_THRESHOLD 3
-#define KB_ONTO_PROMOTE_BATCH 32
+#define KB_ONTO_PROMOTE_BATCH             32
 
 /* Rebuild the corpus-derived cross-repo precision metadata (precision-hardening
  * H0/H1): the H0c repo-identity index, the H0d inter-repo structural-route
@@ -225,8 +225,8 @@ static void *drain_thread_main(void *arg)
                   continue;
                if (db2_ontology_approve(cands[i]) == 0)
                   aimee_log(LOG_INFO, "kb.ontology.promote",
-                            "auto-promoted relation '%s' to active (>= %d observations)",
-                            cands[i], thr);
+                            "auto-promoted relation '%s' to active (>= %d observations)", cands[i],
+                            thr);
             }
          }
       }

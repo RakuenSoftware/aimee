@@ -26,6 +26,14 @@ char *kb_client_memory_facts(const char *query)
    (void)query;
    return NULL;
 }
+
+/* Typed-facts gate stub: off, so the builder's facts path stays inert here
+ * (kb_client_memory_facts above already returns NULL). ingress_preinject.c gained
+ * this call with the typed_facts feature; the test link needs the symbol. */
+int kb_client_typed_facts_enabled(void)
+{
+   return 0;
+}
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
    (void)query;
