@@ -17,9 +17,11 @@ human approval gates.
 > scheduler drives it server-side. See
 > [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md). The chosen `workflow` is
 > authoritative, so **any** saved workflow starts this way, not only `build`.
-> What's still missing is a trigger *outside* the proposal path: no
-> `aimee workflow run` command and no Run button on **Edit Workflows** to start a
-> saved workflow without submitting a proposal. See
+> You can start a run from the CLI with `aimee workflow run <name> --proposal
+> <file>` (or `--message`, or `-` for stdin) and watch it with `aimee workflow
+> status <id> --watch`; agents can start one over MCP with the `workflow_run`
+> tool. Both go through the same capped/audited intake as `POST /v1/dev/submit`,
+> so a proposal is still required (the run is framed as *propose → … → PR*). See
 > [Limitations](#current-limitations).
 
 ## Mental model
@@ -239,14 +241,15 @@ the API):
 
 These are real today and worth knowing before you lean on workflows:
 
-1. **Runs start only from the proposal-submit path.** `POST /v1/dev/submit` (the
-   **Workflow Actions** tab) resolves the workflow and starts a run through the
-   scheduler (see [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). The
-   `workflow` field is authoritative, so **any** saved workflow starts this way, not
-   just `build` — the tab's picker is populated from every saved definition
-   (`GET /api/workflow/defs`). What's missing is a trigger *outside* that path: no
-   `aimee workflow run <name>` command and no Run button on the **Edit Workflows**
-   page, and every run is still framed as a proposal (`proposal_md` is required).
+1. **Every run is still framed as a proposal.** Runs start through the capped,
+   audited intake behind `POST /v1/dev/submit` (see
+   [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). The `workflow` field is
+   authoritative, so **any** saved workflow starts this way, not just `build`.
+   That intake is now reachable three ways — the **Workflow Actions** tab, the
+   `aimee workflow run <name>` CLI command, and the `workflow_run` MCP tool for
+   agents — but all of them require a `proposal_md`: there is still no way to
+   start a workflow whose entry node isn't `author.proposal` without supplying
+   proposal text. (There is still no Run button on the **Edit Workflows** page.)
 2. **Run-in-a-specific-project isn't wired.** A work-item has a `repo` field, but
    the per-step blocks resolve their working directory from
    `$AIMEE_WORKFLOW_REPO`/cwd rather than the work-item's `repo`, so binding a run

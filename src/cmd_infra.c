@@ -776,16 +776,16 @@ static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "\n%d session(s)\n", count);
 
    {
-      workflow_session_info_t *rows = NULL;
+      ensemble_info_t *rows = NULL;
       int wf_count = 0;
       char err[256] = "";
 
-      if (db1_workflow_session_list(&rows, &wf_count, err, sizeof(err)) == 0 && rows)
+      if (db1_ensemble_list(&rows, &wf_count, err, sizeof(err)) == 0 && rows)
       {
          for (int i = 0; i < wf_count && i < 20; i++)
          {
             if (i == 0)
-               printf("\nworkflow sessions:\n");
+               printf("\nensembles:\n");
             printf("  #%d  %-8s %-18s channel=%s phase=%d turn=%d expected=%s\n", rows[i].id,
                    rows[i].status, rows[i].template_name, rows[i].channel,
                    rows[i].current_phase + 1, rows[i].current_turn + 1, rows[i].expected_agent);
@@ -867,10 +867,10 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
 static const subcmd_t session_subcmds[] = {
     {"list", "List active sessions", session_subcmd_list},
     {"clean", "Remove stale sessions and their worktrees [--dry-run]", session_subcmd_clean},
-    {"start", "Start a templated multi-agent workflow session", session_subcmd_start},
-    {"status", "Show templated workflow session status", session_subcmd_status},
-    {"pause", "Pause a templated workflow session", session_subcmd_pause},
-    {"advance", "Advance a workflow session with a speaker/message", session_subcmd_advance},
+    {"start", "Alias of `ensemble start` (start a multi-agent ensemble)", session_subcmd_start},
+    {"status", "Alias of `ensemble status`", session_subcmd_status},
+    {"pause", "Alias of `ensemble pause`", session_subcmd_pause},
+    {"advance", "Alias of `ensemble advance`", session_subcmd_advance},
     {"show", "Show session details and delegation timeline", session_subcmd_show},
     {"search", "Search session history by keyword", session_subcmd_search},
     {"stats", "Show session and delegation statistics [--since DATE]", session_subcmd_stats},

@@ -16,6 +16,20 @@ extern "C"
 {
 #endif
 
+   struct cJSON;
+   /* Shared autonomous-run intake, used by POST /v1/dev/submit and the
+    * `workflow_run` MCP tool so both go through one capped/audited path.
+    * Resolves the workflow (explicit `workflow_opt` wins; NULL ⇒ autoroute or
+    * "build"), enforces per-principal concurrency+rate caps keyed on
+    * `submitter`, creates+binds+audits the run atomically, persists the proposal
+    * artifact, sets the per-run cost cap, and notifies the scheduler. On success
+    * returns 200 and (when `out` is non-NULL) sets *out to a
+    * {work_item_id, workflow, state} object the caller owns. On failure returns
+    * an HTTP-style status (400/401/429/500/503) and fills `err`; *out stays NULL.
+    * `proposal_md` is required; `repo` may be "" ; `submitter` must be non-empty. */
+   int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char *repo,
+                      const char *submitter, struct cJSON **out, char *err, size_t errlen);
+
    /* Start the HTTP listener(s), spawning a detached accept-loop thread that
     * polls all bound sockets. The UDS at uds_path (unlinked first;
     * filesystem-permission auth, no token) is always bound. When tcp_port > 0

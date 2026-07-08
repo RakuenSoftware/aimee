@@ -332,7 +332,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-lsp \
                $(TESTPREFIX)/unit-test-memory-retrieval-eval \
                $(TESTPREFIX)/unit-test-context-discover \
-               $(TESTPREFIX)/unit-test-workflow-session \
+               $(TESTPREFIX)/unit-test-ensemble \
                $(TESTPREFIX)/unit-test-cli-session \
                $(TESTPREFIX)/unit-test-cli-session-pty \
                $(TESTPREFIX)/unit-test-cli-codex \
@@ -3276,8 +3276,8 @@ $(TESTPREFIX)/unit-test-memory-retrieval-eval: $(OBJDIR)/kb/kb_bandit.o $(OBJDIR
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
 
-$(TESTPREFIX)/unit-test-workflow-session: $(OBJDIR)/tests/test_workflow_session.o \
-                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/workflow_session.o \
+$(TESTPREFIX)/unit-test-ensemble: $(OBJDIR)/tests/test_ensemble.o \
+                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/ensemble.o \
                      $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/yaml.o \

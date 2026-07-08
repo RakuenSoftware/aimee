@@ -1,6 +1,7 @@
-/* cmd_session_workflow.c: templated multi-agent workflow session commands */
+/* cmd_ensemble.c: multi-agent ensemble (templated multi-agent session) commands */
 #include "aimee.h"
 #include "commands.h"
+#include "config.h"
 #include "util.h"
 #include "db1.h"
 #include "cJSON.h"
@@ -34,7 +35,7 @@ static cJSON *parse_assignments(int argc, char **argv, char *err, size_t errlen)
          return NULL;
       }
 
-      char role[WF_ROLE_NAME_MAX];
+      char role[ENSEMBLE_ROLE_NAME_MAX];
       size_t role_len = (size_t)(eq - spec);
       if (role_len >= sizeof(role))
          role_len = sizeof(role) - 1;
@@ -78,10 +79,10 @@ static cJSON *parse_assignments(int argc, char **argv, char *err, size_t errlen)
    return root;
 }
 
-static void print_workflow_status(const workflow_session_info_t *info, const char *prompt,
+static void print_ensemble_status(const ensemble_info_t *info, const char *prompt,
                                   const char *context)
 {
-   printf("workflow session: #%d\n", info->id);
+   printf("ensemble #%d\n", info->id);
    printf("  template: %s\n", info->template_name);
    printf("  channel:  %s\n", info->channel);
    printf("  status:   %s\n", info->status);
@@ -105,9 +106,8 @@ void session_subcmd_start(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    if (argc < 1)
    {
-      fprintf(
-          stderr,
-          "usage: aimee session start <template> [--channel NAME] [--assign role=agent[,agent]]\n");
+      fprintf(stderr, "usage: aimee ensemble start <template> [--channel NAME] [--assign "
+                      "role=agent[,agent]]\n");
       return;
    }
 
@@ -125,7 +125,7 @@ void session_subcmd_start(app_ctx_t *ctx, int argc, char **argv)
    cJSON *assignments = parse_assignments(argc - 1, argv + 1, err, sizeof(err));
    if (!assignments)
    {
-      fprintf(stderr, "session start: %s\n", err[0] ? err : "failed to parse assignments");
+      fprintf(stderr, "ensemble start: %s\n", err[0] ? err : "failed to parse assignments");
       return;
    }
 
@@ -134,27 +134,26 @@ void session_subcmd_start(app_ctx_t *ctx, int argc, char **argv)
       cwd[0] = '\0';
 
    int id = 0;
-   if (db1_workflow_session_create(cwd, template_name, channel, assignments, &id, err,
-                                   sizeof(err)) != 0)
+   if (db1_ensemble_create(cwd, template_name, channel, assignments, &id, err, sizeof(err)) != 0)
    {
-      fprintf(stderr, "session start: %s\n", err);
+      fprintf(stderr, "ensemble start: %s\n", err);
       cJSON_Delete(assignments);
       return;
    }
    cJSON_Delete(assignments);
 
-   workflow_session_info_t info;
+   ensemble_info_t info;
    char *prompt = NULL;
    char *context = NULL;
-   if (db1_workflow_session_get(id, &info, &prompt, &context, err, sizeof(err)) != 0)
+   if (db1_ensemble_get(id, &info, &prompt, &context, err, sizeof(err)) != 0)
    {
-      fprintf(stderr, "session start: %s\n", err);
+      fprintf(stderr, "ensemble start: %s\n", err);
       free(prompt);
       free(context);
       return;
    }
 
-   print_workflow_status(&info, prompt, context);
+   print_ensemble_status(&info, prompt, context);
    free(prompt);
    free(context);
 }
@@ -164,23 +163,23 @@ void session_subcmd_status(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    if (argc < 1)
    {
-      fprintf(stderr, "usage: aimee session status <id>\n");
+      fprintf(stderr, "usage: aimee ensemble status <id>\n");
       return;
    }
 
    char err[256] = "";
-   workflow_session_info_t info;
+   ensemble_info_t info;
    char *prompt = NULL;
    char *context = NULL;
-   if (db1_workflow_session_get(atoi(argv[0]), &info, &prompt, &context, err, sizeof(err)) != 0)
+   if (db1_ensemble_get(atoi(argv[0]), &info, &prompt, &context, err, sizeof(err)) != 0)
    {
-      fprintf(stderr, "session status: %s\n", err);
+      fprintf(stderr, "ensemble status: %s\n", err);
       free(prompt);
       free(context);
       return;
    }
 
-   print_workflow_status(&info, prompt, context);
+   print_ensemble_status(&info, prompt, context);
    free(prompt);
    free(context);
 }
@@ -190,19 +189,19 @@ void session_subcmd_pause(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    if (argc < 1)
    {
-      fprintf(stderr, "usage: aimee session pause <id> [reason]\n");
+      fprintf(stderr, "usage: aimee ensemble pause <id> [reason]\n");
       return;
    }
 
    char reason[64];
    snprintf(reason, sizeof(reason), "%s", (argc >= 2 && argv[1][0]) ? argv[1] : "manual");
    char err[256] = "";
-   if (db1_workflow_session_pause(atoi(argv[0]), reason, err, sizeof(err)) != 0)
+   if (db1_ensemble_pause(atoi(argv[0]), reason, err, sizeof(err)) != 0)
    {
-      fprintf(stderr, "session pause: %s\n", err);
+      fprintf(stderr, "ensemble pause: %s\n", err);
       return;
    }
-   printf("workflow session #%d paused (%s)\n", atoi(argv[0]), reason);
+   printf("ensemble #%d paused (%s)\n", atoi(argv[0]), reason);
 }
 
 void session_subcmd_advance(app_ctx_t *ctx, int argc, char **argv)
@@ -210,7 +209,7 @@ void session_subcmd_advance(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    if (argc < 1)
    {
-      fprintf(stderr, "usage: aimee session advance <id> --speaker NAME --message TEXT\n");
+      fprintf(stderr, "usage: aimee ensemble advance <id> --speaker NAME --message TEXT\n");
       return;
    }
 
@@ -229,16 +228,51 @@ void session_subcmd_advance(app_ctx_t *ctx, int argc, char **argv)
    }
 
    char err[256] = "";
-   workflow_session_info_t info;
+   ensemble_info_t info;
    char *prompt = NULL;
-   if (db1_workflow_session_advance(atoi(argv[0]), speaker, message ? message : "", &info, &prompt,
-                                    err, sizeof(err)) != 0)
+   if (db1_ensemble_advance(atoi(argv[0]), speaker, message ? message : "", &info, &prompt, err,
+                            sizeof(err)) != 0)
    {
-      fprintf(stderr, "session advance: %s\n", err);
+      fprintf(stderr, "ensemble advance: %s\n", err);
       free(prompt);
       return;
    }
 
-   print_workflow_status(&info, prompt, NULL);
+   print_ensemble_status(&info, prompt, NULL);
    free(prompt);
+}
+
+/* `aimee ensemble <sub>` — the canonical verb for multi-agent ensemble sessions.
+ * The same handlers remain reachable under `aimee session <sub>` as back-compat
+ * aliases (see session_subcmds in cmd_infra.c). */
+static const subcmd_t ensemble_subcmds[] = {
+    {"start", "Start a templated multi-agent ensemble (code-review, debate, ...)",
+     session_subcmd_start},
+    {"status", "Show ensemble status by id", session_subcmd_status},
+    {"pause", "Pause an ensemble [reason]", session_subcmd_pause},
+    {"advance", "Advance an ensemble with --speaker/--message", session_subcmd_advance},
+    {NULL, NULL, NULL},
+};
+
+const subcmd_t *get_ensemble_subcmds(void)
+{
+   return ensemble_subcmds;
+}
+
+void cmd_ensemble(app_ctx_t *ctx, int argc, char **argv)
+{
+   config_t db1_cfg;
+   config_load(&db1_cfg);
+   if (db1_init(db1_cfg.db1_path) != 0)
+      fatal("ensemble: could not initialize DB1");
+
+   const char *sub = (argc > 0) ? argv[0] : NULL;
+   if (argc > 0)
+   {
+      argc--;
+      argv++;
+   }
+
+   if (subcmd_dispatch(ensemble_subcmds, sub, ctx, argc, argv) != 0)
+      subcmd_usage("ensemble", ensemble_subcmds);
 }

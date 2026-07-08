@@ -332,7 +332,7 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/checkpoints.c
     ${AIMEE_SRC_DIR}/db1/clarify.c
     ${AIMEE_SRC_DIR}/db1/diagnose.c
-    ${AIMEE_SRC_DIR}/db1/workflow_session.c
+    ${AIMEE_SRC_DIR}/db1/ensemble.c
     ${AIMEE_SRC_DIR}/db1/caches.c
     ${AIMEE_SRC_DIR}/db1/primary_sessions.c
     ${AIMEE_SRC_DIR}/db1/webchat_claude_sessions.c
@@ -725,7 +725,7 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_session_history.c
     ${AIMEE_SRC_DIR}/cmd_capabilities.c
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
-    ${AIMEE_SRC_DIR}/cmd_session_workflow.c
+    ${AIMEE_SRC_DIR}/cmd_ensemble.c
     ${AIMEE_SRC_DIR}/cmd_memory.c
     ${AIMEE_SRC_DIR}/cmd_memory_core.c
     ${AIMEE_SRC_DIR}/cmd_memory_curiosity.c
@@ -904,7 +904,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_mcp_process.c
     ${AIMEE_SRC_DIR}/server/server_mcp_skill.c
     ${AIMEE_SRC_DIR}/server/server_mcp_learning.c
-    ${AIMEE_SRC_DIR}/server/server_mcp_workflows.c
+    ${AIMEE_SRC_DIR}/server/server_mcp_ensemble.c
     ${AIMEE_SRC_DIR}/server/server_workflow_api.c
     ${AIMEE_SRC_DIR}/server/server_mcp_gateway.c
     ${AIMEE_SRC_DIR}/server/session_search_tool.c

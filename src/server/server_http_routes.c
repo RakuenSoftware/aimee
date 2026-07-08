@@ -233,36 +233,39 @@ static int dev_autonomous_router_on(void)
    return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
 }
 
-static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
+/* Shared autonomous-run intake (declared in server_http.h) — the capped/audited
+ * core behind POST /v1/dev/submit and the `workflow_run` MCP tool. See the header
+ * for the contract. `submitter` is supplied by the caller (the HTTP route passes
+ * the attested principal; the MCP tool passes the connection principal) so this
+ * body is transport-agnostic. */
+int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char *repo,
+                   const char *submitter, cJSON **out, char *err, size_t errlen)
 {
-   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
-   cJSON *jprop = body ? cJSON_GetObjectItemCaseSensitive(body, "proposal_md") : NULL;
-   if (!jprop || !cJSON_IsString(jprop) || !jprop->valuestring[0])
+   if (out)
+      *out = NULL;
+   if (!proposal_md || !proposal_md[0])
    {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"proposal_md is required\"}");
+      snprintf(err, errlen, "proposal_md is required");
       return 400;
    }
-   cJSON *jwf = cJSON_GetObjectItemCaseSensitive(body, "workflow");
-   cJSON *jrepo = cJSON_GetObjectItemCaseSensitive(body, "repo");
-   const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
+   if (!repo)
+      repo = "";
 
-   /* Workflow selection. Explicit `workflow` ALWAYS wins (backwards-compat). When
-    * omitted, S4 autonomous parity (default-OFF via AIMEE_WORKFLOW_AUTONOMOUS_ROUTER)
+   /* Workflow selection. Explicit `workflow_opt` ALWAYS wins (backwards-compat).
+    * When NULL, S4 autonomous parity (default-OFF via AIMEE_WORKFLOW_AUTONOMOUS_ROUTER)
     * routes the proposal through the router (clamped to the full-spine set, floor
-    * managed-change) instead of silently defaulting to "build". The chosen name is
-    * copied into a stack buffer so it survives `body` being freed below. */
+    * managed-change) instead of silently defaulting to "build". */
    char wf_choice[64];
    int autoroute = 0, autoroute_clamped = 0;
    char autoroute_src[16] = "", autoroute_raw[64] = "", autoroute_tag[9] = "";
-   if (jwf && cJSON_IsString(jwf) && jwf->valuestring[0])
+   if (workflow_opt && workflow_opt[0])
    {
-      snprintf(wf_choice, sizeof wf_choice, "%s", jwf->valuestring); /* explicit: authoritative */
+      snprintf(wf_choice, sizeof wf_choice, "%s", workflow_opt); /* explicit: authoritative */
    }
    else if (dev_autonomous_router_on())
    {
-      autoroute = 1; /* pick fills wf_choice + audit fields (FNV tag while body alive) */
-      router_autonomous_pick(jprop->valuestring, wf_choice, sizeof wf_choice, autoroute_src,
+      autoroute = 1; /* pick fills wf_choice + audit fields */
+      router_autonomous_pick(proposal_md, wf_choice, sizeof wf_choice, autoroute_src,
                              sizeof autoroute_src, autoroute_raw, sizeof autoroute_raw,
                              autoroute_tag, sizeof autoroute_tag, &autoroute_clamped);
    }
@@ -274,23 +277,18 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
 
    /* Intake-auth (WP-4/WP-5): require an attested submitter, and cap per-principal
     * concurrency + submit rate so one principal can't fan out unbounded autonomous
-    * runs (each spends budget and, once the live forge is enabled, opens PRs). The
-    * endpoint is already CAP_DELEGATE; this binds the run to the principal for audit
-    * and bounds resource abuse. Both caps are DB-backed (survive restart). */
-   const char *submitter = server_http_identity_principal();
+    * runs. Binds the run to the principal for audit and bounds resource abuse.
+    * Both caps are DB-backed (survive restart). */
    if (!submitter || !submitter[0])
    {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"unauthenticated: no attested principal\"}");
+      snprintf(err, errlen, "unauthenticated: no attested principal");
       return 401;
    }
-   /* The submitter is the cap/audit key and is stored in submitter[128]; a longer
-    * principal would truncate and collide with another's quota bucket, so reject it
-    * rather than silently mis-bucket. */
+   /* The submitter is the cap/audit key stored in submitter[128]; a longer
+    * principal would truncate and collide with another's quota bucket. */
    if (strlen(submitter) >= 128)
    {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"principal too long\"}");
+      snprintf(err, errlen, "principal too long");
       return 400;
    }
    int max_active = dev_env_cap(getenv("AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL"), 5);
@@ -309,41 +307,32 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
    /* Resolve the workflow (no DB write), then create + cap-check + submitter-bind +
     * audit ATOMICALLY under one BEGIN IMMEDIATE so concurrent submits from one
     * principal serialize (TOCTOU-free) and any DB fault fails closed. */
-   char id[80] = "", err[256] = "";
+   char id[80] = "", rerr[256] = "";
    char wf_name[64], wf_ver[65], wf_start[64], wf_repo[512];
-   if (wfe_work_item_resolve(workflow, repo, wf_name, wf_ver, wf_start, wf_repo, id, err,
-                             sizeof err) != 0 ||
+   if (wfe_work_item_resolve(workflow, repo, wf_name, wf_ver, wf_start, wf_repo, id, rerr,
+                             sizeof rerr) != 0 ||
        !id[0])
    {
-      cJSON *e = cJSON_CreateObject();
-      cJSON_AddStringToObject(e, "error", err[0] ? err : "failed to resolve workflow");
-      char *s = cJSON_PrintUnformatted(e);
-      snprintf(resp, cap, "%s", s ? s : "{\"error\":\"failed to resolve workflow\"}");
-      free(s);
-      cJSON_Delete(e);
-      cJSON_Delete(body);
+      snprintf(err, errlen, "%s", rerr[0] ? rerr : "failed to resolve workflow");
       return 500;
    }
    int sr = db1_work_item_submit_capped(id, wf_repo, ppath, wf_name, wf_ver, wf_start, submitter,
                                         max_active, rate_max, rate_secs);
    if (sr == 1)
    {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"too many active autonomous runs for this principal\"}");
+      snprintf(err, errlen, "too many active autonomous runs for this principal");
       return 429;
    }
    if (sr == 2)
    {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"submit rate exceeded for this principal\"}");
+      snprintf(err, errlen, "submit rate exceeded for this principal");
       return 429;
    }
    if (sr != 0)
    {
       /* Fail CLOSED: a DB/txn fault on the cap path returns 503, never an
        * uncapped/unattributed run. */
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"could not record submission\"}");
+      snprintf(err, errlen, "could not record submission");
       return 503;
    }
    /* Admitted: now (and only now) write the proposal artifact the row references.
@@ -353,14 +342,13 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
    FILE *pf = fopen(ppath, "wb");
    if (pf)
    {
-      fwrite(jprop->valuestring, 1, strlen(jprop->valuestring), pf);
+      fwrite(proposal_md, 1, strlen(proposal_md), pf);
       fclose(pf);
    }
-   cJSON_Delete(body);
    if (!pf)
    {
       db1_work_item_set_terminal(id, "abandoned");
-      snprintf(resp, cap, "{\"error\":\"could not persist proposal\"}");
+      snprintf(err, errlen, "could not persist proposal");
       return 500;
    }
    if (autoroute) /* S4: audit the routing decision (typed fields; no proposal content) */
@@ -368,9 +356,7 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
                               autoroute_tag);
    /* WP-5: a per-run USD budget ceiling so a runaway autonomous run parks
     * (budget_exceeded) instead of burning unbounded delegate cost. Default $5.00;
-    * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). The engine
-    * checks cum_cost_usd against this each advance; cost is the server-side
-    * wall-clock estimate threaded from the delegate dispatch. */
+    * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). */
    {
       double cap_usd = 5.0;
       const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
@@ -385,15 +371,49 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
          db1_work_item_set_cost_cap(id, cap_usd);
    }
    wfe_scheduler_notify(); /* drive it now; the run continues server-side */
-   cJSON *ok = cJSON_CreateObject();
-   cJSON_AddStringToObject(ok, "work_item_id", id);
-   cJSON_AddStringToObject(ok, "workflow", workflow);
-   cJSON_AddStringToObject(ok, "state", "active");
-   char *s = cJSON_PrintUnformatted(ok);
-   snprintf(resp, cap, "%s", s ? s : "{}");
-   free(s);
-   cJSON_Delete(ok);
+   if (out)
+   {
+      cJSON *ok = cJSON_CreateObject();
+      cJSON_AddStringToObject(ok, "work_item_id", id);
+      cJSON_AddStringToObject(ok, "workflow", workflow);
+      cJSON_AddStringToObject(ok, "state", "active");
+      *out = ok;
+   }
    return 200;
+}
+
+static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   cJSON *jprop = body ? cJSON_GetObjectItemCaseSensitive(body, "proposal_md") : NULL;
+   cJSON *jwf = body ? cJSON_GetObjectItemCaseSensitive(body, "workflow") : NULL;
+   cJSON *jrepo = body ? cJSON_GetObjectItemCaseSensitive(body, "repo") : NULL;
+   const char *proposal = (jprop && cJSON_IsString(jprop)) ? jprop->valuestring : "";
+   const char *workflow_opt =
+       (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring : NULL;
+   const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
+
+   cJSON *out = NULL;
+   char err[256] = "";
+   int st = dev_submit_run(proposal, workflow_opt, repo, server_http_identity_principal(), &out,
+                           err, sizeof err);
+   cJSON_Delete(body);
+   if (st == 200 && out)
+   {
+      char *s = cJSON_PrintUnformatted(out);
+      snprintf(resp, cap, "%s", s ? s : "{}");
+      free(s);
+      cJSON_Delete(out);
+      return 200;
+   }
+   cJSON_Delete(out);
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "error", err[0] ? err : "submit failed");
+   char *s = cJSON_PrintUnformatted(e);
+   snprintf(resp, cap, "%s", s ? s : "{\"error\":\"submit failed\"}");
+   free(s);
+   cJSON_Delete(e);
+   return st;
 }
 
 /* Loop-back retry cap for operator rejects on a `retry_on_reject` gate: bounds an

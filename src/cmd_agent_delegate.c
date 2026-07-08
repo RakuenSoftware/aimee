@@ -1299,7 +1299,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          snprintf(authority_root, sizeof(authority_root), "%s", worktree_path);
       else if (getcwd(authority_root, sizeof(authority_root)) == NULL)
          authority_root[0] = '\0';
-      delegate_source_authority_env_set((const char(*)[MAX_PATH_LEN])source_paths,
+      delegate_source_authority_env_set((const char (*)[MAX_PATH_LEN])source_paths,
                                         source_path_count, authority_root);
    }
 
@@ -1597,14 +1597,13 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Channel mirroring: if --channel was given and delegate succeeded, advance
-    * the workflow session bound to that channel using the delegate's output.
+    * the ensemble bound to that channel using the delegate's output.
     * Failures are advisory — a missing or ended session is a warning, not an error. */
    if (channel && channel[0] && rc == 0 && result.response && result.response[0])
    {
       char wf_err[256];
       int wf_id = 0;
-      int wf_rc =
-          db1_workflow_session_find_current_by_channel(channel, &wf_id, wf_err, sizeof(wf_err));
+      int wf_rc = db1_ensemble_find_current_by_channel(channel, &wf_id, wf_err, sizeof(wf_err));
       if (wf_rc != 0)
       {
          LOG_WARN("delegate", "channel mirror: no active session on channel '%s': %s", channel,
@@ -1612,13 +1611,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
       else
       {
-         workflow_session_info_t wf_out;
+         ensemble_info_t wf_out;
          char *wf_next_prompt = NULL;
          char advance_err[256];
          /* Use the delegate's role as the speaker for workflow advancement */
-         int adv_rc =
-             db1_workflow_session_advance(wf_id, role, result.response, &wf_out, &wf_next_prompt,
-                                          advance_err, sizeof(advance_err));
+         int adv_rc = db1_ensemble_advance(wf_id, role, result.response, &wf_out, &wf_next_prompt,
+                                           advance_err, sizeof(advance_err));
          free(wf_next_prompt);
          if (adv_rc != 0)
             LOG_WARN("delegate", "channel mirror: session_advance on channel '%s' failed: %s",

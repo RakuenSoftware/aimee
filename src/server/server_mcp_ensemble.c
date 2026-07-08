@@ -1,5 +1,5 @@
-/* server_mcp_workflows.c: MCP workflow-session tool handlers */
-#include "server_mcp_workflows.h"
+/* server_mcp_ensemble.c: MCP ensemble (multi-agent session) tool handlers */
+#include "server_mcp_ensemble.h"
 #include "aimee.h"
 #include "db1.h"
 #include "headers/primary_session_adapter.h"
@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static cJSON *workflow_text_content(const char *text)
+static cJSON *ensemble_text_content(const char *text)
 {
    cJSON *arr = cJSON_CreateArray();
    cJSON *item = cJSON_CreateObject();
@@ -24,12 +24,12 @@ static cJSON *workflow_text_content(const char *text)
    return arr;
 }
 
-static cJSON *workflow_summary_content(const workflow_session_info_t *info, const char *prompt,
+static cJSON *ensemble_summary_content(const ensemble_info_t *info, const char *prompt,
                                        const char *context)
 {
    char buf[4096];
    int pos = 0;
-   pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "workflow session #%d\n", info->id);
+   pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "ensemble #%d\n", info->id);
    pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "template: %s\n", info->template_name);
    pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "channel: %s\n", info->channel);
    pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "status: %s\n", info->status);
@@ -49,10 +49,10 @@ static cJSON *workflow_summary_content(const workflow_session_info_t *info, cons
       pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\nrecent context:\n%s", context);
    if (prompt && prompt[0] && pos < (int)sizeof(buf) - 64)
       pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\nnext prompt:\n%s\n", prompt);
-   return workflow_text_content(buf);
+   return ensemble_text_content(buf);
 }
 
-static cJSON *workflow_assignments_from_args(cJSON *args, char *err, size_t errlen)
+static cJSON *ensemble_assignments_from_args(cJSON *args, char *err, size_t errlen)
 {
    cJSON *src = cJSON_GetObjectItemCaseSensitive(args, "assignments");
    if (!cJSON_IsObject(src))
@@ -121,29 +121,46 @@ static cJSON *workflow_assignments_from_args(cJSON *args, char *err, size_t errl
    return root;
 }
 
-int server_mcp_is_workflow_tool(const char *tool)
+/* Canonical ensemble tool names are ensemble_*; the legacy session_* spellings
+ * remain as back-compat aliases. Map either spelling to the canonical name so
+ * the dispatch below only tests ensemble_*. Returns a pointer valid for the
+ * duration of the call (thread-local scratch for the alias rewrite). */
+static const char *ensemble_tool_canonical(const char *tool)
 {
-   return strcmp(tool, "session_start") == 0 || strcmp(tool, "session_status") == 0 ||
-          strcmp(tool, "session_pause") == 0 || strcmp(tool, "session_advance") == 0 ||
-          strcmp(tool, "session_list") == 0;
+   if (tool && strncmp(tool, "session_", 8) == 0)
+   {
+      static _Thread_local char buf[64];
+      snprintf(buf, sizeof buf, "ensemble_%s", tool + 8);
+      return buf;
+   }
+   return tool ? tool : "";
 }
 
-int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON *args,
+int server_mcp_is_ensemble_tool(const char *tool)
+{
+   const char *t = ensemble_tool_canonical(tool);
+   return strcmp(t, "ensemble_start") == 0 || strcmp(t, "ensemble_status") == 0 ||
+          strcmp(t, "ensemble_pause") == 0 || strcmp(t, "ensemble_advance") == 0 ||
+          strcmp(t, "ensemble_list") == 0;
+}
+
+int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON *args,
                                     cJSON **content_out, cJSON **structured_out)
 {
+   const char *t = ensemble_tool_canonical(tool);
    cJSON *content = NULL;
    cJSON *structured = NULL;
 
-   if (strcmp(tool, "session_start") == 0 || strcmp(tool, "session_status") == 0 ||
-       strcmp(tool, "session_pause") == 0 || strcmp(tool, "session_advance") == 0)
+   if (strcmp(t, "ensemble_start") == 0 || strcmp(t, "ensemble_status") == 0 ||
+       strcmp(t, "ensemble_pause") == 0 || strcmp(t, "ensemble_advance") == 0)
    {
-      workflow_session_info_t info;
+      ensemble_info_t info;
       char *prompt = NULL;
       char *context = NULL;
       char errbuf[256] = "";
       int rc = -1;
 
-      if (strcmp(tool, "session_start") == 0)
+      if (strcmp(t, "ensemble_start") == 0)
       {
          cJSON *jt = cJSON_GetObjectItemCaseSensitive(args, "template");
          cJSON *jc = cJSON_GetObjectItemCaseSensitive(args, "channel");
@@ -153,45 +170,42 @@ int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON
          }
          else
          {
-            cJSON *assignments = workflow_assignments_from_args(args, errbuf, sizeof(errbuf));
+            cJSON *assignments = ensemble_assignments_from_args(args, errbuf, sizeof(errbuf));
             if (assignments)
             {
                char cwd[MAX_PATH_LEN];
                int id = 0;
                if (!getcwd(cwd, sizeof(cwd)))
                   cwd[0] = '\0';
-               rc = db1_workflow_session_create(
-                   cwd, jt->valuestring,
-                   (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring : "general",
-                   assignments, &id, errbuf, sizeof(errbuf));
+               rc = db1_ensemble_create(cwd, jt->valuestring,
+                                        (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring
+                                                                                   : "general",
+                                        assignments, &id, errbuf, sizeof(errbuf));
                cJSON_Delete(assignments);
                if (rc == 0)
-                  rc = db1_workflow_session_get(id, &info, &prompt, &context, errbuf,
-                                                sizeof(errbuf));
+                  rc = db1_ensemble_get(id, &info, &prompt, &context, errbuf, sizeof(errbuf));
             }
          }
       }
-      else if (strcmp(tool, "session_status") == 0)
+      else if (strcmp(t, "ensemble_status") == 0)
       {
          cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
          if (!cJSON_IsNumber(jid))
             snprintf(errbuf, sizeof(errbuf), "missing 'id' parameter");
          else
-            rc = db1_workflow_session_get(jid->valueint, &info, &prompt, &context, errbuf,
-                                          sizeof(errbuf));
+            rc = db1_ensemble_get(jid->valueint, &info, &prompt, &context, errbuf, sizeof(errbuf));
       }
-      else if (strcmp(tool, "session_pause") == 0)
+      else if (strcmp(t, "ensemble_pause") == 0)
       {
          cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
          cJSON *jr = cJSON_GetObjectItemCaseSensitive(args, "reason");
          if (!cJSON_IsNumber(jid))
             snprintf(errbuf, sizeof(errbuf), "missing 'id' parameter");
-         else if (db1_workflow_session_pause(
-                      jid->valueint,
-                      (cJSON_IsString(jr) && jr->valuestring[0]) ? jr->valuestring : "manual",
-                      errbuf, sizeof(errbuf)) == 0)
-            rc = db1_workflow_session_get(jid->valueint, &info, &prompt, &context, errbuf,
-                                          sizeof(errbuf));
+         else if (db1_ensemble_pause(jid->valueint,
+                                     (cJSON_IsString(jr) && jr->valuestring[0]) ? jr->valuestring
+                                                                                : "manual",
+                                     errbuf, sizeof(errbuf)) == 0)
+            rc = db1_ensemble_get(jid->valueint, &info, &prompt, &context, errbuf, sizeof(errbuf));
       }
       else
       {
@@ -202,14 +216,13 @@ int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON
             snprintf(errbuf, sizeof(errbuf), "missing 'id' parameter");
          else if (!cJSON_IsString(js) || !js->valuestring[0])
             snprintf(errbuf, sizeof(errbuf), "missing 'speaker' parameter");
-         else if (db1_workflow_session_advance(jid->valueint, js->valuestring,
-                                               cJSON_IsString(jm) ? jm->valuestring : "", &info,
-                                               &prompt, errbuf, sizeof(errbuf)) == 0)
+         else if (db1_ensemble_advance(jid->valueint, js->valuestring,
+                                       cJSON_IsString(jm) ? jm->valuestring : "", &info, &prompt,
+                                       errbuf, sizeof(errbuf)) == 0)
          {
             free(context);
             context = NULL;
-            rc = db1_workflow_session_get(jid->valueint, &info, NULL, &context, errbuf,
-                                          sizeof(errbuf));
+            rc = db1_ensemble_get(jid->valueint, &info, NULL, &context, errbuf, sizeof(errbuf));
          }
       }
 
@@ -217,26 +230,25 @@ int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON
       {
          free(prompt);
          free(context);
-         return server_send_error(conn, errbuf[0] ? errbuf : "workflow session operation failed",
-                                  NULL);
+         return server_send_error(conn, errbuf[0] ? errbuf : "ensemble operation failed", NULL);
       }
 
-      content = workflow_summary_content(&info, prompt, context);
-      structured = db1_workflow_session_info_to_json(&info, prompt, context);
+      content = ensemble_summary_content(&info, prompt, context);
+      structured = db1_ensemble_info_to_json(&info, prompt, context);
       free(prompt);
       free(context);
       if (!structured)
-         return server_send_error(conn, "workflow session serialization failed", NULL);
+         return server_send_error(conn, "ensemble serialization failed", NULL);
    }
-   else if (strcmp(tool, "session_list") == 0)
+   else if (strcmp(t, "ensemble_list") == 0)
    {
       cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
       int limit = cJSON_IsNumber(jl) ? jl->valueint : 20;
       char errbuf[256] = "";
-      workflow_session_info_t *rows = NULL;
+      ensemble_info_t *rows = NULL;
       int n = 0;
-      if (db1_workflow_session_list(&rows, &n, errbuf, sizeof(errbuf)) != 0)
-         return server_send_error(conn, errbuf[0] ? errbuf : "workflow session list failed", NULL);
+      if (db1_ensemble_list(&rows, &n, errbuf, sizeof(errbuf)) != 0)
+         return server_send_error(conn, errbuf[0] ? errbuf : "ensemble list failed", NULL);
       if (limit < 0)
          limit = 0;
       if (limit > 100)
@@ -247,35 +259,35 @@ int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON
       if (!structured)
       {
          free(rows);
-         return server_send_error(conn, "workflow session serialization failed", NULL);
+         return server_send_error(conn, "ensemble serialization failed", NULL);
       }
       cJSON *sessions = cJSON_AddArrayToObject(structured, "sessions");
       if (!sessions)
       {
          free(rows);
          cJSON_Delete(structured);
-         return server_send_error(conn, "workflow session serialization failed", NULL);
+         return server_send_error(conn, "ensemble serialization failed", NULL);
       }
       for (int i = 0; i < limit; i++)
       {
-         cJSON *item = db1_workflow_session_info_to_json(&rows[i], NULL, NULL);
+         cJSON *item = db1_ensemble_info_to_json(&rows[i], NULL, NULL);
          if (!item)
          {
             free(rows);
             cJSON_Delete(structured);
-            return server_send_error(conn, "workflow session serialization failed", NULL);
+            return server_send_error(conn, "ensemble serialization failed", NULL);
          }
          cJSON_AddItemToArray(sessions, item);
       }
       free(rows);
       cJSON_AddNumberToObject(structured, "count", limit);
       char summary[128];
-      snprintf(summary, sizeof(summary), "workflow sessions: %d", limit);
-      content = workflow_text_content(summary);
+      snprintf(summary, sizeof(summary), "ensembles: %d", limit);
+      content = ensemble_text_content(summary);
    }
 
    if (!content)
-      return server_send_error(conn, "workflow session operation failed", NULL);
+      return server_send_error(conn, "ensemble operation failed", NULL);
 
    *content_out = content;
    *structured_out = structured;
@@ -285,7 +297,7 @@ int server_mcp_handle_workflow_tool(server_conn_t *conn, const char *tool, cJSON
 cJSON *server_mcp_compact_context(const char *session_id)
 {
    if (!session_id || !session_id[0])
-      return workflow_text_content("error: compact_context requires an active primary session");
+      return ensemble_text_content("error: compact_context requires an active primary session");
 
    session_compact_result_t sc_result;
    char errbuf[256] = {0};
@@ -296,34 +308,34 @@ cJSON *server_mcp_compact_context(const char *session_id)
       char out[512];
       snprintf(out, sizeof(out), "compact_context failed: %s",
                errbuf[0] ? errbuf : "unknown error");
-      return workflow_text_content(out);
+      return ensemble_text_content(out);
    }
    if (!sc_result.compacted)
-      return workflow_text_content("compact_context: context is not near the limit");
+      return ensemble_text_content("compact_context: context is not near the limit");
 
    char out[SESSION_COMPACT_SUMMARY_MAX + 512];
    snprintf(out, sizeof(out), "compact_context: %d→%d messages (%d removed)\n\n%s",
             sc_result.messages_before, sc_result.messages_after, sc_result.messages_removed,
             sc_result.summary);
-   return workflow_text_content(out);
+   return ensemble_text_content(out);
 }
 
 cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args)
 {
    if (!session_id || !session_id[0])
-      return workflow_text_content("error: set_primary_agent requires an active session");
+      return ensemble_text_content("error: set_primary_agent requires an active session");
 
    cJSON *jclear = args ? cJSON_GetObjectItemCaseSensitive(args, "clear") : NULL;
    if (cJSON_IsTrue(jclear))
    {
       session_primary_clear(session_id);
-      return workflow_text_content(
+      return ensemble_text_content(
           "primary agent cleared; this session reverts to the default provider");
    }
 
    cJSON *jagent = args ? cJSON_GetObjectItemCaseSensitive(args, "agent") : NULL;
    if (!cJSON_IsString(jagent) || !jagent->valuestring[0])
-      return workflow_text_content(
+      return ensemble_text_content(
           "error: set_primary_agent requires an 'agent' name (or clear:true)");
 
    const char *name = jagent->valuestring;
@@ -332,20 +344,20 @@ cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args)
    {
       char out[256];
       snprintf(out, sizeof(out), "error: no such agent '%s' (see 'aimee agent list')", name);
-      return workflow_text_content(out);
+      return ensemble_text_content(out);
    }
 
    session_primary_set(session_id, name);
    char out[256];
    snprintf(out, sizeof(out), "primary agent set to '%s' for this session", name);
-   return workflow_text_content(out);
+   return ensemble_text_content(out);
 }
 
 cJSON *server_mcp_upsert_persona(cJSON *args)
 {
    cJSON *jname = args ? cJSON_GetObjectItemCaseSensitive(args, "name") : NULL;
    if (!cJSON_IsString(jname) || !persona_name_valid(jname->valuestring))
-      return workflow_text_content("error: upsert_persona requires a valid 'name' "
+      return ensemble_text_content("error: upsert_persona requires a valid 'name' "
                                    "(letters, digits, '.', '_', '-')");
 
    persona_t p;
@@ -391,33 +403,33 @@ cJSON *server_mcp_upsert_persona(cJSON *args)
    snprintf(saved_name, sizeof(saved_name), "%s", p.name);
    persona_free(&p);
    if (rc != 0)
-      return workflow_text_content("error: failed to write persona file");
+      return ensemble_text_content("error: failed to write persona file");
 
    char out[256];
    snprintf(out, sizeof(out),
             "persona '%s' written to user config; it is the source of truth on the next load",
             saved_name);
-   return workflow_text_content(out);
+   return ensemble_text_content(out);
 }
 
 cJSON *server_mcp_upsert_role_template(cJSON *args)
 {
    cJSON *jrole = args ? cJSON_GetObjectItemCaseSensitive(args, "role") : NULL;
    if (!cJSON_IsString(jrole) || !role_template_name_valid(jrole->valuestring))
-      return workflow_text_content("error: upsert_role_template requires a valid 'role' name "
+      return ensemble_text_content("error: upsert_role_template requires a valid 'role' name "
                                    "(letters, digits, '.', '_', '-')");
    cJSON *jc = args ? cJSON_GetObjectItemCaseSensitive(args, "content") : NULL;
    if (!cJSON_IsString(jc))
-      return workflow_text_content(
+      return ensemble_text_content(
           "error: upsert_role_template requires 'content' (the template body, with optional "
           "{{TASK}} and {{CONTEXT}} placeholders)");
 
    if (role_template_write(jrole->valuestring, jc->valuestring) != 0)
-      return workflow_text_content("error: failed to write role template (bad name or too large)");
+      return ensemble_text_content("error: failed to write role template (bad name or too large)");
 
    char out[256];
    snprintf(out, sizeof(out),
             "role template '%s' written; delegates of that role use it on the next run",
             jrole->valuestring);
-   return workflow_text_content(out);
+   return ensemble_text_content(out);
 }
