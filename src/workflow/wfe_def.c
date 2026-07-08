@@ -384,8 +384,7 @@ int wfe_node_max_iters(const wfe_node_t *n)
 
 wfe_on_max_t wfe_node_on_max(const wfe_node_t *n)
 {
-   const cJSON *o =
-       (n && n->params) ? cJSON_GetObjectItemCaseSensitive(n->params, "on_max") : NULL;
+   const cJSON *o = (n && n->params) ? cJSON_GetObjectItemCaseSensitive(n->params, "on_max") : NULL;
    if (cJSON_IsString(o) && o->valuestring)
    {
       if (strcmp(o->valuestring, "fail") == 0)

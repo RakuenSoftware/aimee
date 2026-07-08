@@ -45,7 +45,7 @@ static const char *MINI = "name: mini\n"
    "start: draft\nnodes:\n"                                                                        \
    "  - id: draft\n    block: author.proposal\n    next: gate\n"                                   \
    "  - id: gate\n    block: gate.roundtable\n    in:\n      src: draft.out\n    params:\n"        \
-   "      panel:\n        required:\n          - security\n          - architect\n"               \
+   "      panel:\n        required:\n          - security\n          - architect\n"                \
    "      max_iters: 2\n      on_max: " policy "\n    on_pass: pr\n    on_fail: draft\n"           \
    "  - id: pr\n    block: pr.open\n    in:\n      src: draft.out\n    next: done\n"               \
    "  - id: done\n    block: merge\n    in:\n      pr: pr.out\n"
