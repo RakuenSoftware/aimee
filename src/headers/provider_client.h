@@ -46,6 +46,13 @@ extern "C"
       double temperature;   /* <0 => omit (let the provider default). */
       int max_tokens;       /* <=0 => omit. */
       int max_attempts;     /* total attempts incl. the first; <=0 => default. */
+      int disable_thinking; /* !=0 => send chat_template_kwargs.enable_thinking=false
+                             * so a reasoning model skips its chain-of-thought pass.
+                             * For mechanical, high-volume stages (Tier-A extract/
+                             * index) the reasoning pass only adds latency and can
+                             * truncate the answer; the flag makes output compact and
+                             * deterministic. Ignored by endpoints that don't support
+                             * the jinja chat-template kwarg. */
    } provider_def_t;
 
    typedef struct
