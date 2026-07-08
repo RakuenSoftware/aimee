@@ -621,6 +621,7 @@ static const struct
     {"curator.contradictions", "POST", "/v1/curator/contradictions"},
     {"curator.implements", "POST", "/v1/curator/implements"},
     {"curator.invalidated", "POST", "/v1/curator/invalidated"},
+    {"curator.stages", "POST", "/v1/curator/stages"},
     {"dashboard.all", "GET", "/v1/dashboard/all"},
     {"dashboard.audit", "GET", "/v1/dashboard/audit"},
     {"dashboard.delegations", "GET", "/v1/dashboard/delegations"},

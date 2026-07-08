@@ -2432,6 +2432,11 @@ paths:
       summary: Curator invalidated claims
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Invalidated, content: { application/json: { schema: { type: object } } } } }
+  /curator/stages:
+    post:
+      summary: Curator pipeline stage registry (name/label/lane/order/config_key) for the GUI
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Stage registry, content: { application/json: { schema: { type: object } } } } }
   /graph/explain:
     post:
       summary: Explain a graph relationship
