@@ -22,6 +22,7 @@
 #include "kb_curator_index_narrative.h"
 #include "kb_curator_index_claims.h"
 #include "kb_curator_contradictions.h"
+#include "kb_curator_queue.h"
 #include "kb_curator_index_code_unit.h"
 #include "kb_curator_link_artifacts.h"
 #include "kb_curator_synthesize.h"
@@ -277,6 +278,13 @@ static void *drain_thread_main(void *arg)
             int b = kb_doc_embed_backfill(projects[i].name, cfg.embedding_command, 200);
             if (b > 0)
                total += b;
+            /* Backfill: queue extract_doc curation for docs that entered
+             * kb_documents via this drain (kb_doc_refresh) rather than the
+             * ingest-route hook (kb_http) -- otherwise drain-ingested docs are
+             * never curated (no claims/narrative). Idempotent: dedups against
+             * existing extract_doc jobs, so it queues the backlog once then idles. */
+            if (cfg.kb_curator_extract_docs_enabled)
+               (void)kb_curator_queue_docs_for_project(projects[i].name);
          }
          if (total > 0)
             aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)",
