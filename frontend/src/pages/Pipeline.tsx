@@ -3,14 +3,19 @@ import { FIELD_HELP } from "./settingsHelp";
 
 /* Pipeline page: the curator pipeline as an ordered, resource-lane-grouped view.
  *
- * Option B (single source of truth): the stage list, order, lanes, and the
- * config key that toggles each stage come LIVE from the backend registry via
- * POST /api/curator/stages (curator.stages -> CURATOR_STAGES + the projection
- * sweeps in src/kb/kb_curator_drain.c). There is no hand-kept frontend mirror to
- * drift. Enable state comes from GET /api/config and toggles via POST
- * /api/config/set (persisted to aimee.yaml; the KB picks it up on next load). A
- * stage with a null config_key is embedder-gated (active whenever an embedder is
- * configured) and shown read-only. Descriptions come from the shared FIELD_HELP. */
+ * Option B (single source of truth): the stage list, order, lanes, config key, and
+ * dependency `requires` come LIVE from the backend registry via POST
+ * /api/curator/stages (curator.stages -> CURATOR_STAGES + the projection sweeps in
+ * src/kb/kb_curator_drain.c). Enable state comes from GET /api/config; toggles and
+ * the stage order persist via POST /api/config/set (aimee.yaml; the KB picks it up
+ * on next load). A null config_key = embedder-gated (read-only). Descriptions come
+ * from the shared FIELD_HELP.
+ *
+ * Reorder: ▲▼ moves a stage within its lane (cross-lane order is meaningless — the
+ * lanes run concurrently). A move that would place a stage before a same-lane
+ * prerequisite (or a prerequisite after its dependent) is refused client-side; the
+ * backend independently validates kb_curator_stage_order and falls back to registry
+ * order on anything invalid. The persisted order is the full stage sequence. */
 
 type Val = boolean | number | string;
 type Lane = "llm" | "index";
@@ -21,6 +26,7 @@ type Stage = {
   budget: number;
   order: number;
   config_key: string | null;
+  requires: string[];
 };
 type Preset = { name: string; description: string; enabled: string[] };
 
@@ -44,6 +50,23 @@ const LANE_META: Record<Lane, { title: string; hint: string; color: string }> = 
 
 const DEFAULT_DESC = "Active whenever an embedder is configured (no individual toggle).";
 
+// Display order: kb_curator_stage_order (listed first, in order) then any unlisted
+// in registry order — mirrors the backend kb_curator_ordered_stages fail-safe.
+function applyOrder(list: Stage[], orderStr: string): Stage[] {
+  const byOrder = [...list].sort((a, b) => a.order - b.order);
+  if (!orderStr) return byOrder;
+  const names = orderStr.split(",").map((s) => s.trim()).filter(Boolean);
+  const byName = new Map(byOrder.map((s) => [s.name, s]));
+  const out: Stage[] = [];
+  const used = new Set<string>();
+  for (const n of names) {
+    const s = byName.get(n);
+    if (s && !used.has(n)) { out.push(s); used.add(n); }
+  }
+  for (const s of byOrder) if (!used.has(s.name)) out.push(s);
+  return out;
+}
+
 export default function Pipeline() {
   const [stages, setStages] = useState<Stage[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -63,7 +86,8 @@ export default function Pipeline() {
         .then((d: { config?: Record<string, Val> }) => d.config || {})
         .catch(() => ({} as Record<string, Val>)),
     ]).then(([sp, c]) => {
-      setStages([...sp.stages].sort((a, b) => a.order - b.order));
+      const orderStr = typeof c.kb_curator_stage_order === "string" ? c.kb_curator_stage_order : "";
+      setStages(applyOrder(sp.stages, orderStr));
       setPresets(sp.presets);
       setCfg(c);
       setLoaded(true);
@@ -84,8 +108,7 @@ export default function Pipeline() {
   }, []);
 
   // Apply a preset: enable its listed config keys, disable every other toggleable
-  // stage. One config.set per stage, in parallel; embedder-gated stages (no
-  // config_key) are untouched.
+  // stage. One config.set per stage, in parallel; embedder-gated stages untouched.
   const applyPreset = useCallback(async (p: Preset) => {
     setBusy(`preset:${p.name}`);
     const on = new Set(p.enabled);
@@ -107,9 +130,64 @@ export default function Pipeline() {
     );
   }, [stages]);
 
+  const persistOrder = useCallback(async (arr: Stage[]) => {
+    const order = arr.map((s) => s.name).join(",");
+    setBusy("order");
+    const { status: st, error } = await postJSON("/api/config/set", { key: "kb_curator_stage_order", value: order });
+    setBusy("");
+    if (st >= 200 && st < 300 && !error) {
+      setCfg((p) => ({ ...p, kb_curator_stage_order: order }));
+      setStatus({ kind: "ok", msg: "stage order saved" });
+    } else {
+      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    }
+  }, []);
+
+  // Move a stage one slot within its lane. Refused if it would cross a same-lane
+  // dependency edge (using `requires` from the backend DAG).
+  const move = useCallback((name: string, dir: -1 | 1) => {
+    const cur = stages;
+    const s = cur.find((x) => x.name === name);
+    if (!s) return;
+    const laneIdx = cur.map((x, i) => ({ x, i })).filter((o) => o.x.lane === s.lane).map((o) => o.i);
+    const pos = laneIdx.findIndex((i) => cur[i].name === name);
+    const tgt = pos + dir;
+    if (tgt < 0 || tgt >= laneIdx.length) return;
+    const iA = laneIdx[pos];
+    const iB = laneIdx[tgt];
+    const other = cur[iB];
+    if (dir === -1 && s.requires.includes(other.name)) {
+      setStatus({ kind: "err", msg: `${s.label} must stay after its prerequisite ${other.label}` });
+      return;
+    }
+    if (dir === 1 && other.requires.includes(s.name)) {
+      setStatus({ kind: "err", msg: `${s.label} must stay before ${other.label}, which depends on it` });
+      return;
+    }
+    const next = [...cur];
+    [next[iA], next[iB]] = [next[iB], next[iA]];
+    setStages(next);
+    persistOrder(next);
+  }, [stages, persistOrder]);
+
   const isOn = (k: string) => cfg[k] === true || cfg[k] === 1;
 
-  const row = (s: Stage, i: number) => {
+  const arrowBtn = (enabled: boolean, glyph: string, title: string, onClick: () => void) => (
+    <button
+      disabled={!enabled || busy === "order"}
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 22, height: 20, fontSize: 11, lineHeight: "18px", padding: 0, borderRadius: 4,
+        border: "1px solid #ccc", cursor: enabled ? "pointer" : "default",
+        background: "#fff", color: enabled ? "#555" : "#ccc",
+      }}
+    >
+      {glyph}
+    </button>
+  );
+
+  const row = (s: Stage, i: number, laneCount: number) => {
     const gated = !s.config_key;
     const on = gated ? true : isOn(s.config_key as string);
     const desc = (s.config_key && FIELD_HELP[s.config_key]) || DEFAULT_DESC;
@@ -118,10 +196,17 @@ export default function Pipeline() {
         display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
         borderBottom: "1px solid #eee", opacity: gated ? 0.75 : 1,
       }}>
-        <span style={{ width: 22, color: "#aaa", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</span>
+        <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {arrowBtn(i > 0, "▲", "Move earlier in this lane", () => move(s.name, -1))}
+          {arrowBtn(i < laneCount - 1, "▼", "Move later in this lane", () => move(s.name, 1))}
+        </span>
+        <span style={{ width: 18, color: "#aaa", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>{s.label}
             {gated && <span style={{ marginLeft: 8, fontSize: 11, color: "#999" }}>(embedder-gated)</span>}
+            {s.requires.length > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 11, color: "#aaa" }}>after: {s.requires.join(", ")}</span>
+            )}
           </div>
           <div style={{ fontSize: 12, color: "#777" }}>{desc}</div>
         </div>
@@ -154,9 +239,9 @@ export default function Pipeline() {
       <h2 style={{ margin: "0 0 4px" }}>Curator pipeline</h2>
       <p style={{ color: "#777", fontSize: 13, margin: "0 0 18px" }}>
         Ingested content flows through these stages into curated knowledge (claims, entities,
-        contradictions, graph). Toggle a stage to include/exclude it; changes persist to aimee.yaml and
-        take effect on the KB's next config load. Stages run in two resource lanes concurrently, and this
-        view is generated live from the backend stage registry.
+        contradictions, graph). Toggle a stage to include/exclude it, or reorder within a lane with ▲▼
+        (dependencies are enforced). Changes persist to aimee.yaml and take effect on the KB's next
+        config load. This view is generated live from the backend stage registry.
       </p>
       {presets.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
@@ -188,7 +273,7 @@ export default function Pipeline() {
               <span style={{ fontWeight: 700, color: meta.color }}>{meta.title}</span>
               <span style={{ marginLeft: 10, fontSize: 12, color: "#999" }}>{meta.hint}</span>
             </div>
-            {laneStages.map((s, i) => row(s, i))}
+            {laneStages.map((s, i) => row(s, i, laneStages.length))}
           </div>
         );
       })}
