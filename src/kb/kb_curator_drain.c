@@ -22,6 +22,7 @@
 #include "kb_curator_index_narrative.h"
 #include "kb_curator_index_claims.h"
 #include "kb_curator_contradictions.h"
+#include "kb_curator_queue.h"
 #include "kb_curator_index_code_unit.h"
 #include "kb_curator_link_artifacts.h"
 #include "kb_curator_synthesize.h"
@@ -292,6 +293,11 @@ static void *drain_thread_main(void *arg)
                       "dim-change re-embed reconciled (doc corpus); cleared maintenance");
          }
       }
+
+      /* Backfill: queue extract_doc curation for docs that entered kb_documents
+       * via the drain (kb_doc_refresh) rather than the ingest-route hook -- else
+       * drain-ingested docs are never curated. Idempotent, self-gated. */
+      kb_curator_queue_docs_all_projects(cfg.kb_curator_extract_docs_enabled);
 
       /* Code projection-graph drain — publish a fresh typed-edge generation per
        * CHANGED project (content-addressed: an unchanged project is skipped), so

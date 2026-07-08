@@ -1517,8 +1517,10 @@ typedef struct config
    int review_batch_cap;
 
    /* Deep curator extraction (kb.curator.*).
-    * kb_curator_extract_docs_enabled:  0 = off (default), 1 = queue extract_doc jobs post-ingest.
-    * kb_curator_extract_code_enabled:  0 = off (default), 1 = queue extract_code_unit jobs.
+    * kb_curator_extract_docs_enabled:  default ON (config_kb_curator_defaults). Queues extract_doc
+    *   jobs at ingest (kb_http hook) AND via the curator-drain backfill, so docs ingested
+    *   through the drain path (kb_doc_refresh) are curated too.
+    * kb_curator_extract_code_enabled:  default ON. 1 = queue extract_code_unit jobs.
     * kb_curator_extract_command[512]:  sidecar command (default: scripts/curator-extract.py).
     * kb_curator_extract_max_tokens:    max_tokens per job stdin payload (default 2048).
     * kb_curator_max_attempts:          max drain attempts per job before marking failed (default

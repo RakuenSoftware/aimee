@@ -11,6 +11,7 @@
 #include "kb_curator_queue.h"
 #include "aimee.h"
 #include "config.h"
+#include "index.h" /* index_list_projects, project_info_t */
 #include "log.h"
 #include "db2/kb_payload.h"
 #include "db2/db2_internal.h"
@@ -213,4 +214,14 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
       }
       aimee_pg_finalize(st);
    }
+}
+
+void kb_curator_queue_docs_all_projects(int extract_docs_enabled)
+{
+   if (!extract_docs_enabled)
+      return;
+   project_info_t projects[128];
+   int np = index_list_projects(projects, (int)(sizeof(projects) / sizeof(projects[0])));
+   for (int i = 0; i < np; i++)
+      (void)kb_curator_queue_docs_for_project(projects[i].name);
 }
