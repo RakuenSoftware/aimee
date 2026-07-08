@@ -1,8 +1,18 @@
 # Proposal: Learning-to-rank weight fitting — close the loop on the KB-hybrid ranker
 
-- **State:** PENDING — design only. Completes the one unshipped half of the
-  statistical ranking substrate: the ranker *infers* with a learned linear model
-  today, but nothing ever *fits* it from data.
+- **State:** done — Phases 1–4 implemented as **option A** (the fitter sidecar
+  `scripts/rank-fit.py` + training-view/`export-view` + benchmark-gated commit +
+  scheduled refit), shipped default-off behind `intelligence.ranking.fit.enabled`.
+  **Honest limit (not papered over):** on the shipped substrate the §1 training-view
+  join is empty — ranker features are keyed to `feature_rows.subject_kind='kb_document'`
+  (the kb_hybrid code-search path) while retrieval outcomes are attributed to `memory`
+  row ids, and `feature_rows` carries no `retrieval_event_id`/query-grouping key. So the
+  loop is **bench-only** (fixture-fitted + fixture-gated) until the kb_hybrid
+  outcome-wiring prerequisite lands (deliberately out of scope — it is a schema
+  migration + retrieval hot-path change, its own proposal). That gap is not silent:
+  `aimee kb ranker export-view` emits a structured diagnostic naming the
+  subject-space mismatch and the missing grouping key. This matches the proposal's
+  own "ships bench-only is an acceptable outcome" stance.
 - **Author:** JBailes
 - **Date:** 2026-07-07
 - **Charter roles:** Rank-Fuse (learned lexical/dense/recency/sketch blend

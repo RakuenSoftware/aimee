@@ -677,6 +677,14 @@ int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "demotion.check");
 }
+int handle_ranker_export_view(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "ranker.export_view");
+}
+int handle_ranker_fit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "ranker.fit");
+}
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "workers");

@@ -862,6 +862,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return json_copy_response(out_buf, out_cap, json);
    }
 
+   if (strcmp(path, "/v1/intelligence/ranker/export-view") == 0)
+   {
+      if (strcmp(method, "GET") != 0)
+         return json_body_error(out_buf, out_cap, 405, "method not allowed");
+      cJSON *resp = kb_intel_ranker_export_view_response();
+      char *json = resp ? cJSON_PrintUnformatted(resp) : NULL;
+      cJSON_Delete(resp);
+      return json_copy_response(out_buf, out_cap, json);
+   }
+
+   if (strcmp(path, "/v1/intelligence/ranker/fit") == 0)
+      return strcmp(method, "POST") == 0
+                 ? kb_intel_ranker_fit_http(body, body_len, out_buf, out_cap)
+                 : json_body_error(out_buf, out_cap, 405, "method not allowed");
+
    if (strcmp(path, "/v1/intelligence/bandit/export") == 0)
    {
       if (strcmp(method, "GET") != 0)

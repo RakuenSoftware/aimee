@@ -285,6 +285,11 @@ void config_apply_ranking_settings(config_t *cfg, cJSON *root)
    cfg->kb_ranker_enabled = 0;
    cfg->ranker_fuse_command[0] = '\0';
    cfg->drift_detect_shadow_enabled = 0;
+   cfg->kb_ranker_fit_enabled = 0;
+   cfg->kb_ranker_fit_command[0] = '\0';
+   cfg->kb_ranker_fit_min_groups = 0;
+   cfg->kb_ranker_fit_benchmark[0] = '\0';
+   cfg->kb_ranker_fit_bench_k = 0;
 
    cJSON *intel = cJSON_GetObjectItemCaseSensitive(root, "intelligence");
    if (!cJSON_IsObject(intel))
@@ -322,6 +327,35 @@ void config_apply_ranking_settings(config_t *cfg, cJSON *root)
       cfg->drift_detect_shadow_enabled = (int)item->valuedouble;
    else if (cJSON_IsBool(item))
       cfg->drift_detect_shadow_enabled = cJSON_IsTrue(item) ? 1 : 0;
+
+   /* intelligence.ranking.fit.*: the learning-to-rank weight fitter. */
+   cJSON *fit = cJSON_GetObjectItemCaseSensitive(rank, "fit");
+   if (cJSON_IsObject(fit))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(fit, "enabled");
+      if (cJSON_IsNumber(item))
+         cfg->kb_ranker_fit_enabled = (int)item->valuedouble;
+      else if (cJSON_IsBool(item))
+         cfg->kb_ranker_fit_enabled = cJSON_IsTrue(item) ? 1 : 0;
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "command");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->kb_ranker_fit_command, sizeof(cfg->kb_ranker_fit_command), "%s",
+                  item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "min_groups");
+      if (cJSON_IsNumber(item))
+         cfg->kb_ranker_fit_min_groups = (int)item->valuedouble;
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "benchmark");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->kb_ranker_fit_benchmark, sizeof(cfg->kb_ranker_fit_benchmark), "%s",
+                  item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "bench_k");
+      if (cJSON_IsNumber(item))
+         cfg->kb_ranker_fit_bench_k = (int)item->valuedouble;
+   }
 }
 
 void config_apply_reasoning_settings(config_t *cfg, cJSON *root)

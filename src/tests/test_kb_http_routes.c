@@ -883,6 +883,25 @@ int db2_calibration_surfaces_with_data(int min_rows)
    return 2;
 }
 
+/* kb_intel_payload.o now calls the ranker-fit surface; stub it (this test
+ * exercises HTTP routing, not the fitter — the fitter has its own unit test). */
+char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_set_version)
+{
+   (void)subject_kind;
+   (void)feature_set_version;
+   return strdup("{\"status\":\"ok\",\"n_rows\":0,\"rows\":[]}");
+}
+
+int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out)
+{
+   (void)cfg;
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (report_out)
+      *report_out = strdup("{\"status\":\"disabled\"}");
+   return 1;
+}
+
 int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max)
 {
    assert(n_min == 2);

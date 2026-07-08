@@ -708,6 +708,8 @@ static const struct
     {"provider.slot_acquire", "POST", "/v1/provider/slot_acquire"},
     {"provider.slot_release", "POST", "/v1/provider/slot_release"},
     {"provider.test", "POST", "/v1/provider/test"},
+    {"ranker.export_view", "GET", "/v1/intelligence/ranker/export-view"},
+    {"ranker.fit", "POST", "/v1/intelligence/ranker/fit"},
     {"repo.trust", "POST", "/v1/repo/trust"},
     {"rules.delete", "POST", "/v1/rules/delete"},
     {"server.health", "GET", "/v1/server/health"},

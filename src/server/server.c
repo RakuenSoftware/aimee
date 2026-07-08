@@ -1407,6 +1407,8 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"optimize.replay_record", handle_optimize_replay_record},
     {"calibration.readiness", handle_calibration_readiness},
     {"demotion.check", handle_demotion_check},
+    {"ranker.export_view", handle_ranker_export_view},
+    {"ranker.fit", handle_ranker_fit},
     {"workers", handle_workers},
     /* Rules */
     {"rules.list", handle_rules_list},

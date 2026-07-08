@@ -968,6 +968,36 @@ int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* ranker.export_view: dump the learning-to-rank training view + wiring-gap
+ * diagnostic (read-only). Reachable via `aimee kb ranker export-view`. */
+int handle_ranker_export_view(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *json = kb_client_ranker_export_view_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "ranker export-view failed", NULL);
+   return send_and_free(conn, resp);
+}
+
+/* ranker.fit: run the fitter sidecar + benchmark gate and (on lift) promote a
+ * ranker_model. Reachable via `aimee kb ranker fit`. */
+int handle_ranker_fit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *json = kb_client_ranker_fit_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "ranker fit failed", NULL);
+   return send_and_free(conn, resp);
+}
+
 /* optimize.replay_record: record off-policy replay attribution (output of
  * tools/bandit_replay.py) as a benchmark_trace artifact. Body: {decision_point,
  * result}. Reachable via `aimee optimize replay-record --point X --file F`. */

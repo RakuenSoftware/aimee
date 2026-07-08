@@ -1384,6 +1384,23 @@ typedef struct config
    char ranker_fuse_command[512];
    int drift_detect_shadow_enabled;
 
+   /* Learning-to-rank weight fitting (the Calibrate half of the ranker).
+    * See docs/proposals/done/learning-to-rank-weight-fitting.md.
+    * kb_ranker_fit_enabled:   0 = off (default). Gates `aimee kb ranker fit`
+    *                          and any scheduled refit; export-view is always safe.
+    * kb_ranker_fit_command:   fitter sidecar command (e.g. "python3 scripts/rank-fit.py");
+    *                          empty → fit refuses (never ships an unfit model).
+    * kb_ranker_fit_min_groups: floor of labelled groups before a fit is attempted
+    *                          (0 → default 8) — the thin-log overfit guardrail.
+    * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
+    *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
+    * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5). */
+   int kb_ranker_fit_enabled;
+   char kb_ranker_fit_command[512];
+   int kb_ranker_fit_min_groups;
+   char kb_ranker_fit_benchmark[512];
+   int kb_ranker_fit_bench_k;
+
    /* Graph reasoning (Datalog sidecar).
     * reasoning_datalog_command: path to Datalog evaluator; empty = disabled.
     * reasoning_row_budget:      max derived facts per query (0 = default 10000).
