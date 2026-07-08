@@ -69,8 +69,8 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
  * (2 = block a hard-destructive op on a high-attention file, or — only when a
  * positive ingress_max_raw_scans cap is configured — block a raw recursive scan
  * once that per-session cap is exhausted; 0 = allow). With no cap configured
- * (the default) raw scans are never blocked. Never blocks on read/soft ops. Set
- * AIMEE_GUARD=0 to bypass. */
+ * (the default) raw scans are never blocked. Never blocks on read/soft ops.
+ * There is no env-var bypass; disabling it is an operator config action. */
 int handle_attention_guard(void);
 
 #endif /* DEC_CLI_ATTENTION_GUARD_H */

@@ -506,7 +506,6 @@ ENV_DESC = {
     "AIMEE_PROFILE": ("Client & session", "Active working-profile name."),
     "AIMEE_ACTIVE_TOOLSET": ("Client & session", "Active toolset (tool allowlist) for the session."),
     "AIMEE_SESSION_START_VERBOSE": ("Client & session", "Verbose logging during session start."),
-    "AIMEE_GUARD": ("Client & session", "Attention-guard control; set to bypass the guard hook."),
     # Server runtime
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),

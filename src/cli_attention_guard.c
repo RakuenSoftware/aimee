@@ -10,8 +10,9 @@
  * set to a positive cap, in which case a session may run that many recursive
  * raw scans before further ones are redirected toward Aimee's indexed
  * exploration tools. With no cap configured (the default, and what a thin-client
- * host with no aimee.yaml sees) raw scans are never blocked. AIMEE_GUARD=0
- * disables the guard entirely.
+ * host with no aimee.yaml sees) raw scans are never blocked. The guard has no
+ * env-var off switch: disabling it is a deliberate operator config action
+ * (require_session_worktree: false), never something the guarded agent can do.
  */
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
@@ -563,14 +564,19 @@ static void attn_lexical_normalize(const char *path, char *out, size_t out_n)
    }
 }
 
-/* Returns 1 iff `norm` (an already lexically-normalized path) is inside an
- * aimee-managed worktree. Matches ONLY the canonical managed location
- * "/.aimee/worktrees/" — deliberately NOT the looser "/.aimee-" prefix that
- * is_aimee_worktree_path() also accepts, which would false-match unrelated
- * dirs like "/home/u/.aimee-notes/...". */
+/* Returns 1 iff `norm` (an already lexically-normalized path) is inside a
+ * managed session worktree. Matches the two canonical managed locations:
+ *   "/.aimee/worktrees/"  — aimee's own launcher + delegate worktrees
+ *   "/.claude/worktrees/" — Claude Code's native worktrees (EnterWorktree)
+ * Both are isolated worktrees on a branch off the default branch — the exact
+ * isolation this guard requires — so a Claude Code session working in its own
+ * worktree is honoured, not blocked. Deliberately the full "/worktrees/" path,
+ * NOT the looser "/.aimee-" / "/.claude" prefixes, which would false-match
+ * unrelated dirs like "/home/u/.aimee-notes/..." or "~/.claude/". */
 static int attn_path_in_managed_worktree(const char *norm)
 {
-   return norm && strstr(norm, "/.aimee/worktrees/") != NULL;
+   return norm && (strstr(norm, "/.aimee/worktrees/") != NULL ||
+                   strstr(norm, "/.claude/worktrees/") != NULL);
 }
 
 /* Pure decision for the session-isolation guard (testable in isolation).
@@ -600,10 +606,11 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
 
 int handle_attention_guard(void)
 {
-   const char *bypass = getenv("AIMEE_GUARD");
-   if (bypass && strcmp(bypass, "0") == 0)
-      return 0;
-
+   /* No env-var bypass. The guard must not be disableable by the agent it
+    * guards — an LLM can trivially set an env var on any command, so a would-be
+    * bypass has to be a deliberate OPERATOR action in config
+    * (require_session_worktree: false / ingress_max_raw_scans), not an env var.
+    * (Removed the former AIMEE_GUARD=0 escape hatch.) */
    char *stdin_data = read_stdin();
    cJSON *hook = stdin_data ? cJSON_Parse(stdin_data) : NULL;
    if (!hook)
@@ -636,12 +643,13 @@ int handle_attention_guard(void)
       if (attn_session_isolation_blocked(op, fp, cwd))
       {
          fprintf(stderr,
-                 "aimee attention-guard: refusing a mutating op outside an aimee session "
-                 "worktree. This session is operating in '%s', which is not an aimee-managed "
-                 "worktree (.aimee/worktrees/...). aimee requires each mutating session to run "
-                 "in an isolated worktree+branch off the default branch; provision one with "
-                 "`aimee session-start` (or restart the client so its SessionStart hook does). "
-                 "Set require_session_worktree:false in aimee.yaml or AIMEE_GUARD=0 to bypass.\n",
+                 "aimee attention-guard: refusing a mutating op outside a session worktree. "
+                 "This session is operating in '%s', which is not a managed worktree "
+                 "(.aimee/worktrees/... or .claude/worktrees/...). aimee requires each mutating "
+                 "session to run in an isolated worktree+branch off the default branch: create "
+                 "one (Claude Code: EnterWorktree; aimee: launch `aimee`, which materializes a "
+                 "worktree and chdirs into it). An operator may set require_session_worktree: "
+                 "false in aimee.yaml to disable this — there is no env-var bypass.\n",
                  cwd[0] ? cwd : "(unknown cwd)");
          cJSON_Delete(hook);
          free(stdin_data);
@@ -671,7 +679,7 @@ int handle_attention_guard(void)
                     "aimee attention-guard: this session has hit its raw-scan cap (%d). Aimee "
                     "indexes this repo — explore through it instead: find_symbol, "
                     "ast_grep_search, search_graph, or get_context_block. Raise "
-                    "ingress_max_raw_scans (or set AIMEE_GUARD=0) to bypass.\n",
+                    "ingress_max_raw_scans in aimee.yaml to raise or lift the cap.\n",
                     ingress_max_raw_scans);
             exit_code = 2;
          }
