@@ -1297,6 +1297,7 @@ $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o 
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/execution_plans.o \
                                $(OBJDIR)/db1/coord_jobs.o $(OBJDIR)/server/delegate_role.o \
+                               $(OBJDIR)/role_templates.o \
                                $(OBJDIR)/json_fluent.o \
                                $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2128,6 +2129,7 @@ $(TESTPREFIX)/unit-test-cmd-cancel: $(OBJDIR)/tests/test_cmd_cancel.o \
 
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
                              $(OBJDIR)/server/delegate_depth.o $(OBJDIR)/server/delegate_role.o \
+                             $(OBJDIR)/role_templates.o \
                              $(OBJDIR)/server/delegate_prompt.o $(OBJDIR)/server/delegate_routing.o \
                              $(OBJDIR)/server/delegate_checkout.o $(OBJDIR)/cJSON.o \
                              $(OBJDIR)/util.o $(OBJDIR)/posix/platform_process.o $(OBJDIR)/posix/util.o
@@ -2138,7 +2140,7 @@ $(TESTPREFIX)/unit-test-delegate-plan: $(OBJDIR)/tests/test_delegate_plan.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
-                             $(OBJDIR)/server/delegate_role.o
+                             $(OBJDIR)/server/delegate_role.o $(OBJDIR)/role_templates.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/cJSON.o

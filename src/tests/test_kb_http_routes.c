@@ -11,6 +11,7 @@
 #include "kb_http.h"
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
+#include "rel_types.h"              /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
 #include "kb_service.h"
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
@@ -360,6 +361,50 @@ int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
    (void)since_id;
    (void)out;
    (void)max;
+   return 0;
+}
+
+/* Ontology-console db2 stubs + config_save: the typed_facts ontology console added
+ * these refs into kb_http_console.o; the real defs pull the whole db2/config stack,
+ * so stub them link-only (this test exercises routing, not the ontology backend). */
+long db2_ontology_eval_count(const char *rel_type)
+{
+   (void)rel_type;
+   return 0;
+}
+int db2_ontology_eval_status(const char *rel_type, char *out, size_t out_len)
+{
+   (void)rel_type;
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}
+int db2_ontology_eval_candidates(int threshold, char (*out)[REL_TYPE_NAME_MAX], int max)
+{
+   (void)threshold;
+   (void)out;
+   (void)max;
+   return 0;
+}
+int db2_ontology_approve(const char *rel_type)
+{
+   (void)rel_type;
+   return 0;
+}
+int db2_ontology_map(const char *novel, const char *target)
+{
+   (void)novel;
+   (void)target;
+   return 0;
+}
+int db2_ontology_reject(const char *rel_type)
+{
+   (void)rel_type;
+   return 0;
+}
+int config_save(const config_t *cfg)
+{
+   (void)cfg;
    return 0;
 }
 
