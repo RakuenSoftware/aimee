@@ -8,9 +8,6 @@
 #include "aimee_home.h"
 #include "wfe_store.h"
 
-/* Loop-back safety bound (config-overridable in W6). */
-#define WFE_MAX_ATTEMPTS 20
-
 struct wfe_ctx
 {
    const char *work_item_id;
@@ -389,12 +386,42 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       {
          if (r.status == WFE_STEP_LOOPED)
          {
-            int att = db1_stage_attempt_inc(work_item_id, next);
-            if (att >= WFE_MAX_ATTEMPTS)
+            /* Generic per-node loop cap. Keyed on the GATE node (node->id) so
+             * distinct gates looping to a shared target keep independent budgets
+             * and the review block's own read (also node->id) agrees. */
+            int att = db1_stage_attempt_inc(work_item_id, node->id);
+            if (att >= wfe_node_max_iters(node))
             {
+               wfe_on_max_t pol = wfe_node_on_max(node);
+               if (pol == WFE_ON_MAX_FAIL)
+               {
+                  WFE_CKW(db1_work_item_set_terminal(work_item_id, "rejected"));
+                  db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine",
+                                          "rejected: max_iters reached", "", r.cost_usd);
+                  out->terminal = 1;
+                  snprintf(out->state, sizeof out->state, "rejected");
+                  db1_lifecycle_txn_commit();
+                  wfe_def_free(def);
+                  return 0;
+               }
+               if (pol == WFE_ON_MAX_PASS)
+               {
+                  /* Proceed forward as if the node advanced; the validator
+                   * guarantees on_max:pass carries an on_pass/next forward edge. */
+                  const char *fwd = node->on_pass[0] ? node->on_pass : node->next;
+                  WFE_CKW(db1_work_item_set_stage(work_item_id, fwd, r.content_hash));
+                  db1_lifecycle_event_add(work_item_id, node->id, "forced_pass", "engine", fwd,
+                                          r.content_hash, r.cost_usd);
+                  out->last_status = WFE_STEP_ADVANCED;
+                  snprintf(out->next_stage, sizeof out->next_stage, "%s", fwd);
+                  db1_lifecycle_txn_commit();
+                  wfe_def_free(def);
+                  return 0;
+               }
+               /* WFE_ON_MAX_HUMAN (default): pause for a human. */
                WFE_CKW(db1_work_item_set_pause(work_item_id, "pending_human", next));
-               db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "max_attempts",
-                                       "", r.cost_usd);
+               db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "max_iters", "",
+                                       r.cost_usd);
                out->last_status = WFE_STEP_PENDING;
                out->pause_reason = WFE_PAUSE_PENDING_HUMAN;
                snprintf(out->next_stage, sizeof out->next_stage, "%s", next);

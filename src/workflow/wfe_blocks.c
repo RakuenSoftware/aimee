@@ -1136,25 +1136,14 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
 /* review: a READ-ONLY reviewer delegate (persona from node params `reviewer`,
  * validator-checked disjoint from the roundtable panel + producer) emits a typed
  * verdict. pass -> ADVANCED (on_pass); changes -> LOOPED (on_fail, re-delegate).
- * The re-delegate loop is bounded by the engine-owned per-stage attempt counter:
- * on exhaustion the step FAILS (terminal), never silently loops. Tool-level
- * read-only enforcement is the S2 tool-policy slice (documented residual). */
-static int review_max_iters(const wfe_node_t *node)
-{
-   const cJSON *m =
-       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "max_iters") : NULL;
-   return (m && cJSON_IsNumber(m) && m->valueint > 0) ? m->valueint : 3;
-}
-
+ * The re-delegate loop is bounded by the engine's GENERIC per-node loop cap
+ * (params.max_iters / on_max, keyed on the gate node): the engine owns the cap
+ * and its resolution, so this block no longer self-terminates. A review node
+ * that wants the historical "3 tries then terminal fail" sets max_iters:3 and
+ * on_max:fail. Tool-level read-only enforcement is the S2 tool-policy slice. */
 static wfe_step_result_t exec_review(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *wi = wfe_ctx_work_item(ctx);
-   if (wi && db1_stage_attempt_get(wi, node->id) >= review_max_iters(node))
-   {
-      db1_lifecycle_event_add(wi, node->id, "failed", "engine",
-                              "review re-delegation budget exhausted", "", 0.0);
-      return wfe_step_failed();
-   }
    const cJSON *jrev =
        node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "reviewer") : NULL;
    const char *reviewer =
