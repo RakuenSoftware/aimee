@@ -1986,6 +1986,7 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op},
     {"POST", "/v1/curator/implements", NULL, RM_EXACT, "curator.implements", 0, rh_dispatch_op},
     {"POST", "/v1/curator/invalidated", NULL, RM_EXACT, "curator.invalidated", 0, rh_dispatch_op},
+    {"POST", "/v1/curator/stages", NULL, RM_EXACT, "curator.stages", 0, rh_dispatch_op},
     {"POST", "/v1/graph/explain", NULL, RM_EXACT, "graph.explain", 0, rh_dispatch_op},
     {"POST", "/v1/code/audit", NULL, RM_EXACT, "code.audit", 0, rh_dispatch_op},
     {"POST", "/v1/audit/trace", NULL, RM_EXACT, "evidence.trace_retrieval_event", 0,
