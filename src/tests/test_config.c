@@ -49,6 +49,8 @@ int main(void)
       /* kb.typed_facts.* autonomous reconciliation defaults (§7.2/§8). */
       assert(cfg.kb_typed_facts_auto_promote_enabled == 1);
       assert(cfg.kb_typed_facts_promote_threshold == 3);
+      /* Typed-fact extraction is offline, so it defaults ON on every backend. */
+      assert(cfg.typed_facts_enabled == 1);
       assert(strcmp(cfg.guardrail_mode, "approve") == 0);
       /* §5 hybrid RRF weights + rank constant default to equal weights / k=60,
        * and the §7 blast-radius advisory is opt-in (off). */
