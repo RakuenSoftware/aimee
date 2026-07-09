@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> /* strcasecmp */
 #include <time.h>
 #include <ctype.h>
 
@@ -1163,11 +1164,21 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
  * has no server endpoint and would just burn a slot on a "failed to build request
  * URL" participant; server-hosting is capability, NOT authorization, so both are
  * required. So an unauthorized or disabled claude is never seated, even after a
- * server-side OAuth setup. Other enabled agents are eligible. */
+ * server-side OAuth setup. Other enabled agents are eligible.
+ *
+ * The PRIMARY agent is also never seated: a roundtable exists for an INDEPENDENT
+ * second opinion, so the model the operator runs as primary (config.provider)
+ * must not sit on — or aggregate — its own review panel and quietly grade its own
+ * work. Any agent that resolves to the primary provider (by agent name — the
+ * primary passthrough is named after the provider — or by its provider tag) is
+ * excluded, structurally, regardless of what ensemble.reference_models lists. */
 int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
 {
    if (!ag || !ag->enabled || !ag->name[0])
       return 0;
+   if (cfg->provider[0] && (strcasecmp(ag->name, cfg->provider) == 0 ||
+                            (ag->provider[0] && strcasecmp(ag->provider, cfg->provider) == 0)))
+      return 0; /* the primary must never sit on its own panel */
    if (agent_is_claude_cli(ag) && (!cfg->claude_cli_delegate_enabled || !ag->is_server_hosted))
       return 0;
    return 1;
