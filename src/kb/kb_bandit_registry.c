@@ -52,6 +52,17 @@ static const kb_bandit_decision_point_t REGISTRY[] = {
         .reward_fn = "guardrail_outcome_replay_v1",
         .status = "static",
     },
+    {
+        .id = "reflection_synthesis_mode",
+        .description = "Idle-reflection synthesis rollout (proposal §4): keep the "
+                       "candidate stream in shadow (scored, unpromoted) or promote it "
+                       "to active (writes into the promotion pipeline). Declared here; "
+                       "the shadow->active flip is wired separately, never a config edit.",
+        .arms = {"shadow", "active"},
+        .n_arms = 2,
+        .reward_fn = "reflection_synthesis_quality_replay_v1",
+        .status = "static",
+    },
 };
 
 int kb_bandit_registry_count(void)

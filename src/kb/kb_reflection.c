@@ -3,8 +3,10 @@
  * When now - last_session_rpc_ts > review_idle_trigger_minutes, fires a
  * reflection pass over unreflected session_summary artifacts older than
  * review_session_cooldown_hours.  Stamps reflected_at on each processed
- * artifact.  LLM candidate generation is stubbed pending charter sidecar
- * integration; the scheduler infrastructure and deduplication run fully.
+ * artifact.  LLM candidate generation runs the shared curator LLM path
+ * (kb_curator_llm_run, stage KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION): a
+ * configured Tier-B provider, else the legacy kb_synthesize_command sidecar.
+ * The scheduler infrastructure, MDL selection, and deduplication run fully.
  *
  * No DB1 access from this file.
  */
@@ -20,12 +22,27 @@
 #include "cJSON.h"
 #include "config.h"
 #include "db2/artifacts.h"
-#include "db2/db2.h" /* db2_lease_release_idle */
+#include "db2/db2.h"             /* db2_lease_release_idle */
+#include "kb_curator_llm.h"      /* kb_curator_llm_run — shared curator LLM path */
+#include "kb_curator_provider.h" /* KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, provider_for_stage */
 #include "kb_features.h"
 #include "kb_mdl.h"
 #include "kb_service.h"
 #include "log.h"
 #include "platform_process.h"
+
+/* Reflection synthesis runs through the shared curator LLM path
+ * (kb_curator_llm_run): a configured Tier-B provider (provider_client, strict
+ * JSON) if present, else the legacy kb_synthesize_command sidecar as fallback.
+ * The provider path needs a system prompt (the legacy sidecar carried its own). */
+#define REFLECTION_SYNTH_OUTBUF 16384
+static const char *const REFLECTION_SYNTH_SYSTEM_PROMPT =
+    "You consolidate a batch of session-summary evidence into ONE higher-order "
+    "insight. Reply with a single JSON object and nothing else: "
+    "{\"candidate\": \"<the synthesized insight, one or two sentences>\", "
+    "\"cluster\": \"<a short topic label the insight belongs to>\", "
+    "\"confidence\": <0.0-1.0>}. Ground the insight in the evidence; do not invent "
+    "facts. If the evidence supports no durable insight, return a low confidence.";
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -96,19 +113,22 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
       char *req_str = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
 
-      char *out = NULL;
-      size_t out_len = 0;
-      int rc =
-          platform_exec_pipe(cfg->kb_synthesize_command, req_str, strlen(req_str), &out, &out_len);
+      /* Route through the shared curator LLM path: a configured Tier-B provider
+       * (provider_client) if present, else the legacy kb_synthesize_command
+       * sidecar. A NULL return is a fail — skip this attempt (fail-closed: no
+       * durable write happens on a failed/empty response). */
+      char serr[256];
+      char *out = kb_curator_llm_run(
+          cfg, KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, REFLECTION_SYNTH_SYSTEM_PROMPT, req_str,
+          NULL, cfg->kb_synthesize_command, REFLECTION_SYNTH_OUTBUF, serr, sizeof(serr));
       free(req_str);
 
-      if (rc != 0 || !out || out_len == 0)
-      {
-         free(out);
+      if (!out)
          continue;
-      }
 
-      cJSON *resp = cJSON_ParseWithLength(out, out_len);
+      /* Tolerate prose/fence-wrapped output: scan to the first JSON object. */
+      const char *start = strchr(out, '{');
+      cJSON *resp = start ? cJSON_Parse(start) : NULL;
       free(out);
 
       if (!resp)
@@ -144,6 +164,7 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
    {
       aimee_log(LOG_WARN, "kb.reflection", "synthesis sidecar returned no valid candidates for %s",
                 row->id);
+      free(evidence_enriched);
       return -1;
    }
 
@@ -162,6 +183,26 @@ static int run_synthesis_pass(const config_t *cfg, const db2_artifact_proposed_t
    cJSON_AddNumberToObject(win, "mdl_total", scores[winner].total);
    char *win_str = cJSON_PrintUnformatted(win);
    cJSON_Delete(win);
+
+   /* Shadow gate (proposal §4): score and log the winner as evidence, but write
+    * NO durable candidate — fail-closed, nothing enters the promotion pipeline.
+    * Promoting the shadow stream to normal is a bandit decision
+    * (reflection_synthesis_mode), wired separately; this never flips itself. */
+   if (cfg->kb_reflection_synthesis_shadow)
+   {
+      aimee_log(LOG_INFO, "kb.reflection",
+                "shadow synthesis (scored, unpromoted): source=%s winner=%d conf=%.2f "
+                "mdl_total=%.2f candidate=%s",
+                row->id, winner, confidences[winner], scores[winner].total, win_str);
+      free(win_str);
+      for (int i = 0; i < n_valid; i++)
+      {
+         free(candidate_bufs[i]);
+         free(cluster_bufs[i]);
+      }
+      free(evidence_enriched);
+      return 0;
+   }
 
    char new_id[37];
    db2_artifact_gen_id(new_id, sizeof(new_id));
@@ -237,14 +278,19 @@ static void run_reflection_pass(const config_t *cfg)
          continue;
       }
 
-      if (cfg->kb_synthesize_command[0] != '\0' && cfg->kb_mdl_tiebreak_enabled)
+      /* Run when MDL tie-break is on AND we have somewhere to send the work: a
+       * configured Tier-B provider (provider_client) or the legacy sidecar. */
+      provider_def_t rprov;
+      int have_provider =
+          kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, &rprov);
+      if ((cfg->kb_synthesize_command[0] != '\0' || have_provider) && cfg->kb_mdl_tiebreak_enabled)
       {
          run_synthesis_pass(cfg, &rows[i]);
       }
       else
       {
-         aimee_log(LOG_INFO, "kb.reflection",
-                   "session %s reflected (synthesis sidecar not configured)", rows[i].id);
+         aimee_log(LOG_INFO, "kb.reflection", "session %s reflected (synthesis LLM not configured)",
+                   rows[i].id);
       }
       processed++;
    }

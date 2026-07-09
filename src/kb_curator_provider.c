@@ -29,6 +29,7 @@ kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage)
    case KB_CURATOR_STAGE_DETECT_CONTRADICTIONS:
    case KB_CURATOR_STAGE_SYNTHESIZE:
    case KB_CURATOR_STAGE_PROMOTE_ENTITY:
+   case KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION:
       return KB_CURATOR_TIER_B;
    }
    /* Fail safe: an unclassified / future stage routes to the capable tier (which
