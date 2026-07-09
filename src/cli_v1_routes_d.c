@@ -1018,23 +1018,38 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
 
    int waited = 0;
    const int step_ms = 500;
+   /* A long remote run (delegate ensembles, kb.build, index.scan, …) polls for many
+    * minutes. A single transient poll failure — a TLS/connection blip while the run
+    * is still progressing server-side — must NOT abandon it; that surfaced as the
+    * misleading "could not reach the /v1 endpoint" on long roundtables. Tolerate a
+    * bounded run of CONSECUTIVE poll failures (reset on any success) before giving
+    * up, so a momentary blip is ridden out instead of failing the whole run. */
+   int consec_fail = 0;
+   const int max_consec_fail = 20;
    for (;;)
    {
       cJSON *snap = cli_v1_send(remote, bearer, "GET", runpath, NULL, 15000, &status);
       if (!snap)
-         return NULL;
-      cJSON *st = cJSON_GetObjectItemCaseSensitive(snap, "status");
-      if (cJSON_IsString(st) &&
-          (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
-           strcmp(st->valuestring, "cancelled") == 0))
       {
-         cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
-         cJSON_Delete(snap);
-         /* Completed runs carry the raw dispatch result; a failed/empty run yields
-          * an empty object so the caller still gets a well-formed response. */
-         return result ? result : cJSON_CreateObject();
+         if (++consec_fail > max_consec_fail)
+            return NULL;
       }
-      cJSON_Delete(snap);
+      else
+      {
+         consec_fail = 0;
+         cJSON *st = cJSON_GetObjectItemCaseSensitive(snap, "status");
+         if (cJSON_IsString(st) &&
+             (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
+              strcmp(st->valuestring, "cancelled") == 0))
+         {
+            cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
+            cJSON_Delete(snap);
+            /* Completed runs carry the raw dispatch result; a failed/empty run yields
+             * an empty object so the caller still gets a well-formed response. */
+            return result ? result : cJSON_CreateObject();
+         }
+         cJSON_Delete(snap);
+      }
       if (timeout_ms > 0 && waited >= timeout_ms)
          return NULL;
       cli_v1_sleep_ms(step_ms);
