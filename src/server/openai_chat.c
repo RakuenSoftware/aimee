@@ -1155,11 +1155,16 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
          learning_implicit_detect_turn(turn_text);
          /* Bridge the same continuation/repair classification into a retrieval
           * OUTCOME for the prior turn's surfaced rows (default-off). Closes the
-          * demotion + learning-to-rank loops from the signal already computed. */
+          * demotion + learning-to-rank loops from the signal already computed.
+          * The prior assistant answer (from the message history) drives per-doc
+          * overlap attribution — which surfaced rows the answer actually used. */
          {
             dogfood_autolabel_kind_t rob_kind = dogfood_classify_next_turn(turn_text);
-            retrieval_outcome_bridge_on_autolabel(rob_kind == DOGFOOD_AUTOLABEL_CONTINUATION,
+            char *prior_answer = ingress_preinject_last_assistant_from_messages(messages);
+            retrieval_outcome_bridge_on_autolabel(prior_answer,
+                                                  rob_kind == DOGFOOD_AUTOLABEL_CONTINUATION,
                                                   rob_kind == DOGFOOD_AUTOLABEL_REPAIR);
+            free(prior_answer);
          }
          free(turn_text);
       }

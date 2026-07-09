@@ -125,11 +125,12 @@ int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *
    return 0;
 }
 void retrieval_outcome_bridge_note(const char *surface, const char *event_id, const int64_t *ids,
-                                   int n)
+                                   const char *const *snippets, int n)
 {
    (void)surface;
    (void)event_id;
    (void)ids;
+   (void)snippets;
    (void)n;
 }
 int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
