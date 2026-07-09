@@ -173,7 +173,7 @@ int main(void)
       db1_work_item_t wi;
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "accepted") == 0);
-      assert(strcmp(g_seen_proposal, PTEXT) == 0);            /* proposal reached the panel */
+      assert(strcmp(g_seen_proposal, PTEXT) == 0); /* proposal reached the panel */
       assert(strcmp(g_seen_focus, "completion and missing tests") == 0); /* focus lens too */
       unlink(pp);
    }
