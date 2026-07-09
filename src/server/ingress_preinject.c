@@ -435,6 +435,37 @@ char *ingress_preinject_query_from_messages(const cJSON *messages)
    return out;
 }
 
+char *ingress_preinject_last_assistant_from_messages(const cJSON *messages)
+{
+   if (!cJSON_IsArray(messages))
+      return NULL;
+
+   /* The LAST assistant-role message is the PRIOR turn's answer (the current
+    * turn's answer does not exist yet). Used by the retrieval-outcome bridge to
+    * attribute per-document overlap. */
+   const cJSON *msg = NULL;
+   const cJSON *last_assistant = NULL;
+   cJSON_ArrayForEach(msg, messages)
+   {
+      const cJSON *role = cJSON_GetObjectItemCaseSensitive(msg, "role");
+      if (cJSON_IsString(role) && strcmp(role->valuestring, "assistant") == 0)
+         last_assistant = msg;
+   }
+   if (!last_assistant)
+      return NULL;
+
+   dstr_t d;
+   dstr_init(&d);
+   append_content_text(&d, cJSON_GetObjectItemCaseSensitive(last_assistant, "content"));
+   char *out = dstr_steal(&d);
+   if (out && out[0] == '\0')
+   {
+      free(out);
+      return NULL;
+   }
+   return out;
+}
+
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    if (request_disabled || g_request_disabled)
@@ -587,10 +618,18 @@ char *ingress_preinject_build(const char *query, int request_disabled)
        * previews surfaced into this turn (mem_n <= the diagnose cap of 5), so
        * recording all of them is the complete memory evidence, not a truncation. */
       int64_t ids[5];
+      const char *snips[5];
       int n_ids = 0;
       for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
          if (mems[i].memory.id > 0)
-            ids[n_ids++] = mems[i].memory.id;
+         {
+            /* Snippet for per-doc overlap attribution: the same preview text the
+             * turn saw (headline, else content). */
+            snips[n_ids] =
+                mems[i].memory.headline[0] ? mems[i].memory.headline : mems[i].memory.content;
+            ids[n_ids] = mems[i].memory.id;
+            n_ids++;
+         }
       if (n_ids > 0)
       {
          char ev_id[64] = "";
@@ -599,7 +638,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          if (kb_client_evidence_emit_retrieval_event_ex(tid, "Recall", fp, ids, n_ids, ev_id,
                                                         sizeof(ev_id)) == 0 &&
              ev_id[0])
-            retrieval_outcome_bridge_note("memory", ev_id, ids, n_ids);
+            retrieval_outcome_bridge_note("memory", ev_id, ids, snips, n_ids);
       }
 
       /* Code surface (P1.5/D3): MERGE the code hits surfaced into this turn into the

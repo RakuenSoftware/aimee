@@ -98,24 +98,34 @@ why the *per-document contrast* below is the thing that unlocks it. The
 per-candidate `weight` field now flows through to the fitter, so an **IPW /
 propensity or confidence weight** on an outcome is honoured unchanged.
 
-### Remaining open work — the real fidelity lever
+### Landed: per-document answer↔doc overlap attribution
 
-1. **Per-document answer↔doc overlap attribution.** The turn verdict is applied to
-   *all* surfaced rows identically, giving a ranker no within-query contrast (and
-   the existing "citation" machinery is circular — `memory_collect_answer_citation_ids`
-   returns the top-ranked match's cluster, computed at *retrieval* time, so it just
-   reinforces the current order). The non-circular fix: at attribution time, the
-   prior turn's assistant answer is already in the message history — score each
-   surfaced doc's snippet against it and emit **per-doc** `accepted` (used) vs
-   `contradicted` (surfaced-but-unused). This is what turns a flat verdict into the
-   contrastive labels the pairwise objective needs.
-2. **Ranker (`kb_search`) capture hook.** Note `ranker` outcomes when the agent uses
-   `kb_search` in a turn (scoped to in-turn tool use — `kb.search` is also CLI/API
-   callable outside a turn; `kb_search`'s response must expose `doc_id`).
-3. **IPW propensity logging.** Log the surfacing propensity (reuse the bandit's
+The turn verdict is no longer applied to all surfaced rows identically. At
+attribution time the prior turn's assistant answer is already in the message
+history (`ingress_preinject_last_assistant_from_messages`); the bridge scores each
+surfaced row's snippet against it (`retrieval_outcome_overlap_used`) and attributes
+**per document**: on a continuation, rows the answer used → `accepted`,
+surfaced-but-unused rows → `corrected`; on a repair, only the used rows are blamed.
+That is the **within-query contrast** the pairwise objective needs — and it is
+non-circular (the old `memory_collect_answer_citation_ids` "citation" is the
+top-ranked match computed at *retrieval* time, so it just reinforces the current
+order; overlap is derived from the answer instead). Wired for the **memory**
+surface (which the bridge already notes), sharpening the revived demotion loop from
+flat to per-row; the bridge is surface-generic so the ranker gets it for free once
+its rows are noted. Falls back to the flat verdict when no answer/snippets exist.
+
+### Remaining open work
+
+1. **Ranker (`kb_search`) capture hook.** Note `ranker` outcomes when the agent uses
+   `kb_search` in a turn. Prerequisite found: the `kb_search` **tool returns a
+   rendered text blob**, not structured ids — so the search response must first
+   expose `docs:[{id, snippet}]`. Then note them (scoped to in-turn tool use —
+   `kb.search` is also CLI/API-callable outside a turn, where no next-turn autolabel
+   follows). With that, per-doc overlap (above) lights up `ranker_outcome`.
+2. **IPW propensity logging.** Log the surfacing propensity (reuse the bandit's
    `db2_bandit_decision_insert` pattern) and populate the outcome `weight` with
    `1/propensity`; the fitter already consumes it.
-4. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
+3. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
 
 ## Non-goals
 
