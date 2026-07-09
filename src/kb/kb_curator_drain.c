@@ -411,6 +411,10 @@ cJSON *kb_curator_stages_json(void)
          cJSON_AddStringToObject(o, "config_key", key);
       }
       kb_curator_add_requires(o, st->name);
+      /* These registry stages are run()-backed, so each is a valid base_op for a
+       * composed custom stage (Phase D). The GUI offers only base_op_eligible
+       * stages in its "add custom stage" picker. */
+      cJSON_AddBoolToObject(o, "base_op_eligible", 1);
       cJSON_AddItemToArray(arr, o);
    }
    /* The projection-graph + cross-repo refresh run on the INDEX lane via
@@ -426,6 +430,8 @@ cJSON *kb_curator_stages_json(void)
       cJSON_AddNumberToObject(o, "order", (double)n);
       cJSON_AddStringToObject(o, "config_key", "kb_curator_projection_graph_enabled");
       kb_curator_add_requires(o, "projection_graph");
+      /* Batch sweeps, not run()-backed CURATOR_STAGES ops — not a valid base_op. */
+      cJSON_AddBoolToObject(o, "base_op_eligible", 0);
       cJSON_AddItemToArray(arr, o);
    }
    {
@@ -437,6 +443,7 @@ cJSON *kb_curator_stages_json(void)
       cJSON_AddNumberToObject(o, "order", (double)(n + 1));
       cJSON_AddStringToObject(o, "config_key", "kb_curator_cross_repo_graph_enabled");
       kb_curator_add_requires(o, "cross_repo_graph");
+      cJSON_AddBoolToObject(o, "base_op_eligible", 0);
       cJSON_AddItemToArray(arr, o);
    }
    /* Composed custom stages (Phase D): the validated entries from
@@ -468,6 +475,7 @@ cJSON *kb_curator_stages_json(void)
             cJSON_AddBoolToObject(o, "custom", 1);
             cJSON_AddStringToObject(o, "base_op", cbuf[i].base_op);
             cJSON_AddBoolToObject(o, "enabled", cbuf[i].enabled ? 1 : 0);
+            cJSON_AddBoolToObject(o, "base_op_eligible", 0); /* a custom can't base another */
             kb_curator_add_requires(o, cbuf[i].base_op);
             cJSON_AddItemToArray(arr, o);
          }
