@@ -1063,25 +1063,31 @@ static const char *const PANEL_DEFAULT_PERSONAS[] = {"security", "architect", "q
 #define PANEL_DEFAULT_PERSONA_COUNT                                                                \
    ((int)(sizeof(PANEL_DEFAULT_PERSONAS) / sizeof(PANEL_DEFAULT_PERSONAS[0])))
 
-/* Persona name for review panelist `model_index`. Returns NULL for non-review
- * modes (draft/aggregate keep their prior NULL-persona behavior) and when no
- * persona applies. The returned pointer is a borrowed string literal or config
- * field; do not free it. */
+/* Persona name for panelist `model_index`. An explicit per-slot override
+ * (ensemble.reference_personas[model_index]) binds first in ANY mode. Otherwise
+ * the default depends on mode: DRAFT authors every panelist as the configured
+ * default persona (config.default_persona, itself defaulting to `engineer`),
+ * while REVIEW round-robins the diverse critique lineup keyed on the stable model
+ * index. The returned pointer is a borrowed string literal or config field; do
+ * not free it. */
 const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index)
 {
-   if (mode != ROUNDTABLE_REVIEW || !cfg || model_index < 0)
+   if (!cfg || model_index < 0)
       return NULL;
    if (model_index < cfg->ensemble_reference_persona_count &&
        cfg->ensemble_reference_personas[model_index][0])
       return cfg->ensemble_reference_personas[model_index];
+   if (mode != ROUNDTABLE_REVIEW)
+      return cfg->default_persona[0] ? cfg->default_persona : "engineer";
    return PANEL_DEFAULT_PERSONAS[model_index % PANEL_DEFAULT_PERSONA_COUNT];
 }
 
-/* Compose the system prompt for review panelist `model_index`. Returns a heap
- * string the caller must free, or NULL (no persona, or compose failed — both
- * fall back to today's NULL-system-prompt behavior, never dropping a panelist).
- * persona_compose_delegate_prompt resolves project->user->built-in and itself
- * falls back to a usable persona, so an unknown custom name is non-fatal. */
+/* Compose the system prompt for panelist `model_index` (draft: engineer; review:
+ * the diverse lineup — see panel_persona_name). Returns a heap string the caller
+ * must free, or NULL (no persona name, or compose failed — both fall back to a
+ * NULL-system-prompt run, never dropping a panelist). persona_compose_delegate_prompt
+ * resolves project->user->built-in and itself falls back to a usable persona, so
+ * an unknown custom name is non-fatal. */
 static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, int model_index)
 {
    const char *name = panel_persona_name(cfg, mode, model_index);
@@ -1111,8 +1117,8 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
       prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context);
       if (!prompts[i])
          goto fail;
-      /* Per-participant persona (review mode only) is the system prompt; the
-       * round prompt still drives the output shape. */
+      /* Per-participant persona is the system prompt (draft: engineer; review:
+       * the diverse lineup); the round prompt still drives the output shape. */
       personas[i] = panel_persona_prompt(cfg, mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
       tasks[i].agent = cfg->ensemble_reference_models[i];

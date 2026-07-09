@@ -47,7 +47,7 @@ function category(key: string): string {
     [/^memory/, "Memory"],
     [/^(ingress|gateway|tool_output|code_span|context|fold|compact)/, "Gateway & context"],
     [/^(audit|governance|decision|guardrail)/, "Audit & governance"],
-    [/^(provider|openai|anthropic|model|delegate|agent|roundtable)/, "Providers & delegates"],
+    [/^(provider|openai|anthropic|model|delegate|agent|roundtable|default_persona|persona)/, "Providers & delegates"],
     [/^(autonomous|cross_verify|ecomode|max_iterations|reasoning|verify|autopilot|trigger)/, "Agent behavior"],
     [/^(learning|intelligence|calibrat|bandit)/, "Learning & intelligence"],
     [/^(kb_curator|curator|synth|embed|rerank|extract|index)/, "Knowledge curation"],

@@ -116,6 +116,7 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
       snprintf(cfg.provider, sizeof(cfg.provider), "gemini");
+      snprintf(cfg.default_persona, sizeof(cfg.default_persona), "architect");
       snprintf(cfg.claude_model, sizeof(cfg.claude_model), "claude-sonnet-4-6");
       snprintf(cfg.codex_model, sizeof(cfg.codex_model), "gpt-5.4");
       snprintf(cfg.model_reasoning_effort, sizeof(cfg.model_reasoning_effort), "high");
@@ -361,6 +362,7 @@ int main(void)
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
       assert(strcmp(cfg2.provider, "gemini") == 0);
+      assert(strcmp(cfg2.default_persona, "architect") == 0);
       assert(strcmp(cfg2.claude_model, "claude-sonnet-4-6") == 0);
       assert(strcmp(cfg2.codex_model, "gpt-5.4") == 0);
       assert(strcmp(cfg2.model_reasoning_effort, "high") == 0);

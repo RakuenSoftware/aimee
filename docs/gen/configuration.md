@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (156)
+## CLI-settable keys (157)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -51,6 +51,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `db2_url` | string | DB2 connection URL (aimee's vector / knowledge-base store). |
 | `dedup_enabled` | bool | Deduplicate near-identical responses. |
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
+| `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
 | `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
 | `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |

@@ -182,10 +182,10 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
  * auto-seeded-but-unkeyed model never burns a seat and degrades the round. */
 void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg);
 
-/* Persona name for review panelist `model_index`: a configured
- * ensemble.reference_personas[model_index] if set, else a round-robin over the
- * engine's diverse default lineup keyed on the stable model index. Returns NULL
- * for non-review modes (draft/aggregate keep their NULL-persona behavior).
+/* Persona name for panelist `model_index`: a configured
+ * ensemble.reference_personas[model_index] if set (any mode), else a mode default
+ * — DRAFT uses the built-in `engineer` persona for every panelist, REVIEW
+ * round-robins the diverse default lineup keyed on the stable model index.
  * Borrowed pointer (string literal or config field) — do not free. Exposed for
  * tests. */
 const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index);
