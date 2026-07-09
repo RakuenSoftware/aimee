@@ -132,32 +132,31 @@ int wfe_implement_verify_ok(const char *workdir);
 /* ---- Child-workflow fan-out seam for foreach.workflow (sliced-lifecycle build).
  * The block decomposes the split packets into one CHILD workflow run per packet
  * (the "slice" workflow: implement -> freeze -> roundtable -> sub-PR -> green CI ->
- * merge into the feature branch) and reports the aggregate child state. The wfe
- * library cannot create/drive child work items itself (that is DB + autonomy-driver
- * territory, a module-boundary concern), so it runs them through this hook. The
- * default provider is NULL -> foreach.workflow PARKS pending_human (fail closed: no
- * child is spawned and nothing silently advances), exactly the pre-seam posture.
- * The server registers a live provider (spawn per packet + aggregate); tests inject
- * a mock. ---- */
-typedef enum
-{
-   WFE_FOREACH_ALL_MERGED = 1, /* every child terminal & merged -> parent advances */
-   WFE_FOREACH_PENDING = 0,    /* >=1 child still active/parked -> park, re-drive later */
-   WFE_FOREACH_FAILED = -1     /* a child failed / could not fan out -> fail closed */
-} wfe_foreach_state_t;
-
+ * merge into the feature branch). SPAWNING children is DB + autonomy-driver territory
+ * (a module-boundary concern), so it runs through this hook; the AGGREGATION (are all
+ * slices merged?) lives in the executor, keyed off the DB parent<->child linkage
+ * (db1_work_item_child_counts), so the fan-in logic is unit-testable. The default
+ * provider is NULL -> foreach.workflow PARKS pending_human (fail closed: no child is
+ * spawned and nothing silently advances). The server registers a live spawner; tests
+ * inject a mock that creates child rows. ---- */
 typedef struct
 {
-   /* Fan the split packets of `work_item_id` out to `child_workflow` (one child run
-    * per packet, targeting the run's feature branch) and report the aggregate state.
-    * `max_children` bounds the fan-out (a pathological/hostile packet list). On a
-    * fatal error fills `err`. Returns a wfe_foreach_state_t. */
-   int (*run)(const char *work_item_id, const char *child_workflow, int max_children, char *err,
-              size_t errlen);
+   /* Create one child `child_workflow` run per split packet of `work_item_id`, each
+    * linked to it via db1_work_item_set_parent and targeting the run's feature branch.
+    * `max_children` bounds the fan-out (a pathological/hostile packet list). Idempotent:
+    * if children already exist it must not double-spawn. Returns the number of children
+    * that exist after the call (0 = no packets -> nothing to do), or -1 on a fatal error
+    * (fills `err`). */
+   int (*spawn)(const char *work_item_id, const char *child_workflow, int max_children, char *err,
+                size_t errlen);
 } wfe_foreach_provider_t;
 
-/* Install a child-workflow fan-out provider (NULL restores the default park). */
+/* Install a child-workflow spawn provider (NULL restores the default park). */
 void wfe_set_foreach_provider(const wfe_foreach_provider_t *p);
+
+/* Register only the foreach.workflow executor (test seam: stub the rest, drive the
+ * real fan-in aggregation). */
+void wfe_register_foreach_block(void);
 
 /* ---- per-work-item git worktree isolation (F2) ----
  * Create/return a locked per-work-item worktree (aimee/wi/<id>) so concurrent
