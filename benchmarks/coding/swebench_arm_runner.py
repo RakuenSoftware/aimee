@@ -24,6 +24,7 @@ is NOT extractable today. `thinking_tokens` is reported as None until the ledger
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,6 +32,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from benchmarks.coding import swebench_transport_verify as V
 from benchmarks.coding import swebench_agentic_harness as H
+from benchmarks.coding import swebench_live_transport as T
 
 _FAKE = os.environ.get("AIMEE_BENCH_FAKE_AGENT") == "1"
 
@@ -143,15 +145,51 @@ def _fake_arm_a_record(instance, primary_model):
                             repo=instance.get("repo", "x/y"), redactions=red)
 
 
+# ------------------------------------------------------------ token assembly ---
+def primary_tokens_by_jobs(token_db: str, primary_model: str, job_ids: list,
+                           delegation_ids: list | None = None) -> PrimaryTokens:
+    """PrimaryTokens for a LIVE agentic run. PREFERS exact delegation_id matching (when the dispatch
+    captured a delegation_id from delegation_spawns); falls back to the job-id `LIKE '%-<job_id>'`
+    scoping (PR #986) when capture was unavailable. This is the deployment attribution (NON-EMPTY
+    delegation_id) — `primary_token_totals` stays for the EMPTY-polarity FAKE/theoretical path."""
+    dids = [d for d in (delegation_ids or []) if d]
+    if dids:
+        uncached, cached, output, turns = T.read_realized_by_delegations(token_db, dids)
+    else:
+        uncached, cached, output, turns = T.read_realized_by_jobs(token_db, primary_model, job_ids)
+    return PrimaryTokens(input_uncached=uncached, input_cached=cached, output=output, turns=turns)
+
+
 # ------------------------------------------------------------ live entry -------
 def run_arm_a(instance: dict, primary_model: str, *, token_db: str, base_repo: str,
-              allocator: "H.EnvAllocator", budget: "H.LoopBudget") -> dict:
-    """Live arm-A run for one instance. Provisions a workspace, drives the primary agentic loop
-    via the S0-verified /v1/runs transport, extracts the patch, and reads the primary's tokens
-    from token_audit scoped to the run's session_id. Marked live (needs a server)."""
+              allocator: "H.EnvAllocator", budget: "H.LoopBudget", primary_agent: str | None = None,
+              aimee_bin: str = "aimee", dispatch=None, now=time.perf_counter) -> dict:
+    """Live arm-A run for one instance. Provisions a workspace, drives the primary agentic loop as
+    a tools-enabled `code` delegate (routed via `primary_agent`, e.g. codex=gpt-5.5), extracts the
+    patch, and reads the primary's tokens from token_audit scoped to the dispatch's job_id. The
+    `dispatch` seam is injected so this is drivable with a fake fleet; `resolved` is left None here
+    and set later by the official grader (S5). Requires a live server on the real path."""
     if _FAKE:
         return _fake_arm_a_record(instance, primary_model)
-    raise NotImplementedError(
-        "live arm-A run not wired: provision via H.provision_workspace, drive H.run_agentic_loop "
-        "(arm='A', /v1/runs transport), extract via H.extract_patch, then read tokens with "
-        "V.collect_rows(token_db, session_id) + primary_token_totals(). Requires a live server.")
+    instance_id = instance["instance_id"]
+    env = allocator.allocate(instance_id, "A", 0)
+    t0 = now()
+    res = H.run_agentic_loop(instance, env, budget, arm="A", worker=primary_agent,
+                             base_repo=base_repo, token_db=token_db, aimee_bin=aimee_bin,
+                             dispatch=dispatch)
+    t1 = now()
+    tok = primary_tokens_by_jobs(token_db, primary_model, [res.job_id],
+                                 delegation_ids=[res.delegation_id])
+    wall = WallClock(t0=t0, first_work=t0, t1=t1)  # single dispatch: queue folded into work
+    rec = build_arm_record(
+        instance_id, "A", primary_model, tokens=tok, worker_in=0, worker_out=0, wall=wall,
+        resolved=None, patch=res.patch, base_commit=instance.get("base_commit", ""),
+        repo=instance.get("repo", ""), n_workers=1, redactions=res.redactions,
+        invalid=not res.ok)
+    # The secret-redacted patch text is needed by the official grader (build_predictions); the
+    # record already carries only the fingerprint for the ledger, so attach the patch explicitly.
+    rec["patch"] = res.patch
+    rec["patch_source"] = res.patch_source   # "workspace" (graded) | "response_text" (non-authoritative)
+    rec["job_id"] = res.job_id
+    rec["agent"] = res.agent
+    return rec

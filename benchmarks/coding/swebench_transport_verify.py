@@ -175,14 +175,20 @@ _PROBE_TASK = ("Read PROBE.txt, delegate a summary of it to a worker, then write
 
 def _invoke_v1_runs(ctx: ProbeCtx) -> str:
     raise NotImplementedError(
-        "live /v1/runs probe not wired: POST an agentic run to /v1/runs on the server, poll "
-        "to completion, return its session_id. Task: " + _PROBE_TASK)
+        "the /v1/runs + EMPTY-delegation-polarity transport is SUPERSEDED on the live deployment "
+        "(swebench_live_attribution.py FINDING 1: the real fleet emits almost no EMPTY-delegation "
+        "rows). Use the sanctioned DELEGATE transport instead: swebench_live_attribution."
+        "run_live_matrix(db_path=..., primary_agent='codex', worker='GLM-5.2'), which dispatches a "
+        "real primary+worker agentic probe via swebench_live_transport and verifies attribution by "
+        "delegation_id/job_id (L1-L4). The P1-P5 assertions here remain the FAKE-mode CI gate. "
+        "Task: " + _PROBE_TASK)
 
 
 def _invoke_agent_shell(ctx: ProbeCtx) -> str:
     raise NotImplementedError(
-        "live agent_shell probe not wired: submit the probe task via the server-side "
-        "agent_shell execution mode and return its session_id. Task: " + _PROBE_TASK)
+        "superseded (see _invoke_v1_runs): the live S0 gate is the delegate-transport probe in "
+        "swebench_live_attribution.run_live_matrix, not a server-side agent_shell run. "
+        "Task: " + _PROBE_TASK)
 
 
 DEFAULT_PROBES = [
