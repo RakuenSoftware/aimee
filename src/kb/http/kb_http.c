@@ -1126,6 +1126,18 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 503;
       }
 
+      /* format=json returns the structured results verbatim (doc_id-keyed) rather
+       * than the file_path-keyed `hits` projection. No existing caller passes
+       * format; the learning-to-rank outcome capture uses it to recover doc_ids. */
+      char search_format[16] = "";
+      json_str(body, "format", search_format, sizeof(search_format));
+      if (strcmp(search_format, "json") == 0)
+      {
+         int n = snprintf(out_buf, (size_t)out_cap, "%s", raw);
+         free(raw);
+         return (n >= 0 && n < out_cap) ? 200 : 500;
+      }
+
       char used_mode[64] = "rrf";
       json_str(raw, "fusion_mode", used_mode, sizeof(used_mode));
 

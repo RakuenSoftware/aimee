@@ -1744,6 +1744,34 @@ int kb_client_record_retrieval_outcome(const char *surface, const char *event_id
    return ok ? 0 : -1;
 }
 
+int kb_client_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_fingerprint,
+                                char *event_id_out, size_t event_id_len)
+{
+   if (event_id_out && event_id_len > 0)
+      event_id_out[0] = '\0';
+   if (!doc_ids || n <= 0)
+      return -1;
+   cJSON *req = cJSON_CreateObject();
+   if (query_fingerprint && query_fingerprint[0])
+      cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
+   cJSON *arr = cJSON_AddArrayToObject(req, "doc_ids");
+   for (int i = 0; arr && i < n; i++)
+      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)doc_ids[i]));
+   char *json = kb_v1_action_request("ranker.emit_event", req);
+   if (!json)
+      return -1;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+   cJSON *ev = cJSON_GetObjectItemCaseSensitive(resp, "retrieval_event_id");
+   int ok = cJSON_IsString(ev) && ev->valuestring[0];
+   if (ok && event_id_out && event_id_len > 0)
+      snprintf(event_id_out, event_id_len, "%s", ev->valuestring);
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
 int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
                                              const char *query_fingerprint,
                                              const char *const *types, const char *const *refs,
