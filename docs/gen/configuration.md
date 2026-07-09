@@ -546,9 +546,11 @@ nodes:
 | `gate.ci` | `verdict` | `pr` |
 | `check.mergeable` | `verdict` | `pr` |
 | `understand` | `WFE_ART_INTENT` | _(source: none)_ |
-| `split` | `plan` | _(source: none)_ |
+| `split` | `plan` | `plan` |
 | `review` | `verdict` | `frozen_diff`, `branch` |
 | `gate.deliver` | `none` | `verdict`, `approval` |
+| `branch.open` | `branch` | `plan` |
+| `foreach.workflow` | `branch` | `plan`, `branch` |
 
 ### Block parameters (`params:`)
 
