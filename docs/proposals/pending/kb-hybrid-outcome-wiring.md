@@ -117,13 +117,12 @@ its rows are noted. Falls back to the flat verdict when no answer/snippets exist
 ### Landed: ranker (`kb_search`) capture hook
 
 When the agent uses `kb_search` in a turn and the flag is on, the tool dispatch
-(`agent_tools_dispatch.c`) does a structured `format=json` fetch, mints a kb_hybrid
-`retrieval_event` over the surfaced doc_ids (`kb_client_ranker_emit_event` →
-`ranker.emit_event`), and notes them on the ranker surface. Two substrate facts
-found + fixed: `kb_search_json` now emits `doc_id` per result (the file_path-keyed
-http `hits` shape lacked it), and `/v1/search` honours `format=json` to return the
-structured `results` verbatim (no other caller passes `format`, so existing
-behaviour is untouched). The bridge symbol is declared **weak** in the agent layer,
+(`agent_tools_dispatch.c`) reads the surfaced `hits[].doc_id` + `excerpt`, mints a
+kb_hybrid `retrieval_event` over them (`kb_client_ranker_emit_event` →
+`ranker.emit_event`), and notes them on the ranker surface. The substrate fix that
+made this possible: `/v1/search` now includes **`doc_id` on each `hit`** (the
+projection was file_path-keyed and lacked it) — additive, the response shape is
+unchanged and existing consumers ignore it. The bridge symbol is declared **weak** in the agent layer,
 so a delegate/lean binary links cleanly and simply skips capture. The next turn's
 per-doc overlap (above) then attributes `ranker_outcome` — closing the ranker loop.
 

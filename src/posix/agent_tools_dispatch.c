@@ -1351,9 +1351,9 @@ extern void retrieval_outcome_bridge_note(const char *surface, const char *event
 
 /* Learning-to-rank outcome capture (default-off behind learning_implicit_retrieval_outcome):
  * when the agent uses kb_search in a turn, record the surfaced doc_ids + snippets so the
- * NEXT turn's continuation/repair autolabel can attribute a per-doc ranker outcome. Uses a
- * separate structured (format=json) fetch so the agent-facing text result is unchanged; the
- * extra fetch only happens when the flag is on. No-op unless the bridge is linked (server). */
+ * NEXT turn's continuation/repair autolabel can attribute a per-doc ranker outcome. The
+ * agent-facing text result is unchanged; the extra structured fetch only happens when the
+ * flag is on. No-op unless the bridge is linked (server binary). */
 static void td_kb_search_capture_outcome(const config_t *cfg, const char *query, int max,
                                          const char *result)
 {
@@ -1362,26 +1362,28 @@ static void td_kb_search_capture_outcome(const config_t *cfg, const char *query,
    if (!query || !query[0] || !result || strncmp(result, "error:", 6) == 0)
       return;
 
-   char *sj = kb_client_search_json(NULL, query, config_embedding_command(cfg, NULL), max, "json");
+   /* /v1/search returns {"hits":[{artifact_id,score,doc_id,excerpt,...}]}. doc_id
+    * keys each hit to its feature_rows; excerpt is the snippet for overlap. */
+   char *sj = kb_client_search_json(NULL, query, config_embedding_command(cfg, NULL), max, NULL);
    cJSON *sr = sj ? cJSON_Parse(sj) : NULL;
    free(sj);
-   cJSON *results = sr ? cJSON_GetObjectItemCaseSensitive(sr, "results") : NULL;
-   if (cJSON_IsArray(results))
+   cJSON *hits = sr ? cJSON_GetObjectItemCaseSensitive(sr, "hits") : NULL;
+   if (cJSON_IsArray(hits))
    {
       int64_t ids[8];
       const char *snips[8]; /* point into sr; valid until cJSON_Delete(sr) below */
       int cn = 0;
-      cJSON *r;
-      cJSON_ArrayForEach(r, results)
+      cJSON *h;
+      cJSON_ArrayForEach(h, hits)
       {
          if (cn >= (int)(sizeof(ids) / sizeof(ids[0])))
             break;
-         cJSON *did = cJSON_GetObjectItemCaseSensitive(r, "doc_id");
-         cJSON *content = cJSON_GetObjectItemCaseSensitive(r, "content");
+         cJSON *did = cJSON_GetObjectItemCaseSensitive(h, "doc_id");
+         cJSON *excerpt = cJSON_GetObjectItemCaseSensitive(h, "excerpt");
          if (cJSON_IsNumber(did) && did->valuedouble > 0)
          {
             ids[cn] = (int64_t)did->valuedouble;
-            snips[cn] = cJSON_IsString(content) ? content->valuestring : "";
+            snips[cn] = cJSON_IsString(excerpt) ? excerpt->valuestring : "";
             cn++;
          }
       }
