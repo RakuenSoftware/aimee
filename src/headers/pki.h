@@ -51,8 +51,17 @@ extern "C"
     * is written 0600. Returns 0 if a usable cert is in place, -1 on failure. */
    int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_path);
 
-   /* Build the self-signed server cert SAN string into |out| (cap bytes): always
-    * the hostname |cn| + localhost + IPv4/IPv6 loopback, plus |extra| (the
+   /* Resolve the STABLE common name for the self-signed server cert, preferring an
+    * operator-declared identity (AIMEE_TLS_CN, else the first non-IP token of
+    * AIMEE_TLS_EXTRA_SAN) over the OS hostname — which in a container is the
+    * volatile per-container ID and rotated the cert on every recreate, breaking
+    * TOFU-pinned clients. Falls back to gethostname(), then "aimee-server". Writes
+    * a NUL-terminated CN into |out|. Truncation-safe. Exposed for tests. */
+   void pki_resolve_server_cn(char *out, size_t cap);
+
+   /* Build the self-signed server cert SAN string into |out| (cap bytes): the
+    * type-classified |cn| (IP: for an IP literal, else DNS:) + localhost + IPv4/IPv6
+    * loopback, plus |extra| (the
     * AIMEE_TLS_EXTRA_SAN value: comma/space-separated additional names, each
     * pre-typed "IP:"/"DNS:"/… or a bare host/IP auto-classified). Lets a
     * NAT/DNAT deployment present a cert that verifies for its reachable address

@@ -42,6 +42,17 @@ static int verify_chains_to_ca(const char *cert_pem, const char *ca_path)
    return ok;
 }
 
+/* Read a whole file into |buf|; returns byte count (0 on any error). */
+static long slurp(const char *path, char *buf, size_t cap)
+{
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return 0;
+   size_t n = fread(buf, 1, cap, f);
+   fclose(f);
+   return (long)n;
+}
+
 int main(void)
 {
    char home[256];
@@ -108,7 +119,59 @@ int main(void)
    assert(strstr(san, ",IP:192.168.1.254") && strstr(san, ",DNS:nas.local")); /* multi */
    pki_build_server_san("h", "fd00::1", san, sizeof(san));
    assert(strstr(san, ",IP:fd00::1")); /* IPv6 -> IP: */
+   /* A leading CN that is an IP literal must be typed IP:, never DNS:<ip>. */
+   pki_build_server_san("192.168.1.254", NULL, san, sizeof(san));
+   assert(strstr(san, "IP:192.168.1.254") && !strstr(san, "DNS:192.168.1.254"));
+   pki_build_server_san("smoothnas", NULL, san, sizeof(san));
+   assert(strstr(san, "DNS:smoothnas")); /* hostname CN stays DNS: */
    printf("pki: SAN builder ok\n");
+
+   /* Stable-CN resolution: the operator identity must win over the OS hostname so a
+    * container recreate (fresh per-container gethostname()) cannot rotate the cert
+    * and break TOFU-pinned clients. */
+   char cn[256];
+   setenv("AIMEE_TLS_CN", "explicit.example", 1);
+   setenv("AIMEE_TLS_EXTRA_SAN", "192.168.1.254,smoothnas", 1);
+   pki_resolve_server_cn(cn, sizeof(cn));
+   assert(strcmp(cn, "explicit.example") == 0); /* 1. AIMEE_TLS_CN wins */
+   unsetenv("AIMEE_TLS_CN");
+   pki_resolve_server_cn(cn, sizeof(cn));
+   assert(strcmp(cn, "smoothnas") == 0); /* 2. first NON-IP token (skips the IP) */
+   setenv("AIMEE_TLS_EXTRA_SAN", "IP:192.168.1.254,DNS:nas.local", 1);
+   pki_resolve_server_cn(cn, sizeof(cn));
+   assert(strcmp(cn, "nas.local") == 0); /* pre-typed prefixes stripped */
+   setenv("AIMEE_TLS_EXTRA_SAN", "192.168.1.254, 10.0.0.5", 1);
+   pki_resolve_server_cn(cn, sizeof(cn));
+   assert(strcmp(cn, "192.168.1.254") == 0); /* 3. all-IP list -> first IP */
+   unsetenv("AIMEE_TLS_EXTRA_SAN");
+   pki_resolve_server_cn(cn, sizeof(cn));
+   assert(cn[0] != '\0'); /* 4. no operator identity -> gethostname() fallback */
+   printf("pki: stable CN resolution ok\n");
+
+   /* End-to-end: with a fixed operator identity the provisioned cert is KEPT across
+    * boots (no churn — the regression), and refreshes only when the identity itself
+    * changes. Because the resolved CN ignores gethostname() whenever AIMEE_TLS_EXTRA_SAN
+    * is set, a container recreate that changes only the OS hostname takes the keep path. */
+   char crtp[512], keyp[512];
+   snprintf(crtp, sizeof(crtp), "%s/tls/server.crt", home);
+   snprintf(keyp, sizeof(keyp), "%s/tls/server.key", home);
+   unsetenv("AIMEE_TLS_CN");
+   setenv("AIMEE_TLS_EXTRA_SAN", "192.168.1.254,smoothnas", 1);
+   assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
+   char c1[8192];
+   long n1 = slurp(crtp, c1, sizeof(c1));
+   assert(n1 > 0);
+   assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0); /* second boot, same identity */
+   char c2[8192];
+   long n2 = slurp(crtp, c2, sizeof(c2));
+   assert(n1 == n2 && memcmp(c1, c2, (size_t)n1) == 0);    /* kept verbatim: NOT rotated */
+   setenv("AIMEE_TLS_EXTRA_SAN", "10.0.0.9,othername", 1); /* operator changes identity */
+   assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
+   char c3[8192];
+   long n3 = slurp(crtp, c3, sizeof(c3));
+   assert(!(n1 == n3 && memcmp(c1, c3, (size_t)n1) == 0)); /* refreshed on a real change */
+   unsetenv("AIMEE_TLS_EXTRA_SAN");
+   printf("pki: server cert stable across boots, refreshes on identity change ok\n");
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);
