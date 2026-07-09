@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 10 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 11 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — ten proposals (all but one not yet implemented).
+The genuinely open work — eleven proposals (all but one not yet implemented).
 
 - [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
   — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
@@ -69,14 +69,6 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   — the thin client's SessionStart falls back to a recall-only remote path and
   emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
   a thin client gets the full server-assembled brief. Companion to the memory split.
-- [LLM-sidecar productionization — curator extraction + idle reflection](proposals/pending/llm-sidecar-productionization-curator-and-reflection.md)
-  — two intelligence steps ship as full scaffolding but stub the LLM call: curator
-  extraction (all stages present; only the Phase-0 embedding sidecar exists behind
-  `kb_curator_sidecar`) and the idle-reflection scheduler (`kb_reflection.c` runs
-  fully; its own header notes LLM candidate generation is stubbed). Graduate both
-  onto one versioned sidecar contract behind a shadow → canary → default gate on the
-  shipped calibration + bandit rails. **Extract / Synthesize / Judge / Reflect /
-  Gate-Promote.**
 - [Org-data connectors + source ingestion](proposals/pending/org-data-connectors-and-source-ingestion.md)
   — the missing ingest front door for the every-domain KB: a uniform connector
   contract plus a first adapter set (issue tracker / chat / doc-wiki / email),
@@ -100,6 +92,13 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
   validation + a v1 API stability tag) is the one remaining piece with no closing
   artifact.
+- [Binding retrieval context-contract for agents](proposals/pending/proposal-retrieval-context-contract.md)
+  — surveys an external context-engine against Aimee (most of its mechanisms
+  already exist: attention guard, per-intent budgets, confidence scorer, symbol
+  preload) and scopes the one clean gap: surface the confidence + caps the memory
+  assembler already computes to the delegate as a *binding* exploration contract,
+  enforced by the existing `cli_attention_guard.c` raw-scan redirect.
+  **Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote.**
 
 ## Done (66)
 
@@ -166,6 +165,7 @@ Grouped by theme:
   [recall economy progressive disclosure](proposals/done/recall-economy-progressive-disclosure.md),
   [recall abstention confidence gate](proposals/done/retrieval-abstention-confidence-gate.md),
   [typed-fact knowledge layer](proposals/done/typed-fact-knowledge-layer.md),
+  [LLM-sidecar productionization — curator extraction + idle reflection](proposals/done/llm-sidecar-productionization-curator-and-reflection.md),
   [generalise the `memory.benchmark` RPC](proposals/done/memory-benchmark-suite-generalisation.md).
 - **Structured PDF & evidence.**
   [structured PDF ingestion + coordinate-anchored evidence](proposals/done/structured-pdf-ingestion-and-evidence-layer.md),

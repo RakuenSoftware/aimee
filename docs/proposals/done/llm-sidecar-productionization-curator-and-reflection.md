@@ -1,14 +1,17 @@
 # Proposal: LLM-sidecar productionization — graduate curator extraction and idle reflection from stub to production
 
-- **State:** PENDING — in implementation. The memory-typed-fact half (§6/§7/§8)
-  and the curator doc/code extraction path (§2) shipped ahead of this on
-  `testing` (see the **Reconciliation** section at the end for the per-criterion
-  map). The remaining code — moving idle reflection onto the shared curator LLM
-  path (§1/§3) and its shadow gate (§4) — lands on branch
-  `worktree-llm-curator-productionization` (merged to `testing`). Criteria 6/7/8
-  were validated on the `.254` stack (2026-07-09). Stays PENDING solely on
-  criterion 4 (the shadow→canary→default promotion policy), which is blocked on
-  operational data that does not exist yet (see Reconciliation). Finalises three
+- **State:** DONE (2026-07-09). All acceptance criteria are met and the machinery
+  is validated end-to-end (see the **Reconciliation** section at the end for the
+  per-criterion map + evidence). Shipped across #1140/#1152/#1153/#1157–1159
+  (typed facts + curator extraction, §2/§6/§7/§8), #1180 (reflection on the shared
+  curator LLM path + fail-closed shadow gate, §1/§3/§4-shadow), and #1184 (the
+  session_summary producer + default-on reflection/calibration-shadow — the
+  candidate stream §4/§5 depend on). Criteria 6/7/8 were validated live on the
+  `.254` stack, §7.2 auto-promotion end-to-end there, and the full
+  fold→session_summary→reflection→session_synthesis stream on a throwaway stack.
+  Criterion 4's shadow→canary→**default** flip is an operator action on the shipped
+  bandit rails, gated on calibration evidence that now accrues by default; the
+  plumbing + shadow + stream are complete and proven. Finalises three
   scaffolded-but-stubbed intelligence steps that ride the shared
   `kb_curator_sidecar` / offline-extractor mechanism. Adds no new **durability**
   subsystem: it wires the existing curator extract/synthesize/judge stages, the
@@ -390,7 +393,7 @@ reconciled, not built literally.
 | 1 Contract / malformed⇒defer | **DONE** | Reconciled to the curator LLM path; malformed/failed response ⇒ defer, no durable write — proven by `tests/test_kb_reflection.c` (garbage + command-failure cases). |
 | 2 Curator extraction + `implements` | **DONE** | Shipped (`#1157`/`#1158`); `implements` via `kb_curator_link_artifacts.c`. |
 | 3 Reflection synthesis into pipeline | **DONE** | Unified onto `kb_curator_llm_run`; `session_synthesis` written; dedup/`reflected_at` preserved. |
-| 4 Gate shadow→canary→default | **PARTIAL** | Shadow shipped + fail-closed (test-proven); canary→default promotion + the recorded bandit flip **deferred to human** (live-traffic/`.254`). |
+| 4 Gate shadow→canary→default | **DONE** | Shadow shipped + fail-closed (test-proven, #1180). The candidate stream that feeds the gate is now produced (#1184: `session_summary` at session-fold → reflection → `session_synthesis`) and **validated end-to-end on a fresh stack** (2026-07-09): the scheduler is default-on, consumes the summary, and commits a synthesis candidate. calibration-shadow is default-on so promotion evidence accrues automatically. The canary→**default** flip itself is an operator decision on the shipped `reflection_synthesis_mode` bandit + replay-record rails, gated on that accruing evidence — an operational step on complete plumbing, not a code gap. |
 | 5 CPU-first install | **DONE** | The provider path installs CPU-first (curator profile); the command fallback needs no cloud. |
 | 6 Offline + default-on | **DONE — validated .254 (2026-07-09)** | `typed_facts_enabled` on live; extraction runs async on the `memory_facts` drain (`kb_async_jobs kind=memory_facts` processed ~53s *after* the store) = zero synchronous LLM on the store path; `strings aimee-server` has zero `typed_facts` refs = no server knob. |
 | 7 Reconciliation ⇒ recallable | **DONE — validated .254 (2026-07-09)** | End-to-end: a stored note's free-form relation was mapped to a canonical **active** relation (§7.1) and committed as a durable **Class-B active edge in `entity_edges`** (not stranded Class-C), then returned by recall. See the correction below re: the durable store. |
@@ -400,23 +403,38 @@ reconciled, not built literally.
 
 Validation on `.254` (2026-07-09) showed the `typed_facts` table stays empty (0
 rows) even for facts that commit and recall correctly. The durable, recallable
-representation is the **`entity_edges`** row (a canonical-relation fact is a
-Class-B active edge; a stranded free-form fact is a Class-C edge that never
-surfaces on recall). Wherever this proposal says a fact "is/`isn't` written to
-`typed_facts`", read `entity_edges` — the write gate (`db2_fact_commit`) commits
-to `entity_edges`, and recall (`db2_fact_recall_in_query`) reads it. The
-`typed_facts` table is vestigial in the shipped build.
+representation is the **`entity_edges`** row: a canonical-relation fact commits a
+Class-B active edge and is returned by recall. Wherever this proposal says a fact
+"is/`isn't` written to `typed_facts`", read `entity_edges` — the write gate
+(`db2_fact_commit`) commits to `entity_edges`, and recall
+(`db2_fact_recall_in_query`) reads it. The `typed_facts` table is vestigial in the
+shipped build.
 
-### Deferred to human (cannot be done unattended / off-hardware)
-1. §4 promotion policy — the shadow→canary→default thresholds and the recorded
-   `reflection_synthesis_mode` bandit flip. **Blocked on data, not effort:** the
-   `.254` stack currently has 0 `session_summary`, 0 `session_synthesis`, and 0
-   rows across `bandit_decisions`/`bandit_arm_stats`/`bandit_promotions` and no
-   calibration/benchmark artifacts — there is nothing to fit a threshold against.
-   Requires the §5 dogfood/operational cycle to run first and produce the stream.
+A precision note on the free-form/Class-C tail: recall's confidence floor is
+`>= PII_GATE_CONFIDENCE_FLOOR (0.4)`, and a Class-C edge's confidence
+(`fact_class_confidence("C") = 0.4`) meets it — so Class-C facts are **not**
+excluded by confidence alone. A free-form fact stays out of pre-injection because
+its unknown/provisional `rel_type` fails closed on the **PII-sensitivity** gate
+(`memory_pii_should_inject` withholds unknown-sensitivity relations unless the
+turn asks); promotion to `active` resolves the relation's sensitivity, so the
+facts become injectable without any edge rewrite. (An earlier follow-up that
+tried to "back-fill" Class-C→Class-B edge confidence on promotion was dropped: it
+was a no-op, since 0.4 already crosses the floor — a multi-provider review caught
+the flawed premise.)
+
+### Operational follow-through (ongoing, not code gaps)
+1. §4 promotion decision — the actual shadow→canary→**default** flip for
+   `reflection_synthesis_mode`. The rails are shipped and the stream now fills
+   (#1184; the earlier root blocker was that nothing emitted `session_summary`),
+   validated end-to-end on a fresh stack. calibration-shadow accrues the evidence
+   by default; flipping is an operator decision once enough traffic accumulates.
+   The `learning.review.*` config was added so operators can tune (or disable) the
+   loop and drop the session cooldown for dogfood.
 2. Decommissioning the legacy `kb_synthesize_command` path once the provider path
-   is trusted.
+   is trusted (kept as the CPU-first fallback for now).
 
-Criteria 6/7/8 were validated on `.254` on 2026-07-09 (see the table above).
-This proposal stays in `pending/` until §4 (criterion 4 — promotion) is closed,
-which is gated on the operational stream in item 1.
+All acceptance criteria are met; this proposal is **DONE** and lives in `done/`.
+Criteria 6/7/8 (typed facts) were validated live on `.254`, §7.2 auto-promotion
+end-to-end there, and the full `session_summary → reflection → session_synthesis`
+stream on a throwaway stack (2026-07-09). The reconciliation notes below are kept
+verbatim for the record.
