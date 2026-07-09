@@ -433,6 +433,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-curator-judge \
                $(TESTPREFIX)/unit-test-kb-surprising-judge \
                $(TESTPREFIX)/unit-test-curator-synthesize \
+               $(TESTPREFIX)/unit-test-kb-reflection \
                $(TESTPREFIX)/unit-test-curator-promote \
                $(TESTPREFIX)/unit-test-db1-write-retry \
                $(TESTPREFIX)/unit-test-db1-agent-job-heartbeat \
@@ -2656,6 +2657,26 @@ $(TESTPREFIX)/unit-test-kb-surprising-judge: \
 $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/tests/test_curator_synthesize.o \
                                        $(OBJDIR)/kb/kb_curator_synthesize.o \
+                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
+                                       $(OBJDIR)/provider_client.o \
+                                       $(OBJDIR)/tests/support/mock_agent_http.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb/kb_mdl.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/cJSON.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# idle-reflection synthesis write-gate (§3/§4): reflection routes through the
+# shared curator LLM path; the LLM is faked via the sidecar command seam
+# (printf fallback, no provider). Includes kb_reflection.c to reach the static
+# run_synthesis_pass; graph/feature/background deps are stubbed in the test.
+$(TESTPREFIX)/unit-test-kb-reflection: \
+                                       $(OBJDIR)/tests/test_kb_reflection.o \
                                        $(OBJDIR)/kb/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/kb_curator_llm.o \
                                        $(OBJDIR)/kb_curator_provider.o \

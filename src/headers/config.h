@@ -1427,11 +1427,19 @@ typedef struct config
     * kb_mdl_bump_drift_alert: fraction of MDL disagreements after a prompt bump
     *   that triggers a review flag (default 0.30).
     * kb_synthesize_command: sidecar command for N-attempt synthesis (stdin=JSON, stdout=JSON).
-    * kb_synthesize_n_attempts: number of synthesis attempts per evidence bundle (default 3). */
+    * kb_synthesize_n_attempts: number of synthesis attempts per evidence bundle (default 3).
+    * kb_reflection_synthesis_shadow: 1 = shadow mode for idle-reflection synthesis
+    *   (kb_reflection.c) — the LLM runs and its winner is scored and logged as
+    *   evidence, but the durable `session_synthesis` proposed candidate is NOT
+    *   written (fail-closed, no promotion). 0 = normal (default): the scored
+    *   winner is written into the promotion pipeline. Promotion of the shadow
+    *   stream to normal is a bandit decision (reflection_synthesis_mode), wired
+    *   separately; this flag never flips itself. */
    int kb_mdl_tiebreak_enabled;
    double kb_mdl_bump_drift_alert;
    char kb_synthesize_command[512];
    int kb_synthesize_n_attempts;
+   int kb_reflection_synthesis_shadow;
 
    /* KB background ingest worker pool (kb.worker_count, kb.connection_workers,
     * kb.background_ingest.*). kb_worker_count: aimee-kb in-process KB ingest

@@ -436,6 +436,7 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
    cfg->kb_mdl_bump_drift_alert = 0.30;
    cfg->kb_synthesize_n_attempts = 3;
    cfg->kb_synthesize_command[0] = '\0';
+   cfg->kb_reflection_synthesis_shadow = 0;
 
    if (!root)
       return;
@@ -463,6 +464,12 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(s, "synthesize_n_attempts");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->kb_synthesize_n_attempts = (int)item->valuedouble;
+
+   /* Shadow gate for idle-reflection synthesis (proposal §4): when on, the pass
+    * scores and logs its winner but writes no durable candidate. Fail-closed. */
+   item = cJSON_GetObjectItemCaseSensitive(s, "reflection_shadow");
+   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
+      cfg->kb_reflection_synthesis_shadow = item->valueint;
 }
 
 /* Inverse of the intelligence.* parsers (calibrate/demotion/bandit) so config_save

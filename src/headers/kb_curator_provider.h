@@ -30,6 +30,11 @@ extern "C"
       KB_CURATOR_STAGE_DETECT_CONTRADICTIONS,
       KB_CURATOR_STAGE_SYNTHESIZE,
       KB_CURATOR_STAGE_PROMOTE_ENTITY,
+      /* Idle-time reflection synthesis (kb_reflection.c). A distinct Tier-B stage
+       * from SYNTHESIZE so its provider resolution, and any future calibration /
+       * bandit telemetry, stay isolated from the curator entity-synthesis stream
+       * (which writes a different artifact kind on a different surface). */
+      KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION,
    } kb_curator_stage_t;
 
    typedef enum

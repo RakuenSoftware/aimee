@@ -1,6 +1,13 @@
 # Proposal: LLM-sidecar productionization — graduate curator extraction and idle reflection from stub to production
 
-- **State:** PENDING — design only, no code in this PR. Finalises three
+- **State:** PENDING — in implementation. The memory-typed-fact half (§6/§7/§8)
+  and the curator doc/code extraction path (§2) shipped ahead of this on
+  `testing` (see the **Reconciliation** section at the end for the per-criterion
+  map). The remaining code — moving idle reflection onto the shared curator LLM
+  path (§1/§3) and its shadow gate (§4) — lands on branch
+  `worktree-llm-curator-productionization`. Stays PENDING because criteria 4
+  (canary→default promotion), 6/7 (`.254` runtime proof) and part of 8 are
+  hardware-/human-gated (see Reconciliation). Finalises three
   scaffolded-but-stubbed intelligence steps that ride the shared
   `kb_curator_sidecar` / offline-extractor mechanism. Adds no new **durability**
   subsystem: it wires the existing curator extract/synthesize/judge stages, the
@@ -335,3 +342,65 @@ aimee-server is not in the loop for any of it.
   constraint) and *running* provisional→active promotion on by default — the gate
   and the durability contract themselves are unchanged. Free-form relations are no
   longer silently stranded as provisional; that is the whole point.
+
+## Reconciliation (as-built — 2026-07-08)
+
+The codebase moved past this proposal's "design-only, everything stubbed"
+premise. This section maps the proposal to what actually shipped, so the doc is
+honest about done vs validation-pending. **Human steering (2026-07-08): do NOT
+build a new popen sidecar; route through the existing curator LLM
+infrastructure** (`kb_curator_llm_run` → `provider_client`). §1 is therefore
+reconciled, not built literally.
+
+### Section-by-section
+- **§1 sidecar contract — SUPERSEDED.** The "one versioned JSON contract invoked
+  through `kb_curator_sidecar_run`" is realised by the shipped curator LLM path:
+  `kb_curator_llm_run(cfg, stage, system_prompt, request, json_schema,
+  fallback_command, …)` → a per-tier `provider_client` (strict
+  `response_format: json_schema`), version-keyed via `kb_curator_version.c`, with
+  the legacy `*_command` sidecar as a fail-closed fallback. That path — not a new
+  popen contract — is "the contract."
+- **§2 curator extraction — DONE** (`#1157`/`#1158`/`#1159`). extract_doc /
+  extract_code produce entities/facts/decisions/relationships; the doc↔code
+  `implements` bridge is `kb_curator_link_artifacts.c` + `POST /v1/implements`.
+- **§3 reflection synthesis — DONE, now unified.** `kb_reflection.c`
+  `run_synthesis_pass` already synthesised (N-attempt, MDL cluster selection,
+  writes `session_synthesis`, dedup/cooldown/idle). This branch moves its LLM step
+  off the standalone `kb_synthesize_command`/`platform_exec_pipe` onto the shared
+  `kb_curator_llm_run` under the new Tier-B stage
+  `KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION` (the sidecar command remains the
+  fallback). MDL/dedup/cooldown/idle preserved verbatim.
+- **§4 gated rollout — SHADOW shipped; promotion deferred.** A fail-closed shadow
+  gate lands: `intelligence.synthesize.reflection_shadow`
+  (`kb_reflection_synthesis_shadow`, default 0) makes the pass score and log its
+  winner as evidence but write NO durable candidate. The
+  `reflection_synthesis_mode` bandit arm is declared in `kb_bandit_registry.c`
+  (status `static`). The shadow→canary→default *promotion policy* (thresholds,
+  the recorded bandit flip) is **deferred to a human** — it is validatable only on
+  live traffic / the `.254` stack.
+- **§6 offline + default-on — DONE** (`#1153`): `typed_facts_enabled` defaults on.
+- **§7 autonomous reconciliation — DONE** (`#1140`/`#1152`): ontology-constrained
+  extraction + auto-promote; facts commit recallable.
+- **§8 KB console — DONE** (`#1140`): the Typed Facts panel routes.
+
+### Acceptance criteria
+| # | State | Note |
+|---|-------|------|
+| 1 Contract / malformed⇒defer | **DONE** | Reconciled to the curator LLM path; malformed/failed response ⇒ defer, no durable write — proven by `tests/test_kb_reflection.c` (garbage + command-failure cases). |
+| 2 Curator extraction + `implements` | **DONE** | Shipped (`#1157`/`#1158`); `implements` via `kb_curator_link_artifacts.c`. |
+| 3 Reflection synthesis into pipeline | **DONE** | Unified onto `kb_curator_llm_run`; `session_synthesis` written; dedup/`reflected_at` preserved. |
+| 4 Gate shadow→canary→default | **PARTIAL** | Shadow shipped + fail-closed (test-proven); canary→default promotion + the recorded bandit flip **deferred to human** (live-traffic/`.254`). |
+| 5 CPU-first install | **DONE** | The provider path installs CPU-first (curator profile); the command fallback needs no cloud. |
+| 6 Offline + default-on | **DONE (code)** / **VALIDATION-PENDING** | Default-on shipped; the "time a store shows zero synchronous LLM" proof is a `.254` runtime check. |
+| 7 Reconciliation ⇒ recallable | **DONE (code)** / **VALIDATION-PENDING** | Committed in code (`#1152`); the end-to-end recall proof is on the `.254` stack. |
+| 8 KB console core | **DONE** | Routes shipped (`#1140`). |
+
+### Deferred to human (cannot be done unattended / off-hardware)
+1. §4 promotion policy — the shadow→canary→default thresholds and the recorded
+   `reflection_synthesis_mode` bandit flip (needs live traffic).
+2. `.254`-stack quality/latency validation for criteria 6/7 and reflection
+   synthesis output quality.
+3. Decommissioning the legacy `kb_synthesize_command` path once the provider path
+   is trusted.
+
+This proposal stays in `pending/` until the human-gated items above are closed.
