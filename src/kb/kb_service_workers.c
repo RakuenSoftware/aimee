@@ -13,7 +13,9 @@
 #include "kb_ingest_workers.h"
 #include "kb_learning_version.h"
 #include "kb_curator_version.h"
+#include "kb_features.h"
 #include "kb_mining.h"
+#include "kb_ranker_fit.h"
 #include "kb_reasoning.h"
 #include "kb_reflection.h"
 #include "kb_service.h"
@@ -114,6 +116,23 @@ static void *kb_maintenance_timer_thread(void *arg)
          db2_kb_runtime_state_set("last_maintenance_decayed", buf);
          snprintf(buf, sizeof(buf), "%d", res.orphans_pruned);
          db2_kb_runtime_state_set("last_maintenance_pruned", buf);
+      }
+
+      /* Phase 4: learning-to-rank scheduled refit (default-off). Folded into the
+       * same cycle. Keyed on the current KB_FEATURE_SET_VERSION — kb_ranker_fit_run
+       * trains only on that version's rows and stamps it on the model, so a
+       * v1→v2 feature-set bump naturally re-fits against v2 the next cycle. The
+       * §2 floor/refusal + benchmark gate keep it from ever shipping a bad model. */
+      if (cfg.kb_ranker_fit_enabled)
+      {
+         kb_background_set("ranker_fit", "%s", KB_FEATURE_SET_VERSION);
+         char *fit_report = NULL;
+         int frc = kb_ranker_fit_run(&cfg, NULL, 0, &fit_report);
+         aimee_log(frc == 0 ? LOG_INFO : LOG_DEBUG, "kb.ranker_fit",
+                   "scheduled refit rc=%d report=%s", frc, fit_report ? fit_report : "(none)");
+         free(fit_report);
+         db2_kb_runtime_state_set_now("last_ranker_fit_at");
+         kb_background_clear("ranker_fit");
       }
 
       kb_background_clear("maintenance");

@@ -50,14 +50,8 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — ten proposals, none yet implemented.
+The genuinely open work — nine proposals, none yet implemented.
 
-- [Learning-to-rank weight fitting](proposals/pending/learning-to-rank-weight-fitting.md)
-  — the KB-hybrid ranker (`kb_ranker.c`) infers with a learned linear model but
-  nothing ever *fits* it; weights are hand-set `{0.6, 0.4}` defaults and the two
-  sketch weights ship pinned at `0.0`. Adds a fitter sidecar over
-  `feature_rows ⋈ retrieval_outcome`, promotion-gated and benchmark-gated.
-  **Rank-Fuse / Calibrate / Evaluate-Optimize / Gate-Promote.**
 - [Agentic supervised SWE-bench](proposals/pending/agentic-supervised-swebench.md)
   — a true tool-using, iterating agentic SWE-bench harness so the "beats Reddit's
   −75.5% supervisor-token reduction at no wall-clock penalty" claim is
@@ -104,9 +98,9 @@ The genuinely open work — ten proposals, none yet implemented.
   validation + a v1 API stability tag) is the one remaining piece with no closing
   artifact.
 
-## Done (65)
+## Done (66)
 
-The [`proposals/done/`](proposals/done/) directory holds 65 shipped proposals.
+The [`proposals/done/`](proposals/done/) directory holds 66 shipped proposals.
 Grouped by theme:
 
 - **Universal gateway, ingress & protocol.**
@@ -204,8 +198,10 @@ Cleanup surfaced while regenerating this index:
     `bandit_decisions` table (`db2/schema.sql`), `test_bandit.c` +
     `tools/bandit_replay.py`, endpoints `/v1/intelligence/bandit/{export,replay-record,sample}`.
   - **Statistical decision systems** — `kb_ranker.c`, `kb_features.c`,
-    `kb_detect.c`, `db2/feature_rows.c` (the [pending LTR proposal](proposals/pending/learning-to-rank-weight-fitting.md)
-    completes the one unshipped half).
+    `kb_detect.c`, `db2/feature_rows.c`, `kb/kb_ranker_fit.c` + `scripts/rank-fit.py`
+    (the [LTR weight-fitting proposal](proposals/done/learning-to-rank-weight-fitting.md)
+    shipped the Calibrate half — fitter + benchmark gate, default-off, bench-only
+    until the outcome-wiring prerequisite).
   - **Graph reasoning / case recall** — `kb_reasoning.c` (474 LOC), `db2/cases.sql`.
   - **MDL-guided synthesis** — `kb_mdl.c` (239 LOC).
   - **Deliberate planning** — `kb_planner.c` + `scripts/mcts-planner.py`.

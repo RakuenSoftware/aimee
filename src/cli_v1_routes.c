@@ -214,6 +214,8 @@ static const struct
     {"kb", "curator", "kb.curator", NULL, NULL, 0},
     {"kb", "calibrate", "calibration.readiness", NULL, NULL, 0},
     {"kb", "demote", "demotion.check", NULL, NULL, 0},
+    {"kb", "ranker export-view", "ranker.export_view", NULL, NULL, 0},
+    {"kb", "ranker fit", "ranker.fit", NULL, NULL, 900000},
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},

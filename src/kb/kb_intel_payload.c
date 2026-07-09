@@ -10,6 +10,7 @@
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_intel_payload.h"
+#include "kb_ranker_fit.h"
 #include "memory.h"
 
 #include <math.h>
@@ -539,4 +540,45 @@ int kb_intel_bandit_promote_http(const char *body, int body_len, char *out_buf, 
       return 500;
    return intel_bandit_emit_http(kb_intel_bandit_promote_response(body, body_len), out_buf,
                                  out_cap);
+}
+
+cJSON *kb_intel_ranker_export_view_response(void)
+{
+   char *json = kb_ranker_export_view_json("kb_document", NULL);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+   {
+      resp = cJSON_CreateObject();
+      if (resp)
+      {
+         cJSON_AddStringToObject(resp, "status", "error");
+         cJSON_AddStringToObject(resp, "error", "training view unavailable");
+      }
+   }
+   return resp;
+}
+
+int kb_intel_ranker_fit_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   (void)body;
+   (void)body_len;
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   config_t cfg;
+   config_load(&cfg);
+   char *report = NULL;
+   /* rc distinguishes committed(0)/refused(1)/error(-1); the report carries the
+    * detail. HTTP 200 for any well-formed report (the fit ran, even if it
+    * refused/held) — a fit that declines to promote is a success, not a 5xx. */
+   int rc = kb_ranker_fit_run(&cfg, NULL, 0, &report);
+   if (!report)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"error\",\"error\":\"fit produced no report\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", report);
+   free(report);
+   return rc < 0 ? 500 : 200;
 }

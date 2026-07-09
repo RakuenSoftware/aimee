@@ -893,6 +893,8 @@ char *kb_client_learning_reject_proposal_json(int id);
  * on success or {"status":"error","message":"..."}. */
 char *kb_client_calibrate_readiness_json(void);
 char *kb_client_demote_check_json(void);
+char *kb_client_ranker_export_view_json(void);
+char *kb_client_ranker_fit_json(void);
 char *kb_client_bandit_export_json(void);
 
 /* POST /v1/intelligence/bandit/replay-record — records the output of

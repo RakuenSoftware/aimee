@@ -1451,6 +1451,10 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_no_args(method);
    if (strcmp(method, "demotion.check") == 0)
       return marshal_no_args(method);
+   if (strcmp(method, "ranker.export_view") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "ranker.fit") == 0)
+      return marshal_no_args(method);
    if (strcmp(method, "identity.snapshot") == 0)
       return marshal_identity_snapshot(argc, argv);
    if (strcmp(method, "identity.diff") == 0)

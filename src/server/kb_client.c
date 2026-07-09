@@ -1362,6 +1362,24 @@ char *kb_client_demote_check_json(void)
    return json ? json : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
 }
 
+char *kb_client_ranker_export_view_json(void)
+{
+   char *json = kb_client_v1_get_json("/v1/intelligence/ranker/export-view",
+                                      CLIENT_DEFAULT_TIMEOUT_MS, NULL);
+   return json ? json : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
+}
+
+char *kb_client_ranker_fit_json(void)
+{
+   /* Fitting materializes the view, spawns the sidecar, and runs the benchmark
+    * gate — allow a long window (mirrors the repair-class maintenance timeout). */
+   cJSON *req = cJSON_CreateObject();
+   char *json = kb_client_v1_post_json("/v1/intelligence/ranker/fit", req,
+                                       KB_CLIENT_REPAIR_TIMEOUT_MS, NULL);
+   cJSON_Delete(req);
+   return json ? json : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
+}
+
 char *kb_client_bandit_export_json(void)
 {
    char *json =

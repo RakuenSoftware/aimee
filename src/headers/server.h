@@ -323,6 +323,8 @@ int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_calibration_readiness(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_ranker_export_view(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_ranker_fit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_replay_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_rules_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

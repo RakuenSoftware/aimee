@@ -161,6 +161,8 @@ const method_policy_t method_registry[] = {
     {"optimize.replay_record", CAP_INDEX_ADMIN, "record bandit replay attribution"},
     {"calibration.readiness", CAP_DASHBOARD_READ, "calibration readiness report"},
     {"demotion.check", CAP_DASHBOARD_READ, "demotion dry-run report"},
+    {"ranker.export_view", CAP_DASHBOARD_READ, "ranker training-view export"},
+    {"ranker.fit", CAP_TOOL_EXECUTE, "fit + benchmark-gate the ranker model"},
     {"kb.build", CAP_INDEX_ADMIN, "build knowledge base"},
     {"kb.ingest", CAP_INDEX_ADMIN, "ingest corpus"},
     {"kb.update", CAP_INDEX_ADMIN, "update knowledge base"},
