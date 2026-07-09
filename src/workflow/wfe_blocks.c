@@ -1276,9 +1276,12 @@ static wfe_step_result_t exec_branch_open(wfe_ctx *ctx, const wfe_node_t *node)
    const char *wi = wfe_ctx_work_item(ctx);
    char feat[200];
    feature_branch_name(wi, feat, sizeof feat);
-   const char *br[] = {"git", "-C", wd, "branch", "-f", feat, "HEAD", NULL};
+   /* Create the local branch at HEAD if absent; NO `-f`, so a re-entry never resets an
+    * existing feature branch back to base (which would discard already-merged slices).
+    * "already exists" is a harmless non-zero rc here (best-effort). */
+   const char *br[] = {"git", "-C", wd, "branch", feat, "HEAD", NULL};
    char *o = NULL;
-   (void)safe_exec_capture(br, &o, 1 << 14); /* best-effort local branch */
+   (void)safe_exec_capture(br, &o, 1 << 14);
    free(o);
    if (g_forge->publish_base && g_forge->publish_base(wfe_ctx_repo(ctx), feat) != 0)
       return wfe_step_looped(); /* couldn't publish the base -> retry */

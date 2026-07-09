@@ -97,6 +97,20 @@ int main(void)
    write_file(empty, "{\"schema_version\":1,\"packets\":[]}");
    assert(wfe_foreach_spawn("par2", "slice", empty, 16, err, sizeof err) == 0);
 
+   /* --- partial fan-out rolls back ALL-OR-NOTHING: a mid-loop create failure must
+    *     leave the parent with NO children (else it would advance with fewer slices,
+    *     and the idempotency guard would block a re-spawn). Force the 2nd child's id to
+    *     collide with a pre-existing (unrelated) row so its create fails. --- */
+   assert(db1_work_item_create("par3", "repo1", "p/par3", "build", "v", "slices", "autonomous") ==
+          0);
+   assert(db1_work_item_create("par3.s1", "repo1", "p/collide", "slice", "v", "impl",
+                               "autonomous") == 0);
+   write_plan(plan, 3);
+   assert(wfe_foreach_spawn("par3", "slice", plan, 16, err, sizeof err) == -1);
+   assert(db1_work_item_child_counts("par3", &total, NULL, NULL) == 0 && total == 0);
+   assert(db1_work_item_get("par3.s0", &wi) ==
+          0); /* the child created before the fault rolled back */
+
    printf("ok\n");
    return 0;
 }

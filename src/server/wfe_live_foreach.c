@@ -147,15 +147,20 @@ int wfe_foreach_spawn(const char *parent_wi, const char *child_workflow, const c
    snprintf(dir, sizeof dir, "%s/wfe-packets", aimee_home());
    mkdir(dir, 0700);
 
+   /* Create the children ALL-OR-NOTHING: a partial fan-out (some children created,
+    * then an error) would let the foreach node aggregate the partial set as complete
+    * and advance with fewer slices (and the idempotency guard would block a re-spawn).
+    * So on any fatal error we delete every child we created and return -1, leaving the
+    * parent child-less -> the executor re-spawns cleanly. */
    int created = 0;
-   for (int i = 0; i < npk; i++)
+   int failed = 0;
+   for (int i = 0; i < npk && !failed; i++)
    {
       const cJSON *pk = cJSON_GetArrayItem(packets, i);
       if (!cJSON_IsObject(pk))
          continue;
       const cJSON *pid = cJSON_GetObjectItemCaseSensitive(pk, "packet_id");
       const cJSON *sum = cJSON_GetObjectItemCaseSensitive(pk, "summary");
-      /* deterministic id -> idempotent (a re-run collides on UNIQUE(work_item_id)). */
       char child_id[80];
       snprintf(child_id, sizeof child_id, "%s.s%d", parent_wi, i);
 
@@ -171,28 +176,32 @@ int wfe_foreach_spawn(const char *parent_wi, const char *child_workflow, const c
       if (write_file(proposal_path, seed) != 0)
       {
          serr(err, errlen, "could not seed child %s", child_id);
-         cJSON_Delete(root);
-         return -1;
+         failed = 1;
+         break;
       }
-
       if (db1_work_item_create(child_id, crepo, proposal_path, cname, cver, cstart, "autonomous") !=
           0)
       {
-         /* A UNIQUE collision means this child already exists (idempotent re-run) —
-          * tolerate it; any other failure is fatal. */
-         db1_work_item_t existing_row;
-         if (db1_work_item_get(child_id, &existing_row) != 1)
-         {
-            serr(err, errlen, "could not create child %s", child_id);
-            cJSON_Delete(root);
-            return -1;
-         }
+         serr(err, errlen, "could not create child %s", child_id);
+         failed = 1;
+         break;
       }
       /* Link the child to its parent so the foreach node can aggregate it. */
       (void)db1_work_item_set_parent(child_id, parent_wi);
       created++;
    }
    cJSON_Delete(root);
+   if (failed)
+   {
+      /* roll back every child created this call (deterministic ids par.s0..par.s{k-1}). */
+      for (int i = 0; i < created; i++)
+      {
+         char cid[80];
+         snprintf(cid, sizeof cid, "%s.s%d", parent_wi, i);
+         (void)db1_work_item_delete(cid);
+      }
+      return -1;
+   }
    aimee_log(LOG_INFO, "wfe-foreach", "spawned %d slice children for %s", created, parent_wi);
    return created;
 }
