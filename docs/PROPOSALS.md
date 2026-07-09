@@ -52,6 +52,9 @@ realized in code and enforced in review; their standalone proposal documents are
 
 The genuinely open work — eleven proposals (all but one not yet implemented).
 
+- [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
+  — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
+  feedback→durable org rules with decay; promotion behind a strict operator gate.
 - [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
   — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
   a dedicated `ranker_outcome` kind, `ranker.emit_event` / `ranker.record_outcome`
