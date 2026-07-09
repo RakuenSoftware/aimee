@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 12 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 13 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — twelve proposals (all but one not yet implemented).
+The genuinely open work — thirteen proposals (all but one not yet implemented).
 
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
@@ -102,6 +102,14 @@ The genuinely open work — twelve proposals (all but one not yet implemented).
   assembler already computes to the delegate as a *binding* exploration contract,
   enforced by the existing `cli_attention_guard.c` raw-scan redirect.
   **Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote.**
+- [Evidence provenance-tier contract — gate Tier-3 (untrusted) memory](proposals/pending/proposal-evidence-provenance-tiers.md)
+  — every memory carries an evidence tier (1 direct-human / 2 derived-from-human /
+  3 no-human). The `provenance_category` field and an anchor-eligibility seam
+  (`memory_answer_mode_for_anchor`) already exist, but the INSERT never sets the
+  field so everything defaults to `user_stated` (Tier 1) — delegate content is
+  silently trusted. Adds write-time classification, a category→tier map, and the
+  gate that bars Tier-3 from being *main* evidence (anti-poisoning), plus
+  human-only promotion. **Classify-Score / Enforce / Gate-Promote / Constrain-Verify.**
 - [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
   — small reasoning models served through the gateway fall into degenerate
   repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
