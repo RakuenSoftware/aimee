@@ -27,6 +27,7 @@
 #include "kb_curator_link_artifacts.h"
 #include "kb_curator_synthesize.h"
 #include "kb_curator_promote.h"
+#include "kb_curator_custom.h"
 #include "kb_curator_pipeline.h"
 #include "kb_evidence_embed.h"
 #include "kb_memory_facts.h"
@@ -326,6 +327,19 @@ static const kb_curator_stage_desc_t CURATOR_STAGES[] = {
      KB_CURATOR_LANE_INDEX},
 };
 
+/* Resolve a built-in stage by name for the composed-stage loader (Phase D): a
+ * custom stage's base_op must name one of these vetted run()-backed ops. Returns
+ * the registry descriptor or NULL. */
+static const kb_curator_stage_desc_t *kb_curator_base_resolve(const char *name)
+{
+   if (!name)
+      return NULL;
+   for (size_t i = 0; i < sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]); i++)
+      if (strcmp(CURATOR_STAGES[i].name, name) == 0)
+         return &CURATOR_STAGES[i];
+   return NULL;
+}
+
 /* Producer->consumer dependency DAG for the curator stages: a stage may not be
  * ordered before a prerequisite in the SAME lane (cross-lane prereqs are advisory
  * -- the two lanes run concurrently, so cross-lane order is not enforceable). The
@@ -424,6 +438,40 @@ cJSON *kb_curator_stages_json(void)
       cJSON_AddStringToObject(o, "config_key", "kb_curator_cross_repo_graph_enabled");
       kb_curator_add_requires(o, "cross_repo_graph");
       cJSON_AddItemToArray(arr, o);
+   }
+   /* Composed custom stages (Phase D): the validated entries from
+    * kb.curator.custom_stages, appended after the built-ins so the GUI can render
+    * them. Marked custom:true with their base_op; config_key is null (they are
+    * edited via the custom_stages JSON, not a flat flag). `requires` is inherited
+    * from the base op. enabled:false entries are surfaced (deletable/toggleable in
+    * the GUI) but not composed into the runner. Reuses the same validating parser
+    * as the runner, so only well-formed entries appear. */
+   {
+      config_t cfg;
+      config_load(&cfg);
+      if (cfg.kb_curator_custom_stages[0])
+      {
+         kb_curator_custom_t cbuf[KB_CURATOR_MAX_CUSTOM];
+         size_t nc =
+             kb_curator_custom_stages_parse(cfg.kb_curator_custom_stages, kb_curator_base_resolve,
+                                            cbuf, KB_CURATOR_MAX_CUSTOM, NULL);
+         for (size_t i = 0; i < nc; i++)
+         {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "name", cbuf[i].name);
+            cJSON_AddStringToObject(o, "label", cbuf[i].name);
+            cJSON_AddStringToObject(o, "lane",
+                                    cbuf[i].base->lane == KB_CURATOR_LANE_LLM ? "llm" : "index");
+            cJSON_AddNumberToObject(o, "budget", cbuf[i].budget);
+            cJSON_AddNumberToObject(o, "order", (double)(n + 2 + i));
+            cJSON_AddNullToObject(o, "config_key");
+            cJSON_AddBoolToObject(o, "custom", 1);
+            cJSON_AddStringToObject(o, "base_op", cbuf[i].base_op);
+            cJSON_AddBoolToObject(o, "enabled", cbuf[i].enabled ? 1 : 0);
+            kb_curator_add_requires(o, cbuf[i].base_op);
+            cJSON_AddItemToArray(arr, o);
+         }
+      }
    }
    return arr;
 }
@@ -586,28 +634,61 @@ static int kb_curator_order_valid(const char *order, char *err, size_t err_sz)
    return 1;
 }
 
+/* Append enabled composed (custom) stages after the built-ins (Phase D). Parses
+ * kb.curator.custom_stages, reuses each valid entry's base op run fn under the
+ * custom name/budget on the base op's native lane, and appends to out[]. `cbuf`
+ * (capacity cbuf_n) backs the custom name storage, so it must outlive out[]'s use.
+ * Fail-safe: invalid entries are skipped with one WARN, mirroring stage_order. */
+static size_t kb_curator_append_custom(const config_t *cfg, kb_curator_stage_desc_t *out, size_t k,
+                                       size_t max, kb_curator_custom_t *cbuf, size_t cbuf_n)
+{
+   if (!cbuf || cbuf_n == 0 || !cfg->kb_curator_custom_stages[0])
+      return k;
+   int nrej = 0;
+   size_t nc = kb_curator_custom_stages_parse(cfg->kb_curator_custom_stages,
+                                              kb_curator_base_resolve, cbuf, cbuf_n, &nrej);
+   if (nrej > 0)
+      aimee_log(LOG_WARN, "kb.curator.custom",
+                "skipped %d custom_stages entr%s (unknown base_op / bad name / re-lane / dup / bad "
+                "budget / over cap); using the rest",
+                nrej, nrej == 1 ? "y" : "ies");
+   for (size_t i = 0; i < nc && k < max; i++)
+   {
+      if (!cbuf[i].enabled)
+         continue; /* keep-but-disabled: surfaced on the endpoint, not composed */
+      kb_curator_custom_to_desc(&cbuf[i], &out[k]);
+      k++;
+   }
+   return k;
+}
+
 /* Build the stage array the lane workers iterate: kb_curator_stage_order when set
  * AND valid (listed stages first in that order, then any unlisted in registry
- * order), else the registry order. Fail-safe: an invalid order logs one WARN and
- * falls back to registry order, so a bad config can never corrupt the pipeline.
- * Fills `out` (capacity `max`); returns the count. */
+ * order), else the registry order; then any enabled composed custom stages
+ * (Phase D) appended after the built-ins. Fail-safe: an invalid order logs one
+ * WARN and falls back to registry order, so a bad config can never corrupt the
+ * pipeline. Fills `out` (capacity `max`); `cbuf` (capacity `cbuf_n`) backs the
+ * custom stages' name storage and must outlive `out`. Returns the count. */
 static size_t kb_curator_ordered_stages(const config_t *cfg, kb_curator_stage_desc_t *out,
-                                        size_t max)
+                                        size_t max, kb_curator_custom_t *cbuf, size_t cbuf_n)
 {
    size_t n = sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]);
    size_t reg = n < max ? n : max;
    for (size_t i = 0; i < reg; i++)
       out[i] = CURATOR_STAGES[i];
    const char *order = cfg->kb_curator_stage_order;
-   if (!order[0])
-      return reg;
    char err[160];
-   if (!kb_curator_order_valid(order, err, sizeof(err)))
+   if (!order[0] || !kb_curator_order_valid(order, err, sizeof(err)))
    {
-      aimee_log(LOG_WARN, "kb.curator.order",
-                "ignoring invalid kb_curator_stage_order (%s); using registry order", err);
-      return reg;
+      if (order[0])
+         aimee_log(LOG_WARN, "kb.curator.order",
+                   "ignoring invalid kb_curator_stage_order (%s); using registry order", err);
+      return kb_curator_append_custom(cfg, out, reg, max, cbuf, cbuf_n);
    }
+   /* `used` is indexed by built-in registry position; guard its width against the
+    * built-in count so adding a 33rd stage can't silently overflow it. */
+   _Static_assert(sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]) <= 32,
+                  "used[] must cover every built-in curator stage");
    int used[32] = {0};
    size_t k = 0;
    char buf[512];
@@ -628,7 +709,7 @@ static size_t kb_curator_ordered_stages(const config_t *cfg, kb_curator_stage_de
    for (size_t i = 0; i < n && k < max; i++)
       if (!used[i])
          out[k++] = CURATOR_STAGES[i];
-   return k;
+   return kb_curator_append_custom(cfg, out, k, max, cbuf, cbuf_n);
 }
 
 static void *drain_thread_main(void *arg)
@@ -780,8 +861,10 @@ static void *drain_thread_main(void *arg)
       /* Stage order for this poll: kb_curator_stage_order when set + valid, else
        * registry order (fail-safe). Built once per poll so an invalid order WARNs
        * at most once, not once per drained job. */
-      kb_curator_stage_desc_t ordered[16];
-      size_t nordered = kb_curator_ordered_stages(&cfg, ordered, 16);
+      kb_curator_stage_desc_t ordered[16 + KB_CURATOR_MAX_CUSTOM];
+      kb_curator_custom_t customs[KB_CURATOR_MAX_CUSTOM];
+      size_t nordered = kb_curator_ordered_stages(
+          &cfg, ordered, sizeof(ordered) / sizeof(ordered[0]), customs, KB_CURATOR_MAX_CUSTOM);
 
       /* Drain a batch of curator jobs back-to-back. Each iteration runs ONE job
        * from the highest-priority non-empty stage (the rc chain below). Draining a
@@ -848,8 +931,10 @@ static void *kb_curator_index_lane_main(void *arg)
       kb_curator_projection_sweep(&cfg);
 
       /* Same stage-order resolution as the LLM lane; run_pass filters to this lane. */
-      kb_curator_stage_desc_t ordered[16];
-      size_t nordered = kb_curator_ordered_stages(&cfg, ordered, 16);
+      kb_curator_stage_desc_t ordered[16 + KB_CURATOR_MAX_CUSTOM];
+      kb_curator_custom_t customs[KB_CURATOR_MAX_CUSTOM];
+      size_t nordered = kb_curator_ordered_stages(
+          &cfg, ordered, sizeof(ordered) / sizeof(ordered[0]), customs, KB_CURATOR_MAX_CUSTOM);
 
       int r = 0, drained = 0;
       while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
