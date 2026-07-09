@@ -117,6 +117,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-roundtable \
                $(TESTPREFIX)/unit-test-wfe-sliced-build \
                $(TESTPREFIX)/unit-test-wfe-foreach \
+               $(TESTPREFIX)/unit-test-wfe-foreach-spawn \
+               $(TESTPREFIX)/unit-test-wfe-panel-verdict \
                $(TESTPREFIX)/unit-test-wfe-autonomy \
                $(TESTPREFIX)/unit-test-wfe-custom \
                $(TESTPREFIX)/unit-test-wfe-safety \
@@ -1673,6 +1675,25 @@ $(TESTPREFIX)/unit-test-wfe-foreach: $(OBJDIR)/tests/test_wfe_foreach.o \
                                     $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
                                     $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
+                                    $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Live panel: the review-reply -> verdict mapping (pure; cJSON + wfe_verdict).
+$(TESTPREFIX)/unit-test-wfe-panel-verdict: $(OBJDIR)/tests/test_wfe_panel_verdict.o \
+                                    $(OBJDIR)/server/wfe_panel_verdict.o \
+                                    $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Live foreach spawner: a split packet-plan -> child slice work items (parent linkage).
+$(TESTPREFIX)/unit-test-wfe-foreach-spawn: $(OBJDIR)/tests/test_wfe_foreach_spawn.o \
+                                    $(OBJDIR)/server/wfe_live_foreach.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

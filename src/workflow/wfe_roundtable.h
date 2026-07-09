@@ -19,6 +19,7 @@ typedef struct
    const char *artifact_hash; /* work item's current content (plan/diff under review) */
    const char *proposal;      /* originating proposal/request text, "" if none */
    const char *focus;         /* review lens from params.focus, "" if unset */
+   const char *workdir; /* the run's worktree (a live panel inspects the diff here), "" if none */
 } wfe_review_packet_t;
 
 /* A panel provider runs the configured panel against the review packet and fills

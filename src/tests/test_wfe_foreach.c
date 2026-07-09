@@ -58,8 +58,10 @@ static void setup_home(void)
 static int g_spawn_n;   /* children to create (0 = no packets) */
 static int g_spawn_err; /* 1 -> return -1 (fatal fan-out failure) */
 static int g_spawned;   /* observed: was spawn actually called? */
-static int mock_spawn(const char *wi, const char *child, int maxc, char *err, size_t n)
+static int mock_spawn(const char *wi, const char *child, const char *packets_path, int maxc,
+                      char *err, size_t n)
 {
+   (void)packets_path;
    (void)maxc;
    (void)err;
    (void)n;

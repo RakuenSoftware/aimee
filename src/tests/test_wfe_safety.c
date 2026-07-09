@@ -49,33 +49,36 @@ static wfe_merge_result_t m_merge(const char *r, const char *p)
    return g_merge;
 }
 /* a PR-opening provider: writes a known forge ref so we can assert it propagates. */
-static int m_open(const char *repo, const char *branch, const char *title, const char *body,
-                  char out_pr_ref[128])
+static int m_open(const char *repo, const char *branch, const char *base, const char *title,
+                  const char *body, char out_pr_ref[128])
 {
    (void)repo;
    (void)branch;
+   (void)base;
    (void)title;
    (void)body;
    snprintf(out_pr_ref, 128, "PR#42");
    return 0;
 }
 /* open that signals success but writes a junk (empty) ref -> must be rejected. */
-static int m_open_bad(const char *repo, const char *branch, const char *title, const char *body,
-                      char out_pr_ref[128])
+static int m_open_bad(const char *repo, const char *branch, const char *base, const char *title,
+                      const char *body, char out_pr_ref[128])
 {
    (void)repo;
    (void)branch;
+   (void)base;
    (void)title;
    (void)body;
    out_pr_ref[0] = '\0';
    return 0;
 }
 /* open that fails outright. */
-static int m_open_fail(const char *repo, const char *branch, const char *title, const char *body,
-                       char out_pr_ref[128])
+static int m_open_fail(const char *repo, const char *branch, const char *base, const char *title,
+                       const char *body, char out_pr_ref[128])
 {
    (void)repo;
    (void)branch;
+   (void)base;
    (void)title;
    (void)body;
    (void)out_pr_ref;
@@ -84,10 +87,11 @@ static int m_open_fail(const char *repo, const char *branch, const char *title, 
 /* MOCK: no `open` (today's default) -> pr_ref falls back to the work-item id.
  * MOCK_OPEN: opens "PR#42" -> the gates must resolve that, not the work-item id.
  * MOCK_OPENBAD / MOCK_OPENFAIL: pr.open must fail closed, never reaching the gates. */
-static const wfe_forge_t MOCK = {m_ci, m_mergeable, m_is_merged, m_merge, NULL};
-static const wfe_forge_t MOCK_OPEN = {m_ci, m_mergeable, m_is_merged, m_merge, m_open};
-static const wfe_forge_t MOCK_OPENBAD = {m_ci, m_mergeable, m_is_merged, m_merge, m_open_bad};
-static const wfe_forge_t MOCK_OPENFAIL = {m_ci, m_mergeable, m_is_merged, m_merge, m_open_fail};
+static const wfe_forge_t MOCK = {m_ci, m_mergeable, m_is_merged, m_merge, NULL, NULL};
+static const wfe_forge_t MOCK_OPEN = {m_ci, m_mergeable, m_is_merged, m_merge, m_open, NULL};
+static const wfe_forge_t MOCK_OPENBAD = {m_ci, m_mergeable, m_is_merged, m_merge, m_open_bad, NULL};
+static const wfe_forge_t MOCK_OPENFAIL = {m_ci,    m_mergeable, m_is_merged,
+                                          m_merge, m_open_fail, NULL};
 
 /* pp -> pr -> check.mergeable -> gate.ci -> merge; gates loop back to pp. */
 static const char *WF = "name: sf\nstart: pp\nnodes:\n"
