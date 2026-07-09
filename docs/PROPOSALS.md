@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 10 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 11 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — ten proposals (all but one not yet implemented).
+The genuinely open work — eleven proposals (all but one not yet implemented).
 
 - [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
   — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
@@ -104,6 +104,13 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
   validation + a v1 API stability tag) is the one remaining piece with no closing
   artifact.
+- [Binding retrieval context-contract for agents](proposals/pending/proposal-retrieval-context-contract.md)
+  — surveys an external context-engine against Aimee (most of its mechanisms
+  already exist: attention guard, per-intent budgets, confidence scorer, symbol
+  preload) and scopes the one clean gap: surface the confidence + caps the memory
+  assembler already computes to the delegate as a *binding* exploration contract,
+  enforced by the existing `cli_attention_guard.c` raw-scan redirect.
+  **Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote.**
 
 ## Done (66)
 
