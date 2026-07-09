@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (157)
+## CLI-settable keys (158)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -93,6 +93,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
 | `kb_curator_cross_repo_graph_enabled` | bool | — |
+| `kb_curator_custom_stages` | string | — |
 | `kb_curator_detect_contradictions_enabled` | bool | — |
 | `kb_curator_extract_code_enabled` | bool | — |
 | `kb_curator_extract_docs_enabled` | bool | — |
@@ -184,7 +185,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | — |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `wfe_live_forge_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `wfe_live_forge_enabled`
 
 ## Config-file sections (53)
 
