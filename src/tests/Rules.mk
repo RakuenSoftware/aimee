@@ -411,6 +411,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-ranker-fit \
                $(TESTPREFIX)/unit-test-retrieval-outcome-bridge \
+               $(TESTPREFIX)/unit-test-td-search-render \
                $(TESTPREFIX)/unit-test-report-enrichments \
                $(TESTPREFIX)/unit-test-reasoning \
                $(TESTPREFIX)/unit-test-bandit \
@@ -3900,6 +3901,12 @@ $(TESTPREFIX)/unit-test-ranker-fit: $(OBJDIR)/tests/test_ranker_fit.o \
 # DB/network objects are needed — just the bridge TU.
 $(TESTPREFIX)/unit-test-retrieval-outcome-bridge: $(OBJDIR)/tests/test_retrieval_outcome_bridge.o \
                      $(OBJDIR)/server/retrieval_outcome_bridge.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Pure render/extract helpers behind the kb_search tool — cJSON + dstr only.
+$(TESTPREFIX)/unit-test-td-search-render: $(OBJDIR)/tests/test_td_search_render.o \
+                     $(OBJDIR)/posix/td_search_render.o \
+                     $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-report-enrichments: $(OBJDIR)/tests/test_report_enrichments.o \
