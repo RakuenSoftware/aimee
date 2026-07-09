@@ -520,6 +520,8 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
  * (e.g. to 0 for tests / high-throughput dogfood) without a rebuild. */
 void config_apply_review_settings(config_t *cfg, cJSON *root)
 {
+   if (!cfg || !root)
+      return;
    cJSON *learning_cfg = cJSON_GetObjectItemCaseSensitive(root, "learning");
    if (!cJSON_IsObject(learning_cfg))
       return;
@@ -527,20 +529,26 @@ void config_apply_review_settings(config_t *cfg, cJSON *root)
    if (!cJSON_IsObject(rv))
       return;
 
+   /* scheduler_enabled is boolean — normalise any bool/number to 0/1. */
    cJSON *item = cJSON_GetObjectItemCaseSensitive(rv, "scheduler_enabled");
-   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
-      cfg->review_scheduler_enabled = item->valueint;
+   if (cJSON_IsBool(item))
+      cfg->review_scheduler_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   else if (cJSON_IsNumber(item))
+      cfg->review_scheduler_enabled = item->valuedouble != 0.0 ? 1 : 0;
 
+   /* Positive-integer knobs: cast first, then require > 0 so a fractional value
+    * that truncates to 0 (e.g. 0.5) is rejected, not silently taken as 0. */
    item = cJSON_GetObjectItemCaseSensitive(rv, "idle_trigger_minutes");
-   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+   if (cJSON_IsNumber(item) && (int)item->valuedouble > 0)
       cfg->review_idle_trigger_minutes = (int)item->valuedouble;
 
+   /* >= 0: a whole-hour cooldown, or 0 to disable it. */
    item = cJSON_GetObjectItemCaseSensitive(rv, "session_cooldown_hours");
-   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0 && (int)item->valuedouble >= 0)
       cfg->review_session_cooldown_hours = (int)item->valuedouble;
 
    item = cJSON_GetObjectItemCaseSensitive(rv, "batch_cap");
-   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+   if (cJSON_IsNumber(item) && (int)item->valuedouble > 0)
       cfg->review_batch_cap = (int)item->valuedouble;
 }
 

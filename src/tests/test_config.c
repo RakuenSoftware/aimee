@@ -1988,19 +1988,54 @@ int main(void)
       cfg2.review_session_cooldown_hours = 24;
       cfg2.review_batch_cap = 10;
       cJSON *no_review = cJSON_Parse("{\"learning\":{}}");
+      assert(no_review);
       config_apply_review_settings(&cfg2, no_review);
       assert(cfg2.review_scheduler_enabled == 1 && cfg2.review_idle_trigger_minutes == 30 &&
              cfg2.review_session_cooldown_hours == 24 && cfg2.review_batch_cap == 10);
       cJSON_Delete(no_review);
 
-      /* Missing 'learning' key entirely: early return, no change, no crash. */
+      /* Missing 'learning' key entirely, and NULL root: early return, no change,
+       * no crash. */
       config_t cfg3;
       memset(&cfg3, 0, sizeof(cfg3));
       cfg3.review_scheduler_enabled = 1;
+      cfg3.review_idle_trigger_minutes = 30;
+      cfg3.review_session_cooldown_hours = 24;
+      cfg3.review_batch_cap = 10;
       cJSON *empty = cJSON_Parse("{}");
+      assert(empty);
       config_apply_review_settings(&cfg3, empty);
-      assert(cfg3.review_scheduler_enabled == 1);
+      config_apply_review_settings(&cfg3, NULL);
+      assert(cfg3.review_scheduler_enabled == 1 && cfg3.review_idle_trigger_minutes == 30 &&
+             cfg3.review_session_cooldown_hours == 24 && cfg3.review_batch_cap == 10);
       cJSON_Delete(empty);
+
+      /* Robustness: scheduler_enabled normalises to 0/1; fractional/zero positive
+       * knobs are rejected (leave defaults); a partial override touches only its
+       * own field. */
+      config_t cfg4;
+      memset(&cfg4, 0, sizeof(cfg4));
+      cfg4.review_scheduler_enabled = 0;
+      cfg4.review_idle_trigger_minutes = 30;
+      cfg4.review_batch_cap = 10;
+      cJSON *robust = cJSON_Parse("{\"learning\":{\"review\":{\"scheduler_enabled\":5,"
+                                  "\"idle_trigger_minutes\":0.5,\"batch_cap\":0}}}");
+      assert(robust);
+      config_apply_review_settings(&cfg4, robust);
+      assert(cfg4.review_scheduler_enabled == 1);     /* 5 normalised to 1 */
+      assert(cfg4.review_idle_trigger_minutes == 30); /* 0.5 truncates to 0 -> rejected */
+      assert(cfg4.review_batch_cap == 10);            /* 0 rejected */
+      cJSON_Delete(robust);
+
+      config_t cfg5;
+      memset(&cfg5, 0, sizeof(cfg5));
+      cfg5.review_scheduler_enabled = 1;
+      cfg5.review_batch_cap = 10;
+      cJSON *partial = cJSON_Parse("{\"learning\":{\"review\":{\"batch_cap\":7}}}");
+      assert(partial);
+      config_apply_review_settings(&cfg5, partial);
+      assert(cfg5.review_batch_cap == 7 && cfg5.review_scheduler_enabled == 1);
+      cJSON_Delete(partial);
    }
 
    /* AIMEE_EMBEDDING_DIM env override (config_resolve_embedding_dim) */
