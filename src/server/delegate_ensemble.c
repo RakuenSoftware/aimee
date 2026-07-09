@@ -411,8 +411,8 @@ static int positional_change_0_100(const char *prev, const char *next)
 
 static int token_jaccard_change_0_100(const char *prev, const char *next)
 {
-   char (*a)[64] = calloc(512, sizeof(*a));
-   char (*b)[64] = calloc(512, sizeof(*b));
+   char(*a)[64] = calloc(512, sizeof(*a));
+   char(*b)[64] = calloc(512, sizeof(*b));
    if (!a || !b)
    {
       free(a);
