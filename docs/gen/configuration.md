@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (156)
+## CLI-settable keys (155)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -145,7 +145,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_kb_neighbour_expand` | bool | Expand recall to KB neighbours. |
 | `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
 | `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
-| `memory_md_retire` | bool | Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
 | `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
 | `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |

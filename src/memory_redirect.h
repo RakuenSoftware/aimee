@@ -44,32 +44,20 @@ extern "C"
                                            const char *home);
 
    /* Full interception stage for pre_tool_check. Inspects a parsed tool-input
-    * object for a memory write/edit; on a memory op performs the redirect (POST
-    * to /v1/harness_memory/upsert + re-materialize the file) and returns a
-    * pre_tool_check verdict: 0 = allow, 2 = deny (msg holds the agent-facing
-    * reason). Fail-open: if the store is unreachable it returns 0 (allow) so the
+    * object for a memory write/edit; on a memory op performs the redirect (stores
+    * the content into aimee's db1 as a private, non-recallable archive row — the
+    * .md is retired and never materialized) and returns a pre_tool_check verdict:
+    * 0 = allow, 2 = deny (msg holds the agent-facing reason). Fail-open: if the
+    * store is unreachable it spills for reconcile and returns 0 (allow) so the
     * agent is never blocked by our outage.
     *
     * project_hint: when non-empty, the project key to store under, resolved by
     * the caller (the thin client, where the real cwd / git repo / AIMEE_PROJECT_ID
     * live). This is REQUIRED for a remote server, whose filesystem has neither the
     * client's cwd nor its git repo; when NULL/empty the project is resolved from
-    * cwd as a local-server fallback.
-    *
-    * md_retire: when non-zero, the intercepted memory write is stored into aimee's
-    * db1 archive and the .md is NOT re-materialized (the file never exists); when
-    * zero, the legacy behavior stores + re-materializes a local .md mirror. Sourced
-    * from the config flag memory_md_retire by the caller. */
+    * cwd as a local-server fallback. */
    int memory_redirect_check(const char *tool, cJSON *root, const char *cwd,
-                             const char *project_hint, int md_retire, char *msg, size_t msg_len);
-
-   /* Re-materialize a memory file with aimee's own I/O (atomic temp+rename on
-    * POSIX), confined under <home>/<projects_root>/ via realpath so a symlinked
-    * component cannot redirect the write out of the memory tree. Used by the
-    * server-side interception (which writes DB1 directly) to mirror the stored
-    * row back to disk. Returns 0 on success, -1 otherwise. */
-   int memory_redirect_rematerialize(const char *path, const char *content, const char *home,
-                                     const char *projects_root);
+                             const char *project_hint, char *msg, size_t msg_len);
 
 #ifdef __cplusplus
 }

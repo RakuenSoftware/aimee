@@ -1,8 +1,9 @@
 # Proposal: Memory architecture — retire `.md` memory; db1 = user, db2 = organization
 
-- **State:** in progress — Phase 1 (db1 user store + recall merge + capture) and migration
-  Slices 1/3/4 are live on `testing`; one acceptance criterion remains (§2 Slice 5 subsystem
-  removal), which is operator-gated. See "Implementation status (as-built)" below.
+- **State:** shipped — Phase 1 (db1 user store + recall merge + capture), migration Slices 1/3/4,
+  and §2 Slice 5 (harness-memory subsystem removal + CI guard) are all merged on `testing`. Every
+  acceptance criterion is met; §4 Phase-4 auto-population (OQ5) is deferred to a follow-up. See
+  "Implementation status (as-built)" below.
 
 ## Thesis
 
@@ -307,7 +308,7 @@ remaining acceptance criterion is **Removal** (§2 Slice 5), which is operator-g
 | §2 Slice 1 — migration inventory | **Shipped** | `scripts/harness-memory-inventory.py` (read-only). PR #1046. |
 | §2 Slice 3 — `.md` → db1 archive migration | **Shipped** | `scripts/harness-memory-migrate.py` (safe default: all → db1 private `archive`/L1, source retained, dry-run default) + `aimee memory archive`. PR #1047. |
 | §2 Slice 4 — replacement write path (interception → db1) | **Shipped, default-ON** | config `memory_md_retire` (**default-on**): a memory-`.md` Write is denied and stored as a private non-recallable db1 `archive:<project>/<name>` row; session-start hydrate skipped; brief steers the agent to aimee memory. PRs #1048, later default-on flip. |
-| **§2 Slice 5 — subsystem removal + CI guard** | **NOT done — operator-gated** | the `harness_memory_*` subsystem, `memory_redirect` legacy branch, `server/harness_memory_routes.c`, the `harness_memory.*` RPC ops, tests, and docs still exist. See runbook below. |
+| **§2 Slice 5 — subsystem removal + CI guard** | **Shipped** | deleted the `harness_memory` mirror table, `_hydrate`/`_watch`, `server/harness_memory_routes.c`, the `harness_memory.*` RPC ops + routes + auth caps, and the `memory_md_retire` config flag (retirement is now unconditional); the replacement path (`memory_redirect` → db1 archive) and `user_memory` are retained, as are the shared `harness_memory_{common,scope,audit,spill}` interception helpers. Added `scripts/check-md-store-retired.py` (wired into `make lint`). |
 | §4 Phase 4 — feedback→durable db2 rules, promotion, gated extraction, quarantine review | **NOT done (default-off scope)** | OQ5 (ship default-off now vs. hold for calibration) remains open. |
 
 ### Open questions — resolution
@@ -321,13 +322,11 @@ remaining acceptance criterion is **Removal** (§2 Slice 5), which is operator-g
   hard org rules are a separate, non-overridable section.
 - **OQ5 (Phase-4 extraction default):** **OPEN** — operator decision.
 
-### Remaining step: §2 Slice 5 subsystem-removal runbook (operator-gated)
+### §2 Slice 5 subsystem-removal — as executed
 
-Removal is the last acceptance criterion. It is intentionally **not executed autonomously** because
-the proposal (R2/R3) gates it on **operator per-file classification** of any historical `.md` content
-and on operator confirmation that the migration ran on the live deployment, and because the
-interception seam (remote client → server pre-hook → db1) can only be end-to-end validated on the
-live stack, not in an offline build. When the operator is ready:
+Removal was the last acceptance criterion, executed on operator direction after the live `.254`
+check confirmed the canonical `harness_memory` table is empty there (0 rows — nothing to
+classify/lose). What was done (and what any other deployment should still run before upgrading):
 
 1. **Confirm migration on the live db1** — run `scripts/harness-memory-migrate.py --apply` (safe:
    all → db1 `archive`, source retained), then verify by content-hash + key-set that every
@@ -392,5 +391,6 @@ cross-user state mutation. Split it:
       lattice/dedup unit coverage — see `test_harness_memory.c` merge assertions.)*
 - [x] Migration: a sample `.md` set imports into db1 archive by the safe default with no content loss.
 - [x] Tier policy: a freshly-captured preference surfaces in recall without a manual `--tier`.
-- [ ] **Removal: after §2, no code path reads/writes the `.md` store; CI guard enforces it.**
-      *(Operator-gated — see runbook above. This is the only open criterion.)*
+- [x] **Removal: after §2, no code path reads/writes the `.md` store; CI guard enforces it.**
+      *(Legacy subsystem deleted; `scripts/check-md-store-retired.py` enforces it, wired into
+      `make lint`.)*

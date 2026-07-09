@@ -9,13 +9,6 @@
 char *read_stdin(void);
 int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len);
 
-/* memory_md_retire config flag, fetched from the server via config.get (the thin
- * CLI does not link the config module). Returns 1 (retire on) by default and
- * whenever the server is unreachable, so a fresh/offline session never
- * re-materializes memory files. Defined in cli_session_start.c; used by the
- * session-start hydrate gate and the cli_main.c remote-only memory guard. */
-int cli_memory_md_retire(void);
-
 /* `aimee session-start` SessionStart-hook entry (cli_session_start.c). Reads the
  * host hook JSON from stdin and either forwards hooks.session_start to a
  * co-located server or, against a remote /v1 endpoint, emits proactive recall

@@ -1,7 +1,8 @@
-/* Unit tests for the DB1 harness_memory store + content-hash primitive (P1). */
+/* Unit tests for harness_memory_common (sha256 + content-hash + project-key
+ * resolve/validate) and the DB1 per-user memory store + recall merge
+ * (Proposal 2). The legacy harness_memory .md-mirror table was retired. */
 
 #include "db1/db1.h"
-#include "db1/harness_memory.h"
 #include "db1/user_memory.h"
 #include "harness_memory_common.h"
 #include "cJSON.h"
@@ -53,52 +54,6 @@ static void test_hash(void)
    char x[65];
    assert(hmem_content_hash("fact", "n", "d", "other", "{}", x) == 0);
    assert(strcmp(m1, x) != 0);
-}
-
-static hmem_row_t mkrow(const char *proj, const char *name, const char *type, const char *body)
-{
-   hmem_row_t r;
-   memset(&r, 0, sizeof(r));
-   snprintf(r.project, sizeof(r.project), "%s", proj);
-   snprintf(r.name, sizeof(r.name), "%s", name);
-   snprintf(r.type, sizeof(r.type), "%s", type);
-   r.body = (char *)body; /* borrowed; upsert only reads */
-   return r;
-}
-
-static void test_page_end(void)
-{
-   /* Pure paging math: page boundaries respect the byte budget and always
-    * advance (a single oversized row can't stall the pager). */
-   char big[6000], mid[1000];
-   memset(big, 'x', sizeof(big) - 1);
-   big[sizeof(big) - 1] = '\0';
-   memset(mid, 'y', sizeof(mid) - 1);
-   mid[sizeof(mid) - 1] = '\0';
-
-   hmem_row_t rows[4] = {mkrow("p", "a", "fact", mid), /* rowsz ~= 999 + 512 = 1511 */
-                         mkrow("p", "b", "fact", mid), mkrow("p", "c", "fact", mid),
-                         mkrow("p", "d", "fact", mid)};
-
-   /* generous budget -> whole set fits in one page */
-   assert(hmem_page_end(rows, 4, 0, 1 << 20) == 4);
-
-   /* tight budget (2000): one ~1511-byte row per page, always advancing */
-   assert(hmem_page_end(rows, 4, 0, 2000) == 1);
-   assert(hmem_page_end(rows, 4, 1, 2000) == 2);
-   assert(hmem_page_end(rows, 4, 3, 2000) == 4);
-
-   /* two rows fit under a 3200 budget; the third opens the next page */
-   assert(hmem_page_end(rows, 4, 0, 3200) == 2);
-
-   /* a single row larger than the whole budget still advances by one */
-   hmem_row_t huge[1] = {mkrow("p", "big", "fact", big)}; /* rowsz ~= 6511 > 2000 */
-   assert(hmem_page_end(huge, 1, 0, 2000) == 1);
-
-   /* offset at the end yields an empty final page; NULL/empty inputs are safe */
-   assert(hmem_page_end(rows, 4, 4, 2000) == 4);
-   assert(hmem_page_end(NULL, 0, 0, 2000) == 0);
-   assert(hmem_page_end(rows, 0, 0, 2000) == 0);
 }
 
 static void test_resolve(void)
@@ -241,94 +196,10 @@ int main(void)
 {
    test_sha();
    test_hash();
-   test_page_end();
    test_resolve();
    test_project_key_ok();
    assert(db1_init(":memory:") == 0);
    test_user_memory();
-
-   /* upsert + get (nested name round-trips) */
-   hmem_row_t in = mkrow("proj", "topics/auth", "fact", "alpha");
-   int64_t id = 0;
-   assert(hmem_upsert(&in, &id) == 0);
-   assert(id > 0);
-   hmem_row_t got;
-   assert(hmem_get("proj", "topics/auth", &got) == 0);
-   assert(strcmp(got.body, "alpha") == 0);
-   assert(strcmp(got.type, "fact") == 0);
-   assert(got.deleted_at[0] == '\0');
-   char ts1[32];
-   snprintf(ts1, sizeof(ts1), "%s", got.updated_at);
-   hmem_row_free_fields(&got);
-
-   /* same content => no-op (updated_at unchanged) */
-   assert(hmem_upsert(&in, NULL) == 0);
-   assert(hmem_get("proj", "topics/auth", &got) == 0);
-   assert(strcmp(got.updated_at, ts1) == 0);
-   hmem_row_free_fields(&got);
-
-   /* changed content => updates */
-   hmem_row_t in2 = mkrow("proj", "topics/auth", "fact", "beta");
-   assert(hmem_upsert(&in2, NULL) == 0);
-   assert(hmem_get("proj", "topics/auth", &got) == 0);
-   assert(strcmp(got.body, "beta") == 0);
-   hmem_row_free_fields(&got);
-
-   /* invalid type rejected */
-   hmem_row_t bad = mkrow("proj", "x", "bogus", "b");
-   assert(hmem_upsert(&bad, NULL) == -1);
-
-   /* second row + list (live only) */
-   hmem_row_t in3 = mkrow("proj", "notes/x", "note", "gamma");
-   assert(hmem_upsert(&in3, NULL) == 0);
-   hmem_row_t *rows = NULL;
-   int n = 0;
-   assert(hmem_list("proj", &rows, &n, 0) == 0);
-   assert(n == 2);
-   hmem_rows_free(rows, n);
-
-   /* tombstone hides from get/list; include_deleted reveals */
-   assert(hmem_tombstone("proj", "notes/x") == 0);
-   assert(hmem_get("proj", "notes/x", &got) == -1);
-   assert(hmem_list("proj", &rows, &n, 0) == 0);
-   assert(n == 1);
-   hmem_rows_free(rows, n);
-   assert(hmem_list("proj", &rows, &n, 1) == 0);
-   assert(n == 2);
-   hmem_rows_free(rows, n);
-
-   /* resurrection: upsert onto a tombstoned row clears deleted_at */
-   hmem_row_t in4 = mkrow("proj", "notes/x", "note", "gamma2");
-   assert(hmem_upsert(&in4, NULL) == 0);
-   assert(hmem_get("proj", "notes/x", &got) == 0);
-   assert(got.deleted_at[0] == '\0');
-   assert(strcmp(got.body, "gamma2") == 0);
-   hmem_row_free_fields(&got);
-
-   /* search */
-   assert(hmem_search("proj", "beta", &rows, &n) == 0);
-   assert(n == 1);
-   assert(strcmp(rows[0].name, "topics/auth") == 0);
-   hmem_rows_free(rows, n);
-
-   /* bulk prefix tombstone: both topics rows gone, notes/x stays */
-   hmem_row_t in5 = mkrow("proj", "topics/sub", "fact", "s");
-   assert(hmem_upsert(&in5, NULL) == 0);
-   assert(hmem_tombstone_prefix("proj", "topics") == 2);
-   assert(hmem_get("proj", "topics/auth", &got) == -1);
-   assert(hmem_get("proj", "notes/x", &got) == 0);
-   hmem_row_free_fields(&got);
-
-   /* prefix match is wildcard-free: '_' in dir must not over-match a sibling */
-   hmem_row_t w1 = mkrow("proj", "a_b/foo", "fact", "1");
-   hmem_row_t w2 = mkrow("proj", "axb/foo", "fact", "2");
-   assert(hmem_upsert(&w1, NULL) == 0);
-   assert(hmem_upsert(&w2, NULL) == 0);
-   assert(hmem_tombstone_prefix("proj", "a_b") == 1);
-   assert(hmem_get("proj", "axb/foo", &got) == 0); /* sibling untouched */
-   hmem_row_free_fields(&got);
-   assert(hmem_get("proj", "a_b/foo", &got) == -1); /* tombstoned */
-
    db1_shutdown();
    printf("test_harness_memory: OK\n");
    return 0;
