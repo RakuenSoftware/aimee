@@ -1603,7 +1603,7 @@ typedef struct config
    /* Comma-separated stage-name order for the curator pipeline (GUI reorder).
     * Empty = registry (default) order. Validated against the dependency DAG; an
     * invalid order falls back to registry order with a WARN. Opt-in: unset changes
-    * nothing. See docs/proposals/pending/user-configurable-curator-pipeline.md. */
+    * nothing. See docs/proposals/done/user-configurable-curator-pipeline.md. */
    char kb_curator_stage_order[512];
    /* User-defined curator presets as a JSON array string:
     * [{"name":"...","enabled":["kb_curator_..._enabled",...]}]. Merged with the
@@ -1620,7 +1620,7 @@ typedef struct config
     * (the dequeue is a non-atomic SELECT-then-commit). Invalid entries are skipped
     * with one WARN (fail-safe); unknown fields are ignored (forward-compat).
     * The GUI edits this via config.set (flat string, no bespoke op). Empty = none.
-    * See docs/proposals/pending/user-configurable-curator-pipeline.md §5. */
+    * See docs/proposals/done/user-configurable-curator-pipeline.md §5. */
    char kb_curator_custom_stages[4096];
    int kb_curator_extract_max_tokens;
    int kb_curator_max_attempts;

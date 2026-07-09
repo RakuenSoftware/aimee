@@ -12,7 +12,7 @@
  * Keeping a custom stage on its base op's lane makes built-in ⊕ custom sequential
  * on a single thread — safe by construction. Re-laning is a future phase gated on
  * an atomic transactional dequeue. See
- * docs/proposals/pending/user-configurable-curator-pipeline.md §5.
+ * docs/proposals/done/user-configurable-curator-pipeline.md §5.
  *
  * This module is deliberately decoupled from the drain's private CURATOR_STAGES
  * table (via an injected resolver) and dependency-light, so it is unit-testable
