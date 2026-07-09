@@ -42,12 +42,20 @@ typedef struct
    int (*mergeable)(const char *repo, const char *pr_ref); /* 1 yes, 0 conflict, -1 unknown */
    int (*is_merged)(const char *repo, const char *pr_ref); /* 1 merged, 0 open, -1 unknown */
    wfe_merge_result_t (*merge)(const char *repo, const char *pr_ref);
-   /* Push `branch` and open a PR; write its forge ref (number/url) into out_pr_ref.
-    * Returns 0 on success, -1 on failure. May be NULL on a provider that predates
-    * this field (the default live provider and test mocks) -> pr.open fails closed
-    * and the gate that follows re-loops. */
-   int (*open)(const char *repo, const char *branch, const char *title, const char *body,
-               char out_pr_ref[128]);
+   /* Push `branch` and open a PR AGAINST `base` (the target branch: the autonomous
+    * base for a top-level PR, or the parent feature branch aimee/feat/<parent> for a
+    * slice sub-PR); write its forge ref (number/url) into out_pr_ref. `base` is never
+    * empty and is guaranteed non-protected by the caller. Returns 0 on success, -1 on
+    * failure. May be NULL on a provider that predates this field -> pr.open fails
+    * closed and the gate that follows re-loops. */
+   int (*open)(const char *repo, const char *branch, const char *base, const char *title,
+               const char *body, char out_pr_ref[128]);
+   /* Publish a durable feature branch to the forge (push the local aimee/feat/<id>
+    * branch so slice sub-PRs can target it as their base). Returns 0 on success, -1
+    * on failure. May be NULL (predates this field / no live forge) -> branch.open
+    * still produces the branch name, but the base won't exist remotely until a live
+    * provider is installed, so slice sub-PRs fail closed. */
+   int (*publish_base)(const char *repo, const char *branch);
 } wfe_forge_t;
 
 /* Install a forge provider (NULL restores the default live/gh provider). */
@@ -141,14 +149,15 @@ int wfe_implement_verify_ok(const char *workdir);
  * inject a mock that creates child rows. ---- */
 typedef struct
 {
-   /* Create one child `child_workflow` run per split packet of `work_item_id`, each
-    * linked to it via db1_work_item_set_parent and targeting the run's feature branch.
-    * `max_children` bounds the fan-out (a pathological/hostile packet list). Idempotent:
-    * if children already exist it must not double-spawn. Returns the number of children
-    * that exist after the call (0 = no packets -> nothing to do), or -1 on a fatal error
-    * (fills `err`). */
-   int (*spawn)(const char *work_item_id, const char *child_workflow, int max_children, char *err,
-                size_t errlen);
+   /* Create one child `child_workflow` run per packet in the split packet-plan at
+    * `packets_path` (the parent's `.wfe-<split>.json`; may be NULL/absent -> 0
+    * children), each linked to `work_item_id` via db1_work_item_set_parent and
+    * targeting its feature branch. `max_children` bounds the fan-out (a pathological/
+    * hostile packet list). Idempotent: if children already exist it must not
+    * double-spawn. Returns the number of children that exist after the call (0 = no
+    * packets -> nothing to do), or -1 on a fatal error (fills `err`). */
+   int (*spawn)(const char *work_item_id, const char *child_workflow, const char *packets_path,
+                int max_children, char *err, size_t errlen);
 } wfe_foreach_provider_t;
 
 /* Install a child-workflow spawn provider (NULL restores the default park). */

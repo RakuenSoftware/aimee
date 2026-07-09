@@ -192,16 +192,18 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    return res;
 }
 
-static int live_open(const char *repo, const char *branch, const char *title, const char *body,
-                     char out_pr_ref[128])
+static int live_open(const char *repo, const char *branch, const char *base, const char *title,
+                     const char *body, char out_pr_ref[128])
 {
    (void)repo;
    if (out_pr_ref)
       out_pr_ref[0] = '\0';
    if (!forge_allowed() || !branch || !branch[0])
       return -1;
-   const char *base = wfe_autonomous_base();
-   if (!base || !base[0]) /* a missing/empty base must never reach push/create */
+   /* `base` is resolved + guaranteed non-protected by exec_pr_open (the autonomous
+    * base for a top-level PR, or aimee/feat/<parent> for a slice sub-PR). Defence in
+    * depth: refuse an empty or protected base here too. */
+   if (!base || !base[0] || wfe_base_is_protected(base))
       return -1;
 
    /* Escape every interpolated value; ABORT on any truncation (never run a
@@ -251,8 +253,30 @@ static int live_open(const char *repo, const char *branch, const char *title, co
    return 0;
 }
 
+/* Publish the durable feature branch (aimee/feat/<id>) to the forge so slice
+ * sub-PRs can target it as their base. Pushes the local branch through the vaulted
+ * runner; refuses a protected/empty branch (defence in depth). */
+static int live_publish_base(const char *repo, const char *branch)
+{
+   (void)repo;
+   if (!forge_allowed() || !branch || !branch[0] || wfe_base_is_protected(branch))
+      return -1;
+   char ebranch[256];
+   if (shq(ebranch, sizeof ebranch, branch) != 0)
+      return -1;
+   char cmd[512];
+   snprintf(cmd, sizeof cmd, "git push -u origin '%s' 2>&1", ebranch);
+   int rc;
+   char *out = mcp_git_run(cmd, &rc);
+   if (rc != 0)
+      aimee_log(LOG_WARN, "wfe-forge", "publish feature base %s failed: %s", branch,
+                out ? out : "");
+   free(out);
+   return rc == 0 ? 0 : -1;
+}
+
 static const wfe_forge_t WFE_LIVE_FORGE = {live_ci_status, live_mergeable, live_is_merged,
-                                           live_merge, live_open};
+                                           live_merge,     live_open,      live_publish_base};
 
 void wfe_live_forge_register(void)
 {
