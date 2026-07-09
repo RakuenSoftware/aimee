@@ -1662,10 +1662,12 @@ char *kb_client_memory_facts(const char *query)
    return out;
 }
 
-int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
-                                            const char *query_fingerprint, const int64_t *ids,
-                                            int n_ids)
+int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
+                                               const char *query_fingerprint, const int64_t *ids,
+                                               int n_ids, char *event_id_out, size_t event_id_len)
 {
+   if (event_id_out && event_id_len > 0)
+      event_id_out[0] = '\0';
    if (!turn_id || !turn_id[0])
       return -1;
 
@@ -1683,6 +1685,55 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
    if (!json)
       return -1;
 
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   if (ok && event_id_out && event_id_len > 0)
+   {
+      cJSON *ev = cJSON_GetObjectItemCaseSensitive(resp, "retrieval_event_id");
+      if (cJSON_IsString(ev) && ev->valuestring[0])
+         snprintf(event_id_out, event_id_len, "%s", ev->valuestring);
+   }
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
+int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
+                                            const char *query_fingerprint, const int64_t *ids,
+                                            int n_ids)
+{
+   return kb_client_evidence_emit_retrieval_event_ex(turn_id, role, query_fingerprint, ids, n_ids,
+                                                     NULL, 0);
+}
+
+/* Record retrieval outcomes for surfaced rows against an event, as one batch.
+ * `surface` selects the KB-service method: "memory" -> memory.record_retrieval_outcome
+ * (writes retrieval_attribution), "ranker" -> ranker.record_outcome (writes
+ * ranker_outcome). Returns 0 on an ok response, -1 otherwise. */
+int kb_client_record_retrieval_outcome(const char *surface, const char *event_id,
+                                       const int64_t *ids, int n, const char *verdict)
+{
+   if (!event_id || !event_id[0] || !verdict || !verdict[0] || n <= 0 || !ids)
+      return -1;
+   const char *method = (surface && strcmp(surface, "ranker") == 0)
+                            ? "ranker.record_outcome"
+                            : "memory.record_retrieval_outcome";
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "retrieval_event_id", event_id);
+   cJSON *rows = cJSON_AddArrayToObject(req, "rows");
+   for (int i = 0; rows && i < n; i++)
+   {
+      cJSON *row = cJSON_CreateObject();
+      cJSON_AddNumberToObject(row, "id", (double)ids[i]);
+      cJSON_AddStringToObject(row, "verdict", verdict);
+      cJSON_AddItemToArray(rows, row);
+   }
+   char *json = kb_v1_action_request(method, req);
+   if (!json)
+      return -1;
    cJSON *resp = cJSON_Parse(json);
    free(json);
    if (!resp)

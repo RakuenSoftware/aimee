@@ -111,6 +111,27 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
    (void)n_ids;
    return 0;
 }
+int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
+                                               const char *query_fingerprint, const int64_t *ids,
+                                               int n_ids, char *event_id_out, size_t event_id_len)
+{
+   (void)turn_id;
+   (void)role;
+   (void)query_fingerprint;
+   (void)ids;
+   (void)n_ids;
+   if (event_id_out && event_id_len > 0)
+      event_id_out[0] = '\0';
+   return 0;
+}
+void retrieval_outcome_bridge_note(const char *surface, const char *event_id, const int64_t *ids,
+                                   int n)
+{
+   (void)surface;
+   (void)event_id;
+   (void)ids;
+   (void)n;
+}
 int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
                                              const char *query_fingerprint,
                                              const char *const *types, const char *const *refs,
