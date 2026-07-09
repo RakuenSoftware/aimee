@@ -318,6 +318,8 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(root, "db2_pool_size", cfg->db2_pool_size);
    cJSON_AddStringToObject(root, "guardrail_mode", cfg->guardrail_mode);
    cJSON_AddStringToObject(root, "provider", cfg->provider);
+   if (cfg->default_persona[0] && strcmp(cfg->default_persona, "engineer") != 0)
+      cJSON_AddStringToObject(root, "default_persona", cfg->default_persona);
 
    if (cfg->autonomous)
       cJSON_AddTrueToObject(root, "autonomous");

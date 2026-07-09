@@ -197,6 +197,21 @@ static char *build_session_context(const char *client_cwd)
    aimee_mode_t mode = config_current_mode();
    char persona_name[PERSONA_NAME_MAX];
    config_current_persona(persona_name, sizeof(persona_name));
+   /* When nothing more specific selected a persona — no AIMEE_MODE override and no
+    * durable /novel-style mode file, so the resolver fell through to the built-in
+    * `engineer` default — honor the operator-configured default persona so a fresh
+    * primary session starts as it (config.default_persona itself defaults to
+    * engineer, so this is a no-op until the operator changes it). */
+   if (strcmp(persona_name, "engineer") == 0)
+   {
+      config_t persona_cfg;
+      if (config_load(&persona_cfg) == 0 && persona_cfg.default_persona[0] &&
+          strcmp(persona_cfg.default_persona, "engineer") != 0)
+      {
+         snprintf(persona_name, sizeof(persona_name), "%s", persona_cfg.default_persona);
+         mode = aimee_mode_from_string(persona_name);
+      }
+   }
    persona_t persona;
    persona_load(NULL, persona_name, &persona);
 

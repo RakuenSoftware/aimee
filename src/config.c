@@ -310,6 +310,7 @@ static const config_schema_entry_t config_schema[] = {
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
     {"provider", SCHEMA_STRING, 0},
+    {"default_persona", SCHEMA_STRING, 0},
     {"use_builtin_cli", SCHEMA_BOOL, 0},
     {"claude_model", SCHEMA_STRING, 0},
     {"codex_model", SCHEMA_STRING, 0},
@@ -809,6 +810,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
+   snprintf(cfg->default_persona, sizeof(cfg->default_persona), "engineer");
    cfg->roundtable_max_rounds = 1;
    cfg->roundtable_converge_threshold = 10;
    /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
@@ -1035,6 +1037,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "provider");
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->provider, sizeof(cfg->provider), "%s", item->valuestring);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "default_persona");
+   if (cJSON_IsString(item) && item->valuestring[0])
+      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", item->valuestring);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "openai_endpoint");
    if (cJSON_IsString(item) && item->valuestring[0])

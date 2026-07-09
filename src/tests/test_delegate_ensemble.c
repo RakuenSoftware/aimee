@@ -1069,9 +1069,16 @@ static void test_panel_persona_name_assignment(void)
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 4), "reviewer-constructive") == 0);
    /* wraps after the lineup is exhausted */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 5), "security") == 0);
-   /* DRAFT authors every panelist as the default `engineer` persona. */
+   /* DRAFT authors every panelist as the configured default persona; an unset
+    * default_persona falls back to the built-in `engineer`. */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0);
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "engineer") == 0);
+   snprintf(cfg.default_persona, sizeof(cfg.default_persona), "architect");
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "architect") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "architect") == 0);
+   /* the configured default persona does not disturb the REVIEW lineup */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "security") == 0);
+   cfg.default_persona[0] = '\0';
    /* a configured persona pins to its model slot; an empty entry within the
     * configured range still falls back to the mode default */
    cfg.ensemble_reference_persona_count = 2;

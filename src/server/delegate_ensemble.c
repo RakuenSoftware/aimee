@@ -1065,10 +1065,11 @@ static const char *const PANEL_DEFAULT_PERSONAS[] = {"security", "architect", "q
 
 /* Persona name for panelist `model_index`. An explicit per-slot override
  * (ensemble.reference_personas[model_index]) binds first in ANY mode. Otherwise
- * the default depends on mode: DRAFT authors every panelist as the built-in
- * `engineer` persona (the default autonomous-engineer prompt), while REVIEW
- * round-robins the diverse critique lineup keyed on the stable model index. The
- * returned pointer is a borrowed string literal or config field; do not free it. */
+ * the default depends on mode: DRAFT authors every panelist as the configured
+ * default persona (config.default_persona, itself defaulting to `engineer`),
+ * while REVIEW round-robins the diverse critique lineup keyed on the stable model
+ * index. The returned pointer is a borrowed string literal or config field; do
+ * not free it. */
 const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index)
 {
    if (!cfg || model_index < 0)
@@ -1077,7 +1078,7 @@ const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int 
        cfg->ensemble_reference_personas[model_index][0])
       return cfg->ensemble_reference_personas[model_index];
    if (mode != ROUNDTABLE_REVIEW)
-      return "engineer";
+      return cfg->default_persona[0] ? cfg->default_persona : "engineer";
    return PANEL_DEFAULT_PERSONAS[model_index % PANEL_DEFAULT_PERSONA_COUNT];
 }
 

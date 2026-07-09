@@ -62,6 +62,8 @@ export const FIELD_HELP: Record<string, string> = {
     "How aimee handles a risky tool call: 'approve' asks you first (default), 'prompt' warns but proceeds, 'deny' refuses it outright.",
   db2_url: "Postgres connection URL for the shared knowledge store (DB2). Changing it needs a server restart.",
   provider: "Which primary agent aimee drives — e.g. claude, codex, or an openai-compatible endpoint.",
+  default_persona:
+    "The persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set. Defaults to 'engineer' (e.g. qa, security, reviewer, architect, or a custom persona).",
   claude_model:
     "Model to force when the primary is Claude, passed as --model on launch. Blank uses the CLI's own default.",
   openai_endpoint: "Base URL for an OpenAI-compatible primary, e.g. https://api.openai.com/v1.",

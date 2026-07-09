@@ -19,6 +19,8 @@ const config_field_t config_fields[] = {
     {"db2_url", offsetof(config_t, db2_url), sizeof(((config_t *)0)->db2_url), 0, CFG_STRING,
      RELOAD_RESTART}, /* the postgres pool is opened at startup */
     {"provider", offsetof(config_t, provider), sizeof(((config_t *)0)->provider), 0, CFG_STRING},
+    {"default_persona", offsetof(config_t, default_persona),
+     sizeof(((config_t *)0)->default_persona), 0, CFG_STRING},
     {"claude_model", offsetof(config_t, claude_model), sizeof(((config_t *)0)->claude_model), 0,
      CFG_STRING},
     {"openai_endpoint", offsetof(config_t, openai_endpoint),

@@ -268,6 +268,10 @@ typedef struct config
    int workspace_count;
    char guardrail_mode[16];
    char provider[16];
+   /* Durable default persona: the persona a fresh primary session starts as, and
+    * the persona draft roundtable panelists author with when none is set. Width =
+    * PERSONA_NAME_MAX (persona.h). Defaults to "engineer"; settable in the GUI. */
+   char default_persona[64];
 
    /* Claude primary CLI model override (enforced via --model flag on launch) */
    char claude_model[128]; /* e.g. "claude-opus-4-6" — empty means use CLI default */

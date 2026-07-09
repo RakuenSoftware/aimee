@@ -260,6 +260,7 @@ CFG_KEY_DESC = {
     "openai_key_cmd": "Command that prints the OpenAI API key.",
     "openai_model": "OpenAI model name.",
     "provider": "Default model provider.",
+    "default_persona": "Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer').",
     "reasoning_cap_enabled": "Cap the model's reasoning effort.",
     "typed_facts_enabled": "Enable the typed-fact knowledge layer (master gate; default off).",
     "audit_worm_enabled": "Dual-write governed-action audit rows into the append-only, "
