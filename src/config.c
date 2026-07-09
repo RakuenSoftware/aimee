@@ -765,7 +765,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->kb_mining_enabled = 1;
    cfg->kb_mining_min_poll_s = 300;
    cfg->kb_mining_failure_learning_enabled = 0;
-   cfg->review_scheduler_enabled = 0;
+   cfg->review_scheduler_enabled = 1; /* default on: idle reflection over session_summary
+                                       * artifacts. Cheap when idle; the LLM synthesis pass only
+                                       * runs where a Tier-B provider/command is configured. */
    cfg->review_idle_trigger_minutes = 30;
    cfg->review_session_cooldown_hours = 24;
    cfg->concurrency_preempt_single_slot_only = 1;

@@ -162,8 +162,10 @@ void config_apply_learning_settings(config_t *cfg, cJSON *root)
 
 void config_apply_calibration_settings(config_t *cfg, cJSON *root)
 {
-   /* Default values */
-   cfg->calibration_enabled = 0;
+   /* Default values. calibration_enabled defaults to 1 (shadow): write
+    * calibration profiles from outcomes but never enforce them — observe-only,
+    * no behaviour change. 0 = off, 2 = A/B/enforce (opt-in). */
+   cfg->calibration_enabled = 1;
    cfg->calibration_command[0] = '\0';
    cfg->calibration_buckets = 10;
    cfg->calibration_prior_alpha0 = 2.0;
@@ -514,12 +516,14 @@ void config_save_intelligence(const config_t *cfg, cJSON *root)
 {
    if (!cfg || !root)
       return;
+   /* calibration_enabled defaults to 1 (shadow); emit when it differs from the
+    * default so the off (0) and A/B (2) states survive a save round-trip. */
    int cal_any =
-       cfg->calibration_enabled || cfg->calibration_command[0] || cfg->calibration_buckets != 10 ||
-       cfg->calibration_prior_alpha0 != 2.0 || cfg->calibration_prior_beta0 != 1.0 ||
-       cfg->calibration_credible_delta != 0.10 || cfg->calibration_conformal_window != 500 ||
-       cfg->calibration_conformal_epsilon != 0.05 || cfg->calibration_tau_memory_auto != 0.70 ||
-       cfg->calibration_tau_memory_flag != 0.55 ||
+       cfg->calibration_enabled != 1 || cfg->calibration_command[0] ||
+       cfg->calibration_buckets != 10 || cfg->calibration_prior_alpha0 != 2.0 ||
+       cfg->calibration_prior_beta0 != 1.0 || cfg->calibration_credible_delta != 0.10 ||
+       cfg->calibration_conformal_window != 500 || cfg->calibration_conformal_epsilon != 0.05 ||
+       cfg->calibration_tau_memory_auto != 0.70 || cfg->calibration_tau_memory_flag != 0.55 ||
        cfg->calibration_tau_working_profile_auto != 0.80 ||
        cfg->calibration_tau_working_profile_flag != 0.65;
    /* demotion_enabled defaults to 1 (shadow); emit when it differs from the

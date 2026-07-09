@@ -528,8 +528,10 @@ int memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max);
 void add_provenance(int64_t memory_id, const char *session_id, const char *action,
                     const char *details);
 
-/* Session folding: compress L0 into L1 checkpoint. */
-int memory_fold_session(const char *session_id);
+/* Session folding: compress L0 into L1 checkpoint. When summary_out is non-NULL,
+ * it is filled with the session digest (the checkpoint text) so the caller can
+ * surface it as a session_summary evidence artifact; pass NULL to skip. */
+int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len);
 
 /* --- Search --- */
 int memory_search(char **clusters, int cluster_count, int limit, search_result_t *out, int max);

@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (155)
+## CLI-settable keys (156)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -124,6 +124,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `learning_implicit_citation_repair` | bool | Implicit-learning signal: citation on repair. |
 | `learning_implicit_repeat_question` | bool | Implicit-learning signal: repeated question. |
 | `learning_implicit_repeated_correction` | bool | Implicit-learning signal: repeated correction. |
+| `learning_implicit_retrieval_outcome` | bool | Bridge continuation/repair autolabels into retrieval outcomes (memory + ranker). |
 | `learning_implicit_workflow_repetition` | bool | Implicit-learning signal: workflow repetition. |
 | `learning_max_commits_per_week` | int | Cap on learning-derived commits per week. |
 | `learning_proposal_ttl_days` | int | TTL (days) for learning proposals. |

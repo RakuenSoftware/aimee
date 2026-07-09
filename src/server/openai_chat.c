@@ -18,14 +18,15 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
-#include "gateway_pipeline.h"       /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "gw_stage_memory.h"        /* gw_stage_memory + gw_memory_system_prompt (P3) */
-#include "dogfood.h"                /* dogfood_autolabel_next_turn_live */
-#include "learning_implicit.h"      /* learning_implicit_detect_turn */
-#include "openai_responses_store.h" /* previous_response_id continuation store */
-#include "openai_runs_store.h"      /* GET /v1/runs/{id} record store */
-#include "aimee.h"                  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
-#include "config.h"                 /* config_t, config_load */
+#include "gateway_pipeline.h"         /* gw_request_t + gw_pipeline_run_request — shared seam */
+#include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
+#include "learning_implicit.h"        /* learning_implicit_detect_turn */
+#include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
+#include "openai_responses_store.h"   /* previous_response_id continuation store */
+#include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
+#include "aimee.h"  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "context_reduce.h"
@@ -1152,6 +1153,14 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       {
          dogfood_autolabel_next_turn_live(turn_text);
          learning_implicit_detect_turn(turn_text);
+         /* Bridge the same continuation/repair classification into a retrieval
+          * OUTCOME for the prior turn's surfaced rows (default-off). Closes the
+          * demotion + learning-to-rank loops from the signal already computed. */
+         {
+            dogfood_autolabel_kind_t rob_kind = dogfood_classify_next_turn(turn_text);
+            retrieval_outcome_bridge_on_autolabel(rob_kind == DOGFOOD_AUTOLABEL_CONTINUATION,
+                                                  rob_kind == DOGFOOD_AUTOLABEL_REPAIR);
+         }
          free(turn_text);
       }
    }

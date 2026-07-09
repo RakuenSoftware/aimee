@@ -795,6 +795,11 @@ typedef struct config
    int learning_implicit_repeat_question;
    int learning_implicit_repeated_correction;
    int learning_implicit_workflow_repetition;
+   /* When on, the continuation/repair autolabel also writes a retrieval OUTCOME
+    * (retrieval_attribution for memory, ranker_outcome for kb_hybrid) for the
+    * prior turn's surfaced rows — closing the demotion + learning-to-rank loops.
+    * Default off. See docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+   int learning_implicit_retrieval_outcome;
 
    /* Autonomous mode: launch agent CLIs with their full autonomous flags,
     * relying solely on aimee guardrails for safety */
