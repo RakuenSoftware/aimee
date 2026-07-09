@@ -251,7 +251,7 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
 
    char serr[256];
    char *response = kb_curator_llm_run(
-       &cfg, KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request,
+       &cfg, KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request, NULL,
        cfg.kb_curator_synthesize_command, CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
    free(request);
    if (!response)

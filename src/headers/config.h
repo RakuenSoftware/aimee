@@ -268,6 +268,10 @@ typedef struct config
    int workspace_count;
    char guardrail_mode[16];
    char provider[16];
+   /* Durable default persona: the persona a fresh primary session starts as, and
+    * the persona draft roundtable panelists author with when none is set. Width =
+    * PERSONA_NAME_MAX (persona.h). Defaults to "engineer"; settable in the GUI. */
+   char default_persona[64];
 
    /* Claude primary CLI model override (enforced via --model flag on launch) */
    char claude_model[128]; /* e.g. "claude-opus-4-6" — empty means use CLI default */
@@ -320,15 +324,6 @@ typedef struct config
     * passive, fail-open, and never changes an enforcement verdict. Set false to
     * opt out. */
    int audit_action_enabled;
-   /* memory_md_retire: retire the agent file-memory surface into aimee. When on,
-    * a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into
-    * aimee's db1 (kind='archive', non-recallable) and the .md is NEVER
-    * materialized; Edit/MultiEdit/MEMORY.md/Bash-writes to the memory dir are
-    * rejected with guidance; and session-start skips .md hydration. Retrieval is
-    * via `aimee memory search` (the session brief steers there). Fail-open (spill
-    * for reconcile) on a store outage. Default-ON: aimee is the single memory of
-    * record. Set false to keep the legacy re-materialized .md mirrors. */
-   int memory_md_retire;
    /* audit_worm_enabled: dual-write each governed-action audit row into the
     * per-service WORM store (append-only, hash-chained SQLite) alongside the
     * legacy audit.log. Default-OFF (S0 of the WORM audit-store proposal); the
@@ -423,9 +418,10 @@ typedef struct config
     * model, P1). Single-model Anthropic-compatible shims (llama.cpp/vLLM) enable
     * this so an arbitrary client model name is not forwarded and rejected upstream. */
    int gateway_pin_model;
-   int typed_facts_enabled;         /* typed-fact knowledge layer master gate (default off) */
+   int typed_facts_enabled; /* typed-fact knowledge layer master gate (default off) */
    /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (proposal §7.2/§8). */
-   int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional relations */
+   int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional
+                                               relations */
    int kb_typed_facts_promote_threshold;    /* observations before auto-promote (default 3) */
    int kb_pdf_ingest_enabled;       /* structured-pdf: route PDF uploads through the geometry
                                        extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
@@ -803,6 +799,11 @@ typedef struct config
    int learning_implicit_repeat_question;
    int learning_implicit_repeated_correction;
    int learning_implicit_workflow_repetition;
+   /* When on, the continuation/repair autolabel also writes a retrieval OUTCOME
+    * (retrieval_attribution for memory, ranker_outcome for kb_hybrid) for the
+    * prior turn's surfaced rows — closing the demotion + learning-to-rank loops.
+    * Default off. See docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+   int learning_implicit_retrieval_outcome;
 
    /* Autonomous mode: launch agent CLIs with their full autonomous flags,
     * relying solely on aimee guardrails for safety */
@@ -1384,6 +1385,27 @@ typedef struct config
    char ranker_fuse_command[512];
    int drift_detect_shadow_enabled;
 
+   /* Learning-to-rank weight fitting (the Calibrate half of the ranker).
+    * See docs/proposals/done/learning-to-rank-weight-fitting.md.
+    * kb_ranker_fit_enabled:   0 = off (default). Gates `aimee kb ranker fit`
+    *                          and any scheduled refit; export-view is always safe.
+    * kb_ranker_fit_command:   fitter sidecar command (e.g. "python3 scripts/rank-fit.py");
+    *                          empty → fit refuses (never ships an unfit model).
+    * kb_ranker_fit_min_groups: floor of labelled groups before a fit is attempted
+    *                          (0 → default 8) — the thin-log overfit guardrail.
+    * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
+    *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
+    * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5).
+    * kb_ranker_fit_objective: "pointwise" (default) or "pairwise" — the fitter
+    *                          objective. Pairwise learns within-query ordering
+    *                          and is robust to positive-skewed labels. */
+   int kb_ranker_fit_enabled;
+   char kb_ranker_fit_command[512];
+   int kb_ranker_fit_min_groups;
+   char kb_ranker_fit_benchmark[512];
+   int kb_ranker_fit_bench_k;
+   char kb_ranker_fit_objective[16];
+
    /* Graph reasoning (Datalog sidecar).
     * reasoning_datalog_command: path to Datalog evaluator; empty = disabled.
     * reasoning_row_budget:      max derived facts per query (0 = default 10000).
@@ -1426,11 +1448,19 @@ typedef struct config
     * kb_mdl_bump_drift_alert: fraction of MDL disagreements after a prompt bump
     *   that triggers a review flag (default 0.30).
     * kb_synthesize_command: sidecar command for N-attempt synthesis (stdin=JSON, stdout=JSON).
-    * kb_synthesize_n_attempts: number of synthesis attempts per evidence bundle (default 3). */
+    * kb_synthesize_n_attempts: number of synthesis attempts per evidence bundle (default 3).
+    * kb_reflection_synthesis_shadow: 1 = shadow mode for idle-reflection synthesis
+    *   (kb_reflection.c) — the LLM runs and its winner is scored and logged as
+    *   evidence, but the durable `session_synthesis` proposed candidate is NOT
+    *   written (fail-closed, no promotion). 0 = normal (default): the scored
+    *   winner is written into the promotion pipeline. Promotion of the shadow
+    *   stream to normal is a bandit decision (reflection_synthesis_mode), wired
+    *   separately; this flag never flips itself. */
    int kb_mdl_tiebreak_enabled;
    double kb_mdl_bump_drift_alert;
    char kb_synthesize_command[512];
    int kb_synthesize_n_attempts;
+   int kb_reflection_synthesis_shadow;
 
    /* KB background ingest worker pool (kb.worker_count, kb.connection_workers,
     * kb.background_ingest.*). kb_worker_count: aimee-kb in-process KB ingest
@@ -1505,10 +1535,12 @@ typedef struct config
    cron_job_t cron_jobs[CRON_JOBS_MAX];
    int cron_job_count;
 
-   /* Learning review / reflection scheduler (learning.review.*).
-    * review_scheduler_enabled:      0 = off (default), 1 = run idle reflection.
+   /* Learning review / reflection scheduler. Settable under learning.review.*
+    * (config_apply_review_settings).
+    * review_scheduler_enabled:      1 = run idle reflection (default), 0 = off.
     * review_idle_trigger_minutes:   idle window before reflection fires (default 30).
-    * review_session_cooldown_hours: min age of session artifact before reflection (default 24).
+    * review_session_cooldown_hours: min age of session artifact before reflection
+    *                                (default 24; 0 disables the cooldown).
     * review_batch_cap:              max session artifacts per reflection pass (default 10).
     */
    int review_scheduler_enabled;
@@ -1517,8 +1549,10 @@ typedef struct config
    int review_batch_cap;
 
    /* Deep curator extraction (kb.curator.*).
-    * kb_curator_extract_docs_enabled:  0 = off (default), 1 = queue extract_doc jobs post-ingest.
-    * kb_curator_extract_code_enabled:  0 = off (default), 1 = queue extract_code_unit jobs.
+    * kb_curator_extract_docs_enabled:  default ON (config_kb_curator_defaults). Queues extract_doc
+    *   jobs at ingest (kb_http hook) AND via the curator-drain backfill, so docs ingested
+    *   through the drain path (kb_doc_refresh) are curated too.
+    * kb_curator_extract_code_enabled:  default ON. 1 = queue extract_code_unit jobs.
     * kb_curator_extract_command[512]:  sidecar command (default: scripts/curator-extract.py).
     * kb_curator_extract_max_tokens:    max_tokens per job stdin payload (default 2048).
     * kb_curator_max_attempts:          max drain attempts per job before marking failed (default
@@ -1566,6 +1600,16 @@ typedef struct config
    int kb_curator_promote_entity_enabled;
    int kb_curator_promote_min_sources;
    char kb_curator_extract_command[512];
+   /* Comma-separated stage-name order for the curator pipeline (GUI reorder).
+    * Empty = registry (default) order. Validated against the dependency DAG; an
+    * invalid order falls back to registry order with a WARN. Opt-in: unset changes
+    * nothing. See docs/proposals/pending/user-configurable-curator-pipeline.md. */
+   char kb_curator_stage_order[512];
+   /* User-defined curator presets as a JSON array string:
+    * [{"name":"...","enabled":["kb_curator_..._enabled",...]}]. Merged with the
+    * built-in presets on the curator.stages endpoint; the GUI saves/deletes named
+    * profiles here via config.set (flat string, no bespoke op). Empty = none. */
+   char kb_curator_user_presets[4096];
    int kb_curator_extract_max_tokens;
    int kb_curator_max_attempts;
    /* Curator LLM provider (curator-llm-backend §2), operator-owned and kb-level

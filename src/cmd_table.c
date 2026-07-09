@@ -98,6 +98,8 @@ void cmd_help(app_ctx_t *ctx, int argc, char **argv)
             subs = get_db_subcmds();
          else if (strcmp(target, "session") == 0)
             subs = get_session_subcmds();
+         else if (strcmp(target, "ensemble") == 0)
+            subs = get_ensemble_subcmds();
          else if (strcmp(target, "work") == 0)
             subs = get_work_subcmds();
          else if (strcmp(target, "branch") == 0)
@@ -216,6 +218,8 @@ const command_t commands[] = {
      CMD_TIER_ADVANCED},
     {"plans", "Execution plan management (list, show, replay)", cmd_plans, CMD_TIER_ADVANCED},
     {"session", "Session management (list, clean)", cmd_session, CMD_TIER_ADVANCED},
+    {"ensemble", "A panel of agents: aggregate (MoA), roundtable, or templated session",
+     cmd_ensemble, CMD_TIER_ADVANCED},
     {"status", "System health overview", cmd_status, CMD_TIER_ADVANCED},
     {"hud", "Real-time session status and HUD (--watch for live mode)", cmd_hud, CMD_TIER_ADVANCED},
     {"usage", "Token usage statistics", cmd_usage, CMD_TIER_ADVANCED},

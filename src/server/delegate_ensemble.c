@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> /* strcasecmp */
 #include <time.h>
 #include <ctype.h>
 
@@ -613,7 +614,8 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
-                                roundtable_mode_t mode, int round, const char *brief)
+                                roundtable_mode_t mode, int round, const char *brief,
+                                const char *context)
 {
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
@@ -667,23 +669,46 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
       brief_block = owned_brief_block;
    }
 
+   /* Read-only aimee context (memory recall + code-graph snippets), assembled by
+    * the server-side caller. Panelists have no tools, so this block is the only
+    * way they see aimee memory and the code graph; it is authoritative reference,
+    * not something they can re-query. */
+   const char *context_block = "";
+   char *owned_context_block = NULL;
+   if (context && context[0])
+   {
+      owned_context_block =
+          xasprintf3("AIMEE CONTEXT (read-only reference — aimee memory + code graph):\n", context,
+                     "\nUse this context as grounding; it is authoritative reference you cannot "
+                     "re-query.\n\n");
+      if (!owned_context_block)
+      {
+         free(owned_brief_block);
+         return NULL;
+      }
+      context_block = owned_context_block;
+   }
+
    size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) +
-                   strlen(brief_block) + strlen(mode_task) + strlen(role_hint) + strlen(head_note) +
-                   512;
+                   strlen(brief_block) + strlen(context_block) + strlen(mode_task) +
+                   strlen(role_hint) + strlen(head_note) + 512;
    char *prompt = malloc(needed);
    if (!prompt)
    {
       free(owned_brief_block);
+      free(owned_context_block);
       return NULL;
    }
-   snprintf(prompt, needed,
-            "You are one participant in an agent roundtable. Your role is to %s.\n\n%s"
-            "TASK:\n%s\n\nCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
-            "ROUND %d INSTRUCTION:\n%s\n",
-            role_hint, head_note, task ? task : "", artifact[0] ? artifact : "(none yet)",
-            peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task);
+   snprintf(
+       prompt, needed,
+       "You are one participant in an agent roundtable. Your role is to %s.\n\n%s"
+       "TASK:\n%s\n\n%sCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
+       "ROUND %d INSTRUCTION:\n%s\n",
+       role_hint, head_note, task ? task : "", context_block, artifact[0] ? artifact : "(none yet)",
+       peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task);
 
    free(owned_brief_block);
+   free(owned_context_block);
    return prompt;
 }
 
@@ -1038,25 +1063,31 @@ static const char *const PANEL_DEFAULT_PERSONAS[] = {"security", "architect", "q
 #define PANEL_DEFAULT_PERSONA_COUNT                                                                \
    ((int)(sizeof(PANEL_DEFAULT_PERSONAS) / sizeof(PANEL_DEFAULT_PERSONAS[0])))
 
-/* Persona name for review panelist `model_index`. Returns NULL for non-review
- * modes (draft/aggregate keep their prior NULL-persona behavior) and when no
- * persona applies. The returned pointer is a borrowed string literal or config
- * field; do not free it. */
+/* Persona name for panelist `model_index`. An explicit per-slot override
+ * (ensemble.reference_personas[model_index]) binds first in ANY mode. Otherwise
+ * the default depends on mode: DRAFT authors every panelist as the configured
+ * default persona (config.default_persona, itself defaulting to `engineer`),
+ * while REVIEW round-robins the diverse critique lineup keyed on the stable model
+ * index. The returned pointer is a borrowed string literal or config field; do
+ * not free it. */
 const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index)
 {
-   if (mode != ROUNDTABLE_REVIEW || !cfg || model_index < 0)
+   if (!cfg || model_index < 0)
       return NULL;
    if (model_index < cfg->ensemble_reference_persona_count &&
        cfg->ensemble_reference_personas[model_index][0])
       return cfg->ensemble_reference_personas[model_index];
+   if (mode != ROUNDTABLE_REVIEW)
+      return cfg->default_persona[0] ? cfg->default_persona : "engineer";
    return PANEL_DEFAULT_PERSONAS[model_index % PANEL_DEFAULT_PERSONA_COUNT];
 }
 
-/* Compose the system prompt for review panelist `model_index`. Returns a heap
- * string the caller must free, or NULL (no persona, or compose failed — both
- * fall back to today's NULL-system-prompt behavior, never dropping a panelist).
- * persona_compose_delegate_prompt resolves project->user->built-in and itself
- * falls back to a usable persona, so an unknown custom name is non-fatal. */
+/* Compose the system prompt for panelist `model_index` (draft: engineer; review:
+ * the diverse lineup — see panel_persona_name). Returns a heap string the caller
+ * must free, or NULL (no persona name, or compose failed — both fall back to a
+ * NULL-system-prompt run, never dropping a panelist). persona_compose_delegate_prompt
+ * resolves project->user->built-in and itself falls back to a usable persona, so
+ * an unknown custom name is non-fatal. */
 static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, int model_index)
 {
    const char *name = panel_persona_name(cfg, mode, model_index);
@@ -1071,8 +1102,8 @@ static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, i
 
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, const char *brief, agent_result_t *results,
-                              int deadline_ms)
+                              int round, const char *brief, const char *context,
+                              agent_result_t *results, int deadline_ms)
 {
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -1083,11 +1114,11 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    memset(personas, 0, sizeof(personas));
    for (int i = 0; i < ref_count; i++)
    {
-      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief);
+      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context);
       if (!prompts[i])
          goto fail;
-      /* Per-participant persona (review mode only) is the system prompt; the
-       * round prompt still drives the output shape. */
+      /* Per-participant persona is the system prompt (draft: engineer; review:
+       * the diverse lineup); the round prompt still drives the output shape. */
       personas[i] = panel_persona_prompt(cfg, mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
       tasks[i].agent = cfg->ensemble_reference_models[i];
@@ -1119,7 +1150,8 @@ fail:
 
 static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const char *task,
                                 const char *artifact, char **peer_notes, roundtable_mode_t mode,
-                                int round, const char *brief, agent_result_t *results)
+                                int round, const char *brief, const char *context,
+                                agent_result_t *results)
 {
    int ref_count = cfg->ensemble_reference_count;
    int order[ENSEMBLE_MAX_REFS];
@@ -1130,7 +1162,7 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    for (int oi = 0; oi < ref_count; oi++)
    {
       int i = order[oi];
-      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief);
+      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief, context);
       if (!prompt)
          return -1;
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
@@ -1163,11 +1195,21 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
  * has no server endpoint and would just burn a slot on a "failed to build request
  * URL" participant; server-hosting is capability, NOT authorization, so both are
  * required. So an unauthorized or disabled claude is never seated, even after a
- * server-side OAuth setup. Other enabled agents are eligible. */
+ * server-side OAuth setup. Other enabled agents are eligible.
+ *
+ * The PRIMARY agent is also never seated: a roundtable exists for an INDEPENDENT
+ * second opinion, so the model the operator runs as primary (config.provider)
+ * must not sit on — or aggregate — its own review panel and quietly grade its own
+ * work. Any agent that resolves to the primary provider (by agent name — the
+ * primary passthrough is named after the provider — or by its provider tag) is
+ * excluded, structurally, regardless of what ensemble.reference_models lists. */
 int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
 {
    if (!ag || !ag->enabled || !ag->name[0])
       return 0;
+   if (cfg->provider[0] && (strcasecmp(ag->name, cfg->provider) == 0 ||
+                            (ag->provider[0] && strcasecmp(ag->provider, cfg->provider) == 0)))
+      return 0; /* the primary must never sit on its own panel */
    if (agent_is_claude_cli(ag) && (!cfg->claude_cli_delegate_enabled || !ag->is_server_hosted))
       return 0;
    return 1;
@@ -1465,12 +1507,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       local.mode = ROUNDTABLE_DRAFT;
       local.turns = strcmp(cfg->roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
                                                                      : ROUNDTABLE_PARALLEL;
-      local.max_rounds = cfg->roundtable_max_rounds > 0 ? cfg->roundtable_max_rounds : 3;
+      local.max_rounds = cfg->roundtable_max_rounds > 0 ? cfg->roundtable_max_rounds : 1;
       local.converge_threshold = cfg->roundtable_converge_threshold;
       local.deadline_ms = cfg->roundtable_deadline_ms;
    }
    if (local.max_rounds <= 0)
-      local.max_rounds = 3;
+      local.max_rounds = 1;
    if (local.converge_threshold < 0)
       local.converge_threshold = 10;
    if (local.brief_truncated)
@@ -1553,9 +1595,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
-                                          local.brief, results)
+                                          local.brief, local.context, results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
-                                        local.brief, results, panel_deadline_ms);
+                                        local.brief, local.context, results, panel_deadline_ms);
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)

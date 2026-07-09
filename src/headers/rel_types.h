@@ -92,6 +92,13 @@ extern "C"
     * `def`? NODE_OTHER in the def's list is the ANY wildcard. */
    int rel_type_kind_allowed(const rel_type_def_t *def, int is_head, memory_node_kind_t kind);
 
+   /* Is `rel_type` single-valued (functional)? A functional relation's new object
+    * contradicts any prior object for the same subject, so the commit path applies
+    * the relation's correction_behavior (supersede/hard-delete/reject-if-immutable).
+    * Multi-valued relations (knows, member_of, parent_of, also_known_as, ...)
+    * accumulate objects and are not corrected. */
+   int rel_type_is_functional(const char *rel_type);
+
    /* Validate the SEED_ONTOLOGY for internal consistency (R1-D1): every head/tail
     * kind is a known entity kind; a symmetric type's inverse is itself and its
     * head/tail kind sets match; a non-symmetric type's declared inverse exists in

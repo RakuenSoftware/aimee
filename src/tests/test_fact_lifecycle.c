@@ -185,13 +185,31 @@ int main(void)
 
    /* §4 retract — target (old-value) scoping: only the matching edge is retracted,
     * sibling values of the same (subject, relation) are untouched. */
-   assert(db2_fact_commit("gus", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_USER,
+   assert(db2_fact_commit("gus", NODE_PERSON, "member_of", "acme", NODE_ORG, FACT_AUTHORITY_USER,
                           1) == FACT_GATE_ACCEPT);
-   assert(db2_fact_commit("gus", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_USER,
+   assert(db2_fact_commit("gus", NODE_PERSON, "member_of", "globex", NODE_ORG, FACT_AUTHORITY_USER,
                           1) == FACT_GATE_ACCEPT);
    assert(db2_fact_current_count("gus") == 2);
-   assert(db2_fact_retract("gus", "works_for", "acme", FACT_AUTHORITY_USER) == 1);
+   assert(db2_fact_retract("gus", "member_of", "acme", FACT_AUTHORITY_USER) == 1);
    assert(db2_fact_current_count("gus") == 1); /* globex remains */
+
+   /* Commit correction: a FUNCTIONAL relation supersedes the prior object. hank
+    * works_for acme, then globex -> globex current, acme archived (superseded). */
+   assert(db2_fact_commit("hank", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("hank") == 1);
+   assert(db2_fact_commit("hank", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("hank") == 1); /* globex supersedes acme */
+
+   /* Commit correction: an IMMUTABLE relation rejects a contradicting object. iris
+    * born_in kyoto is fixed; a later born_in osaka is dropped. */
+   assert(db2_fact_commit("iris", NODE_PERSON, "born_in", "kyoto", NODE_PLACE, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("iris") == 1);
+   (void)db2_fact_commit("iris", NODE_PERSON, "born_in", "osaka", NODE_PLACE, FACT_AUTHORITY_USER,
+                         1);
+   assert(db2_fact_current_count("iris") == 1); /* still kyoto, immutable */
 
    /* bad args / no-op. */
    assert(db2_fact_retract(NULL, "works_for", NULL, FACT_AUTHORITY_MODEL) == -1);

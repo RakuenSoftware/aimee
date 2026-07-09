@@ -203,6 +203,14 @@ static void test_session_isolation_decision(void)
    /* The loose "/.claude" prefix (e.g. ~/.claude/) is NOT a managed worktree. */
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/x.c", primary_cwd) == 1);
 
+   /* Codex's native worktrees (/.codex/worktrees/) are honoured the same way. */
+   const char *cx_wt = "/home/u/repo/.codex/worktrees/feat/src/x.c";
+   const char *cx_wt_cwd = "/home/u/repo/.codex/worktrees/feat";
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, cx_wt, primary_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cx_wt_cwd) == 0);
+   /* The loose "/.codex" prefix is NOT a managed worktree. */
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.codex/x.c", primary_cwd) == 1);
+
    /* The loose "/.aimee-" prefix is NOT treated as a managed worktree (only the
     * canonical "/.aimee/worktrees/" counts) — avoids false-matching e.g. a
     * user's "/.aimee-notes" dir. */

@@ -44,6 +44,7 @@ static const wfe_delegate_provider_t MOCK_DELEG = {mock_deleg_run};
 static int g_open_calls;
 static int g_open_rc; /* 0 success, -1 failure */
 static char g_open_branch[64];
+static char g_open_base[64]; /* the base the last pr.open targeted */
 static wfe_ci_status_t f_ci(const char *r, const char *p)
 {
    (void)r;
@@ -68,19 +69,20 @@ static wfe_merge_result_t f_merge(const char *r, const char *p)
    (void)p;
    return WFE_MERGE_OK;
 }
-static int f_open(const char *repo, const char *branch, const char *title, const char *body,
-                  char out_pr_ref[128])
+static int f_open(const char *repo, const char *branch, const char *base, const char *title,
+                  const char *body, char out_pr_ref[128])
 {
    (void)repo;
    (void)title;
    (void)body;
    g_open_calls++;
    snprintf(g_open_branch, sizeof g_open_branch, "%s", branch ? branch : "");
+   snprintf(g_open_base, sizeof g_open_base, "%s", base ? base : "");
    if (out_pr_ref)
       snprintf(out_pr_ref, 128, "PR-7");
    return g_open_rc;
 }
-static const wfe_forge_t MOCK_FORGE = {f_ci, f_mergeable, f_is_merged, f_merge, f_open};
+static const wfe_forge_t MOCK_FORGE = {f_ci, f_mergeable, f_is_merged, f_merge, f_open, NULL};
 
 /* author.proposal -> pr.open (terminal). No git needed (author hashes its
  * artifact; pr.open uses the forge `open` seam). */
@@ -119,6 +121,12 @@ static const char *WF = "name: ds\nstart: au\nnodes:\n"
                         "  - id: au\n    block: author.proposal\n    next: pr\n"
                         "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n";
 
+/* base:feature -> a slice sub-PR targets the PARENT feature branch aimee/feat/<parent>. */
+static const char *WF_FEAT = "name: dsf\nstart: au\nnodes:\n"
+                             "  - id: au\n    block: author.proposal\n    next: pr\n"
+                             "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n"
+                             "    params:\n      base: feature\n";
+
 static int run_fresh(const char *suffix)
 {
    char id[80] = "", err[256] = "";
@@ -143,6 +151,11 @@ int main(void)
    assert(f);
    fputs(WF, f);
    fclose(f);
+   snprintf(p, sizeof p, "%s/workflows/dsf.yaml", home);
+   f = fopen(p, "wb");
+   assert(f);
+   fputs(WF_FEAT, f);
+   fclose(f);
    setenv("AIMEE_HOME", home, 1);
    assert(db1_init(":memory:") == 0);
 
@@ -160,6 +173,23 @@ int main(void)
    assert(g_deleg_calls == 1);                          /* author dispatched a delegate */
    assert(strcmp(g_deleg_last_role, "architect") == 0); /* author uses architect */
    assert(g_open_calls == 1);                           /* pr.open used the forge open seam */
+   /* base-targeting: a top-level pr.open (no base param) targets the autonomous base. */
+   assert(strcmp(g_open_base, wfe_autonomous_base()) == 0);
+
+   /* A2: base:feature -> a slice sub-PR targets the PARENT feature branch. The run is
+    *     linked to parent "P1" (as foreach.workflow would), so pr.open must resolve
+    *     the base to aimee/feat/P1 (derived from the DB parent linkage, not an env). */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("dsf", "r", "feat-child", "interactive", id, err, sizeof err) ==
+             0);
+      assert(db1_work_item_set_parent(id, "P1") == 0);
+      g_open_calls = 0;
+      g_open_base[0] = '\0';
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(g_open_calls == 1);
+      assert(strcmp(g_open_base, "aimee/feat/P1") == 0); /* base derived from parent linkage */
+   }
 
    /* B: no delegate provider installed -> author still advances (fail-open to the
     *    legacy behavior); pr.open still uses the forge. */
@@ -173,7 +203,7 @@ int main(void)
    /* C: forge without an `open` method -> pr.open preserves prior advance (no
     *    crash), and the delegate seam still fires for author. */
    wfe_set_delegate_provider(&MOCK_DELEG);
-   static const wfe_forge_t NO_OPEN = {f_ci, f_mergeable, f_is_merged, f_merge, NULL};
+   static const wfe_forge_t NO_OPEN = {f_ci, f_mergeable, f_is_merged, f_merge, NULL, NULL};
    wfe_set_forge_provider(&NO_OPEN);
    g_deleg_calls = 0;
    g_open_calls = 0;

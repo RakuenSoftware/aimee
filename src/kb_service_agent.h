@@ -49,6 +49,8 @@ int kb_handle_dashboard_recall(int fd, cJSON *req);
 int kb_handle_dashboard_directives(int fd, cJSON *req);
 int kb_handle_maintenance_calibrate_promotions(int fd, cJSON *req);
 int kb_handle_memory_record_retrieval_outcome(int fd, cJSON *req);
+int kb_handle_ranker_emit_event(int fd, cJSON *req);
+int kb_handle_ranker_record_outcome(int fd, cJSON *req);
 int kb_handle_maintenance_compute_demotions(int fd, cJSON *req);
 
 #endif /* DEC_KB_SERVICE_AGENT_H */

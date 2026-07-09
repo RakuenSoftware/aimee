@@ -30,11 +30,40 @@ export const SECTION_HELP: Record<string, string> = {
 
 // One line per config key. Plain language, states the default.
 export const FIELD_HELP: Record<string, string> = {
+  // Knowledge curation — curator pipeline stage gates (see the Pipeline tab)
+  kb_curator_extract_docs_enabled:
+    "Curator: extract structured claims and entities from ingested documents (LLM). The entry stage for document knowledge; feeds claim indexing and contradiction detection.",
+  kb_curator_extract_code_enabled:
+    "Curator: extract code units (functions/types) from indexed source for the code knowledge graph (LLM).",
+  kb_curator_resolve_entities_enabled:
+    "Curator: resolve and deduplicate extracted entities into canonical records (LLM).",
+  kb_curator_index_narrative_enabled:
+    "Curator: embed narrative summaries into the vector store (CPU/index lane).",
+  kb_curator_index_claims_enabled:
+    "Curator: embed extracted claims into curator_claim_vectors — the prerequisite for contradiction detection (CPU/index lane).",
+  kb_curator_detect_contradictions_enabled:
+    "Curator: flag contradicting claims (same subject + attribute, different value) as 'contradicts' artifact links (CPU/index lane). Requires claim indexing to be on.",
+  kb_curator_index_code_unit_enabled:
+    "Curator: embed extracted code units into the vector store (CPU/index lane).",
+  kb_curator_link_artifacts_enabled:
+    "Curator: build relationship links between related artifacts (CPU/index lane).",
+  kb_curator_synthesize_enabled:
+    "Curator: synthesize per-topic summaries from clustered knowledge (LLM).",
+  kb_curator_promote_entity_enabled:
+    "Curator: promote well-supported entities to durable canonical status (LLM).",
+  kb_curator_projection_graph_enabled:
+    "Curator: publish the code projection graph (typed edges per changed project) and refresh cross-repo metadata (CPU/index lane).",
+  kb_curator_cross_repo_graph_enabled:
+    "Curator: keep cross-repo precision metadata (identities, routes, build deps, distinctiveness) fresh; also gates cross-repo dependency resolution. Refreshed alongside the projection graph.",
+  kb_evidence_embed_enabled:
+    "Curator: embed evidence spans backing each claim, for grounding and citation (CPU/index lane).",
   // Providers & delegates
   guardrail_mode:
     "How aimee handles a risky tool call: 'approve' asks you first (default), 'prompt' warns but proceeds, 'deny' refuses it outright.",
   db2_url: "Postgres connection URL for the shared knowledge store (DB2). Changing it needs a server restart.",
   provider: "Which primary agent aimee drives — e.g. claude, codex, or an openai-compatible endpoint.",
+  default_persona:
+    "The persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set. Defaults to 'engineer' (e.g. qa, security, reviewer, architect, or a custom persona).",
   claude_model:
     "Model to force when the primary is Claude, passed as --model on launch. Blank uses the CLI's own default.",
   openai_endpoint: "Base URL for an OpenAI-compatible primary, e.g. https://api.openai.com/v1.",

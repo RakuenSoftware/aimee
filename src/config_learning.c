@@ -1,6 +1,7 @@
 #include "aimee.h"
 #include "config_learning.h"
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 
 static void apply_tau_value(config_t *cfg, const char *surface, const char *mode, double value)
@@ -162,8 +163,10 @@ void config_apply_learning_settings(config_t *cfg, cJSON *root)
 
 void config_apply_calibration_settings(config_t *cfg, cJSON *root)
 {
-   /* Default values */
-   cfg->calibration_enabled = 0;
+   /* Default values. calibration_enabled defaults to 1 (shadow): write
+    * calibration profiles from outcomes but never enforce them — observe-only,
+    * no behaviour change. 0 = off, 2 = A/B/enforce (opt-in). */
+   cfg->calibration_enabled = 1;
    cfg->calibration_command[0] = '\0';
    cfg->calibration_buckets = 10;
    cfg->calibration_prior_alpha0 = 2.0;
@@ -285,6 +288,12 @@ void config_apply_ranking_settings(config_t *cfg, cJSON *root)
    cfg->kb_ranker_enabled = 0;
    cfg->ranker_fuse_command[0] = '\0';
    cfg->drift_detect_shadow_enabled = 0;
+   cfg->kb_ranker_fit_enabled = 0;
+   cfg->kb_ranker_fit_command[0] = '\0';
+   cfg->kb_ranker_fit_min_groups = 0;
+   cfg->kb_ranker_fit_benchmark[0] = '\0';
+   cfg->kb_ranker_fit_bench_k = 0;
+   cfg->kb_ranker_fit_objective[0] = '\0';
 
    cJSON *intel = cJSON_GetObjectItemCaseSensitive(root, "intelligence");
    if (!cJSON_IsObject(intel))
@@ -322,6 +331,40 @@ void config_apply_ranking_settings(config_t *cfg, cJSON *root)
       cfg->drift_detect_shadow_enabled = (int)item->valuedouble;
    else if (cJSON_IsBool(item))
       cfg->drift_detect_shadow_enabled = cJSON_IsTrue(item) ? 1 : 0;
+
+   /* intelligence.ranking.fit.*: the learning-to-rank weight fitter. */
+   cJSON *fit = cJSON_GetObjectItemCaseSensitive(rank, "fit");
+   if (cJSON_IsObject(fit))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(fit, "enabled");
+      if (cJSON_IsNumber(item))
+         cfg->kb_ranker_fit_enabled = (int)item->valuedouble;
+      else if (cJSON_IsBool(item))
+         cfg->kb_ranker_fit_enabled = cJSON_IsTrue(item) ? 1 : 0;
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "command");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->kb_ranker_fit_command, sizeof(cfg->kb_ranker_fit_command), "%s",
+                  item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "min_groups");
+      if (cJSON_IsNumber(item))
+         cfg->kb_ranker_fit_min_groups = (int)item->valuedouble;
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "benchmark");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->kb_ranker_fit_benchmark, sizeof(cfg->kb_ranker_fit_benchmark), "%s",
+                  item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "bench_k");
+      if (cJSON_IsNumber(item))
+         cfg->kb_ranker_fit_bench_k = (int)item->valuedouble;
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "objective");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->kb_ranker_fit_objective, sizeof(cfg->kb_ranker_fit_objective), "%s",
+                  item->valuestring);
+   }
 }
 
 void config_apply_reasoning_settings(config_t *cfg, cJSON *root)
@@ -436,6 +479,7 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
    cfg->kb_mdl_bump_drift_alert = 0.30;
    cfg->kb_synthesize_n_attempts = 3;
    cfg->kb_synthesize_command[0] = '\0';
+   cfg->kb_reflection_synthesis_shadow = 0;
 
    if (!root)
       return;
@@ -463,6 +507,59 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(s, "synthesize_n_attempts");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->kb_synthesize_n_attempts = (int)item->valuedouble;
+
+   /* Shadow gate for idle-reflection synthesis (proposal §4): when on, the pass
+    * scores and logs its winner but writes no durable candidate. Fail-closed. */
+   item = cJSON_GetObjectItemCaseSensitive(s, "reflection_shadow");
+   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
+      cfg->kb_reflection_synthesis_shadow = item->valueint;
+}
+
+/* Read an integer-valued JSON number in [lo, INT_MAX] into *out. Rejects
+ * non-numbers, non-finite, out-of-range (avoids UB on the double->int cast),
+ * and fractional values (30.5 is a config typo, not 30). Returns 1 on success. */
+static int review_int_field(const cJSON *item, int lo, int *out)
+{
+   if (!cJSON_IsNumber(item))
+      return 0;
+   double d = item->valuedouble;
+   if (!(d >= (double)lo) || d > (double)INT_MAX) /* !(>=) also rejects NaN */
+      return 0;
+   if (d != (double)(long)d) /* integer-valued only */
+      return 0;
+   *out = (int)d;
+   return 1;
+}
+
+/* learning.review.*: idle-reflection scheduler knobs. Defaults live in config.c;
+ * this only overrides when a key is present, so an operator can turn the
+ * (default-on) scheduler off, tune the idle window, or drop the session cooldown
+ * (e.g. to 0 for tests / high-throughput dogfood) without a rebuild. */
+void config_apply_review_settings(config_t *cfg, cJSON *root)
+{
+   if (!cfg || !root)
+      return;
+   cJSON *learning_cfg = cJSON_GetObjectItemCaseSensitive(root, "learning");
+   if (!cJSON_IsObject(learning_cfg))
+      return;
+   cJSON *rv = cJSON_GetObjectItemCaseSensitive(learning_cfg, "review");
+   if (!cJSON_IsObject(rv))
+      return;
+
+   /* scheduler_enabled is boolean — normalise any bool/number to 0/1. */
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(rv, "scheduler_enabled");
+   if (cJSON_IsBool(item))
+      cfg->review_scheduler_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   else if (cJSON_IsNumber(item))
+      cfg->review_scheduler_enabled = item->valuedouble != 0.0 ? 1 : 0;
+
+   int v;
+   if (review_int_field(cJSON_GetObjectItemCaseSensitive(rv, "idle_trigger_minutes"), 1, &v))
+      cfg->review_idle_trigger_minutes = v; /* minutes > 0 */
+   if (review_int_field(cJSON_GetObjectItemCaseSensitive(rv, "session_cooldown_hours"), 0, &v))
+      cfg->review_session_cooldown_hours = v; /* whole hours; 0 disables the cooldown */
+   if (review_int_field(cJSON_GetObjectItemCaseSensitive(rv, "batch_cap"), 1, &v))
+      cfg->review_batch_cap = v; /* cap > 0 */
 }
 
 /* Inverse of the intelligence.* parsers (calibrate/demotion/bandit) so config_save
@@ -473,12 +570,14 @@ void config_save_intelligence(const config_t *cfg, cJSON *root)
 {
    if (!cfg || !root)
       return;
+   /* calibration_enabled defaults to 1 (shadow); emit when it differs from the
+    * default so the off (0) and A/B (2) states survive a save round-trip. */
    int cal_any =
-       cfg->calibration_enabled || cfg->calibration_command[0] || cfg->calibration_buckets != 10 ||
-       cfg->calibration_prior_alpha0 != 2.0 || cfg->calibration_prior_beta0 != 1.0 ||
-       cfg->calibration_credible_delta != 0.10 || cfg->calibration_conformal_window != 500 ||
-       cfg->calibration_conformal_epsilon != 0.05 || cfg->calibration_tau_memory_auto != 0.70 ||
-       cfg->calibration_tau_memory_flag != 0.55 ||
+       cfg->calibration_enabled != 1 || cfg->calibration_command[0] ||
+       cfg->calibration_buckets != 10 || cfg->calibration_prior_alpha0 != 2.0 ||
+       cfg->calibration_prior_beta0 != 1.0 || cfg->calibration_credible_delta != 0.10 ||
+       cfg->calibration_conformal_window != 500 || cfg->calibration_conformal_epsilon != 0.05 ||
+       cfg->calibration_tau_memory_auto != 0.70 || cfg->calibration_tau_memory_flag != 0.55 ||
        cfg->calibration_tau_working_profile_auto != 0.80 ||
        cfg->calibration_tau_working_profile_flag != 0.65;
    /* demotion_enabled defaults to 1 (shadow); emit when it differs from the

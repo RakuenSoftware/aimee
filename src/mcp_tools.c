@@ -1545,7 +1545,7 @@ cJSON *mcp_build_tools_list(void)
                      s));
    }
 
-   /* session_start */
+   /* ensemble_start */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
@@ -1554,12 +1554,12 @@ cJSON *mcp_build_tools_list(void)
       cJSON_AddStringToObject(t, "type", "string");
       cJSON_AddStringToObject(
           t, "description",
-          "Workflow template name (e.g. code-review, debate, planning, "
-          "design-critique) or a project-local template in session_templates/.");
+          "Ensemble template name (e.g. code-review, debate, planning, "
+          "design-critique) or a project-local template in ensemble_templates/.");
       cJSON *c = cJSON_AddObjectToObject(p, "channel");
       cJSON_AddStringToObject(c, "type", "string");
       cJSON_AddStringToObject(c, "description",
-                              "Channel name for this workflow session (default: 'general').");
+                              "Channel name for this ensemble (default: 'general').");
       cJSON *a = cJSON_AddObjectToObject(p, "assignments");
       cJSON_AddStringToObject(a, "type", "object");
       cJSON_AddStringToObject(a, "description",
@@ -1572,31 +1572,31 @@ cJSON *mcp_build_tools_list(void)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("session_start",
-                     "Start a templated multi-agent workflow session (code-review, debate, "
+          build_tool("ensemble_start",
+                     "Start a templated multi-agent ensemble (code-review, debate, "
                      "planning, ...). Returns the structured session state including the first "
                      "expected agent and prompt.",
                      s));
    }
 
-   /* session_status */
+   /* ensemble_status */
    cJSON_AddItemToArray(
-       tools, build_tool("session_status",
-                         "Fetch the current state of a workflow session: phase, turn, "
+       tools, build_tool("ensemble_status",
+                         "Fetch the current state of an ensemble: phase, turn, "
                          "expected participant, pause reason, and recent context excerpt.",
                          cJSON_Parse("{\"type\":\"object\","
                                      "\"properties\":{\"id\":{\"type\":\"integer\","
-                                     "\"description\":\"Workflow session id\"}},"
+                                     "\"description\":\"Ensemble id\"}},"
                                      "\"required\":[\"id\"]}")));
 
-   /* session_pause */
+   /* ensemble_pause */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
       cJSON *i = cJSON_AddObjectToObject(p, "id");
       cJSON_AddStringToObject(i, "type", "integer");
-      cJSON_AddStringToObject(i, "description", "Workflow session id");
+      cJSON_AddStringToObject(i, "description", "Ensemble id");
       cJSON *r = cJSON_AddObjectToObject(p, "reason");
       cJSON_AddStringToObject(r, "type", "string");
       cJSON_AddStringToObject(r, "description", "Reason for pausing (default: 'manual').");
@@ -1604,18 +1604,17 @@ cJSON *mcp_build_tools_list(void)
       cJSON_AddItemToArray(req, cJSON_CreateString("id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools,
-          build_tool("session_pause", "Pause a workflow session with an optional reason.", s));
+          tools, build_tool("ensemble_pause", "Pause an ensemble with an optional reason.", s));
    }
 
-   /* session_advance */
+   /* ensemble_advance */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
       cJSON *i = cJSON_AddObjectToObject(p, "id");
       cJSON_AddStringToObject(i, "type", "integer");
-      cJSON_AddStringToObject(i, "description", "Workflow session id");
+      cJSON_AddStringToObject(i, "description", "Ensemble id");
       cJSON *sp = cJSON_AddObjectToObject(p, "speaker");
       cJSON_AddStringToObject(sp, "type", "string");
       cJSON_AddStringToObject(sp, "description",
@@ -1630,20 +1629,52 @@ cJSON *mcp_build_tools_list(void)
       cJSON_AddItemToArray(req, cJSON_CreateString("speaker"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(tools,
-                           build_tool("session_advance",
-                                      "Record a turn in a workflow session and advance to the next "
+                           build_tool("ensemble_advance",
+                                      "Record a turn in an ensemble and advance to the next "
                                       "expected participant. Returns the updated session state.",
                                       s));
    }
 
-   /* session_list */
+   /* ensemble_list */
    cJSON_AddItemToArray(
-       tools, build_tool("session_list",
-                         "List every stored workflow session with its template, channel, status, "
+       tools, build_tool("ensemble_list",
+                         "List every stored ensemble with its template, channel, status, "
                          "phase, and expected participant.",
                          cJSON_Parse("{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":"
                                      "\"integer\",\"description\":\"Maximum sessions to return "
                                      "(default 20, max 100).\"}}}")));
+
+   /* workflow_run */
+   {
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "type", "object");
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      cJSON *w = cJSON_AddObjectToObject(p, "workflow");
+      cJSON_AddStringToObject(w, "type", "string");
+      cJSON_AddStringToObject(w, "description",
+                              "Saved workflow name to run (e.g. 'build'; see `aimee workflow "
+                              "list`). Omit to let the server route the proposal (or fall back "
+                              "to the default workflow).");
+      cJSON *pm = cJSON_AddObjectToObject(p, "proposal_md");
+      cJSON_AddStringToObject(pm, "type", "string");
+      cJSON_AddStringToObject(pm, "description",
+                              "The proposal markdown that seeds the run (what to build/change). "
+                              "Required.");
+      cJSON *r = cJSON_AddObjectToObject(p, "repo");
+      cJSON_AddStringToObject(r, "type", "string");
+      cJSON_AddStringToObject(r, "description",
+                              "Optional repository path/name to bind the run to.");
+      cJSON *req = cJSON_CreateArray();
+      cJSON_AddItemToArray(req, cJSON_CreateString("proposal_md"));
+      cJSON_AddItemToObject(s, "required", req);
+      cJSON_AddItemToArray(
+          tools, build_tool("workflow_run",
+                            "Start a saved workflow-engine run from a written proposal (async): "
+                            "the run advances server-side through its review/gate/approval steps. "
+                            "Returns the work_item_id to watch. This is the workflow ENGINE, not a "
+                            "multi-agent ensemble (see ensemble_start for that).",
+                            s));
+   }
 
    /* mutate */
    cJSON_AddItemToArray(

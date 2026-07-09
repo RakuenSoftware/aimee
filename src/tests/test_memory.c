@@ -265,8 +265,13 @@ static void test_fold_session(void)
    memory_insert(TIER_L0, KIND_SCRATCH, "task1", "content 1", 0.5, "fold-sess", &m);
    memory_insert(TIER_L0, KIND_SCRATCH, "task2", "content 2", 0.5, "fold-sess", &m);
 
-   int rc = memory_fold_session("fold-sess");
+   char fold_summary[256] = "";
+   int rc = memory_fold_session("fold-sess", fold_summary, sizeof(fold_summary));
    assert(rc == 0);
+   /* The caller-facing digest is populated so the KB layer can emit it as a
+    * session_summary evidence artifact (the reflection input producer). */
+   assert(fold_summary[0] != '\0');
+   assert(strstr(fold_summary, "content 1") != NULL);
 
    /* L0 should be gone */
    memory_t l0[10];

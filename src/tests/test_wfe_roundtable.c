@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "db1.h"
 #include "wfe_store.h"
@@ -27,17 +28,24 @@ static wfe_verdict_t mk(const char *persona, wfe_verdict_kind_t k, const char *h
 
 /* ---- mock panel provider for the engine sub-test ---- */
 static int g_mode; /* 0=approve all required, 1=request changes, 2=unreachable */
-static int mock_panel(const char *artifact_hash, const char *const *required, int nreq,
+/* last review packet the panel saw (S1: proposal + focus reach the panel) */
+static char g_seen_proposal[512];
+static char g_seen_focus[128];
+static char g_seen_workdir[512];
+static int mock_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
    (void)eligible;
    (void)nelig;
+   snprintf(g_seen_proposal, sizeof g_seen_proposal, "%s", pkt->proposal);
+   snprintf(g_seen_focus, sizeof g_seen_focus, "%s", pkt->focus);
+   snprintf(g_seen_workdir, sizeof g_seen_workdir, "%s", pkt->workdir);
    if (g_mode == 2)
       return -1;
    int n = 0;
    for (int i = 0; i < nreq && n < max; i++)
-      out[n++] =
-          mk(required[i], g_mode == 0 ? WFE_V_APPROVE : WFE_V_REQUEST_CHANGES, artifact_hash, 0);
+      out[n++] = mk(required[i], g_mode == 0 ? WFE_V_APPROVE : WFE_V_REQUEST_CHANGES,
+                    pkt->artifact_hash, 0);
    return n;
 }
 
@@ -57,6 +65,7 @@ static const char *RT = "name: rt\n"
                         "          - security\n"
                         "          - architect\n"
                         "      quorum: 2\n"
+                        "      focus: completion and missing tests\n"
                         "    on_pass: pr\n"
                         "    on_fail: draft\n"
                         "  - id: pr\n"
@@ -144,19 +153,37 @@ int main(void)
    setup_home();
    assert(db1_init(":memory:") == 0);
 
-   /* mode 0: panel approves -> gate advances -> accepted */
+   /* mode 0: panel approves -> gate advances -> accepted. S1: the panel must see
+    * the originating proposal text AND the focus lens from params.focus. */
    {
       wfe_reset_block_executors();
       wfe_register_stub_executors();
       wfe_register_roundtable_gate();
       g_mode = 0;
       wfe_set_panel_provider(mock_panel);
+      /* a real proposal file so read_text_capped returns its content to the panel */
+      char pp[] = "/tmp/wfe_rt_proposal_XXXXXX";
+      int fd = mkstemp(pp);
+      assert(fd >= 0);
+      const char *PTEXT = "PROPOSAL: add a widget with tests.";
+      assert(write(fd, PTEXT, strlen(PTEXT)) == (ssize_t)strlen(PTEXT));
+      close(fd);
+      g_seen_proposal[0] = g_seen_focus[0] = g_seen_workdir[0] = '\0';
+      /* No per-item worktree is set on this run; the panel must still get a workdir to
+       * review in — the shared repo (AIMEE_WORKFLOW_REPO) — never an empty string that
+       * would make a live panel park panel_unreachable (the .253 live-run regression). */
+      setenv("AIMEE_WORKFLOW_REPO", "/tmp", 1);
       char id[80] = "", err[256] = "";
-      assert(wfe_work_item_create("rt", "r0", "p0", "interactive", id, err, sizeof err) == 0);
+      assert(wfe_work_item_create("rt", "r0", pp, "interactive", id, err, sizeof err) == 0);
       assert(wfe_engine_run(id, err, sizeof err) == 0);
       db1_work_item_t wi;
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "accepted") == 0);
+      assert(strcmp(g_seen_proposal, PTEXT) == 0); /* proposal reached the panel */
+      assert(strcmp(g_seen_focus, "completion and missing tests") == 0); /* focus lens too */
+      assert(strcmp(g_seen_workdir, "/tmp") == 0); /* worktree empty -> repo-dir fallback */
+      unsetenv("AIMEE_WORKFLOW_REPO");
+      unlink(pp);
    }
 
    /* mode 1: panel requests changes -> gate loops -> max_attempts -> pending_human */

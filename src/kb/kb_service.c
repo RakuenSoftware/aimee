@@ -16,6 +16,7 @@
 #include "memory.h"
 #include "lifecycle.h"
 #include "kb_vectors.h"
+#include "kb_curator_drain.h" /* kb_curator_stages_json — Option B registry endpoint */
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -908,6 +909,19 @@ static int kb_handle_learning_mutate(int fd, cJSON *req, const char *verb)
    return srv_rc;
 }
 
+/* curator.stages: the curator stage registry as data for the Pipeline GUI to
+ * render dynamically (Option B — single source of truth, no hand-kept mirror). */
+static int kb_handle_curator_stages(int fd, cJSON *req)
+{
+   (void)req;
+   cJSON *resp = jo_ok();
+   cJSON_AddItemToObject(resp, "stages", kb_curator_stages_json());
+   cJSON_AddItemToObject(resp, "presets", kb_curator_presets_json());
+   int rc = kb_send_response(fd, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
 /* Method -> handler dispatch for the uniform `int (int fd, cJSON *req)` kb RPCs.
  * The handful that do not fit that shape stay inline in kb_handle_request
  * (server.info / server.health, which read ctx; the learning.* mutate verbs,
@@ -926,6 +940,7 @@ static const struct
    kb_rpc_fn fn;
 } kb_rpc_table[] = {
     {"kb.file.get", kb_handle_file_get},
+    {"curator.stages", kb_handle_curator_stages},
     {"kb.maintenance.run", kb_handle_maintenance_run},
     {"kb.export", kb_handle_kb_export},
     {"kb.import", kb_handle_kb_import},
@@ -977,6 +992,8 @@ static const struct
     {"maintenance.calibrate_promotions", kb_handle_maintenance_calibrate_promotions},
     {"maintenance.compute_demotions", kb_handle_maintenance_compute_demotions},
     {"memory.record_retrieval_outcome", kb_handle_memory_record_retrieval_outcome},
+    {"ranker.emit_event", kb_handle_ranker_emit_event},
+    {"ranker.record_outcome", kb_handle_ranker_record_outcome},
     {"maintenance.memory_learn_style", kb_handle_memory_learn_style},
     {"decision_log.insert", kb_handle_decision_log_insert},
     {"decision_log.list", kb_handle_decision_log_list},

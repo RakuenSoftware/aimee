@@ -31,4 +31,13 @@ int kb_intel_bandit_close_http(const char *body, int body_len, char *out_buf, in
 cJSON *kb_intel_bandit_promote_response(const char *body_json, int body_len);
 int kb_intel_bandit_promote_http(const char *body, int body_len, char *out_buf, int out_cap);
 
+/* ranker.export_view: dump the §1 learning-to-rank training view (feature_rows
+ * joined to retrieval outcomes) plus the wiring-gap diagnostic. Read-only. */
+cJSON *kb_intel_ranker_export_view_response(void);
+
+/* ranker.fit: materialize the training view, run the fitter sidecar, and
+ * benchmark-gate/commit the fitted ranker_model. Writes the report into out_buf
+ * and returns the HTTP status. Gated by intelligence.ranking.fit.enabled. */
+int kb_intel_ranker_fit_http(const char *body, int body_len, char *out_buf, int out_cap);
+
 #endif /* DEC_KB_INTEL_PAYLOAD_H */

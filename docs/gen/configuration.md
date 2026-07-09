@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (141)
+## CLI-settable keys (157)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -51,6 +51,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `db2_url` | string | DB2 connection URL (aimee's vector / knowledge-base store). |
 | `dedup_enabled` | bool | Deduplicate near-identical responses. |
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
+| `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
 | `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
 | `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |
@@ -91,6 +92,21 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `integrity_enabled` | bool | Enable the integrity gate. |
 | `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
+| `kb_curator_cross_repo_graph_enabled` | bool | — |
+| `kb_curator_detect_contradictions_enabled` | bool | — |
+| `kb_curator_extract_code_enabled` | bool | — |
+| `kb_curator_extract_docs_enabled` | bool | — |
+| `kb_curator_index_claims_enabled` | bool | — |
+| `kb_curator_index_code_unit_enabled` | bool | — |
+| `kb_curator_index_narrative_enabled` | bool | — |
+| `kb_curator_link_artifacts_enabled` | bool | — |
+| `kb_curator_projection_graph_enabled` | bool | — |
+| `kb_curator_promote_entity_enabled` | bool | — |
+| `kb_curator_resolve_entities_enabled` | bool | — |
+| `kb_curator_stage_order` | string | — |
+| `kb_curator_synthesize_enabled` | bool | — |
+| `kb_curator_user_presets` | string | — |
+| `kb_evidence_embed_enabled` | bool | — |
 | `kb_evidence_emit_enabled` | bool | Emit evidence records from KB ingest. |
 | `kb_fusion_mode` | string | KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha. |
 | `kb_fusion_static_alpha` | float | Lexical/dense blend weight (0-1) for the static_alpha fusion mode. |
@@ -109,6 +125,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `learning_implicit_citation_repair` | bool | Implicit-learning signal: citation on repair. |
 | `learning_implicit_repeat_question` | bool | Implicit-learning signal: repeated question. |
 | `learning_implicit_repeated_correction` | bool | Implicit-learning signal: repeated correction. |
+| `learning_implicit_retrieval_outcome` | bool | Bridge continuation/repair autolabels into retrieval outcomes (memory + ranker). |
 | `learning_implicit_workflow_repetition` | bool | Implicit-learning signal: workflow repetition. |
 | `learning_max_commits_per_week` | int | Cap on learning-derived commits per week. |
 | `learning_proposal_ttl_days` | int | TTL (days) for learning proposals. |
@@ -130,7 +147,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_kb_neighbour_expand` | bool | Expand recall to KB neighbours. |
 | `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
 | `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
-| `memory_md_retire` | bool | Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
 | `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
 | `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
@@ -168,7 +184,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | — |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `wfe_live_forge_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `wfe_live_forge_enabled`
 
 ## Config-file sections (53)
 
@@ -198,7 +214,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`integrity`** — _Integrity gate._ Keys: `dry_run`, `enabled`
 - **`intelligence`** — _Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects._ Keys: `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
 - **`kb`** — _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `code_hybrid`, `connection_pool_size`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `reembed_on_dim_change`, `search_max_results`, `typed_facts`, `worker_count`
-- **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `router`, `synthesize`
+- **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `review`, `router`, `synthesize`
 - **`lsp_servers`** — _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
 - **`mcp`** — _MCP integration (e.g. OSV)._ Keys: `osv`
 - **`mcp_clients`** — _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `name`, `transport`, `url`
@@ -245,7 +261,7 @@ The binaries read 144 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_BUNDLED_SKILLS_DIR` | Override directory for the bundled skills. |
 | `AIMEE_FORENSICS_DIR` | Directory for shutdown-forensics dumps. |
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
-| `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory interception/hydration. |
+| `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
 | `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
 | `AIMEE_INSTALL_PREFIX` | Install prefix used to locate bundled assets and plugins. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
@@ -531,9 +547,11 @@ nodes:
 | `gate.ci` | `verdict` | `pr` |
 | `check.mergeable` | `verdict` | `pr` |
 | `understand` | `WFE_ART_INTENT` | _(source: none)_ |
-| `split` | `plan` | _(source: none)_ |
+| `split` | `plan` | `plan` |
 | `review` | `verdict` | `frozen_diff`, `branch` |
 | `gate.deliver` | `none` | `verdict`, `approval` |
+| `branch.open` | `branch` | `plan` |
+| `foreach.workflow` | `branch` | `plan`, `branch` |
 
 ### Block parameters (`params:`)
 
@@ -559,7 +577,7 @@ blocks:
 
 ### Run-level controls (not in the definition)
 
-- **Per-stage loop cap** — a gate that loops back via `on_fail` is retried at most `20` times (`WFE_MAX_ATTEMPTS`) before the run parks; fixed, not configurable.
+- **Per-stage loop cap** — a node that loops back via `on_fail` is retried at most `max_iters` times (per-node param, default `20`); on the cap its `on_max` policy resolves the loop: `human` parks (default), `fail` is a terminal reject, `pass` forces the flow forward via `on_pass`/`next`.
 - **Gate-override cap** — a parked human gate may be overridden at most `2` times (`WFE_MAX_OVERRIDES`) before the run is forced terminal.
 - **Cost cap** — an optional per-work-item USD ceiling set at run creation (`work_item_max_cost_usd`); the engine parks the run when cumulative cost reaches it.
 - **Trigger / autonomy mode** — `interactive` vs `autonomous`, set when the run is created.

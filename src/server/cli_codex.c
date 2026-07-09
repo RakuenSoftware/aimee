@@ -1815,7 +1815,7 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
    c.err_log_fd = -1;
    c.autonomous = agent->autonomous;
    const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "codex";
-   const char *sandbox_config = agent->write_enforce ? CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG
+   const char *sandbox_config = agent->write_capable ? CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG
                                                      : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
    if (cli_codex_spawn(&c, cli_cmd, cwd, sandbox_config) != 0)
    {

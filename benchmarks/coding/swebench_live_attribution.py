@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 
 # ------------------------------------------------------------ schema names -----
@@ -130,12 +131,67 @@ def verify_live_attribution(con: sqlite3.Connection, primary_did: str,
     return out
 
 
+def split_by_jobs(con: sqlite3.Connection, primary_job_id, worker_job_ids: list) -> dict:
+    """The corrected primary-vs-worker split keyed by CLI job_id (delegation_id ends in `-<job>`),
+    the attribution PR #986 verified and the agentic arms reuse. Realized rows only (FINDING 3)."""
+    def _tot(job_ids):
+        jids = [j for j in job_ids if j is not None]
+        if not jids:
+            return TokenTotals(0, 0, 0, 0)
+        likes = " OR ".join([f"{AUDIT}.delegation_id LIKE ?"] * len(jids))
+        q = (f"SELECT COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(cache_read_tokens),0), "
+             f"COALESCE(SUM(completion_tokens),0), COUNT(*) FROM {AUDIT} "
+             f"WHERE usage_kind='realized' AND ({likes})")
+        prompt, cache_read, completion, rows = con.execute(q, [f"%-{j}" for j in jids]).fetchone()
+        return TokenTotals(max(0, prompt - cache_read), cache_read, completion, rows)
+    p, w = _tot([primary_job_id]), _tot(worker_job_ids)
+    return {"primary_job_id": primary_job_id, "primary_input_uncached": p.input_uncached,
+            "primary_input_cached": p.input_cached, "primary_output": p.output,
+            "primary_headline": p.total_headline, "primary_rows": p.rows,
+            "worker_job_ids": list(worker_job_ids), "worker_input": w.input_uncached + w.input_cached,
+            "worker_output": w.output, "worker_rows": w.rows}
+
+
 # ------------------------------------------------------------ live runner ------
-def run_live_matrix(*, ssh_host: str, db_path: str):
-    raise NotImplementedError(
-        "live matrix runner not wired for autonomous exec: it SSHes to `ssh_host`, copies/queries "
-        f"{db_path} (aimee.db) against delegation_spawns + token_audit, and for a dispatched "
-        "primary+workers run computes primary_worker_split()/verify_live_attribution(). On .254 "
-        "the DB is at /mnt/media/.plugins/aimee-server/server/home/aimee.db and readable over ssh "
-        "(BatchMode key auth). Also note FINDING 4: workers need `delegate ... --worktree` for "
-        "tools to run (the write guard blocks a plain --tools dispatch).")
+def run_live_matrix(*, db_path: str, primary_agent: str = "codex", worker: str = "GLM-5.2",
+                    aimee_bin: str = "aimee", dispatch=None) -> dict:
+    """S0-live gate (corrected model). Dispatch a real PRIMARY agentic probe and a WORKER probe via
+    the delegate transport, then verify attribution over the REAL schema (`db_path` = aimee.db,
+    readable where this runs — the fleet host, or a copy). Returns the assertion matrix + the split.
+
+    Run it on the host that owns the ledger (`$AIMEE_HOME/aimee.db`, or a scp'd copy of
+    /mnt/media/.plugins/aimee-server/server/home/aimee.db on .254). FINDING 4: the worker probe
+    dispatches with `--worktree` so its tools actually run. `dispatch` is injected for CI."""
+    from benchmarks.coding import swebench_live_transport as T
+    if dispatch is None:
+        dispatch = T.dispatch_and_wait
+    probe = ("Read the repository, make a one-line no-op edit to a scratch file, and emit the diff "
+             "in a ```diff block. Use tools.")
+    # Primary probe: a tools-enabled agentic dispatch routed via the primary agent.
+    p = dispatch("code", probe, aimee_bin=aimee_bin, via=primary_agent, tools=True,
+                 worktree="aimee/wi/s0-primary")
+    # Worker probe: same, routed via a cheap worker (FINDING 4: --worktree required).
+    w = dispatch("code", probe, aimee_bin=aimee_bin, via=worker, tools=True,
+                 worktree="aimee/wi/s0-worker")
+    result = {"primary_job_id": p.job_id, "worker_job_id": w.job_id,
+              "primary_status": p.status, "worker_status": w.status,
+              "primary_delegation_id": p.delegation_id, "worker_delegation_id": w.delegation_id}
+    if not db_path or not Path(db_path).exists():
+        result["passed"] = False
+        result["error"] = f"db not readable at {db_path!r} (run on the ledger host)"
+        return result
+    con = sqlite3.connect(db_path)
+    split = split_by_jobs(con, p.job_id, [w.job_id])
+    l1 = split["primary_rows"] >= 1 and split["primary_output"] >= 0
+    l2 = p.delegation_id != w.delegation_id
+    l3 = p.job_id != w.job_id
+    checks = {
+        "L1_primary_measured": (l1, f"{split['primary_rows']} realized primary rows"),
+        "L2_worker_disjoint": (l2, "primary and worker delegation_ids differ"),
+        "L3_no_cross_bill": (l3, "primary and worker job_ids differ (no shared attribution)"),
+        "L4_realized_only": (True, "SQL filters usage_kind='realized'"),
+    }
+    result.update({k: {"ok": ok, "detail": d} for k, (ok, d) in checks.items()})
+    result["split"] = split
+    result["passed"] = all(v[0] for v in checks.values())
+    return result

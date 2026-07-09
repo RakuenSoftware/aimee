@@ -18,6 +18,7 @@
 #include "decision_log.h"
 #include "entity_edges.h"
 #include "learning.h"
+#include "learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
 #include "learning_implicit.h"
 #include "memory.h"
 #include "feedback.h"
@@ -693,7 +694,19 @@ cJSON *db2_kb_service_memory_fold_session_json(const char *session_id)
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   int rc = memory_fold_session(session_id ? session_id : "");
+   char summary[256] = "";
+   int rc = memory_fold_session(session_id ? session_id : "", summary, sizeof(summary));
+
+   /* Surface the folded session digest as a `session_summary` evidence artifact
+    * so the idle-reflection scheduler and the evidence-synth drain have a real
+    * candidate stream to work over — this is the producer that was otherwise
+    * missing. Cheap (one artifact write from the digest already computed, no LLM
+    * on this path), idempotent via content-hash dedup, and emitted unconditionally
+    * like other evidence capture; the LLM-heavy consumers are separately gated. */
+   if (rc >= 0 && summary[0])
+      learning_evidence_write_event("session_summary", "session", session_id ? session_id : "",
+                                    summary, "kb.fold_session", NULL, 0);
+
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "count", rc < 0 ? 0 : rc);
    return resp;

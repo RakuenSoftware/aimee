@@ -40,6 +40,56 @@
    "and relations grounded only in that content. Respond with a single JSON "                      \
    "object matching the request's role. Do not invent facts."
 
+/* Engineer-mode extract_doc contract: names the exact artifact kinds + payload
+ * fields (claim => subject/attribute/value, matching index_claims) so the provider
+ * path yields claims the contradiction detector can index. Paired with the envelope
+ * schema (ce_build_extract_schema) that forces fence-free {status,artifacts} JSON —
+ * without both, the reasoning model markdown-fences its output and invents an
+ * envelope, so cJSON_Parse fails ("sidecar returned non-JSON"). */
+#define CE_EXTRACT_DOC_PROMPT                                                                      \
+   "You are a knowledge-base extractor. Read the JSON request (a document chunk with a `role` "    \
+   "and `input.content`) and extract structured knowledge grounded ONLY in that content; do not "  \
+   "invent facts. Respond with a single JSON object: {\"status\":\"ok\",\"artifacts\":[...]}. "    \
+   "Each "                                                                                         \
+   "artifact is {\"kind\":<kind>,\"payload\":<obj>}. Use these kinds and exact payload fields:\n"  \
+   "- \"doc_summary\" (exactly one): {\"summary\":<one "                                           \
+   "paragraph>,\"status\":\"draft|accepted|done|"                                                  \
+   "rejected|deferred\",\"priority\":\"low|medium|high\",\"components\":[<lowercase tags>]}\n"     \
+   "- \"claim\": {\"subject\":<what the claim is about>,\"attribute\":<the property/relation "     \
+   "asserted>,\"value\":<the asserted "                                                            \
+   "value>,\"claim_kind\":\"fact|requirement|constraint|decision|"                                 \
+   "behavior\",\"text\":<full claim as one sentence>}\n"                                           \
+   "- \"entity\": {\"name\":<canonical name>,\"entity_kind\":\"component|system|concept|protocol|" \
+   "data_store|tool\",\"context\":<short phrase>}\n"                                               \
+   "Emit a claim for each distinct factual assertion and an entity for each named "                \
+   "system/component/"                                                                             \
+   "concept."
+
+/* Build the extract envelope json-schema (caller frees). provider_client wraps it
+ * as response_format:{json_schema:{schema:<this>,strict}}. */
+static cJSON *ce_build_extract_schema(void)
+{
+   const char *ok_only[] = {"ok"};
+   const char *art_req[] = {"kind", "payload"};
+   const char *top_req[] = {"status", "artifacts"};
+   cJSON *sc = cJSON_CreateObject();
+   cJSON_AddStringToObject(sc, "type", "object");
+   cJSON *props = cJSON_AddObjectToObject(sc, "properties");
+   cJSON *status = cJSON_AddObjectToObject(props, "status");
+   cJSON_AddStringToObject(status, "type", "string");
+   cJSON_AddItemToObject(status, "enum", cJSON_CreateStringArray(ok_only, 1));
+   cJSON *arts = cJSON_AddObjectToObject(props, "artifacts");
+   cJSON_AddStringToObject(arts, "type", "array");
+   cJSON *items = cJSON_AddObjectToObject(arts, "items");
+   cJSON_AddStringToObject(items, "type", "object");
+   cJSON *iprops = cJSON_AddObjectToObject(items, "properties");
+   cJSON_AddStringToObject(cJSON_AddObjectToObject(iprops, "kind"), "type", "string");
+   cJSON_AddStringToObject(cJSON_AddObjectToObject(iprops, "payload"), "type", "object");
+   cJSON_AddItemToObject(items, "required", cJSON_CreateStringArray(art_req, 2));
+   cJSON_AddItemToObject(sc, "required", cJSON_CreateStringArray(top_req, 2));
+   return sc;
+}
+
 typedef struct
 {
    int64_t job_id;
@@ -380,8 +430,12 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
              (long long)job.document_id, cmd);
 
    char sidecar_err[512] = "";
-   char *resp_str = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, CE_SYSTEM_PROMPT,
-                                       req_str, cmd, CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
+   const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;
+   cJSON *extract_schema = ce_build_extract_schema();
+   char *resp_str =
+       kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, req_str, extract_schema,
+                          cmd, CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
+   cJSON_Delete(extract_schema);
    free(req_str);
 
    if (!resp_str)

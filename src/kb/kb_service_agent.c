@@ -11,6 +11,7 @@
 #include "db2/kb_service_backend.h"
 #include "kb_calibrate.h"
 #include "kb_demote.h"
+#include "kb_ranker_fit.h"
 #include "kb_service_agent.h"
 #include "learning_evidence.h"
 
@@ -491,6 +492,95 @@ int kb_handle_memory_record_retrieval_outcome(int fd, cJSON *req)
          double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
          if (learning_evidence_write_retrieval_attribution(ev_id, (int64_t)rid_j->valuedouble,
                                                            vj->valuestring, w) == 0)
+            written++;
+      }
+   }
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "written", written);
+   int srv_rc = kb_send_response(fd, resp);
+   cJSON_Delete(resp);
+   return srv_rc;
+}
+
+/* ranker.emit_event {doc_ids:[...], query_fingerprint?} -> {retrieval_event_id}.
+ * Option B: the kb_hybrid analogue of evidence.emit_retrieval_event — mints an
+ * event over the surfaced kb_document candidates so a caller can attribute
+ * outcomes to it. Endpoint-driven (no kb.c hot-path change). */
+int kb_handle_ranker_emit_event(int fd, cJSON *req)
+{
+   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(req, "doc_ids");
+   cJSON *fp_j = cJSON_GetObjectItemCaseSensitive(req, "query_fingerprint");
+   const char *fp = cJSON_IsString(fp_j) ? fp_j->valuestring : "";
+
+   int n = cJSON_IsArray(ids_j) ? cJSON_GetArraySize(ids_j) : 0;
+   int64_t *ids = NULL;
+   int n_ids = 0;
+   if (n > 0)
+   {
+      ids = (int64_t *)calloc((size_t)n, sizeof(int64_t));
+      if (!ids)
+         return kb_send_error(fd, "out of memory");
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *e = cJSON_GetArrayItem(ids_j, i);
+         if (cJSON_IsNumber(e) && e->valuedouble > 0)
+            ids[n_ids++] = (int64_t)e->valuedouble;
+      }
+   }
+
+   char ev_id[64] = "";
+   int rc = kb_ranker_emit_event(ids, n_ids, fp, ev_id, sizeof(ev_id));
+   free(ids);
+   if (rc != 0)
+      return kb_send_error(fd, "failed to write retrieval_event");
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
+   int srv_rc = kb_send_response(fd, resp);
+   cJSON_Delete(resp);
+   return srv_rc;
+}
+
+/* ranker.record_outcome {retrieval_event_id, rows:[{id,verdict,weight}]}
+ * (or single {retrieval_event_id, surfaced_row_id, verdict, weight}).
+ * Writes ranker_outcome artifacts the fitter's training view consumes. */
+int kb_handle_ranker_record_outcome(int fd, cJSON *req)
+{
+   cJSON *ev_j = cJSON_GetObjectItemCaseSensitive(req, "retrieval_event_id");
+   cJSON *rows_j = cJSON_GetObjectItemCaseSensitive(req, "rows");
+   if (!cJSON_IsString(ev_j) || !ev_j->valuestring[0])
+      return kb_send_error(fd, "ranker.record_outcome: retrieval_event_id required");
+
+   const char *ev_id = ev_j->valuestring;
+   int written = 0;
+
+   if (cJSON_IsArray(rows_j))
+   {
+      cJSON *row;
+      cJSON_ArrayForEach(row, rows_j)
+      {
+         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(row, "id");
+         cJSON *vj = cJSON_GetObjectItemCaseSensitive(row, "verdict");
+         cJSON *wj = cJSON_GetObjectItemCaseSensitive(row, "weight");
+         if (!cJSON_IsNumber(id_j) || !cJSON_IsString(vj))
+            continue;
+         double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
+         if (kb_ranker_outcome_write(ev_id, (int64_t)id_j->valuedouble, vj->valuestring, w) == 0)
+            written++;
+      }
+   }
+   else
+   {
+      cJSON *rid_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_row_id");
+      cJSON *vj = cJSON_GetObjectItemCaseSensitive(req, "verdict");
+      cJSON *wj = cJSON_GetObjectItemCaseSensitive(req, "weight");
+      if (cJSON_IsNumber(rid_j) && cJSON_IsString(vj))
+      {
+         double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
+         if (kb_ranker_outcome_write(ev_id, (int64_t)rid_j->valuedouble, vj->valuestring, w) == 0)
             written++;
       }
    }

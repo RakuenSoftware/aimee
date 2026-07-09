@@ -70,7 +70,7 @@ int kb_curator_judge_same_entity(const config_t *cfg, const char *judge_cmd,
     * judge_cmd sidecar; "neither configured" surfaces as -1 (caller treats as
     * not-same / create). */
    char local_err[256];
-   char *response = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_JUDGE, CJ_SYSTEM_PROMPT, request,
+   char *response = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_JUDGE, CJ_SYSTEM_PROMPT, request, NULL,
                                        judge_cmd, 0, local_err, sizeof(local_err));
    free(request);
    if (!response)

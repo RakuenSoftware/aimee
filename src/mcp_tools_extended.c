@@ -282,17 +282,22 @@ static const struct fam_def MCP_FAMILIES[] = {
       {"evidence", "diagnose_evidence"},
       {"status", "diagnose_status"},
       {NULL, NULL}}},
+    {"ensemble",
+     "command",
+     "Multi-agent ensemble sessions: a templated panel (code-review, debate, planning, "
+     "design-critique) of agents taking turns. Set 'command' to start/status/pause/advance/list.",
+     {{"start", "ensemble_start"},
+      {"status", "ensemble_status"},
+      {"pause", "ensemble_pause"},
+      {"advance", "ensemble_advance"},
+      {"list", "ensemble_list"},
+      {NULL, NULL}}},
     {"session",
      "command",
-     "Session operations: workflow sessions (start/status/pause/advance/list), conversation "
-     "transcript search (transcript_search), and current-session virtual-context stubs "
-     "(context_search/context_expand/context_status). Set 'command'.",
-     {{"start", "session_start"},
-      {"status", "session_status"},
-      {"pause", "session_pause"},
-      {"advance", "session_advance"},
-      {"list", "session_list"},
-      {"transcript_search", "session_search"},
+     "Session operations: conversation transcript search (transcript_search) and "
+     "current-session virtual-context stubs (context_search/context_expand/context_status). "
+     "Set 'command'. (For multi-agent ensembles, see the 'ensemble' tool.)",
+     {{"transcript_search", "session_search"},
       {"context_search", "session_context_search"},
       {"context_expand", "session_context_expand"},
       {"context_status", "session_context_status"},

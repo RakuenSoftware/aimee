@@ -163,9 +163,14 @@ int wf_api_blocks(char *resp, int cap)
    wfe_custom_registry_ensure(e, sizeof e); /* best-effort; built-ins always listed */
    cJSON *o = cJSON_CreateObject();
    cJSON *arr = cJSON_AddArrayToObject(o, "blocks");
-   /* built-ins: every catalog entry except UNKNOWN/CUSTOM sentinels */
-   for (wfe_block_type_t t = WFE_BLK_UNKNOWN + 1; t < WFE_BLK_CUSTOM; t++)
+   /* built-ins: every catalog entry except the UNKNOWN/CUSTOM sentinels. Iterate the
+    * FULL enum (not just up to CUSTOM) so the manager-loop + sliced-lifecycle blocks
+    * appended after CUSTOM (understand, split, review, gate.deliver, branch.open,
+    * foreach.workflow) are modellable in the GUI too. */
+   for (wfe_block_type_t t = WFE_BLK_UNKNOWN + 1; t < WFE_BLK__COUNT; t++)
    {
+      if (t == WFE_BLK_CUSTOM)
+         continue; /* sentinel: config-defined blocks are enumerated separately below */
       cJSON *b = cJSON_CreateObject();
       cJSON_AddStringToObject(b, "name", wfe_block_name(t));
       cJSON_AddStringToObject(b, "produces", wfe_artifact_name(wfe_block_output(t)));

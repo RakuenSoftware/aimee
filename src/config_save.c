@@ -91,7 +91,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    }
 
    /* roundtable.* (including the authoring-pipeline keys, roundtable.pipeline_*) */
-   if (cfg->roundtable_max_rounds != 3 || cfg->roundtable_converge_threshold != 10 ||
+   if (cfg->roundtable_max_rounds != 1 || cfg->roundtable_converge_threshold != 10 ||
        cfg->roundtable_deadline_ms != 600000 || strcmp(cfg->roundtable_turns, "parallel") != 0 ||
        strcmp(cfg->roundtable_pipeline_done_bar, "zero_blocking") != 0 ||
        cfg->roundtable_pipeline_max_passes != 0 ||
@@ -318,6 +318,8 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(root, "db2_pool_size", cfg->db2_pool_size);
    cJSON_AddStringToObject(root, "guardrail_mode", cfg->guardrail_mode);
    cJSON_AddStringToObject(root, "provider", cfg->provider);
+   if (cfg->default_persona[0] && strcmp(cfg->default_persona, "engineer") != 0)
+      cJSON_AddStringToObject(root, "default_persona", cfg->default_persona);
 
    if (cfg->autonomous)
       cJSON_AddTrueToObject(root, "autonomous");
@@ -856,8 +858,6 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "audit_action_enabled", 0);
    if (cfg->audit_worm_enabled) /* default-off: persist only the opt-in (enable) */
       cJSON_AddBoolToObject(root, "audit_worm_enabled", 1);
-   if (!cfg->memory_md_retire) /* default-on: persist only the opt-out (disable) */
-      cJSON_AddBoolToObject(root, "memory_md_retire", 0);
    /* default-on render backend: persist only a non-default value (a custom command
     * OR an empty string to disable) so both round-trip; the default isn't written. */
    if (strcmp(cfg->css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) != 0)

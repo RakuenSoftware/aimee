@@ -62,6 +62,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "web_search.h"
 #include "notes.h"
 #include "kb.h"
+#include "td_search_render.h"
 #include "mcp_client_registry.h"
 #include "lifecycle.h"
 #include "workspace.h"
@@ -229,6 +230,10 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
       return safe_strdup("error: missing or empty 'old_string' parameter");
    if (!new_string)
       new_string = "";
+   /* Fail fast for a read-only delegate: the edit's write-back routes through
+    * the gated tool_write_file, but reject up front so we don't read/process. */
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
 
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
@@ -456,7 +461,11 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
    {
       const char *new_str = (nw && cJSON_IsString(nw)) ? nw->valuestring : "";
       int replace_all = (ra && cJSON_IsBool(ra)) ? cJSON_IsTrue(ra) : 0;
-      if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
+      if (agent_tools_readonly_delegate_blocks())
+      {
+         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+      }
+      else if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
       {
          result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
       }
@@ -495,7 +504,11 @@ static char *td_write_file(cJSON *args, const char *name, const char *dispatch_c
    else
    {
       const char *content_str = c && cJSON_IsString(c) ? c->valuestring : "";
-      if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
+      if (agent_tools_readonly_delegate_blocks())
+      {
+         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+      }
+      else if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
       {
          result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
       }
@@ -1330,6 +1343,13 @@ static char *td_diagnose_status(cJSON *args, const char *name, const char *dispa
    return result;
 }
 
+/* The retrieval-outcome bridge lives in the server layer; declare it weak so the
+ * agent-runtime object links cleanly into binaries that do not include it (a
+ * delegate/lean build simply skips capture). See retrieval_outcome_bridge.h. */
+extern void retrieval_outcome_bridge_note(const char *surface, const char *event_id,
+                                          const int64_t *ids, const char *const *snippets, int n)
+    __attribute__((weak));
+
 static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_cwd,
                             const char *dispatch_sid, int timeout_ms)
 {
@@ -1347,15 +1367,34 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
       char *envelope = kb_client_search_json(NULL, q->valuestring,
                                              config_embedding_command(&cfg, NULL), max, NULL);
-      /* The knowledge service returns {"status":"ok","result":"<text>"}; unwrap so the
-       * tool sees the same body shape kb_search() used to return. */
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
-      cJSON *body = resp ? cJSON_GetObjectItemCaseSensitive(resp, "result") : NULL;
-      if (cJSON_IsString(body) && body->valuestring[0])
-         result = safe_strdup(body->valuestring);
-      else
-         result = safe_strdup("error: knowledge search unavailable");
+
+      /* Text result: legacy {result} for back-compat, else the rendered {hits},
+       * else an error line. Extracted into td_search_result_from_response so the
+       * exact result-vs-hits selection that once silently broke the tool is unit
+       * tested (see td_search_render). */
+      result = td_search_result_from_response(resp, q->valuestring);
+      cJSON *hits = resp ? cJSON_GetObjectItemCaseSensitive(resp, "hits") : NULL;
+
+      /* Learning-to-rank outcome capture (default-off): from the SAME hits — no
+       * second search. Records the surfaced doc_ids + snippets so the next turn's
+       * continuation/repair autolabel attributes a per-doc ranker outcome. The
+       * bridge symbol is weak, so a delegate/lean binary simply skips this. */
+      if (cfg.learning_implicit_retrieval_outcome && retrieval_outcome_bridge_note &&
+          cJSON_IsArray(hits))
+      {
+         int64_t ids[8];
+         const char *snips[8]; /* point into resp; copied by _note before free */
+         int cn = td_extract_hit_docs(hits, ids, snips, (int)(sizeof(ids) / sizeof(ids[0])));
+         if (cn > 0)
+         {
+            char ev[64] = "";
+            if (kb_client_ranker_emit_event(ids, cn, NULL, ev, sizeof(ev)) == 0 && ev[0])
+               retrieval_outcome_bridge_note("ranker", ev, ids, snips, cn);
+         }
+      }
+
       cJSON_Delete(resp);
    }
 

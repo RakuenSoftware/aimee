@@ -214,6 +214,8 @@ static const struct
     {"kb", "curator", "kb.curator", NULL, NULL, 0},
     {"kb", "calibrate", "calibration.readiness", NULL, NULL, 0},
     {"kb", "demote", "demotion.check", NULL, NULL, 0},
+    {"kb", "ranker export-view", "ranker.export_view", NULL, NULL, 0},
+    {"kb", "ranker fit", "ranker.fit", NULL, NULL, 900000},
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},
@@ -249,6 +251,13 @@ static const struct
      * route, which maps positional[0] -> role and never ran the engine. */
     {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
     {"delegate", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
+    /* `ensemble` is the umbrella verb for a panel of agents. Its aggregate (MoA
+     * fan-out + synthesis) and roundtable (review/debate panel) modes reuse the
+     * exact delegate.* server methods; the third mode is the persistent, templated
+     * turn-based session (db1 `ensembles`, agent-driven via the ensemble_* MCP
+     * tools). `delegate aggregate/roundtable` stay as back-compat aliases. */
+    {"ensemble", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
+    {"ensemble", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -1858,8 +1867,27 @@ cJSON *marshal_delegate_roundtable(int argc, char **argv)
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("delegate.roundtable");
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
+   /* Fold --context-file / --files / --context-dir / --context preloads into the
+    * prompt, mirroring marshal_delegate() so both paths ship identical payloads. */
+   char *prompt = (opts.pos_count > 0 && opts.positional[0]) ? strdup(opts.positional[0]) : NULL;
+   char *preload = marshal_build_preload_context(&opts);
+   if (preload)
+   {
+      const char *base = (prompt && prompt[0]) ? prompt : "";
+      size_t cap = strlen(base) + strlen(preload) + 64;
+      char *combined = malloc(cap);
+      if (combined)
+      {
+         snprintf(combined, cap, "%s%s# Source Packet: Preloaded Context\n%s", base,
+                  base[0] ? "\n\n" : "", preload);
+         free(prompt);
+         prompt = combined;
+      }
+      free(preload);
+   }
+   if (prompt && prompt[0])
+      cJSON_AddStringToObject(req, "prompt", prompt);
+   free(prompt);
    const char *mode = rpc_get(&opts, "mode");
    if (mode)
       cJSON_AddStringToObject(req, "mode", mode);
@@ -1935,7 +1963,8 @@ cJSON *marshal_delegate(int argc, char **argv)
       char *combined = malloc(cap);
       if (combined)
       {
-         snprintf(combined, cap, "%s\n\n# Source Packet: Preloaded Context\n%s", base, preload);
+         snprintf(combined, cap, "%s%s# Source Packet: Preloaded Context\n%s", base,
+                  base[0] ? "\n\n" : "", preload);
          free(delegate_prompt);
          delegate_prompt = combined;
       }

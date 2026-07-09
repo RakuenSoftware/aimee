@@ -9,6 +9,7 @@
 #include "config.h"
 #include "cJSON.h"
 #include "kb_http.h"
+#include "td_search_render.h"       /* consumer side of the /v1/search contract test */
 #include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "rel_types.h"              /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
@@ -250,6 +251,12 @@ char *kb_service_ingest_status_json(void)
 
 /* ── Phase 5 backend stubs (satisfies extern refs in kb_http.o) ─────────── */
 
+/* When g_test_search_populated is set, the backend stub returns one populated
+ * result row so the /v1/search handler emits a real hit — used by the
+ * producer->consumer contract test. The row shape (file_path/content/score/
+ * doc_id) mirrors what the ranked backend emits and what the handler's reshaper
+ * parses. Default 0 keeps every other test on the empty-results path. */
+static int g_test_search_populated = 0;
 char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, const char *f)
 {
    (void)p;
@@ -257,9 +264,13 @@ char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, cons
    (void)e;
    (void)m;
    (void)f;
-   char *r = malloc(64);
+   const char *src = g_test_search_populated
+                         ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"file_path\":\"docs/alpha.md\","
+                           "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}"
+                         : "{\"fusion_mode\":\"rrf\",\"results\":[]}";
+   char *r = malloc(strlen(src) + 1);
    if (r)
-      strcpy(r, "{\"fusion_mode\":\"rrf\",\"results\":[]}");
+      strcpy(r, src);
    return r;
 }
 
@@ -881,6 +892,25 @@ int db2_calibration_surfaces_with_data(int min_rows)
 {
    assert(min_rows == 200);
    return 2;
+}
+
+/* kb_intel_payload.o now calls the ranker-fit surface; stub it (this test
+ * exercises HTTP routing, not the fitter — the fitter has its own unit test). */
+char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_set_version)
+{
+   (void)subject_kind;
+   (void)feature_set_version;
+   return strdup("{\"status\":\"ok\",\"n_rows\":0,\"rows\":[]}");
+}
+
+int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out)
+{
+   (void)cfg;
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (report_out)
+      *report_out = strdup("{\"status\":\"disabled\"}");
+   return 1;
 }
 
 int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max)
@@ -3937,6 +3967,59 @@ static void test_search_ok(void)
    assert(strstr(buf, "\"fusion_mode_used\"") != NULL);
 }
 
+/* Producer->consumer contract: the /v1/search ranked handler and the kb_search
+ * agent tool must agree on the response shape. A refactor once left the tool
+ * unwrapping a top-level {"result"} field the endpoint never emits, so every
+ * kb_search call errored and the learning-to-rank capture (which reads doc_id
+ * off each hit) silently went dead. This test drives the REAL handler to emit a
+ * populated hit, then feeds that exact JSON through the REAL tool-side parse
+ * helpers (td_render_search_hits / td_extract_hit_docs). If either side renames
+ * a field or drops doc_id, or the tool reverts to reading {"result"}, it fails.
+ * That is the seam neither the handler test nor the render unit test covered. */
+static void test_search_hits_tool_contract(void)
+{
+   char buf[2048];
+   g_test_search_populated = 1;
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, "{\"query\":\"foo\"}", 15, buf,
+                            sizeof(buf));
+   g_test_search_populated = 0;
+   assert(s == 200);
+
+   /* Producer side: the emitted hit carries exactly the fields the tool reads. */
+   cJSON *resp = cJSON_Parse(buf);
+   assert(resp);
+   cJSON *hits = cJSON_GetObjectItemCaseSensitive(resp, "hits");
+   assert(cJSON_IsArray(hits) && cJSON_GetArraySize(hits) == 1);
+   cJSON *h0 = cJSON_GetArrayItem(hits, 0);
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(h0, "artifact_id")));
+   assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(h0, "score")));
+   assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(h0, "doc_id")));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(h0, "excerpt")));
+
+   /* Consumer side (selection + render): route the WHOLE response through the
+    * tool's real result-selection (td_search_result_from_response) — the exact
+    * function that once read the wrong field and errored. It must return
+    * non-error text naming the artifact and its excerpt. */
+   char *rendered = td_search_result_from_response(resp, "foo");
+   assert(rendered);
+   assert(strncmp(rendered, "error:", 6) != 0);
+   assert(!strstr(rendered, "No knowledge-base results"));
+   assert(strstr(rendered, "docs/alpha.md"));
+   assert(strstr(rendered, "alpha excerpt body"));
+   free(rendered);
+
+   /* Consumer side (capture): the doc_id the handler emitted is the one the LTR
+    * capture attributes, with the matching excerpt as its overlap snippet. */
+   int64_t ids[4];
+   const char *snips[4];
+   int cn = td_extract_hit_docs(hits, ids, snips, 4);
+   assert(cn == 1);
+   assert(ids[0] == 4242);
+   assert(strcmp(snips[0], "alpha excerpt body") == 0);
+
+   cJSON_Delete(resp);
+}
+
 /* §2c: while a dim-change re-embed is in flight the vector store is being
  * rebuilt at the new dim; /v1/search must refuse with 503 (maintenance) rather
  * than serve partial/empty results — and the guard runs before query parsing,
@@ -4152,6 +4235,7 @@ int main(void)
    test_curator_routes();
    test_invalidations_route();
    test_search_ok();
+   test_search_hits_tool_contract();
    test_search_503_while_reembed_in_progress();
    test_reembed_wrong_method();
    test_reembed_disabled_by_default();

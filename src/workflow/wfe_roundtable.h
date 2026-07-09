@@ -6,12 +6,28 @@
 
 #include "wfe_verdict.h"
 
-/* A panel provider runs the configured panel against the artifact and fills up
- * to `max` verdicts. Returns the number of verdicts, or -1 if the panel could
+/* The composite context a panel reviews. The panel sees the artifact under review
+ * AND the originating proposal/request, so it can validate the work AGAINST what
+ * was asked (e.g. "does this plan satisfy the proposal?", "was the proposal
+ * completed?") rather than inspecting it in isolation. `focus` is an optional
+ * review lens carried from the gate node's `focus` param (e.g. "completion, code
+ * quality, missing tests") so one block composes as both a plan gate and an
+ * acceptance gate. Fields are borrowed (valid only for the duration of the call)
+ * and never NULL — an absent value is the empty string. */
+typedef struct
+{
+   const char *artifact_hash; /* work item's current content (plan/diff under review) */
+   const char *proposal;      /* originating proposal/request text, "" if none */
+   const char *focus;         /* review lens from params.focus, "" if unset */
+   const char *workdir; /* the run's worktree (a live panel inspects the diff here), "" if none */
+} wfe_review_packet_t;
+
+/* A panel provider runs the configured panel against the review packet and fills
+ * up to `max` verdicts. Returns the number of verdicts, or -1 if the panel could
  * not be reached/composed (-> the gate parks DEGRADED). */
-typedef int (*wfe_panel_run_fn)(const char *artifact_hash, const char *const *required, int nreq,
-                                const char *const *eligible, int nelig, wfe_verdict_t *out,
-                                int max);
+typedef int (*wfe_panel_run_fn)(const wfe_review_packet_t *pkt, const char *const *required,
+                                int nreq, const char *const *eligible, int nelig,
+                                wfe_verdict_t *out, int max);
 
 /* Install a panel provider (tests inject a mock; NULL restores the default). */
 void wfe_set_panel_provider(wfe_panel_run_fn fn);

@@ -9,6 +9,7 @@ Run: python3 -m unittest benchmarks.tests.test_swebench_agentic_harness
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -188,11 +189,127 @@ class TestFingerprint(unittest.TestCase):
                             H.workspace_fingerprint("r", "c", "y"))
 
 
-class TestLiveStubHonesty(unittest.TestCase):
-    def test_run_agentic_loop_is_marked_stub(self):
-        with self.assertRaises(NotImplementedError):
-            H.run_agentic_loop({}, H.EnvAllocator("/r").allocate("i", "A", 0),
-                               H.LoopBudget(), arm="A")
+class TestAgenticPromptAndDiff(unittest.TestCase):
+    def test_prompt_includes_issue_and_diff_instruction(self):
+        p = H.agentic_prompt({"repo": "django/django", "problem": "TZ bug",
+                              "file": "django/utils/tz.py", "region": "def now(): pass"}, arm="C")
+        self.assertIn("TZ bug", p)
+        self.assertIn("django/utils/tz.py", p)
+        self.assertIn("```diff", p)
+
+    def test_extract_diff_from_fenced_block(self):
+        txt = "prose\n```diff\ndiff --git a/x b/x\n+ok\n```\ntrailing"
+        self.assertEqual(H.extract_diff_from_text(txt), "diff --git a/x b/x\n+ok")
+
+    def test_extract_diff_stops_at_prose(self):
+        txt = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n+ok\nNow some prose."
+        out = H.extract_diff_from_text(txt)
+        self.assertIn("+ok", out)
+        self.assertNotIn("prose", out)
+
+    def test_worktree_branch_is_deterministic_and_safe(self):
+        b = H.worktree_branch("django__django-12908", "C", 2)
+        self.assertEqual(b, H.worktree_branch("django__django-12908", "C", 2))
+        self.assertTrue(b.startswith("aimee/wi/swebench-"))
+        self.assertNotIn(" ", b)
+
+
+class TestRunAgenticLoopLive(unittest.TestCase):
+    def test_loop_extracts_patch_from_returned_diff(self):
+        from benchmarks.coding import swebench_live_transport as LT
+
+        def fake_dispatch(role, prompt, **kw):
+            self.assertEqual(role, "code")
+            self.assertTrue(kw["tools"] and kw["worktree"])   # FINDING 4
+            return LT.DispatchOutcome(job_id=9, status="done",
+                                      result="```diff\ndiff --git a/f b/f\n+patch\n```",
+                                      agent_name="GLM-5.2", delegation_id="deleg-1-2-9",
+                                      api_calls=3, polls=1)
+
+        env = H.EnvAllocator("/tmp/wsx").allocate("i", "C", 0)
+        res = H.run_agentic_loop({"instance_id": "i", "repo": "x/y", "base_commit": "0" * 40,
+                                  "problem": "b"}, env, H.LoopBudget(), arm="C", worker="GLM-5.2",
+                                 base_repo="", dispatch=fake_dispatch)
+        self.assertTrue(res.ok)
+        self.assertIn("+patch", res.patch)
+        self.assertEqual(res.job_id, 9)
+        self.assertEqual(res.delegation_id, "deleg-1-2-9")
+
+    def test_failed_dispatch_is_recorded_not_raised(self):
+        from benchmarks.coding import swebench_live_transport as LT
+        fake = lambda role, prompt, **kw: LT.DispatchOutcome(None, "error", "", "", None, 0, 0,
+                                                             error="no job_id")
+        env = H.EnvAllocator("/tmp/wsx").allocate("i", "A", 0)
+        res = H.run_agentic_loop({"instance_id": "i", "base_commit": "0" * 40}, env,
+                                 H.LoopBudget(), arm="A", dispatch=fake)
+        self.assertFalse(res.ok)
+        self.assertEqual(res.status, "error")
+
+    def test_response_text_patch_is_non_authoritative(self):
+        # Dev mode (no co-located workspace): a returned diff is usable but NOT graded-authoritative
+        # (it is only a claim — the roundtable hallucination-gap guard).
+        from benchmarks.coding import swebench_live_transport as LT
+        fake = lambda role, prompt, **kw: LT.DispatchOutcome(9, "done",
+            "```diff\ndiff --git a/f b/f\n+claimed\n```", "GLM-5.2", "d-9", 1, 1)
+        env = H.EnvAllocator("/tmp/wsx").allocate("i", "C", 0)
+        res = H.run_agentic_loop({"instance_id": "i", "base_commit": "0" * 40, "problem": "b"},
+                                 env, H.LoopBudget(), arm="C", worker="GLM-5.2", base_repo="",
+                                 dispatch=fake)
+        self.assertEqual(res.patch_source, "response_text")
+        self.assertFalse(res.authoritative)          # never graded from a mere claim
+        self.assertTrue(res.ok)                       # still a produced patch (dev/telemetry)
+
+
+class TestHallucinationGapGuard(unittest.TestCase):
+    """Co-located mode: the graded patch is the ACTUAL filesystem diff (git diff), never the diff
+    the delegate merely CLAIMED in its response text."""
+
+    def _base_repo(self):
+        import subprocess, tempfile
+        d = tempfile.mkdtemp()
+        run = lambda *a: subprocess.run(["git", "-C", d, *a], check=True, capture_output=True,
+                                        text=True, env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL":
+                                        "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL":
+                                        "t@t", "PATH": os.environ.get("PATH", "")})
+        subprocess.run(["git", "init", "-q", d], check=True, capture_output=True)
+        Path(d, "f.py").write_text("x = 1\n")
+        run("add", "-A"); run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
+        commit = run("rev-parse", "HEAD").stdout.strip()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        return d, commit
+
+    def test_colocated_uses_workspace_diff_not_claim(self):
+        from benchmarks.coding import swebench_live_transport as LT
+        base, commit = self._base_repo()
+        env = H.EnvAllocator(__import__("tempfile").mkdtemp()).allocate("i", "A", 0)
+
+        def fake_dispatch(role, prompt, **kw):
+            # The agent ACTUALLY edits the workspace...
+            Path(env.workspace, "f.py").write_text("x = 2  # real edit\n")
+            # ...but its response text CLAIMS a different, unrelated diff.
+            return LT.DispatchOutcome(5, "done", "```diff\ndiff --git a/OTHER b/OTHER\n+lie\n```",
+                                      "codex", "d-5", 2, 1)
+
+        res = H.run_agentic_loop({"instance_id": "i", "repo": "x/y", "base_commit": commit},
+                                 env, H.LoopBudget(), arm="A", base_repo=base, dispatch=fake_dispatch)
+        self.assertEqual(res.patch_source, "workspace")
+        self.assertTrue(res.authoritative)
+        self.assertIn("real edit", res.patch)        # the FS edit, graded
+        self.assertNotIn("lie", res.patch)           # the claimed diff is NOT graded
+        self.assertIn("OTHER", res.returned_diff)    # claim retained only as diagnostic
+
+    def test_colocated_clean_workspace_is_not_graded_from_claim(self):
+        from benchmarks.coding import swebench_live_transport as LT
+        base, commit = self._base_repo()
+        env = H.EnvAllocator(__import__("tempfile").mkdtemp()).allocate("i", "A", 0)
+        # The agent edits NOTHING but claims a fix -> must NOT be graded (patch_source none).
+        fake = lambda role, prompt, **kw: LT.DispatchOutcome(6, "done",
+            "```diff\ndiff --git a/f.py b/f.py\n+claimed fix\n```", "codex", "d-6", 1, 1)
+        res = H.run_agentic_loop({"instance_id": "i", "repo": "x/y", "base_commit": commit},
+                                 env, H.LoopBudget(), arm="A", base_repo=base, dispatch=fake)
+        self.assertEqual(res.patch_source, "none")
+        self.assertFalse(res.authoritative)
+        self.assertEqual(res.patch, "")
 
 
 if __name__ == "__main__":

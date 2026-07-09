@@ -19,6 +19,7 @@
 #include "memory.h"
 #include "memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
+#include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -619,6 +620,16 @@ int main(int argc, char **argv)
          attempt++;
       }
    }
+
+   /* Seed the relation-type ontology into the shared rel_types table now that DB2
+    * is up. The fact-commit path resolves each seed relation's id from this table
+    * (db2_fact_commit -> db2_rel_types_resolve); without the seed every seed-relation
+    * commit DEFERs and no typed fact ever lands. ensure_seed is idempotent
+    * (ON CONFLICT DO NOTHING) and cheap, so running it on each start is safe.
+    * Non-fatal: a failure is logged but does not block the KB. */
+   if (db2_rel_types_ensure_seed() != 0)
+      fprintf(stderr, "aimee-kb: warning: rel_types ontology seed failed; typed-fact "
+                      "commits will DEFER until the seed lands on a later start\n");
 
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
     * starting the service. */

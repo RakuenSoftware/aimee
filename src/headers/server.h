@@ -323,6 +323,8 @@ int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_calibration_readiness(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_ranker_export_view(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_ranker_fit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_replay_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_rules_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -335,13 +337,6 @@ int handle_collab_rules_reject(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 int handle_collab_rules_retire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_wm_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_wm_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-/* harness_memory.* — intercepted agent-memory store (server/harness_memory_routes.c) */
-int handle_hmem_upsert(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_hmem_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_hmem_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_hmem_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_hmem_tombstone(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_hmem_tombstone_prefix(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_wm_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_wm_context(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

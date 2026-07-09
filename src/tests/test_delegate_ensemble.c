@@ -975,6 +975,61 @@ static void test_panel_filter_drops_unauthorized_claude(void)
    printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
 }
 
+static void test_panel_excludes_primary(void)
+{
+   /* The PRIMARY agent (config.provider) is never seated on — nor allowed to
+    * aggregate — its own review panel, even when it is an authorized,
+    * server-hosted claude that would otherwise pass the claude-CLI gate. Matched
+    * by agent name (the primary passthrough is named after the provider) or by
+    * the agent's provider tag. */
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 3;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "codex");
+   snprintf(acfg.agents[0].provider, sizeof(acfg.agents[0].provider), "openai");
+   acfg.agents[1].enabled = 1;
+   acfg.agents[1].is_server_hosted = 1; /* would otherwise be an authorized claude */
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* the primary passthrough */
+   acfg.agents[2].enabled = 1;
+   snprintf(acfg.agents[2].name, MAX_AGENT_NAME, "claude-api"); /* different name ... */
+   snprintf(acfg.agents[2].provider, sizeof(acfg.agents[2].provider),
+            "claude"); /* ... primary provider */
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.claude_cli_delegate_enabled = 1; /* claude would otherwise be authorized */
+   snprintf(cfg.provider, sizeof(cfg.provider), "claude"); /* PRIMARY = claude */
+
+   /* per-agent predicate */
+   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[0]) == 1); /* codex/openai — seated */
+   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0); /* claude by name — excluded */
+   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) ==
+          0); /* claude by provider — excluded */
+
+   /* explicit reference_models: both primary-provider seats dropped, aggregator repointed */
+   cfg.ensemble_reference_count = 3;
+   snprintf(cfg.ensemble_reference_models[0], 128, "codex");
+   snprintf(cfg.ensemble_reference_models[1], 128, "claude");
+   snprintf(cfg.ensemble_reference_models[2], 128, "claude-api");
+   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
+   ensemble_filter_panel_authorization(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 1);
+   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "codex") == 0); /* repointed off the primary */
+
+   /* seeding from enabled agents also never seats the primary */
+   config_t seed_cfg;
+   memset(&seed_cfg, 0, sizeof(seed_cfg));
+   seed_cfg.claude_cli_delegate_enabled = 1;
+   snprintf(seed_cfg.provider, sizeof(seed_cfg.provider), "claude");
+   ensemble_default_panel_from_agents(&seed_cfg, &acfg);
+   assert(seed_cfg.ensemble_reference_count == 1); /* only codex */
+   assert(strcmp(seed_cfg.ensemble_reference_models[0], "codex") == 0);
+
+   printf("  test_panel_excludes_primary: ok\n");
+}
+
 static void test_panel_filter_drops_unavailable(void)
 {
    /* A configured panelist that is enabled but NOT runtime-usable (a bearer HTTP
@@ -1014,16 +1069,29 @@ static void test_panel_persona_name_assignment(void)
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 4), "reviewer-constructive") == 0);
    /* wraps after the lineup is exhausted */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 5), "security") == 0);
-   /* draft/aggregate keep their prior NULL-persona behavior */
-   assert(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0) == NULL);
+   /* DRAFT authors every panelist as the configured default persona; an unset
+    * default_persona falls back to the built-in `engineer`. */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "engineer") == 0);
+   snprintf(cfg.default_persona, sizeof(cfg.default_persona), "architect");
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "architect") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "architect") == 0);
+   /* the configured default persona does not disturb the REVIEW lineup */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "security") == 0);
+   cfg.default_persona[0] = '\0';
    /* a configured persona pins to its model slot; an empty entry within the
-    * configured range still falls back to the default lineup */
+    * configured range still falls back to the mode default */
    cfg.ensemble_reference_persona_count = 2;
    snprintf(cfg.ensemble_reference_personas[1], 64, "security");
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0); /* override */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "security") ==
           0); /* empty->dflt */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "reviewer") ==
+          0); /* beyond->dflt */
+   /* the per-slot override also binds in DRAFT; empty/beyond slots fall to engineer */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 1), "security") == 0); /* override */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0); /* empty->dflt */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 3), "engineer") ==
           0); /* beyond->dflt */
    printf("  test_panel_persona_name_assignment: ok\n");
 }
@@ -1419,6 +1487,7 @@ int main(void)
    test_roundtable_review_brief_and_items_return();
    test_default_panel_excludes_claude_cli();
    test_panel_filter_drops_unauthorized_claude();
+   test_panel_excludes_primary();
    test_panel_filter_drops_unavailable();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();

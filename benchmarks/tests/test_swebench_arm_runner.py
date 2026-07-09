@@ -114,12 +114,43 @@ class TestFakeMode(unittest.TestCase):
         self.assertIn("patch_fingerprint", rec)
 
 
-class TestLiveStubHonesty(unittest.TestCase):
-    def test_run_arm_a_live_is_marked_stub(self):
-        inst = {"instance_id": "i", "repo": "x/y", "base_commit": "0" * 40}
-        with self.assertRaises(NotImplementedError):
-            R.run_arm_a(inst, PRIMARY, token_db="/x", base_repo="/y",
-                        allocator=None, budget=None)
+class TestRunArmALive(unittest.TestCase):
+    """run_arm_a drives the real path with an INJECTED fake fleet (no server): assert it produces
+    a schema-valid record from the delegate's returned diff, with wall-clock captured."""
+
+    def setUp(self):
+        # Force the LIVE path regardless of a global AIMEE_BENCH_FAKE_AGENT (this test injects a
+        # fake fleet, so it must not short-circuit to the synthesized fake record).
+        self._orig = R._FAKE
+        R._FAKE = False
+        self.addCleanup(lambda: setattr(R, "_FAKE", self._orig))
+
+    def test_run_arm_a_with_fake_dispatch(self):
+        from benchmarks.coding import swebench_agentic_harness as H
+        from benchmarks.coding import swebench_live_transport as LT
+
+        def fake_dispatch(role, prompt, **kw):
+            self.assertEqual(role, "code")
+            self.assertTrue(kw.get("tools"))
+            self.assertTrue(kw.get("worktree"))  # FINDING 4: tools require a worktree
+            return LT.DispatchOutcome(job_id=7, status="done",
+                                      result="```diff\ndiff --git a/x b/x\n+fix\n```",
+                                      agent_name="codex", delegation_id="deleg-1-2-7",
+                                      api_calls=5, polls=2)
+
+        inst = {"instance_id": "django__django-1", "repo": "django/django",
+                "base_commit": "0" * 40, "problem": "boom"}
+        clk = iter([100.0, 142.0])
+        rec = R.run_arm_a(inst, PRIMARY, token_db="", base_repo="",
+                          allocator=H.EnvAllocator("/tmp/x"), budget=H.LoopBudget(),
+                          primary_agent="codex", dispatch=fake_dispatch, now=lambda: next(clk))
+        self.assertEqual(rec["arm"], "A")
+        self.assertEqual(rec["instance_id"], "django__django-1")
+        self.assertTrue(rec["patch_fingerprint"])          # patch extracted from the diff text
+        self.assertEqual(rec["wall_s"], 42.0)
+        self.assertFalse(rec["invalid"])                   # a non-empty diff + done => valid
+        self.assertIsNone(rec["resolved"])                 # graded later by S5
+        REP.build_report([rec])                            # record is consumable by the reporter
 
 
 if __name__ == "__main__":

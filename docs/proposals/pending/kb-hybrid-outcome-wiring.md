@@ -1,0 +1,158 @@
+# Proposal: kb_hybrid outcome wiring — close the learning-to-rank loop on live data
+
+- **State:** in progress — B1 (the loop-closing plumbing) is integrated. B2's
+  first outcome source — a dogfood-autolabel → retrieval-outcome bridge — is
+  implemented for the memory surface (closing the long-dormant demotion loop) and
+  is ranker-ready; the ranker (`kb_search`) capture hook and higher-fidelity
+  signals are the remaining open work. Follow-up prerequisite named by the done
+  proposal [learning-to-rank weight fitting](../done/learning-to-rank-weight-fitting.md).
+- **Author:** JBailes
+- **Date:** 2026-07-09
+- **Charter roles:** Calibrate (feed the fitter real observed outcomes, not just
+  fixtures), Evaluate-Optimize (the fitter's benchmark gate still decides
+  promotion), Gate-Promote (unchanged — a fitted model only lands on lift).
+
+## Thesis
+
+The learning-to-rank fitter (option A) infers, fits, benchmark-gates, and refits —
+but its §1 training-view join is empty on the shipped substrate, so it can only
+ever fit fixtures. The gap: the ranker's features are written on
+`feature_rows.subject_kind='kb_document'` (the kb_hybrid code-search surface,
+`src/kb/kb.c`), while the only outcome labels that exist are attributed to
+`memory` row ids on the memory-recall surface. Disjoint id spaces; no shared
+grouping key. The fitter cannot learn from live traffic until the kb_hybrid
+surface itself reports which surfaced documents were useful.
+
+## What was found (the design pivot)
+
+The memory surface does **not** capture outcomes inline in its recall hot path.
+A dedicated, caller-driven pair of endpoints does it: `evidence.emit_retrieval_event`
+mints a `retrieval_event` over the surfaced ids, and `memory.record_retrieval_outcome`
+records per-id verdicts as artifacts. That means the kb_hybrid loop can be closed
+the same way — **endpoint-driven, with zero `src/kb/kb.c` retrieval hot-path
+change** — rather than the schema-migration + hot-path rewrite the original
+option-B framing assumed. This is strictly safer and reversible.
+
+## B1 — the loop-closing plumbing (implemented)
+
+- A dedicated `ranker_outcome` artifact kind for kb_hybrid outcomes
+  (`kb_ranker_outcome_write` in `src/kb/kb_ranker_fit.c`), keyed by kb_document
+  doc_id and tied to a `retrieval_event_id`. It is deliberately **not**
+  `retrieval_attribution`: keeping a separate kind means the memory demotion
+  scorer (which reads `retrieval_attribution`) is untouched, and a memory row id
+  that happens to equal a doc_id can never collide into the ranker's training view.
+- `kb_ranker_emit_event` mints a kb_hybrid `retrieval_event` capturing the
+  surfaced doc_ids (audit + the grouping key that ties a query's outcomes together).
+- Two caller-facing KB-service methods mirroring the memory evidence pair:
+  `ranker.emit_event` and `ranker.record_outcome`
+  (`src/kb/kb_service_agent.c`, dispatched from `src/kb/kb_service.c`).
+- The fitter's training view (`kb_ranker_training_view`) now reads `ranker_outcome`
+  instead of `retrieval_attribution` — which both enables this loop and removes the
+  latent id-collision described above. Nothing else about the fitter changes: the
+  same benchmark gate and refusal rails apply.
+
+The result: once outcomes are reported for candidates that have feature rows, the
+existing fitter fits, benchmark-gates, and (on lift) promotes — on live data.
+Verified end-to-end by `test_closed_loop_capture` in `src/tests/test_ranker_fit.c`
+(emit event → record outcomes → training view groups by event and joins feature
+rows → non-empty, correctly-labelled batch).
+
+## B2 — the first outcome source: a dogfood-autolabel bridge (implemented)
+
+Production evidence (`.254`) reframed the problem: there are **408 `retrieval_event`
+artifacts and 0 attributions** — the memory demotion loop was never wired to an
+outcome source either, despite the endpoint existing. And there are **185
+`kb_document` feature rows** already waiting. So the missing piece is universal,
+not ranker-specific: nothing ever converts the *signal already computed each turn*
+into an outcome.
+
+That signal exists. `dogfood_classify_next_turn()` already labels the next user
+turn **continuation** or **repair** after a retrieval. This proposal adds
+`retrieval_outcome_bridge` (`src/server/retrieval_outcome_bridge.c`): the emitter
+notes the prior turn's surfaced rows + event id (`ingress_preinject.c`), and the
+next turn's classification writes the outcome — `accepted` on continuation,
+`corrected` on repair. Wired for **memory** now (closing the dormant demotion loop
+from the 408 existing events, via `retrieval_attribution`) and **ranker-ready**
+(the same bridge writes `ranker_outcome` for a "ranker" surface note). Default-off
+behind `learning_implicit_retrieval_outcome`; observation-only. Unit-tested end to
+end in `test_retrieval_outcome_bridge.c`.
+
+### Honest limit — this is a weak, positively-biased label
+
+`dogfood_classify_next_turn` returns **CONTINUATION for any substantive
+non-correction follow-up** — i.e. "the user kept talking and didn't immediately
+correct me," a loose proxy for "the rows were useful." So the label skews heavily
+positive (the exact position/outcome bias the LTR proposal's Risks section names).
+It is a legitimate *first* source — it turns a dead loop into a live trickle of
+real weak labels — but the fitter must not over-trust it, and the benchmark gate
+remains the backstop. Higher-fidelity sources are the real goal.
+
+### Fitter side, landed: pairwise objective + IPW weight
+
+The fitter (`scripts/rank-fit.py`) now supports a **pairwise (RankNet) objective**
+(`intelligence.ranking.fit.objective = pairwise`) alongside pointwise. This matters
+directly for the weak-label problem: pairwise optimises *within-query ordering*, so
+a feature that is **constant across a query's candidates earns ~0 weight** — which
+is exactly why a turn-level, all-`accepted` label carries no learnable signal, and
+why the *per-document contrast* below is the thing that unlocks it. The
+per-candidate `weight` field now flows through to the fitter, so an **IPW /
+propensity or confidence weight** on an outcome is honoured unchanged.
+
+### Landed: per-document answer↔doc overlap attribution
+
+The turn verdict is no longer applied to all surfaced rows identically. At
+attribution time the prior turn's assistant answer is already in the message
+history (`ingress_preinject_last_assistant_from_messages`); the bridge scores each
+surfaced row's snippet against it (`retrieval_outcome_overlap_used`) and attributes
+**per document**: on a continuation, rows the answer used → `accepted`,
+surfaced-but-unused rows → `corrected`; on a repair, only the used rows are blamed.
+That is the **within-query contrast** the pairwise objective needs — and it is
+non-circular (the old `memory_collect_answer_citation_ids` "citation" is the
+top-ranked match computed at *retrieval* time, so it just reinforces the current
+order; overlap is derived from the answer instead). Wired for the **memory**
+surface (which the bridge already notes), sharpening the revived demotion loop from
+flat to per-row; the bridge is surface-generic so the ranker gets it for free once
+its rows are noted. Falls back to the flat verdict when no answer/snippets exist.
+
+### Landed: ranker (`kb_search`) capture hook
+
+When the agent uses `kb_search` in a turn and the flag is on, the tool dispatch
+(`agent_tools_dispatch.c`) reads the surfaced `hits[].doc_id` + `excerpt`, mints a
+kb_hybrid `retrieval_event` over them (`kb_client_ranker_emit_event` →
+`ranker.emit_event`), and notes them on the ranker surface. The substrate fix that
+made this possible: `/v1/search` now includes **`doc_id` on each `hit`** (the
+projection was file_path-keyed and lacked it) — additive, the response shape is
+unchanged and existing consumers ignore it. The bridge symbol is declared **weak** in the agent layer,
+so a delegate/lean binary links cleanly and simply skips capture. The next turn's
+per-doc overlap (above) then attributes `ranker_outcome` — closing the ranker loop.
+
+**Validation-pending (stated in these words):** the capture fires inside the
+agentic tool loop, which has no unit test here — the compile/link and each helper
+are verified, but the live attribution is unverified until observed on real traffic
+via `aimee kb ranker export-view`. It is default-off and observation-only, so a
+misfire cannot affect an answer.
+
+### Remaining open work
+
+1. **IPW propensity logging.** Log the surfacing propensity (reuse the bandit's
+   `db2_bandit_decision_insert` pattern) and populate the outcome `weight` with
+   `1/propensity`; the fitter already consumes it.
+2. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
+
+## Non-goals
+
+- No change to `src/kb/kb.c` retrieval scoring or ordering.
+- No schema migration (outcomes are artifacts, like every other evidence row).
+- No new inference behaviour — the fitter and its gate are unchanged.
+
+## Tests
+
+- `test_closed_loop_capture` — emit + record + training-view join over live-shaped data.
+- The existing fitter suite (`src/tests/test_ranker_fit.c`) now exercises the
+  `ranker_outcome` path throughout (refusals, gate commit/hold, round-trip).
+
+## Provenance
+
+Follow-up to `docs/proposals/done/learning-to-rank-weight-fitting.md` (option A).
+Mirrors the memory evidence pattern in `src/kb/kb_service_memory.c` and
+`src/kb/kb_service_agent.c`.

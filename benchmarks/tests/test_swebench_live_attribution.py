@@ -103,10 +103,59 @@ class TestVerifyLiveAttribution(unittest.TestCase):
         self.assertFalse(v["passed"])
 
 
-class TestLiveRunnerStub(unittest.TestCase):
-    def test_runner_is_marked_stub(self):
-        with self.assertRaises(NotImplementedError):
-            A.run_live_matrix(ssh_host="admin@x", db_path="/x/aimee.db")
+class TestSplitByJobs(unittest.TestCase):
+    def _db(self):
+        con = sqlite3.connect(":memory:")
+        con.execute(f"CREATE TABLE {A.AUDIT}(delegation_id TEXT, usage_kind TEXT, prompt_tokens INT,"
+                    " completion_tokens INT, cache_read_tokens INT)")
+        return con
+
+    def test_split_partitions_by_trailing_job_id(self):
+        con = self._db()
+        con.execute(f"INSERT INTO {A.AUDIT} VALUES('deleg-1-2-7','realized',1000,100,200)")
+        con.execute(f"INSERT INTO {A.AUDIT} VALUES('deleg-9-9-8','realized',5000,40,0)")
+        con.execute(f"INSERT INTO {A.AUDIT} VALUES('deleg-1-2-7','avoided',9999,9999,0)")  # excluded
+        con.commit()
+        s = A.split_by_jobs(con, 7, [8])
+        self.assertEqual(s["primary_input_uncached"], 800)   # 1000 - 200 cache_read
+        self.assertEqual(s["primary_output"], 100)
+        self.assertEqual(s["worker_output"], 40)
+
+
+class TestRunLiveMatrix(unittest.TestCase):
+    """Drive the S0-live runner with a fake fleet + an on-disk fixture DB: assert L1-L4 pass when
+    the primary and worker land distinct realized rows keyed by job_id."""
+
+    def test_passes_on_disjoint_jobs(self):
+        import tempfile, os
+        from benchmarks.coding import swebench_live_transport as LT
+        fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+        con = sqlite3.connect(path)
+        con.execute(f"CREATE TABLE {A.AUDIT}(delegation_id TEXT, usage_kind TEXT, prompt_tokens INT,"
+                    " completion_tokens INT, cache_read_tokens INT)")
+        con.execute(f"INSERT INTO {A.AUDIT} VALUES('deleg-a-b-31','realized',800,90,100)")   # primary
+        con.execute(f"INSERT INTO {A.AUDIT} VALUES('deleg-a-b-32','realized',400,20,0)")     # worker
+        con.commit(); con.close()
+
+        jobs = iter([31, 32])
+        def fake_dispatch(role, prompt, **kw):
+            jid = next(jobs)
+            return LT.DispatchOutcome(jid, "done", "```diff\n+x\n```", kw.get("via"),
+                                      f"deleg-a-b-{jid}", 2, 1)
+        res = A.run_live_matrix(db_path=path, primary_agent="codex", worker="GLM-5.2",
+                                dispatch=fake_dispatch)
+        os.unlink(path)
+        self.assertTrue(res["passed"], res)
+        self.assertEqual(res["primary_job_id"], 31)
+        self.assertEqual(res["split"]["primary_input_uncached"], 700)
+
+    def test_reports_error_when_db_missing(self):
+        from benchmarks.coding import swebench_live_transport as LT
+        fake = lambda role, prompt, **kw: LT.DispatchOutcome(1, "done", "", kw.get("via"),
+                                                            "d-1", 1, 1)
+        res = A.run_live_matrix(db_path="/no/such.db", dispatch=fake)
+        self.assertFalse(res["passed"])
+        self.assertIn("not readable", res["error"])
 
 
 if __name__ == "__main__":

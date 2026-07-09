@@ -197,6 +197,21 @@ static char *build_session_context(const char *client_cwd)
    aimee_mode_t mode = config_current_mode();
    char persona_name[PERSONA_NAME_MAX];
    config_current_persona(persona_name, sizeof(persona_name));
+   /* When nothing more specific selected a persona — no AIMEE_MODE override and no
+    * durable /novel-style mode file, so the resolver fell through to the built-in
+    * `engineer` default — honor the operator-configured default persona so a fresh
+    * primary session starts as it (config.default_persona itself defaults to
+    * engineer, so this is a no-op until the operator changes it). */
+   if (strcmp(persona_name, "engineer") == 0)
+   {
+      config_t persona_cfg;
+      if (config_load(&persona_cfg) == 0 && persona_cfg.default_persona[0] &&
+          strcmp(persona_cfg.default_persona, "engineer") != 0)
+      {
+         snprintf(persona_name, sizeof(persona_name), "%s", persona_cfg.default_persona);
+         mode = aimee_mode_from_string(persona_name);
+      }
+   }
    persona_t persona;
    persona_load(NULL, persona_name, &persona);
 
@@ -225,28 +240,19 @@ static char *build_session_context(const char *client_cwd)
           "- Use `aimee session brief` to inspect the full startup brief.\n\n");
 
    /* Enforce aimee's memory system as the single memory of record: steer the
-    * agent to aimee memory commands rather than a native store. The generic
-    * reminder is always on (operator directive). The stronger '.md files are
-    * intercepted / not persisted' claim is only accurate under the retirement
-    * flag (config memory_md_retire, default-on), so it is gated on it. */
+    * agent to aimee memory commands rather than a native store. `.md` memory is
+    * retired — a write under the memory dir is intercepted into aimee and never
+    * persisted as a file. */
    pos += (size_t)snprintf(
        buf + pos, cap - pos,
        "# Memory (use aimee, not your own store)\n"
        "- aimee is the single memory of record. Store durable memory with "
        "`aimee memory store <key> <content>`; set who-you-are / preferences with "
        "`aimee memory identity <key> <value>` and `aimee memory prefer <key> <value>`.\n"
-       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n");
-   {
-      config_t mr_cfg;
-      config_load(&mr_cfg);
-      if (mr_cfg.memory_md_retire)
-         pos +=
-             (size_t)snprintf(buf + pos, cap - pos,
-                              "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY "
-                              "DIR is intercepted into aimee and not persisted as a file. Writing "
-                              "`.md` files elsewhere (docs, READMEs, notes) is unaffected — only "
-                              "the memory dir is intercepted.\n");
-   }
+       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n"
+       "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY DIR is intercepted "
+       "into aimee and not persisted as a file. Writing `.md` files elsewhere (docs, READMEs, "
+       "notes) is unaffected — only the memory dir is intercepted.\n");
    pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
 
    {

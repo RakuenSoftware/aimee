@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 10 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 13 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,36 +50,28 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — ten proposals, none yet implemented.
+The genuinely open work — thirteen proposals (all but one not yet implemented).
 
-- [Learning-to-rank weight fitting](proposals/pending/learning-to-rank-weight-fitting.md)
-  — the KB-hybrid ranker (`kb_ranker.c`) infers with a learned linear model but
-  nothing ever *fits* it; weights are hand-set `{0.6, 0.4}` defaults and the two
-  sketch weights ship pinned at `0.0`. Adds a fitter sidecar over
-  `feature_rows ⋈ retrieval_outcome`, promotion-gated and benchmark-gated.
-  **Rank-Fuse / Calibrate / Evaluate-Optimize / Gate-Promote.**
+- [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
+  — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
+  feedback→durable org rules with decay; promotion behind a strict operator gate.
+- [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
+  — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
+  a dedicated `ranker_outcome` kind, `ranker.emit_event` / `ranker.record_outcome`
+  KB-service endpoints mirroring the memory evidence pattern, and the fitter's
+  training view reading it) is implemented with zero `kb.c` hot-path change; B2 (a
+  production outcome source for code-search) is the remaining open work. Follow-up
+  to the done LTR fitter. **Calibrate / Evaluate-Optimize / Gate-Promote.**
 - [Agentic supervised SWE-bench](proposals/pending/agentic-supervised-swebench.md)
   — a true tool-using, iterating agentic SWE-bench harness so the "beats Reddit's
   −75.5% supervisor-token reduction at no wall-clock penalty" claim is
   apples-to-apples; official Docker grader as the sole resolution source; a
   public-claim gate that fails closed (issue #987, builds on PR #986).
   **Reason / Execute / Persist / Calibrate / Review.**
-- [Memory architecture — db1 = user, db2 = org](proposals/pending/memory-db1-db2-architecture.md)
-  — retire the `.md`/harness-memory subsystem; split durable memory by scope
-  (db1 = user identity/preferences/commitments, db2 = org rules/conventions/facts/
-  code graph); session-start recall merges both; ingestion routes by scope.
 - [Remote-first session-start](proposals/pending/remote-first-session-start.md)
   — the thin client's SessionStart falls back to a recall-only remote path and
   emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
   a thin client gets the full server-assembled brief. Companion to the memory split.
-- [LLM-sidecar productionization — curator extraction + idle reflection](proposals/pending/llm-sidecar-productionization-curator-and-reflection.md)
-  — two intelligence steps ship as full scaffolding but stub the LLM call: curator
-  extraction (all stages present; only the Phase-0 embedding sidecar exists behind
-  `kb_curator_sidecar`) and the idle-reflection scheduler (`kb_reflection.c` runs
-  fully; its own header notes LLM candidate generation is stubbed). Graduate both
-  onto one versioned sidecar contract behind a shadow → canary → default gate on the
-  shipped calibration + bandit rails. **Extract / Synthesize / Judge / Reflect /
-  Gate-Promote.**
 - [Org-data connectors + source ingestion](proposals/pending/org-data-connectors-and-source-ingestion.md)
   — the missing ingest front door for the every-domain KB: a uniform connector
   contract plus a first adapter set (issue tracker / chat / doc-wiki / email),
@@ -103,10 +95,35 @@ The genuinely open work — ten proposals, none yet implemented.
   — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
   validation + a v1 API stability tag) is the one remaining piece with no closing
   artifact.
+- [Binding retrieval context-contract for agents](proposals/pending/proposal-retrieval-context-contract.md)
+  — surveys an external context-engine against Aimee (most of its mechanisms
+  already exist: attention guard, per-intent budgets, confidence scorer, symbol
+  preload) and scopes the one clean gap: surface the confidence + caps the memory
+  assembler already computes to the delegate as a *binding* exploration contract,
+  enforced by the existing `cli_attention_guard.c` raw-scan redirect.
+  **Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote.**
+- [Evidence provenance-tier contract — gate Tier-3 (untrusted) memory](proposals/pending/proposal-evidence-provenance-tiers.md)
+  — every memory carries an evidence tier (1 direct-human / 2 derived-from-human /
+  3 no-human). The `provenance_category` field and an anchor-eligibility seam
+  (`memory_answer_mode_for_anchor`) already exist, but the INSERT never sets the
+  field so everything defaults to `user_stated` (Tier 1) — delegate content is
+  silently trusted. Adds write-time classification, a category→tier map, and the
+  gate that bars Tier-3 from being *main* evidence (anti-poisoning), plus
+  human-only promotion. **Classify-Score / Enforce / Gate-Promote / Constrain-Verify.**
+- [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
+  — small reasoning models served through the gateway fall into degenerate
+  repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
+  Adds a deterministic streaming detector on the provider-neutral IR-delta relay,
+  a bounded holdback-buffered decode-time intervention (truncate / gated resample
+  using only standard sampling params + stop sequences — no logit access), and a
+  per-backend collapse-rate metric that calibrates the default serving temperature.
+  Fail-open, default-off, shadow → canary → default gated.
+  **Detect-Cluster / Constrain-Verify / Enforce / Calibrate / Evaluate-Optimize /
+  Gate-Promote.**
 
-## Done (65)
+## Done (66)
 
-The [`proposals/done/`](proposals/done/) directory holds 65 shipped proposals.
+The [`proposals/done/`](proposals/done/) directory holds 66 shipped proposals.
 Grouped by theme:
 
 - **Universal gateway, ingress & protocol.**
@@ -169,6 +186,7 @@ Grouped by theme:
   [recall economy progressive disclosure](proposals/done/recall-economy-progressive-disclosure.md),
   [recall abstention confidence gate](proposals/done/retrieval-abstention-confidence-gate.md),
   [typed-fact knowledge layer](proposals/done/typed-fact-knowledge-layer.md),
+  [LLM-sidecar productionization — curator extraction + idle reflection](proposals/done/llm-sidecar-productionization-curator-and-reflection.md),
   [generalise the `memory.benchmark` RPC](proposals/done/memory-benchmark-suite-generalisation.md).
 - **Structured PDF & evidence.**
   [structured PDF ingestion + coordinate-anchored evidence](proposals/done/structured-pdf-ingestion-and-evidence-layer.md),
@@ -204,8 +222,10 @@ Cleanup surfaced while regenerating this index:
     `bandit_decisions` table (`db2/schema.sql`), `test_bandit.c` +
     `tools/bandit_replay.py`, endpoints `/v1/intelligence/bandit/{export,replay-record,sample}`.
   - **Statistical decision systems** — `kb_ranker.c`, `kb_features.c`,
-    `kb_detect.c`, `db2/feature_rows.c` (the [pending LTR proposal](proposals/pending/learning-to-rank-weight-fitting.md)
-    completes the one unshipped half).
+    `kb_detect.c`, `db2/feature_rows.c`, `kb/kb_ranker_fit.c` + `scripts/rank-fit.py`
+    (the [LTR weight-fitting proposal](proposals/done/learning-to-rank-weight-fitting.md)
+    shipped the Calibrate half — fitter + benchmark gate, default-off, bench-only
+    until the outcome-wiring prerequisite).
   - **Graph reasoning / case recall** — `kb_reasoning.c` (474 LOC), `db2/cases.sql`.
   - **MDL-guided synthesis** — `kb_mdl.c` (239 LOC).
   - **Deliberate planning** — `kb_planner.c` + `scripts/mcts-planner.py`.

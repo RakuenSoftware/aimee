@@ -41,6 +41,21 @@ extern "C"
     * Returns 0 if a model was loaded, -1 if none found (caller uses RRF). */
    int kb_ranker_model_load(void);
 
+   /* Write a ranker_model artifact in the 'proposed' state (stamps
+    * target_surface='kb_hybrid' but NOT committed_at). Unlike kb_ranker_model_write
+    * — which force-commits — this leaves the model behind the promotion gate: a
+    * fitted model must clear the benchmark before kb_ranker_model_commit lands it.
+    * fit_metrics_json (may be NULL) is embedded under "fit_metrics" for provenance.
+    * id_out receives the artifact UUID (>= 37 bytes); may be NULL.
+    * Returns 0 on success, -1 on error. */
+   int kb_ranker_model_write_proposed(const char *weights_json, const char *fit_metrics_json,
+                                      char *id_out, int id_out_len);
+
+   /* Promote a proposed ranker_model to 'committed' (stamps committed_at so
+    * kb_ranker_model_load's ORDER BY committed_at DESC selects it). Idempotent.
+    * Returns 0 on success, -1 on error. */
+   int kb_ranker_model_commit(const char *id);
+
 #ifdef __cplusplus
 }
 #endif

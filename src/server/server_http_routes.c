@@ -206,194 +206,38 @@ static int rh_runs_post(const route_req_t *rq, char *resp, int cap)
  * to drive it server-side. The run proceeds independent of this connection;
  * human gates park it for approval. Returns {work_item_id}. This is the ONLY way
  * an autonomous run begins — aimee never self-initiates. */
-/* Parse a positive-integer env cap value. Returns `defval` for unset/empty/
- * non-numeric/trailing-garbage/overflow/out-of-[1,1000000] — so a malformed
- * AIMEE_AUTONOMY_* (incl. "0" or a negative) can never silently DISABLE the cap,
- * only fall back to the safe default. The whole string must be consumed. The
- * caller fetches the value via a getenv string literal so the var stays
- * discoverable by the docs-gen scanner. */
-static int dev_env_cap(const char *v, int defval)
-{
-   if (!v || !v[0])
-      return defval;
-   errno = 0;
-   char *end = NULL;
-   long n = strtol(v, &end, 10);
-   if (errno != 0 || !end || *end != '\0' || n < 1 || n > 1000000)
-      return defval;
-   return (int)n;
-}
-
-/* AIMEE_WORKFLOW_AUTONOMOUS_ROUTER (S4): default-OFF. On -> an omitted `workflow`
- * on /v1/dev/submit is routed (clamped to the full-spine set) instead of
- * defaulting to "build". Same truthy set as the other aimee boolean flags. */
-static int dev_autonomous_router_on(void)
-{
-   const char *v = getenv("AIMEE_WORKFLOW_AUTONOMOUS_ROUTER");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
-}
-
 static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    cJSON *jprop = body ? cJSON_GetObjectItemCaseSensitive(body, "proposal_md") : NULL;
-   if (!jprop || !cJSON_IsString(jprop) || !jprop->valuestring[0])
-   {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"proposal_md is required\"}");
-      return 400;
-   }
-   cJSON *jwf = cJSON_GetObjectItemCaseSensitive(body, "workflow");
-   cJSON *jrepo = cJSON_GetObjectItemCaseSensitive(body, "repo");
+   cJSON *jwf = body ? cJSON_GetObjectItemCaseSensitive(body, "workflow") : NULL;
+   cJSON *jrepo = body ? cJSON_GetObjectItemCaseSensitive(body, "repo") : NULL;
+   const char *proposal = (jprop && cJSON_IsString(jprop)) ? jprop->valuestring : "";
+   const char *workflow_opt =
+       (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring : NULL;
    const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
 
-   /* Workflow selection. Explicit `workflow` ALWAYS wins (backwards-compat). When
-    * omitted, S4 autonomous parity (default-OFF via AIMEE_WORKFLOW_AUTONOMOUS_ROUTER)
-    * routes the proposal through the router (clamped to the full-spine set, floor
-    * managed-change) instead of silently defaulting to "build". The chosen name is
-    * copied into a stack buffer so it survives `body` being freed below. */
-   char wf_choice[64];
-   int autoroute = 0, autoroute_clamped = 0;
-   char autoroute_src[16] = "", autoroute_raw[64] = "", autoroute_tag[9] = "";
-   if (jwf && cJSON_IsString(jwf) && jwf->valuestring[0])
-   {
-      snprintf(wf_choice, sizeof wf_choice, "%s", jwf->valuestring); /* explicit: authoritative */
-   }
-   else if (dev_autonomous_router_on())
-   {
-      autoroute = 1; /* pick fills wf_choice + audit fields (FNV tag while body alive) */
-      router_autonomous_pick(jprop->valuestring, wf_choice, sizeof wf_choice, autoroute_src,
-                             sizeof autoroute_src, autoroute_raw, sizeof autoroute_raw,
-                             autoroute_tag, sizeof autoroute_tag, &autoroute_clamped);
-   }
-   else
-   {
-      snprintf(wf_choice, sizeof wf_choice, "build"); /* legacy default */
-   }
-   const char *workflow = wf_choice;
-
-   /* Intake-auth (WP-4/WP-5): require an attested submitter, and cap per-principal
-    * concurrency + submit rate so one principal can't fan out unbounded autonomous
-    * runs (each spends budget and, once the live forge is enabled, opens PRs). The
-    * endpoint is already CAP_DELEGATE; this binds the run to the principal for audit
-    * and bounds resource abuse. Both caps are DB-backed (survive restart). */
-   const char *submitter = server_http_identity_principal();
-   if (!submitter || !submitter[0])
-   {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"unauthenticated: no attested principal\"}");
-      return 401;
-   }
-   /* The submitter is the cap/audit key and is stored in submitter[128]; a longer
-    * principal would truncate and collide with another's quota bucket, so reject it
-    * rather than silently mis-bucket. */
-   if (strlen(submitter) >= 128)
-   {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"principal too long\"}");
-      return 400;
-   }
-   int max_active = dev_env_cap(getenv("AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL"), 5);
-   int rate_max = dev_env_cap(getenv("AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN"), 10);
-   int rate_secs = dev_env_cap(getenv("AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS"), 60);
-
-   /* Compute the unique artifact path now, but DON'T write the file until the
-    * submit is admitted below — a capped/rate-limited/faulted principal must not be
-    * able to land an unbounded proposal file on disk on every rejected request. */
-   const char *home = aimee_home();
-   char dir[1024];
-   snprintf(dir, sizeof dir, "%s/workflows/proposals", home ? home : "/tmp");
-   char ppath[1152];
-   snprintf(ppath, sizeof ppath, "%s/wi-%ld-%d.md", dir, (long)time(NULL), (int)getpid());
-
-   /* Resolve the workflow (no DB write), then create + cap-check + submitter-bind +
-    * audit ATOMICALLY under one BEGIN IMMEDIATE so concurrent submits from one
-    * principal serialize (TOCTOU-free) and any DB fault fails closed. */
-   char id[80] = "", err[256] = "";
-   char wf_name[64], wf_ver[65], wf_start[64], wf_repo[512];
-   if (wfe_work_item_resolve(workflow, repo, wf_name, wf_ver, wf_start, wf_repo, id, err,
-                             sizeof err) != 0 ||
-       !id[0])
-   {
-      cJSON *e = cJSON_CreateObject();
-      cJSON_AddStringToObject(e, "error", err[0] ? err : "failed to resolve workflow");
-      char *s = cJSON_PrintUnformatted(e);
-      snprintf(resp, cap, "%s", s ? s : "{\"error\":\"failed to resolve workflow\"}");
-      free(s);
-      cJSON_Delete(e);
-      cJSON_Delete(body);
-      return 500;
-   }
-   int sr = db1_work_item_submit_capped(id, wf_repo, ppath, wf_name, wf_ver, wf_start, submitter,
-                                        max_active, rate_max, rate_secs);
-   if (sr == 1)
-   {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"too many active autonomous runs for this principal\"}");
-      return 429;
-   }
-   if (sr == 2)
-   {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"submit rate exceeded for this principal\"}");
-      return 429;
-   }
-   if (sr != 0)
-   {
-      /* Fail CLOSED: a DB/txn fault on the cap path returns 503, never an
-       * uncapped/unattributed run. */
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"could not record submission\"}");
-      return 503;
-   }
-   /* Admitted: now (and only now) write the proposal artifact the row references.
-    * If the write fails, abandon the just-created run so it can't drive a missing
-    * proposal forward. */
-   mkdir(dir, 0700); /* best effort; parent created by standup */
-   FILE *pf = fopen(ppath, "wb");
-   if (pf)
-   {
-      fwrite(jprop->valuestring, 1, strlen(jprop->valuestring), pf);
-      fclose(pf);
-   }
+   cJSON *out = NULL;
+   char err[256] = "";
+   int st = dev_submit_run(proposal, workflow_opt, repo, server_http_identity_principal(), &out,
+                           err, sizeof err);
    cJSON_Delete(body);
-   if (!pf)
+   if (st == 200 && out)
    {
-      db1_work_item_set_terminal(id, "abandoned");
-      snprintf(resp, cap, "{\"error\":\"could not persist proposal\"}");
-      return 500;
+      char *s = cJSON_PrintUnformatted(out);
+      snprintf(resp, cap, "%s", s ? s : "{}");
+      free(s);
+      cJSON_Delete(out);
+      return 200;
    }
-   if (autoroute) /* S4: audit the routing decision (typed fields; no proposal content) */
-      router_autonomous_audit(id, workflow, autoroute_src, autoroute_raw, autoroute_clamped,
-                              autoroute_tag);
-   /* WP-5: a per-run USD budget ceiling so a runaway autonomous run parks
-    * (budget_exceeded) instead of burning unbounded delegate cost. Default $5.00;
-    * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). The engine
-    * checks cum_cost_usd against this each advance; cost is the server-side
-    * wall-clock estimate threaded from the delegate dispatch. */
-   {
-      double cap_usd = 5.0;
-      const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
-      if (v && v[0])
-      {
-         char *e = NULL;
-         double d = strtod(v, &e);
-         if (e && *e == '\0' && isfinite(d) && d >= 0) /* reject inf/NaN: would void the cap */
-            cap_usd = d;
-      }
-      if (cap_usd > 0)
-         db1_work_item_set_cost_cap(id, cap_usd);
-   }
-   wfe_scheduler_notify(); /* drive it now; the run continues server-side */
-   cJSON *ok = cJSON_CreateObject();
-   cJSON_AddStringToObject(ok, "work_item_id", id);
-   cJSON_AddStringToObject(ok, "workflow", workflow);
-   cJSON_AddStringToObject(ok, "state", "active");
-   char *s = cJSON_PrintUnformatted(ok);
-   snprintf(resp, cap, "%s", s ? s : "{}");
+   cJSON_Delete(out);
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "error", err[0] ? err : "submit failed");
+   char *s = cJSON_PrintUnformatted(e);
+   snprintf(resp, cap, "%s", s ? s : "{\"error\":\"submit failed\"}");
    free(s);
-   cJSON_Delete(ok);
-   return 200;
+   cJSON_Delete(e);
+   return st;
 }
 
 /* Loop-back retry cap for operator rejects on a `retry_on_reject` gate: bounds an
@@ -1928,16 +1772,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/work/complete", NULL, RM_EXACT, "work.complete", 0, rh_dispatch_op},
     {"POST", "/v1/work/fail", NULL, RM_EXACT, "work.fail", 0, rh_dispatch_op},
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
-    {"POST", "/v1/harness_memory/upsert", NULL, RM_EXACT, "harness_memory.upsert", 0,
-     rh_dispatch_op},
-    {"POST", "/v1/harness_memory/get", NULL, RM_EXACT, "harness_memory.get", 0, rh_dispatch_op},
-    {"POST", "/v1/harness_memory/list", NULL, RM_EXACT, "harness_memory.list", 0, rh_dispatch_op},
-    {"POST", "/v1/harness_memory/search", NULL, RM_EXACT, "harness_memory.search", 0,
-     rh_dispatch_op},
-    {"POST", "/v1/harness_memory/tombstone", NULL, RM_EXACT, "harness_memory.tombstone", 0,
-     rh_dispatch_op},
-    {"POST", "/v1/harness_memory/bulk_tombstone", NULL, RM_EXACT, "harness_memory.tombstone_prefix",
-     0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/approve", NULL, RM_EXACT, "collab_rules.approve", 0, rh_dispatch_op},
@@ -2125,6 +1959,9 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/calibration/readiness", NULL, RM_EXACT, "calibration.readiness", 0,
      rh_dispatch_op},
     {"GET", "/v1/demotion/check", NULL, RM_EXACT, "demotion.check", 0, rh_dispatch_op},
+    {"GET", "/v1/intelligence/ranker/export-view", NULL, RM_EXACT, "ranker.export_view", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/intelligence/ranker/fit", NULL, RM_EXACT, "ranker.fit", 0, rh_dispatch_op},
     {"GET", "/v1/identity/show", NULL, RM_EXACT, "identity.show", 0, rh_dispatch_op},
     {"POST", "/v1/identity/diff", NULL, RM_EXACT, "identity.diff", 0, rh_dispatch_op},
     {"POST", "/v1/identity/snapshot", NULL, RM_EXACT, "identity.snapshot", 0, rh_dispatch_op},
@@ -2142,6 +1979,7 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op},
     {"POST", "/v1/curator/implements", NULL, RM_EXACT, "curator.implements", 0, rh_dispatch_op},
     {"POST", "/v1/curator/invalidated", NULL, RM_EXACT, "curator.invalidated", 0, rh_dispatch_op},
+    {"POST", "/v1/curator/stages", NULL, RM_EXACT, "curator.stages", 0, rh_dispatch_op},
     {"POST", "/v1/graph/explain", NULL, RM_EXACT, "graph.explain", 0, rh_dispatch_op},
     {"POST", "/v1/code/audit", NULL, RM_EXACT, "code.audit", 0, rh_dispatch_op},
     {"POST", "/v1/audit/trace", NULL, RM_EXACT, "evidence.trace_retrieval_event", 0,
@@ -2453,9 +2291,6 @@ static const char *const g_v1_write_ops[] = {"memory.store",
                                              "work.complete",
                                              "work.fail",
                                              "wm.set",
-                                             "harness_memory.upsert",
-                                             "harness_memory.tombstone",
-                                             "harness_memory.tombstone_prefix",
                                              "attempt.record",
                                              "rules.delete",
                                              "collab_rules.approve",

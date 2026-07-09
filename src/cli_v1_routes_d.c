@@ -621,6 +621,7 @@ static const struct
     {"curator.contradictions", "POST", "/v1/curator/contradictions"},
     {"curator.implements", "POST", "/v1/curator/implements"},
     {"curator.invalidated", "POST", "/v1/curator/invalidated"},
+    {"curator.stages", "POST", "/v1/curator/stages"},
     {"dashboard.all", "GET", "/v1/dashboard/all"},
     {"dashboard.audit", "GET", "/v1/dashboard/audit"},
     {"dashboard.delegations", "GET", "/v1/dashboard/delegations"},
@@ -648,12 +649,6 @@ static const struct
     {"evidence.provenance_retrieval_event", "POST", "/v1/audit/provenance"},
     {"evidence.trace_retrieval_event", "POST", "/v1/audit/trace"},
     {"graph.explain", "POST", "/v1/graph/explain"},
-    {"harness_memory.get", "POST", "/v1/harness_memory/get"},
-    {"harness_memory.list", "POST", "/v1/harness_memory/list"},
-    {"harness_memory.search", "POST", "/v1/harness_memory/search"},
-    {"harness_memory.tombstone", "POST", "/v1/harness_memory/tombstone"},
-    {"harness_memory.tombstone_prefix", "POST", "/v1/harness_memory/bulk_tombstone"},
-    {"harness_memory.upsert", "POST", "/v1/harness_memory/upsert"},
     {"hooks.post", "POST", "/v1/hooks/post"},
     {"hooks.pre", "POST", "/v1/hooks/pre"},
     {"hooks.session_start", "POST", "/v1/hooks/session_start"},
@@ -708,6 +703,8 @@ static const struct
     {"provider.slot_acquire", "POST", "/v1/provider/slot_acquire"},
     {"provider.slot_release", "POST", "/v1/provider/slot_release"},
     {"provider.test", "POST", "/v1/provider/test"},
+    {"ranker.export_view", "GET", "/v1/intelligence/ranker/export-view"},
+    {"ranker.fit", "POST", "/v1/intelligence/ranker/fit"},
     {"repo.trust", "POST", "/v1/repo/trust"},
     {"rules.delete", "POST", "/v1/rules/delete"},
     {"server.health", "GET", "/v1/server/health"},
@@ -1015,23 +1012,38 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
 
    int waited = 0;
    const int step_ms = 500;
+   /* A long remote run (delegate ensembles, kb.build, index.scan, …) polls for many
+    * minutes. A single transient poll failure — a TLS/connection blip while the run
+    * is still progressing server-side — must NOT abandon it; that surfaced as the
+    * misleading "could not reach the /v1 endpoint" on long roundtables. Tolerate a
+    * bounded run of CONSECUTIVE poll failures (reset on any success) before giving
+    * up, so a momentary blip is ridden out instead of failing the whole run. */
+   int consec_fail = 0;
+   const int max_consec_fail = 20;
    for (;;)
    {
       cJSON *snap = cli_v1_send(remote, bearer, "GET", runpath, NULL, 15000, &status);
       if (!snap)
-         return NULL;
-      cJSON *st = cJSON_GetObjectItemCaseSensitive(snap, "status");
-      if (cJSON_IsString(st) &&
-          (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
-           strcmp(st->valuestring, "cancelled") == 0))
       {
-         cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
-         cJSON_Delete(snap);
-         /* Completed runs carry the raw dispatch result; a failed/empty run yields
-          * an empty object so the caller still gets a well-formed response. */
-         return result ? result : cJSON_CreateObject();
+         if (++consec_fail > max_consec_fail)
+            return NULL;
       }
-      cJSON_Delete(snap);
+      else
+      {
+         consec_fail = 0;
+         cJSON *st = cJSON_GetObjectItemCaseSensitive(snap, "status");
+         if (cJSON_IsString(st) &&
+             (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
+              strcmp(st->valuestring, "cancelled") == 0))
+         {
+            cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
+            cJSON_Delete(snap);
+            /* Completed runs carry the raw dispatch result; a failed/empty run yields
+             * an empty object so the caller still gets a well-formed response. */
+            return result ? result : cJSON_CreateObject();
+         }
+         cJSON_Delete(snap);
+      }
       if (timeout_ms > 0 && waited >= timeout_ms)
          return NULL;
       cli_v1_sleep_ms(step_ms);

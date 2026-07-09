@@ -126,6 +126,39 @@ static int check_gate_rules(const wfe_node_t *n, char *err, size_t errlen)
    return 0;
 }
 
+/* generic loop-cap params: max_iters (positive int) + on_max (pass/fail/human). */
+static int check_loop_cap(const wfe_node_t *n, char *err, size_t errlen)
+{
+   const cJSON *mi = n->params ? cJSON_GetObjectItemCaseSensitive(n->params, "max_iters") : NULL;
+   if (mi && (!cJSON_IsNumber(mi) || mi->valueint <= 0))
+   {
+      snprintf(err, errlen, "node '%s': max_iters must be a positive integer", n->id);
+      return -1;
+   }
+   const cJSON *om = n->params ? cJSON_GetObjectItemCaseSensitive(n->params, "on_max") : NULL;
+   if (om)
+   {
+      if (!cJSON_IsString(om) ||
+          (strcmp(om->valuestring, "pass") != 0 && strcmp(om->valuestring, "fail") != 0 &&
+           strcmp(om->valuestring, "human") != 0))
+      {
+         snprintf(err, errlen, "node '%s': on_max must be one of \"pass\", \"fail\", \"human\"",
+                  n->id);
+         return -1;
+      }
+      /* on_max:pass routes forward as if advanced (via on_pass, else next); require
+       * a forward edge so the forced-pass path never resolves to an empty target. */
+      if (strcmp(om->valuestring, "pass") == 0 && !n->on_pass[0] && !n->next[0])
+      {
+         snprintf(err, errlen,
+                  "node '%s': on_max:pass requires an on_pass or next edge to route forward",
+                  n->id);
+         return -1;
+      }
+   }
+   return 0;
+}
+
 /* control-edge target must exist (dangling check). */
 static int check_edge(const wfe_def_t *def, const wfe_node_t *n, const char *edge,
                       const char *label, char *err, size_t errlen)
@@ -220,6 +253,8 @@ int wfe_def_validate(const wfe_def_t *def, char *err, size_t errlen)
       if (check_inputs(def, n, err, errlen) != 0)
          return -1;
       if (check_gate_rules(n, err, errlen) != 0)
+         return -1;
+      if (check_loop_cap(n, err, errlen) != 0)
          return -1;
       if (check_edge(def, n, n->next, "next", err, errlen) != 0)
          return -1;

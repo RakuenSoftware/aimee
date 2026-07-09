@@ -862,6 +862,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return json_copy_response(out_buf, out_cap, json);
    }
 
+   if (strcmp(path, "/v1/intelligence/ranker/export-view") == 0)
+   {
+      if (strcmp(method, "GET") != 0)
+         return json_body_error(out_buf, out_cap, 405, "method not allowed");
+      cJSON *resp = kb_intel_ranker_export_view_response();
+      char *json = resp ? cJSON_PrintUnformatted(resp) : NULL;
+      cJSON_Delete(resp);
+      return json_copy_response(out_buf, out_cap, json);
+   }
+
+   if (strcmp(path, "/v1/intelligence/ranker/fit") == 0)
+      return strcmp(method, "POST") == 0
+                 ? kb_intel_ranker_fit_http(body, body_len, out_buf, out_cap)
+                 : json_body_error(out_buf, out_cap, 405, "method not allowed");
+
    if (strcmp(path, "/v1/intelligence/bandit/export") == 0)
    {
       if (strcmp(method, "GET") != 0)
@@ -1186,13 +1201,30 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                score_s[i] = '\0';
             }
 
+            /* doc_id keys the row to its feature_rows for the learning-to-rank
+             * outcome capture; additive, existing consumers ignore it. */
+            char doc_id_s[32] = "0";
+            const char *di = strstr(rp, "\"doc_id\":");
+            if (di && di < obj_end)
+            {
+               di += 9;
+               while (*di == ' ')
+                  di++;
+               size_t i = 0;
+               while (i < sizeof(doc_id_s) - 1 && ((*di >= '0' && *di <= '9') || *di == '-'))
+                  doc_id_s[i++] = *di++;
+               doc_id_s[i] = '\0';
+               if (!doc_id_s[0])
+                  doc_id_s[0] = '0', doc_id_s[1] = '\0';
+            }
+
             if (hit_count > 0)
                out_buf[pos++] = ',';
             pos = js_appendf(out_buf, pos, out_cap, "{\"artifact_id\":\"");
             pos = json_escape(fp, out_buf, pos, out_cap);
             pos = js_appendf(out_buf, pos, out_cap,
-                             "\",\"score\":%s,\"kind\":\"doc_chunk\",\"excerpt\":\"",
-                             score_s[0] ? score_s : "0.0");
+                             "\",\"score\":%s,\"doc_id\":%s,\"kind\":\"doc_chunk\",\"excerpt\":\"",
+                             score_s[0] ? score_s : "0.0", doc_id_s);
             pos = json_escape(content, out_buf, pos, out_cap);
             pos = js_appendf(out_buf, pos, out_cap, "\",\"citations\":[]}");
             hit_count++;

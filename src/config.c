@@ -310,6 +310,7 @@ static const config_schema_entry_t config_schema[] = {
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
     {"provider", SCHEMA_STRING, 0},
+    {"default_persona", SCHEMA_STRING, 0},
     {"use_builtin_cli", SCHEMA_BOOL, 0},
     {"claude_model", SCHEMA_STRING, 0},
     {"codex_model", SCHEMA_STRING, 0},
@@ -628,14 +629,13 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
             "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
-   /* The LLM-backed memory features (typed-fact extract/inject + HyDE query
-    * rewrite) default OFF here; config_apply_inference_backend_defaults() below
-    * flips them ON when the active inference model is an accelerated backend
-    * (external model or a larger local model) rather than the CPU-only Gemma
-    * E4B/E2B fallback, which is too slow for per-turn LLM work. An explicit
-    * value in the config always wins. HyDE mode defaults on so the rewrite, once
-    * enabled, generates a hypothetical answer. */
-   cfg->typed_facts_enabled = 0;
+   /* Typed-fact extraction runs fully OFFLINE (the memory_facts drain), so it costs
+    * nothing per turn and defaults ON on every backend -- including the CPU-only
+    * Gemma E4B/E2B fallback. HyDE query rewrite is still per-turn LLM work, so it
+    * defaults OFF here and config_apply_inference_backend_defaults() flips it ON only
+    * for an accelerated backend. An explicit config value always wins. HyDE mode
+    * defaults on so the rewrite, once enabled, generates a hypothetical answer. */
+   cfg->typed_facts_enabled = 1;
    cfg->memory_rewrite_enabled = 0;
    cfg->memory_rewrite_hyde = 1;
    /* Replayable-evidence roundtable verification (Part A): default-on. config_t
@@ -766,7 +766,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->kb_mining_enabled = 1;
    cfg->kb_mining_min_poll_s = 300;
    cfg->kb_mining_failure_learning_enabled = 0;
-   cfg->review_scheduler_enabled = 0;
+   cfg->review_scheduler_enabled = 1; /* default on: idle reflection over session_summary
+                                       * artifacts. Cheap when idle; the LLM synthesis pass only
+                                       * runs where a Tier-B provider/command is configured. */
    cfg->review_idle_trigger_minutes = 30;
    cfg->review_session_cooldown_hours = 24;
    cfg->concurrency_preempt_single_slot_only = 1;
@@ -796,9 +798,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->audit_action_enabled = 1;    /* default-ON: the trajectory_export reader (S3)
                                         shipped, so the passive per-action audit row
                                         is on by default; set false to opt out */
-   cfg->memory_md_retire = 1;        /* default-ON: agent file-memory is retired into
-                                        aimee (no local .md mirrors); set false for
-                                        the legacy re-materialized .md behavior */
    snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty
@@ -811,7 +810,8 @@ static void config_set_defaults(config_t *cfg)
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
-   cfg->roundtable_max_rounds = 3;
+   snprintf(cfg->default_persona, sizeof(cfg->default_persona), "engineer");
+   cfg->roundtable_max_rounds = 1;
    cfg->roundtable_converge_threshold = 10;
    /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
     * ensemble, short enough that a wedged run fails fast instead of a 10-min
@@ -866,15 +866,9 @@ static int model_is_cpu_only(const char *model)
 static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *root)
 {
    int accel = !model_is_cpu_only(cfg->kb_curator_provider_model);
-   /* typed_facts_enabled is now KB-owned (kb.typed_facts.enabled). Only apply the
-    * accel-derived default when it is set by NEITHER the KB section nor the legacy
-    * root key — otherwise this would clobber the operator's explicit value. */
-   const cJSON *kb = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "kb");
-   const cJSON *kb_tf = kb ? cJSON_GetObjectItemCaseSensitive(kb, "typed_facts") : NULL;
-   int tf_explicit = cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled") ||
-                     (kb_tf && cJSON_GetObjectItemCaseSensitive(kb_tf, "enabled"));
-   if (!tf_explicit)
-      cfg->typed_facts_enabled = accel;
+   /* typed_facts_enabled now defaults ON unconditionally (offline extraction, see
+    * config_reset); the backend gate below governs only the per-turn HyDE rewrite.
+    * An explicit kb.typed_facts.enabled / typed_facts_enabled still wins via parse. */
    if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite") &&
        !cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite_enabled"))
       cfg->memory_rewrite_enabled = accel;
@@ -1044,6 +1038,10 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->provider, sizeof(cfg->provider), "%s", item->valuestring);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "default_persona");
+   if (cJSON_IsString(item) && item->valuestring[0])
+      snprintf(cfg->default_persona, sizeof(cfg->default_persona), "%s", item->valuestring);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "openai_endpoint");
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->openai_endpoint, sizeof(cfg->openai_endpoint), "%s", item->valuestring);
@@ -1135,10 +1133,6 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "audit_worm_enabled");
    if (cJSON_IsBool(item))
       cfg->audit_worm_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "memory_md_retire");
-   if (cJSON_IsBool(item))
-      cfg->memory_md_retire = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "css_render_command");
    if (cJSON_IsString(item) && item->valuestring)
@@ -1274,6 +1268,7 @@ int config_load_file(config_t *cfg)
    config_apply_bandit_settings(cfg, root);
    config_apply_planner_settings(cfg, root);
    config_apply_mdl_settings(cfg, root);
+   config_apply_review_settings(cfg, root);
 
    cJSON *ws = cJSON_GetObjectItemCaseSensitive(root, "workspaces");
    if (cJSON_IsArray(ws))

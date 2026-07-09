@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "cJSON.h"
+#include "config_learning.h"
 #include "config_database.h"
 #include "config_sections.h"
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
@@ -49,6 +50,8 @@ int main(void)
       /* kb.typed_facts.* autonomous reconciliation defaults (§7.2/§8). */
       assert(cfg.kb_typed_facts_auto_promote_enabled == 1);
       assert(cfg.kb_typed_facts_promote_threshold == 3);
+      /* Typed-fact extraction is offline, so it defaults ON on every backend. */
+      assert(cfg.typed_facts_enabled == 1);
       assert(strcmp(cfg.guardrail_mode, "approve") == 0);
       /* §5 hybrid RRF weights + rank constant default to equal weights / k=60,
        * and the §7 blast-radius advisory is opt-in (off). */
@@ -113,6 +116,7 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
       snprintf(cfg.provider, sizeof(cfg.provider), "gemini");
+      snprintf(cfg.default_persona, sizeof(cfg.default_persona), "architect");
       snprintf(cfg.claude_model, sizeof(cfg.claude_model), "claude-sonnet-4-6");
       snprintf(cfg.codex_model, sizeof(cfg.codex_model), "gpt-5.4");
       snprintf(cfg.model_reasoning_effort, sizeof(cfg.model_reasoning_effort), "high");
@@ -358,6 +362,7 @@ int main(void)
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
       assert(strcmp(cfg2.provider, "gemini") == 0);
+      assert(strcmp(cfg2.default_persona, "architect") == 0);
       assert(strcmp(cfg2.claude_model, "claude-sonnet-4-6") == 0);
       assert(strcmp(cfg2.codex_model, "gpt-5.4") == 0);
       assert(strcmp(cfg2.model_reasoning_effort, "high") == 0);
@@ -1955,6 +1960,98 @@ int main(void)
       }
       else
          platform_unsetenv("AIMEE_DB2_URL");
+   }
+
+   /* learning.review.* config parser (idle-reflection scheduler knobs). */
+   {
+      /* All four fields overridden, incl. cooldown=0 (disables cooldown). */
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.review_scheduler_enabled = 1; /* seed the config.c defaults */
+      cfg.review_idle_trigger_minutes = 30;
+      cfg.review_session_cooldown_hours = 24;
+      cfg.review_batch_cap = 10;
+      cJSON *root = cJSON_Parse("{\"learning\":{\"review\":{\"scheduler_enabled\":0,"
+                                "\"idle_trigger_minutes\":5,\"session_cooldown_hours\":0,"
+                                "\"batch_cap\":3}}}");
+      assert(root);
+      config_apply_review_settings(&cfg, root);
+      assert(cfg.review_scheduler_enabled == 0);
+      assert(cfg.review_idle_trigger_minutes == 5);
+      assert(cfg.review_session_cooldown_hours == 0); /* 0 disables the cooldown */
+      assert(cfg.review_batch_cap == 3);
+      cJSON_Delete(root);
+
+      /* Absent 'review' object leaves all four defaults intact. */
+      config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      cfg2.review_scheduler_enabled = 1;
+      cfg2.review_idle_trigger_minutes = 30;
+      cfg2.review_session_cooldown_hours = 24;
+      cfg2.review_batch_cap = 10;
+      cJSON *no_review = cJSON_Parse("{\"learning\":{}}");
+      assert(no_review);
+      config_apply_review_settings(&cfg2, no_review);
+      assert(cfg2.review_scheduler_enabled == 1 && cfg2.review_idle_trigger_minutes == 30 &&
+             cfg2.review_session_cooldown_hours == 24 && cfg2.review_batch_cap == 10);
+      cJSON_Delete(no_review);
+
+      /* Missing 'learning' key entirely, and NULL root: early return, no change,
+       * no crash. */
+      config_t cfg3;
+      memset(&cfg3, 0, sizeof(cfg3));
+      cfg3.review_scheduler_enabled = 1;
+      cfg3.review_idle_trigger_minutes = 30;
+      cfg3.review_session_cooldown_hours = 24;
+      cfg3.review_batch_cap = 10;
+      cJSON *empty = cJSON_Parse("{}");
+      assert(empty);
+      config_apply_review_settings(&cfg3, empty);
+      config_apply_review_settings(&cfg3, NULL);
+      assert(cfg3.review_scheduler_enabled == 1 && cfg3.review_idle_trigger_minutes == 30 &&
+             cfg3.review_session_cooldown_hours == 24 && cfg3.review_batch_cap == 10);
+      cJSON_Delete(empty);
+
+      /* Robustness: scheduler_enabled normalises to 0/1; fractional/zero positive
+       * knobs are rejected (leave defaults); a partial override touches only its
+       * own field. */
+      config_t cfg4;
+      memset(&cfg4, 0, sizeof(cfg4));
+      cfg4.review_scheduler_enabled = 0;
+      cfg4.review_idle_trigger_minutes = 30;
+      cfg4.review_session_cooldown_hours = 24;
+      cfg4.review_batch_cap = 10;
+      cJSON *robust = cJSON_Parse(
+          "{\"learning\":{\"review\":{\"scheduler_enabled\":5,\"idle_trigger_minutes\":30.5,"
+          "\"session_cooldown_hours\":0.5,\"batch_cap\":0}}}");
+      assert(robust);
+      config_apply_review_settings(&cfg4, robust);
+      assert(cfg4.review_scheduler_enabled == 1);     /* 5 normalised to 1 */
+      assert(cfg4.review_idle_trigger_minutes == 30); /* 30.5 not integer -> rejected */
+      assert(cfg4.review_session_cooldown_hours ==
+             24);                          /* 0.5h not integer, != disable -> rejected */
+      assert(cfg4.review_batch_cap == 10); /* 0 rejected */
+      cJSON_Delete(robust);
+
+      /* An explicit whole-number 0 still disables the cooldown. */
+      config_t cfg4b;
+      memset(&cfg4b, 0, sizeof(cfg4b));
+      cfg4b.review_session_cooldown_hours = 24;
+      cJSON *disable = cJSON_Parse("{\"learning\":{\"review\":{\"session_cooldown_hours\":0}}}");
+      assert(disable);
+      config_apply_review_settings(&cfg4b, disable);
+      assert(cfg4b.review_session_cooldown_hours == 0);
+      cJSON_Delete(disable);
+
+      config_t cfg5;
+      memset(&cfg5, 0, sizeof(cfg5));
+      cfg5.review_scheduler_enabled = 1;
+      cfg5.review_batch_cap = 10;
+      cJSON *partial = cJSON_Parse("{\"learning\":{\"review\":{\"batch_cap\":7}}}");
+      assert(partial);
+      config_apply_review_settings(&cfg5, partial);
+      assert(cfg5.review_batch_cap == 7 && cfg5.review_scheduler_enabled == 1);
+      cJSON_Delete(partial);
    }
 
    /* AIMEE_EMBEDDING_DIM env override (config_resolve_embedding_dim) */

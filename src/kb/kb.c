@@ -1891,6 +1891,11 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
       dstr_append_str(&out, "\",\"score\":");
       snprintf(num, sizeof(num), "%.6f", merged[i].score);
       dstr_append_str(&out, num);
+      /* doc_id keys the row to its feature_rows — needed by the learning-to-rank
+       * outcome capture (the file_path-keyed http `hits` shape lacks it). */
+      dstr_append_str(&out, ",\"doc_id\":");
+      snprintf(num, sizeof(num), "%lld", (long long)merged[i].doc_id);
+      dstr_append_str(&out, num);
       dstr_append_str(&out, "}");
    }
    dstr_append_str(&out, "]}");
@@ -1964,6 +1969,11 @@ char *kb_search_json_ex(const char *project, const char *query, const char *embe
       kb_json_append_escaped(&out, merged[i].content);
       dstr_append_str(&out, "\",\"score\":");
       snprintf(num, sizeof(num), "%.6f", merged[i].score);
+      dstr_append_str(&out, num);
+      /* doc_id keys the row to its feature_rows — needed by the learning-to-rank
+       * outcome capture (the file_path-keyed http `hits` shape lacks it). */
+      dstr_append_str(&out, ",\"doc_id\":");
+      snprintf(num, sizeof(num), "%lld", (long long)merged[i].doc_id);
       dstr_append_str(&out, num);
       dstr_append_str(&out, "}");
    }

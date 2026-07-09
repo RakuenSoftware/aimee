@@ -51,6 +51,11 @@ void agent_tools_set_snap_id(int64_t id)
 }
 _Thread_local static char g_parent_ro_root[MAX_PATH_LEN] = {0};
 _Thread_local static char g_parent_write_root[MAX_PATH_LEN] = {0};
+/* Backend-agnostic read-only-delegate gate. 1 = writes permitted (the default,
+ * so primary sessions and any non-delegate caller are unaffected); 0 = this
+ * delegate is not write-capable and ALL file writes are refused. Set per
+ * delegation from the delegate's write policy; reset on guard clear. */
+_Thread_local static int g_write_capable = 1;
 
 static int agent_tools_path_under_root(const char *path, const char *root)
 {
@@ -105,6 +110,17 @@ void agent_tools_parent_write_guard_clear(void)
 {
    g_parent_ro_root[0] = '\0';
    g_parent_write_root[0] = '\0';
+   g_write_capable = 1;
+}
+
+void agent_tools_write_capable_set(int capable)
+{
+   g_write_capable = capable ? 1 : 0;
+}
+
+int agent_tools_readonly_delegate_blocks(void)
+{
+   return !g_write_capable;
 }
 
 const char *agent_tools_parent_write_guard_root(void)

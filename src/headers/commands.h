@@ -75,6 +75,10 @@ int cmd_workspace_serve(const char *workspace_id);
 void cmd_db(app_ctx_t *ctx, int argc, char **argv);
 void cmd_session(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_session_subcmds(void);
+/* cmd_ensemble.c — multi-agent ensemble sessions (canonical `ensemble` verb;
+ * the same session_subcmd_* handlers stay reachable under `session` as aliases) */
+void cmd_ensemble(app_ctx_t *ctx, int argc, char **argv);
+const subcmd_t *get_ensemble_subcmds(void);
 /* cmd_session_history.c */
 void session_subcmd_show(app_ctx_t *ctx, int argc, char **argv);
 void session_subcmd_search(app_ctx_t *ctx, int argc, char **argv);

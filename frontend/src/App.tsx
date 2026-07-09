@@ -9,12 +9,20 @@ import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
 import Agents from './pages/Agents';
 import Personas from './pages/Personas';
+import Roles from './pages/Roles';
+import Pipeline from './pages/Pipeline';
 import Settings from './pages/Settings';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
 import Editor from './pages/Editor';
 import { SessionProvider, useSessions } from './SessionContext';
 import SettingsPanel from './components/SettingsPanel';
+import TabTutorial from './components/TabTutorial';
+import SetupChip from './components/SetupChip';
+import SetupWizard from './components/SetupWizard';
+import SilentBoundary from './components/SilentBoundary';
+import { OPEN_WIZARD_EVENT } from './setup/setupState';
+import { NAV_ITEMS } from './nav';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -62,21 +70,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     return this.props.children;
   }
 }
-
-type Tab = { label: string; icon: string; route: string };
-const NAV_ITEMS: Tab[] = [
-  { label: 'Chat', icon: '💬', route: '/chat' },
-  { label: 'Dashboard', icon: '📊', route: '/dashboard' },
-  { label: 'Logs', icon: '📜', route: '/logs' },
-  { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows' },
-  { label: 'Workflow Actions', icon: '📝', route: '/workflow-actions' },
-  { label: 'Agents', icon: '🤝', route: '/agents' },
-  { label: 'Personas', icon: '🎭', route: '/personas' },
-  { label: 'Projects', icon: '📁', route: '/projects' },
-  { label: 'Graph', icon: '🕸️', route: '/graph' },
-  { label: 'Editor', icon: '🖥️', route: '/editor' },
-  { label: 'Settings', icon: '⚙️', route: '/settings' },
-];
 
 /* Top bar: one tab per session. A session bundles a chat + the project it runs
  * in; every tool operates on the active session's project. */
@@ -170,7 +163,15 @@ function LogoutButton() {
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const location = useLocation();
+
+  // The setup chip / "Re-run setup" dispatch this event to open the wizard.
+  useEffect(() => {
+    const openWizard = () => setWizardOpen(true);
+    window.addEventListener(OPEN_WIZARD_EVENT, openWizard);
+    return () => window.removeEventListener(OPEN_WIZARD_EVENT, openWizard);
+  }, []);
 
   useEffect(() => {
     fetch('/api/chat/session')
@@ -210,6 +211,7 @@ export default function App() {
         >
           <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18 }}>aimee</span>
           <SessionTabBar />
+          <SilentBoundary><SetupChip /></SilentBoundary>
           <SettingsPanel />
           <LogoutButton />
         </header>
@@ -237,8 +239,10 @@ export default function App() {
               </NavLink>
             ))}
           </nav>
-          {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve. */}
-          <main style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+          {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve.
+           * position:relative anchors the per-tab tutorial overlay/"?" button. */}
+          <main style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+            <SilentBoundary><TabTutorial route={location.pathname} /></SilentBoundary>
             <ErrorBoundary key={location.pathname}>
               <Routes>
                 <Route path="/chat" element={<Chat />} />
@@ -249,6 +253,8 @@ export default function App() {
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/delegates" element={<Navigate to="/agents" replace />} />
                 <Route path="/personas" element={<Personas />} />
+                <Route path="/roles" element={<Roles />} />
+                <Route path="/pipeline" element={<Pipeline />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />
@@ -259,6 +265,7 @@ export default function App() {
           </main>
         </div>
       </div>
+      <SilentBoundary><SetupWizard open={wizardOpen} onClose={() => setWizardOpen(false)} /></SilentBoundary>
       <Toast />
     </SessionProvider>
   );

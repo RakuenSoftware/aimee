@@ -327,12 +327,11 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/db1_init.c
     ${AIMEE_SRC_DIR}/db1/db1_write.c
     ${AIMEE_SRC_DIR}/db1/wm.c
-    ${AIMEE_SRC_DIR}/db1/harness_memory.c
     ${AIMEE_SRC_DIR}/db1/fsnap.c
     ${AIMEE_SRC_DIR}/db1/checkpoints.c
     ${AIMEE_SRC_DIR}/db1/clarify.c
     ${AIMEE_SRC_DIR}/db1/diagnose.c
-    ${AIMEE_SRC_DIR}/db1/workflow_session.c
+    ${AIMEE_SRC_DIR}/db1/ensemble.c
     ${AIMEE_SRC_DIR}/db1/caches.c
     ${AIMEE_SRC_DIR}/db1/primary_sessions.c
     ${AIMEE_SRC_DIR}/db1/webchat_claude_sessions.c
@@ -725,7 +724,7 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_session_history.c
     ${AIMEE_SRC_DIR}/cmd_capabilities.c
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
-    ${AIMEE_SRC_DIR}/cmd_session_workflow.c
+    ${AIMEE_SRC_DIR}/cmd_ensemble.c
     ${AIMEE_SRC_DIR}/cmd_memory.c
     ${AIMEE_SRC_DIR}/cmd_memory_core.c
     ${AIMEE_SRC_DIR}/cmd_memory_curiosity.c
@@ -790,12 +789,10 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
-    ${AIMEE_SRC_DIR}/harness_memory_hydrate.c
-    ${AIMEE_SRC_DIR}/harness_memory_watch.c
-    # hydrate calls hmem_resolve_project/_scope_for_client/_spill_dir/_audit; the
-    # standalone `aimee` CLI does not link aimee-core, so their definers must build
-    # into the CLI directly (the make build links them via L_CLIENT). Without these
-    # the macOS/Windows CMake link fails with undefined hmem_* symbols.
+    # memory_redirect_check (the CLI's remote-only hooks-pre interception) calls
+    # hmem_resolve_project/_scope_for_client/_audit/_spill; the standalone `aimee`
+    # CLI does not link aimee-core, so their definers must build into the CLI
+    # directly. Without these the macOS/Windows CMake link fails undefined hmem_*.
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
     # cli_main's remote-only hooks-pre path calls memory_redirect_check; the CLI
@@ -879,7 +876,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_state_index.c
-    ${AIMEE_SRC_DIR}/server/harness_memory_routes.c
     ${AIMEE_SRC_DIR}/server/server_plugin.c
     ${AIMEE_SRC_DIR}/server/server_work.c
     ${AIMEE_SRC_DIR}/server/server_delegate_monitor.c
@@ -904,7 +900,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_mcp_process.c
     ${AIMEE_SRC_DIR}/server/server_mcp_skill.c
     ${AIMEE_SRC_DIR}/server/server_mcp_learning.c
-    ${AIMEE_SRC_DIR}/server/server_mcp_workflows.c
+    ${AIMEE_SRC_DIR}/server/server_mcp_ensemble.c
     ${AIMEE_SRC_DIR}/server/server_workflow_api.c
     ${AIMEE_SRC_DIR}/server/server_mcp_gateway.c
     ${AIMEE_SRC_DIR}/server/session_search_tool.c

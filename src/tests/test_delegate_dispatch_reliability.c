@@ -1,8 +1,7 @@
 /* test_delegate_dispatch_reliability.c: unit tests for delegate dispatch
  * reliability improvements (Phase 2):
  *   1. delegate_extract_named_paths — multi-file scope detection
- *   2. delegate_inject_code_context — context injection via code index
- *   3. write_enforce.h threshold constants */
+ *   2. delegate_inject_code_context — context injection via code index */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +11,6 @@
 
 #include "cmd_agent_delegate_impl.h"
 #include "index.h"
-#include "write_enforce.h"
 
 /* ── stub: kb_client_index_code_search ──────────────────────────────────── */
 
@@ -275,25 +273,6 @@ static void test_worktree_has_changes_nonexistent_path(void)
    printf("  PASS: test_worktree_has_changes_nonexistent_path\n");
 }
 
-/* ── 4. write_enforce threshold constant tests ─────────────────────────── */
-
-static void test_write_enforce_thresholds(void)
-{
-   /* soft warn at end of turn 5 (0-indexed: turn 4) */
-   assert(WRITE_ENFORCE_WARN_TURN == 4);
-   /* strong warn at end of turn 10 (0-indexed: turn 9) */
-   assert(WRITE_ENFORCE_STRONG_WARN_TURN == 9);
-   /* final warn — one turn before the abort */
-   assert(WRITE_ENFORCE_FINAL_WARN_TURN == 13);
-   /* failure at end of turn 15 (0-indexed: turn 14) */
-   assert(WRITE_ENFORCE_FAIL_TURN == 14);
-   /* ordering invariant */
-   assert(WRITE_ENFORCE_WARN_TURN < WRITE_ENFORCE_STRONG_WARN_TURN);
-   assert(WRITE_ENFORCE_STRONG_WARN_TURN < WRITE_ENFORCE_FINAL_WARN_TURN);
-   assert(WRITE_ENFORCE_FINAL_WARN_TURN < WRITE_ENFORCE_FAIL_TURN);
-   printf("  PASS: test_write_enforce_thresholds\n");
-}
-
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -317,8 +296,6 @@ int main(void)
 
    test_worktree_has_changes_empty_input();
    test_worktree_has_changes_nonexistent_path();
-
-   test_write_enforce_thresholds();
 
    printf("ok\n");
    return 0;

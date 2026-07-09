@@ -1137,30 +1137,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /harness_memory/upsert:
-    post:
-      summary: Upsert an intercepted harness-memory entry (canonical (project,name) row)
-      responses: { "200": { description: Upsert result, content: { application/json: { schema: { type: object } } } } }
-  /harness_memory/get:
-    post:
-      summary: Fetch one live harness-memory entry by (project,name)
-      responses: { "200": { description: Memory entry or not-found, content: { application/json: { schema: { type: object } } } } }
-  /harness_memory/list:
-    post:
-      summary: List harness-memory entries for a project
-      responses: { "200": { description: Memory list, content: { application/json: { schema: { type: object } } } } }
-  /harness_memory/search:
-    post:
-      summary: Substring-search a project's harness-memory entries
-      responses: { "200": { description: Search results, content: { application/json: { schema: { type: object } } } } }
-  /harness_memory/tombstone:
-    post:
-      summary: Tombstone one harness-memory entry
-      responses: { "200": { description: Tombstone result, content: { application/json: { schema: { type: object } } } } }
-  /harness_memory/bulk_tombstone:
-    post:
-      summary: Bulk-tombstone harness-memory entries under a name prefix
-      responses: { "200": { description: Bulk tombstone result, content: { application/json: { schema: { type: object } } } } }
   /memory/recall:
     post:
       summary: Recall relevant memories (proxied to aimee-kb)
@@ -2384,6 +2360,15 @@ paths:
     get:
       summary: Demotion dry-run report
       responses: { "200": { description: Demotion check, content: { application/json: { schema: { type: object } } } } }
+  /intelligence/ranker/export-view:
+    get:
+      summary: Export the learning-to-rank training view + wiring-gap diagnostic
+      responses: { "200": { description: Ranker training view, content: { application/json: { schema: { type: object } } } } }
+  /intelligence/ranker/fit:
+    post:
+      summary: Fit + benchmark-gate the KB-hybrid ranker model
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Ranker fit report, content: { application/json: { schema: { type: object } } } } }
   /identity/show:
     get:
       summary: Show current identity
@@ -2432,6 +2417,11 @@ paths:
       summary: Curator invalidated claims
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Invalidated, content: { application/json: { schema: { type: object } } } } }
+  /curator/stages:
+    post:
+      summary: Curator pipeline stage registry (name/label/lane/order/config_key) for the GUI
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Stage registry, content: { application/json: { schema: { type: object } } } } }
   /graph/explain:
     post:
       summary: Explain a graph relationship

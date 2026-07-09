@@ -213,6 +213,7 @@ CFG_KEY_DESC = {
     "learning_implicit_citation_repair": "Implicit-learning signal: citation on repair.",
     "learning_implicit_repeat_question": "Implicit-learning signal: repeated question.",
     "learning_implicit_repeated_correction": "Implicit-learning signal: repeated correction.",
+    "learning_implicit_retrieval_outcome": "Bridge continuation/repair autolabels into retrieval outcomes (memory + ranker).",
     "learning_implicit_workflow_repetition": "Implicit-learning signal: workflow repetition.",
     "learning_max_commits_per_week": "Cap on learning-derived commits per week.",
     "learning_proposal_ttl_days": "TTL (days) for learning proposals.",
@@ -259,6 +260,7 @@ CFG_KEY_DESC = {
     "openai_key_cmd": "Command that prints the OpenAI API key.",
     "openai_model": "OpenAI model name.",
     "provider": "Default model provider.",
+    "default_persona": "Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer').",
     "reasoning_cap_enabled": "Cap the model's reasoning effort.",
     "typed_facts_enabled": "Enable the typed-fact knowledge layer (master gate; default off).",
     "audit_worm_enabled": "Dual-write governed-action audit rows into the append-only, "
@@ -487,7 +489,7 @@ ENV_DESC = {
     "AIMEE_GUARDRAILS_PATH": ("Paths & assets", "Path to the guardrails policy file."),
     "AIMEE_FORENSICS_DIR": ("Paths & assets", "Directory for shutdown-forensics dumps."),
     "AIMEE_PACK_DIR": ("Paths & assets", "Directory of memory profile packs."),
-    "AIMEE_HARNESS_MEMORY_SCOPES": ("Paths & assets", "Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory interception/hydration."),
+    "AIMEE_HARNESS_MEMORY_SCOPES": ("Paths & assets", "Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1)."),
     "AIMEE_WORKSPACES_DIR": ("Paths & assets", "Root directory for mirrored/registered workspaces."),
     "AIMEE_MODELS_DEV_SNAPSHOT": ("Paths & assets", "Path to an offline models.dev catalog snapshot."),
     # Client & session
@@ -789,9 +791,9 @@ def parse_block_catalog():
 
 
 def parse_engine_consts():
-    eng = (SRC / "workflow" / "wfe_engine.c").read_text(encoding="utf-8")
+    dfn = (SRC / "workflow" / "wfe_def.h").read_text(encoding="utf-8")
     auto = (SRC / "workflow" / "wfe_autonomy.h").read_text(encoding="utf-8")
-    att = re.search(r'#define\s+WFE_MAX_ATTEMPTS\s+(\d+)', eng)
+    att = re.search(r'#define\s+WFE_DEFAULT_MAX_ITERS\s+(\d+)', dfn)
     ovr = re.search(r'#define\s+WFE_MAX_OVERRIDES\s+(\d+)', auto)
     return (att.group(1) if att else "?"), (ovr.group(1) if ovr else "?")
 
@@ -861,9 +863,10 @@ def render_workflow(catalog, consts):
         "",
         "### Run-level controls (not in the definition)",
         "",
-        f"- **Per-stage loop cap** — a gate that loops back via `on_fail` is retried "
-        f"at most `{max_att}` times (`WFE_MAX_ATTEMPTS`) before the run parks; fixed, "
-        "not configurable.",
+        f"- **Per-stage loop cap** — a node that loops back via `on_fail` is retried at "
+        f"most `max_iters` times (per-node param, default `{max_att}`); on the cap its "
+        f"`on_max` policy resolves the loop: `human` parks (default), `fail` is a "
+        f"terminal reject, `pass` forces the flow forward via `on_pass`/`next`.",
         f"- **Gate-override cap** — a parked human gate may be overridden at most "
         f"`{max_ovr}` times (`WFE_MAX_OVERRIDES`) before the run is forced terminal.",
         "- **Cost cap** — an optional per-work-item USD ceiling set at run creation "

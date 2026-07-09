@@ -289,19 +289,21 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
 }
 /* Default forge open: integration-gated (the live provider — git push + gh pr
  * create — is registered by the server). Fail closed here so pr.open re-loops. */
-static int live_open(const char *repo, const char *branch, const char *title, const char *body,
-                     char out_pr_ref[128])
+static int live_open(const char *repo, const char *branch, const char *base, const char *title,
+                     const char *body, char out_pr_ref[128])
 {
    (void)repo;
    (void)branch;
+   (void)base;
    (void)title;
    (void)body;
    if (out_pr_ref)
       out_pr_ref[0] = '\0';
    return -1;
 }
-static const wfe_forge_t LIVE_FORGE = {live_ci_status, live_mergeable, live_is_merged, live_merge,
-                                       live_open};
+static const wfe_forge_t LIVE_FORGE = {
+    live_ci_status, live_mergeable, live_is_merged,
+    live_merge,     live_open,      NULL /* publish_base: live provider registers it */};
 static const wfe_forge_t *g_forge = &LIVE_FORGE;
 
 void wfe_set_forge_provider(const wfe_forge_t *p)
@@ -767,15 +769,48 @@ static int pr_ref_is_sane(const char *ref)
    return 1;
 }
 
+/* The durable feature branch for a run: aimee/feat/<work_item_id>. A slice child's
+ * sub-PR targets its PARENT's feature branch, so the caller passes the id whose
+ * feature branch it wants (the parent id for a child; the run's own id for the
+ * parent's branch.open). */
+static void feature_branch_name(const char *wi_id, char *buf, size_t n)
+{
+   snprintf(buf, n, "aimee/feat/%s", (wi_id && wi_id[0]) ? wi_id : "orphan");
+}
+
+/* Resolve a pr.open node's target base branch into `buf`. params.base:
+ *   "feature" -> the parent feature branch aimee/feat/<parent_id> (a slice sub-PR
+ *                merges INTO the feature branch); requires the run to have a parent.
+ *   "default"/absent -> the autonomous base (a top-level / final PR).
+ * Returns 0 on success, -1 if a feature base was requested but the run has no parent
+ * (a misconfiguration -> the caller fails closed). */
+static int resolve_pr_base(wfe_ctx *ctx, const wfe_node_t *node, char *buf, size_t n)
+{
+   const cJSON *b = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "base") : NULL;
+   const char *base_kind = (b && cJSON_IsString(b) && b->valuestring) ? b->valuestring : "default";
+   if (strcmp(base_kind, "feature") == 0)
+   {
+      const char *wi = wfe_ctx_work_item(ctx);
+      db1_work_item_t row;
+      if (!wi || !wi[0] || db1_work_item_get(wi, &row) != 1 || !row.parent_id[0])
+         return -1; /* base:feature outside a slice child -> misconfig */
+      feature_branch_name(row.parent_id, buf, n);
+      return 0;
+   }
+   const char *ab = wfe_autonomous_base();
+   snprintf(buf, n, "%s", (ab && ab[0]) ? ab : "");
+   return buf[0] ? 0 : -1;
+}
+
 static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   /* Safety rail: an autonomous PR may only target the configured non-protected
-    * base (default testing). Refuse a misconfiguration to main/master/release* —
-    * fail closed so the run stops rather than opening a PR against a protected
-    * branch. */
-   if (!wfe_autonomous_target_ok())
+   /* Resolve the target base (autonomous base, or the parent feature branch for a
+    * slice sub-PR). Safety rail: refuse a base that resolves to a protected branch
+    * (main/master/release*) -> fail closed rather than open a PR against it. */
+   char base[256] = "";
+   if (resolve_pr_base(ctx, node, base, sizeof base) != 0 || wfe_base_is_protected(base))
       return wfe_step_failed();
    if (g_forge->open)
    {
@@ -798,7 +833,7 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
             branch = "HEAD";
       }
       char pr_ref[128] = ""; /* the forge open() contract writes up to 128 bytes */
-      if (g_forge->open(wfe_ctx_repo(ctx), branch, wfe_ctx_work_item(ctx), "", pr_ref) != 0)
+      if (g_forge->open(wfe_ctx_repo(ctx), branch, base, wfe_ctx_work_item(ctx), "", pr_ref) != 0)
          return wfe_step_looped();
       /* Fail closed on a success-with-bad-ref: advancing with no resolvable PR would
        * silently push the merge gates onto the wrong target. */
@@ -1136,25 +1171,14 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
 /* review: a READ-ONLY reviewer delegate (persona from node params `reviewer`,
  * validator-checked disjoint from the roundtable panel + producer) emits a typed
  * verdict. pass -> ADVANCED (on_pass); changes -> LOOPED (on_fail, re-delegate).
- * The re-delegate loop is bounded by the engine-owned per-stage attempt counter:
- * on exhaustion the step FAILS (terminal), never silently loops. Tool-level
- * read-only enforcement is the S2 tool-policy slice (documented residual). */
-static int review_max_iters(const wfe_node_t *node)
-{
-   const cJSON *m =
-       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "max_iters") : NULL;
-   return (m && cJSON_IsNumber(m) && m->valueint > 0) ? m->valueint : 3;
-}
-
+ * The re-delegate loop is bounded by the engine's GENERIC per-node loop cap
+ * (params.max_iters / on_max, keyed on the gate node): the engine owns the cap
+ * and its resolution, so this block no longer self-terminates. A review node
+ * that wants the historical "3 tries then terminal fail" sets max_iters:3 and
+ * on_max:fail. Tool-level read-only enforcement is the S2 tool-policy slice. */
 static wfe_step_result_t exec_review(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *wi = wfe_ctx_work_item(ctx);
-   if (wi && db1_stage_attempt_get(wi, node->id) >= review_max_iters(node))
-   {
-      db1_lifecycle_event_add(wi, node->id, "failed", "engine",
-                              "review re-delegation budget exhausted", "", 0.0);
-      return wfe_step_failed();
-   }
    const cJSON *jrev =
        node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "reviewer") : NULL;
    const char *reviewer =
@@ -1234,8 +1258,128 @@ static wfe_step_result_t exec_gate_deliver(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, "", 0.0); /* terminal: engine logs "terminal" */
 }
 
+/* branch.open: open/return the durable feature branch that the per-slice sub-PRs
+ * target and merge into. Produces the branch head SHA as its artifact (mirrors
+ * freeze/document). Creating + pushing a named durable branch is the live-forge
+ * concern (integration-gated); with no repo available it fails closed. */
+static wfe_step_result_t exec_branch_open(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
+   char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
+   if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+      return wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0);
+   /* The durable feature branch slice sub-PRs merge into: aimee/feat/<work-item>.
+    * Create it locally at HEAD (best-effort) and publish it to the forge so the base
+    * exists remotely; the live forge registers publish_base, tests/no-forge stub it
+    * (the branch name is still produced so the graph advances). */
+   const char *wi = wfe_ctx_work_item(ctx);
+   char feat[200];
+   feature_branch_name(wi, feat, sizeof feat);
+   /* Create the local branch at HEAD if absent; NO `-f`, so a re-entry never resets an
+    * existing feature branch back to base (which would discard already-merged slices).
+    * "already exists" is a harmless non-zero rc here (best-effort). */
+   const char *br[] = {"git", "-C", wd, "branch", feat, "HEAD", NULL};
+   char *o = NULL;
+   (void)safe_exec_capture(br, &o, 1 << 14);
+   free(o);
+   if (g_forge->publish_base && g_forge->publish_base(wfe_ctx_repo(ctx), feat) != 0)
+      return wfe_step_looped(); /* couldn't publish the base -> retry */
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+   /* Produce the feature branch NAME as the artifact (downstream slices derive their
+    * base from the parent linkage, not this handle, but the name records intent). */
+   return wfe_step_advanced(handle, feat, 0.0);
+}
+
+/* Child-workflow fan-out seam (see wfe_blocks.h). Default NULL -> foreach.workflow
+ * parks (no child spawned; nothing silently advances). */
+static const wfe_foreach_provider_t *g_foreach = NULL;
+
+void wfe_set_foreach_provider(const wfe_foreach_provider_t *p)
+{
+   g_foreach = p;
+}
+
+/* foreach.workflow: fan the split packets out to one child "slice" workflow each,
+ * parking until every child has merged into the feature branch. Aggregation is keyed
+ * off the DB parent<->child linkage; only SPAWNING is delegated to the seam. With no
+ * spawn provider installed (and no children yet) it parks pending_human (fail closed).
+ *   - no children yet    -> spawn (park while they run); no provider -> park
+ *   - any child FAILED    -> a slice will not merge (rejected/abandoned) -> park for a human
+ *   - all children accepted -> advance (feature branch carries every merged slice)
+ *   - else                -> children still running -> park, re-drive later
+ * Trouble always PARKS (pending_human), never a silent advance and never a hard
+ * run-fail: a human resolves the failed slice, then the run resumes. */
+static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   const char *wi = wfe_ctx_work_item(ctx);
+   int total = 0, accepted = 0, failed = 0;
+   if (wi && wi[0])
+      (void)db1_work_item_child_counts(wi, &total, &accepted, &failed);
+
+   if (total == 0)
+   {
+      /* No children spawned yet: ask the seam to fan out one per packet. */
+      if (!g_foreach || !g_foreach->spawn)
+         return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* no spawner -> fail closed */
+      const cJSON *wf =
+          node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "workflow") : NULL;
+      const char *child = (wf && cJSON_IsString(wf) && wf->valuestring) ? wf->valuestring : "slice";
+      long max_children = wfe_env_pos("AIMEE_AUTONOMY_UNIT_MAX", 16);
+      /* The split packet-plan the spawner fans out: <worktree>/.wfe-<producer>.json,
+       * where <producer> is the node bound to this foreach's `packets` input. */
+      char packets_path[1200] = "";
+      const char *producer = NULL;
+      for (int i = 0; i < node->n_ins; i++)
+         if (strcmp(node->ins[i].input_name, "packets") == 0)
+            producer = node->ins[i].producer_id;
+      if (producer && producer[0])
+      {
+         char pwd[1024];
+         resolve_workdir(ctx, pwd, sizeof pwd);
+         snprintf(packets_path, sizeof packets_path, "%s/.wfe-%s.json", pwd, producer);
+      }
+      char err[200] = "";
+      int n = g_foreach->spawn(wi, child, packets_path[0] ? packets_path : NULL, (int)max_children,
+                               err, sizeof err);
+      if (n < 0)
+         return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* could not fan out -> park */
+      if (n == 0)
+      {
+         /* no packets to slice -> nothing to do, advance past the fan-out. */
+         char handle[80];
+         snprintf(handle, sizeof handle, "%s.out", node->id);
+         return wfe_step_advanced(handle, "", 0.0);
+      }
+      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* spawned; run + re-drive */
+   }
+
+   if (failed > 0)
+      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* a slice will not merge -> park human */
+   if (accepted >= total)
+   {
+      /* every slice merged into the feature branch; its content is re-derived
+       * downstream by the acceptance freeze. */
+      char handle[80];
+      snprintf(handle, sizeof handle, "%s.out", node->id);
+      return wfe_step_advanced(handle, "", 0.0);
+   }
+   return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* slices still running -> re-drive */
+}
+
+/* Register just the foreach.workflow executor over any prior (stub) registration --
+ * lets a test drive the real fan-in aggregation while stubbing the git/delegate
+ * producing blocks. */
+void wfe_register_foreach_block(void)
+{
+   wfe_register_block_executor(WFE_BLK_FOREACH_WORKFLOW, exec_foreach_workflow);
+}
+
 void wfe_register_default_executors(void)
 {
+   wfe_register_block_executor(WFE_BLK_BRANCH_OPEN, exec_branch_open);
+   wfe_register_block_executor(WFE_BLK_FOREACH_WORKFLOW, exec_foreach_workflow);
    wfe_register_block_executor(WFE_BLK_UNDERSTAND, exec_understand);
    wfe_register_block_executor(WFE_BLK_SPLIT, exec_split);
    wfe_register_block_executor(WFE_BLK_REVIEW, exec_review);
