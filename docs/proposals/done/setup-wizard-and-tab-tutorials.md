@@ -1,6 +1,18 @@
 # Proposal: aimee-server web GUI — first-run setup wizard + per-tab tutorials
 
-- **State:** proposed (pending — not started)
+- **State:** done — shipped to `testing` across two slices. Slice 1 (per-tab tutorial
+  overlays + "?" re-opener + "Replay tutorials") and Slice 2 (client-side readiness +
+  header "Setup — N left" chip + wizard modal writing through the existing
+  `POST /api/config/set`, restart-key aware) merged via **#1147 / #1149 / #1150**. A
+  follow-up (this close-out) restores AC4 for the two tabs added after the wizard merged
+  — **Roles** (#1146) and **Pipeline** (#1167) — which had no tutorial: `NAV_ITEMS` moved
+  to `src/nav.ts` and `tutorials.test.ts` now derives its route list from it, so a future
+  untutored tab fails the coverage test rather than shipping silently. **Two documented
+  MVP deviations** (roundtable-approved in the plan): readiness is computed client-side
+  from `GET /api/config` rather than a server `GET /api/setup/state`, and seen/dismissed
+  state lives in `localStorage` rather than per-user server state — both listed as Future
+  in the plan. All acceptance criteria are exercised by the frontend test suite
+  (`readiness.test.ts`, `wizardSteps.test.ts`, `tutorials.test.ts`); `tsc -b` clean.
 - **Charter role(s):** none (product/UX surface; consumes existing config + readiness contracts, adds no intelligence pass)
 - **Surfaces:** `frontend/` (the aimee-server web GUI), `/api/config`, `/api/config/set`, `/api/git/*`, Dashboard readiness
 

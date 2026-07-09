@@ -22,6 +22,7 @@ import SetupChip from './components/SetupChip';
 import SetupWizard from './components/SetupWizard';
 import SilentBoundary from './components/SilentBoundary';
 import { OPEN_WIZARD_EVENT } from './setup/setupState';
+import { NAV_ITEMS } from './nav';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -69,23 +70,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     return this.props.children;
   }
 }
-
-type Tab = { label: string; icon: string; route: string };
-const NAV_ITEMS: Tab[] = [
-  { label: 'Chat', icon: '💬', route: '/chat' },
-  { label: 'Dashboard', icon: '📊', route: '/dashboard' },
-  { label: 'Logs', icon: '📜', route: '/logs' },
-  { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows' },
-  { label: 'Workflow Actions', icon: '📝', route: '/workflow-actions' },
-  { label: 'Agents', icon: '🤝', route: '/agents' },
-  { label: 'Personas', icon: '🎭', route: '/personas' },
-  { label: 'Roles', icon: '🎬', route: '/roles' },
-  { label: 'Projects', icon: '📁', route: '/projects' },
-  { label: 'Graph', icon: '🕸️', route: '/graph' },
-  { label: 'Pipeline', icon: '🧩', route: '/pipeline' },
-  { label: 'Editor', icon: '🖥️', route: '/editor' },
-  { label: 'Settings', icon: '⚙️', route: '/settings' },
-];
 
 /* Top bar: one tab per session. A session bundles a chat + the project it runs
  * in; every tool operates on the active session's project. */

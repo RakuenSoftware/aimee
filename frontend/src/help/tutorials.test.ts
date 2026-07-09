@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { TAB_TUTORIALS, tutorialFor } from './tutorials';
 import { parseSeen, withSeen, SEEN_KEY } from './tutorialState';
+import { NAV_ITEMS } from '../nav';
 
-/* The routes App exposes in NAV_ITEMS. Kept in sync by hand with App.tsx; the
- * "every nav route has a tutorial" test below is what guards a drift (a new tab
- * added to App without a tutorial entry fails here). */
-const NAV_ROUTES = [
-  '/chat', '/dashboard', '/logs', '/edit-workflows', '/workflow-actions',
-  '/agents', '/personas', '/projects', '/graph', '/editor', '/settings',
-];
+/* The routes App exposes, read straight from the nav registry (not a hand-copied
+ * list) so the "every nav route has a tutorial" test below actually guards drift:
+ * a new tab added to NAV_ITEMS without a tutorial entry fails here. */
+const NAV_ROUTES = NAV_ITEMS.map(it => it.route);
 
 describe('TAB_TUTORIALS content contract', () => {
   it('has a tutorial for every NAV_ITEMS route', () => {
