@@ -2017,15 +2017,29 @@ int main(void)
       memset(&cfg4, 0, sizeof(cfg4));
       cfg4.review_scheduler_enabled = 0;
       cfg4.review_idle_trigger_minutes = 30;
+      cfg4.review_session_cooldown_hours = 24;
       cfg4.review_batch_cap = 10;
-      cJSON *robust = cJSON_Parse("{\"learning\":{\"review\":{\"scheduler_enabled\":5,"
-                                  "\"idle_trigger_minutes\":0.5,\"batch_cap\":0}}}");
+      cJSON *robust = cJSON_Parse(
+          "{\"learning\":{\"review\":{\"scheduler_enabled\":5,\"idle_trigger_minutes\":30.5,"
+          "\"session_cooldown_hours\":0.5,\"batch_cap\":0}}}");
       assert(robust);
       config_apply_review_settings(&cfg4, robust);
       assert(cfg4.review_scheduler_enabled == 1);     /* 5 normalised to 1 */
-      assert(cfg4.review_idle_trigger_minutes == 30); /* 0.5 truncates to 0 -> rejected */
-      assert(cfg4.review_batch_cap == 10);            /* 0 rejected */
+      assert(cfg4.review_idle_trigger_minutes == 30); /* 30.5 not integer -> rejected */
+      assert(cfg4.review_session_cooldown_hours ==
+             24);                          /* 0.5h not integer, != disable -> rejected */
+      assert(cfg4.review_batch_cap == 10); /* 0 rejected */
       cJSON_Delete(robust);
+
+      /* An explicit whole-number 0 still disables the cooldown. */
+      config_t cfg4b;
+      memset(&cfg4b, 0, sizeof(cfg4b));
+      cfg4b.review_session_cooldown_hours = 24;
+      cJSON *disable = cJSON_Parse("{\"learning\":{\"review\":{\"session_cooldown_hours\":0}}}");
+      assert(disable);
+      config_apply_review_settings(&cfg4b, disable);
+      assert(cfg4b.review_session_cooldown_hours == 0);
+      cJSON_Delete(disable);
 
       config_t cfg5;
       memset(&cfg5, 0, sizeof(cfg5));

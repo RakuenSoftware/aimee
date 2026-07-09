@@ -1,6 +1,7 @@
 #include "aimee.h"
 #include "config_learning.h"
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 
 static void apply_tau_value(config_t *cfg, const char *surface, const char *mode, double value)
@@ -514,6 +515,22 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
       cfg->kb_reflection_synthesis_shadow = item->valueint;
 }
 
+/* Read an integer-valued JSON number in [lo, INT_MAX] into *out. Rejects
+ * non-numbers, non-finite, out-of-range (avoids UB on the double->int cast),
+ * and fractional values (30.5 is a config typo, not 30). Returns 1 on success. */
+static int review_int_field(const cJSON *item, int lo, int *out)
+{
+   if (!cJSON_IsNumber(item))
+      return 0;
+   double d = item->valuedouble;
+   if (!(d >= (double)lo) || d > (double)INT_MAX) /* !(>=) also rejects NaN */
+      return 0;
+   if (d != (double)(long)d) /* integer-valued only */
+      return 0;
+   *out = (int)d;
+   return 1;
+}
+
 /* learning.review.*: idle-reflection scheduler knobs. Defaults live in config.c;
  * this only overrides when a key is present, so an operator can turn the
  * (default-on) scheduler off, tune the idle window, or drop the session cooldown
@@ -536,20 +553,13 @@ void config_apply_review_settings(config_t *cfg, cJSON *root)
    else if (cJSON_IsNumber(item))
       cfg->review_scheduler_enabled = item->valuedouble != 0.0 ? 1 : 0;
 
-   /* Positive-integer knobs: cast first, then require > 0 so a fractional value
-    * that truncates to 0 (e.g. 0.5) is rejected, not silently taken as 0. */
-   item = cJSON_GetObjectItemCaseSensitive(rv, "idle_trigger_minutes");
-   if (cJSON_IsNumber(item) && (int)item->valuedouble > 0)
-      cfg->review_idle_trigger_minutes = (int)item->valuedouble;
-
-   /* >= 0: a whole-hour cooldown, or 0 to disable it. */
-   item = cJSON_GetObjectItemCaseSensitive(rv, "session_cooldown_hours");
-   if (cJSON_IsNumber(item) && item->valuedouble >= 0 && (int)item->valuedouble >= 0)
-      cfg->review_session_cooldown_hours = (int)item->valuedouble;
-
-   item = cJSON_GetObjectItemCaseSensitive(rv, "batch_cap");
-   if (cJSON_IsNumber(item) && (int)item->valuedouble > 0)
-      cfg->review_batch_cap = (int)item->valuedouble;
+   int v;
+   if (review_int_field(cJSON_GetObjectItemCaseSensitive(rv, "idle_trigger_minutes"), 1, &v))
+      cfg->review_idle_trigger_minutes = v; /* minutes > 0 */
+   if (review_int_field(cJSON_GetObjectItemCaseSensitive(rv, "session_cooldown_hours"), 0, &v))
+      cfg->review_session_cooldown_hours = v; /* whole hours; 0 disables the cooldown */
+   if (review_int_field(cJSON_GetObjectItemCaseSensitive(rv, "batch_cap"), 1, &v))
+      cfg->review_batch_cap = v; /* cap > 0 */
 }
 
 /* Inverse of the intelligence.* parsers (calibrate/demotion/bandit) so config_save
