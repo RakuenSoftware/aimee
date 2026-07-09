@@ -114,18 +114,30 @@ surface (which the bridge already notes), sharpening the revived demotion loop f
 flat to per-row; the bridge is surface-generic so the ranker gets it for free once
 its rows are noted. Falls back to the flat verdict when no answer/snippets exist.
 
+### Landed: ranker (`kb_search`) capture hook
+
+When the agent uses `kb_search` in a turn and the flag is on, the tool dispatch
+(`agent_tools_dispatch.c`) reads the surfaced `hits[].doc_id` + `excerpt`, mints a
+kb_hybrid `retrieval_event` over them (`kb_client_ranker_emit_event` →
+`ranker.emit_event`), and notes them on the ranker surface. The substrate fix that
+made this possible: `/v1/search` now includes **`doc_id` on each `hit`** (the
+projection was file_path-keyed and lacked it) — additive, the response shape is
+unchanged and existing consumers ignore it. The bridge symbol is declared **weak** in the agent layer,
+so a delegate/lean binary links cleanly and simply skips capture. The next turn's
+per-doc overlap (above) then attributes `ranker_outcome` — closing the ranker loop.
+
+**Validation-pending (stated in these words):** the capture fires inside the
+agentic tool loop, which has no unit test here — the compile/link and each helper
+are verified, but the live attribution is unverified until observed on real traffic
+via `aimee kb ranker export-view`. It is default-off and observation-only, so a
+misfire cannot affect an answer.
+
 ### Remaining open work
 
-1. **Ranker (`kb_search`) capture hook.** Note `ranker` outcomes when the agent uses
-   `kb_search` in a turn. Prerequisite found: the `kb_search` **tool returns a
-   rendered text blob**, not structured ids — so the search response must first
-   expose `docs:[{id, snippet}]`. Then note them (scoped to in-turn tool use —
-   `kb.search` is also CLI/API-callable outside a turn, where no next-turn autolabel
-   follows). With that, per-doc overlap (above) lights up `ranker_outcome`.
-2. **IPW propensity logging.** Log the surfacing propensity (reuse the bandit's
+1. **IPW propensity logging.** Log the surfacing propensity (reuse the bandit's
    `db2_bandit_decision_insert` pattern) and populate the outcome `weight` with
    `1/propensity`; the fitter already consumes it.
-3. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
+2. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
 
 ## Non-goals
 

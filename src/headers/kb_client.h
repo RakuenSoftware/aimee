@@ -818,6 +818,12 @@ int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *
 int kb_client_record_retrieval_outcome(const char *surface, const char *event_id,
                                        const int64_t *ids, int n, const char *verdict);
 
+/* Mint a kb_hybrid retrieval_event over the surfaced doc_ids (ranker.emit_event)
+ * and return its id in event_id_out. Used by the kb_search tool-capture to give
+ * the outcome bridge an event to attribute against. 0 on success, -1 on error. */
+int kb_client_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_fingerprint,
+                                char *event_id_out, size_t event_id_len);
+
 /* Auditable-correctness P1.5: merge typed code/doc refs into the turn's event via
  * the KB evidence.merge_retrieval_event action (the idempotent two-writer upsert).
  * `types`/`refs`/`versions` are parallel arrays of length `n` (entries with an
