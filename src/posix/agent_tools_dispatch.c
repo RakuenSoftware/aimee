@@ -62,6 +62,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "web_search.h"
 #include "notes.h"
 #include "kb.h"
+#include "td_search_render.h"
 #include "mcp_client_registry.h"
 #include "lifecycle.h"
 #include "workspace.h"
@@ -1349,54 +1350,6 @@ extern void retrieval_outcome_bridge_note(const char *surface, const char *event
                                           const int64_t *ids, const char *const *snippets, int n)
     __attribute__((weak));
 
-/* Learning-to-rank outcome capture (default-off behind learning_implicit_retrieval_outcome):
- * when the agent uses kb_search in a turn, record the surfaced doc_ids + snippets so the
- * NEXT turn's continuation/repair autolabel can attribute a per-doc ranker outcome. The
- * agent-facing text result is unchanged; the extra structured fetch only happens when the
- * flag is on. No-op unless the bridge is linked (server binary). */
-static void td_kb_search_capture_outcome(const config_t *cfg, const char *query, int max,
-                                         const char *result)
-{
-   if (!cfg->learning_implicit_retrieval_outcome || !retrieval_outcome_bridge_note)
-      return;
-   if (!query || !query[0] || !result || strncmp(result, "error:", 6) == 0)
-      return;
-
-   /* /v1/search returns {"hits":[{artifact_id,score,doc_id,excerpt,...}]}. doc_id
-    * keys each hit to its feature_rows; excerpt is the snippet for overlap. */
-   char *sj = kb_client_search_json(NULL, query, config_embedding_command(cfg, NULL), max, NULL);
-   cJSON *sr = sj ? cJSON_Parse(sj) : NULL;
-   free(sj);
-   cJSON *hits = sr ? cJSON_GetObjectItemCaseSensitive(sr, "hits") : NULL;
-   if (cJSON_IsArray(hits))
-   {
-      int64_t ids[8];
-      const char *snips[8]; /* point into sr; valid until cJSON_Delete(sr) below */
-      int cn = 0;
-      cJSON *h;
-      cJSON_ArrayForEach(h, hits)
-      {
-         if (cn >= (int)(sizeof(ids) / sizeof(ids[0])))
-            break;
-         cJSON *did = cJSON_GetObjectItemCaseSensitive(h, "doc_id");
-         cJSON *excerpt = cJSON_GetObjectItemCaseSensitive(h, "excerpt");
-         if (cJSON_IsNumber(did) && did->valuedouble > 0)
-         {
-            ids[cn] = (int64_t)did->valuedouble;
-            snips[cn] = cJSON_IsString(excerpt) ? excerpt->valuestring : "";
-            cn++;
-         }
-      }
-      if (cn > 0)
-      {
-         char ev[64] = "";
-         if (kb_client_ranker_emit_event(ids, cn, NULL, ev, sizeof(ev)) == 0 && ev[0])
-            retrieval_outcome_bridge_note("ranker", ev, ids, snips, cn);
-      }
-   }
-   cJSON_Delete(sr);
-}
-
 static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_cwd,
                             const char *dispatch_sid, int timeout_ms)
 {
@@ -1414,18 +1367,35 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
       char *envelope = kb_client_search_json(NULL, q->valuestring,
                                              config_embedding_command(&cfg, NULL), max, NULL);
-      /* The knowledge service returns {"status":"ok","result":"<text>"}; unwrap so the
-       * tool sees the same body shape kb_search() used to return. */
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
-      cJSON *body = resp ? cJSON_GetObjectItemCaseSensitive(resp, "result") : NULL;
-      if (cJSON_IsString(body) && body->valuestring[0])
-         result = safe_strdup(body->valuestring);
-      else
-         result = safe_strdup("error: knowledge search unavailable");
-      cJSON_Delete(resp);
 
-      td_kb_search_capture_outcome(&cfg, q->valuestring, max, result);
+      /* Text result: legacy {result} for back-compat, else the rendered {hits},
+       * else an error line. Extracted into td_search_result_from_response so the
+       * exact result-vs-hits selection that once silently broke the tool is unit
+       * tested (see td_search_render). */
+      result = td_search_result_from_response(resp, q->valuestring);
+      cJSON *hits = resp ? cJSON_GetObjectItemCaseSensitive(resp, "hits") : NULL;
+
+      /* Learning-to-rank outcome capture (default-off): from the SAME hits — no
+       * second search. Records the surfaced doc_ids + snippets so the next turn's
+       * continuation/repair autolabel attributes a per-doc ranker outcome. The
+       * bridge symbol is weak, so a delegate/lean binary simply skips this. */
+      if (cfg.learning_implicit_retrieval_outcome && retrieval_outcome_bridge_note &&
+          cJSON_IsArray(hits))
+      {
+         int64_t ids[8];
+         const char *snips[8]; /* point into resp; copied by _note before free */
+         int cn = td_extract_hit_docs(hits, ids, snips, (int)(sizeof(ids) / sizeof(ids[0])));
+         if (cn > 0)
+         {
+            char ev[64] = "";
+            if (kb_client_ranker_emit_event(ids, cn, NULL, ev, sizeof(ev)) == 0 && ev[0])
+               retrieval_outcome_bridge_note("ranker", ev, ids, snips, cn);
+         }
+      }
+
+      cJSON_Delete(resp);
    }
 
    return result;
