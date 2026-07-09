@@ -72,14 +72,6 @@ The genuinely open work — eleven proposals (all but one not yet implemented).
   — the thin client's SessionStart falls back to a recall-only remote path and
   emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
   a thin client gets the full server-assembled brief. Companion to the memory split.
-- [LLM-sidecar productionization — curator extraction + idle reflection](proposals/pending/llm-sidecar-productionization-curator-and-reflection.md)
-  — two intelligence steps ship as full scaffolding but stub the LLM call: curator
-  extraction (all stages present; only the Phase-0 embedding sidecar exists behind
-  `kb_curator_sidecar`) and the idle-reflection scheduler (`kb_reflection.c` runs
-  fully; its own header notes LLM candidate generation is stubbed). Graduate both
-  onto one versioned sidecar contract behind a shadow → canary → default gate on the
-  shipped calibration + bandit rails. **Extract / Synthesize / Judge / Reflect /
-  Gate-Promote.**
 - [Org-data connectors + source ingestion](proposals/pending/org-data-connectors-and-source-ingestion.md)
   — the missing ingest front door for the every-domain KB: a uniform connector
   contract plus a first adapter set (issue tracker / chat / doc-wiki / email),
@@ -176,6 +168,7 @@ Grouped by theme:
   [recall economy progressive disclosure](proposals/done/recall-economy-progressive-disclosure.md),
   [recall abstention confidence gate](proposals/done/retrieval-abstention-confidence-gate.md),
   [typed-fact knowledge layer](proposals/done/typed-fact-knowledge-layer.md),
+  [LLM-sidecar productionization — curator extraction + idle reflection](proposals/done/llm-sidecar-productionization-curator-and-reflection.md),
   [generalise the `memory.benchmark` RPC](proposals/done/memory-benchmark-suite-generalisation.md).
 - **Structured PDF & evidence.**
   [structured PDF ingestion + coordinate-anchored evidence](proposals/done/structured-pdf-ingestion-and-evidence-layer.md),

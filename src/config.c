@@ -1262,6 +1262,7 @@ int config_load_file(config_t *cfg)
    config_apply_bandit_settings(cfg, root);
    config_apply_planner_settings(cfg, root);
    config_apply_mdl_settings(cfg, root);
+   config_apply_review_settings(cfg, root);
 
    cJSON *ws = cJSON_GetObjectItemCaseSensitive(root, "workspaces");
    if (cJSON_IsArray(ws))

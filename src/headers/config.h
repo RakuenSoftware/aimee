@@ -1531,10 +1531,12 @@ typedef struct config
    cron_job_t cron_jobs[CRON_JOBS_MAX];
    int cron_job_count;
 
-   /* Learning review / reflection scheduler (learning.review.*).
-    * review_scheduler_enabled:      0 = off (default), 1 = run idle reflection.
+   /* Learning review / reflection scheduler. Settable under learning.review.*
+    * (config_apply_review_settings).
+    * review_scheduler_enabled:      1 = run idle reflection (default), 0 = off.
     * review_idle_trigger_minutes:   idle window before reflection fires (default 30).
-    * review_session_cooldown_hours: min age of session artifact before reflection (default 24).
+    * review_session_cooldown_hours: min age of session artifact before reflection
+    *                                (default 24; 0 disables the cooldown).
     * review_batch_cap:              max session artifacts per reflection pass (default 10).
     */
    int review_scheduler_enabled;

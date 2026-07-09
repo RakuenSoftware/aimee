@@ -213,7 +213,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`integrity`** — _Integrity gate._ Keys: `dry_run`, `enabled`
 - **`intelligence`** — _Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects._ Keys: `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
 - **`kb`** — _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `code_hybrid`, `connection_pool_size`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `reembed_on_dim_change`, `search_max_results`, `typed_facts`, `worker_count`
-- **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `router`, `synthesize`
+- **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `review`, `router`, `synthesize`
 - **`lsp_servers`** — _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
 - **`mcp`** — _MCP integration (e.g. OSV)._ Keys: `osv`
 - **`mcp_clients`** — _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `name`, `transport`, `url`
