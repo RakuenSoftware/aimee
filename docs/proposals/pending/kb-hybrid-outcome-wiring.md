@@ -1,10 +1,11 @@
 # Proposal: kb_hybrid outcome wiring — close the learning-to-rank loop on live data
 
-- **State:** in progress — B1 (the loop-closing plumbing) is implemented and
-  integrated; B2 (a production outcome source for code-search) is the remaining
-  open work. This is the follow-up prerequisite named by the done proposal
-  [learning-to-rank weight fitting](../done/learning-to-rank-weight-fitting.md),
-  whose fitter ships bench-only until this lands.
+- **State:** in progress — B1 (the loop-closing plumbing) is integrated. B2's
+  first outcome source — a dogfood-autolabel → retrieval-outcome bridge — is
+  implemented for the memory surface (closing the long-dormant demotion loop) and
+  is ranker-ready; the ranker (`kb_search`) capture hook and higher-fidelity
+  signals are the remaining open work. Follow-up prerequisite named by the done
+  proposal [learning-to-rank weight fitting](../done/learning-to-rank-weight-fitting.md).
 - **Author:** JBailes
 - **Date:** 2026-07-09
 - **Charter roles:** Calibrate (feed the fitter real observed outcomes, not just
@@ -56,23 +57,47 @@ Verified end-to-end by `test_closed_loop_capture` in `src/tests/test_ranker_fit.
 (emit event → record outcomes → training view groups by event and joins feature
 rows → non-empty, correctly-labelled batch).
 
-## B2 — a production outcome source (open work)
+## B2 — the first outcome source: a dogfood-autolabel bridge (implemented)
 
-B1 makes the loop *closeable and testable*; it does not invent a signal. The
-remaining question is genuinely separate: **what reports which code-search
-documents were useful?** The memory surface has an established reporter (the agent
-attributes recalled memories). Code-search has no equivalent yet. Candidate
-sources, in rough order of fidelity:
+Production evidence (`.254`) reframed the problem: there are **408 `retrieval_event`
+artifacts and 0 attributions** — the memory demotion loop was never wired to an
+outcome source either, despite the endpoint existing. And there are **185
+`kb_document` feature rows** already waiting. So the missing piece is universal,
+not ranker-specific: nothing ever converts the *signal already computed each turn*
+into an outcome.
 
-1. Answer-attribution: when a turn cites/uses a surfaced doc in its answer, emit an
-   `accepted` outcome for that doc against the query's event.
-2. Explicit harness feedback (benchmark / eval harness reporting relevance).
-3. Weak implicit signals (a later edit touching a surfaced file) — lowest fidelity,
-   position-biased.
+That signal exists. `dogfood_classify_next_turn()` already labels the next user
+turn **continuation** or **repair** after a retrieval. This proposal adds
+`retrieval_outcome_bridge` (`src/server/retrieval_outcome_bridge.c`): the emitter
+notes the prior turn's surfaced rows + event id (`ingress_preinject.c`), and the
+next turn's classification writes the outcome — `accepted` on continuation,
+`corrected` on repair. Wired for **memory** now (closing the dormant demotion loop
+from the 408 existing events, via `retrieval_attribution`) and **ranker-ready**
+(the same bridge writes `ranker_outcome` for a "ranker" surface note). Default-off
+behind `learning_implicit_retrieval_outcome`; observation-only. Unit-tested end to
+end in `test_retrieval_outcome_bridge.c`.
 
-This is deferred, not faked: until a real source populates `ranker_outcome`, the
-fitter correctly stays bench-only and `aimee kb ranker export-view` keeps reporting
-the empty-view diagnostic.
+### Honest limit — this is a weak, positively-biased label
+
+`dogfood_classify_next_turn` returns **CONTINUATION for any substantive
+non-correction follow-up** — i.e. "the user kept talking and didn't immediately
+correct me," a loose proxy for "the rows were useful." So the label skews heavily
+positive (the exact position/outcome bias the LTR proposal's Risks section names).
+It is a legitimate *first* source — it turns a dead loop into a live trickle of
+real weak labels — but the pointwise fitter inherits the bias, and the benchmark
+gate remains the backstop. Higher-fidelity sources are the real goal.
+
+### Remaining open work
+
+1. **Ranker (`kb_search`) capture hook.** Note `ranker` outcomes when the agent
+   uses `kb_search` in a turn. Subtlety to handle first: `kb.search` is also
+   callable from the CLI/API *outside* a conversational turn, where no next-turn
+   autolabel follows — the note must be scoped to in-turn tool use to avoid
+   mis-attribution, and `kb_search`'s response must expose `doc_id`.
+2. **Answer-attribution** — a turn citing a surfaced doc → a stronger `accepted`
+   signal than the continuation heuristic (uses the `artifact_citations` /
+   `lessons_cite_tracker` machinery).
+3. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
 
 ## Non-goals
 

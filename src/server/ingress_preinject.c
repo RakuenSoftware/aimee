@@ -7,6 +7,7 @@
 #include "ingress_preinject.h"
 #include "config.h"
 #include "kb_client.h"
+#include "retrieval_outcome_bridge.h"
 #include "dstr.h"
 #include "log.h"
 #include "request_context.h"
@@ -591,7 +592,15 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          if (mems[i].memory.id > 0)
             ids[n_ids++] = mems[i].memory.id;
       if (n_ids > 0)
-         (void)kb_client_evidence_emit_retrieval_event(tid, "Recall", fp, ids, n_ids);
+      {
+         char ev_id[64] = "";
+         /* Capture the event id so the next turn's continuation/repair autolabel
+          * can attribute an outcome to these rows (default-off bridge). */
+         if (kb_client_evidence_emit_retrieval_event_ex(tid, "Recall", fp, ids, n_ids, ev_id,
+                                                        sizeof(ev_id)) == 0 &&
+             ev_id[0])
+            retrieval_outcome_bridge_note("memory", ev_id, ids, n_ids);
+      }
 
       /* Code surface (P1.5/D3): MERGE the code hits surfaced into this turn into the
        * turn's event as typed refs (code:<project>:<file_path>, v=content_hash).

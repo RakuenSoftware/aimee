@@ -807,6 +807,17 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
                                             const char *query_fingerprint, const int64_t *ids,
                                             int n_ids);
 
+/* Like the above, but also returns the minted retrieval_event_id in event_id_out
+ * (so a caller can later attribute outcomes to it). */
+int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
+                                               const char *query_fingerprint, const int64_t *ids,
+                                               int n_ids, char *event_id_out, size_t event_id_len);
+
+/* Record retrieval outcomes for surfaced rows against an event.
+ * surface: "memory" -> retrieval_attribution, "ranker" -> ranker_outcome. */
+int kb_client_record_retrieval_outcome(const char *surface, const char *event_id,
+                                       const int64_t *ids, int n, const char *verdict);
+
 /* Auditable-correctness P1.5: merge typed code/doc refs into the turn's event via
  * the KB evidence.merge_retrieval_event action (the idempotent two-writer upsert).
  * `types`/`refs`/`versions` are parallel arrays of length `n` (entries with an

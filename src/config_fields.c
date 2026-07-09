@@ -212,6 +212,8 @@ const config_field_t config_fields[] = {
      offsetof(config_t, learning_implicit_repeated_correction), sizeof(int), 0, CFG_BOOL},
     {"learning_implicit_workflow_repetition",
      offsetof(config_t, learning_implicit_workflow_repetition), sizeof(int), 0, CFG_BOOL},
+    {"learning_implicit_retrieval_outcome", offsetof(config_t, learning_implicit_retrieval_outcome),
+     sizeof(int), 0, CFG_BOOL},
     {"identity_working_profile_injection_enabled",
      offsetof(config_t, identity_working_profile_injection_enabled), sizeof(int), 0, CFG_BOOL},
     {"integrity_enabled", offsetof(config_t, integrity_enabled), sizeof(int), 0, CFG_BOOL},

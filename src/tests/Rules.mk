@@ -406,6 +406,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-fidelity-check \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-ranker-fit \
+               $(TESTPREFIX)/unit-test-retrieval-outcome-bridge \
                $(TESTPREFIX)/unit-test-report-enrichments \
                $(TESTPREFIX)/unit-test-reasoning \
                $(TESTPREFIX)/unit-test-bandit \
@@ -3855,6 +3856,12 @@ $(TESTPREFIX)/unit-test-ranker-fit: $(OBJDIR)/tests/test_ranker_fit.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
+
+# Bridge logic in isolation: the test stubs config_load + the KB client, so no
+# DB/network objects are needed — just the bridge TU.
+$(TESTPREFIX)/unit-test-retrieval-outcome-bridge: $(OBJDIR)/tests/test_retrieval_outcome_bridge.o \
+                     $(OBJDIR)/server/retrieval_outcome_bridge.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-report-enrichments: $(OBJDIR)/tests/test_report_enrichments.o \
                      $(OBJDIR)/db2/report_enrichments.o \

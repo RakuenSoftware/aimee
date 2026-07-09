@@ -213,6 +213,7 @@ CFG_KEY_DESC = {
     "learning_implicit_citation_repair": "Implicit-learning signal: citation on repair.",
     "learning_implicit_repeat_question": "Implicit-learning signal: repeated question.",
     "learning_implicit_repeated_correction": "Implicit-learning signal: repeated correction.",
+    "learning_implicit_retrieval_outcome": "Bridge continuation/repair autolabels into retrieval outcomes (memory + ranker).",
     "learning_implicit_workflow_repetition": "Implicit-learning signal: workflow repetition.",
     "learning_max_commits_per_week": "Cap on learning-derived commits per week.",
     "learning_proposal_ttl_days": "TTL (days) for learning proposals.",
