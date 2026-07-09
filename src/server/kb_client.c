@@ -1374,8 +1374,8 @@ char *kb_client_ranker_fit_json(void)
    /* Fitting materializes the view, spawns the sidecar, and runs the benchmark
     * gate — allow a long window (mirrors the repair-class maintenance timeout). */
    cJSON *req = cJSON_CreateObject();
-   char *json =
-       kb_client_v1_post_json("/v1/intelligence/ranker/fit", req, KB_CLIENT_REPAIR_TIMEOUT_MS, NULL);
+   char *json = kb_client_v1_post_json("/v1/intelligence/ranker/fit", req,
+                                       KB_CLIENT_REPAIR_TIMEOUT_MS, NULL);
    cJSON_Delete(req);
    return json ? json : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
 }

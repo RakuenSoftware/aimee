@@ -2384,6 +2384,15 @@ paths:
     get:
       summary: Demotion dry-run report
       responses: { "200": { description: Demotion check, content: { application/json: { schema: { type: object } } } } }
+  /intelligence/ranker/export-view:
+    get:
+      summary: Export the learning-to-rank training view + wiring-gap diagnostic
+      responses: { "200": { description: Ranker training view, content: { application/json: { schema: { type: object } } } } }
+  /intelligence/ranker/fit:
+    post:
+      summary: Fit + benchmark-gate the KB-hybrid ranker model
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Ranker fit report, content: { application/json: { schema: { type: object } } } } }
   /identity/show:
     get:
       summary: Show current identity

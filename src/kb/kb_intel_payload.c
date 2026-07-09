@@ -574,7 +574,8 @@ int kb_intel_ranker_fit_http(const char *body, int body_len, char *out_buf, int 
    int rc = kb_ranker_fit_run(&cfg, NULL, 0, &report);
    if (!report)
    {
-      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"error\",\"error\":\"fit produced no report\"}");
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"error\",\"error\":\"fit produced no report\"}");
       return 500;
    }
    snprintf(out_buf, (size_t)out_cap, "%s", report);

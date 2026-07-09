@@ -56,8 +56,8 @@ static void insert_attr(const char *event_id, long long surfaced, const char *ve
             "{\"retrieval_event_id\":\"%s\",\"surfaced_row_id\":%lld,\"verdict\":\"%s\","
             "\"weight\":1.0}",
             event_id, surfaced, verdict);
-   int rc = db2_artifact_write(id, "retrieval_attribution", "proposed", "memory", "", "", 1.0,
-                               payload);
+   int rc =
+       db2_artifact_write(id, "retrieval_attribution", "proposed", "memory", "", "", 1.0, payload);
    assert(rc == 0);
 }
 
@@ -245,9 +245,10 @@ static void test_gate_commit_on_lift(void)
 {
    open_db();
    seed_two_groups();
-   write_exec("/tmp/rf_stub_win.sh",
-              stub_weights("{\"dense.cos\":0.0,\"lex.cos\":1.0,\"temp.recency\":0.0,"
-                           "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
+   write_exec(
+       "/tmp/rf_stub_win.sh",
+       stub_weights("{\"dense.cos\":0.0,\"lex.cos\":1.0,\"temp.recency\":0.0,"
+                    "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
    write_file("/tmp/rf_fix.json", FIXTURE);
 
    config_t cfg;
@@ -285,9 +286,10 @@ static void test_gate_hold_on_no_lift(void)
    open_db();
    seed_two_groups();
    /* dense-only weights keep the incumbent's (wrong) ordering → no lift. */
-   write_exec("/tmp/rf_stub_lose.sh",
-              stub_weights("{\"dense.cos\":1.0,\"lex.cos\":0.0,\"temp.recency\":0.0,"
-                           "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
+   write_exec(
+       "/tmp/rf_stub_lose.sh",
+       stub_weights("{\"dense.cos\":1.0,\"lex.cos\":0.0,\"temp.recency\":0.0,"
+                    "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
    write_file("/tmp/rf_fix.json", FIXTURE);
 
    config_t cfg;

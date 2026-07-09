@@ -31,7 +31,10 @@
 /* The v1 feature set, in the order the ranker and the sidecar agree on. These
  * keys are the contract with kb_ranker_model_load and scripts/rank-fit.py. */
 static const char *const FEATURE_KEYS[] = {
-    "dense.cos", "lex.cos", "temp.recency", "sketch.frequency_kind_scope",
+    "dense.cos",
+    "lex.cos",
+    "temp.recency",
+    "sketch.frequency_kind_scope",
     "sketch.distinct_sources_hll",
 };
 #define N_FEATURES ((int)(sizeof(FEATURE_KEYS) / sizeof(FEATURE_KEYS[0])))
@@ -53,8 +56,8 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
       *n_positive_out = 0;
 
    const char *sk = (subject_kind && subject_kind[0]) ? subject_kind : "kb_document";
-   const char *fsv =
-       (feature_set_version && feature_set_version[0]) ? feature_set_version : KB_FEATURE_SET_VERSION;
+   const char *fsv = (feature_set_version && feature_set_version[0]) ? feature_set_version
+                                                                     : KB_FEATURE_SET_VERSION;
 
    void *conn = db2_conn();
    if (!conn)
@@ -171,19 +174,19 @@ static void add_empty_view_diagnostic(cJSON *out, const char *subject_kind)
 {
    cJSON *d = cJSON_CreateObject();
    cJSON_AddStringToObject(d, "reason", "empty_training_view");
-   cJSON_AddStringToObject(
-       d, "detail",
-       "No (retrieval_event, candidate) rows have BOTH a v1 feature vector and an outcome verdict.");
+   cJSON_AddStringToObject(d, "detail",
+                           "No (retrieval_event, candidate) rows have BOTH a v1 feature vector and "
+                           "an outcome verdict.");
    cJSON_AddStringToObject(
        d, "subject_space_mismatch",
        "ranker features are written on feature_rows.subject_kind='kb_document' (the kb_hybrid "
        "code-search path); retrieval outcomes are attributed to 'memory' row ids on the "
        "memory-recall surface — disjoint id spaces.");
-   cJSON_AddStringToObject(
-       d, "missing_grouping_key",
-       "feature_rows has no retrieval_event_id/query column (PK is "
-       "subject_id,subject_kind,feature_set_version; per-candidate upsert), so per-(query,candidate) "
-       "training rows do not exist.");
+   cJSON_AddStringToObject(d, "missing_grouping_key",
+                           "feature_rows has no retrieval_event_id/query column (PK is "
+                           "subject_id,subject_kind,feature_set_version; per-candidate upsert), so "
+                           "per-(query,candidate) "
+                           "training rows do not exist.");
    cJSON_AddStringToObject(
        d, "prerequisite",
        "wire the kb_hybrid surface to emit retrieval_event + attributions keyed by kb_document ids "
@@ -196,8 +199,8 @@ static void add_empty_view_diagnostic(cJSON *out, const char *subject_kind)
 char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_set_version)
 {
    const char *sk = (subject_kind && subject_kind[0]) ? subject_kind : "kb_document";
-   const char *fsv =
-       (feature_set_version && feature_set_version[0]) ? feature_set_version : KB_FEATURE_SET_VERSION;
+   const char *fsv = (feature_set_version && feature_set_version[0]) ? feature_set_version
+                                                                     : KB_FEATURE_SET_VERSION;
 
    cJSON *rows = NULL;
    int n_groups = 0, n_rows = 0, n_positive = 0;
@@ -220,7 +223,8 @@ char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_s
    cJSON_AddNumberToObject(out, "n_groups", n_groups);
    cJSON_AddNumberToObject(out, "n_rows", n_rows);
    cJSON_AddNumberToObject(out, "n_positive", n_positive);
-   int fittable = (n_groups >= RANK_FIT_DEFAULT_MIN_GROUPS && n_positive > 0 && n_positive < n_rows);
+   int fittable =
+       (n_groups >= RANK_FIT_DEFAULT_MIN_GROUPS && n_positive > 0 && n_positive < n_rows);
    cJSON_AddBoolToObject(out, "fittable", fittable);
    if (n_rows == 0)
       add_empty_view_diagnostic(out, sk);
@@ -475,8 +479,8 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
       return 1;
    }
 
-   int min_groups =
-       cfg->kb_ranker_fit_min_groups > 0 ? cfg->kb_ranker_fit_min_groups : RANK_FIT_DEFAULT_MIN_GROUPS;
+   int min_groups = cfg->kb_ranker_fit_min_groups > 0 ? cfg->kb_ranker_fit_min_groups
+                                                      : RANK_FIT_DEFAULT_MIN_GROUPS;
 
    cJSON *rows = NULL;
    int n_groups = 0, n_rows = 0, n_positive = 0;
@@ -524,7 +528,8 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
 
    char *out = NULL;
    size_t out_len = 0;
-   int rc = platform_exec_pipe(cfg->kb_ranker_fit_command, req_str, strlen(req_str), &out, &out_len);
+   int rc =
+       platform_exec_pipe(cfg->kb_ranker_fit_command, req_str, strlen(req_str), &out, &out_len);
    free(req_str);
    if (rc != 0 || !out)
    {
@@ -539,7 +544,8 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
 
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    cJSON *weights = cJSON_GetObjectItemCaseSensitive(resp, "weights");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(weights))
+   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 ||
+       !cJSON_IsObject(weights))
    {
       cJSON *r = cJSON_GetObjectItemCaseSensitive(resp, "reason");
       const char *reason = cJSON_IsString(r) ? r->valuestring : "sidecar_refused";
