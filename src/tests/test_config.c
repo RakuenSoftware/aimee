@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "cJSON.h"
+#include "config_learning.h"
 #include "config_database.h"
 #include "config_sections.h"
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
@@ -1957,6 +1958,49 @@ int main(void)
       }
       else
          platform_unsetenv("AIMEE_DB2_URL");
+   }
+
+   /* learning.review.* config parser (idle-reflection scheduler knobs). */
+   {
+      /* All four fields overridden, incl. cooldown=0 (disables cooldown). */
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.review_scheduler_enabled = 1; /* seed the config.c defaults */
+      cfg.review_idle_trigger_minutes = 30;
+      cfg.review_session_cooldown_hours = 24;
+      cfg.review_batch_cap = 10;
+      cJSON *root = cJSON_Parse("{\"learning\":{\"review\":{\"scheduler_enabled\":0,"
+                                "\"idle_trigger_minutes\":5,\"session_cooldown_hours\":0,"
+                                "\"batch_cap\":3}}}");
+      assert(root);
+      config_apply_review_settings(&cfg, root);
+      assert(cfg.review_scheduler_enabled == 0);
+      assert(cfg.review_idle_trigger_minutes == 5);
+      assert(cfg.review_session_cooldown_hours == 0); /* 0 disables the cooldown */
+      assert(cfg.review_batch_cap == 3);
+      cJSON_Delete(root);
+
+      /* Absent 'review' object leaves all four defaults intact. */
+      config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      cfg2.review_scheduler_enabled = 1;
+      cfg2.review_idle_trigger_minutes = 30;
+      cfg2.review_session_cooldown_hours = 24;
+      cfg2.review_batch_cap = 10;
+      cJSON *no_review = cJSON_Parse("{\"learning\":{}}");
+      config_apply_review_settings(&cfg2, no_review);
+      assert(cfg2.review_scheduler_enabled == 1 && cfg2.review_idle_trigger_minutes == 30 &&
+             cfg2.review_session_cooldown_hours == 24 && cfg2.review_batch_cap == 10);
+      cJSON_Delete(no_review);
+
+      /* Missing 'learning' key entirely: early return, no change, no crash. */
+      config_t cfg3;
+      memset(&cfg3, 0, sizeof(cfg3));
+      cfg3.review_scheduler_enabled = 1;
+      cJSON *empty = cJSON_Parse("{}");
+      config_apply_review_settings(&cfg3, empty);
+      assert(cfg3.review_scheduler_enabled == 1);
+      cJSON_Delete(empty);
    }
 
    /* AIMEE_EMBEDDING_DIM env override (config_resolve_embedding_dim) */

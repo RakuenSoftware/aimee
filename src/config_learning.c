@@ -514,6 +514,36 @@ void config_apply_mdl_settings(config_t *cfg, cJSON *root)
       cfg->kb_reflection_synthesis_shadow = item->valueint;
 }
 
+/* learning.review.*: idle-reflection scheduler knobs. Defaults live in config.c;
+ * this only overrides when a key is present, so an operator can turn the
+ * (default-on) scheduler off, tune the idle window, or drop the session cooldown
+ * (e.g. to 0 for tests / high-throughput dogfood) without a rebuild. */
+void config_apply_review_settings(config_t *cfg, cJSON *root)
+{
+   cJSON *learning_cfg = cJSON_GetObjectItemCaseSensitive(root, "learning");
+   if (!cJSON_IsObject(learning_cfg))
+      return;
+   cJSON *rv = cJSON_GetObjectItemCaseSensitive(learning_cfg, "review");
+   if (!cJSON_IsObject(rv))
+      return;
+
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(rv, "scheduler_enabled");
+   if (cJSON_IsBool(item) || cJSON_IsNumber(item))
+      cfg->review_scheduler_enabled = item->valueint;
+
+   item = cJSON_GetObjectItemCaseSensitive(rv, "idle_trigger_minutes");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->review_idle_trigger_minutes = (int)item->valuedouble;
+
+   item = cJSON_GetObjectItemCaseSensitive(rv, "session_cooldown_hours");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->review_session_cooldown_hours = (int)item->valuedouble;
+
+   item = cJSON_GetObjectItemCaseSensitive(rv, "batch_cap");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->review_batch_cap = (int)item->valuedouble;
+}
+
 /* Inverse of the intelligence.* parsers (calibrate/demotion/bandit) so config_save
  * does not drop these tuning gates on the next save. Emits a sub-object only when
  * it differs from defaults; ints that carry modes (calibrate/demotion enabled)
