@@ -32,9 +32,10 @@ radius. This proposal makes that split concrete.
 
 ## §0 Invariants inherited from Proposal 2 (non-negotiable)
 
-- **The automated pipeline can NEVER mint a hard rule.** Only operator-entered rules may be
-  `directive_type='hard'`. Every §4 write is hard-capped at `soft`, and there is no code path from
-  an inferred/injected signal to the non-overridable slot (Proposal 2 R2).
+- **The automated pipeline can NEVER mint a hard rule — enforced *structurally*, not just in code
+  (R1).** Every §4 write is hard-capped at `soft`, AND a db2 trigger/CHECK rejects any `rules` row
+  with an auto/quarantine provenance and `directive_type='hard'`, so even a buggy or injected code
+  path cannot reach the non-overridable slot. Only operator-entered rules may be `hard`.
 - **Precedence lattice** (Proposal 2 R2), highest authority first: hard org rules → operator user
   captures → soft org defaults → **untrusted advisory** (auto-extracted / quarantine-released rows,
   repo-file conventions). Auto-population only ever writes into the *lowest* tier.
@@ -75,7 +76,10 @@ ttl_at, state (pending|approved|rejected)}`.
   operator review command.
 - **Gates before quarantine**: a candidate must clear the PII gate and a confidence floor; a PII or
   low-confidence hit is quarantined-for-review or dropped, never auto-approved.
-- **Scope default**: unsure → db1/private (Proposal 2 §1 "over-sharing is the harm").
+- **Scope default**: unsure → db1/private (Proposal 2 §1 "over-sharing is the harm") — **except a
+  candidate whose subject/speaker is ambiguous** (e.g. a multi-speaker transcript) is NOT
+  auto-attributed to db1; it is quarantined `scope=unknown` and the operator assigns scope on
+  approval (R1: a multi-speaker candidate silently landing in one user's db1 is a mis-attribution).
 - **Hard cap**: any org candidate is `directive_type='soft'` (§0). No hard-rule path exists.
 - **TTL**: an unreviewed candidate expires at `ttl_at` (default e.g. 30d) — "stored forever, never
   reviewed" is impossible; expiry is logged, not silently dropped.
@@ -95,15 +99,18 @@ ttl_at, state (pending|approved|rejected)}`.
 
 ### §2c Feedback → durable org rules
 
-Route the feedback signal `kb_client_rules_generate` consumes into a **persistent** db2 `rules`
-write path (in addition to, or replacing, the ephemeral brief block):
-- New/reinforced rules land as `directive_type='soft'`, `domain` from the feedback topic, `weight`
+Route the feedback signal `kb_client_rules_generate` consumes toward **persistent** db2 `rules` —
+but **through the same quarantine gate as extraction (R1: no bypass)**. A feedback-derived rule is a
+db2-targeted candidate; it is written to quarantine and reaches the `rules` table only on operator
+approval. It never auto-writes a durable, every-user-visible rule.
+- On approval, the rule lands as `directive_type='soft'`, `domain` from the feedback topic, `weight`
   from evidence strength.
-- **Lifecycle**: set `expires_at` (decay) and bump `last_reinforced_at` on repeat signal, so an
-  erroneous/injected rule cannot persist indefinitely across every user's brief; a stale rule
-  expires, a reinforced one survives.
+- **Lifecycle**: set `expires_at` (decay) and bump `last_reinforced_at` **only on genuinely new
+  evidence** — a distinct session/source, never the rule's own prior emission (R1: reinforcement
+  must not self-feed and defeat decay); a rule with no *new* evidence still decays and expires.
 - A revocation path (`aimee rules -` / review reject) tombstones a bad auto-rule.
-- **Config**: `intelligence.autopopulate.feedback_rules.enabled` (default 0).
+- **Config**: `intelligence.autopopulate.feedback_rules.enabled` (default 0). The existing ephemeral
+  brief block is unchanged until durable rules are calibrated — additive, not a replacement (OQ3).
 
 ### §2d Promotion → durable org facts/rules (strict gate)
 
@@ -119,7 +126,9 @@ Consolidate recurring, high-confidence db2 `episode` rows into durable org facts
 
 1. **§2b review surface + quarantine table + schema** — the *sink and the gate UI* first, so nothing
    can be produced without a place to review it. `aimee memory review list/approve/reject/edit`
-   against a hand-seeded candidate. (No producer yet ⇒ zero risk.)
+   against a hand-seeded candidate. **Low blast radius, not "zero risk" (R1):** `approve` is a live
+   write into recall, so the review command itself is operator-gated + audited, and the quarantine
+   table is structurally outside the recall selectors (a guard test asserts recall never reads it).
 2. **§2a extraction producer (default-off)** — the gated offline pass that fills quarantine, behind
    `extract.enabled=0`; calibratable.
 3. **§2c feedback→durable rules (default-off)** — the durable sink for the feedback signal, with
@@ -160,18 +169,46 @@ Consolidate recurring, high-confidence db2 `episode` rows into durable org facts
   `expires_at` and drops from recall (unit).
 - Default-off: with all `autopopulate.*` flags 0, no producer runs and no candidate is written (unit).
 
-## Open questions for the roundtable
+## Review revisions (R1)
 
-1. **Quarantine store**: a new db2 `memory_candidates` table, or reuse `collab_rules`'
-   proposed/decided pattern generalized? One table for both db1- and db2-targeted candidates, or split
-   by store?
-2. **Extraction cadence + source**: offline batch over episodes only, or also transcripts? What
-   confidence floor is defensible before calibration data exists — or ship the producer dark (writes
-   quarantine, review surface hidden) until calibrated?
-3. **Feedback→rules vs the ephemeral brief block**: additive (both) or replace the ephemeral block
-   once durable rules exist? Migration of any in-flight ephemeral guidance?
-4. **Promotion gate granularity**: per-row approval vs per-batch vs confidence-auto-approve with WORM
-   audit + easy revoke? How does promotion interact with the KB's own typed-fact ontology
-   reconciliation (avoid two systems promoting the same signal)?
-5. **Review surface reuse**: extend the existing `aimee memory review` (charter pipeline) or a
-   distinct `aimee memory quarantine` namespace to avoid conflating two review queues?
+From the design roundtable (5 participants: MiniMax-M3, codex, mimo-v2.5-pro, GLM-5.2,
+mistral-medium-3-5). The panel converged — near-unanimously — on these blocking findings, all folded
+in above:
+
+- **Feedback→rules must not bypass quarantine** (5/5). §2c now routes feedback-derived rules through
+  the *same* quarantine+approval gate as extraction; nothing auto-writes a durable every-user rule.
+- **The no-hard-rule invariant must be enforced structurally** (5/5), not only code-capped: a db2
+  trigger/CHECK rejects an auto/quarantine-provenance `rules` row with `directive_type='hard'` (§0).
+- **Quarantine is a sensitive (PII) store** (5/5): PII-flagged candidates carry a `sensitivity` tag,
+  are operator-only (never surfaced), and have a hard retention TTL; raw PII content is access-gated,
+  not shown in the plain review list.
+- **Rejected candidates need fingerprint tombstones** (4/5): a `reject` records a content/semantic
+  fingerprint; the extractor checks the tombstone set and will not re-propose a rejected fingerprint
+  (with decay, so a genuinely changed fact can eventually re-surface) — no re-proposal loops.
+- **Reinforcement must not self-feed** (4/5): `last_reinforced_at` bumps only on genuinely *new*
+  evidence (distinct session/source), never a rule's own prior emission; decay still applies (§2c).
+- **Multi-speaker scope leak** (4/5): an ambiguous-subject candidate is quarantined `scope=unknown`
+  for operator scope-assignment, never auto-attributed to a user's db1 (§2a).
+- **Quarantine isolation is structural** (2/5): the quarantine table sits physically outside the
+  recall selectors; a guard test asserts recall never reads it (§2b).
+- **Promotion is per-row, audited** (1, strong): per-row operator approval (or confidence-auto with a
+  per-row WORM audit row + easy revoke), never per-batch bulk; a conflict check against the KB's own
+  typed-fact ontology reconciliation avoids two systems promoting the same signal (§2d).
+- **Phase 1 is low-blast-radius, not "zero risk"** (1): `approve` is a live write path, so the review
+  command is itself operator-gated + audited (§3.1).
+
+## Open questions (post-R1)
+
+Panel consensus resolved most of the original OQs; these remain for implementation:
+
+1. **Quarantine store shape**: the panel favoured a **single** `memory_candidates` table for both
+   db1- and db2-targeted candidates (discriminated by `proposed_store`), rather than splitting or
+   reusing `collab_rules`. Confirm columns + indexes at the schema slice (§3.1).
+2. **Extraction confidence floor + dark-mode**: ship the producer **dark** (writes quarantine, review
+   surface gated) over **episodes** first (not raw transcripts) until calibration data exists; the
+   defensible confidence floor is set from that calibration. What initial floor is safe pre-data?
+3. **Review namespace**: a **distinct** `aimee memory quarantine` (or a clearly separated
+   `aimee memory review --queue autopopulate`) to avoid conflating the auto-extract queue with the
+   existing charter-pipeline review — final naming.
+4. **Retention/PII policy specifics**: exact TTLs (quarantine, tombstone), and whether raw PII
+   content is stored encrypted vs. reference-only, pending the operator's data-handling policy.
