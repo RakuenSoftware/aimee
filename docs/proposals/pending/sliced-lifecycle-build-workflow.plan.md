@@ -1,5 +1,33 @@
 # Implementation plan: sliced-lifecycle "build" workflow
 
+## Delivery status (2026-07-09)
+
+**Landed + verified (build + tests green):**
+- **S1** multi-input roundtable — `gate.roundtable` reviews a composite packet
+  (artifact + originating proposal + `focus` lens). `test_wfe_roundtable` extended.
+- **S3/S4 (catalog)** — `branch.open` + `foreach.workflow` blocks (append-only,
+  enum-stable); `split` now accepts a `plan`; `foreach.workflow` runs behind a
+  child-runner seam that fail-closed-parks with no live driver. `test_wfe_sliced_build`.
+- **S5** — the reworked default `build` workflow + child `slice` workflow
+  (`config/workflows/`), both validator-clean (`aimee workflow validate`).
+- **GUI** — `/v1/workflow/blocks` now enumerates the full built-in catalog (the
+  loop stopped at the CUSTOM sentinel, hiding understand/split/review/gate.deliver +
+  the new blocks); roundtable step editor gained a first-class `focus` field.
+  `test_wfe_webapi` extended; `tsc -b` + vitest green. Whole `wfe` unit suite (31)
+  green; `aimee` + `aimee-server` link clean.
+
+**Validation-pending (integration-gated; seams in place, live wiring deferred):**
+- **S2 live panel** — `wfe_set_panel_provider` off the ensemble engine. The
+  multi-input path is real+tested; convening a live diverse panel needs a reachable
+  ensemble (not available in this environment), so the roundtable stays fail-closed
+  (park) until wired + exercised.
+- **S4 live child driver** — the `foreach.workflow` provider that actually spawns +
+  drives child `slice` runs, plus the DB1 parent↔child linkage. Contract is
+  fail-closed today; needs a schema migration + driver, verified against a live run.
+- **S3 forge base-targeting** — `pr.open`/`merge` against an explicit base (sub-PRs →
+  feature branch; final PR → default) needs the live-forge seam extended; gated the
+  same way the existing live forge is.
+
 Slices are ordered by dependency and are individually shippable. Each slice is itself
 delivered as a PR that goes through the roundtable and merges into this effort's feature
 branch — mirroring the lifecycle we are building. Live panel + live forge remain
