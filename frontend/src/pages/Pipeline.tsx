@@ -27,8 +27,19 @@ type Stage = {
   order: number;
   config_key: string | null;
   requires: string[];
+  // Phase D — composed custom stages. `custom` marks a user-defined stage that
+  // recomposes `base_op` (a built-in run()-backed stage) on that op's lane;
+  // `enabled` is its own on/off in the custom_stages config. `base_op_eligible`
+  // marks a built-in that may be used as a base_op (the two sweep pseudo-stages
+  // are not).
+  custom?: boolean;
+  base_op?: string;
+  enabled?: boolean;
+  base_op_eligible?: boolean;
 };
 type Preset = { name: string; description: string; enabled: string[]; builtin?: boolean };
+// One entry in the kb_curator_custom_stages JSON array (what the GUI writes).
+type CustomStageCfg = { name: string; base_op: string; budget?: number; enabled?: boolean };
 
 const csrf = () => ({ "X-CSRF-Token": window._csrf || "" });
 
@@ -174,8 +185,84 @@ export default function Pipeline() {
     await writeUserPresets(list, `preset "${name}" deleted`);
   }, [readUserPresets, writeUserPresets]);
 
+  // Composed custom stages (Phase D) live as a JSON array in the
+  // kb_curator_custom_stages config string; like user presets, the GUI reads/edits
+  // it and persists via config.set (no bespoke op). The backend validates each
+  // entry (base_op must be a built-in run() stage; runs on that op's lane) and
+  // surfaces the accepted ones on /api/curator/stages with custom:true.
+  const readCustomStages = useCallback((): CustomStageCfg[] => {
+    const raw = cfg.kb_curator_custom_stages;
+    if (typeof raw !== "string" || !raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? (arr as CustomStageCfg[]) : [];
+    } catch {
+      return [];
+    }
+  }, [cfg]);
+
+  const writeCustomStages = useCallback(async (list: CustomStageCfg[], okMsg: string) => {
+    setBusy("custom-stages");
+    const { status: st, error } = await postJSON("/api/config/set", {
+      key: "kb_curator_custom_stages",
+      value: JSON.stringify(list),
+    });
+    setBusy("");
+    if (st >= 200 && st < 300 && !error) {
+      setStatus({ kind: "ok", msg: okMsg });
+      refresh();
+    } else {
+      setStatus({ kind: "err", msg: error || `save failed (${st})` });
+    }
+  }, [refresh]);
+
+  const addCustomStage = useCallback(async () => {
+    // Valid base ops = built-in run()-backed stages the backend marks eligible.
+    const baseNames = stages.filter((s) => !s.custom && s.base_op_eligible).map((s) => s.name);
+    const name = window.prompt("New custom stage name (letters, digits, _ or -):")?.trim();
+    if (!name) return;
+    if (!/^[A-Za-z0-9_-]{1,63}$/.test(name)) {
+      setStatus({ kind: "err", msg: "name must be 1–63 chars of [A-Za-z0-9_-]" });
+      return;
+    }
+    if (stages.some((s) => s.name === name)) {
+      setStatus({ kind: "err", msg: `"${name}" collides with an existing stage` });
+      return;
+    }
+    const baseOp = window.prompt(`Base op to recompose — one of:\n${baseNames.join(", ")}`)?.trim();
+    if (!baseOp) return;
+    if (!baseNames.includes(baseOp)) {
+      setStatus({ kind: "err", msg: `base op must be one of: ${baseNames.join(", ")}` });
+      return;
+    }
+    const budgetStr = window.prompt("Per-pass budget (blank = base op default):")?.trim();
+    const entry: CustomStageCfg = { name, base_op: baseOp, enabled: true };
+    if (budgetStr) {
+      const b = Number(budgetStr);
+      if (!Number.isFinite(b) || b < 1) {
+        setStatus({ kind: "err", msg: "budget must be a number ≥ 1" });
+        return;
+      }
+      entry.budget = Math.min(Math.floor(b), 65536);
+    }
+    const list = readCustomStages().filter((c) => c.name !== name);
+    list.push(entry);
+    await writeCustomStages(list, `custom stage "${name}" added (runs on ${baseOp}'s lane)`);
+  }, [stages, readCustomStages, writeCustomStages]);
+
+  const toggleCustomStage = useCallback(async (name: string, next: boolean) => {
+    const list = readCustomStages().map((c) => (c.name === name ? { ...c, enabled: next } : c));
+    await writeCustomStages(list, `custom stage "${name}" ${next ? "enabled" : "disabled"}`);
+  }, [readCustomStages, writeCustomStages]);
+
+  const deleteCustomStage = useCallback(async (name: string) => {
+    const list = readCustomStages().filter((c) => c.name !== name);
+    await writeCustomStages(list, `custom stage "${name}" deleted`);
+  }, [readCustomStages, writeCustomStages]);
+
   const persistOrder = useCallback(async (arr: Stage[]) => {
-    const order = arr.map((s) => s.name).join(",");
+    // Only built-ins participate in stage_order; custom stages append after them.
+    const order = arr.filter((s) => !s.custom).map((s) => s.name).join(",");
     setBusy("order");
     const { status: st, error } = await postJSON("/api/config/set", { key: "kb_curator_stage_order", value: order });
     setBusy("");
@@ -333,7 +420,9 @@ export default function Pipeline() {
       </div>
       {(["llm", "index"] as Lane[]).map((lane) => {
         const meta = LANE_META[lane];
-        const laneStages = stages.filter((s) => s.lane === lane);
+        // Built-in stages only — custom stages append after the built-ins and are
+        // managed in their own panel below (they don't participate in reorder).
+        const laneStages = stages.filter((s) => s.lane === lane && !s.custom);
         if (!laneStages.length) return null;
         return (
           <div key={lane} style={{ marginBottom: 22, border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden" }}>
@@ -345,6 +434,80 @@ export default function Pipeline() {
           </div>
         );
       })}
+      {(() => {
+        const customs = stages.filter((s) => s.custom);
+        return (
+          <div style={{ marginBottom: 22, border: "1px dashed #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
+            <div style={{ padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #e2e2e2", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 700, color: "#a67" }}>Custom stages</span>
+              <span style={{ fontSize: 12, color: "#999", flex: 1, minWidth: 160 }}>
+                Recompose a built-in op under a new name/budget. Runs on the base op's lane (re-laning is not supported).
+              </span>
+              <button
+                disabled={busy === "custom-stages"}
+                onClick={addCustomStage}
+                title="Add a custom stage that recomposes a built-in op"
+                style={{
+                  padding: "5px 12px", fontSize: 13, borderRadius: 14, cursor: "pointer",
+                  border: "1px dashed #cbd5e1", background: "#fff", color: "#555",
+                }}
+              >
+                ＋ Add custom stage
+              </button>
+            </div>
+            {customs.length === 0 ? (
+              <div style={{ padding: "10px 12px", fontSize: 12, color: "#999" }}>
+                None yet — add one to run an existing op a second time (e.g. a larger-budget pass) under its own name.
+              </div>
+            ) : (
+              customs.map((s) => {
+                const on = s.enabled !== false;
+                return (
+                  <div key={s.name} style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
+                    borderBottom: "1px solid #eee",
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{s.label}
+                        <span style={{ marginLeft: 8, fontSize: 11, color: "#a67" }}>custom</span>
+                        <span style={{ marginLeft: 8, fontSize: 11, color: "#aaa" }}>
+                          {s.base_op} · {s.lane} lane · budget {s.budget}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#777" }}>Recomposes {s.base_op} on the {s.lane} lane.</div>
+                    </div>
+                    <button
+                      disabled={busy === "custom-stages"}
+                      onClick={() => toggleCustomStage(s.name, !on)}
+                      title={on ? "Disable stage" : "Enable stage"}
+                      style={{
+                        width: 52, height: 26, borderRadius: 13, border: "1px solid #ccc", cursor: "pointer",
+                        background: on ? "#7d7" : "#ddd", position: "relative", transition: "background .15s",
+                      }}
+                    >
+                      <span style={{
+                        position: "absolute", top: 2, left: on ? 28 : 2, width: 20, height: 20,
+                        borderRadius: "50%", background: "#fff", transition: "left .15s",
+                      }} />
+                    </button>
+                    <button
+                      disabled={busy === "custom-stages"}
+                      onClick={() => deleteCustomStage(s.name)}
+                      title={`Delete custom stage "${s.name}"`}
+                      style={{
+                        padding: "5px 8px", fontSize: 13, borderRadius: 6, cursor: "pointer",
+                        border: "1px solid #cbd5e1", background: "#fff", color: "#b00",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        );
+      })()}
       {!stages.length && (
         <div style={{ color: "#888" }}>No stages reported (aimee-server unreachable, or the KB has no curator registry).</div>
       )}
