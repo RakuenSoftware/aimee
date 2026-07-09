@@ -114,13 +114,21 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    char *proposal = read_text_capped(wfe_ctx_proposal_path(ctx), WFE_PROPOSAL_MAX);
    const cJSON *focus_j =
        node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+   /* The directory the panel reviews the change in: the per-work-item worktree, or —
+    * when worktree isolation is unavailable and a run fell back to the shared checkout
+    * (wfe_worktree_ensure failed) — that shared repo dir. Mirrors the producing blocks'
+    * resolve_workdir fallback (AIMEE_WORKFLOW_REPO, else "."), so the panel can always
+    * convene rather than fail closed to panel_unreachable when the worktree is empty. */
    const char *worktree = wfe_ctx_worktree(ctx);
+   const char *workdir = (worktree && worktree[0]) ? worktree : getenv("AIMEE_WORKFLOW_REPO");
+   if (!workdir || !workdir[0])
+      workdir = ".";
    wfe_review_packet_t pkt = {
        .artifact_hash = artifact_hash,
        .proposal = proposal ? proposal : "",
        .focus =
            (focus_j && cJSON_IsString(focus_j) && focus_j->valuestring) ? focus_j->valuestring : "",
-       .workdir = worktree ? worktree : "",
+       .workdir = workdir,
    };
 
    wfe_verdict_t verdicts[WFE_PANEL_MAX];
