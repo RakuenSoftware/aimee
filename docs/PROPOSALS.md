@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 12 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 13 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — twelve proposals (all but one not yet implemented).
+The genuinely open work — thirteen proposals (all but one not yet implemented).
 
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
@@ -110,6 +110,16 @@ The genuinely open work — twelve proposals (all but one not yet implemented).
   silently trusted. Adds write-time classification, a category→tier map, and the
   gate that bars Tier-3 from being *main* evidence (anti-poisoning), plus
   human-only promotion. **Classify-Score / Enforce / Gate-Promote / Constrain-Verify.**
+- [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
+  — small reasoning models served through the gateway fall into degenerate
+  repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
+  Adds a deterministic streaming detector on the provider-neutral IR-delta relay,
+  a bounded holdback-buffered decode-time intervention (truncate / gated resample
+  using only standard sampling params + stop sequences — no logit access), and a
+  per-backend collapse-rate metric that calibrates the default serving temperature.
+  Fail-open, default-off, shadow → canary → default gated.
+  **Detect-Cluster / Constrain-Verify / Enforce / Calibrate / Evaluate-Optimize /
+  Gate-Promote.**
 
 ## Done (66)
 
