@@ -3,6 +3,7 @@
  * unit-testable with a mock base resolver. */
 #include "kb_curator_custom.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -139,14 +140,27 @@ size_t kb_curator_custom_stages_parse(const char *json, kb_curator_base_resolver
          }
          enabled = cJSON_IsTrue(jen) ? 1 : 0;
       }
-      /* Optional "budget": default to the base op's; clamp >= 1. */
+      /* Optional "budget": default to the base op's; if present it must be a JSON
+       * number (a wrong-typed budget is rejected, like enabled/lane — no silent
+       * coercion). Clamp the double into [1, BUDGET_MAX] BEFORE the int cast:
+       * casting an out-of-range or non-finite double to int is undefined behavior,
+       * so a hostile "budget": 1e308 / Infinity / NaN must never reach the cast. */
       int budget = bd->budget > 0 ? bd->budget : 1;
       const cJSON *jbud = cJSON_GetObjectItemCaseSensitive(el, "budget");
-      if (jbud && cJSON_IsNumber(jbud))
+      if (jbud)
       {
-         budget = (int)jbud->valuedouble;
-         if (budget < 1)
+         if (!cJSON_IsNumber(jbud))
+         {
+            rej++;
+            continue;
+         }
+         double bv = jbud->valuedouble;
+         if (isnan(bv) || bv < 1.0)
             budget = 1;
+         else if (bv >= (double)KB_CURATOR_CUSTOM_BUDGET_MAX) /* also catches +Inf */
+            budget = KB_CURATOR_CUSTOM_BUDGET_MAX;
+         else
+            budget = (int)bv;
       }
 
       kb_curator_custom_t *c = &out[k++];

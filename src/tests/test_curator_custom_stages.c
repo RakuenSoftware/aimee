@@ -82,6 +82,23 @@ int main(void)
       assert(n == 1 && c[0].budget == 1);
    }
 
+   /* 3b. A wrong-typed budget is rejected (not coerced), like enabled/lane. */
+   {
+      size_t n = parse("[{\"name\":\"a\",\"base_op\":\"index_claims\",\"budget\":\"5\"}]", c,
+                       KB_CURATOR_MAX_CUSTOM, &nrej);
+      assert(n == 0 && nrej == 1);
+   }
+
+   /* 3c. An out-of-range / non-finite budget is clamped, never cast (no int UB). */
+   {
+      size_t n = parse("[{\"name\":\"a\",\"base_op\":\"index_claims\",\"budget\":1e308}]", c,
+                       KB_CURATOR_MAX_CUSTOM, &nrej);
+      assert(n == 1 && c[0].budget == KB_CURATOR_CUSTOM_BUDGET_MAX);
+      n = parse("[{\"name\":\"a\",\"base_op\":\"index_claims\",\"budget\":9999999999}]", c,
+                KB_CURATOR_MAX_CUSTOM, &nrej);
+      assert(n == 1 && c[0].budget == KB_CURATOR_CUSTOM_BUDGET_MAX);
+   }
+
    /* 4. enabled:false is surfaced (returned) but flagged disabled. */
    {
       size_t n = parse("[{\"name\":\"a\",\"base_op\":\"index_claims\",\"enabled\":false}]", c,
