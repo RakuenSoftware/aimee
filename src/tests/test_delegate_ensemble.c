@@ -1069,16 +1069,22 @@ static void test_panel_persona_name_assignment(void)
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 4), "reviewer-constructive") == 0);
    /* wraps after the lineup is exhausted */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 5), "security") == 0);
-   /* draft/aggregate keep their prior NULL-persona behavior */
-   assert(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0) == NULL);
+   /* DRAFT authors every panelist as the default `engineer` persona. */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 4), "engineer") == 0);
    /* a configured persona pins to its model slot; an empty entry within the
-    * configured range still falls back to the default lineup */
+    * configured range still falls back to the mode default */
    cfg.ensemble_reference_persona_count = 2;
    snprintf(cfg.ensemble_reference_personas[1], 64, "security");
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0); /* override */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "security") ==
           0); /* empty->dflt */
    assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "reviewer") ==
+          0); /* beyond->dflt */
+   /* the per-slot override also binds in DRAFT; empty/beyond slots fall to engineer */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 1), "security") == 0); /* override */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0), "engineer") == 0); /* empty->dflt */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 3), "engineer") ==
           0); /* beyond->dflt */
    printf("  test_panel_persona_name_assignment: ok\n");
 }
