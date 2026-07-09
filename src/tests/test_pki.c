@@ -148,10 +148,11 @@ int main(void)
    assert(cn[0] != '\0'); /* 4. no operator identity -> gethostname() fallback */
    printf("pki: stable CN resolution ok\n");
 
-   /* End-to-end: with a fixed operator identity the provisioned cert is KEPT across
-    * boots (no churn — the regression), and refreshes only when the identity itself
-    * changes. Because the resolved CN ignores gethostname() whenever AIMEE_TLS_EXTRA_SAN
-    * is set, a container recreate that changes only the OS hostname takes the keep path. */
+   /* End-to-end: an existing cert is AUTHORITATIVE. Once provisioned it is kept
+    * verbatim across boots — and, critically, even when AIMEE_TLS_EXTRA_SAN or the
+    * hostname later changes. The server never recreates it, so a container recreate
+    * (fresh gethostname()) cannot rotate the cert out from under a TOFU-pinned
+    * client. A fresh cert is minted ONLY when none exists. */
    char crtp[512], keyp[512];
    snprintf(crtp, sizeof(crtp), "%s/tls/server.crt", home);
    snprintf(keyp, sizeof(keyp), "%s/tls/server.key", home);
@@ -164,14 +165,25 @@ int main(void)
    assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0); /* second boot, same identity */
    char c2[8192];
    long n2 = slurp(crtp, c2, sizeof(c2));
-   assert(n1 == n2 && memcmp(c1, c2, (size_t)n1) == 0);    /* kept verbatim: NOT rotated */
-   setenv("AIMEE_TLS_EXTRA_SAN", "10.0.0.9,othername", 1); /* operator changes identity */
+   assert(n1 == n2 && memcmp(c1, c2, (size_t)n1) == 0); /* kept verbatim */
+   /* An identity change — as a container recreate or an operator SAN edit would
+    * present — must NOT rotate an existing cert. This is the core guarantee. */
+   setenv("AIMEE_TLS_EXTRA_SAN", "10.0.0.9,othername", 1);
+   setenv("AIMEE_TLS_CN", "some-other-host", 1);
    assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
    char c3[8192];
    long n3 = slurp(crtp, c3, sizeof(c3));
-   assert(!(n1 == n3 && memcmp(c1, c3, (size_t)n1) == 0)); /* refreshed on a real change */
+   assert(n1 == n3 && memcmp(c1, c3, (size_t)n1) == 0); /* STILL kept: never recreated */
+   /* Only an absent cert triggers provisioning: delete it and a fresh one appears. */
+   assert(unlink(crtp) == 0 && unlink(keyp) == 0);
+   assert(pki_ensure_self_signed_server_cert(crtp, keyp) == 0);
+   char c4[8192];
+   long n4 = slurp(crtp, c4, sizeof(c4));
+   assert(n4 > 0 && !(n1 == n4 && memcmp(c1, c4, (size_t)n1) == 0)); /* minted when absent */
    unsetenv("AIMEE_TLS_EXTRA_SAN");
-   printf("pki: server cert stable across boots, refreshes on identity change ok\n");
+   unsetenv("AIMEE_TLS_CN");
+   printf("pki: existing server cert authoritative (kept across identity change; minted only when "
+          "absent) ok\n");
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);
