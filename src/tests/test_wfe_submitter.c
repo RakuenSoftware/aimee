@@ -82,6 +82,39 @@ int main(void)
    free(ev);
    assert(saw_submit);
 
+   /* --- foreach.workflow parent<->child linkage + terminal-state aggregation. --- */
+   {
+      assert(db1_work_item_create("par", "r/p", "p/par", "build", "v1", "slices", "autonomous") == 0);
+      const char *kids[] = {"ch1", "ch2", "ch3"};
+      for (int i = 0; i < 3; i++)
+      {
+         char path[64];
+         snprintf(path, sizeof path, "p/%s", kids[i]);
+         assert(db1_work_item_create(kids[i], "r/p", path, "slice", "v1", "impl", "autonomous") == 0);
+         assert(db1_work_item_set_parent(kids[i], "par") == 0);
+      }
+      /* the link round-trips */
+      assert(db1_work_item_get("ch2", &wi) == 1);
+      assert(strcmp(wi.parent_id, "par") == 0);
+      /* a top-level run has no parent */
+      assert(db1_work_item_get("par", &wi) == 1);
+      assert(wi.parent_id[0] == '\0');
+      /* aggregate: 3 children, none terminal yet */
+      int total = -1, acc = -1, rej = -1;
+      assert(db1_work_item_child_counts("par", &total, &acc, &rej) == 0);
+      assert(total == 3 && acc == 0 && rej == 0);
+      /* two slices merge (accepted), one fails (rejected) */
+      assert(db1_work_item_set_terminal("ch1", "accepted") == 0);
+      assert(db1_work_item_set_terminal("ch2", "accepted") == 0);
+      assert(db1_work_item_set_terminal("ch3", "rejected") == 0);
+      assert(db1_work_item_child_counts("par", &total, &acc, &rej) == 0);
+      assert(total == 3 && acc == 2 && rej == 1);
+      /* a parent with no children aggregates to zero (not an error) */
+      assert(db1_work_item_child_counts("nobody", &total, &acc, &rej) == 0 && total == 0);
+      /* set_parent on an unknown work item fails closed */
+      assert(db1_work_item_set_parent("ghost", "par") == -1);
+   }
+
    printf("ok\n");
    return 0;
 }

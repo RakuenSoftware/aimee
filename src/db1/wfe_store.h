@@ -26,6 +26,7 @@ typedef struct
    char pr_ref[128];
    char worktree[1024]; /* per-work-item git worktree (aimee/wi/<id>); "" until created */
    char submitter[128]; /* attested principal that submitted the run (intake-auth) */
+   char parent_id[80];  /* parent work item (foreach.workflow child), "" for a top-level run */
    double cum_cost_usd;
    double work_item_max_cost_usd; /* 0 = no cap */
    int override_count;
@@ -74,6 +75,14 @@ int db1_work_item_set_pr_ref(const char *work_item_id, const char *pr_ref);
 int db1_work_item_set_worktree(const char *work_item_id, const char *worktree);
 /* Record the attested submitter principal (intake-auth audit binding). */
 int db1_work_item_set_submitter(const char *work_item_id, const char *submitter);
+/* Record the parent work item of a foreach.workflow child ("slice") run. */
+int db1_work_item_set_parent(const char *work_item_id, const char *parent_id);
+/* Aggregate the terminal state of a parent's children (foreach.workflow fan-in).
+ * Fills the counts (any may be NULL): total children, those in state 'accepted',
+ * and those in state 'rejected'. Returns 0 on success, -1 on error. A parent whose
+ * total==accepted (and total>0) has every slice merged; any rejected child means a
+ * slice failed. */
+int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *rejected);
 /* Count this submitter's ACTIVE autonomous work items (per-principal concurrency
  * cap). Returns the count, or -1 on error. */
 int db1_work_item_count_active_by_submitter(const char *submitter);

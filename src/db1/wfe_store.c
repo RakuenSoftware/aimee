@@ -60,14 +60,15 @@ static void fill_wi(db1_work_item_t *o, sqlite3_stmt *st)
    db1_copy_col_text(o->pr_ref, sizeof o->pr_ref, st, 14);
    db1_copy_col_text(o->worktree, sizeof o->worktree, st, 15);
    db1_copy_col_text(o->submitter, sizeof o->submitter, st, 16);
+   db1_copy_col_text(o->parent_id, sizeof o->parent_id, st, 17);
 }
 
-/* pr_ref/worktree/submitter are appended last so the existing column indices (0-13)
- * are unchanged. */
+/* pr_ref/worktree/submitter/parent_id are appended last so the existing column
+ * indices (0-16) are unchanged. */
 #define WI_COLS                                                                                    \
    "work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage, "           \
    "state, mode, pause_reason, paused_state, content_hash, cum_cost_usd, "                         \
-   "work_item_max_cost_usd, override_count, pr_ref, worktree, submitter"
+   "work_item_max_cost_usd, override_count, pr_ref, worktree, submitter, parent_id"
 
 int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
 {
@@ -229,6 +230,64 @@ int db1_work_item_set_submitter(const char *wi, const char *submitter)
    if (rc != SQLITE_DONE || sqlite3_changes(db) != 1)
       return -1;
    return 0;
+}
+
+int db1_work_item_set_parent(const char *wi, const char *parent_id)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !wi)
+      return -1;
+   static const char *sql = "UPDATE lifecycle_work_item SET parent_id=?, "
+                            "updated_at=datetime('now') WHERE work_item_id=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, parent_id ? parent_id : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, wi, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   /* Fail closed: an update that matched no row (unknown work item) must not
+    * silently report success — the child would be orphaned from its parent. */
+   if (rc != SQLITE_DONE || sqlite3_changes(db) != 1)
+      return -1;
+   return 0;
+}
+
+int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *rejected)
+{
+   if (total)
+      *total = 0;
+   if (accepted)
+      *accepted = 0;
+   if (rejected)
+      *rejected = 0;
+   sqlite3 *db = db1_conn();
+   if (!db || !parent_id || !parent_id[0])
+      return -1;
+   /* One aggregate pass: total children + those terminal-accepted + terminal-rejected.
+    * The foreach gate advances only when total>0 AND accepted==total (every slice
+    * merged); any rejected child means a slice failed and the parent parks. */
+   static const char *sql =
+       "SELECT COUNT(*), "
+       "SUM(CASE WHEN state='accepted' THEN 1 ELSE 0 END), "
+       "SUM(CASE WHEN state='rejected' THEN 1 ELSE 0 END) "
+       "FROM lifecycle_work_item WHERE parent_id=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, parent_id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   if (rc == SQLITE_ROW)
+   {
+      if (total)
+         *total = sqlite3_column_int(st, 0);
+      if (accepted)
+         *accepted = sqlite3_column_int(st, 1);
+      if (rejected)
+         *rejected = sqlite3_column_int(st, 2);
+   }
+   sqlite3_finalize(st);
+   return rc == SQLITE_ROW ? 0 : -1;
 }
 
 int db1_work_item_count_active_by_submitter(const char *submitter)
