@@ -62,6 +62,11 @@ typedef struct
    int apply_review;
    const char *brief;
    int brief_truncated;
+   /* Optional pre-assembled read-only context (aimee memory recall + code-graph
+    * snippets) injected into every panelist prompt. Panelists run with no tools,
+    * so this is the only way they see aimee memory and the code graph. The caller
+    * owns the string for the duration of the run; NULL = no context injected. */
+   const char *context;
    const char **questions;
    int question_count;
    int (*cancel_requested)(void *ctx);

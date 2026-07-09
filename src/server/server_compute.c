@@ -50,6 +50,7 @@
 #include "workspace_provider.h"
 #include "workspace_turn.h"
 #include "cJSON.h"
+#include "dstr.h"
 
 /* Defined in agent_runtime_tmux.c (no shared header). Drives the standard CLI
  * agent over a tmux session, which runs on the client over the reverse channel
@@ -1845,6 +1846,88 @@ static const replay_backend_t rt_replay_kb_backend = {
     .project_count = rt_replay_project_count,
 };
 
+/* Assemble the read-only aimee context injected into every roundtable panelist
+ * prompt. Panelists run with NO tools, so — unlike a normal delegate, which
+ * reaches aimee memory and the code graph through tools mid-run — they can only
+ * see them if the context is pre-loaded. Combines aimee memory recall (graph-code
+ * fusion on, so code-graph-fused memory flows in) with the same code-index and
+ * structural-graph snippets a regular delegate is seeded with. Best-effort and
+ * fail-open: returns a heap string the caller frees, or NULL when nothing is
+ * available (recall disabled/empty and kb unreachable). */
+static char *roundtable_build_aimee_context(const char *prompt)
+{
+   if (!prompt || !prompt[0])
+      return NULL;
+   dstr_t s;
+   dstr_init(&s);
+
+   config_t cfg;
+   if (config_load(&cfg) == 0 && cfg.memory_recall_enabled)
+   {
+      int limit = cfg.memory_recall_limit_tokens_turn > 0 ? cfg.memory_recall_limit_tokens_turn : 0;
+      char *env = kb_client_memory_recall_json_ex(prompt, limit, 0 /* not session start */, "on");
+      cJSON *j = env ? cJSON_Parse(env) : NULL;
+      free(env);
+      cJSON *recall = j ? cJSON_GetObjectItemCaseSensitive(j, "recall") : NULL;
+      if (recall)
+      {
+         /* Same six recall sections the primary agent gets, in priority order. */
+         static const char *const sections[][2] = {{"identity", "Identity"},
+                                                   {"preferences", "Preferences"},
+                                                   {"active_context", "Active Context"},
+                                                   {"open_commitments", "Open Commitments"},
+                                                   {"reminders", "Reminders"},
+                                                   {"directives", "Directives"}};
+         int any = 0;
+         for (int si = 0; si < (int)(sizeof(sections) / sizeof(sections[0])); si++)
+         {
+            cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, sections[si][0]);
+            if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) <= 0)
+               continue;
+            if (!any)
+            {
+               dstr_append_str(&s, "## Aimee memory\n");
+               any = 1;
+            }
+            dstr_appendf(&s, "### %s\n", sections[si][1]);
+            cJSON *it = NULL;
+            cJSON_ArrayForEach(it, arr)
+            {
+               const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
+               if (text && text[0])
+                  dstr_appendf(&s, "- %s\n", text);
+            }
+         }
+         if (any)
+            dstr_append_char(&s, '\n');
+      }
+      cJSON_Delete(j);
+   }
+
+   /* Code graph: the same code-index search + structural neighborhood a normal
+    * delegate is seeded with. delegate_inject_graph_context is itself gated by
+    * delegate_graph_context_enabled and both helpers fail open (NULL on a miss). */
+   char *code = delegate_inject_code_context(prompt);
+   if (code)
+   {
+      dstr_append_str(&s, code);
+      free(code);
+   }
+   char *graph = delegate_inject_graph_context(prompt, NULL);
+   if (graph)
+   {
+      dstr_append_str(&s, graph);
+      free(graph);
+   }
+
+   if (s.len == 0)
+   {
+      dstr_free(&s);
+      return NULL;
+   }
+   return dstr_steal(&s);
+}
+
 int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1870,7 +1953,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.mode = ROUNDTABLE_DRAFT;
    opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
                                                                 : ROUNDTABLE_PARALLEL;
-   opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 3;
+   opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 1;
    opts.converge_threshold = cfg.roundtable_converge_threshold;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
    opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
@@ -1924,10 +2007,16 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    ensemble_filter_panel_availability(&cfg, &acfg);
    bind_request_session_creds(req);
 
+   /* Give the tool-less panelists read-only access to aimee memory + the code
+    * graph by pre-loading it into their prompt (best-effort; NULL = none). */
+   char *rt_context = roundtable_build_aimee_context(prompt);
+   opts.context = rt_context;
+
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
    if (rc != 0)
    {
+      free(rt_context);
       free(brief.rendered);
       return server_send_error(conn, "roundtable run failed (no enabled agents in agents.json?)",
                                NULL);
@@ -1950,6 +2039,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    add_roundtable_arrays(resp, &result);
    delegate_roundtable_result_free(&result);
+   free(rt_context);
    free(brief.rendered);
    return server_send_ok(conn, resp);
 }
