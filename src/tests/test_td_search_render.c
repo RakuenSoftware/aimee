@@ -135,6 +135,52 @@ static void test_extract_guards(void)
    printf("  ok: extract guards\n");
 }
 
+static void test_result_from_response(void)
+{
+   /* hits shape (what /v1/search actually returns) -> rendered, non-error. */
+   cJSON *r1 = cJSON_CreateObject();
+   cJSON *hits = cJSON_AddArrayToObject(r1, "hits");
+   cJSON_AddItemToArray(hits, hit("docs/a.md", 0.9, 11, "alpha"));
+   char *s1 = td_search_result_from_response(r1, "q");
+   assert(s1 && strncmp(s1, "error:", 6) != 0);
+   assert(strstr(s1, "docs/a.md") && strstr(s1, "alpha"));
+   free(s1);
+   cJSON_Delete(r1);
+
+   /* legacy {result:"..."} shape -> passed through verbatim (back-compat). */
+   cJSON *r2 = cJSON_CreateObject();
+   cJSON_AddStringToObject(r2, "result", "legacy text body");
+   char *s2 = td_search_result_from_response(r2, "q");
+   assert(s2 && strcmp(s2, "legacy text body") == 0);
+   free(s2);
+   cJSON_Delete(r2);
+
+   /* neither hits nor result -> the error line (the ONLY genuine failure). */
+   cJSON *r3 = cJSON_CreateObject();
+   cJSON_AddStringToObject(r3, "fusion_mode_used", "rrf");
+   char *s3 = td_search_result_from_response(r3, "q");
+   assert(s3 && strncmp(s3, "error:", 6) == 0);
+   free(s3);
+   cJSON_Delete(r3);
+
+   /* NULL response -> error, no crash. */
+   char *s4 = td_search_result_from_response(NULL, "q");
+   assert(s4 && strncmp(s4, "error:", 6) == 0);
+   free(s4);
+
+   /* Regression guard: an EMPTY hits array is a valid (zero-result) response,
+    * NOT an error — the tool must say "no results", never "error:". */
+   cJSON *r5 = cJSON_CreateObject();
+   cJSON_AddArrayToObject(r5, "hits");
+   char *s5 = td_search_result_from_response(r5, "nothing");
+   assert(s5 && strncmp(s5, "error:", 6) != 0);
+   assert(strstr(s5, "No knowledge-base results"));
+   free(s5);
+   cJSON_Delete(r5);
+
+   printf("  ok: result_from_response (hits/legacy/error/null/empty)\n");
+}
+
 int main(void)
 {
    printf("test_td_search_render:\n");
@@ -143,6 +189,7 @@ int main(void)
    test_render_missing_fields();
    test_extract();
    test_extract_guards();
+   test_result_from_response();
    printf("all td_search_render tests passed\n");
    return 0;
 }

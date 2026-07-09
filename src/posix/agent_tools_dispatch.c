@@ -1370,19 +1370,12 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
 
-      /* /v1/search returns {"hits":[{artifact_id,score,doc_id,excerpt,...}]}. A
-       * refactor that moved kb_search() onto this http path left the tool
-       * unwrapping a legacy {"result":"<text>"} that the endpoint no longer sends
-       * — so it errored on every call. Honour {result} if a variant still returns
-       * it, else render the hits into the tool's text result. */
-      cJSON *legacy = resp ? cJSON_GetObjectItemCaseSensitive(resp, "result") : NULL;
+      /* Text result: legacy {result} for back-compat, else the rendered {hits},
+       * else an error line. Extracted into td_search_result_from_response so the
+       * exact result-vs-hits selection that once silently broke the tool is unit
+       * tested (see td_search_render). */
+      result = td_search_result_from_response(resp, q->valuestring);
       cJSON *hits = resp ? cJSON_GetObjectItemCaseSensitive(resp, "hits") : NULL;
-      if (cJSON_IsString(legacy) && legacy->valuestring[0])
-         result = safe_strdup(legacy->valuestring);
-      else if (cJSON_IsArray(hits))
-         result = td_render_search_hits(hits, q->valuestring);
-      else
-         result = safe_strdup("error: knowledge search unavailable");
 
       /* Learning-to-rank outcome capture (default-off): from the SAME hits — no
        * second search. Records the surfaced doc_ids + snippets so the next turn's

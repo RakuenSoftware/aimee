@@ -3714,6 +3714,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/prompt_sanitizer.o \
                      $(OBJDIR)/kb/http/kb_http_pdf.o \
                      $(OBJDIR)/kb/http/kb_http_jobs.o \
+                     $(OBJDIR)/posix/td_search_render.o $(OBJDIR)/dstr.o \
                      $(OBJDIR)/cJSON.o \
                      $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
