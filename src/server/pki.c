@@ -233,6 +233,88 @@ static int set_random_serial(X509 *cert, char *hex_out, size_t hex_len)
    return hex_out[0] ? 0 : -1;
 }
 
+/* Strip a leading "DNS:"/"IP:" SAN type prefix, if present, returning the bare
+ * host/IP. Other typed prefixes (email:/URI:) are left as-is — they are not
+ * hostname candidates and the caller only tests them for IP-ness. */
+static const char *san_bare(const char *tok)
+{
+   if (strncmp(tok, "DNS:", 4) == 0)
+      return tok + 4;
+   if (strncmp(tok, "IP:", 3) == 0)
+      return tok + 3;
+   return tok;
+}
+
+/* True if |tok| parses as an IPv4 or IPv6 literal. */
+static int san_is_ip(const char *tok)
+{
+   unsigned char ipbuf[16];
+   return inet_pton(AF_INET, tok, ipbuf) == 1 || inet_pton(AF_INET6, tok, ipbuf) == 1;
+}
+
+/* Resolve the STABLE common name / primary identity for the self-signed server
+ * cert. In a container gethostname() returns the per-container ID, which changes
+ * on every recreate; feeding it into the cert rotated the self-signed cert on each
+ * restart and silently broke every TOFU-pinned client. Prefer an operator-declared
+ * identity so the cert stays put across recreates. Precedence:
+ *   1. AIMEE_TLS_CN                              — explicit override (also test hook)
+ *   2. first non-IP token of AIMEE_TLS_EXTRA_SAN — the declared reachable hostname
+ *   3. first token of AIMEE_TLS_EXTRA_SAN        — all-IP list: use the IP
+ *   4. gethostname()                             — bare-metal fallback (unchanged)
+ *   5. "aimee-server"                            — last resort
+ * Writes a NUL-terminated CN into |out|. Exposed for tests. */
+void pki_resolve_server_cn(char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return;
+   out[0] = '\0';
+
+   const char *cn_env = getenv("AIMEE_TLS_CN");
+   if (cn_env && *cn_env)
+   {
+      snprintf(out, cap, "%s", cn_env);
+      return;
+   }
+
+   const char *extra = getenv("AIMEE_TLS_EXTRA_SAN");
+   if (extra && *extra)
+   {
+      char buf[512];
+      snprintf(buf, sizeof(buf), "%s", extra);
+      char *save = NULL;
+      const char *first = NULL;
+      for (char *tok = strtok_r(buf, ", ", &save); tok; tok = strtok_r(NULL, ", ", &save))
+      {
+         if (!*tok)
+            continue;
+         const char *bare = san_bare(tok);
+         if (!*bare)
+            continue;
+         if (!first)
+            first = bare; /* remember the first entry as an all-IP fallback */
+         if (!san_is_ip(bare))
+         {
+            snprintf(out, cap, "%s", bare); /* prefer a real hostname */
+            return;
+         }
+      }
+      if (first)
+      {
+         snprintf(out, cap, "%s", first);
+         return;
+      }
+   }
+
+   char host[256];
+   if (gethostname(host, sizeof(host)) == 0 && host[0])
+   {
+      host[sizeof(host) - 1] = '\0';
+      snprintf(out, cap, "%s", host);
+      return;
+   }
+   snprintf(out, cap, "aimee-server");
+}
+
 /* Generate a self-signed EC P-256 server certificate at (cert_path, key_path)
  * when neither already exists. Makes native TLS zero-config: with
  * aimee.api.tls_port set but no operator cert present, the server provisions its
@@ -244,8 +326,11 @@ void pki_build_server_san(const char *cn, const char *extra, char *out, size_t c
 {
    if (!out || cap == 0)
       return;
-   int n = snprintf(out, cap, "DNS:%s,DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1",
-                    (cn && *cn) ? cn : "localhost");
+   /* Classify the leading CN entry: an IP literal must be typed "IP:", not "DNS:",
+    * or verification against the address fails (and OpenSSL rejects DNS:<ip>). */
+   const char *cnv = (cn && *cn) ? cn : "localhost";
+   const char *cn_prefix = san_is_ip(cnv) ? "IP:" : "DNS:";
+   int n = snprintf(out, cap, "%s%s,DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", cn_prefix, cnv);
    if (n < 0 || (size_t)n >= cap)
    {
       out[cap - 1] = '\0';
@@ -288,12 +373,14 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
    if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
       return -1;
 
-   /* Desired SAN for this boot: CN (hostname) + AIMEE_TLS_EXTRA_SAN. Computed up
-    * front so it can be compared against what a previously-provisioned cert used. */
-   char cn[200];
-   if (gethostname(cn, sizeof(cn)) != 0 || !cn[0])
-      snprintf(cn, sizeof(cn), "aimee-server");
-   cn[sizeof(cn) - 1] = '\0';
+   /* Desired SAN for this boot: a STABLE CN + AIMEE_TLS_EXTRA_SAN. Computed up
+    * front so it can be compared against what a previously-provisioned cert used.
+    * The CN comes from pki_resolve_server_cn (operator identity preferred over the
+    * OS hostname) — so a container recreate, which changes gethostname() to a fresh
+    * per-container ID, no longer shifts the SAN and rotates the cert out from under
+    * pinned clients. */
+   char cn[256];
+   pki_resolve_server_cn(cn, sizeof(cn));
    char san[1024];
    pki_build_server_san(cn, getenv("AIMEE_TLS_EXTRA_SAN"), san, sizeof(san));
 
