@@ -49,6 +49,7 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_extract_command[0] = '\0';
    cfg->kb_curator_stage_order[0] = '\0';
    cfg->kb_curator_user_presets[0] = '\0';
+   cfg->kb_curator_custom_stages[0] = '\0';
    cfg->kb_curator_judge_command[0] = '\0';
    cfg->kb_curator_synthesize_command[0] = '\0';
    cfg->kb_curator_synthesize_k = 8;
@@ -365,6 +366,11 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
    if (user_presets && cJSON_IsString(user_presets) && user_presets->valuestring)
       snprintf(cfg->kb_curator_user_presets, sizeof(cfg->kb_curator_user_presets), "%s",
                user_presets->valuestring);
+
+   const cJSON *custom_stages = cJSON_GetObjectItemCaseSensitive(curator, "custom_stages");
+   if (custom_stages && cJSON_IsString(custom_stages) && custom_stages->valuestring)
+      snprintf(cfg->kb_curator_custom_stages, sizeof(cfg->kb_curator_custom_stages), "%s",
+               custom_stages->valuestring);
 
    const cJSON *judge_command = cJSON_GetObjectItemCaseSensitive(curator, "judge_command");
    if (judge_command && cJSON_IsString(judge_command) && judge_command->valuestring)
