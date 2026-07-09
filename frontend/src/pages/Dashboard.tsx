@@ -127,6 +127,19 @@ interface OnboardReport {
   next_actions: string[];
 }
 
+/* One server-incurred tool-action guardrail verdict (the per-row audit ledger the
+ * server sends as `audit`; `auditSummary` is its aggregate). */
+interface AuditRow {
+  ts: string;
+  kind: string;
+  actor: string;
+  tool: string;
+  mode?: string;
+  reason_code?: string;
+  verdict: string;
+  task_id?: number;
+}
+
 interface DashData {
   delegations: Delegation[];
   metrics: Metric[];
@@ -140,6 +153,7 @@ interface DashData {
   tokenAudit: TokenAudit[];
   decisions: Decision[];
   sessions: Session[];
+  audit: AuditRow[];
   auditSummary: AuditSummary;
 }
 
@@ -166,6 +180,7 @@ interface RawDashboard {
   token_audit?: TokenAudit[];
   decisions?: Decision[];
   sessions?: Session[];
+  audit?: AuditRow[];
   audit_summary?: AuditSummary;
 }
 
@@ -244,6 +259,7 @@ export function toDashData(raw: RawDashboard | null | undefined): DashData {
     tokenAudit: arr<TokenAudit>(r.token_audit),
     decisions: arr<Decision>(r.decisions),
     sessions: arr<Session>(r.sessions),
+    audit: arr<AuditRow>(r.audit),
     auditSummary: r.audit_summary || {
       total: 0, allow: 0, block: 0, rewrite: 0, approval_required: 0, other: 0,
     },

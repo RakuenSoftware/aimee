@@ -488,7 +488,7 @@ ENV_DESC = {
     "AIMEE_GUARDRAILS_PATH": ("Paths & assets", "Path to the guardrails policy file."),
     "AIMEE_FORENSICS_DIR": ("Paths & assets", "Directory for shutdown-forensics dumps."),
     "AIMEE_PACK_DIR": ("Paths & assets", "Directory of memory profile packs."),
-    "AIMEE_HARNESS_MEMORY_SCOPES": ("Paths & assets", "Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory interception/hydration."),
+    "AIMEE_HARNESS_MEMORY_SCOPES": ("Paths & assets", "Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1)."),
     "AIMEE_WORKSPACES_DIR": ("Paths & assets", "Root directory for mirrored/registered workspaces."),
     "AIMEE_MODELS_DEV_SNAPSHOT": ("Paths & assets", "Path to an offline models.dev catalog snapshot."),
     # Client & session

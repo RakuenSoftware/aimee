@@ -4,6 +4,7 @@
 #include "wfe_roundtable.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -18,10 +19,10 @@
  * roundtable-panel-composition (§0) — until that ships the engine passes no
  * per-participant persona and codex cannot review, so we cannot compose a
  * diverse panel and MUST fail closed (park) rather than approve. */
-static int live_panel_run(const char *artifact_hash, const char *const *required, int nreq,
+static int live_panel_run(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                           const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
-   (void)artifact_hash;
+   (void)pkt;
    (void)required;
    (void)nreq;
    (void)eligible;
@@ -57,6 +58,30 @@ static int names_from(const cJSON *panel, const char *key, char buf[][32], int c
    return n;
 }
 
+/* Read up to `cap-1` bytes of a text file into a NUL-terminated malloc'd buffer.
+ * Returns NULL if `path` is empty/unreadable. Bounded so a pathological proposal
+ * file cannot balloon the review packet; truncation is silent (the panel sees the
+ * leading, most-relevant portion). Caller frees. */
+#define WFE_PROPOSAL_MAX 262144 /* 256 KiB cap on proposal text handed to the panel */
+static char *read_text_capped(const char *path, size_t cap)
+{
+   if (!path || !path[0])
+      return NULL;
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   char *buf = malloc(cap);
+   if (!buf)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t n = fread(buf, 1, cap - 1, f);
+   fclose(f);
+   buf[n] = '\0';
+   return buf;
+}
+
 static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const cJSON *panel =
@@ -83,8 +108,22 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    if (wi && db1_work_item_get(wi, &row) == 1)
       snprintf(artifact_hash, sizeof artifact_hash, "%s", row.content_hash);
 
+   /* Compose the review packet: the panel sees the artifact together with the
+    * originating proposal/request (so it validates the plan/diff AGAINST the ask,
+    * not in isolation) and the optional review lens from params.focus. */
+   char *proposal = read_text_capped(wfe_ctx_proposal_path(ctx), WFE_PROPOSAL_MAX);
+   const cJSON *focus_j =
+       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+   wfe_review_packet_t pkt = {
+       .artifact_hash = artifact_hash,
+       .proposal = proposal ? proposal : "",
+       .focus =
+           (focus_j && cJSON_IsString(focus_j) && focus_j->valuestring) ? focus_j->valuestring : "",
+   };
+
    wfe_verdict_t verdicts[WFE_PANEL_MAX];
-   int nv = g_provider(artifact_hash, req, nreq, elig, nelig, verdicts, WFE_PANEL_MAX);
+   int nv = g_provider(&pkt, req, nreq, elig, nelig, verdicts, WFE_PANEL_MAX);
+   free(proposal);
    if (nv < 0)
       return wfe_step_pending(WFE_PAUSE_PANEL_UNREACHABLE);
 

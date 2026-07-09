@@ -18,7 +18,6 @@
 #include "code_collect.h"          /* code_index_install_branch_hook (index watch) */
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
-#include "harness_memory_watch.h"  /* harness_memory_watch_run (real-time backstop) */
 #include "delegate_plan.h"
 #include "cli_tui.h"
 #include "platform.h"
@@ -782,8 +781,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
             cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
             const char *hp = (cJSON_IsString(hpj) && hpj->valuestring[0]) ? hpj->valuestring : NULL;
             char mr_msg[1024] = "";
-            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, cli_memory_md_retire(),
-                                      mr_msg, sizeof(mr_msg)) == 2)
+            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, mr_msg, sizeof(mr_msg)) ==
+                2)
             {
                if (cli_hook_client_uses_pretool_json())
                   emit_pretool_deny_json(mr_msg);
@@ -1896,17 +1895,6 @@ int main(int argc, char **argv)
    /* SessionStart hook (settings.json wires it as `aimee session-start`). */
    if (strcmp(cmd, "session-start") == 0)
       return handle_session_start(json_output);
-
-   /* Real-time agent-memory backstop: watch this project's memory dir and import
-    * memory-file writes into the central store as they happen (catches below-the-
-    * tool writes). Long-lived; an operator/session manager launches it. */
-   if (strcmp(cmd, "harness-memory-watch") == 0)
-   {
-      char wcwd[4096];
-      if (!getcwd(wcwd, sizeof(wcwd)))
-         wcwd[0] = '\0';
-      return harness_memory_watch_run(wcwd) == 0 ? 0 : 1;
-   }
 
    /* UserPromptSubmit hook (P1 per-turn context pre-injection for Claude Code;
     * settings.json wires it as `aimee user-prompt-submit`). */

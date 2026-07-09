@@ -54,6 +54,11 @@ extern "C"
  * validator and every consumer size against this so they stay in lockstep. */
 #define HMEM_PROJECT_KEY_MAX 256
 
+/* Max length of a memory "name" (the .md basename / interception key). Retained
+ * here (the interception classifier + server seam size against it) after the
+ * legacy harness_memory mirror table that originally defined it was retired. */
+#define HMEM_NAME_LEN 256
+
    /* Validate a project key received over the wire (e.g. a client-resolved key a
     * remote server cannot re-derive). A key is an opaque namespace string —
     * typically a repo path, so '/' is allowed — but must be non-empty, shorter

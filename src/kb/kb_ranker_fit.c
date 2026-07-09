@@ -591,10 +591,15 @@ int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **
    if (!cfg->kb_ranker_fit_command[0])
       return finish_refused(report, "no_fitter_command", report_out, rows);
 
-   /* Build the sidecar request: {feature_set_version, objective, min_groups, rows}. */
+   /* Build the sidecar request: {feature_set_version, objective, min_groups, rows}.
+    * Objective is operator-selectable (pointwise default | pairwise). The rows
+    * already carry per-candidate `weight`, so an IPW/confidence weight flows to
+    * the sidecar unchanged. */
+   const char *objective =
+       cfg->kb_ranker_fit_objective[0] ? cfg->kb_ranker_fit_objective : "pointwise";
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "feature_set_version", KB_FEATURE_SET_VERSION);
-   cJSON_AddStringToObject(req, "objective", "pointwise");
+   cJSON_AddStringToObject(req, "objective", objective);
    cJSON_AddNumberToObject(req, "min_groups", min_groups);
    /* Hand the rows to the sidecar (detach from `rows` so we can free it). */
    cJSON *req_rows = cJSON_Duplicate(rows, 1);

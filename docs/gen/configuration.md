@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (157)
+## CLI-settable keys (156)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -146,7 +146,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_kb_neighbour_expand` | bool | Expand recall to KB neighbours. |
 | `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
 | `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
-| `memory_md_retire` | bool | Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
 | `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
 | `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
@@ -261,7 +260,7 @@ The binaries read 144 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_BUNDLED_SKILLS_DIR` | Override directory for the bundled skills. |
 | `AIMEE_FORENSICS_DIR` | Directory for shutdown-forensics dumps. |
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
-| `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory interception/hydration. |
+| `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
 | `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
 | `AIMEE_INSTALL_PREFIX` | Install prefix used to locate bundled assets and plugins. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
@@ -547,9 +546,11 @@ nodes:
 | `gate.ci` | `verdict` | `pr` |
 | `check.mergeable` | `verdict` | `pr` |
 | `understand` | `WFE_ART_INTENT` | _(source: none)_ |
-| `split` | `plan` | _(source: none)_ |
+| `split` | `plan` | `plan` |
 | `review` | `verdict` | `frozen_diff`, `branch` |
 | `gate.deliver` | `none` | `verdict`, `approval` |
+| `branch.open` | `branch` | `plan` |
+| `foreach.workflow` | `branch` | `plan`, `branch` |
 
 ### Block parameters (`params:`)
 

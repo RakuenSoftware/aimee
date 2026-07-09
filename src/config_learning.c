@@ -292,6 +292,7 @@ void config_apply_ranking_settings(config_t *cfg, cJSON *root)
    cfg->kb_ranker_fit_min_groups = 0;
    cfg->kb_ranker_fit_benchmark[0] = '\0';
    cfg->kb_ranker_fit_bench_k = 0;
+   cfg->kb_ranker_fit_objective[0] = '\0';
 
    cJSON *intel = cJSON_GetObjectItemCaseSensitive(root, "intelligence");
    if (!cJSON_IsObject(intel))
@@ -357,6 +358,11 @@ void config_apply_ranking_settings(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(fit, "bench_k");
       if (cJSON_IsNumber(item))
          cfg->kb_ranker_fit_bench_k = (int)item->valuedouble;
+
+      item = cJSON_GetObjectItemCaseSensitive(fit, "objective");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->kb_ranker_fit_objective, sizeof(cfg->kb_ranker_fit_objective), "%s",
+                  item->valuestring);
    }
 }
 

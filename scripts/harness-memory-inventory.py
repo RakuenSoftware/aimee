@@ -10,11 +10,9 @@ the legacy schema (harness_memory.type is {fact,index,note,scratch}, and
 auto-defaulting either way is a silent, irreversible leak-or-lockaway).
 
 It inventories the LOCAL .md files (their frontmatter `metadata.type` is the
-scope signal) and, best-effort, reconciles against the canonical server
-harness_memory table via the existing read-only /v1/harness_memory/list route,
-flagging drift (server-only / local-only / present-in-both). Reconciliation is
-by name; content divergence is left for operator spot-check (the exact
-content_hash is a length-prefixed server-side tuple not replicated here).
+scope signal). The legacy canonical harness_memory table (and its
+/v1/harness_memory/* route) was retired in §2 Slice 5, so there is no longer a
+server side to reconcile against — this is a local .md view only.
 
 Usage:
   harness-memory-inventory.py [--memory-dir DIR] [--project KEY] [--json]
@@ -34,7 +32,6 @@ import argparse
 import csv
 import json
 import os
-import subprocess
 import sys
 from collections import Counter
 
@@ -155,21 +152,13 @@ def inventory_local(memory_dir):
     return rows
 
 
-def fetch_server_rows(project):
-    """Best-effort read of the canonical server harness_memory table via the
-    existing read-only /v1 route (through the aimee CLI). Returns a list of
-    {name, type, deleted_at, ...} or None if unavailable (never fatal)."""
-    args = ["./aimee", "memory", "harness-list", "--json"]
-    if project:
-        args += ["--project", project]
-    try:
-        out = subprocess.run(args, capture_output=True, text=True, timeout=30)
-        if out.returncode != 0:
-            return None
-        data = json.loads(out.stdout or "{}")
-        return data.get("rows") or data.get("memories") or None
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
+def fetch_server_rows(_project):
+    """The canonical server harness_memory table and its /v1 route were retired
+    (Proposal 2, §2 Slice 5 — subsystem removal). There is nothing left to
+    reconcile against; the .md files are now the only source this tool
+    inventories. Kept as a stub so the report still prints its (now always
+    local-only) view without a dead RPC call."""
+    return None
 
 
 def main():

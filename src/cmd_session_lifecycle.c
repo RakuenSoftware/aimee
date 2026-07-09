@@ -225,28 +225,19 @@ static char *build_session_context(const char *client_cwd)
           "- Use `aimee session brief` to inspect the full startup brief.\n\n");
 
    /* Enforce aimee's memory system as the single memory of record: steer the
-    * agent to aimee memory commands rather than a native store. The generic
-    * reminder is always on (operator directive). The stronger '.md files are
-    * intercepted / not persisted' claim is only accurate under the retirement
-    * flag (config memory_md_retire, default-on), so it is gated on it. */
+    * agent to aimee memory commands rather than a native store. `.md` memory is
+    * retired — a write under the memory dir is intercepted into aimee and never
+    * persisted as a file. */
    pos += (size_t)snprintf(
        buf + pos, cap - pos,
        "# Memory (use aimee, not your own store)\n"
        "- aimee is the single memory of record. Store durable memory with "
        "`aimee memory store <key> <content>`; set who-you-are / preferences with "
        "`aimee memory identity <key> <value>` and `aimee memory prefer <key> <value>`.\n"
-       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n");
-   {
-      config_t mr_cfg;
-      config_load(&mr_cfg);
-      if (mr_cfg.memory_md_retire)
-         pos +=
-             (size_t)snprintf(buf + pos, cap - pos,
-                              "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY "
-                              "DIR is intercepted into aimee and not persisted as a file. Writing "
-                              "`.md` files elsewhere (docs, READMEs, notes) is unaffected — only "
-                              "the memory dir is intercepted.\n");
-   }
+       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n"
+       "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY DIR is intercepted "
+       "into aimee and not persisted as a file. Writing `.md` files elsewhere (docs, READMEs, "
+       "notes) is unaffected — only the memory dir is intercepted.\n");
    pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
 
    {

@@ -856,8 +856,6 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "audit_action_enabled", 0);
    if (cfg->audit_worm_enabled) /* default-off: persist only the opt-in (enable) */
       cJSON_AddBoolToObject(root, "audit_worm_enabled", 1);
-   if (!cfg->memory_md_retire) /* default-on: persist only the opt-out (disable) */
-      cJSON_AddBoolToObject(root, "memory_md_retire", 0);
    /* default-on render backend: persist only a non-default value (a custom command
     * OR an empty string to disable) so both round-trip; the default isn't written. */
    if (strcmp(cfg->css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) != 0)

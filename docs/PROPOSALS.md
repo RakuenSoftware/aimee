@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 10 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 12 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,8 +50,11 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — ten proposals (all but one not yet implemented).
+The genuinely open work — twelve proposals (all but one not yet implemented).
 
+- [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
+  — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
+  feedback→durable org rules with decay; promotion behind a strict operator gate.
 - [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
   — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
   a dedicated `ranker_outcome` kind, `ranker.emit_event` / `ranker.record_outcome`
@@ -65,10 +68,6 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   apples-to-apples; official Docker grader as the sole resolution source; a
   public-claim gate that fails closed (issue #987, builds on PR #986).
   **Reason / Execute / Persist / Calibrate / Review.**
-- [Memory architecture — db1 = user, db2 = org](proposals/pending/memory-db1-db2-architecture.md)
-  — retire the `.md`/harness-memory subsystem; split durable memory by scope
-  (db1 = user identity/preferences/commitments, db2 = org rules/conventions/facts/
-  code graph); session-start recall merges both; ingestion routes by scope.
 - [Remote-first session-start](proposals/pending/remote-first-session-start.md)
   — the thin client's SessionStart falls back to a recall-only remote path and
   emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
@@ -104,6 +103,13 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
   validation + a v1 API stability tag) is the one remaining piece with no closing
   artifact.
+- [Binding retrieval context-contract for agents](proposals/pending/proposal-retrieval-context-contract.md)
+  — surveys an external context-engine against Aimee (most of its mechanisms
+  already exist: attention guard, per-intent budgets, confidence scorer, symbol
+  preload) and scopes the one clean gap: surface the confidence + caps the memory
+  assembler already computes to the delegate as a *binding* exploration contract,
+  enforced by the existing `cli_attention_guard.c` raw-scan redirect.
+  **Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote.**
 - [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
   — small reasoning models served through the gateway fall into degenerate
   repetition collapse (a short span re-emitted until `max_tokens` is exhausted).

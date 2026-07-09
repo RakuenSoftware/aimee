@@ -1,0 +1,64 @@
+# Child "slice" workflow -- one packet of the parent "build" run.
+#
+# foreach.workflow spawns one of these per split packet. Each slice implements its
+# packet, freezes the diff, passes the standard roundtable (resubmit-until-
+# convergence), opens a sub-PR, waits for FULLY GREEN CI, then merges into the
+# parent's feature branch. A slice is terminal (done) only once merged.
+name: slice
+intent_tags:
+  - slice
+start: scope
+nodes:
+  # Scope the packet handed down by the parent into an actionable intent (source;
+  # no user -- this is an autonomous child run). Self-loop on delegate failure.
+  - id: scope
+    block: understand
+    params:
+      with_user: false
+    next: impl
+    on_fail: scope
+  # Implement the packet on the slice branch.
+  - id: impl
+    block: implement
+    in:
+      plan: scope.out
+    next: freeze
+  - id: freeze
+    block: freeze
+    in:
+      branch: impl.out
+    next: rt_gate
+  # Standard roundtable review of the slice diff; changes loop back to implement.
+  - id: rt_gate
+    block: gate.roundtable
+    in:
+      src: freeze.out
+    params:
+      panel:
+        required:
+          - security
+          - architect
+          - qa
+          - reviewer
+      quorum: 4
+      max_rounds: 6
+    on_pass: pr
+    on_fail: impl
+  # Open the slice sub-PR (targets the parent feature branch).
+  - id: pr
+    block: pr.open
+    in:
+      src: freeze.out
+    next: ci
+  # CI must be fully green before the slice may merge; red loops back to implement.
+  - id: ci
+    block: gate.ci
+    in:
+      pr: pr.out
+    on_pass: merge
+    on_fail: impl
+  # Merge the green, approved slice into the feature branch. Terminal: slice done.
+  - id: merge
+    block: merge
+    in:
+      pr: pr.out
