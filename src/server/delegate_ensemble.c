@@ -613,7 +613,8 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
-                                roundtable_mode_t mode, int round, const char *brief)
+                                roundtable_mode_t mode, int round, const char *brief,
+                                const char *context)
 {
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
@@ -667,23 +668,46 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
       brief_block = owned_brief_block;
    }
 
+   /* Read-only aimee context (memory recall + code-graph snippets), assembled by
+    * the server-side caller. Panelists have no tools, so this block is the only
+    * way they see aimee memory and the code graph; it is authoritative reference,
+    * not something they can re-query. */
+   const char *context_block = "";
+   char *owned_context_block = NULL;
+   if (context && context[0])
+   {
+      owned_context_block =
+          xasprintf3("AIMEE CONTEXT (read-only reference — aimee memory + code graph):\n", context,
+                     "\nUse this context as grounding; it is authoritative reference you cannot "
+                     "re-query.\n\n");
+      if (!owned_context_block)
+      {
+         free(owned_brief_block);
+         return NULL;
+      }
+      context_block = owned_context_block;
+   }
+
    size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) +
-                   strlen(brief_block) + strlen(mode_task) + strlen(role_hint) + strlen(head_note) +
-                   512;
+                   strlen(brief_block) + strlen(context_block) + strlen(mode_task) +
+                   strlen(role_hint) + strlen(head_note) + 512;
    char *prompt = malloc(needed);
    if (!prompt)
    {
       free(owned_brief_block);
+      free(owned_context_block);
       return NULL;
    }
-   snprintf(prompt, needed,
-            "You are one participant in an agent roundtable. Your role is to %s.\n\n%s"
-            "TASK:\n%s\n\nCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
-            "ROUND %d INSTRUCTION:\n%s\n",
-            role_hint, head_note, task ? task : "", artifact[0] ? artifact : "(none yet)",
-            peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task);
+   snprintf(
+       prompt, needed,
+       "You are one participant in an agent roundtable. Your role is to %s.\n\n%s"
+       "TASK:\n%s\n\n%sCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
+       "ROUND %d INSTRUCTION:\n%s\n",
+       role_hint, head_note, task ? task : "", context_block, artifact[0] ? artifact : "(none yet)",
+       peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task);
 
    free(owned_brief_block);
+   free(owned_context_block);
    return prompt;
 }
 
@@ -1071,8 +1095,8 @@ static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, i
 
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, const char *brief, agent_result_t *results,
-                              int deadline_ms)
+                              int round, const char *brief, const char *context,
+                              agent_result_t *results, int deadline_ms)
 {
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -1083,7 +1107,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    memset(personas, 0, sizeof(personas));
    for (int i = 0; i < ref_count; i++)
    {
-      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief);
+      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context);
       if (!prompts[i])
          goto fail;
       /* Per-participant persona (review mode only) is the system prompt; the
@@ -1119,7 +1143,8 @@ fail:
 
 static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const char *task,
                                 const char *artifact, char **peer_notes, roundtable_mode_t mode,
-                                int round, const char *brief, agent_result_t *results)
+                                int round, const char *brief, const char *context,
+                                agent_result_t *results)
 {
    int ref_count = cfg->ensemble_reference_count;
    int order[ENSEMBLE_MAX_REFS];
@@ -1130,7 +1155,7 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    for (int oi = 0; oi < ref_count; oi++)
    {
       int i = order[oi];
-      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief);
+      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief, context);
       if (!prompt)
          return -1;
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
@@ -1465,12 +1490,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       local.mode = ROUNDTABLE_DRAFT;
       local.turns = strcmp(cfg->roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
                                                                      : ROUNDTABLE_PARALLEL;
-      local.max_rounds = cfg->roundtable_max_rounds > 0 ? cfg->roundtable_max_rounds : 3;
+      local.max_rounds = cfg->roundtable_max_rounds > 0 ? cfg->roundtable_max_rounds : 1;
       local.converge_threshold = cfg->roundtable_converge_threshold;
       local.deadline_ms = cfg->roundtable_deadline_ms;
    }
    if (local.max_rounds <= 0)
-      local.max_rounds = 3;
+      local.max_rounds = 1;
    if (local.converge_threshold < 0)
       local.converge_threshold = 10;
    if (local.brief_truncated)
@@ -1553,9 +1578,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
-                                          local.brief, results)
+                                          local.brief, local.context, results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
-                                        local.brief, results, panel_deadline_ms);
+                                        local.brief, local.context, results, panel_deadline_ms);
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)

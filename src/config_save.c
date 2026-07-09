@@ -91,7 +91,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    }
 
    /* roundtable.* (including the authoring-pipeline keys, roundtable.pipeline_*) */
-   if (cfg->roundtable_max_rounds != 3 || cfg->roundtable_converge_threshold != 10 ||
+   if (cfg->roundtable_max_rounds != 1 || cfg->roundtable_converge_threshold != 10 ||
        cfg->roundtable_deadline_ms != 600000 || strcmp(cfg->roundtable_turns, "parallel") != 0 ||
        strcmp(cfg->roundtable_pipeline_done_bar, "zero_blocking") != 0 ||
        cfg->roundtable_pipeline_max_passes != 0 ||

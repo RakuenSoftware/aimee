@@ -809,7 +809,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
-   cfg->roundtable_max_rounds = 3;
+   cfg->roundtable_max_rounds = 1;
    cfg->roundtable_converge_threshold = 10;
    /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
     * ensemble, short enough that a wedged run fails fast instead of a 10-min
