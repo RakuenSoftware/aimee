@@ -649,8 +649,8 @@ static size_t kb_curator_append_custom(const config_t *cfg, kb_curator_stage_des
                                               kb_curator_base_resolve, cbuf, cbuf_n, &nrej);
    if (nrej > 0)
       aimee_log(LOG_WARN, "kb.curator.custom",
-                "skipped %d invalid custom_stages entr%s (unknown base_op / bad name / re-lane / "
-                "dup); using the rest",
+                "skipped %d custom_stages entr%s (unknown base_op / bad name / re-lane / dup / bad "
+                "budget / over cap); using the rest",
                 nrej, nrej == 1 ? "y" : "ies");
    for (size_t i = 0; i < nc && k < max; i++)
    {
@@ -685,6 +685,10 @@ static size_t kb_curator_ordered_stages(const config_t *cfg, kb_curator_stage_de
                    "ignoring invalid kb_curator_stage_order (%s); using registry order", err);
       return kb_curator_append_custom(cfg, out, reg, max, cbuf, cbuf_n);
    }
+   /* `used` is indexed by built-in registry position; guard its width against the
+    * built-in count so adding a 33rd stage can't silently overflow it. */
+   _Static_assert(sizeof(CURATOR_STAGES) / sizeof(CURATOR_STAGES[0]) <= 32,
+                  "used[] must cover every built-in curator stage");
    int used[32] = {0};
    size_t k = 0;
    char buf[512];

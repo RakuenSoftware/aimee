@@ -24,9 +24,10 @@
 
 #include "kb_curator_pipeline.h" /* kb_curator_stage_desc_t */
 
-#define KB_CURATOR_CUSTOM_NAME_MAX 64   /* incl. NUL; names are [A-Za-z0-9_-]{1,63} */
-#define KB_CURATOR_MAX_CUSTOM      32   /* cap on composed stages (DoS backstop) */
-#define KB_CURATOR_CUSTOM_JSON_MAX 8192 /* refuse to parse a larger config blob */
+#define KB_CURATOR_CUSTOM_NAME_MAX   64    /* incl. NUL; names are [A-Za-z0-9_-]{1,63} */
+#define KB_CURATOR_MAX_CUSTOM        32    /* cap on composed stages (DoS backstop) */
+#define KB_CURATOR_CUSTOM_JSON_MAX   8192  /* refuse to parse a larger config blob */
+#define KB_CURATOR_CUSTOM_BUDGET_MAX 65536 /* clamp ceiling for a per-pass budget */
 
 /* Map a built-in stage name to its registry descriptor, or NULL if the name is
  * not a vetted built-in run()-backed stage. Injected so this module need not see
