@@ -33,9 +33,13 @@ radius. This proposal makes that split concrete.
 ## §0 Invariants inherited from Proposal 2 (non-negotiable)
 
 - **The automated pipeline can NEVER mint a hard rule — enforced *structurally*, not just in code
-  (R1).** Every §4 write is hard-capped at `soft`, AND a db2 trigger/CHECK rejects any `rules` row
-  with an auto/quarantine provenance and `directive_type='hard'`, so even a buggy or injected code
-  path cannot reach the non-overridable slot. Only operator-entered rules may be `hard`.
+  (R1/R2).** Every §4 write is hard-capped at `soft`, AND a DB trigger/CHECK rejects any
+  auto/quarantine-provenance row with `directive_type='hard'` — **in both db2 (org rules) AND db1
+  (user memory)**, so no auto-populated user identity/preference can be minted `hard` either (R2).
+  Provenance is stamped by a single trusted, code-controlled quarantine-release sink (ideally a
+  dedicated SQL INSERT target / role for auto-writes), so an injected code path cannot forge an
+  operator provenance to reach the non-overridable slot (R2). Only operator-entered rules may be
+  `hard`.
 - **Precedence lattice** (Proposal 2 R2), highest authority first: hard org rules → operator user
   captures → soft org defaults → **untrusted advisory** (auto-extracted / quarantine-released rows,
   repo-file conventions). Auto-population only ever writes into the *lowest* tier.
@@ -69,7 +73,9 @@ A gated, offline LLM pass (never on the hot turn loop) reads recent transcripts/
 proposes candidate memories, each tagged with a target store + scope. Candidates are written to a
 **quarantine table** (NOT to the `memories`/`rules`/`user_memories` recall selectors), carrying:
 `{proposed_store (db1|db2), kind, key, content, scope, confidence, evidence_ref, provenance,
-ttl_at, state (pending|approved|rejected)}`.
+sensitivity, content_hash, ttl_at, state (pending|approved|rejected)}`. `content_hash` carries a
+UNIQUE constraint over pending rows so the extractor cannot flood the queue with the same signal
+(R2 dedup); `sensitivity` drives PII handling (§2b).
 
 - **Nothing in quarantine is recallable** — the recall selectors (db1 `db1_user_memory_list_recall`,
   db2 `db2_memory_list_recall_section`) never read the quarantine table. It surfaces ONLY via the
@@ -87,11 +93,19 @@ ttl_at, state (pending|approved|rejected)}`.
 
 ### §2b Quarantine review surface
 
-`aimee memory review` gains the auto-extract queue with explicit verbs:
+`aimee memory review` gains the auto-extract queue with explicit verbs. Every mutating verb requires
+a named capability — **`CAP_MEMORY_ADMIN`** (a new server auth cap, distinct from `CAP_MEMORY_WRITE`)
+— so gating is structural, not policy-by-convention (R2):
 - `aimee memory review list [--store db1|db2] [--limit N]` — pending candidates with provenance.
-- `aimee memory review approve <id> [--edit "..."]` — release into the target store at the correct
-  scope (db1 via `memory.user_capture`; db2 as a `soft` rule/fact) tagged `provenance=auto-extracted`
-  so the merge places it at the **untrusted-advisory** lattice tier.
+  For a `sensitivity=pii` candidate the list renders a **redacted preview**; the raw content is
+  access-gated behind a separate `--reveal` that re-checks `CAP_MEMORY_ADMIN` and audits the reveal
+  (R2 — quarantine is a sensitive store, never a plain-text PII dump).
+- `aimee memory review approve <id> [--edit "..."] [--scope user|org]` — release into the target
+  store at the correct scope (db1 via `memory.user_capture`; db2 as a `soft` rule/fact) tagged
+  `provenance=auto-extracted` so the merge places it at the **untrusted-advisory** lattice tier. A
+  `scope=unknown` candidate (multi-speaker, §2a) CANNOT be approved without an explicit `--scope`
+  (enforced by a DB CHECK: no release with unresolved scope) — never a silent db1 mis-attribution
+  (R2).
 - `aimee memory review reject <id> [--reason S]` — tombstone; feeds a negative signal so the same
   candidate is not re-proposed.
 - `aimee memory review edit <id> "..."` — correct before approving.
@@ -106,8 +120,11 @@ approval. It never auto-writes a durable, every-user-visible rule.
 - On approval, the rule lands as `directive_type='soft'`, `domain` from the feedback topic, `weight`
   from evidence strength.
 - **Lifecycle**: set `expires_at` (decay) and bump `last_reinforced_at` **only on genuinely new
-  evidence** — a distinct session/source, never the rule's own prior emission (R1: reinforcement
-  must not self-feed and defeat decay); a rule with no *new* evidence still decays and expires.
+  evidence** — a distinct session/source, never the rule's own prior emission. Enforced
+  structurally (R2): each reinforcement carries a `source_evidence_ref`, and a reinforcement is
+  rejected when that ref is a descendant of the rule's own prior emissions (an evidence-lineage
+  check), so a rule can never reinforce itself and defeat decay. A rule with no *new* evidence still
+  decays and expires.
 - A revocation path (`aimee rules -` / review reject) tombstones a bad auto-rule.
 - **Config**: `intelligence.autopopulate.feedback_rules.enabled` (default 0). The existing ephemeral
   brief block is unchanged until durable rules are calibrated — additive, not a replacement (OQ3).
@@ -115,10 +132,13 @@ approval. It never auto-writes a durable, every-user-visible rule.
 ### §2d Promotion → durable org facts/rules (strict gate)
 
 Consolidate recurring, high-confidence db2 `episode` rows into durable org facts/rules:
-- Runs only when `intelligence.autopopulate.promote.enabled` (default 0) AND a promotion is
-  operator-gated per batch (a review step), because it mutates shared multi-user state.
+- Runs only when `intelligence.autopopulate.promote.enabled` (default 0) AND each promotion is
+  approved **per row** (never per batch — R2), because it mutates shared multi-user state.
 - Each promotion writes a **WORM audit** row (reuse `audit_worm_*` / `kb_audit_event`) recording
   source episodes, resulting row, and approver.
+- **KB-ontology reconciliation (R2)**: before promoting, check the candidate against the KB's own
+  typed-fact ontology reconciliation so the two systems don't diverge (a promoted rule that
+  conflicts with an existing typed fact is flagged, not silently written).
 - Hard-capped at `soft`; the promoted row enters recall at the advisory tier until an operator
   elevates it via explicit capture.
 
@@ -134,7 +154,7 @@ Consolidate recurring, high-confidence db2 `episode` rows into durable org facts
 3. **§2c feedback→durable rules (default-off)** — the durable sink for the feedback signal, with
    decay/reinforcement lifecycle.
 4. **§2d promotion (default-off, strict gate)** — last, because it mutates shared org state; gated
-   per-batch with WORM audit.
+   **per-row** with WORM audit.
 
 ## Non-goals
 
@@ -160,7 +180,12 @@ Consolidate recurring, high-confidence db2 `episode` rows into durable org facts
 *(Acceptance is prose here — this is a design proposal; the concrete
 `make unit-tests TEST=...` acceptance block lands with the first implementation slice, §3.1.)*
 
-- Quarantine isolation: a quarantined candidate NEVER appears in `aimee memory recall` (unit).
+- Quarantine isolation: a quarantined candidate NEVER appears in `aimee memory recall` (unit), AND
+  a source guard asserts the recall selectors (`db1_user_memory_list_recall`,
+  `db2_memory_list_recall_section`) contain no reference to the quarantine table (structural, R2).
+- Capability gate: a review mutating verb without `CAP_MEMORY_ADMIN` is refused (unit).
+- Dedup: two extractions of the same signal collapse to one pending candidate via `content_hash` (unit).
+- Scope enforcement: approving a `scope=unknown` candidate without `--scope` is rejected (unit).
 - Gate: a PII-flagged or sub-threshold candidate is quarantined/dropped, never auto-approved (unit).
 - No-hard-rule invariant: every §4 write path rejects `directive_type='hard'` (unit).
 - Review verbs: `approve` releases to the correct store+scope tagged advisory; `reject` tombstones +
@@ -197,9 +222,42 @@ in above:
 - **Phase 1 is low-blast-radius, not "zero risk"** (1): `approve` is a live write path, so the review
   command is itself operator-gated + audited (§3.1).
 
-## Open questions (post-R1)
+## Review revisions (R2)
 
-Panel consensus resolved most of the original OQs; these remain for implementation:
+Second roundtable pass (same 5-provider panel). It confirmed the architecture but flagged that R1
+stated its invariants as prose without the *structural* mechanism that makes them hold, plus one
+direct contradiction. All folded in above:
+
+- **§2d contradiction fixed**: promotion is **per-row** (approval + WORM audit), never "per batch" —
+  the earlier §2d/§3 "per batch" wording contradicted R1 and is removed.
+- **No-hard-rule now covers db1 too** (was db2-only): the structural trigger/CHECK rejects a
+  `hard` auto/quarantine row in **both** stores, and provenance is stamped by a single trusted,
+  code-controlled release sink (ideally a dedicated SQL INSERT role for auto-writes) so an injected
+  path cannot forge operator provenance (§0).
+- **PII made structural**: the candidate schema gains a `sensitivity` column; the review `list`
+  renders redacted previews for `pii` rows and gates raw content behind an audited `--reveal` (§2a/§2b).
+- **Reinforcement self-feed made structural**: a `source_evidence_ref` + evidence-lineage check
+  rejects a reinforcement whose evidence descends from the rule's own prior emissions (§2c).
+- **Multi-speaker scope enforced**: a `scope=unknown` candidate cannot be released without an
+  explicit `--scope`, enforced by a DB CHECK — no silent db1 mis-attribution (§2a/§2b).
+- **`approve`/mutating verbs need a named capability**: a new `CAP_MEMORY_ADMIN` server auth cap
+  (distinct from `CAP_MEMORY_WRITE`) gates the review verbs structurally (§2b).
+- **Promotion ↔ KB-ontology reconciliation**: promotion checks the candidate against the KB's own
+  typed-fact reconciliation so the two systems don't diverge (§2d).
+- **Dedup / anti-flood**: a UNIQUE `content_hash` over pending candidates prevents the extractor from
+  flooding the queue with the same signal (§2a).
+- **Structural isolation is a named guard test**: a test asserts the recall selectors
+  (`db1_user_memory_list_recall`, `db2_memory_list_recall_section`) contain no reference to the
+  quarantine table — belt-and-suspenders on non-membership (Tests).
+- **Namespace**: the auto-population queue lives under a **distinct** surface (`aimee memory
+  quarantine`, or `aimee memory review --queue autopopulate`) to avoid conflating it with the
+  charter-pipeline review (OQ3).
+- **db1 decay symmetry (noted)**: whether auto-extracted db1 rows carry `expires_at`/reinforcement
+  like db2 rules — to avoid stale identity drift — is called out for the schema slice (OQ4).
+
+## Open questions (post-R2)
+
+Panel consensus resolved the original OQs and the R1/R2 blockers; these remain for the schema slice:
 
 1. **Quarantine store shape**: the panel favoured a **single** `memory_candidates` table for both
    db1- and db2-targeted candidates (discriminated by `proposed_store`), rather than splitting or
