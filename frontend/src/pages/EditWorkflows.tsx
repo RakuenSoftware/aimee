@@ -984,6 +984,7 @@ function NodeInspector({
   const [task, setTask] = useState("");
   const [parts, setParts] = useState<Participant[]>([]);
   const [quorum, setQuorum] = useState(0);
+  const [focus, setFocus] = useState("");
   const [showAdv, setShowAdv] = useState(false);
   const [paramsText, setParamsText] = useState("");
   const [paramsErr, setParamsErr] = useState("");
@@ -1001,6 +1002,7 @@ function NodeInspector({
     }
     setParts(ps);
     setQuorum(typeof p.quorum === "number" ? p.quorum : 0);
+    setFocus(typeof p.focus === "string" ? p.focus : "");
     setParamsText(node.params ? JSON.stringify(node.params, null, 2) : "");
     setParamsErr("");
     setShowAdv(false);
@@ -1017,15 +1019,18 @@ function NodeInspector({
     task?: string;
     parts?: Participant[];
     quorum?: number;
+    focus?: string;
   }) => {
     const t = next.title ?? title;
     const tk = next.task ?? task;
     const pr = next.parts ?? parts;
     const q = next.quorum ?? quorum;
+    const fc = next.focus ?? focus;
     if (next.title !== undefined) setTitle(next.title);
     if (next.task !== undefined) setTask(next.task);
     if (next.parts !== undefined) setParts(next.parts);
     if (next.quorum !== undefined) setQuorum(next.quorum);
+    if (next.focus !== undefined) setFocus(next.focus);
     mutate((g) => {
       const n = g.nodes.find((x) => x.id === node.id);
       if (!n) return g;
@@ -1056,6 +1061,10 @@ function NodeInspector({
         else delete params.panel;
         if (q > 0) params.quorum = q;
         else delete params.quorum;
+        // review lens: the acceptance/plan gates set this so the panel judges the
+        // work AGAINST the ask (completion, quality, missing tests).
+        if (fc.trim()) params.focus = fc;
+        else delete params.focus;
       } else {
         delete params.panel;
         delete params.quorum;
@@ -1205,6 +1214,20 @@ function NodeInspector({
             />
           </label>
         </div>
+      )}
+      {isMulti && (
+        <>
+          <label style={{ ...lbl, marginTop: 8 }}>
+            Review focus (what the panel judges the work against)
+          </label>
+          <textarea
+            value={focus}
+            placeholder="e.g. does this plan satisfy the proposal? / was the proposal completed — quality, missing tests?"
+            onChange={(e) => commitStep({ focus: e.target.value })}
+            rows={2}
+            style={{ ...inp, width: "100%" }}
+          />
+        </>
       )}
       <datalist id="wf-persona-opts">
         {personas.map((p) => (
