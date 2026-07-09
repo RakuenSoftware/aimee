@@ -255,9 +255,21 @@ direct contradiction. All folded in above:
 - **db1 decay symmetry (noted)**: whether auto-extracted db1 rows carry `expires_at`/reinforcement
   like db2 rules — to avoid stale identity drift — is called out for the schema slice (OQ4).
 
-## Open questions (post-R2)
+## Review revisions (R3 — converged)
 
-Panel consensus resolved the original OQs and the R1/R2 blockers; these remain for the schema slice:
+Third roundtable pass. The panel **converged**: codex and mimo-v2.5-pro reported CONVERGED, mistral
+and gpu-mid marked every R1/R2 blocker resolved. The only residual "blocking" votes (MiniMax-M3) ask
+for deeper *implementation* concreteness — the exact confidence floor, the precise evidence-lineage
+algorithm, the trusted-sink implementation, and the KB-reconciliation mechanics. These are
+design-complete here (the mechanisms and their enforcement points are named) and their exact
+DDL/thresholds land with the schema/implementation slice (§3.1), consistent with the design-vs-code
+boundary; the open items are captured below. One small robustness point folded: the feedback→
+quarantine path is **fail-closed** — if the candidate write fails, the signal is dropped, never
+written as a durable rule.
+
+## Open questions (post-R3)
+
+Design-complete; these are implementation-slice decisions (not design blockers):
 
 1. **Quarantine store shape**: the panel favoured a **single** `memory_candidates` table for both
    db1- and db2-targeted candidates (discriminated by `proposed_store`), rather than splitting or
