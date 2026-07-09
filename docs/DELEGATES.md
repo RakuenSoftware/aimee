@@ -337,9 +337,14 @@ During a long coding session, use a `summarize` delegate to fold older context i
 
 ## Roundtable and ensemble (MoA)
 
+> These are two of the three **ensemble** modes (a panel of agents). See
+> [Ensembles](ENSEMBLE.md) for the full picture, including the templated
+> turn-based session mode and how a delegate feeds a running session.
+
 Two commands run a panel of models instead of one delegate and synthesize a
 single answer. Both ship configured; the panel and aggregator are on by
-default.
+default. They are also reachable under the `ensemble` verb —
+`aimee ensemble aggregate` / `aimee ensemble roundtable`.
 
 ```bash
 # Mixture-of-agents: fan out to diverse models, one aggregator synthesizes

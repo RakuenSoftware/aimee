@@ -251,6 +251,13 @@ static const struct
      * route, which maps positional[0] -> role and never ran the engine. */
     {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
     {"delegate", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
+    /* `ensemble` is the umbrella verb for a panel of agents. Its aggregate (MoA
+     * fan-out + synthesis) and roundtable (review/debate panel) modes reuse the
+     * exact delegate.* server methods; the third mode is the persistent, templated
+     * turn-based session (db1 `ensembles`, agent-driven via the ensemble_* MCP
+     * tools). `delegate aggregate/roundtable` stay as back-compat aliases. */
+    {"ensemble", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
+    {"ensemble", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */

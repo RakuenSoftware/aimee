@@ -1,4 +1,8 @@
-/* db1/ensemble.h: templated multi-agent ensembles.
+/* db1/ensemble.h: templated multi-agent ensembles — the persistent, turn-based
+ * SESSION mode of the ensemble concept (see docs/ENSEMBLE.md). The one-shot
+ * aggregate (Mixture-of-Agents) and roundtable panel modes live in
+ * server/delegate_ensemble.{c,h}; a delegate can advance a session bound to a
+ * channel via db1_ensemble_find_current_by_channel below.
  *
  * Pure domain API. No backend types or handles in any signature. */
 #ifndef DEC_DB1_ENSEMBLE_H

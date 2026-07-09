@@ -528,6 +528,25 @@ char *read_stdin(void)
    return buf;
 }
 
+/* Unified help for the `ensemble` umbrella verb (a panel of agents). aggregate
+ * and roundtable are live modes routed to the delegate.* server methods; the
+ * templated turn-based session is agent-driven via the ensemble_* MCP tools. */
+static void ensemble_usage(void)
+{
+   fprintf(stderr,
+           "Usage: aimee ensemble <mode>\n"
+           "  A panel of agents collaborating on one task. Modes:\n"
+           "    aggregate <prompt>   Mixture-of-Agents: fan out to diverse models and\n"
+           "                         synthesize one answer (configured by ensemble.*).\n"
+           "    roundtable <task> [--mode review|draft] [--turns parallel|sequential]\n"
+           "                         a multi-persona review/debate panel.\n"
+           "    session <start|status|pause|advance|list>\n"
+           "                         a persistent, templated, turn-based session\n"
+           "                         (code-review, debate, planning, design-critique).\n"
+           "                         Agents drive these via the ensemble_* MCP tools.\n"
+           "  See docs/ENSEMBLE.md. `aimee delegate aggregate|roundtable` remain as aliases.\n");
+}
+
 static int unsupported_client_command(const char *cmd, int json_output)
 {
    const char *name = (cmd && cmd[0]) ? cmd : "launch";
@@ -1759,6 +1778,29 @@ int main(int argc, char **argv)
    /* workflow definitions are local files; inspect/validate without a server. */
    if (strcmp(cmd, "workflow") == 0)
       return cmd_workflow_client_run(sub_argc, sub_argv, json_output);
+   /* `ensemble` umbrella: give the verb unified help; the session subcommands are
+    * agent-driven (ensemble_* MCP tools), so point there rather than emitting a raw
+    * "no /v1 route" error. aggregate/roundtable fall through to /v1 routing below. */
+   if (strcmp(cmd, "ensemble") == 0)
+   {
+      const char *sub = (sub_argc >= 1) ? sub_argv[0] : NULL;
+      if (!sub || is_help_arg(sub) || strcmp(sub, "session") == 0)
+      {
+         ensemble_usage();
+         return sub ? 0 : 2;
+      }
+      if (strcmp(sub, "start") == 0 || strcmp(sub, "status") == 0 || strcmp(sub, "pause") == 0 ||
+          strcmp(sub, "advance") == 0 || strcmp(sub, "list") == 0)
+      {
+         fprintf(stderr,
+                 "aimee ensemble %s: templated session ensembles are agent-driven via the\n"
+                 "  ensemble_%s MCP tool (or a delegate bound to a channel). See "
+                 "docs/ENSEMBLE.md.\n",
+                 sub, sub);
+         return 2;
+      }
+      /* aggregate / roundtable (and anything else) fall through to the /v1 routes. */
+   }
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */

@@ -1,4 +1,7 @@
-/* delegate_ensemble.h: Mixture-of-Agents ensemble fan-out and synthesis. */
+/* delegate_ensemble.h: Mixture-of-Agents ensemble fan-out and synthesis — the
+ * one-shot AGGREGATE and ROUNDTABLE panel modes of the ensemble concept (see
+ * docs/ENSEMBLE.md). The persistent, templated, turn-based SESSION mode lives in
+ * db1/ensemble.{c,h}; a delegate's output can feed a channel-bound session. */
 #ifndef DEC_DELEGATE_ENSEMBLE_H
 #define DEC_DELEGATE_ENSEMBLE_H 1
 
