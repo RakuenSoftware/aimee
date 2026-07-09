@@ -425,6 +425,68 @@ static void test_sidecar_recovers_order(void)
    printf("  sidecar_recovers_order: ok\n");
 }
 
+/* ---- 9. the real sidecar fits the pairwise objective (within-query ordering) ---- */
+static void test_sidecar_pairwise(void)
+{
+   const char *cands[] = {"scripts/rank-fit.py", "../scripts/rank-fit.py",
+                          "../../scripts/rank-fit.py"};
+   const char *script = NULL;
+   for (size_t i = 0; i < sizeof(cands) / sizeof(cands[0]); i++)
+      if (access(cands[i], R_OK) == 0)
+      {
+         script = cands[i];
+         break;
+      }
+   if (!script || system("command -v python3 >/dev/null 2>&1") != 0)
+   {
+      printf("  sidecar_pairwise: skipped (python3/rank-fit.py unavailable)\n");
+      return;
+   }
+
+   /* Each query has a used (label 1) and an unused (label 0) candidate that
+    * differ only in dense/lex — so pairwise must recover positive dense/lex
+    * weight and ~0 on the constant recency feature. */
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "python3 %s > /tmp/rf_pairout.json", script);
+   FILE *p = popen(cmd, "w");
+   assert(p);
+   fputs("{\"feature_set_version\":\"v1\",\"objective\":\"pairwise\",\"min_groups\":4,\"rows\":[",
+         p);
+   for (int g = 0; g < 6; g++)
+   {
+      if (g)
+         fputs(",", p);
+      fprintf(p,
+              "{\"group\":\"q%d\",\"label\":1,\"weight\":1.0,\"features\":{\"dense.cos\":0.9,"
+              "\"lex.cos\":0.8,\"temp.recency\":0.5}},"
+              "{\"group\":\"q%d\",\"label\":0,\"weight\":1.0,\"features\":{\"dense.cos\":0.3,"
+              "\"lex.cos\":0.2,\"temp.recency\":0.5}}",
+              g, g);
+   }
+   fputs("]}", p);
+   assert(pclose(p) == 0);
+
+   FILE *rf = fopen("/tmp/rf_pairout.json", "rb");
+   assert(rf);
+   char buf[4096];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, rf);
+   buf[n] = '\0';
+   fclose(rf);
+   cJSON *o = cJSON_Parse(buf);
+   assert(o);
+   assert(strcmp(sstr(o, "status"), "ok") == 0);
+   cJSON *m = cJSON_GetObjectItemCaseSensitive(o, "fit_metrics");
+   assert(strcmp(sstr(m, "objective"), "pairwise") == 0);
+   assert(snum(m, "n_pairs") > 0.0);
+   cJSON *w = cJSON_GetObjectItemCaseSensitive(o, "weights");
+   assert(snum(w, "dense.cos") > 0.0);
+   assert(snum(w, "lex.cos") > 0.0);
+   /* Constant-within-query feature earns ~0 weight — the pairwise property. */
+   assert(snum(w, "temp.recency") < 0.5 && snum(w, "temp.recency") > -0.5);
+   cJSON_Delete(o);
+   printf("  sidecar_pairwise: ok\n");
+}
+
 int main(void)
 {
    printf("test_ranker_fit:\n");
@@ -437,6 +499,7 @@ int main(void)
    test_gate_hold_on_no_lift();
    test_sidecar_refusal();
    test_sidecar_recovers_order();
+   test_sidecar_pairwise();
    printf("test_ranker_fit: all passed\n");
    return 0;
 }

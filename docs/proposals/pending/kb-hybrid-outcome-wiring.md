@@ -84,20 +84,38 @@ non-correction follow-up** — i.e. "the user kept talking and didn't immediatel
 correct me," a loose proxy for "the rows were useful." So the label skews heavily
 positive (the exact position/outcome bias the LTR proposal's Risks section names).
 It is a legitimate *first* source — it turns a dead loop into a live trickle of
-real weak labels — but the pointwise fitter inherits the bias, and the benchmark
-gate remains the backstop. Higher-fidelity sources are the real goal.
+real weak labels — but the fitter must not over-trust it, and the benchmark gate
+remains the backstop. Higher-fidelity sources are the real goal.
 
-### Remaining open work
+### Fitter side, landed: pairwise objective + IPW weight
 
-1. **Ranker (`kb_search`) capture hook.** Note `ranker` outcomes when the agent
-   uses `kb_search` in a turn. Subtlety to handle first: `kb.search` is also
-   callable from the CLI/API *outside* a conversational turn, where no next-turn
-   autolabel follows — the note must be scoped to in-turn tool use to avoid
-   mis-attribution, and `kb_search`'s response must expose `doc_id`.
-2. **Answer-attribution** — a turn citing a surfaced doc → a stronger `accepted`
-   signal than the continuation heuristic (uses the `artifact_citations` /
-   `lessons_cite_tracker` machinery).
-3. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
+The fitter (`scripts/rank-fit.py`) now supports a **pairwise (RankNet) objective**
+(`intelligence.ranking.fit.objective = pairwise`) alongside pointwise. This matters
+directly for the weak-label problem: pairwise optimises *within-query ordering*, so
+a feature that is **constant across a query's candidates earns ~0 weight** — which
+is exactly why a turn-level, all-`accepted` label carries no learnable signal, and
+why the *per-document contrast* below is the thing that unlocks it. The
+per-candidate `weight` field now flows through to the fitter, so an **IPW /
+propensity or confidence weight** on an outcome is honoured unchanged.
+
+### Remaining open work — the real fidelity lever
+
+1. **Per-document answer↔doc overlap attribution.** The turn verdict is applied to
+   *all* surfaced rows identically, giving a ranker no within-query contrast (and
+   the existing "citation" machinery is circular — `memory_collect_answer_citation_ids`
+   returns the top-ranked match's cluster, computed at *retrieval* time, so it just
+   reinforces the current order). The non-circular fix: at attribution time, the
+   prior turn's assistant answer is already in the message history — score each
+   surfaced doc's snippet against it and emit **per-doc** `accepted` (used) vs
+   `contradicted` (surfaced-but-unused). This is what turns a flat verdict into the
+   contrastive labels the pairwise objective needs.
+2. **Ranker (`kb_search`) capture hook.** Note `ranker` outcomes when the agent uses
+   `kb_search` in a turn (scoped to in-turn tool use — `kb.search` is also CLI/API
+   callable outside a turn; `kb_search`'s response must expose `doc_id`).
+3. **IPW propensity logging.** Log the surfacing propensity (reuse the bandit's
+   `db2_bandit_decision_insert` pattern) and populate the outcome `weight` with
+   `1/propensity`; the fitter already consumes it.
+4. **Explicit harness/eval feedback** — highest fidelity, for benchmark runs.
 
 ## Non-goals
 

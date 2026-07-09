@@ -1400,12 +1400,16 @@ typedef struct config
     *                          (0 → default 8) — the thin-log overfit guardrail.
     * kb_ranker_fit_benchmark: path to the recall-track fixture used as the
     *                          promotion gate (empty → benchmarks/rank/kb_hybrid/queries.json).
-    * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5). */
+    * kb_ranker_fit_bench_k:   NDCG cutoff for the gate (0 → default 5).
+    * kb_ranker_fit_objective: "pointwise" (default) or "pairwise" — the fitter
+    *                          objective. Pairwise learns within-query ordering
+    *                          and is robust to positive-skewed labels. */
    int kb_ranker_fit_enabled;
    char kb_ranker_fit_command[512];
    int kb_ranker_fit_min_groups;
    char kb_ranker_fit_benchmark[512];
    int kb_ranker_fit_bench_k;
+   char kb_ranker_fit_objective[16];
 
    /* Graph reasoning (Datalog sidecar).
     * reasoning_datalog_command: path to Datalog evaluator; empty = disabled.
