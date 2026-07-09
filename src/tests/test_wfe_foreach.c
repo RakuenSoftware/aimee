@@ -6,7 +6,7 @@
  *   - no children + spawner returns 0    -> advance (no packets, nothing to do)
  *   - no children + no spawner           -> park (fail closed)
  *   - all children accepted              -> advance (every slice merged)
- *   - a child rejected                   -> DEGRADED park (a slice failed)
+ *   - a child rejected or abandoned      -> park pending_human (a slice will not merge)
  */
 #include <assert.h>
 #include <stdio.h>
@@ -78,14 +78,15 @@ static int mock_spawn(const char *wi, const char *child, int maxc, char *err, si
 }
 static const wfe_foreach_provider_t MOCK = {mock_spawn};
 
-/* Create a work item on the `fe` workflow, run it, return its id + final row. */
+/* Create a work item on the `fe` workflow, drive it to a stop, return its final row.
+ * For the spawn-driven cases only (the pre-seeded cases mint the id + seed children
+ * inline before running, since the id is not known until create). */
 static void run_fe(const char *repo, const char *ppath, db1_work_item_t *wi, char id_out[80])
 {
    char id[80] = "", err[256] = "";
    assert(wfe_work_item_create("fe", repo, ppath, "autonomous", id, err, sizeof err) == 0);
    if (id_out)
       snprintf(id_out, 80, "%s", id);
-   /* seed children (for the pre-seeded cases) happens BEFORE this call by the caller */
    assert(wfe_engine_run(id, err, sizeof err) == 0);
    assert(db1_work_item_get(id, wi) == 1);
 }
@@ -144,20 +145,28 @@ int main(void)
       assert(g_spawned == 0); /* aggregation used the DB, not a re-spawn */
    }
 
-   /* (5) a child rejected -> DEGRADED park (a slice failed). */
+   /* (5)+(6) a child that reached a terminal state OTHER than accepted (rejected, and
+    * separately abandoned) -> the slice will never merge -> park for a human. */
    {
-      char id[80] = "", err[256] = "";
-      assert(wfe_work_item_create("fe", "r/fail", "p/fail", "autonomous", id, err, sizeof err) == 0);
-      char cid[80], cp[96];
-      snprintf(cid, sizeof cid, "%s.k0", id);
-      snprintf(cp, sizeof cp, "fp/%s/0", id);
-      assert(db1_work_item_create(cid, "r/fail", cp, "slice", "v1", "impl", "autonomous") == 0);
-      assert(db1_work_item_set_parent(cid, id) == 0);
-      assert(db1_work_item_set_terminal(cid, "rejected") == 0);
-      assert(wfe_engine_run(id, err, sizeof err) == 0);
-      assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.state, "active") == 0);
-      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      const char *term[] = {"rejected", "abandoned"};
+      const char *repos[] = {"r/rej", "r/aband"};
+      for (int c = 0; c < 2; c++)
+      {
+         char id[80] = "", err[256] = "";
+         char pp[32];
+         snprintf(pp, sizeof pp, "p/%s", repos[c]);
+         assert(wfe_work_item_create("fe", repos[c], pp, "autonomous", id, err, sizeof err) == 0);
+         char cid[80], cp[96];
+         snprintf(cid, sizeof cid, "%s.k0", id);
+         snprintf(cp, sizeof cp, "fp/%s/0", id);
+         assert(db1_work_item_create(cid, repos[c], cp, "slice", "v1", "impl", "autonomous") == 0);
+         assert(db1_work_item_set_parent(cid, id) == 0);
+         assert(db1_work_item_set_terminal(cid, term[c]) == 0);
+         assert(wfe_engine_run(id, err, sizeof err) == 0);
+         assert(db1_work_item_get(id, &wi) == 1);
+         assert(strcmp(wi.state, "active") == 0);
+         assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      }
    }
 
    printf("ok\n");

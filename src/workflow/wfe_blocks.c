@@ -1252,18 +1252,18 @@ void wfe_set_foreach_provider(const wfe_foreach_provider_t *p)
  * parking until every child has merged into the feature branch. Aggregation is keyed
  * off the DB parent<->child linkage; only SPAWNING is delegated to the seam. With no
  * spawn provider installed (and no children yet) it parks pending_human (fail closed).
- *   - no children yet   -> spawn (park while they run); no provider -> park
- *   - any child rejected -> a slice failed -> park for a human
+ *   - no children yet    -> spawn (park while they run); no provider -> park
+ *   - any child FAILED    -> a slice will not merge (rejected/abandoned) -> park for a human
  *   - all children accepted -> advance (feature branch carries every merged slice)
- *   - else               -> children still running -> park, re-drive later
+ *   - else                -> children still running -> park, re-drive later
  * Trouble always PARKS (pending_human), never a silent advance and never a hard
  * run-fail: a human resolves the failed slice, then the run resumes. */
 static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *wi = wfe_ctx_work_item(ctx);
-   int total = 0, accepted = 0, rejected = 0;
+   int total = 0, accepted = 0, failed = 0;
    if (wi && wi[0])
-      (void)db1_work_item_child_counts(wi, &total, &accepted, &rejected);
+      (void)db1_work_item_child_counts(wi, &total, &accepted, &failed);
 
    if (total == 0)
    {
@@ -1289,8 +1289,8 @@ static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *n
       return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* spawned; run + re-drive */
    }
 
-   if (rejected > 0)
-      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* a slice failed -> park human */
+   if (failed > 0)
+      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* a slice will not merge -> park human */
    if (accepted >= total)
    {
       /* every slice merged into the feature branch; its content is re-derived

@@ -79,10 +79,11 @@ int db1_work_item_set_submitter(const char *work_item_id, const char *submitter)
 int db1_work_item_set_parent(const char *work_item_id, const char *parent_id);
 /* Aggregate the terminal state of a parent's children (foreach.workflow fan-in).
  * Fills the counts (any may be NULL): total children, those in state 'accepted',
- * and those in state 'rejected'. Returns 0 on success, -1 on error. A parent whose
- * total==accepted (and total>0) has every slice merged; any rejected child means a
- * slice failed. */
-int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *rejected);
+ * and those that reached a terminal state OTHER than accepted -- i.e. 'rejected' or
+ * 'abandoned' ('failed', a slice that will never merge). Returns 0 on success, -1 on
+ * error. A parent whose total==accepted (and total>0) has every slice merged; any
+ * failed child means a slice will not merge and the parent must park for a human. */
+int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *failed);
 /* Count this submitter's ACTIVE autonomous work items (per-principal concurrency
  * cap). Returns the count, or -1 on error. */
 int db1_work_item_count_active_by_submitter(const char *submitter);

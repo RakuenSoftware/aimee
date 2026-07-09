@@ -16,17 +16,26 @@
   `test_wfe_webapi` extended; `tsc -b` + vitest green. Whole `wfe` unit suite (31)
   green; `aimee` + `aimee-server` link clean.
 
-**Validation-pending (integration-gated; seams in place, live wiring deferred):**
-- **S2 live panel** — `wfe_set_panel_provider` off the ensemble engine. The
-  multi-input path is real+tested; convening a live diverse panel needs a reachable
-  ensemble (not available in this environment), so the roundtable stays fail-closed
-  (park) until wired + exercised.
-- **S4 live child driver** — the `foreach.workflow` provider that actually spawns +
-  drives child `slice` runs, plus the DB1 parent↔child linkage. Contract is
-  fail-closed today; needs a schema migration + driver, verified against a live run.
+**Follow-up round (landed + verified):**
+- **DB1 parent↔child linkage** — `parent_id` column (canonical schema + legacy ALTER)
+  + `db1_work_item_set_parent` / `db1_work_item_child_counts`. `test_wfe_submitter`.
+- **`foreach.workflow` fan-in aggregation** — moved into the executor (keyed off the DB
+  linkage), narrowing the seam to just SPAWNING; all branches (spawn/park, all-merged →
+  advance, a rejected **or abandoned** slice → park for a human, no-provider → fail
+  closed) drive through the engine in `test_wfe_foreach`. Reviewed (roundtable/
+  code-review): the abandoned-child gap was fixed (a terminal non-accepted child now
+  parks the parent instead of looking "still running").
+
+**Still validation-pending (integration-gated; needs a live env):**
+- **S2 live panel** — `wfe_set_panel_provider` off the ensemble engine. The multi-input
+  path is real+tested; convening a live diverse panel needs a reachable ensemble, so the
+  roundtable stays fail-closed (park) until wired + exercised.
+- **S4 live child SPAWNER** — the `foreach.workflow` spawn provider that creates + drives
+  the child `slice` runs (the DB linkage + aggregation it feeds are now done). Must be
+  idempotent/atomic per the seam contract and verified against a live run.
 - **S3 forge base-targeting** — `pr.open`/`merge` against an explicit base (sub-PRs →
-  feature branch; final PR → default) needs the live-forge seam extended; gated the
-  same way the existing live forge is.
+  feature branch; final PR → default) needs the live-forge seam extended; gated the same
+  way the existing live forge is.
 
 Slices are ordered by dependency and are individually shippable. Each slice is itself
 delivered as a PR that goes through the roundtable and merges into this effort's feature

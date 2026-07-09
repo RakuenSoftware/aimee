@@ -253,24 +253,25 @@ int db1_work_item_set_parent(const char *wi, const char *parent_id)
    return 0;
 }
 
-int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *rejected)
+int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted, int *failed)
 {
    if (total)
       *total = 0;
    if (accepted)
       *accepted = 0;
-   if (rejected)
-      *rejected = 0;
+   if (failed)
+      *failed = 0;
    sqlite3 *db = db1_conn();
    if (!db || !parent_id || !parent_id[0])
       return -1;
-   /* One aggregate pass: total children + those terminal-accepted + terminal-rejected.
-    * The foreach gate advances only when total>0 AND accepted==total (every slice
-    * merged); any rejected child means a slice failed and the parent parks. */
+   /* One aggregate pass: total children + those terminal-accepted + those terminal
+    * NOT-accepted ('rejected' or 'abandoned' -> a slice that will never merge). The
+    * foreach gate advances only when total>0 AND accepted==total (every slice merged);
+    * any failed child means a slice will not merge, so the parent parks for a human. */
    static const char *sql =
        "SELECT COUNT(*), "
        "SUM(CASE WHEN state='accepted' THEN 1 ELSE 0 END), "
-       "SUM(CASE WHEN state='rejected' THEN 1 ELSE 0 END) "
+       "SUM(CASE WHEN state IN ('rejected','abandoned') THEN 1 ELSE 0 END) "
        "FROM lifecycle_work_item WHERE parent_id=?";
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
@@ -283,8 +284,8 @@ int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted,
          *total = sqlite3_column_int(st, 0);
       if (accepted)
          *accepted = sqlite3_column_int(st, 1);
-      if (rejected)
-         *rejected = sqlite3_column_int(st, 2);
+      if (failed)
+         *failed = sqlite3_column_int(st, 2);
    }
    sqlite3_finalize(st);
    return rc == SQLITE_ROW ? 0 : -1;
