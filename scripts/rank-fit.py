@@ -143,6 +143,46 @@ def _fit_pure(X, y):
     return w, loss, it
 
 
+def _fit_pairwise(groups):
+    """RankNet-style pairwise logistic on within-query (positive > negative)
+    pairs. Optimises ORDERING rather than absolute labels, so:
+      * features that are constant within a query get ~0 weight (they can't
+        discriminate) — which is exactly why turn-level all-`accepted` labels
+        carry no pointwise signal but the per-doc contrast here does;
+      * it is robust to the heavily positive-skewed live label distribution.
+    Each pair's weight is the product of the two rows' weights, so an IPW /
+    propensity weight on the outcomes flows straight through. Returns
+    (w, n_pairs, usable_groups), or None when no query has both classes.
+    `groups`: dict group -> list of (feature_vec, label01, weight)."""
+    pairs = []  # (x_pos, x_neg, weight)
+    usable = 0
+    for items in groups.values():
+        pos = [it for it in items if it[1] == 1]
+        neg = [it for it in items if it[1] == 0]
+        if pos and neg:
+            usable += 1
+        for p in pos:
+            for ng in neg:
+                pairs.append((p[0], ng[0], p[2] * ng[2]))
+    if not pairs:
+        return None
+
+    d = len(FEATURES)
+    w = [0.0] * d
+    npair = len(pairs)
+    for _ in range(MAX_ITERS):
+        grad = [L2 * w[j] for j in range(d)]
+        for xp, xn, wt in pairs:
+            diff = sum(w[j] * (xp[j] - xn[j]) for j in range(d))
+            # dL/d(diff) for log(1+exp(-diff)) is -sigmoid(-diff); stable form.
+            s = 1.0 / (1.0 + math.exp(diff)) if diff > -30.0 else 1.0
+            for j in range(d):
+                grad[j] += (-s * (xp[j] - xn[j]) * wt) / npair
+        for j in range(d):
+            w[j] -= LR * grad[j]
+    return w, npair, usable
+
+
 def fit(req):
     fsv = req.get("feature_set_version", "")
     if fsv != SUPPORTED_FEATURE_SET_VERSION:
@@ -150,10 +190,7 @@ def fit(req):
                        supported=SUPPORTED_FEATURE_SET_VERSION)
 
     objective = req.get("objective", "pointwise")
-    if objective != "pointwise":
-        # Pairwise/LambdaMART is a later objective behind the same field; this
-        # sidecar only fits pointwise today. Refuse rather than silently
-        # fitting the wrong objective.
+    if objective not in ("pointwise", "pairwise"):
         return _refuse("unsupported_objective", objective=objective)
 
     rows = req.get("rows", [])
@@ -161,30 +198,57 @@ def fit(req):
         return _refuse("bad_request", detail="rows must be a list")
 
     min_groups = int(req.get("min_groups", 8))
-    groups = set()
-    X = []
-    y = []
+
+    # Parse once into groups of (feature_vec, label, weight). `weight` carries an
+    # optional IPW/propensity or confidence weight (default 1.0).
+    groups = {}
     n_positive = 0
     for r in rows:
-        feats = r.get("features") or {}
+        g = str(r.get("group", ""))
         label = 1 if float(r.get("label", 0) or 0) > 0.5 else 0
-        groups.add(str(r.get("group", "")))
-        X.append(_feature_vector(feats))
-        y.append(label)
+        weight = float(r.get("weight", 1.0) or 1.0)
+        if weight <= 0.0:
+            weight = 1.0
+        groups.setdefault(g, []).append((_feature_vector(r.get("features") or {}), label, weight))
         n_positive += label
 
     n_groups = len(groups)
-    n_rows = len(X)
+    n_rows = sum(len(v) for v in groups.values())
 
     if n_groups < min_groups:
         return _refuse("below_floor", n_groups=n_groups, min_groups=min_groups,
                        n_rows=n_rows)
 
-    # Degenerate label distribution — a single class carries no ranking signal.
+    if objective == "pairwise":
+        res = _fit_pairwise(groups)
+        if res is None:
+            # No query has both a used and an unused candidate — no ordering to learn.
+            return _refuse("insufficient_pairs", n_groups=n_groups, n_rows=n_rows,
+                           n_positive=n_positive)
+        w, n_pairs, usable = res
+        weights = {FEATURES[j]: round(float(w[j]), 6) for j in range(len(FEATURES))}
+        return {
+            "status": "ok",
+            "weights": weights,
+            "fit_metrics": {
+                "objective": "pairwise",
+                "feature_set_version": fsv,
+                "n_groups": n_groups,
+                "n_rows": n_rows,
+                "n_positive": n_positive,
+                "n_pairs": n_pairs,
+                "usable_groups": usable,
+            },
+        }
+
+    # ---- pointwise ----
+    # Degenerate label distribution — a single class carries no pointwise signal.
     if n_positive == 0 or n_positive == n_rows:
         return _refuse("degenerate", n_positive=n_positive, n_rows=n_rows,
                        n_groups=n_groups)
 
+    X = [x for items in groups.values() for (x, _, _) in items]
+    y = [lab for items in groups.values() for (_, lab, _) in items]
     try:
         w, loss, iters = _fit_numpy(X, y)
     except Exception:
