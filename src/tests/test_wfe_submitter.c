@@ -84,13 +84,15 @@ int main(void)
 
    /* --- foreach.workflow parent<->child linkage + terminal-state aggregation. --- */
    {
-      assert(db1_work_item_create("par", "r/p", "p/par", "build", "v1", "slices", "autonomous") == 0);
+      assert(db1_work_item_create("par", "r/p", "p/par", "build", "v1", "slices", "autonomous") ==
+             0);
       const char *kids[] = {"ch1", "ch2", "ch3", "ch4"};
       for (int i = 0; i < 4; i++)
       {
          char path[64];
          snprintf(path, sizeof path, "p/%s", kids[i]);
-         assert(db1_work_item_create(kids[i], "r/p", path, "slice", "v1", "impl", "autonomous") == 0);
+         assert(db1_work_item_create(kids[i], "r/p", path, "slice", "v1", "impl", "autonomous") ==
+                0);
          assert(db1_work_item_set_parent(kids[i], "par") == 0);
       }
       /* the link round-trips */

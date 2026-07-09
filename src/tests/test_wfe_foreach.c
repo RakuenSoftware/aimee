@@ -127,7 +127,8 @@ int main(void)
     * Pre-seed children so the executor sees total>0 and never calls spawn. */
    {
       char id[80] = "", err[256] = "";
-      assert(wfe_work_item_create("fe", "r/done", "p/done", "autonomous", id, err, sizeof err) == 0);
+      assert(wfe_work_item_create("fe", "r/done", "p/done", "autonomous", id, err, sizeof err) ==
+             0);
       for (int i = 0; i < 3; i++)
       {
          char cid[80], cp[96];

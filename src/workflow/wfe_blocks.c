@@ -1272,8 +1272,7 @@ static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *n
          return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* no spawner -> fail closed */
       const cJSON *wf =
           node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "workflow") : NULL;
-      const char *child =
-          (wf && cJSON_IsString(wf) && wf->valuestring) ? wf->valuestring : "slice";
+      const char *child = (wf && cJSON_IsString(wf) && wf->valuestring) ? wf->valuestring : "slice";
       long max_children = wfe_env_pos("AIMEE_AUTONOMY_UNIT_MAX", 16);
       char err[200] = "";
       int n = g_foreach->spawn(wi, child, (int)max_children, err, sizeof err);

@@ -268,11 +268,10 @@ int db1_work_item_child_counts(const char *parent_id, int *total, int *accepted,
     * NOT-accepted ('rejected' or 'abandoned' -> a slice that will never merge). The
     * foreach gate advances only when total>0 AND accepted==total (every slice merged);
     * any failed child means a slice will not merge, so the parent parks for a human. */
-   static const char *sql =
-       "SELECT COUNT(*), "
-       "SUM(CASE WHEN state='accepted' THEN 1 ELSE 0 END), "
-       "SUM(CASE WHEN state IN ('rejected','abandoned') THEN 1 ELSE 0 END) "
-       "FROM lifecycle_work_item WHERE parent_id=?";
+   static const char *sql = "SELECT COUNT(*), "
+                            "SUM(CASE WHEN state='accepted' THEN 1 ELSE 0 END), "
+                            "SUM(CASE WHEN state IN ('rejected','abandoned') THEN 1 ELSE 0 END) "
+                            "FROM lifecycle_work_item WHERE parent_id=?";
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
