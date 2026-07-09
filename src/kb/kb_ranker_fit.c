@@ -39,6 +39,81 @@ static const char *const FEATURE_KEYS[] = {
 };
 #define N_FEATURES ((int)(sizeof(FEATURE_KEYS) / sizeof(FEATURE_KEYS[0])))
 
+/* ---- Option B: kb_hybrid outcome capture --------------------------------- */
+
+/* Mint a kb_hybrid retrieval_event for one search and record the surfaced
+ * kb_document candidates in its payload (for audit + as the grouping key that
+ * ties a query's outcomes together). Returns the event id in id_out; 0 ok / -1. */
+int kb_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_fingerprint, char *id_out,
+                         int id_out_len)
+{
+   char id[64];
+   db2_artifact_gen_id(id, sizeof(id));
+
+   cJSON *p = cJSON_CreateObject();
+   if (!p)
+      return -1;
+   cJSON_AddStringToObject(p, "surface", "kb_hybrid");
+   cJSON_AddStringToObject(p, "query_fingerprint", query_fingerprint ? query_fingerprint : "");
+   cJSON *arr = cJSON_AddArrayToObject(p, "surfaced_doc_ids");
+   for (int i = 0; arr && doc_ids && i < n; i++)
+      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)doc_ids[i]));
+   char *payload = cJSON_PrintUnformatted(p);
+   cJSON_Delete(p);
+   if (!payload)
+      return -1;
+
+   int rc = db2_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
+   free(payload);
+   if (rc != 0)
+      return -1;
+
+   /* Tag target_surface so kb_hybrid events are separable from memory-recall
+    * retrieval_events in audit/trace queries. */
+   void *conn = db2_conn();
+   if (conn)
+   {
+      char err[256] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn, "UPDATE artifacts SET target_surface = 'kb_hybrid' WHERE id = ?1",
+                           err, sizeof(err));
+      if (st)
+      {
+         aimee_pg_bind_text(st, "?1", id);
+         aimee_pg_step(st, err, sizeof(err));
+         aimee_pg_finalize(st);
+      }
+   }
+
+   if (id_out && id_out_len > 0)
+      snprintf(id_out, (size_t)id_out_len, "%s", id);
+   return 0;
+}
+
+/* Record one outcome verdict for a surfaced kb_document candidate as a dedicated
+ * `ranker_outcome` artifact (NOT retrieval_attribution — that kind is the memory
+ * demotion surface). This is the label source the training view consumes. */
+int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *verdict,
+                            double weight)
+{
+   if (!event_id || !event_id[0] || !verdict || !verdict[0])
+      return -1;
+
+   char id[64];
+   db2_artifact_gen_id(id, sizeof(id));
+   char scope_id[32];
+   snprintf(scope_id, sizeof(scope_id), "%lld", (long long)doc_id);
+
+   char payload[512];
+   snprintf(payload, sizeof(payload),
+            "{\"retrieval_event_id\":\"%s\",\"surfaced_row_id\":%lld,\"verdict\":\"%s\","
+            "\"weight\":%.6f,\"subject_kind\":\"kb_document\"}",
+            event_id, (long long)doc_id, verdict, weight);
+
+   return db2_artifact_write(id, "ranker_outcome", "proposed", "kb_hybrid", scope_id, "", 1.0,
+                             payload);
+}
+
 /* ---- Phase 1: the training view ------------------------------------------ */
 
 int kb_ranker_training_view(const char *subject_kind, const char *feature_set_version,
@@ -63,17 +138,22 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
    if (!conn)
       return -1;
 
-   /* Enumerate the retrieval_attribution outcome artifacts, then join each to its
-    * candidate's feature vector in C via db2_feature_row_read. Assembling the join
-    * in C (rather than a postgres ->>'x' JOIN) keeps it portable across the
-    * postgres runtime and the sqlite test shim — the same idiom demotion.c and
+   /* Enumerate the ranker_outcome artifacts, then join each to its candidate's
+    * feature vector in C via db2_feature_row_read. Assembling the join in C
+    * (rather than a postgres ->>'x' JOIN) keeps it portable across the postgres
+    * runtime and the sqlite test shim — the same idiom demotion.c and
     * kb_calibrate.c use for artifact payloads. The label is derived from the
     * verdict. One emitted row per (retrieval_event, candidate) that has BOTH a
-    * v1 feature vector and an outcome verdict. */
+    * v1 feature vector and an outcome verdict.
+    *
+    * ranker_outcome is a surface-dedicated kind (kb_hybrid / kb_document ids),
+    * distinct from the memory surface's retrieval_attribution — so this join
+    * never collides with a memory row id that happens to equal a doc_id, and the
+    * memory demotion scorer (which reads retrieval_attribution) is untouched. */
    char err[256] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
-                        "SELECT payload FROM artifacts WHERE kind = 'retrieval_attribution'"
+                        "SELECT payload FROM artifacts WHERE kind = 'ranker_outcome'"
                         " ORDER BY created_at",
                         err, sizeof(err));
    if (!st)

@@ -12,6 +12,25 @@ extern "C"
 {
 #endif
 
+   /* Option B — kb_hybrid outcome capture (the loop-closing plumbing).
+    * These let the surface that produced kb_document feature rows also report
+    * which candidates were useful, keyed to a shared retrieval_event, WITHOUT
+    * touching the kb.c retrieval hot path (endpoint-driven, mirroring the memory
+    * surface's evidence pattern). The training view then joins these outcomes to
+    * the already-written feature_rows. See
+    * docs/proposals/pending/kb-hybrid-outcome-wiring.md. */
+
+   /* Mint a kb_hybrid retrieval_event capturing the surfaced kb_document doc_ids.
+    * id_out receives the event id (>= 37 bytes; may be NULL). 0 ok / -1 error. */
+   int kb_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_fingerprint,
+                            char *id_out, int id_out_len);
+
+   /* Record one outcome verdict for a surfaced doc_id, tied to event_id, as a
+    * `ranker_outcome` artifact. verdict per db2/demotion.h (accepted = positive).
+    * 0 on success, -1 on error. */
+   int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *verdict,
+                               double weight);
+
    /* §1 training view: join the retrieval_attribution outcome labels to the
     * feature_rows vector for each attributed candidate, grouped by
     * retrieval_event_id. Emits one row per (retrieval_event, candidate) that has

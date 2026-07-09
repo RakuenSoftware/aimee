@@ -49,15 +49,9 @@ static void close_db(void)
 
 static void insert_attr(const char *event_id, long long surfaced, const char *verdict)
 {
-   char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
-   char payload[512];
-   snprintf(payload, sizeof(payload),
-            "{\"retrieval_event_id\":\"%s\",\"surfaced_row_id\":%lld,\"verdict\":\"%s\","
-            "\"weight\":1.0}",
-            event_id, surfaced, verdict);
-   int rc =
-       db2_artifact_write(id, "retrieval_attribution", "proposed", "memory", "", "", 1.0, payload);
+   /* Option B: outcomes for the ranker surface are dedicated `ranker_outcome`
+    * artifacts (kb_document ids), written via the capture primitive. */
+   int rc = kb_ranker_outcome_write(event_id, (int64_t)surfaced, verdict, 1.0);
    assert(rc == 0);
 }
 
@@ -161,6 +155,35 @@ static void test_training_view_join(void)
    cJSON_Delete(rows);
    close_db();
    printf("  training_view_join: ok\n");
+}
+
+/* ---- 2b. option B: emit-event + record-outcome closes the loop end-to-end ---- */
+static void test_closed_loop_capture(void)
+{
+   open_db();
+   int64_t docs[2] = {100, 101};
+   insert_feat(100, 0.9, 0.8, 0.9);
+   insert_feat(101, 0.2, 0.1, 0.3);
+
+   /* Mint a kb_hybrid event for the "query", then attribute per-doc outcomes to
+    * it — exactly what an outcome-reporting caller does after a search. */
+   char ev[64] = "";
+   assert(kb_ranker_emit_event(docs, 2, "fp-query", ev, sizeof(ev)) == 0);
+   assert(ev[0] != '\0');
+   assert(kb_ranker_outcome_write(ev, 100, "accepted", 1.0) == 0);
+   assert(kb_ranker_outcome_write(ev, 101, "contradicted", 1.0) == 0);
+
+   cJSON *rows = NULL;
+   int ng = 0, nr = 0, np = 0;
+   assert(kb_ranker_training_view("kb_document", "v1", &rows, &ng, &nr, &np) == 0);
+   assert(nr == 2); /* both candidates joined to their feature rows */
+   assert(np == 1); /* one accepted */
+   assert(ng == 1); /* the emitted event groups both outcomes */
+   cJSON *r0 = cJSON_GetArrayItem(rows, 0);
+   assert(strcmp(sstr(r0, "group"), ev) == 0); /* grouped by the emitted event id */
+   cJSON_Delete(rows);
+   close_db();
+   printf("  closed_loop_capture: ok\n");
 }
 
 /* ---- 3. fit disabled ---- */
@@ -407,6 +430,7 @@ int main(void)
    printf("test_ranker_fit:\n");
    test_empty_view_diagnostic();
    test_training_view_join();
+   test_closed_loop_capture();
    test_fit_disabled();
    test_fit_below_floor();
    test_gate_commit_on_lift();

@@ -992,6 +992,8 @@ static const struct
     {"maintenance.calibrate_promotions", kb_handle_maintenance_calibrate_promotions},
     {"maintenance.compute_demotions", kb_handle_maintenance_compute_demotions},
     {"memory.record_retrieval_outcome", kb_handle_memory_record_retrieval_outcome},
+    {"ranker.emit_event", kb_handle_ranker_emit_event},
+    {"ranker.record_outcome", kb_handle_ranker_record_outcome},
     {"maintenance.memory_learn_style", kb_handle_memory_learn_style},
     {"decision_log.insert", kb_handle_decision_log_insert},
     {"decision_log.list", kb_handle_decision_log_list},

@@ -50,8 +50,15 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — nine proposals, none yet implemented.
+The genuinely open work — ten proposals (all but one not yet implemented).
 
+- [kb_hybrid outcome wiring](proposals/pending/kb-hybrid-outcome-wiring.md)
+  — closes the learning-to-rank loop on live data. B1 (the loop-closing plumbing:
+  a dedicated `ranker_outcome` kind, `ranker.emit_event` / `ranker.record_outcome`
+  KB-service endpoints mirroring the memory evidence pattern, and the fitter's
+  training view reading it) is implemented with zero `kb.c` hot-path change; B2 (a
+  production outcome source for code-search) is the remaining open work. Follow-up
+  to the done LTR fitter. **Calibrate / Evaluate-Optimize / Gate-Promote.**
 - [Agentic supervised SWE-bench](proposals/pending/agentic-supervised-swebench.md)
   — a true tool-using, iterating agentic SWE-bench harness so the "beats Reddit's
   −75.5% supervisor-token reduction at no wall-clock penalty" claim is
