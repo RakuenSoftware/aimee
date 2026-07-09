@@ -245,7 +245,7 @@ static void test_config_defaults(void)
    memset(&cfg, 0, sizeof(cfg));
    config_apply_calibration_settings(&cfg, NULL);
 
-   assert(cfg.calibration_enabled == 0);
+   assert(cfg.calibration_enabled == 1); /* default: shadow (observe-only) */
    assert(cfg.calibration_buckets == 10);
    assert(fabs(cfg.calibration_prior_alpha0 - 2.0) < 1e-9);
    assert(fabs(cfg.calibration_prior_beta0 - 1.0) < 1e-9);

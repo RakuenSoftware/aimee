@@ -46,8 +46,10 @@ static time_t memory_conflict_parse_utc_timestamp(const char *s)
 
 /* --- Session Folding --- */
 
-int memory_fold_session(const char *session_id)
+int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len)
 {
+   if (summary_out && summary_out_len > 0)
+      summary_out[0] = '\0';
    if (!session_id)
       return -1;
 
@@ -86,6 +88,13 @@ int memory_fold_session(const char *session_id)
       return 0;
 
    checkpoint[pos] = '\0';
+
+   /* Hand the session digest back to the caller so the KB layer can surface it as
+    * a `session_summary` evidence artifact (the producer the reflection scheduler
+    * was missing). Kept out of this core-memory file so it doesn't pull the
+    * learning layer into every memory-folding consumer. */
+   if (summary_out && summary_out_len > 0)
+      snprintf(summary_out, summary_out_len, "%s", checkpoint);
 
    /* INSERT as L1 episode */
    char ep_key[256];
