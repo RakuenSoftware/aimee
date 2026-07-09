@@ -31,6 +31,7 @@ static int g_mode; /* 0=approve all required, 1=request changes, 2=unreachable *
 /* last review packet the panel saw (S1: proposal + focus reach the panel) */
 static char g_seen_proposal[512];
 static char g_seen_focus[128];
+static char g_seen_workdir[512];
 static int mock_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
@@ -38,6 +39,7 @@ static int mock_panel(const wfe_review_packet_t *pkt, const char *const *require
    (void)nelig;
    snprintf(g_seen_proposal, sizeof g_seen_proposal, "%s", pkt->proposal);
    snprintf(g_seen_focus, sizeof g_seen_focus, "%s", pkt->focus);
+   snprintf(g_seen_workdir, sizeof g_seen_workdir, "%s", pkt->workdir);
    if (g_mode == 2)
       return -1;
    int n = 0;
@@ -166,7 +168,11 @@ int main(void)
       const char *PTEXT = "PROPOSAL: add a widget with tests.";
       assert(write(fd, PTEXT, strlen(PTEXT)) == (ssize_t)strlen(PTEXT));
       close(fd);
-      g_seen_proposal[0] = g_seen_focus[0] = '\0';
+      g_seen_proposal[0] = g_seen_focus[0] = g_seen_workdir[0] = '\0';
+      /* No per-item worktree is set on this run; the panel must still get a workdir to
+       * review in — the shared repo (AIMEE_WORKFLOW_REPO) — never an empty string that
+       * would make a live panel park panel_unreachable (the .253 live-run regression). */
+      setenv("AIMEE_WORKFLOW_REPO", "/tmp", 1);
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("rt", "r0", pp, "interactive", id, err, sizeof err) == 0);
       assert(wfe_engine_run(id, err, sizeof err) == 0);
@@ -175,6 +181,8 @@ int main(void)
       assert(strcmp(wi.state, "accepted") == 0);
       assert(strcmp(g_seen_proposal, PTEXT) == 0); /* proposal reached the panel */
       assert(strcmp(g_seen_focus, "completion and missing tests") == 0); /* focus lens too */
+      assert(strcmp(g_seen_workdir, "/tmp") == 0); /* worktree empty -> repo-dir fallback */
+      unsetenv("AIMEE_WORKFLOW_REPO");
       unlink(pp);
    }
 
