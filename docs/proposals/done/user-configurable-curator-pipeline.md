@@ -1,13 +1,16 @@
 # Proposal: User-configurable curator pipeline — reorder, constraints, presets, user-defined stages
 
-- **State:** PENDING — design + phased build. Authored autonomously overnight
-  (2026-07-08) at the product owner's direction ("users order stages any valid
-  way; enforce constraints and disallow impossible configs; presets starting at 3,
-  ultimately user-defined; ultimately users add their own stages"). The design
-  decisions here would normally be validated by the delegate roundtable, but the
-  roundtable was unavailable this session (narrow default panel; the `.254`
-  `ensemble.reference_models` config edit failed — codex delegate exhausted budget
-  with "glob failed"). Flagged for review.
+- **State:** DONE — every §8 acceptance criterion is met and verified. Shipped
+  across Phase A reorder + DAG (#1175), Phase C presets (#1177), Phase D composed
+  custom stages backend (#1211) and GUI (#1212); Phase B GUI reorder shipped
+  earlier. Authored autonomously (2026-07-08) at the product owner's direction
+  ("users order stages any valid way; enforce constraints and disallow impossible
+  configs; presets starting at 3, ultimately user-defined; ultimately users add
+  their own stages"). The design and every implementing change were validated
+  through the delegate roundtable on 2026-07-09. **Phase E (plugin-contributed
+  stages) is explicitly out of scope here — future and trust-gated — and belongs
+  in its own proposal;** it carries no §8 acceptance criterion, so it does not hold
+  this one open.
 - **Author:** JBailes (assisted)
 - **Date:** 2026-07-08
 - **Builds on:** the modular curator pipeline (Phases 1–5, shipped): the
@@ -129,9 +132,10 @@ Full arbitrary user code is explicitly out of scope.
 - **Phase B (SHIPPED)** — GUI: drag/▲▼ reorder with client-side constraint
   enforcement; persist `stage_order`.
 - **Phase C (SHIPPED, #1177)** — user-defined presets (save/apply/delete).
-- **Phase D (SHIPPED, backend)** — composed user-defined stages (`custom_stages`),
-  base_op-validated, same-lane, fail-safe; surfaced on the `curator.stages`
-  endpoint (`custom:true`, `base_op`). GUI add/edit form is a follow-up.
+- **Phase D (SHIPPED, #1211 backend + #1212 GUI)** — composed user-defined stages
+  (`custom_stages`), base_op-validated, same-lane, fail-safe; surfaced on the
+  `curator.stages` endpoint (`custom:true`, `base_op`, `base_op_eligible`) and
+  managed in a Custom stages panel on the Pipeline page (add / enable / delete).
 - **Phase E** — plugin-contributed stages (future; trust-gated). Also the home of
   re-laning + new-source composition, both gated on an atomic transactional dequeue.
 
@@ -149,6 +153,8 @@ Full arbitrary user code is explicitly out of scope.
   of a queue whose dequeue is non-atomic.)*
 
 ## 8. Acceptance
+
+All criteria below are **met and verified** (unit tests + green CI on each PR):
 
 - Invalid `stage_order` is rejected at the API and the GUI, and the runner logs one
   WARN and uses registry order if a bad order reaches config.

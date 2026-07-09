@@ -345,7 +345,7 @@ static const kb_curator_stage_desc_t *kb_curator_base_resolve(const char *name)
  * -- the two lanes run concurrently, so cross-lane order is not enforceable). The
  * reorder validator enforces the same-lane edges; the GUI surfaces the full list
  * via `requires`. Single source of truth for the constraints. See
- * docs/proposals/pending/user-configurable-curator-pipeline.md. */
+ * docs/proposals/done/user-configurable-curator-pipeline.md. */
 static const struct
 {
    const char *stage;
