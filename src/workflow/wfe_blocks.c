@@ -1249,29 +1249,64 @@ void wfe_set_foreach_provider(const wfe_foreach_provider_t *p)
 }
 
 /* foreach.workflow: fan the split packets out to one child "slice" workflow each,
- * parking until every child has merged into the feature branch. With no provider
- * installed it parks pending_human (fail closed). */
+ * parking until every child has merged into the feature branch. Aggregation is keyed
+ * off the DB parent<->child linkage; only SPAWNING is delegated to the seam. With no
+ * spawn provider installed (and no children yet) it parks pending_human (fail closed).
+ *   - no children yet    -> spawn (park while they run); no provider -> park
+ *   - any child FAILED    -> a slice will not merge (rejected/abandoned) -> park for a human
+ *   - all children accepted -> advance (feature branch carries every merged slice)
+ *   - else                -> children still running -> park, re-drive later
+ * Trouble always PARKS (pending_human), never a silent advance and never a hard
+ * run-fail: a human resolves the failed slice, then the run resumes. */
 static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   if (!g_foreach || !g_foreach->run)
-      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* no child driver -> park */
-   const cJSON *wf =
-       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "workflow") : NULL;
-   const char *child = (wf && cJSON_IsString(wf) && wf->valuestring) ? wf->valuestring : "slice";
-   long max_children = wfe_env_pos("AIMEE_AUTONOMY_UNIT_MAX", 16);
-   char err[200] = "";
-   int st = g_foreach->run(wfe_ctx_work_item(ctx), child, (int)max_children, err, sizeof err);
-   if (st == WFE_FOREACH_ALL_MERGED)
+   const char *wi = wfe_ctx_work_item(ctx);
+   int total = 0, accepted = 0, failed = 0;
+   if (wi && wi[0])
+      (void)db1_work_item_child_counts(wi, &total, &accepted, &failed);
+
+   if (total == 0)
    {
+      /* No children spawned yet: ask the seam to fan out one per packet. */
+      if (!g_foreach || !g_foreach->spawn)
+         return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* no spawner -> fail closed */
+      const cJSON *wf =
+          node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "workflow") : NULL;
+      const char *child = (wf && cJSON_IsString(wf) && wf->valuestring) ? wf->valuestring : "slice";
+      long max_children = wfe_env_pos("AIMEE_AUTONOMY_UNIT_MAX", 16);
+      char err[200] = "";
+      int n = g_foreach->spawn(wi, child, (int)max_children, err, sizeof err);
+      if (n < 0)
+         return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* could not fan out -> park */
+      if (n == 0)
+      {
+         /* no packets to slice -> nothing to do, advance past the fan-out. */
+         char handle[80];
+         snprintf(handle, sizeof handle, "%s.out", node->id);
+         return wfe_step_advanced(handle, "", 0.0);
+      }
+      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* spawned; run + re-drive */
+   }
+
+   if (failed > 0)
+      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* a slice will not merge -> park human */
+   if (accepted >= total)
+   {
+      /* every slice merged into the feature branch; its content is re-derived
+       * downstream by the acceptance freeze. */
       char handle[80];
       snprintf(handle, sizeof handle, "%s.out", node->id);
-      /* the feature branch (now carrying every merged slice) is the produced
-       * artifact; its content is re-derived downstream by the acceptance freeze. */
       return wfe_step_advanced(handle, "", 0.0);
    }
-   if (st == WFE_FOREACH_FAILED)
-      return wfe_step_failed_class(WFE_FAIL_DEGRADED, 0);
-   return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* children still running -> re-drive */
+   return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* slices still running -> re-drive */
+}
+
+/* Register just the foreach.workflow executor over any prior (stub) registration --
+ * lets a test drive the real fan-in aggregation while stubbing the git/delegate
+ * producing blocks. */
+void wfe_register_foreach_block(void)
+{
+   wfe_register_block_executor(WFE_BLK_FOREACH_WORKFLOW, exec_foreach_workflow);
 }
 
 void wfe_register_default_executors(void)

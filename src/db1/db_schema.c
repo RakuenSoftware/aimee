@@ -49,6 +49,11 @@ static void db1_run_migrations(sqlite3 *db)
        /* intake-auth: the attested principal that submitted this autonomous run, for
         * audit binding + per-principal concurrency/rate caps on POST /v1/dev/submit. */
        "ALTER TABLE lifecycle_work_item ADD COLUMN submitter TEXT NOT NULL DEFAULT ''",
+       /* sliced-lifecycle build: the parent work item of a child "slice" run
+        * (foreach.workflow fans one child per split packet). "" for a top-level
+        * run; set to the parent's work_item_id for a slice child, so the parent's
+        * foreach gate can aggregate its children's terminal states. */
+       "ALTER TABLE lifecycle_work_item ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''",
        /* Rename the multi-agent "workflow session" store to "ensemble" so it no
         * longer collides with the workflow ENGINE. Runs before the canonical
         * schema SQL: on a legacy DB the RENAME preserves every row and the
