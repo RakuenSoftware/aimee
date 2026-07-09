@@ -5,9 +5,10 @@
   `testing` (see the **Reconciliation** section at the end for the per-criterion
   map). The remaining code — moving idle reflection onto the shared curator LLM
   path (§1/§3) and its shadow gate (§4) — lands on branch
-  `worktree-llm-curator-productionization`. Stays PENDING because criteria 4
-  (canary→default promotion), 6/7 (`.254` runtime proof) and part of 8 are
-  hardware-/human-gated (see Reconciliation). Finalises three
+  `worktree-llm-curator-productionization` (merged to `testing`). Criteria 6/7/8
+  were validated on the `.254` stack (2026-07-09). Stays PENDING solely on
+  criterion 4 (the shadow→canary→default promotion policy), which is blocked on
+  operational data that does not exist yet (see Reconciliation). Finalises three
   scaffolded-but-stubbed intelligence steps that ride the shared
   `kb_curator_sidecar` / offline-extractor mechanism. Adds no new **durability**
   subsystem: it wires the existing curator extract/synthesize/judge stages, the
@@ -391,16 +392,31 @@ reconciled, not built literally.
 | 3 Reflection synthesis into pipeline | **DONE** | Unified onto `kb_curator_llm_run`; `session_synthesis` written; dedup/`reflected_at` preserved. |
 | 4 Gate shadow→canary→default | **PARTIAL** | Shadow shipped + fail-closed (test-proven); canary→default promotion + the recorded bandit flip **deferred to human** (live-traffic/`.254`). |
 | 5 CPU-first install | **DONE** | The provider path installs CPU-first (curator profile); the command fallback needs no cloud. |
-| 6 Offline + default-on | **DONE (code)** / **VALIDATION-PENDING** | Default-on shipped; the "time a store shows zero synchronous LLM" proof is a `.254` runtime check. |
-| 7 Reconciliation ⇒ recallable | **DONE (code)** / **VALIDATION-PENDING** | Committed in code (`#1152`); the end-to-end recall proof is on the `.254` stack. |
-| 8 KB console core | **DONE** | Routes shipped (`#1140`). |
+| 6 Offline + default-on | **DONE — validated .254 (2026-07-09)** | `typed_facts_enabled` on live; extraction runs async on the `memory_facts` drain (`kb_async_jobs kind=memory_facts` processed ~53s *after* the store) = zero synchronous LLM on the store path; `strings aimee-server` has zero `typed_facts` refs = no server knob. |
+| 7 Reconciliation ⇒ recallable | **DONE — validated .254 (2026-07-09)** | End-to-end: a stored note's free-form relation was mapped to a canonical **active** relation (§7.1) and committed as a durable **Class-B active edge in `entity_edges`** (not stranded Class-C), then returned by recall. See the correction below re: the durable store. |
+| 8 KB console core | **DONE — validated .254** | `GET /v1/console/typed_facts` serves config + the provisional-relation promotion review queue live. |
+
+### Correction: the durable fact store is `entity_edges`, not `typed_facts`
+
+Validation on `.254` (2026-07-09) showed the `typed_facts` table stays empty (0
+rows) even for facts that commit and recall correctly. The durable, recallable
+representation is the **`entity_edges`** row (a canonical-relation fact is a
+Class-B active edge; a stranded free-form fact is a Class-C edge that never
+surfaces on recall). Wherever this proposal says a fact "is/`isn't` written to
+`typed_facts`", read `entity_edges` — the write gate (`db2_fact_commit`) commits
+to `entity_edges`, and recall (`db2_fact_recall_in_query`) reads it. The
+`typed_facts` table is vestigial in the shipped build.
 
 ### Deferred to human (cannot be done unattended / off-hardware)
 1. §4 promotion policy — the shadow→canary→default thresholds and the recorded
-   `reflection_synthesis_mode` bandit flip (needs live traffic).
-2. `.254`-stack quality/latency validation for criteria 6/7 and reflection
-   synthesis output quality.
-3. Decommissioning the legacy `kb_synthesize_command` path once the provider path
+   `reflection_synthesis_mode` bandit flip. **Blocked on data, not effort:** the
+   `.254` stack currently has 0 `session_summary`, 0 `session_synthesis`, and 0
+   rows across `bandit_decisions`/`bandit_arm_stats`/`bandit_promotions` and no
+   calibration/benchmark artifacts — there is nothing to fit a threshold against.
+   Requires the §5 dogfood/operational cycle to run first and produce the stream.
+2. Decommissioning the legacy `kb_synthesize_command` path once the provider path
    is trusted.
 
-This proposal stays in `pending/` until the human-gated items above are closed.
+Criteria 6/7/8 were validated on `.254` on 2026-07-09 (see the table above).
+This proposal stays in `pending/` until §4 (criterion 4 — promotion) is closed,
+which is gated on the operational stream in item 1.
