@@ -91,6 +91,11 @@ int main(void)
       assert(has_block(blocks, "gate.ci", NULL));
       assert(has_block(blocks, "check.mergeable", NULL));
       assert(has_block(blocks, "merge", NULL));
+      /* manager-loop + sliced-lifecycle blocks (appended after the CUSTOM sentinel)
+       * must be modellable in the GUI too. */
+      assert(has_block(blocks, "split", NULL));
+      assert(has_block(blocks, "branch.open", NULL));
+      assert(has_block(blocks, "foreach.workflow", NULL));
       cJSON_Delete(o);
    }
 

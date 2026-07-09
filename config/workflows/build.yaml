@@ -1,59 +1,41 @@
-# Default "build" development workflow -- one composition of the block catalog.
-# proposal -> roundtable -> PR-with-proposal -> user-approve -> plan ->
-# roundtable -> implement -> freeze -> roundtable -> code PR -> user pass/fail
-# (pass -> merge; fail -> back to implement). No engine privilege over a
-# user-authored workflow; clone and edit freely (`aimee workflow new`).
+# Default full-lifecycle "build" workflow (sliced-lifecycle rework).
+#
+# input (proposal | user request)
+#   -> author.plan -> roundtable {plan reviewed WITH the proposal}  (loop until convergence)
+#   -> branch.open (durable feature branch)
+#   -> split (plan -> per-slice packets)
+#   -> foreach.workflow (each packet runs the child "slice" workflow: implement ->
+#      freeze -> roundtable -> sub-PR -> GREEN CI -> merge into the feature branch)
+#   -> freeze + roundtable {acceptance: proposal completed? quality? missing tests?}
+#   -> PR (feature branch -> default branch) -> GREEN CI -> human pr_review -> merge
+#
+# The roundtable always sees the originating proposal alongside the artifact under
+# review (the engine supplies it from the run's proposal), so both the plan gate and
+# the acceptance gate judge the work AGAINST what was asked. No engine privilege over
+# a user-authored workflow; clone and edit freely (`aimee workflow new`).
 name: build
 intent_tags:
   - proposal
   - full-lifecycle
 start: draft
 nodes:
+  # Ingest: normalize the input (a proposal, or a bare user request) into a proposal
+  # artifact. author.proposal loops on delegate failure; self-loop so it retries.
   - id: draft
     block: author.proposal
     params:
       with_user: true
-    next: proposal_gate
-    # author.proposal LOOPS when its delegate can't produce the artifact; a
-    # loopable node needs an on_fail edge or the engine hard-errors ("looped with
-    # no on_fail edge") and the run wedges. Self-loop so a failed author retries,
-    # bounded by the engine's max-attempts backstop, then parks (surfaced).
-    on_fail: draft
-  - id: proposal_gate
-    block: gate.roundtable
-    in:
-      src: draft.out
-    params:
-      panel:
-        required:
-          - security
-          - architect
-          - qa
-          - reviewer
-        eligible:
-          - contrarian
-      quorum: 4
-      max_rounds: 6
-    on_pass: proposal_pr
-    on_fail: draft
-  - id: proposal_pr
-    block: pr.open
-    in:
-      src: draft.out
-    next: proposal_approve
-  - id: proposal_approve
-    block: gate.human
-    in:
-      pr: proposal_pr.out
-    params:
-      policy: pr_review
     next: plan
+    on_fail: draft
+  # The primary authors the implementation/action plan from the proposal.
   - id: plan
     block: author.plan
     in:
       proposal: draft.out
     next: plan_gate
-    on_fail: plan # author.plan loops on delegate failure; self-loop (see draft)
+    on_fail: plan
+  # Roundtable approves the plan AGAINST the proposal (focus lens). Standard
+  # resubmit-until-convergence: a non-approval loops back to re-author the plan.
   - id: plan_gate
     block: gate.roundtable
     in:
@@ -65,31 +47,47 @@ nodes:
           - architect
           - qa
           - reviewer
+        eligible:
+          - contrarian
       quorum: 4
       max_rounds: 6
-    on_pass: impl
+      focus: does this implementation plan fully satisfy the proposal/request?
+    on_pass: feature
     on_fail: plan
-  - id: impl
-    block: implement
+  # Open the durable feature branch the per-slice sub-PRs merge into.
+  - id: feature
+    block: branch.open
+    in:
+      src: plan.out
+    next: split
+  # Decompose the approved plan into independent per-slice packets.
+  - id: split
+    block: split
     in:
       plan: plan.out
-    params:
-      fanout: max
-    next: document
-  - id: document
-    block: document
+    next: slices
+  # Fan every packet out to the child "slice" workflow; park until all have merged
+  # into the feature branch. A failed/blocked slice parks the run for a human.
+  - id: slices
+    block: foreach.workflow
     in:
-      src: impl.out
-    next: freeze
-  - id: freeze
+      packets: split.out
+      feature: feature.out
+    params:
+      workflow: slice
+    next: accept_freeze
+  # Freeze the assembled feature branch for the acceptance review.
+  - id: accept_freeze
     block: freeze
     in:
-      branch: document.out
-    next: impl_gate
-  - id: impl_gate
+      branch: slices.out
+    next: accept_gate
+  # Acceptance roundtable: given the proposal, was it completed? code quality?
+  # missing tests? Findings loop back to re-split/fix until the panel converges.
+  - id: accept_gate
     block: gate.roundtable
     in:
-      src: freeze.out
+      src: accept_freeze.out
     params:
       panel:
         required:
@@ -99,34 +97,33 @@ nodes:
           - reviewer
       quorum: 4
       max_rounds: 6
-    on_pass: code_pr
-    on_fail: impl
-  - id: code_pr
+      focus: was the proposal completed? assess code quality and any missing tests.
+    on_pass: final_pr
+    on_fail: split
+  # Open the final PR: feature branch -> default branch.
+  - id: final_pr
     block: pr.open
     in:
-      src: freeze.out
-    next: pr_passfail
-  - id: pr_passfail
-    block: gate.human
-    in:
-      pr: code_pr.out
-    params:
-      policy: pr_review
-    on_pass: check_mergeable
-    on_fail: impl
-  - id: check_mergeable
-    block: check.mergeable
-    in:
-      pr: code_pr.out
-    on_pass: gate_ci
-    on_fail: impl
-  - id: gate_ci
+      src: accept_freeze.out
+    next: final_ci
+  # The final PR must be fully green before a human may approve it.
+  - id: final_ci
     block: gate.ci
     in:
-      pr: code_pr.out
+      pr: final_pr.out
+    on_pass: human
+    on_fail: split
+  # Human-gated approval of the feature PR.
+  - id: human
+    block: gate.human
+    in:
+      pr: final_pr.out
+    params:
+      policy: pr_review
     on_pass: merge
-    on_fail: impl
+    on_fail: split
+  # Merge the approved, green feature PR into the default branch.
   - id: merge
     block: merge
     in:
-      pr: code_pr.out
+      pr: final_pr.out
