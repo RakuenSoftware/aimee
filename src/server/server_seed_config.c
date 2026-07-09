@@ -6,7 +6,6 @@
 #endif
 #include "server_internal.h"
 #include "aimee.h"
-#include "harness_memory.h"        /* hmem_upsert (server owns DB1) */
 #include "harness_memory_audit.h"  /* hmem_audit */
 #include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */

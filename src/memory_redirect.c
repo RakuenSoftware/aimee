@@ -2,9 +2,10 @@
  *
  * v1 scope: the Claude Code file-memory surface — paths HOME-anchored under
  * ~/.claude/projects/<slug>/memory/<name>.md. A Write of such a file is stored
- * centrally and re-materialized by aimee (confined to the real memory dir); an
- * Edit/MultiEdit or a MEMORY.md write is rejected with guidance. Other clients
- * and memory surfaces are a documented v1 limitation.
+ * into aimee's db1 as a private, non-recallable archive row (the .md is retired
+ * and never materialized); an Edit/MultiEdit or a MEMORY.md write is rejected
+ * with guidance. Other clients and memory surfaces are a documented v1
+ * limitation.
  */
 
 #include "memory_redirect.h"
@@ -34,16 +35,6 @@
 static int is_write_family(const char *t)
 {
    return t && (strcmp(t, "Write") == 0 || strcmp(t, "Edit") == 0 || strcmp(t, "MultiEdit") == 0);
-}
-
-/* Does abspath start with "<home>/<projects_root>/"? */
-static int under_projects_root(const char *abspath, const char *home, const char *projects_root)
-{
-   char prefix[PATH_MAX];
-   int n = snprintf(prefix, sizeof(prefix), "%s/%s/", home, projects_root);
-   if (n < 0 || (size_t)n >= sizeof(prefix) || !abspath)
-      return 0;
-   return strncmp(abspath, prefix, (size_t)n) == 0;
 }
 
 static int ends_md_ci(const char *path, size_t plen)
@@ -119,68 +110,6 @@ static const char *json_str(cJSON *o, const char *key)
 {
    cJSON *i = cJSON_GetObjectItemCaseSensitive(o, key);
    return (i && cJSON_IsString(i)) ? i->valuestring : NULL;
-}
-
-/* Re-materialize the file with aimee's own I/O (never an agent tool — so it
- * cannot re-enter the PreToolUse hook). The parent dir is realpath-resolved and
- * confined under ~/.claude/projects/, so a symlinked component can't redirect
- * the write outside the memory tree. Atomic (temp + rename) on POSIX. */
-int memory_redirect_rematerialize(const char *path, const char *content, const char *home,
-                                  const char *projects_root)
-{
-   const char *base = strrchr(path, '/');
-   if (!base)
-      return -1;
-   base++;
-   char dir[PATH_MAX];
-   int dn = (int)(base - 1 - path);
-   snprintf(dir, sizeof(dir), "%.*s", dn, path);
-   size_t len = strlen(content);
-
-   /* Confine BEFORE any on-disk side effect: the parent must be syntactically
-    * under <home>/<projects_root>/ with no ".." segment. This gates the mkdir
-    * itself (so a bad path can't create dirs outside the memory tree) and is the
-    * ONLY confinement on Windows, where the realpath gate below is compiled out.
-    * On POSIX the realpath()+under_projects_root check additionally defeats a
-    * symlinked component. */
-   if (!under_projects_root(dir, home, projects_root) || strstr(dir, ".."))
-      return -1;
-   /* Create the memory dir tree if absent so a first write to a fresh project
-    * materializes. */
-   platform_mkdir_p(dir, 0700);
-
-#ifndef _WIN32
-   char rp[PATH_MAX];
-   if (!realpath(dir, rp)) /* parent must exist + resolve */
-      return -1;
-   if (!under_projects_root(rp, home, projects_root)) /* symlink escape — refuse */
-      return -1;
-   char target[PATH_MAX], tmpl[PATH_MAX];
-   if ((size_t)snprintf(target, sizeof(target), "%s/%s", rp, base) >= sizeof(target) ||
-       (size_t)snprintf(tmpl, sizeof(tmpl), "%s/.hmem_tmp_XXXXXX", rp) >= sizeof(tmpl))
-      return -1;
-   int fd = mkstemp(tmpl);
-   if (fd < 0)
-      return -1;
-   ssize_t w = write(fd, content, len);
-   fsync(fd);
-   close(fd);
-   if (w < 0 || (size_t)w != len || rename(tmpl, target) != 0)
-   {
-      unlink(tmpl);
-      return -1;
-   }
-   return 0;
-#else
-   (void)home;
-   (void)projects_root;
-   FILE *f = fopen(path, "wb");
-   if (!f)
-      return -1;
-   size_t w = fwrite(content, 1, len, f);
-   fclose(f);
-   return (w == len) ? 0 : -1;
-#endif
 }
 
 /* Any write operator in [a,b)? '>' (covers >, >>, 2>, &>) is only counted
@@ -261,7 +190,7 @@ int memory_redirect_bash_targets_memory(const char *client, const char *command,
 }
 
 int memory_redirect_check(const char *tool, cJSON *root, const char *cwd, const char *project_hint,
-                          int md_retire, char *msg, size_t msg_len)
+                          char *msg, size_t msg_len)
 {
    if (!root)
       return 0;
@@ -327,102 +256,49 @@ int memory_redirect_check(const char *tool, cJSON *root, const char *cwd, const 
       return 0; /* can't identify the project — fail open */
    }
 
-   /* .md retirement (config flag memory_md_retire, default-on): push the
-    * intercepted write into aimee's db1 memory as a private, non-recallable
-    * archive row and do NOT re-materialize the .md — the file never exists,
-    * content lives only in aimee. The agent retrieves via `aimee memory search`
-    * and is steered to `aimee memory` by the session brief. Fail-open (spill) on
-    * store outage. */
+   /* .md retirement (unconditional): push the intercepted write into aimee's db1
+    * memory as a private, non-recallable archive row and never materialize the
+    * .md — the file never exists, content lives only in aimee. The agent
+    * retrieves via `aimee memory search` and is steered to `aimee memory` by the
+    * session brief. Fail-open (spill) on store outage. */
    {
-      if (md_retire)
-      {
-         /* Project-qualified: identically-named memories from different projects
-          * must not collide under this user's UNIQUE(kind,key). */
-         char key[HMEM_PROJECT_KEY_MAX + 600];
-         snprintf(key, sizeof(key), "archive:%s/%s", project, name);
-         cJSON *ub = cJSON_CreateObject();
-         cJSON_AddStringToObject(ub, "kind", "archive");
-         cJSON_AddStringToObject(ub, "tier", "L1");
-         cJSON_AddStringToObject(ub, "key", key);
-         cJSON_AddStringToObject(ub, "content", content);
-         char *ub_s = cJSON_PrintUnformatted(ub);
-         cJSON_Delete(ub);
-         char *ep = cli_v1_client_endpoint();
-         char *br = cli_v1_client_bearer();
-         int st = 0;
-         cJSON *r = (ep && ub_s) ? cli_http_request(ep, "POST", "/v1/memory/user_capture", ub_s, br,
-                                                    5000, &st)
-                                 : NULL;
-         free(ub_s);
-         free(ep);
-         free(br);
-         if (!r || st < 200 || st >= 300)
-         {
-            if (r)
-               cJSON_Delete(r);
-            int sp = hmem_spill_write(project, name, "archive", content);
-            /* Storage-neutral wording: this file links into the DB-free client,
-             * whose build-integrity boundary forbids db1/db2 string leaks. */
-            hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "store unreachable");
-            fprintf(stderr, "aimee: memory store unavailable (status %d); %s\n", st,
-                    sp == 0 ? "spilled for reconcile" : "spill FAILED — allowing local write");
-            return 0; /* fail-open: allow the local write this once */
-         }
-         cJSON_Delete(r);
-         hmem_audit("redirect-store", project, name, NULL);
-         /* No re-materialize: the .md is retired and never created. */
-         snprintf(msg, msg_len,
-                  "Saved to aimee memory. Memory files are retired — retrieve with "
-                  "`aimee memory search` and use `aimee memory store` going forward.");
-         return 2;
-      }
-   }
-
-   cJSON *body = cJSON_CreateObject();
-   cJSON_AddStringToObject(body, "project", project);
-   cJSON_AddStringToObject(body, "name", name);
-   cJSON_AddStringToObject(body, "type", "fact");
-   cJSON_AddStringToObject(body, "body", content);
-   cJSON_AddStringToObject(body, "client", (client && client[0]) ? client : "claude");
-   char *body_s = cJSON_PrintUnformatted(body);
-   cJSON_Delete(body);
-
-   char *endpoint = cli_v1_client_endpoint();
-   char *bearer = cli_v1_client_bearer();
-   int status = 0;
-   cJSON *resp = (endpoint && body_s)
-                     ? cli_http_request(endpoint, "POST", "/v1/harness_memory/upsert", body_s,
-                                        bearer, 5000, &status)
+      /* Project-qualified: identically-named memories from different projects
+       * must not collide under this user's UNIQUE(kind,key). */
+      char key[HMEM_PROJECT_KEY_MAX + 600];
+      snprintf(key, sizeof(key), "archive:%s/%s", project, name);
+      cJSON *ub = cJSON_CreateObject();
+      cJSON_AddStringToObject(ub, "kind", "archive");
+      cJSON_AddStringToObject(ub, "tier", "L1");
+      cJSON_AddStringToObject(ub, "key", key);
+      cJSON_AddStringToObject(ub, "content", content);
+      char *ub_s = cJSON_PrintUnformatted(ub);
+      cJSON_Delete(ub);
+      char *ep = cli_v1_client_endpoint();
+      char *br = cli_v1_client_bearer();
+      int st = 0;
+      cJSON *r = (ep && ub_s)
+                     ? cli_http_request(ep, "POST", "/v1/memory/user_capture", ub_s, br, 5000, &st)
                      : NULL;
-   free(body_s);
-   free(endpoint);
-   free(bearer);
-
-   if (!resp || status < 200 || status >= 300)
-   {
-      /* Fail-open: spill the intended content so the next session-start reconcile
-       * replays it into the store, and let the agent write its own file this once.
-       * Never block the agent on our outage. */
-      if (resp)
-         cJSON_Delete(resp);
-      int sp = hmem_spill_write(project, name, "fact", content);
-      hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "store unreachable");
-      fprintf(stderr, "aimee: harness-memory store unavailable (status %d); %s\n", status,
-              sp == 0 ? "spilled for reconcile" : "spill FAILED — allowing local write");
-      return 0;
+      free(ub_s);
+      free(ep);
+      free(br);
+      if (!r || st < 200 || st >= 300)
+      {
+         if (r)
+            cJSON_Delete(r);
+         int sp = hmem_spill_write(project, name, "archive", content);
+         /* Storage-neutral wording: this file links into the DB-free client,
+          * whose build-integrity boundary forbids db1/db2 string leaks. */
+         hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "store unreachable");
+         fprintf(stderr, "aimee: memory store unavailable (status %d); %s\n", st,
+                 sp == 0 ? "spilled for reconcile" : "spill FAILED — allowing local write");
+         return 0; /* fail-open: allow the local write this once */
+      }
+      cJSON_Delete(r);
+      hmem_audit("redirect-store", project, name, NULL);
+      snprintf(msg, msg_len,
+               "Saved to aimee memory. Memory files are retired — retrieve with "
+               "`aimee memory search` and use `aimee memory store` going forward.");
+      return 2;
    }
-
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   long id = cJSON_IsNumber(jid) ? (long)jid->valuedouble : 0;
-   cJSON_Delete(resp);
-
-   const hmem_scope_t *scope = hmem_scope_for_client(client); /* non-NULL: classify redirected */
-   memory_redirect_rematerialize(path, content, home,
-                                 scope ? scope->projects_root : ".claude/projects");
-   hmem_audit("redirect", project, name, NULL);
-   snprintf(msg, msg_len,
-            "Saved to aimee memory (id=%ld). The file now reflects your content — do not "
-            "re-write it.",
-            id);
-   return 2;
 }

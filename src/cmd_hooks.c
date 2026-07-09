@@ -401,8 +401,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
             if (cJSON_IsString(hpj) && hpj->valuestring && hpj->valuestring[0])
                hp = hpj->valuestring;
             char mr_msg[1024] = "";
-            int mr = memory_redirect_check(tool_name, ti, cwd, hp, cfg.memory_md_retire, mr_msg,
-                                           sizeof(mr_msg));
+            int mr = memory_redirect_check(tool_name, ti, cwd, hp, mr_msg, sizeof(mr_msg));
             cJSON_Delete(ti);
             if (mr == 2)
             {

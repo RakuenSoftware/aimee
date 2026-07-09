@@ -4,7 +4,6 @@
 #endif
 #include "server_internal.h"
 #include "aimee.h"
-#include "harness_memory.h"        /* hmem_upsert (server owns DB1) */
 #include "harness_memory_audit.h"  /* hmem_audit */
 #include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
@@ -722,10 +721,11 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 }
 
 /* Server-side central agent-memory interception. The split server owns DB1, so
- * (unlike the CLI path's HTTP POST) it writes the store directly via hmem_upsert
- * and mirrors the row back to disk. Returns 2 (deny — msg set) when a memory op
- * was intercepted/rejected, else 0 (allow). Fail-open: any inability to identify
- * or store returns 0 so a normal tool call is never blocked by this stage. */
+ * (unlike the CLI path's HTTP POST) it writes the archive row directly via
+ * db1_user_memory_upsert; the .md is retired and never materialized. Returns 2
+ * (deny — msg set) when a memory op was intercepted/rejected, else 0 (allow).
+ * Fail-open: any inability to identify or store returns 0 so a normal tool call
+ * is never blocked by this stage. */
 static int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd,
                                    cJSON *req, char *msg, size_t msg_len)
 {
@@ -829,65 +829,32 @@ static int server_memory_intercept(const char *tool, const char *tool_input, con
       return 0;
    }
 
-   /* .md retirement (config memory_md_retire, default-on): store the intercepted
-    * write into db1 as a private, non-recallable archive row (kind='archive',
-    * tier L1 — outside the recall selectors) and do NOT re-materialize the .md —
-    * the file never exists; content lives only in aimee. The agent is steered to
-    * `aimee memory` by the session brief. Server owns db1, so write directly. */
+   /* .md retirement (unconditional): store the intercepted write into db1 as a
+    * private, non-recallable archive row (kind='archive', tier L1 — outside the
+    * recall selectors) and never materialize the .md — the file never exists;
+    * content lives only in aimee. The agent is steered to `aimee memory` by the
+    * session brief. Server owns db1, so write directly. */
    {
-      config_t mr_cfg;
-      config_load(&mr_cfg);
-      if (mr_cfg.memory_md_retire)
+      /* Project-qualified so identically-named memories from different projects
+       * don't collide under this user's UNIQUE(kind,key). */
+      char akey[HMEM_PROJECT_KEY_MAX + 600];
+      snprintf(akey, sizeof(akey), "archive:%s/%s", project, name);
+      if (db1_user_memory_upsert("archive", "L1", akey, content, 1.0, client) != 0)
       {
-         /* Project-qualified so identically-named memories from different
-          * projects don't collide under this user's UNIQUE(kind,key). */
-         char akey[HMEM_PROJECT_KEY_MAX + 600];
-         snprintf(akey, sizeof(akey), "archive:%s/%s", project, name);
-         if (db1_user_memory_upsert("archive", "L1", akey, content, 1.0, client) != 0)
-         {
-            /* db1 outage: spill for the next reconcile (matches the non-retire
-             * path + the client fallback), then fail-open so the agent isn't
-             * blocked on our store. */
-            int sp = hmem_spill_write(project, name, "archive", content);
-            hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
-            cJSON_Delete(ti);
-            return 0;
-         }
-         hmem_audit("redirect-db1", project, name, NULL);
-         snprintf(msg, msg_len,
-                  "Saved to aimee memory. Memory files are retired — retrieve with "
-                  "`aimee memory search` and use `aimee memory store` going forward.");
+         /* db1 outage: spill for the next reconcile, then fail-open so the agent
+          * isn't blocked on our store. */
+         int sp = hmem_spill_write(project, name, "archive", content);
+         hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
          cJSON_Delete(ti);
-         return 2;
+         return 0;
       }
+      hmem_audit("redirect-db1", project, name, NULL);
+      snprintf(msg, msg_len,
+               "Saved to aimee memory. Memory files are retired — retrieve with "
+               "`aimee memory search` and use `aimee memory store` going forward.");
+      cJSON_Delete(ti);
+      return 2;
    }
-
-   hmem_row_t row;
-   memset(&row, 0, sizeof(row));
-   snprintf(row.project, sizeof(row.project), "%s", project);
-   snprintf(row.name, sizeof(row.name), "%s", name);
-   snprintf(row.type, sizeof(row.type), "%s", "fact");
-   snprintf(row.last_client, sizeof(row.last_client), "%s", client);
-   /* content is owned by ti and stays valid until cJSON_Delete(ti) at the end of
-    * this function — after hmem_upsert has copied it (SQLITE_TRANSIENT). */
-   row.body = (char *)content;
-   if (hmem_upsert(&row, NULL) != 0)
-   {
-      cJSON_Delete(ti); /* store failed — fail open rather than block the agent */
-      return 0;
-   }
-   /* DB1 is authoritative; the on-disk file is a cache. If the mirror write fails
-    * the row is still stored and the next session-start hydrate re-creates the
-    * file — so note it in the single 'redirect' audit rather than failing the op. */
-   int rmrc = memory_redirect_rematerialize(path, content, home, scope->projects_root);
-   hmem_audit("redirect", project, name,
-              rmrc == 0 ? NULL : "file write failed; stored in DB1, pending hydrate");
-   snprintf(msg, msg_len,
-            "Saved to aimee's central memory store as memory/%s.md (aimee manages these "
-            "files; it has been written for you).",
-            name);
-   cJSON_Delete(ti);
-   return 2;
 }
 
 /* S2 pre-delivery native-tool externalization gate (server side; tracks 2+3). This
@@ -1435,12 +1402,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Working memory */
     {"wm.set", handle_wm_set},
     {"wm.get", handle_wm_get},
-    {"harness_memory.upsert", handle_hmem_upsert},
-    {"harness_memory.get", handle_hmem_get},
-    {"harness_memory.list", handle_hmem_list},
-    {"harness_memory.search", handle_hmem_search},
-    {"harness_memory.tombstone", handle_hmem_tombstone},
-    {"harness_memory.tombstone_prefix", handle_hmem_tombstone_prefix},
     {"wm.list", handle_wm_list},
     {"wm.context", handle_wm_context},
     /* Per-session primary agent selection */

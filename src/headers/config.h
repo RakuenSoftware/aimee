@@ -320,15 +320,6 @@ typedef struct config
     * passive, fail-open, and never changes an enforcement verdict. Set false to
     * opt out. */
    int audit_action_enabled;
-   /* memory_md_retire: retire the agent file-memory surface into aimee. When on,
-    * a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into
-    * aimee's db1 (kind='archive', non-recallable) and the .md is NEVER
-    * materialized; Edit/MultiEdit/MEMORY.md/Bash-writes to the memory dir are
-    * rejected with guidance; and session-start skips .md hydration. Retrieval is
-    * via `aimee memory search` (the session brief steers there). Fail-open (spill
-    * for reconcile) on a store outage. Default-ON: aimee is the single memory of
-    * record. Set false to keep the legacy re-materialized .md mirrors. */
-   int memory_md_retire;
    /* audit_worm_enabled: dual-write each governed-action audit row into the
     * per-service WORM store (append-only, hash-chained SQLite) alongside the
     * legacy audit.log. Default-OFF (S0 of the WORM audit-store proposal); the

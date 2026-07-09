@@ -65,10 +65,6 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   apples-to-apples; official Docker grader as the sole resolution source; a
   public-claim gate that fails closed (issue #987, builds on PR #986).
   **Reason / Execute / Persist / Calibrate / Review.**
-- [Memory architecture — db1 = user, db2 = org](proposals/pending/memory-db1-db2-architecture.md)
-  — retire the `.md`/harness-memory subsystem; split durable memory by scope
-  (db1 = user identity/preferences/commitments, db2 = org rules/conventions/facts/
-  code graph); session-start recall merges both; ingestion routes by scope.
 - [Remote-first session-start](proposals/pending/remote-first-session-start.md)
   — the thin client's SessionStart falls back to a recall-only remote path and
   emits nothing when recall is empty; make `/v1/hooks/session_start` first-class so
