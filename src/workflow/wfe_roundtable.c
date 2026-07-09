@@ -114,11 +114,13 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    char *proposal = read_text_capped(wfe_ctx_proposal_path(ctx), WFE_PROPOSAL_MAX);
    const cJSON *focus_j =
        node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+   const char *worktree = wfe_ctx_worktree(ctx);
    wfe_review_packet_t pkt = {
        .artifact_hash = artifact_hash,
        .proposal = proposal ? proposal : "",
        .focus =
            (focus_j && cJSON_IsString(focus_j) && focus_j->valuestring) ? focus_j->valuestring : "",
+       .workdir = worktree ? worktree : "",
    };
 
    wfe_verdict_t verdicts[WFE_PANEL_MAX];

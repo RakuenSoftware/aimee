@@ -33,6 +33,8 @@
 #include "wfe_approval.h"
 #include "wfe_blocks.h"
 #include "wfe_live_forge.h"
+#include "wfe_live_foreach.h"
+#include "wfe_live_panel.h"
 #include "wfe_roundtable.h"
 
 #include <stdio.h>
@@ -431,6 +433,10 @@ void wfe_autonomy_register(void)
    /* Full engine executor set so a work item can run end-to-end server-side. */
    wfe_register_default_executors();
    wfe_register_roundtable_gate();
+   /* The live roundtable panel (per-persona review delegates -> verdicts). Replaces the
+    * default fail-closed stub so gate.roundtable can actually convene; still fail-closed
+    * (DEGRADED/park) when a required persona has no reachable agent. */
+   wfe_live_panel_register();
    wfe_register_human_gate();
    /* The live worker + the mechanical verify gate (implement only advances a unit
     * that passes verification). */
@@ -444,5 +450,10 @@ void wfe_autonomy_register(void)
     * operator enabled wfe_live_forge_enabled (default OFF). While off, the engine
     * keeps its fail-closed forge stub, so pr.open re-loops and merge parks. */
    wfe_live_forge_register();
+   /* The live foreach.workflow spawner: fans a parent run's split packets out to
+    * child "slice" runs. Registration alone changes nothing (a run only reaches the
+    * foreach node after its plan is authored + roundtabled); without it the foreach
+    * node fails closed (parks). */
+   wfe_live_foreach_register();
    aimee_log(LOG_INFO, "wfe", "autonomous development registered (default-on)");
 }
