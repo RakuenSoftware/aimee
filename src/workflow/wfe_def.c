@@ -56,7 +56,10 @@ static const struct
      * gate.roundtable -> gate.deliver. review consumes the delegate branch and
      * emits a verdict; gate.deliver is a terminal enforcement gate. */
     {WFE_BLK_UNDERSTAND, "understand", WFE_ART_INTENT, 0, {WFE_ART_NONE}},
-    {WFE_BLK_SPLIT, "split", WFE_ART_PLAN, 1, {WFE_ART_INTENT, WFE_ART_NONE}},
+    /* split also accepts a PLAN directly (sliced-lifecycle build): author.plan ->
+     * plan, then split decomposes THAT plan into per-slice packets, so the
+     * roundtable reviews the implementation plan the slices are cut from. */
+    {WFE_BLK_SPLIT, "split", WFE_ART_PLAN, 1, {WFE_ART_INTENT, WFE_ART_PLAN, WFE_ART_NONE}},
     {WFE_BLK_REVIEW,
      "review",
      WFE_ART_VERDICT,
@@ -67,6 +70,17 @@ static const struct
      WFE_ART_NONE,
      1,
      {WFE_ART_VERDICT, WFE_ART_APPROVAL, WFE_ART_NONE}},
+    /* sliced-lifecycle build: open a durable feature branch (source-like, may bind
+     * the plan for naming/traceability but does not require it) -> branch. */
+    {WFE_BLK_BRANCH_OPEN, "branch.open", WFE_ART_BRANCH, 0, {WFE_ART_PLAN, WFE_ART_NONE}},
+    /* foreach.workflow: fan the split packets (plan) out to a child "slice"
+     * workflow, each merging into the bound feature branch; produces that feature
+     * branch (now carrying every merged slice) for the acceptance freeze/gate. */
+    {WFE_BLK_FOREACH_WORKFLOW,
+     "foreach.workflow",
+     WFE_ART_BRANCH,
+     1,
+     {WFE_ART_PLAN, WFE_ART_BRANCH, WFE_ART_NONE}},
 };
 static const int CATALOG_N = (int)(sizeof(CATALOG) / sizeof(CATALOG[0]));
 

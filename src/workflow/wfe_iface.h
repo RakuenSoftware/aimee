@@ -54,6 +54,12 @@ typedef enum
    WFE_BLK_REVIEW,       /* primary reviews delegate output (read-only) -> verdict */
    WFE_BLK_GATE_DELIVER, /* terminal enforcement gate: only crossable once the
                           * upstream review + roundtable have passed */
+   /* sliced-lifecycle build workflow (appended, enum-stable):
+    * branch.open opens a durable feature branch that per-slice sub-PRs target and
+    * merge into; foreach.workflow fans each split packet out to a child "slice"
+    * workflow run and parks the parent until every child is terminal. */
+   WFE_BLK_BRANCH_OPEN,      /* open/return a durable feature branch -> branch */
+   WFE_BLK_FOREACH_WORKFLOW, /* per-packet child workflow fan-out -> branch */
    WFE_BLK__COUNT
 } wfe_block_type_t;
 

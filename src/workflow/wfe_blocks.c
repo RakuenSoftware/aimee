@@ -1223,8 +1223,61 @@ static wfe_step_result_t exec_gate_deliver(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, "", 0.0); /* terminal: engine logs "terminal" */
 }
 
+/* branch.open: open/return the durable feature branch that the per-slice sub-PRs
+ * target and merge into. Produces the branch head SHA as its artifact (mirrors
+ * freeze/document). Creating + pushing a named durable branch is the live-forge
+ * concern (integration-gated); with no repo available it fails closed. */
+static wfe_step_result_t exec_branch_open(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
+   char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
+   if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+      return wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0);
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+   return wfe_step_advanced(handle, head, 0.0);
+}
+
+/* Child-workflow fan-out seam (see wfe_blocks.h). Default NULL -> foreach.workflow
+ * parks (no child spawned; nothing silently advances). */
+static const wfe_foreach_provider_t *g_foreach = NULL;
+
+void wfe_set_foreach_provider(const wfe_foreach_provider_t *p)
+{
+   g_foreach = p;
+}
+
+/* foreach.workflow: fan the split packets out to one child "slice" workflow each,
+ * parking until every child has merged into the feature branch. With no provider
+ * installed it parks pending_human (fail closed). */
+static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   if (!g_foreach || !g_foreach->run)
+      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* no child driver -> park */
+   const cJSON *wf =
+       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "workflow") : NULL;
+   const char *child = (wf && cJSON_IsString(wf) && wf->valuestring) ? wf->valuestring : "slice";
+   long max_children = wfe_env_pos("AIMEE_AUTONOMY_UNIT_MAX", 16);
+   char err[200] = "";
+   int st = g_foreach->run(wfe_ctx_work_item(ctx), child, (int)max_children, err, sizeof err);
+   if (st == WFE_FOREACH_ALL_MERGED)
+   {
+      char handle[80];
+      snprintf(handle, sizeof handle, "%s.out", node->id);
+      /* the feature branch (now carrying every merged slice) is the produced
+       * artifact; its content is re-derived downstream by the acceptance freeze. */
+      return wfe_step_advanced(handle, "", 0.0);
+   }
+   if (st == WFE_FOREACH_FAILED)
+      return wfe_step_failed_class(WFE_FAIL_DEGRADED, 0);
+   return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* children still running -> re-drive */
+}
+
 void wfe_register_default_executors(void)
 {
+   wfe_register_block_executor(WFE_BLK_BRANCH_OPEN, exec_branch_open);
+   wfe_register_block_executor(WFE_BLK_FOREACH_WORKFLOW, exec_foreach_workflow);
    wfe_register_block_executor(WFE_BLK_UNDERSTAND, exec_understand);
    wfe_register_block_executor(WFE_BLK_SPLIT, exec_split);
    wfe_register_block_executor(WFE_BLK_REVIEW, exec_review);
