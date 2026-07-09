@@ -47,8 +47,11 @@ extern "C"
 
    /* Provision a self-signed EC P-256 server cert at (cert_path, key_path) when
     * neither exists yet — makes native TLS zero-config when a tls_port is set but
-    * no operator cert is present. Never overwrites an existing cert/key. The key
-    * is written 0600. Returns 0 if a usable cert is in place, -1 on failure. */
+    * no operator cert is present. An EXISTING cert/key is authoritative: it is used
+    * as-is and NEVER regenerated (a rotation would break every TOFU-pinned client);
+    * to apply a changed hostname/AIMEE_TLS_EXTRA_SAN, delete the cert and restart.
+    * The key is written 0600. Returns 0 if a usable cert is in place, -1 on
+    * failure. */
    int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_path);
 
    /* Resolve the STABLE common name for the self-signed server cert, preferring an

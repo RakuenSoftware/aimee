@@ -373,12 +373,23 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
    if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
       return -1;
 
-   /* Desired SAN for this boot: a STABLE CN + AIMEE_TLS_EXTRA_SAN. Computed up
-    * front so it can be compared against what a previously-provisioned cert used.
-    * The CN comes from pki_resolve_server_cn (operator identity preferred over the
-    * OS hostname) — so a container recreate, which changes gethostname() to a fresh
-    * per-container ID, no longer shifts the SAN and rotates the cert out from under
-    * pinned clients. */
+   /* An existing cert is AUTHORITATIVE: if a usable cert+key are already on disk,
+    * use them and never recreate. Regenerating would silently invalidate every
+    * client that pinned the previous cert (TOFU) — precisely the outage this
+    * guarantee prevents. To apply a changed hostname / AIMEE_TLS_EXTRA_SAN an
+    * operator deletes the cert and restarts (an explicit act), rather than the
+    * server rotating it out from under live clients on a whim (e.g. a container
+    * recreate that shifts gethostname()). */
+   struct stat st;
+   if (stat(cert_path, &st) == 0 && stat(key_path, &st) == 0)
+   {
+      aimee_log(LOG_DEBUG, "pki", "server TLS cert present at %s; using it (not regenerating)",
+                cert_path);
+      return 0;
+   }
+
+   /* No cert yet — provision a self-signed one. The CN prefers an operator-declared
+    * identity (pki_resolve_server_cn) over the volatile OS/container hostname. */
    char cn[256];
    pki_resolve_server_cn(cn, sizeof(cn));
    char san[1024];
@@ -386,31 +397,6 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
 
    char dir[MAX_PATH_LEN];
    snprintf(dir, sizeof(dir), "%s/tls", config_default_dir());
-   char san_path[MAX_PATH_LEN];
-   snprintf(san_path, sizeof(san_path), "%s/server.san", dir);
-
-   struct stat st;
-   if (stat(cert_path, &st) == 0 && stat(key_path, &st) == 0)
-   {
-      /* A cert already exists. Never touch an operator-mounted cert — identified
-       * by the ABSENCE of our server.san sidecar. For a cert WE provisioned
-       * (sidecar present), regenerate only when the desired SAN changed (e.g.
-       * AIMEE_TLS_EXTRA_SAN was set to add the LAN IP/hostname a thin client
-       * reaches us at) so pin+verify works without an operator manually deleting
-       * the cert. Unchanged SAN → keep it. */
-      FILE *sf = fopen(san_path, "r");
-      if (!sf)
-         return 0; /* operator / pre-sidecar cert: never overwrite */
-      char prev[1024] = "";
-      if (fgets(prev, sizeof(prev), sf))
-         prev[strcspn(prev, "\r\n")] = '\0';
-      fclose(sf);
-      if (strcmp(prev, san) == 0)
-         return 0; /* provisioned cert, SAN unchanged: keep it */
-      aimee_log(LOG_INFO, "pki", "server TLS SAN changed; regenerating self-signed cert (SAN=%s)",
-                san);
-      /* fall through: the O_TRUNC / "w" writes below overwrite the old cert+key */
-   }
 
    EVP_PKEY *key = gen_ec_key();
    if (!key)
@@ -474,15 +460,6 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
       if (ok)
       {
          rc = 0;
-         /* Record the SAN we baked in, marking this as a server-provisioned cert
-          * and enabling regeneration when AIMEE_TLS_EXTRA_SAN/hostname later change. */
-         FILE *snf = fopen(san_path, "w");
-         if (snf)
-         {
-            fputs(san, snf);
-            fputc('\n', snf);
-            fclose(snf);
-         }
          aimee_log(LOG_INFO, "pki", "generated self-signed server TLS cert (CN=%s) at %s", cn,
                    cert_path);
       }
