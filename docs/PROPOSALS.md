@@ -104,6 +104,16 @@ The genuinely open work — ten proposals (all but one not yet implemented).
   — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
   validation + a v1 API stability tag) is the one remaining piece with no closing
   artifact.
+- [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
+  — small reasoning models served through the gateway fall into degenerate
+  repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
+  Adds a deterministic streaming detector on the provider-neutral IR-delta relay,
+  a bounded holdback-buffered decode-time intervention (truncate / gated resample
+  using only standard sampling params + stop sequences — no logit access), and a
+  per-backend collapse-rate metric that calibrates the default serving temperature.
+  Fail-open, default-off, shadow → canary → default gated.
+  **Detect-Cluster / Constrain-Verify / Enforce / Calibrate / Evaluate-Optimize /
+  Gate-Promote.**
 
 ## Done (66)
 
