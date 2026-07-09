@@ -10,8 +10,9 @@
   Review (out-of-band approval gates, provenance, undo), Execute (idempotent
   side effects), Reason (trust-tier gating).
 - **Reviewed by:** multi-persona roundtable panel (security, architect, QA,
-  contrarian, constructive) — this revision resolves the panel's blocking
-  findings; see "Roundtable resolutions" at the end.
+  contrarian, constructive), two passes. Round 1 raised 8 blocking findings;
+  round 2 (confirmation) returned **zero blocking findings** — only refinement
+  suggestions, now folded in. Converged. See "Roundtable resolutions" at the end.
 
 ---
 
@@ -39,7 +40,10 @@ the claim holds.
 | 7 | full skills subsystem | `skill_curator`, `skill_review`, `cmd_skill` | [verify] — confirm no tool-count capture trigger today |
 
 **Acceptance of any item is gated on turning its row green** (a real symbol/behavior
-match), not on the prose below.
+match), not on the prose below. The "Have" designations elsewhere in this document
+are therefore **provisional** — read each as "assumed-present, pending verification" —
+and every item's design is written to **degrade gracefully if the assumption fails**
+(the missing capability is simply built rather than extended).
 
 ---
 
@@ -80,12 +84,21 @@ quarantine tier**, provenance-tagged (`self-synthesized`, session, timestamp),
 **never auto-promoted** to identity/critical tiers by any automated stage, reviewable
 as a list, and **individually undoable**.
 
-**Undo is deterministic:** the parent rolling-summary is rebuilt by re-running the
-same summarizer over the *ordered set of surviving source notes* — a pure function of
-inputs, not an incremental patch, so removing one note yields the same result
-regardless of order of operations. Derived artifacts (a promoted claim, a KB entry)
-are linked to their quarantine source so undo can find and flag them rather than
-orphaning them.
+**Undo rebuilds from the verbatim surviving notes** (the authoritative copy, per #2 —
+never from the compressed/summarized form), so what undo consumes is unambiguous and
+consistent with the rest of the design. Two rollback strategies, chosen by whether the
+summarizer is deterministic — an explicit **[verify] precondition**, since an LLM
+summarizer generally is *not*:
+
+- **If the summarizer is deterministic** (or a deterministic compaction is used for
+  this tier): re-run it over the ordered surviving verbatim notes — a pure function of
+  its inputs.
+- **Fallback (assume non-deterministic):** **snapshot the prior rolling-summary at
+  each write.** Undo restores the immediately-preceding snapshot rather than
+  regenerating, giving true rollback without depending on summarizer stability.
+
+Derived artifacts (a promoted claim, a KB entry) are linked to their quarantine source
+so undo can find and flag them rather than orphaning them.
 
 - **aimee already has [verify]:** `memory_lifecycle` PENDING+TTL, curator drain,
   `context_reduce`.
@@ -120,18 +133,22 @@ not substring rewriting.
 - **Scope caveat:** low payoff on large cloud contexts — **constrained/small-model
   tiers only.** Ranked last accordingly.
 
-## 3. A trust boundary drawn at context-assembly time  *(prerequisite for #4)*
+## 3. Owner-gated injection (the boundary) + soft provenance labelling (a mitigation)  *(prerequisite for #4)*
 
-**Idea.** Two distinct controls, only one of which is an enforcement boundary:
+**Idea.** Two distinct controls. Only the first is a trust boundary; the naming here
+keeps them separate on purpose.
 
-- **Enforcement (structural):** passive injections (memory, project lists, bio) are
-  **owner-gated** — a non-owner session never receives them, so there is nothing to
-  leak regardless of what the model does. This is the real fix.
-- **Defense-in-depth (soft):** non-owner input (tool output, inbound messages) is
-  **labelled inline** as data-not-instructions as it enters history, and a
-  session-sticky flag injects a provenance reminder. This *reduces* IPI susceptibility
-  but is **not** a guarantee — a capable injection can still talk past a label. It is
-  a mitigation layered under the structural gate, never a substitute for it.
+**3a — The boundary (structural enforcement).** Passive injections (memory, project
+lists, bio) are **owner-gated** — a non-owner session never receives them, so there is
+nothing to leak regardless of what the model does. This is the real fix and the only
+part that is an enforcement boundary.
+
+**3b — Soft provenance labelling (mitigation, not a boundary).** Non-owner input (tool
+output, inbound messages) is **labelled inline** as data-not-instructions as it enters
+history, and a session-sticky flag injects a provenance reminder. This *reduces* IPI
+susceptibility but is **not** a guarantee — a capable injection can still talk past a
+label. It is defense-in-depth layered under 3a, never a substitute for it, and is not
+described anywhere as a "boundary."
 
 > Illustrative (external source, not an aimee observation): a comparable system had a
 > public channel recite the owner's hostname from *passive memory injection* with
@@ -190,11 +207,22 @@ and only the second is a safety gate:**
    **deliberately not an agent-callable tool**; a human runs it from a trusted
    surface, unreachable from any chat turn, injected or not.
 
-**Audit log:** every lifecycle event (staged/approved/rejected/deleted) is appended,
-**with secret redaction and a retention policy** (the panel's DoS/secret-retention
-concern) — full source is captured but scanned/redacted for credentials, and the log
-rotates/caps. **This gate applies to non-code self-authored artifacts too** — skills,
-prompt templates, personas — not only executable tools, since those also alter future
+**Audit log:** every lifecycle event (staged/approved/rejected/deleted) is appended.
+Redaction and retention are specified, not hand-waved:
+
+- **Who/when:** redaction runs **at append time** (write-path), before the entry is
+  persisted — never deferred to read time, so a secret is never at rest in the log.
+- **What:** a concrete detector over the captured source — API keys/tokens (high-
+  entropy strings + known key prefixes), passwords/connection strings, and PII —
+  replaced with typed placeholders (`<REDACTED:token>`).
+- **Failure mode:** **redact-and-flag**, and if the detector itself errors, **fail
+  closed** — the entry is stored with the raw span withheld and marked
+  `redaction_uncertain` for review, rather than written in the clear.
+- **Retention:** size-capped and time-capped with rotation (a DoS bound), so an agent
+  that stages many artifacts cannot grow the log without limit.
+
+**This gate applies to non-code self-authored artifacts too** — skills, prompt
+templates, personas — not only executable tools, since those also alter future
 behavior.
 
 - **aimee already has [verify]:** autonomous-dev mechanical `git_verify` gate,
@@ -301,3 +329,18 @@ two-phase partial-failure handling (#6); owner-as-authenticated-principal (#4); 
 log redaction/retention + non-code artifact coverage (#5); codec versioning/collision
 bounds (#2); deterministic undo + derived-artifact linkage (#1); effort re-estimates
 for #3/#6; explicit threat model.
+
+**Round 2 (confirmation) — zero blocking, converged.** The re-review returned only
+refinement suggestions, all folded into this revision:
+
+- *#1 undo assumed a deterministic LLM summarizer* → undo now rebuilds from the
+  **verbatim** surviving notes (reconciled with #2's authoritative-verbatim guarantee),
+  with a **snapshot-at-write rollback fallback** and summarizer determinism marked
+  **[verify]**.
+- *Traceability "Have" column vs `[verify]`* → "Have" designations declared
+  **provisional**; every design degrades gracefully if the symbol proves absent.
+- *#3 title called labelling a "boundary"* → section split into **3a (boundary)** and
+  **3b (mitigation, not a boundary)**; labelling is nowhere called a boundary.
+- *#5 redaction under-specified* → redaction timing (append-time), scope (tokens/keys/
+  passwords/PII with a typed detector), failure mode (redact-and-flag; fail-closed on
+  detector error), and retention bounds (size/time cap + rotation) now specified.
