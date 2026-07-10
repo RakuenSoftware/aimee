@@ -2511,6 +2511,11 @@ paths:
       summary: Create a session
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Session, content: { application/json: { schema: { type: object } } } } }
+  /sessions/record_transcript:
+    post:
+      summary: Persist a session's conversation transcript to DB1 under its host id
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Recorded, content: { application/json: { schema: { type: object } } } } }
   /sessions/close:
     post:
       summary: Close a session
