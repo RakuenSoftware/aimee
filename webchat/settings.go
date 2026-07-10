@@ -34,6 +34,50 @@ var settingsAllow = []settingField{
 	{Key: "kb_fusion_mode", Label: "Retrieval fusion mode", Type: "enum",
 		Options: []string{"rrf", "static_alpha", "dynamic_alpha"},
 		Help:    "How lexical + dense KB search results are blended. dynamic_alpha adapts the weight per query (boost exact-token queries); rrf is the safe default."},
+	// Options are filled at request time from the installed personas (see the
+	// GET handler); the static list stays empty so it never drifts from the
+	// engine's persona registry.
+	{Key: "default_persona", Label: "Default persona", Type: "enum",
+		Help: "Persona a new session starts in when none is explicitly set (defaults to engineer)."},
+}
+
+// personaNames lists the persona names the Default-persona selector offers, from
+// aimee-server's /v1/personas (built-ins + any custom personas). The bool is
+// true only when the live list was actually retrieved; on failure it returns
+// (["engineer"], false) so the selector still renders while callers can tell the
+// list is authoritative or a fallback (update-time validation relies on this).
+func (s *server) personaNames(ctx context.Context) ([]string, bool) {
+	st, data, err := s.v1Request(ctx, http.MethodGet, "/v1/personas", nil)
+	if err != nil || st != http.StatusOK {
+		return []string{"engineer"}, false
+	}
+	var d struct {
+		Personas []struct {
+			Name string `json:"name"`
+		} `json:"personas"`
+	}
+	if json.Unmarshal(data, &d) != nil {
+		return []string{"engineer"}, false
+	}
+	names := make([]string, 0, len(d.Personas))
+	for _, p := range d.Personas {
+		if p.Name != "" {
+			names = append(names, p.Name)
+		}
+	}
+	if len(names) == 0 {
+		return []string{"engineer"}, false
+	}
+	return names, true
+}
+
+func containsString(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func settingAllowed(key string) bool {
@@ -73,6 +117,16 @@ func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) {
 					val = d.Value
 				}
 			}
+			if f.Key == "default_persona" {
+				f.Options, _ = s.personaNames(ctx)
+				// Always keep the currently-saved value selectable, even if the
+				// persona list is a fallback or has since dropped it — otherwise
+				// the dropdown would render an invalid selection or silently
+				// overwrite it on the next save.
+				if cur, ok := val.(string); ok && cur != "" && !containsString(f.Options, cur) {
+					f.Options = append([]string{cur}, f.Options...)
+				}
+			}
 			out = append(out, outField{settingField: f, Value: val})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"fields": out})
@@ -89,6 +143,18 @@ func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if !settingAllowed(req.Key) {
 			writeJSONError(w, http.StatusForbidden, "setting not allowed")
 			return
+		}
+		// default_persona is a dynamic enum: reject an unknown persona when the
+		// live list is authoritative (so a direct API caller can't bypass the
+		// dropdown). When the persona service is unavailable we allow the write
+		// and rely on the engine resolving an unknown name to the engineer
+		// fallback, rather than blocking a legitimate change on a transient outage.
+		if req.Key == "default_persona" {
+			name, _ := req.Value.(string)
+			if names, ok := s.personaNames(ctx); ok && !containsString(names, name) {
+				writeJSONError(w, http.StatusBadRequest, "unknown persona")
+				return
+			}
 		}
 		body, _ := json.Marshal(map[string]interface{}{"key": req.Key, "value": req.Value})
 		st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/config/set", body)
