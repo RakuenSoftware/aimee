@@ -2119,6 +2119,7 @@ char *tool_grep(const char *path, const char *pattern, int max_results)
 
    return output ? output : safe_strdup("no matches found");
 }
+
 /* --- git_diff: show working tree changes --- */
 char *tool_git_diff(const char *repo_path, const char *ref)
 {

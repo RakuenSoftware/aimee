@@ -22,6 +22,11 @@ char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, c
  * blast advisory without writing. `edits` is a `struct cJSON *`. */
 char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const struct cJSON *edits,
                               int dry_run, const char *sid);
+/* Anchored grep: like tool_grep but, when `anchored`, groups hits by file with a
+ * per-file snapshot id and prefixes each hit with its `N:hash` edit anchor so a
+ * match is directly editable via edit_file. anchored=0 returns raw grep output. */
+char *tool_grep_ex(const char *path, const char *pattern, int max_results, int anchored,
+                   const char *sid);
 char *tool_write_file(const char *path, const char *content);
 /* Surgical edit: replace old_string with new_string in an existing file.
  * old_string must occur exactly once unless replace_all is non-zero (then all
