@@ -1,4 +1,5 @@
 /* test_wfe_autonomy.c -- W6: the autonomy driver + human-only gate-override. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,7 +91,7 @@ int main(void)
 {
    printf("wfe-autonomy: ");
    char d[] = "/tmp/wfe_auto_XXXXXX";
-   char *dir = mkdtemp(d);
+   char *dir = wfe_test_mkdtemp(d);
    assert(dir);
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

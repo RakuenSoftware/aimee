@@ -1,6 +1,7 @@
 /* test_wfe_router_catalog.c -- the router catalog I/O layer: enumerate
  * $AIMEE_HOME/workflows/<name>.yaml, read router metadata, add the built-in lanes,
  * skip symlinks (escape guard), and reject a workflow that claims `default`. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +23,7 @@ int main(void)
 {
    printf("wfe-router-catalog: ");
    char tmpl[] = "/tmp/wfe_cat_XXXXXX";
-   char *dir = mkdtemp(tmpl);
+   char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

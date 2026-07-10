@@ -9,7 +9,7 @@
 
 #include "log.h"
 #include "wfe_autonomy.h"
-#include "wfe_blocks.h" /* wfe_worktree_cleanup — orphan-sweep of terminal worktrees */
+#include "wfe_blocks.h" /* wfe_worktree_cleanup (terminal) + wfe_worktree_orphan_gc (age-based) */
 #include "wfe_store.h"
 
 #include <pthread.h>
@@ -65,6 +65,25 @@ void wfe_scheduler_run_once(void)
                    err[0] ? err : "error");
    }
    free(items);
+
+   /* Age-based orphan GC: reap wfe-worktrees dirs no live work item owns (a deleted
+    * row, or a crashed run that never reached terminal) once past a grace window,
+    * so a full git worktree can't be stranded — and its inodes leaked — forever.
+    * Complements the per-item terminal cleanup above, which only fires on a clean
+    * state transition. AIMEE_WFE_WORKTREE_GC_GRACE_SECS overrides the default. */
+   long grace = 3600;
+   const char *gv = getenv("AIMEE_WFE_WORKTREE_GC_GRACE_SECS");
+   if (gv && gv[0])
+   {
+      char *end = NULL;
+      long g = strtol(gv, &end, 10);
+      if (end && *end == '\0' && g >= 0)
+         grace = g;
+   }
+   const char *rl = getenv("AIMEE_WORKFLOW_REPO");
+   int reaped = wfe_worktree_orphan_gc((rl && rl[0]) ? rl : ".", grace);
+   if (reaped > 0)
+      aimee_log(LOG_INFO, "wfe-sched", "orphan-GC reaped %d stale worktree(s)", reaped);
 }
 
 static void *wfe_scheduler_loop(void *arg)

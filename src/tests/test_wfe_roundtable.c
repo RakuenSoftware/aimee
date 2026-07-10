@@ -1,5 +1,6 @@
 /* test_wfe_roundtable.c -- W5: the fail-closed gate decision rule + the
  * gate.roundtable executor through the engine with a mock panel provider. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,7 +82,7 @@ static const char *RT = "name: rt\n"
 static void setup_home(void)
 {
    char d[] = "/tmp/wfe_rt_XXXXXX";
-   char *dir = mkdtemp(d);
+   char *dir = wfe_test_mkdtemp(d);
    assert(dir);
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

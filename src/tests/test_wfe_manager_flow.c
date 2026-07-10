@@ -5,6 +5,7 @@
  * git worktree or live panel). Asserts the enforced workflow reaches delivery
  * (crosses gate.deliver -> accepted) and the lifecycle trail records each
  * manager step's advance. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -118,7 +119,7 @@ static wfe_step_result_t stub_adv(wfe_ctx *c, const wfe_node_t *n)
 static void setup_home(void)
 {
    char tmpl[] = "/tmp/wfe_mgr_home_XXXXXX";
-   char *dir = mkdtemp(tmpl);
+   char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

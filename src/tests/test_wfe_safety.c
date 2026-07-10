@@ -1,5 +1,6 @@
 /* test_wfe_safety.c -- gate.ci / check.mergeable / idempotent merge via a mock
  * forge provider, exercised through the engine. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,7 +136,7 @@ int main(void)
 {
    printf("wfe-safety: ");
    char home[] = "/tmp/wfe_sft_XXXXXX";
-   assert(mkdtemp(home));
+   assert(wfe_test_mkdtemp(home));
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", home);
    mkdir(wf, 0755);

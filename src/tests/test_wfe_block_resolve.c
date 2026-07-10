@@ -2,6 +2,7 @@
  * dispatch-time externalization guard, against a real in-memory DB1 + engine
  * (stub executors). Covers the pure decision table, the DB resolve, and the
  * composed guard (default-off, deny/warn/allow, delivered lifts, audit). */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,7 +84,7 @@ static void write_wf(const char *dir, const char *name, const char *body)
 static void setup_home(void)
 {
    char tmpl[] = "/tmp/wfe_res_home_XXXXXX";
-   char *dir = mkdtemp(tmpl);
+   char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);
