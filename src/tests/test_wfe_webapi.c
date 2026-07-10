@@ -3,6 +3,7 @@
  * blocks catalog (built-ins + safety + custom), save/get canonical round-trip
  * byte-stability (incl. a cyclic graph), optimistic-lock conflicts, path-name
  * safety, validate, and work-item run-state. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,7 +68,7 @@ int main(void)
 {
    printf("wfe-webapi: ");
    char home[] = "/tmp/wfe_web_XXXXXX";
-   assert(mkdtemp(home));
+   assert(wfe_test_mkdtemp(home));
    char wfdir[128];
    snprintf(wfdir, sizeof wfdir, "%s/workflows", home);
    mkdir(wfdir, 0755);

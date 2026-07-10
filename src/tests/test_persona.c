@@ -93,6 +93,40 @@ int main(void)
       free(contrarian);
    }
 
+   /* --- primary-session persona prose is uniform per persona (engineer is not
+    * special): each persona's own prose, cwd-substituted; and the engineer
+    * manager framing never leaks into a delegate prompt. --- */
+   {
+      /* Engineer (the default persona) carries the manager/work-queue framing. */
+      persona_t eng;
+      assert(persona_load(NULL, "engineer", &eng) == 0);
+      char *eid = persona_identity_prose(&eng, "/tmp/session-cwd");
+      assert(eid);
+      assert(strstr(eid, "You are the MANAGER") != NULL); /* manager role */
+      assert(strstr(eid, "## Work Queue") != NULL);       /* work queue */
+      assert(strstr(eid, "/tmp/session-cwd") != NULL);    /* %s -> cwd */
+      assert(strstr(eid, "%s") == NULL);
+      free(eid);
+      persona_free(&eng);
+
+      /* Another built-in gets its OWN prose the same way — no engineer framing
+       * bleeds in, confirming there is no engineer special-case. */
+      persona_t arch;
+      assert(persona_load(NULL, "architect", &arch) == 0);
+      char *aid = persona_identity_prose(&arch, "/tmp/session-cwd");
+      assert(aid && aid[0]);
+      assert(strstr(aid, "You are the MANAGER") == NULL);
+      assert(strstr(aid, "## Work Queue") == NULL);
+      free(aid);
+      persona_free(&arch);
+
+      /* Primary-only: an engineer delegate prompt must never contain it. */
+      char *deleg = persona_compose_delegate_prompt("engineer", "/tmp/x", NULL);
+      assert(deleg);
+      assert(strstr(deleg, "You are the MANAGER") == NULL);
+      free(deleg);
+   }
+
    /* --- unknown name falls back to engineer --- */
    {
       persona_t p;

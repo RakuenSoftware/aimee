@@ -8,6 +8,7 @@
  *   - all children accepted              -> advance (every slice merged)
  *   - a child rejected or abandoned      -> park pending_human (a slice will not merge)
  */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,7 +41,7 @@ static const char *FE = "name: fe\n"
 static void setup_home(void)
 {
    char d[] = "/tmp/wfe_fe_XXXXXX";
-   char *dir = mkdtemp(d);
+   char *dir = wfe_test_mkdtemp(d);
    assert(dir);
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

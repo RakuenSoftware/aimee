@@ -460,6 +460,25 @@ static char *persona_apply_cwd(const char *text, const char *cwd)
    return out;
 }
 
+char *persona_identity_prose(const persona_t *p, const char *cwd)
+{
+   if (!p)
+      return NULL;
+   /* Return the persona's COMPLETE identity prose. Built-ins keep their full
+    * block in code (prompts.c) — a built-in's file `## Persona` may be only a
+    * thin one-liner, with the rest of the framing in sibling sections that
+    * load_file does not extract — so a built-in uses its enum prose; a custom
+    * persona uses its file `## Persona` body. */
+   if (p->builtin)
+   {
+      const char *prose = prompt_persona_text(aimee_mode_from_string(p->name));
+      return (prose && prose[0]) ? persona_apply_cwd(prose, cwd) : NULL;
+   }
+   if (p->persona_text && p->persona_text[0])
+      return persona_apply_cwd(p->persona_text, cwd);
+   return NULL;
+}
+
 char *persona_compose_delegate_prompt(const char *name, const char *cwd, const char *base_prompt)
 {
    const char *base = base_prompt ? base_prompt : "";

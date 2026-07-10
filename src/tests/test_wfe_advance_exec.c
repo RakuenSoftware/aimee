@@ -4,6 +4,7 @@
  * resolves the binding, applies the CAS/replay decision, advances exactly one
  * engine step on OK, refuses stale/unbound, is idempotent on replay, and audits
  * every decision to the lifecycle log. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,7 +40,7 @@ static const char *WF = "name: t\n"
 static void setup_home(void)
 {
    char tmpl[] = "/tmp/wfe_adv_home_XXXXXX";
-   char *dir = mkdtemp(tmpl);
+   char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

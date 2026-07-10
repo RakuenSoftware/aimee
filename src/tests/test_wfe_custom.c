@@ -1,5 +1,6 @@
 /* test_wfe_custom.c -- config-extensible blocks: registry load/validate, custom
  * block type-checking, and exec_custom (command opt-in) through the engine. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +53,7 @@ int main(void)
 {
    printf("wfe-custom: ");
    strcpy(g_home, "/tmp/wfe_cust_XXXXXX");
-   assert(mkdtemp(g_home));
+   assert(wfe_test_mkdtemp(g_home));
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", g_home);
    mkdir(wf, 0755);

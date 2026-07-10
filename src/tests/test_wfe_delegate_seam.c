@@ -4,6 +4,7 @@
  * Phase A of full-autonomous-development: producing blocks dispatch real work
  * through registered hooks; with no provider they fail closed; tests inject
  * mocks to assert the wiring. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,7 +149,7 @@ int main(void)
 {
    printf("wfe-delegate-seam: ");
    char home[] = "/tmp/wfe_ds_XXXXXX";
-   assert(mkdtemp(home));
+   assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);
    mkdir(wf, 0755);
@@ -361,7 +362,7 @@ int main(void)
     *    idempotent; cleanup removes it. */
    {
       char repo[] = "/tmp/wfe_f2_repo_XXXXXX";
-      assert(mkdtemp(repo));
+      assert(wfe_test_mkdtemp(repo));
       char cmd[640];
       snprintf(cmd, sizeof cmd,
                "cd %s && git init -q && git -c user.email=t@t -c user.name=t "
@@ -389,6 +390,70 @@ int main(void)
 
       assert(wfe_worktree_cleanup(wt, repo) == 0);
       assert(stat(wt, &stt) != 0); /* removed */
+
+      snprintf(cmd, sizeof cmd, "rm -rf %s", repo);
+      (void)system(cmd);
+   }
+
+   /* F: orphan-worktree GC + inode cap — reap worktrees no LIVE item owns, keep
+    *    active ones, honour the grace window, and fail-closed at the cap. */
+   {
+      char repo[] = "/tmp/wfe_gc_repo_XXXXXX";
+      assert(wfe_test_mkdtemp(repo));
+      char cmd[640];
+      snprintf(cmd, sizeof cmd,
+               "cd %s && git init -q && git -c user.email=t@t -c user.name=t "
+               "commit -q --allow-empty -m base",
+               repo);
+      assert(system(cmd) == 0);
+      struct stat stt;
+      char err[256] = "";
+      /* Start from an empty worktree pool so counts are deterministic (earlier
+       * blocks left terminal-item worktrees under the shared AIMEE_HOME). */
+      snprintf(cmd, sizeof cmd, "rm -rf %s/wfe-worktrees", home);
+      (void)system(cmd);
+
+      /* (1) an active item's worktree survives a grace=0 GC (it still owns it). */
+      char live_id[80] = "";
+      assert(wfe_work_item_create("ds", "gcL", "gcpL", "autonomous", live_id, err, sizeof err) ==
+             0);
+      char wl[1024] = "";
+      assert(wfe_worktree_ensure(live_id, "", repo, "HEAD", wl, sizeof wl) == 0);
+      assert(wfe_worktree_orphan_gc(repo, 0) == 0); /* nothing reapable */
+      assert(stat(wl, &stt) == 0);                  /* kept */
+
+      /* (2) a TERMINAL item's stranded worktree is reaped. */
+      char term_id[80] = "";
+      assert(wfe_work_item_create("ds", "gcT", "gcpT", "autonomous", term_id, err, sizeof err) ==
+             0);
+      char wtm[1024] = "";
+      assert(wfe_worktree_ensure(term_id, "", repo, "HEAD", wtm, sizeof wtm) == 0);
+      assert(db1_work_item_set_terminal(term_id, "abandoned") == 0);
+      assert(wfe_worktree_orphan_gc(repo, 0) == 1);
+      assert(stat(wtm, &stt) != 0); /* reaped */
+      assert(stat(wl, &stt) == 0);  /* the active one is untouched */
+
+      /* (3) a VANISHED row reaps its worktree, but only past the grace window. */
+      char orph_id[80] = "";
+      assert(wfe_work_item_create("ds", "gcO", "gcpO", "autonomous", orph_id, err, sizeof err) ==
+             0);
+      char wo[1024] = "";
+      assert(wfe_worktree_ensure(orph_id, "", repo, "HEAD", wo, sizeof wo) == 0);
+      assert(db1_work_item_delete(orph_id) == 0);
+      assert(wfe_worktree_orphan_gc(repo, 100000) == 0); /* too fresh -> kept */
+      assert(stat(wo, &stt) == 0);
+      assert(wfe_worktree_orphan_gc(repo, 0) == 1); /* grace 0 -> reaped */
+      assert(stat(wo, &stt) != 0);
+
+      /* (4) inode cap fails closed: with MAX=1 and the active worktree holding the
+       *     one slot, a second ensure can't allocate and returns -1 (the caller
+       *     then degrades to the shared checkout). */
+      setenv("AIMEE_WFE_WORKTREE_MAX", "1", 1);
+      char cap_id[80] = "";
+      assert(wfe_work_item_create("ds", "gcC", "gcpC", "autonomous", cap_id, err, sizeof err) == 0);
+      char wc[1024] = "";
+      assert(wfe_worktree_ensure(cap_id, "", repo, "HEAD", wc, sizeof wc) == -1);
+      unsetenv("AIMEE_WFE_WORKTREE_MAX");
 
       snprintf(cmd, sizeof cmd, "rm -rf %s", repo);
       (void)system(cmd);

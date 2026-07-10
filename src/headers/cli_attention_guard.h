@@ -73,4 +73,10 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
  * There is no env-var bypass; disabling it is an operator config action. */
 int handle_attention_guard(void);
 
+/* Authoritative "is session-worktree isolation required?" check (default ON
+ * unless aimee.yaml sets `require_session_worktree: false`). Exposed so the
+ * remote/thin session-start path can gate its worktree-prep directive on the
+ * same answer the guard uses to block. */
+int attn_require_session_worktree(void);
+
 #endif /* DEC_CLI_ATTENTION_GUARD_H */

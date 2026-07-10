@@ -2,6 +2,7 @@
  * fans out to one child "slice" work item per packet, linked to the parent, seeded
  * with its packet, idempotent, and cap-bounded. (The child-DRIVING is the autonomy
  * driver's job, integration-gated; this pins the fan-OUT creation logic.) */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,7 @@ int main(void)
 {
    printf("wfe-foreach-spawn: ");
    char home[] = "/tmp/wfe_spawn_XXXXXX";
-   assert(mkdtemp(home));
+   assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);
    mkdir(wf, 0755);

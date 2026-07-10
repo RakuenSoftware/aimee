@@ -1,5 +1,6 @@
 /* test_wfe_blocks.c -- W3: the real git freeze helper + default executor
  * registration. The delegate/forge executors are integration-gated. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +30,7 @@ int main(void)
 
    /* --- wfe_git_freeze against a real temp git repo --- */
    char dir[] = "/tmp/wfe_repo_XXXXXX";
-   if (!mkdtemp(dir))
+   if (!wfe_test_mkdtemp(dir))
    {
       printf("(skip git freeze: mkdtemp) ok\n");
       return 0;

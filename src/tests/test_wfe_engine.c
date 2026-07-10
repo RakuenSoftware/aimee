@@ -1,6 +1,7 @@
 /* test_wfe_engine.c -- W2: work-item state machine + engine. Exercises
  * create -> run -> accepted, the audit log, loop-back max_attempts pause, and
  * the cost-cap pause, using deterministic executors. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,7 +73,7 @@ static wfe_step_result_t exec_cost(wfe_ctx *c, const wfe_node_t *n)
 static void setup_home(void)
 {
    char tmpl[] = "/tmp/wfe_home_XXXXXX";
-   char *dir = mkdtemp(tmpl);
+   char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

@@ -1,4 +1,5 @@
 /* test_wfe_approval.c -- W4: HMAC approval signer + gate.human executor. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,7 +40,7 @@ static char g_home[64];
 static void setup_home(void)
 {
    strcpy(g_home, "/tmp/wfe_appr_XXXXXX");
-   char *dir = mkdtemp(g_home);
+   char *dir = wfe_test_mkdtemp(g_home);
    assert(dir);
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", dir);
