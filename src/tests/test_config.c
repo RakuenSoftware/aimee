@@ -314,6 +314,7 @@ int main(void)
       snprintf(cfg.trigger_rules[0].event, sizeof(cfg.trigger_rules[0].event), "push:main");
       snprintf(cfg.trigger_rules[0].pipeline_template,
                sizeof(cfg.trigger_rules[0].pipeline_template), "review");
+      snprintf(cfg.trigger_rules[0].mode, sizeof(cfg.trigger_rules[0].mode), "interactive");
       cfg.trigger_rules[0].max_spend_usd = 2.5;
       cfg.cron_job_count = 1;
       snprintf(cfg.cron_jobs[0].id, sizeof(cfg.cron_jobs[0].id), "nightly");
@@ -508,6 +509,7 @@ int main(void)
       assert(strcmp(cfg2.trigger_rules[0].source, "github-webhook") == 0);
       assert(strcmp(cfg2.trigger_rules[0].event, "push:main") == 0);
       assert(strcmp(cfg2.trigger_rules[0].pipeline_template, "review") == 0);
+      assert(strcmp(cfg2.trigger_rules[0].mode, "interactive") == 0);
       assert(cfg2.trigger_rules[0].max_spend_usd > 2.4 &&
              cfg2.trigger_rules[0].max_spend_usd < 2.6);
       assert(cfg2.cron_job_count == 1);
