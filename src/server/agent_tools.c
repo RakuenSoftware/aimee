@@ -589,6 +589,10 @@ static cJSON *tp_read_file(void)
            "Return plain file bytes with no line anchors (for pipelines/binary). Default false: "
            "each line is prefixed with an 'N:hash' anchor and a snapshot id is returned so you "
            "can edit_file by anchor without re-emitting the line text.");
+   tp_prop(props, "mode", "string",
+           "Set to \"outline\" to return the file's symbol skeleton (one anchored signature line "
+           "per top-level definition, no bodies) — one call to map a large file, then read/edit a "
+           "span by its anchor.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));

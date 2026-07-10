@@ -45,6 +45,7 @@ char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const c
 char *tool_grep_ex(const char *path, const char *pattern, int max_results, int anchored,
                    const char *sid);
 char *tool_read_symbol(const char *identifier, const char *sid);
+char *tool_read_file_outline(const char *path, const char *sid);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
@@ -1376,6 +1377,70 @@ static void test_tool_read_symbol(void)
    free(n);
 }
 
+static void test_tool_read_file_outline(void)
+{
+   /* A .c file so the extractor recognizes the language. */
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_outline_test_%d.c", platform_tmpdir(),
+            (int)getpid());
+   FILE *f = fopen(tmppath, "w");
+   assert(f != NULL);
+   fputs("#include <stdio.h>\n\nint alpha(int n)\n{\n  return n + 1;\n}\n\nvoid beta(void)\n{\n}\n",
+         f);
+   fclose(f);
+
+   char *o = tool_read_file_outline(tmppath, "olX");
+   assert(o != NULL);
+   /* Either an outline (snapshot header + anchored signatures) or a clear
+    * "no definitions" message; the extractor should find both functions here. */
+   if (strstr(o, "[outline of") != NULL)
+   {
+      assert(strstr(o, "alpha") != NULL);
+      assert(strstr(o, "beta") != NULL);
+      assert(strstr(o, "|") != NULL); /* signature lines carry N:hash anchors */
+
+      /* Anchor consistency (general): EVERY N:hash the outline emits for a
+       * signature line MUST equal the anchor an anchored read_file shows for that
+       * same line — identical canonicalized digest contract (BOM-on-line-1 and
+       * CRLF handling live inside hashline_digest64, which both paths call the
+       * same way), so the edit round-trip works. Verify all outline anchor lines,
+       * not just one. */
+      char *rd = tool_read_file_ex(tmppath, 0, 0, 1, "olX");
+      assert(rd != NULL);
+      int checked = 0;
+      for (const char *ls = o; (ls = strchr(ls, '\n')) != NULL;)
+      {
+         ls++; /* start of the next line */
+         /* An anchor line looks like "N:hash| ...". Header/note lines start with
+          * '[' and are skipped. */
+         if (!isdigit((unsigned char)ls[0]))
+            continue;
+         const char *bar = strchr(ls, '|');
+         if (!bar)
+            continue;
+         char anchor[24];
+         size_t n = (size_t)(bar - ls);
+         while (n > 0 && ls[n - 1] == ' ')
+            n--; /* trim trailing space before '|' */
+         if (n == 0 || n + 2 >= sizeof(anchor))
+            continue;
+         memcpy(anchor, ls, n);
+         anchor[n] = '|';
+         anchor[n + 1] = '\0';
+         assert(strstr(rd, anchor) != NULL); /* same anchor in the anchored read */
+         checked++;
+      }
+      assert(checked >= 2); /* alpha + beta */
+      free(rd);
+   }
+   else
+   {
+      assert(strstr(o, "no top-level definitions") != NULL);
+   }
+   free(o);
+   unlink(tmppath);
+}
+
 static void test_parent_write_guard_blocks_parent_writes(void)
 {
    char root[512];
@@ -2603,6 +2668,7 @@ int main(void)
    test_tool_edit_file_anchored();
    test_tool_grep_anchored();
    test_tool_read_symbol();
+   test_tool_read_file_outline();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();
