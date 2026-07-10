@@ -221,14 +221,16 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
 
    /* Stage + commit whatever the delegate changed in the worktree. A commit with
     * nothing staged is a harmless no-op (rc ignored); out_commit_sha is then just
-    * the unchanged HEAD. NO co-authorship trailer (standing directive). */
+    * the unchanged HEAD. Commit with the host's CONFIGURED git identity (the same
+    * creds aimee pushes with) rather than a synthetic bot identity: a bot author
+    * makes a downstream squash-merge inject a `Co-authored-by:` trailer, which the
+    * standing directive forbids. No `-c user.name/user.email` override, and no
+    * co-authorship trailer. */
    {
       const char *add[] = {"add", "-A"};
       (void)git_run(workdir, add, 2);
-      const char *commit[] = {
-          "-c",     "user.name=aimee", "-c", "user.email=aimee@localhost",
-          "commit", "--no-verify",     "-m", "aimee: autonomous delegate change"};
-      (void)git_run(workdir, commit, 8);
+      const char *commit[] = {"commit", "--no-verify", "-m", "aimee: autonomous delegate change"};
+      (void)git_run(workdir, commit, 4);
    }
    {
       const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
