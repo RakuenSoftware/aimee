@@ -76,6 +76,32 @@ int main(void)
    assert(git_forge_vault_token("", out, sizeof(out)) == 0);
    assert(out[0] == '\0');
 
+   /* SERVER-SEALED INTAKE (the /v1/git/sshkey write path): a webuser who has
+    * NEVER unlocked can seal an SSH key with the server KEK alone — no cached user
+    * KEK, no 423 — and the server reads it back autonomously. */
+   const char *carol = "webuser:carol";
+   const char *ckey = "-----BEGIN OPENSSH PRIVATE KEY-----\ncarolKEY\n-----END-----";
+   vault_kek_cache_clear(); /* prove no user KEK is cached for carol */
+   /* RED: the old per-user-KEK intake is LOCKED for a never-unlocked user (the 423
+    * this change removes). GREEN: the server-sealed intake below just works. */
+   assert(vault_service_set(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, ckey, T0) ==
+          VAULT_ERR_LOCKED);
+   assert(vault_service_set_server_wrap(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED,
+                                        ckey) == VAULT_OK);
+   vault_kek_cache_clear();
+   assert(git_forge_vault_sshkey(carol, out, sizeof(out)) == 1);
+   assert(strcmp(out, ckey) == 0);
+   /* The user-KEK path can't read a server-only entry carol never unlocked. */
+   assert(vault_service_get(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, out, sizeof(out),
+                            T0) != VAULT_OK);
+   /* Isolation holds: alice's own key is unaffected; carol never sees it. */
+   assert(git_forge_vault_sshkey(alice, out, sizeof(out)) == 1);
+   assert(strcmp(out, akey) == 0);
+   /* Delete round-trips with no unlock too (DELETE /v1/git/sshkey). */
+   assert(vault_service_delete(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED) == VAULT_OK);
+   assert(git_forge_vault_sshkey(carol, out, sizeof(out)) == 0);
+   assert(out[0] == '\0');
+
    char clean[320];
    snprintf(clean, sizeof(clean), "rm -rf %s", home);
    assert(system(clean) == 0);
