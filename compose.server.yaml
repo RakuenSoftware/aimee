@@ -199,28 +199,35 @@ services:
 
   # Unified llama.cpp+Vulkan container — the kb's single LLM backend (embed +
   # rerank + synth on :8080). DEFAULT (the unified-llm cutover; the legacy
-  # embedder/llm services moved behind profiles). CPU tier by default; GPU =
-  # AIMEE_LLM_IMAGE=...-gpu + AIMEE_LLM_NGL=99 + /dev/dri (deploy/compose/aimee.gpu.yaml).
-  # Internal only — kb reaches it at aimee-llm:8080; auth-off (kb sends no bearer).
+  # embedder/llm services moved behind profiles). One model-less image; the tier is
+  # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu) and models download to the
+  # /models volume on first boot. GPU = AIMEE_LLM_TIER=small|mid|large +
+  # AIMEE_LLM_NGL=99 + /dev/dri (deploy/compose/aimee.gpu.yaml). Internal only — kb
+  # reaches it at aimee-llm:8080; auth-off (kb sends no bearer).
   # CI/dev: AIMEE_LLM_DOCKERFILE=Dockerfile.aimee-llm-stub + AIMEE_LLM_STUB=1.
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-cpu:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     build:
       context: .
       dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}
     environment:
       AIMEE_LLM_PORT: "8080"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
       AIMEE_LLM_STUB: ${AIMEE_LLM_STUB:-}
       AIMEE_LLM_STUB_DIM: ${AIMEE_LLM_STUB_DIM:-}
+    volumes:
+      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
+      - aimee-llm-models:/models
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 300s
+      # Cold first boot downloads the tier's models; STUB mode skips it.
+      start_period: 1200s
 
 volumes:
   aimee-kb-home:

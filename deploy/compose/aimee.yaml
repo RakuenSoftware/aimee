@@ -28,22 +28,29 @@ services:
       retries: 5
 
   # Unified llama.cpp/Vulkan container: embed (/embed,/embed_batch), rerank
-  # (/rerank) and synth (/v1/chat/completions). CPU tier here; the kb sends no
-  # bearer, so it runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
+  # (/rerank) and synth (/v1/chat/completions). One model-less image; the tier is
+  # chosen at runtime via AIMEE_LLM_TIER (unset ≡ cpu here) and the models are
+  # downloaded to the /models volume on first boot. The kb sends no bearer, so it
+  # runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-cpu:latest}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_PORT: "8742"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
+      # cpu tier by default (unset ≡ cpu); the GPU override sets small/mid/large.
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+    volumes:
+      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
+      - aimee-llm-models:/models
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
       interval: 30s
       timeout: 5s
       retries: 5
-      # Cold boot loads the baked GGUFs into RAM before /health is OK.
-      start_period: 600s
+      # Cold first boot downloads the tier's models before /health is OK.
+      start_period: 1200s
 
   aimee-kb:
     restart: unless-stopped
@@ -116,3 +123,4 @@ volumes:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
+  aimee-llm-models:

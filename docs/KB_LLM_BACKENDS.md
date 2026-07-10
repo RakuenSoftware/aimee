@@ -6,25 +6,32 @@ How to point `aimee-kb` at the model backend that does its **embedding**,
 ## Principle: the kb runs no model
 
 `aimee-kb` is a thin DB2 / curator service. It **never** runs an LLM or embedder
-in-process. It *calls* one over HTTP. Inference lives in a separate **`aimee-kb-*`
-tier image** (`aimee-kb-cpu` / `aimee-kb-gpu-small` / `aimee-kb-gpu-mid` / `aimee-kb-gpu-large`,
-the unified Vulkan llama.cpp stack, deployed as the SmoothNAS `aimee-llm` plugin) or any external
-OpenAI-compatible endpoint. You only ever give the kb a **URL**. The tiers themselves are
-documented in [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
+in-process. It *calls* one over HTTP. Inference lives in a separate **`aimee-llm`
+container** (the unified Vulkan llama.cpp stack, deployed as the SmoothNAS
+`aimee-llm` plugin) or any external OpenAI-compatible endpoint. `aimee-llm` is a
+single **model-less** image: the **tier** (`cpu` / `small` / `mid` / `large`) is
+chosen at runtime via `AIMEE_LLM_TIER` and the models are downloaded on first
+boot. You only ever give the kb a **URL**. The tiers themselves are documented in
+[AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Tiers: what each backend provides
 
-| Backend | Embedding / reranking | Synthesis | Embedding dim | Pull size |
+All served by the one `aimee-llm` image; `AIMEE_LLM_TIER` picks which models it
+downloads on first boot. "Model download" is the first-boot fetch into the
+`/models` volume (the image itself is small and model-less).
+
+| `AIMEE_LLM_TIER` | Embedding / reranking | Synthesis | Embedding dim | Model download |
 | --- | --- | --- | --- | --- |
-| **`aimee-kb-cpu`** (default) | Qwen3-Emb-0.6B + ettin-68m | **Tier-A** only (gemma-4-E4B, CPU) | **1024** | ~6.5 GB |
-| **`aimee-kb-gpu-small`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 12B) | **2560** (set explicitly) | ~11.4 GB |
-| **`aimee-kb-gpu-mid`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 26B-A4B, 24 GB card, 2 slots) | **2560** (set explicitly) | ~17.8 GB |
-| **`aimee-kb-gpu-large`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (same 26B-A4B, 32 GB card, 4 slots × 256 K) | **2560** (set explicitly) | ~17.8 GB |
+| **`cpu`** (default) | Qwen3-Emb-0.6B + ettin-68m | **Tier-A** only (gemma-4-E4B, CPU) | **1024** | ~6.5 GB |
+| **`small`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 12B) | **2560** (set explicitly) | ~11.4 GB |
+| **`mid`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (Gemma 4 26B-A4B, 24 GB card, 2 slots) | **2560** (set explicitly) | ~17.8 GB |
+| **`large`** | Qwen3-Emb-4B + ettin-400m | **Tier-A + Tier-B** (same 26B-A4B, 32 GB card, 4 slots × 256 K) | **2560** (set explicitly) | ~17.8 GB |
 | **External LLM** | per the endpoint | per the endpoint | per the endpoint | — |
 
-`gpu-small`, `gpu-mid`, and `gpu-large` share the 2560-dim embedder, so a KB moves between them
-with no re-embed. `gpu-large` is byte-identical to `gpu-mid` bar `SYNTH_SLOTS=4` (4 concurrent
-agents for a 32 GB card). Pick by synth need + card size, not by the KB.
+`small`, `mid`, and `large` share the 2560-dim embedder, so a KB moves between them
+with no re-embed. `large` is identical to `mid` bar `SYNTH_SLOTS=4` (4 concurrent
+agents for a 32 GB card). Pick by synth need + card size, not by the KB — switching
+is a `AIMEE_LLM_TIER` change (the new tier downloads to its own `/models` subdir).
 
 *Tier-A* = mechanical extract/index passes. *Tier-B* = reasoning passes (judge,
 resolve-entities, contradictions, **synthesize**, promote). A small CPU model is
@@ -34,10 +41,11 @@ when you point the kb at a capable container via `AIMEE_LLM_URL`.
 
 ## Zero-config default
 
-If **no** LLM is configured, the kb deployment brings up a **CPU `aimee-kb-cpu`
-container beside it** and points itself at it: embedding, reranking, and Tier-A
-synthesis work with nothing to set. The operator only opts *up*:
-configure a GPU container or an external LLM and the CPU sibling is not started.
+If **no** LLM is configured, the kb deployment brings up a **cpu-tier `aimee-llm`
+container beside it** (`AIMEE_LLM_TIER=cpu`) and points itself at it: embedding,
+reranking, and Tier-A synthesis work with nothing to set. The operator only opts
+*up*: set `AIMEE_LLM_TIER=small|mid|large` (with a GPU) or point at an external LLM
+and the CPU sibling is not started.
 
 > The default CPU sibling is owned by the **deploy unit** (the smoothnas plugin /
 > compose), not the kb process. The kb never touches a container runtime.
@@ -97,8 +105,9 @@ AIMEE_EMBEDDER_URL=https://embed.internal  # pin embedding elsewhere
 AIMEE_EMBEDDING_DIM=<that model's dim>
 ```
 
-**Default (nothing set):** the deploy brings up the CPU `aimee-kb-cpu` sibling;
-retrieval + Tier-A synthesis work at 1024-dim with no configuration.
+**Default (nothing set):** the deploy brings up the cpu-tier `aimee-llm` sibling
+(`AIMEE_LLM_TIER=cpu`); retrieval + Tier-A synthesis work at 1024-dim with no
+configuration.
 
 ## Notes for plugin / compose operators
 

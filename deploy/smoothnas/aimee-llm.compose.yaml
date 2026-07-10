@@ -1,25 +1,36 @@
 # aimee-llm — SmoothNAS compose-native plugin (split topology): the unified
 # Vulkan llama.cpp backend (embed + rerank + synth), standalone. GPU tier via
 # /dev/dri (LXC2Docker adds the cgroup allow). No cross-plugin deps — the kb
-# plugin points AIMEE_LLM_URL at this host's published :8742. Baked GGUFs, so no
-# tiered volume. Migrated from aimee-llm.plugin.yaml (gpu-amd profile).
+# plugin points AIMEE_LLM_URL at this host's published :8742. One model-less
+# image; the tier is chosen at runtime via AIMEE_LLM_TIER (mid on the .254 24GB
+# card) and the models download to the aimee-llm-models volume on first boot.
+# Migrated from aimee-llm.plugin.yaml (gpu-amd profile).
 name: aimee-llm
 services:
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:gpu}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_PORT: "8742"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
+      # Synth tier: small (12B) / mid (26B-A4B SLOTS=2) / large (26B-A4B SLOTS=4).
+      # mid fits the .254 24GB card fully GPU-resident. Models download on first boot.
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-mid}
       AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
     devices:
       - "/dev/dri:/dev/dri"
     ports:
       - "8742:8742"
+    volumes:
+      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch (multi-GB).
+      - aimee-llm-models:/models
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 600s
+      # Cold first boot downloads the tier's models before /health is OK.
+      start_period: 1200s
+volumes:
+  aimee-llm-models:
