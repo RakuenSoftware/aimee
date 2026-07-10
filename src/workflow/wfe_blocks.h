@@ -176,4 +176,14 @@ int wfe_worktree_ensure(const char *work_item_id, const char *existing, const ch
                         const char *base, char *out_path, size_t n);
 int wfe_worktree_cleanup(const char *worktree, const char *repo_local);
 
+/* Orphan GC: reap wfe-worktrees/<id> dirs that no LIVE (non-terminal) work item
+ * owns — a vanished row (deleted item) or a terminal row whose terminal-cleanup
+ * was missed would otherwise strand a full git worktree (~thousands of inodes)
+ * forever. Only dirs older than `grace_secs` are reaped (grace_secs <= 0 reaps
+ * immediately), so an in-flight worktree mid-creation is never raced. Force-removes
+ * the worktree + its branch + lock, prunes git's admin refs, and clears any stale
+ * DB worktree column. Returns the number reaped. Belt-and-suspenders to the
+ * terminal-cleanup path (wfe_autonomy_cleanup_worktree / scheduler sweep). */
+int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs);
+
 #endif /* DEC_WFE_BLOCKS_H */

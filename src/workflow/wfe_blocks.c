@@ -7,6 +7,8 @@
  * suite (the engine test overrides them with mocks via the vtable). */
 #include "wfe_blocks.h"
 
+#include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,6 +158,44 @@ static void wt_scrub(const char *rl, const char *path, const char *branch)
    free(o);
 }
 
+/* A positive long from `name`, else `def` (rejects junk/non-positive/overflow so a
+ * malformed override can't silently disable the guardrail). */
+static long wt_env_long(const char *name, long def)
+{
+   const char *v = getenv(name);
+   if (!v || !v[0])
+      return def;
+   errno = 0;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   if (errno == ERANGE || !end || *end != '\0' || n <= 0)
+      return def;
+   return n;
+}
+
+/* Count the worktree directories currently under `parent` (best-effort; a
+ * missing/unreadable dir is 0). Lock files and non-dirs are ignored. */
+static int wt_dir_count(const char *parent)
+{
+   DIR *dp = opendir(parent);
+   if (!dp)
+      return 0;
+   int n = 0;
+   struct dirent *e;
+   while ((e = readdir(dp)) != NULL)
+   {
+      if (e->d_name[0] == '.')
+         continue;
+      char path[1024];
+      struct stat st;
+      if (snprintf(path, sizeof path, "%s/%s", parent, e->d_name) < (int)sizeof path &&
+          stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+         n++;
+   }
+   closedir(dp);
+   return n;
+}
+
 int wfe_worktree_ensure(const char *work_item_id, const char *existing, const char *repo_local,
                         const char *base, char *out_path, size_t n)
 {
@@ -215,6 +255,19 @@ int wfe_worktree_ensure(const char *work_item_id, const char *existing, const ch
       goto unlock;
    }
 
+   /* Inode guardrail: bound how many worktrees can exist at once so a runaway (or a
+    * pile of orphaned checkouts from crashed runs) can't exhaust the filesystem's
+    * inodes. Reclaim orphans first; only if still at the cap do we fail-closed here
+    * — the caller then degrades to the shared checkout rather than adding an
+    * unbounded worktree. AIMEE_WFE_WORKTREE_MAX overrides the default. */
+   long cap = wt_env_long("AIMEE_WFE_WORKTREE_MAX", 32);
+   if (wt_dir_count(parent) >= cap)
+   {
+      wfe_worktree_orphan_gc(rl, 0);
+      if (wt_dir_count(parent) >= cap)
+         goto unlock; /* rc_final stays -1 -> shared-checkout fallback */
+   }
+
    o = NULL;
    const char *add[] = {"git", "-C", rl, "worktree", "add", "--lock", "-b", branch, path, b, NULL};
    int rc = safe_exec_capture(add, &o, 1 << 16);
@@ -256,6 +309,80 @@ int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
    int rc = safe_exec_capture(rm, &o, 1 << 14);
    free(o);
    return rc == 0 ? 0 : -1;
+}
+
+/* True for an immutable-terminal work-item state (mirrors the scheduler sweep's
+ * set): such an item's worktree should already be gone, so a lingering one is
+ * reapable rather than in-use. */
+static int wt_state_terminal(const char *st)
+{
+   return st && (!strcmp(st, "accepted") || !strcmp(st, "rejected") || !strcmp(st, "abandoned"));
+}
+
+int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return 0;
+   char parent[768];
+   if (sn(parent, sizeof parent, "%s/wfe-worktrees", home) != 0)
+      return 0;
+   DIR *dp = opendir(parent);
+   if (!dp)
+      return 0; /* no worktrees dir yet -> nothing to reap */
+   const char *rl = (repo_local && repo_local[0]) ? repo_local : ".";
+   time_t now = time(NULL);
+   int reaped = 0;
+   struct dirent *e;
+   while ((e = readdir(dp)) != NULL)
+   {
+      if (e->d_name[0] == '.')
+         continue;
+      size_t nl = strlen(e->d_name);
+      if (nl >= 5 && strcmp(e->d_name + nl - 5, ".lock") == 0)
+         continue; /* a lock is reaped alongside its worktree, below */
+      char path[1024];
+      if (snprintf(path, sizeof path, "%s/%s", parent, e->d_name) >= (int)sizeof path)
+         continue;
+      struct stat stt;
+      if (stat(path, &stt) != 0 || !S_ISDIR(stt.st_mode))
+         continue; /* only directories are worktrees */
+
+      /* Keep a worktree that a LIVE (non-terminal) work item still owns — an
+       * active/parked item needs it, and the terminal-sweep handles terminal ones.
+       * This GC only fills the gap those miss: a vanished row, or a terminal row
+       * whose worktree was left behind. */
+      db1_work_item_t wi;
+      int have = db1_work_item_get(e->d_name, &wi);
+      if (have == 1 && !wt_state_terminal(wi.state))
+         continue;
+
+      /* Age gate: a worktree dir exists before its row/column is written, so never
+       * reap one younger than the grace window (grace_secs <= 0 = reap now). */
+      if (grace_secs > 0 && now - stt.st_mtime < grace_secs)
+         continue;
+
+      char branch[220];
+      if (sn(branch, sizeof branch, "aimee/wi/%s", e->d_name) != 0)
+         continue;
+      wt_scrub(rl, path, branch); /* force-remove worktree + rm -rf + delete branch */
+      char lockf[1100];
+      if (snprintf(lockf, sizeof lockf, "%s.lock", path) < (int)sizeof lockf)
+         unlink(lockf);
+      if (have == 1)
+         db1_work_item_set_worktree(e->d_name, ""); /* clear a stale terminal column */
+      reaped++;
+   }
+   closedir(dp);
+   if (reaped > 0)
+   {
+      /* Drop git's admin refs (.git/worktrees/<id>) for the dirs we removed. */
+      char *o = NULL;
+      const char *prune[] = {"git", "-C", rl, "worktree", "prune", NULL};
+      safe_exec_capture(prune, &o, 1 << 14);
+      free(o);
+   }
+   return reaped;
 }
 
 /* ---- forge seam (gate.ci / check.mergeable / merge) ---- */
