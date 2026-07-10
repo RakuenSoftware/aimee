@@ -36,13 +36,37 @@ if [ ! -f "$AIMEE_HOME/agents.json" ] && [ -f /opt/aimee/defaults/agents.json ];
     cp /opt/aimee/defaults/agents.json "$AIMEE_HOME/agents.json"
 fi
 # Seed default dev-lifecycle workflows so autonomous development (default-on) can
-# resolve "build" out of the box. Never clobber operator-authored workflows.
+# resolve "build" out of the box. Shipped defaults are hash-tracked under
+# .seeded/<name>: a fresh install is seeded and its hash recorded; on later
+# starts an UNMODIFIED managed default (on-disk hash still equals the recorded
+# seed hash) is refreshed when the image ships a newer one. An operator-edited
+# default (hash diverged) or one of unknown provenance (no seed record and not
+# already equal to the shipped default) is never clobbered.
 if [ -d /opt/aimee/defaults/workflows ]; then
-    mkdir -p "$AIMEE_HOME/workflows"
+    mkdir -p "$AIMEE_HOME/workflows/.seeded"
     for wf in /opt/aimee/defaults/workflows/*.yaml; do
         [ -e "$wf" ] || continue
-        dst="$AIMEE_HOME/workflows/$(basename "$wf")"
-        [ -f "$dst" ] || cp "$wf" "$dst"
+        base=$(basename "$wf")
+        dst="$AIMEE_HOME/workflows/$base"
+        rec="$AIMEE_HOME/workflows/.seeded/$base"
+        if ! command -v sha256sum >/dev/null 2>&1; then
+            # No hasher available: fall back to conservative never-clobber seed.
+            [ -f "$dst" ] || cp "$wf" "$dst"
+            continue
+        fi
+        shipped=$(sha256sum "$wf" | cut -d' ' -f1)
+        if [ ! -f "$dst" ]; then
+            cp "$wf" "$dst" && printf '%s\n' "$shipped" > "$rec"
+        elif [ -f "$rec" ]; then
+            disk=$(sha256sum "$dst" | cut -d' ' -f1)
+            if [ "$disk" = "$(cat "$rec")" ] && [ "$disk" != "$shipped" ]; then
+                cp "$wf" "$dst" && printf '%s\n' "$shipped" > "$rec"
+            fi
+        elif [ "$(sha256sum "$dst" | cut -d' ' -f1)" = "$shipped" ]; then
+            # No record yet, but already identical to the shipped default: adopt
+            # it as managed so a future image can refresh it.
+            printf '%s\n' "$shipped" > "$rec"
+        fi
     done
 fi
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
