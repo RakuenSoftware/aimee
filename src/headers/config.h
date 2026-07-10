@@ -194,6 +194,7 @@ typedef struct
 #define TRIGGER_RULE_MAX_SCHEDULE 64
 #define TRIGGER_RULE_MAX_TEMPLATE 128
 #define TRIGGER_RULE_MAX_WS       256
+#define TRIGGER_RULE_MAX_MODE     32
 #define TRIGGER_RULES_MAX         32
 
 typedef struct
@@ -203,6 +204,10 @@ typedef struct
    char schedule[TRIGGER_RULE_MAX_SCHEDULE]; /* cron expression (source=cron only) */
    char pipeline_template[TRIGGER_RULE_MAX_TEMPLATE];
    char workspace[TRIGGER_RULE_MAX_WS];
+   char mode[TRIGGER_RULE_MAX_MODE]; /* work-item mode the rule files: "autonomous"
+                                      * (default — the run advances hands-off) or
+                                      * "interactive" (parks for a human to drive in
+                                      * the webchat). Empty => "autonomous". */
    double max_spend_usd;
 } trigger_rule_t;
 

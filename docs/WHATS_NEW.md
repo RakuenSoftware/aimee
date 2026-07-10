@@ -11,6 +11,16 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Trigger `mode` (autonomous by default)**: `trigger_rules` now take a `mode`
+  field selecting how a triggered run executes — `autonomous` (the default: the
+  autonomy scheduler drives it hands-off, right for "merging a proposal *is* the
+  approval") or `interactive` (file it and park for a human to drive in the
+  webchat). The `proposals` source now files its runs `autonomous` by default, so
+  a merged proposal builds out end-to-end without further sign-off. In-flight
+  human gates remain a property of the *workflow* you name (`gate.human` /
+  `with_user`), independent of the trigger's `mode`. See
+  [WORKFLOWS.md § Triggers](WORKFLOWS.md#triggers).
+
 - **Dashboard overhaul + Logs tab**: the web UI **Dashboard** is now a customizable
   grid of **server-incurred** metric panels: delegations, per-role metrics, token/cost,
   guardrail actions, agents, active sessions, readiness, plus opt-in panels (success by

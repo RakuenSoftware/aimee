@@ -743,10 +743,12 @@ static void test_scan_proposals_end_to_end(void)
    assert(strcmp(g_lstree_ref, "origin/testing") == 0);
    size_t pl = strlen(g_lstree_pathspec);
    assert(pl > 0 && g_lstree_pathspec[pl - 1] == '/');
-   /* Correct launch args: workflow=pipeline_template, repo=workspace, mode=proposals. */
+   /* Correct launch args: workflow=pipeline_template, repo=workspace, and — with
+    * the rule's mode left empty — the default execution mode "autonomous" (so the
+    * autonomy scheduler drives the run hands-off). */
    assert(strcmp(g_created[0].wf, "build") == 0);
    assert(strcmp(g_created[0].repo, "/repo/aimee") == 0);
-   assert(strcmp(g_created[0].mode, "proposals") == 0);
+   assert(strcmp(g_created[0].mode, "autonomous") == 0);
    /* proposal_path is <home>/triggers/proposals/<blob-sha>.md and holds the blob. */
    char exp0[700], exp1[700];
    snprintf(exp0, sizeof exp0, "%s/triggers/proposals/%s.md", g_home, g_blobs[0].sha);
@@ -773,6 +775,37 @@ static void test_scan_proposals_end_to_end(void)
    assert(strcmp(g_created[2].wf, "build") == 0);
 
    printf("  PASS: test_scan_proposals_end_to_end\n");
+}
+
+/* An explicit mode on the rule is passed through verbatim to the filed work item
+ * (here "interactive" -> the run parks for a human instead of advancing hands-off). */
+static void test_scan_proposals_honors_explicit_mode(void)
+{
+   trig_stub_reset();
+   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-mode-%d", (int)getpid());
+   mkdir(g_home, 0700);
+   snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
+
+   snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
+   snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# Proposal A\n");
+   g_nblobs = 1;
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n");
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+   snprintf(rule.event, sizeof rule.event, "docs/proposals/pending");
+   snprintf(rule.mode, sizeof rule.mode, "interactive");
+
+   scan_proposals(&rule);
+
+   assert(g_ncreated == 1);
+   assert(strcmp(g_created[0].mode, "interactive") == 0);
+
+   printf("  PASS: test_scan_proposals_honors_explicit_mode\n");
 }
 
 static void test_scan_proposals_requires_workspace_and_workflow(void)
@@ -918,6 +951,7 @@ int main(void)
    test_parse_ls_tree_empty_and_garbage();
    test_parse_ls_tree_buffer_cap();
    test_scan_proposals_end_to_end();
+   test_scan_proposals_honors_explicit_mode();
    test_scan_proposals_requires_workspace_and_workflow();
    test_scan_proposals_custom_event_and_schedule();
    test_scan_proposals_rejects_unsafe_ref_and_path();

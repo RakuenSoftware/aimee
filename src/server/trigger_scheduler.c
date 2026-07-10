@@ -242,10 +242,12 @@ static int schedule_matches(const char *expr, const struct tm *tm)
 /* Proposals trigger source                                             */
 /* ------------------------------------------------------------------ */
 
-/* source="proposals" overloads trigger_rule_t without adding fields:
+/* source="proposals" overloads trigger_rule_t's shared fields:
  * workspace = absolute repo path (required), pipeline_template = workflow name
  * (required), event = repo-relative proposal dir (default docs/proposals/pending),
- * schedule = git ref/branch (default auto-detected origin HEAD, then HEAD). */
+ * schedule = git ref/branch (default auto-detected origin HEAD, then HEAD), and
+ * mode = the filed work item's execution mode ("autonomous" default, or
+ * "interactive" to park it for a human in the webchat). */
 typedef struct
 {
    char sha[41];
@@ -540,8 +542,12 @@ static void scan_proposals(const trigger_rule_t *rule)
       free(blob);
 
       char id[80] = "", err[256] = "";
-      rc = wfe_work_item_create(rule->pipeline_template, rule->workspace, proposal_path,
-                                "proposals", id, err, sizeof(err));
+      /* mode drives whether the autonomy scheduler advances the run hands-off
+       * ("autonomous", the default when the rule omits it) or the item parks for
+       * a human to drive in the webchat ("interactive"). */
+      const char *mode = rule->mode[0] ? rule->mode : "autonomous";
+      rc = wfe_work_item_create(rule->pipeline_template, rule->workspace, proposal_path, mode, id,
+                                err, sizeof(err));
       if (rc == 0 && id[0])
          aimee_log(LOG_INFO, "trigger.sched", "filed proposal workflow=%s repo=%s sha=%s id=%s",
                    rule->pipeline_template, rule->workspace, entries[i].sha, id);
