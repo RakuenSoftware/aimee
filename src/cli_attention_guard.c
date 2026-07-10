@@ -489,6 +489,14 @@ static int attn_config_require_session_worktree(void)
    return value;
 }
 
+/* Public wrapper so other client TUs (e.g. the remote/thin session-start path)
+ * can ask the SAME authoritative question the guard uses to decide whether to
+ * block — default ON unless aimee.yaml sets `require_session_worktree: false`. */
+int attn_require_session_worktree(void)
+{
+   return attn_config_require_session_worktree();
+}
+
 /* Lexically resolve '.', '..' and '//' in `path` into `out` (purely textual —
  * the write target may not exist yet, so realpath() is unusable; symlinks are
  * not followed). Closes the `.aimee/worktrees/../escape` traversal bypass: a

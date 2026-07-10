@@ -6,11 +6,18 @@
 #include "cli_client.h"
 #include "cli_session_start.h"
 #include "cJSON.h"
+#include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#include <unistd.h>
+
+/* This is a thin-client TU compiled without -I./-Idb2, and the client binary
+ * links none of workspace.o/guardrails.o/config.o — so worktree creation here
+ * goes through git subprocesses (below), not those functions. Only the
+ * lightweight attention-guard helpers (attn_require_session_worktree /
+ * attn_session_isolation_blocked, from cli_attention_guard.h) are available. */
 
 struct ss_sbuf
 {
@@ -112,7 +119,128 @@ static cJSON *ss_retry_post(const char *endpoint, const char *bearer, const char
    return NULL;
 }
 
-static int handle_session_start_remote(void)
+/* Capture the first trimmed stdout line of `cmd` into out[cap]; 1 on non-empty. */
+static int ss_git_first_line(const char *cmd, char *out, size_t cap)
+{
+   if (cap)
+      out[0] = '\0';
+   FILE *f = popen(cmd, "r");
+   if (!f)
+      return 0;
+   char buf[4096] = {0};
+   char *got = fgets(buf, sizeof buf, f);
+   pclose(f);
+   if (!got)
+      return 0;
+   size_t n = strlen(buf);
+   while (n > 0 &&
+          (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ' || buf[n - 1] == '\t'))
+      buf[--n] = '\0';
+   if (!buf[0])
+      return 0;
+   snprintf(out, cap, "%s", buf);
+   return 1;
+}
+
+/* Remote/thin session-start (handle_session_start_remote) does no local worktree
+ * setup — it assumes the client tree is absent on the remote server. But the
+ * attention-guard's `require_session_worktree` isolation still runs LOCALLY and
+ * blocks every mutation outside a managed worktree, so a remote-server deployment
+ * would wedge the session: nothing prepares or points to a worktree, yet the
+ * guard demands one. Prepare the per-session sibling worktree here (via git, as
+ * the thin client links no workspace helpers) and surface a directive telling the
+ * agent to enter it before its first mutating tool call. No-op when isolation is
+ * off, the session is already inside a worktree, or there is no local git repo. */
+static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
+{
+   if (!attn_require_session_worktree())
+      return; /* isolation not enforced -> nothing to prepare or say */
+
+   char cwd[4096];
+   if (!getcwd(cwd, sizeof cwd))
+      return;
+   /* Already inside a managed (.aimee/.claude/.codex) worktree -> a mutating op
+    * would not be blocked; don't nag or create a redundant worktree. Mirrors the
+    * guard's own decision so the directive fires exactly when it would block. */
+   if (!attn_session_isolation_blocked(ATTN_OP_SOFT, NULL, cwd))
+      return;
+
+   /* Need a stable session id to name the worktree; Claude Code always sends one. */
+   if (!sid || !sid[0])
+      return;
+   char sid_safe[64];
+   size_t si = 0;
+   for (const char *p = sid; *p && si + 1 < sizeof sid_safe; p++)
+   {
+      char c = *p;
+      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '-' || c == '_' || c == '.';
+      sid_safe[si++] = ok ? c : '-';
+   }
+   sid_safe[si] = '\0';
+   if (!sid_safe[0])
+      return;
+
+   /* A single quote in a path would break the single-quoted popen/system commands;
+    * such local repo paths are pathological -> skip rather than risk misquoting. */
+   if (strchr(cwd, '\''))
+      return;
+
+   char cmd[10240];
+   char git_root[4096];
+   snprintf(cmd, sizeof cmd, "git -C '%s' rev-parse --show-toplevel 2>/dev/null", cwd);
+   if (!ss_git_first_line(cmd, git_root, sizeof git_root) || strchr(git_root, '\''))
+      return; /* not a git repo (or unquotable path) -> nothing to prepare */
+
+   /* Base the session branch on the repo's default branch (origin HEAD -> HEAD). */
+   char base_ref[256];
+   snprintf(cmd, sizeof cmd, "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null",
+            git_root);
+   if (!ss_git_first_line(cmd, base_ref, sizeof base_ref))
+   {
+      snprintf(cmd, sizeof cmd, "git -C '%s' symbolic-ref --short HEAD 2>/dev/null", git_root);
+      if (!ss_git_first_line(cmd, base_ref, sizeof base_ref))
+         snprintf(base_ref, sizeof base_ref, "HEAD");
+   }
+   if (strchr(base_ref, '\''))
+      return;
+
+   char wt[4200];
+   if (snprintf(wt, sizeof wt, "%s/.aimee/worktrees/%s/main", git_root, sid_safe) >=
+       (int)sizeof wt)
+      return;
+
+   struct stat st;
+   if (stat(wt, &st) != 0)
+   {
+      /* Prune stale registrations (best-effort), then create the worktree+branch.
+       * git worktree add makes intermediate dirs; -Wno-unused-result covers system(). */
+      snprintf(cmd, sizeof cmd, "git -C '%s' worktree prune >/dev/null 2>&1", git_root);
+      (void)system(cmd);
+      int cn = snprintf(cmd, sizeof cmd,
+                        "git -C '%s' worktree add '%s' -b 'aimee/session/%s' '%s' >/dev/null 2>&1",
+                        git_root, wt, sid_safe, base_ref);
+      if (cn < 0 || cn >= (int)sizeof cmd)
+         return; /* command truncated -> don't run a malformed git invocation */
+      (void)system(cmd);
+   }
+   if (stat(wt, &st) != 0 || !S_ISDIR(st.st_mode))
+      return; /* creation failed -> don't point the agent at a path that isn't there */
+
+   ss_add(ctx, "\n# Isolated Checkout (REQUIRED before editing)\n");
+   ss_add(ctx,
+          "This session runs against a remote aimee-server, and session-worktree isolation "
+          "(`require_session_worktree`) is ON. You are NOT in a managed worktree, so every "
+          "edit/write/mutating shell command WILL be blocked until you enter one. An isolated "
+          "worktree has been prepared for you:\n\n  ");
+   ss_add(ctx, wt);
+   ss_add(ctx,
+          "\n\nBefore your first mutating tool call, switch into it — Claude Code: call "
+          "`EnterWorktree` with that path; or `cd` into it for shell work. Do not edit the shared "
+          "checkout.\n\n");
+}
+
+static int handle_session_start_remote(const char *sid)
 {
    char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
@@ -170,6 +298,12 @@ static int handle_session_start_remote(void)
 
    free(endpoint);
    free(bearer);
+
+   /* Local worktree isolation: even though compute is remote, the guard runs on
+    * THIS host. Prepare + direct the agent into an isolated worktree so mutating
+    * tools aren't blocked. Appended last so it shows even if the remote brief
+    * fetch returned nothing (and so a wedged session always gets the way out). */
+   ss_append_worktree_isolation(&ctx, sid);
 
    if (ctx.p && ctx.p[0])
    {
@@ -494,7 +628,7 @@ int handle_session_start(int json_output)
        * local aimee-server needed (see handle_session_start_remote). */
       if (cli_v1_has_remote_endpoint())
       {
-         int rc = handle_session_start_remote();
+         int rc = handle_session_start_remote(sid);
          cJSON_Delete(hook_json);
          free(stdin_data);
          return rc;
