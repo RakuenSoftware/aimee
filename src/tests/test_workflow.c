@@ -168,12 +168,24 @@ int main(void)
                         "  - id: g\n    block: gate.roundtable\n    in:\n      s: a.out\n"
                         "    params:\n      panel:\n        required:\n          - security\n",
                         e, sizeof e));
-      /* gate.human optional + pr_review */
+      /* gate.human optional:true — forbidden (a human gate is inviolable) */
       assert(!validates("name: x\nstart: a\nnodes:\n"
                         "  - id: a\n    block: author.proposal\n    next: h\n"
                         "  - id: h\n    block: gate.human\n    in:\n      s: a.out\n"
-                        "    params:\n      policy: pr_review\n      optional: true\n",
+                        "    params:\n      optional: true\n",
                         e, sizeof e));
+      /* gate.human policy:preauthorized — forbidden (must not be auto-satisfiable) */
+      assert(!validates("name: x\nstart: a\nnodes:\n"
+                        "  - id: a\n    block: author.proposal\n    next: h\n"
+                        "  - id: h\n    block: gate.human\n    in:\n      s: a.out\n"
+                        "    params:\n      policy: preauthorized\n",
+                        e, sizeof e));
+      /* a plain gate.human (no auto-satisfy params) is valid */
+      assert(validates("name: x\nstart: a\nnodes:\n"
+                       "  - id: a\n    block: author.proposal\n    next: h\n"
+                       "  - id: h\n    block: gate.human\n    in:\n      s: a.out\n    next: p\n"
+                       "  - id: p\n    block: pr.open\n    in:\n      s: a.out\n",
+                       e, sizeof e));
       /* missing required input: author.plan with no input binding */
       assert(!validates("name: x\nstart: a\nnodes:\n"
                         "  - id: a\n    block: author.plan\n",

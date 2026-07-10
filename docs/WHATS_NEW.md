@@ -17,9 +17,18 @@ credentials live in the server's **sealed vault**; see
   approval") or `interactive` (file it and park for a human to drive in the
   webchat). The `proposals` source now files its runs `autonomous` by default, so
   a merged proposal builds out end-to-end without further sign-off. In-flight
-  human gates remain a property of the *workflow* you name (`gate.human` /
-  `with_user`), independent of the trigger's `mode`. See
+  human gates remain a property of the *workflow* you name (`gate.human`),
+  independent of the trigger's `mode`. See
   [WORKFLOWS.md § Triggers](WORKFLOWS.md#triggers).
+- **Human gates are inviolable**: a `gate.human` step can no longer be
+  auto-satisfied in autonomous mode. The autonomy driver's preauthorized/optional
+  auto-pass is removed — an autonomous run now **parks at every human gate** until
+  a person acts, and workflow validation **rejects** `policy: preauthorized` /
+  `optional: true` on a human gate so an overridable one can't even be authored.
+  The only way past a human gate remains a human's signed approval via
+  `POST /v1/workflow/items/<id>/gate` (operator-gated `CAP_WORKFLOW_ADMIN`,
+  attributed to the caller's attested principal, HMAC-signed and content-hash-bound).
+  See [WORKFLOWS.md](WORKFLOWS.md) and [AUTONOMOUS_DEVELOPMENT.md](AUTONOMOUS_DEVELOPMENT.md).
 
 - **Dashboard overhaul + Logs tab**: the web UI **Dashboard** is now a customizable
   grid of **server-incurred** metric panels: delegations, per-role metrics, token/cost,
