@@ -748,11 +748,15 @@ static char *td_grep(cJSON *args, const char *name, const char *dispatch_cwd,
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *pat = cJSON_GetObjectItem(args, "pattern");
    cJSON *mx = cJSON_GetObjectItem(args, "max_results");
+   cJSON *raw = cJSON_GetObjectItem(args, "raw");
    if (!p || !cJSON_IsString(p) || !pat || !cJSON_IsString(pat))
       result = safe_strdup("error: missing 'path' or 'pattern' parameter");
    else
-      result = tool_grep(p->valuestring, pat->valuestring,
-                         (mx && cJSON_IsNumber(mx)) ? mx->valueint : 50);
+   {
+      int anchored = !(raw && cJSON_IsBool(raw) && cJSON_IsTrue(raw));
+      result = tool_grep_ex(p->valuestring, pat->valuestring,
+                            (mx && cJSON_IsNumber(mx)) ? mx->valueint : 50, anchored, dispatch_sid);
+   }
 
    return result;
 }

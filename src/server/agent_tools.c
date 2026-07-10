@@ -707,6 +707,10 @@ static cJSON *tp_grep(void)
    tp_prop(props, "path", "string", "Directory or file to search in");
    tp_prop(props, "pattern", "string", "Pattern to search for (basic regex)");
    tp_prop(props, "max_results", "integer", "Max results (default 50)");
+   tp_prop(props, "raw", "boolean",
+           "Return plain grep output (file:line: text). Default false: hits are grouped by file "
+           "with a per-file snapshot id and each line carries its N:hash edit anchor, so you can "
+           "edit_file a match directly without a separate read.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -955,8 +959,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
     {"verify", "Verify an assertion. check_type: http_status, file_contains, command_succeeds.",
      tp_verify, TSURF_ALL},
     {"git_log", "Show recent git commits for a repository.", tp_git_log, TSURF_ALL},
-    {"grep", "Search for a pattern in files. Returns matching lines with file:line.", tp_grep,
-     TSURF_ALL},
+    {"grep",
+     "Search for a pattern in files. By default returns matches grouped by file with a per-file "
+     "snapshot id and each hit prefixed by its N:hash edit anchor — pass those to edit_file to "
+     "change a match with no intervening read. Use raw:true for plain file:line output.",
+     tp_grep, TSURF_ALL},
     {"git_diff", "Show git diff for a repository. Optionally diff against a ref.", tp_git_diff,
      TSURF_ALL},
     {"git_status", "Show git status (porcelain format) for a repository.", tp_git_status,

@@ -42,6 +42,8 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
                      int replace_all);
 char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const cJSON *edits,
                               int dry_run, const char *sid);
+char *tool_grep_ex(const char *path, const char *pattern, int max_results, int anchored,
+                   const char *sid);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
@@ -1291,6 +1293,72 @@ static void test_tool_edit_file_anchored(void)
    unlink(tmppath);
 }
 
+static void test_tool_grep_anchored(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_test_grep_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   assert(fd >= 0);
+   const char *content = "alpha\nfindme here\nbeta\nfindme again\n";
+   if (write(fd, content, strlen(content)) < 0)
+   { /* ignore */
+   }
+   close(fd);
+   const char *sid = "grepX";
+
+   /* Anchored grep: a file header carries the snapshot; each hit carries its
+    * N:hash anchor, so the match is directly editable with no intervening read. */
+   char *g = tool_grep_ex(tmppath, "findme", 50, 1, sid);
+   assert(g != NULL);
+   assert(strstr(g, "[snapshot ") != NULL);
+   assert(strstr(g, "2:") != NULL && strstr(g, "| findme here") != NULL);
+
+   /* Extract the snapshot id ("[snapshot <id>]") and the line-2 anchor
+    * ("\n  2:<tag>| ") from the grouped grep output, then edit by anchor. */
+   char snap[80], anchor2[24];
+   const char *sp = strstr(g, "[snapshot ");
+   assert(sp != NULL);
+   sp += strlen("[snapshot ");
+   size_t si = 0;
+   while (sp[si] && sp[si] != ']' && si + 1 < sizeof(snap))
+   {
+      snap[si] = sp[si];
+      si++;
+   }
+   snap[si] = '\0';
+   const char *ap = strstr(g, "\n  2:");
+   assert(ap != NULL);
+   ap += 3; /* skip "\n  " */
+   size_t ai = 0;
+   while (ap[ai] && ap[ai] != '|' && ai + 1 < sizeof(anchor2))
+   {
+      anchor2[ai] = ap[ai];
+      ai++;
+   }
+   anchor2[ai] = '\0';
+   free(g);
+   cJSON *edits = cJSON_CreateArray();
+   cJSON *op = cJSON_CreateObject();
+   cJSON_AddStringToObject(op, "op", "replace");
+   cJSON_AddStringToObject(op, "at", anchor2);
+   cJSON_AddStringToObject(op, "text", "FOUND");
+   cJSON_AddItemToArray(edits, op);
+   char *res = tool_edit_file_anchored(tmppath, snap, edits, 0, sid);
+   assert(res && strstr(res, "\"status\":\"ok\"") != NULL);
+   free(res);
+   cJSON_Delete(edits);
+   char *after = tool_read_file_ex(tmppath, 0, 0, 0, sid);
+   assert(after && strcmp(after, "alpha\nFOUND\nbeta\nfindme again\n") == 0);
+   free(after);
+
+   /* raw:true is the plain grep output — no snapshot header. */
+   char *graw = tool_grep_ex(tmppath, "findme", 50, 0, sid);
+   assert(graw && strstr(graw, "[snapshot ") == NULL);
+   free(graw);
+
+   unlink(tmppath);
+}
+
 static void test_parent_write_guard_blocks_parent_writes(void)
 {
    char root[512];
@@ -2516,6 +2584,7 @@ int main(void)
    test_tool_write_file();
    test_tool_edit_file();
    test_tool_edit_file_anchored();
+   test_tool_grep_anchored();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();
