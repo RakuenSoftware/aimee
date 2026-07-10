@@ -20,6 +20,9 @@ typedef struct
    const char *proposal;      /* originating proposal/request text, "" if none */
    const char *focus;         /* review lens from params.focus, "" if unset */
    const char *workdir; /* the run's worktree (a live panel inspects the diff here), "" if none */
+   const char *diff;    /* the change under review vs the base repo, pushed to the panel so it
+                         * reads the delta directly (trusting the index for context) instead of
+                         * re-running git; "" at a plan gate (no code change yet) */
 } wfe_review_packet_t;
 
 /* A panel provider runs the configured panel against the review packet and fills
