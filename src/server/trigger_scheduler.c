@@ -380,37 +380,57 @@ static void trigger_resolve_ref(const char *workspace, const char *schedule, cha
    snprintf(out, n, "%s", "HEAD");
 }
 
+/* Create <home>/triggers/proposals (mode 0700). `home` must be a non-empty
+ * absolute path the caller already validated -- there is deliberately NO /tmp
+ * fallback (a predictable world-writable path is a symlink-clobber vector).
+ * mkdir returning EEXIST is fine; any other error propagates. */
 static int trigger_mkdir_parents(const char *home)
 {
+   if (!home || !home[0])
+      return -1;
    char dir[1024];
-   if (snprintf(dir, sizeof(dir), "%s/triggers", home ? home : "/tmp") >= (int)sizeof(dir))
+   if (snprintf(dir, sizeof(dir), "%s/triggers", home) >= (int)sizeof(dir))
       return -1;
-   mkdir(dir, 0700);
-   if (snprintf(dir, sizeof(dir), "%s/triggers/proposals", home ? home : "/tmp") >=
-       (int)sizeof(dir))
+   if (mkdir(dir, 0700) != 0 && errno != EEXIST)
       return -1;
-   mkdir(dir, 0700);
+   if (snprintf(dir, sizeof(dir), "%s/triggers/proposals", home) >= (int)sizeof(dir))
+      return -1;
+   if (mkdir(dir, 0700) != 0 && errno != EEXIST)
+      return -1;
    return 0;
 }
 
+/* Atomically write `bytes` to `path`. Uses mkstemp (O_EXCL|O_CREAT, mode 0600, a
+ * fresh unique name) so a pre-planted symlink/file at a predictable temp path
+ * cannot be followed/clobbered, then rename() onto the final path. */
 static int trigger_write_atomic(const char *path, const char *bytes)
 {
-   char tmp[1200];
-   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp))
+   char tmp[1300];
+   if (snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path) >= (int)sizeof(tmp))
       return -1;
-   FILE *f = fopen(tmp, "wb");
-   if (!f)
+   int fd = mkstemp(tmp);
+   if (fd < 0)
       return -1;
+
+   const char *p = bytes ? bytes : "";
    size_t len = bytes ? strlen(bytes) : 0;
-   int ok = fwrite(bytes ? bytes : "", 1, len, f) == len;
-   if (fclose(f) != 0)
-      ok = 0;
-   if (!ok)
+   int ok = 1;
+   while (len > 0)
    {
-      unlink(tmp);
-      return -1;
+      ssize_t w = write(fd, p, len);
+      if (w < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         ok = 0;
+         break;
+      }
+      p += w;
+      len -= (size_t)w;
    }
-   if (rename(tmp, path) != 0)
+   if (close(fd) != 0)
+      ok = 0;
+   if (!ok || rename(tmp, path) != 0)
    {
       unlink(tmp);
       return -1;
@@ -475,14 +495,24 @@ static void scan_proposals(const trigger_rule_t *rule)
                 PROPOSALS_MAX_ENTRIES, rule->workspace, scandir);
 
    const char *home = aimee_home();
-   if (trigger_mkdir_parents(home) != 0)
+   if (!home || !home[0])
+   {
+      aimee_log(LOG_WARN, "trigger.sched",
+                "proposals: no resolvable AIMEE_HOME; refusing to materialize under /tmp");
       return;
+   }
+   if (trigger_mkdir_parents(home) != 0)
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "proposals: could not create %s/triggers/proposals: %s",
+                home, strerror(errno));
+      return;
+   }
 
    for (int i = 0; i < n; i++)
    {
       char proposal_path[1200];
-      if (snprintf(proposal_path, sizeof(proposal_path), "%s/triggers/proposals/%s.md",
-                   home ? home : "/tmp", entries[i].sha) >= (int)sizeof(proposal_path))
+      if (snprintf(proposal_path, sizeof(proposal_path), "%s/triggers/proposals/%s.md", home,
+                   entries[i].sha) >= (int)sizeof(proposal_path))
          continue;
 
       char existing[80];

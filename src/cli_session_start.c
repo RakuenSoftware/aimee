@@ -7,6 +7,7 @@
 #include "cli_session_start.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,9 +158,27 @@ static int ss_git(const char *const argv[], char *out, size_t cap)
    close(pfd[1]);
    char buf[4096];
    size_t got = 0;
-   ssize_t r;
-   while (got < sizeof buf - 1 && (r = read(pfd[0], buf + got, sizeof buf - 1 - got)) > 0)
-      got += (size_t)r;
+   /* Read the first bufful; keep draining any excess into scratch so a chatty git
+    * never gets SIGPIPE (which would look like a failure). Retry on EINTR so a
+    * signal cannot truncate a capture that then reports exit 0. */
+   for (;;)
+   {
+      char scratch[4096];
+      int have_room = got < sizeof buf - 1;
+      char *dst = have_room ? buf + got : scratch;
+      size_t room = have_room ? sizeof buf - 1 - got : sizeof scratch;
+      ssize_t r = read(pfd[0], dst, room);
+      if (r < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         break;
+      }
+      if (r == 0)
+         break;
+      if (have_room)
+         got += (size_t)r;
+   }
    buf[got] = '\0';
    close(pfd[0]);
    int status = 0;
