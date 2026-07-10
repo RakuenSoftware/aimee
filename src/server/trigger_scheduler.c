@@ -13,21 +13,31 @@
 #include "db1/db1_cron_jobs.h"
 #include "db1/db1_trigger.h"
 #include "db1/pipelines.h"
+#include "db1/wfe_store.h"
+#include "aimee_home.h"
 #include "log.h"
 #include "platform_random.h"
 #include "skill_curator.h"
 #include "trigger_scheduler.h"
+#include "util.h"
+#include "wfe_engine.h"
 
 #include <pthread.h>
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #define CRON_CONTEXT_OUTPUT_LIMIT 8192
+#define PROPOSALS_DEFAULT_DIR     "docs/proposals/pending"
+#define PROPOSALS_MAX_ENTRIES     512
+#define PROPOSALS_GIT_MAX_OUT     (256 * 1024)
+#define PROPOSALS_GIT_TIMEOUT_MS  15000
 
 /* ------------------------------------------------------------------ */
 /* Cron expression parser                                              */
@@ -226,6 +236,268 @@ static int schedule_matches(const char *expr, const struct tm *tm)
    if (r != -1)
       return r;
    return cron_matches(expr, tm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Proposals trigger source                                             */
+/* ------------------------------------------------------------------ */
+
+/* source="proposals" overloads trigger_rule_t without adding fields:
+ * workspace = absolute repo path (required), pipeline_template = workflow name
+ * (required), event = repo-relative proposal dir (default docs/proposals/pending),
+ * schedule = git ref/branch (default auto-detected origin HEAD, then HEAD). */
+typedef struct
+{
+   char sha[41];
+   char name[512];
+} trigger_ls_tree_entry_t;
+
+static int trigger_is_hex_sha(const char *s)
+{
+   if (!s)
+      return 0;
+   for (int i = 0; i < 40; i++)
+      if (!isxdigit((unsigned char)s[i]))
+         return 0;
+   return s[40] == '\0';
+}
+
+static int trigger_has_md_suffix(const char *s)
+{
+   size_t n = s ? strlen(s) : 0;
+   return n >= 3 && strcmp(s + n - 3, ".md") == 0;
+}
+
+static int trigger_parse_ls_tree(const char *out, trigger_ls_tree_entry_t *entries, int max)
+{
+   if (!out || !entries || max <= 0)
+      return 0;
+
+   int count = 0;
+   const char *p = out;
+   while (*p)
+   {
+      const char *line = p;
+      const char *nl = strchr(p, '\n');
+      size_t len = nl ? (size_t)(nl - line) : strlen(line);
+      p = nl ? nl + 1 : line + len;
+
+      if (len == 0)
+         continue;
+      const char *end = line + len;
+      const char *sp1 = memchr(line, ' ', len);
+      if (!sp1)
+         continue;
+      const char *sp2 = memchr(sp1 + 1, ' ', (size_t)(end - sp1 - 1));
+      if (!sp2)
+         continue;
+      const char *tab = memchr(sp2 + 1, '\t', (size_t)(end - sp2 - 1));
+      if (!tab)
+         continue;
+      if ((size_t)(sp2 - sp1 - 1) != 4 || strncmp(sp1 + 1, "blob", 4) != 0)
+         continue;
+      if ((size_t)(tab - sp2 - 1) != 40)
+         continue;
+
+      char sha[41];
+      memcpy(sha, sp2 + 1, 40);
+      sha[40] = '\0';
+      if (!trigger_is_hex_sha(sha))
+         continue;
+
+      size_t name_len = (size_t)(end - tab - 1);
+      if (name_len == 0 || name_len >= sizeof(entries[0].name))
+         continue;
+      char name[512];
+      memcpy(name, tab + 1, name_len);
+      name[name_len] = '\0';
+      if (!trigger_has_md_suffix(name))
+         continue;
+
+      if (count >= max)
+         break;
+      memcpy(entries[count].sha, sha, sizeof(entries[count].sha));
+      memcpy(entries[count].name, name, name_len + 1);
+      count++;
+   }
+   return count;
+}
+
+extern char **environ;
+
+static int trigger_git_capture(const char *const argv[], const char *cwd, char **out)
+{
+   *out = NULL;
+   return safe_exec_capture_cwd_env_timeout(argv, cwd, environ, out, PROPOSALS_GIT_MAX_OUT,
+                                            PROPOSALS_GIT_TIMEOUT_MS);
+}
+
+static void trigger_trim_line(char *s)
+{
+   if (!s)
+      return;
+   size_t n = strlen(s);
+   while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
+      s[--n] = '\0';
+}
+
+static void trigger_resolve_ref(const char *workspace, const char *schedule, char *out, size_t n)
+{
+   if (schedule && schedule[0])
+   {
+      snprintf(out, n, "%s", schedule);
+      return;
+   }
+
+   const char *const origin_head[] = {"git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD",
+                                      NULL};
+   char *buf = NULL;
+   if (trigger_git_capture(origin_head, workspace, &buf) == 0 && buf && buf[0])
+   {
+      trigger_trim_line(buf);
+      if (buf[0])
+      {
+         snprintf(out, n, "%s", buf);
+         free(buf);
+         return;
+      }
+   }
+   free(buf);
+
+   const char *const head[] = {"git", "symbolic-ref", "--short", "HEAD", NULL};
+   buf = NULL;
+   if (trigger_git_capture(head, workspace, &buf) == 0 && buf && buf[0])
+   {
+      trigger_trim_line(buf);
+      if (buf[0])
+      {
+         snprintf(out, n, "%s", buf);
+         free(buf);
+         return;
+      }
+   }
+   free(buf);
+   snprintf(out, n, "%s", "HEAD");
+}
+
+static int trigger_mkdir_parents(const char *home)
+{
+   char dir[1024];
+   if (snprintf(dir, sizeof(dir), "%s/triggers", home ? home : "/tmp") >= (int)sizeof(dir))
+      return -1;
+   mkdir(dir, 0700);
+   if (snprintf(dir, sizeof(dir), "%s/triggers/proposals", home ? home : "/tmp") >=
+       (int)sizeof(dir))
+      return -1;
+   mkdir(dir, 0700);
+   return 0;
+}
+
+static int trigger_write_atomic(const char *path, const char *bytes)
+{
+   char tmp[1200];
+   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp))
+      return -1;
+   FILE *f = fopen(tmp, "wb");
+   if (!f)
+      return -1;
+   size_t len = bytes ? strlen(bytes) : 0;
+   int ok = fwrite(bytes ? bytes : "", 1, len, f) == len;
+   if (fclose(f) != 0)
+      ok = 0;
+   if (!ok)
+   {
+      unlink(tmp);
+      return -1;
+   }
+   if (rename(tmp, path) != 0)
+   {
+      unlink(tmp);
+      return -1;
+   }
+   return 0;
+}
+
+static void scan_proposals(const trigger_rule_t *rule)
+{
+   if (!rule || !rule->workspace[0] || !rule->pipeline_template[0])
+      return;
+
+   const char *scanpath = rule->event[0] ? rule->event : PROPOSALS_DEFAULT_DIR;
+   char ref[256];
+   trigger_resolve_ref(rule->workspace, rule->schedule, ref, sizeof(ref));
+
+   /* git ls-tree on a bare directory pathspec lists only that directory's own
+    * tree entry, not the blobs inside it -- the parser (blobs only) would then
+    * find nothing. Normalize scanpath to exactly one trailing slash so ls-tree
+    * lists the directory's immediate contents (one level). Refuse on truncation. */
+   char scandir[TRIGGER_RULE_MAX_EVENT + 2];
+   size_t sl = strlen(scanpath);
+   while (sl > 0 && scanpath[sl - 1] == '/')
+      sl--;
+   if (snprintf(scandir, sizeof(scandir), "%.*s/", (int)sl, scanpath) >= (int)sizeof(scandir))
+      return;
+
+   const char *const ls_argv[] = {"git", "ls-tree", ref, "--", scandir, NULL};
+   char *out = NULL;
+   int rc = trigger_git_capture(ls_argv, rule->workspace, &out);
+   if (rc != 0)
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "proposals ls-tree failed repo=%s ref=%s rc=%d",
+                rule->workspace, ref, rc);
+      free(out);
+      return;
+   }
+
+   trigger_ls_tree_entry_t entries[PROPOSALS_MAX_ENTRIES];
+   int n = trigger_parse_ls_tree(out ? out : "", entries, PROPOSALS_MAX_ENTRIES);
+   free(out);
+
+   const char *home = aimee_home();
+   if (trigger_mkdir_parents(home) != 0)
+      return;
+
+   for (int i = 0; i < n; i++)
+   {
+      char proposal_path[1200];
+      if (snprintf(proposal_path, sizeof(proposal_path), "%s/triggers/proposals/%s.md",
+                   home ? home : "/tmp", entries[i].sha) >= (int)sizeof(proposal_path))
+         continue;
+
+      char existing[80];
+      if (db1_work_item_id_by_proposal(rule->workspace, proposal_path, existing,
+                                       sizeof(existing)) == 1)
+         continue;
+
+      const char *const cat_argv[] = {"git", "cat-file", "blob", entries[i].sha, NULL};
+      char *blob = NULL;
+      rc = trigger_git_capture(cat_argv, rule->workspace, &blob);
+      if (rc != 0)
+      {
+         aimee_log(LOG_WARN, "trigger.sched", "proposals cat-file failed repo=%s sha=%s rc=%d",
+                   rule->workspace, entries[i].sha, rc);
+         free(blob);
+         continue;
+      }
+      if (trigger_write_atomic(proposal_path, blob ? blob : "") != 0)
+      {
+         aimee_log(LOG_WARN, "trigger.sched", "proposals materialize failed path=%s: %s",
+                   proposal_path, strerror(errno));
+         free(blob);
+         continue;
+      }
+      free(blob);
+
+      char id[80] = "", err[256] = "";
+      rc = wfe_work_item_create(rule->pipeline_template, rule->workspace, proposal_path,
+                                "proposals", id, err, sizeof(err));
+      if (rc == 0 && id[0])
+         aimee_log(LOG_INFO, "trigger.sched", "filed proposal workflow=%s repo=%s sha=%s id=%s",
+                   rule->pipeline_template, rule->workspace, entries[i].sha, id);
+      else
+         aimee_log(LOG_WARN, "trigger.sched", "proposal create skipped/failed repo=%s sha=%s: %s",
+                   rule->workspace, entries[i].sha, err[0] ? err : "already exists");
+   }
 }
 
 /* ------------------------------------------------------------------ */
@@ -537,6 +809,15 @@ static void sched_tick(void)
    for (int i = 0; i < cfg.trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
    {
       const trigger_rule_t *rule = &cfg.trigger_rules[i];
+
+      if (strcmp(rule->source, "proposals") == 0)
+      {
+         if (now - g_last_fired[i] < 55)
+            continue;
+         g_last_fired[i] = now;
+         scan_proposals(rule);
+         continue;
+      }
 
       if (strcmp(rule->source, "cron") != 0)
          continue;

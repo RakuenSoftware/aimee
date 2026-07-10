@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stddef.h>
 
 /* Stubs for symbols pulled in transitively by trigger_scheduler.c */
 
@@ -83,6 +84,48 @@ int db1_cron_jobs_load(cron_job_t *out, int max, int enabled_only)
    (void)out;
    (void)max;
    (void)enabled_only;
+   return 0;
+}
+
+const char *aimee_home(void)
+{
+   return "/tmp/aimee-test";
+}
+
+int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
+                                      char **out, size_t max_output, int timeout_ms)
+{
+   (void)argv;
+   (void)cwd;
+   (void)envp;
+   (void)max_output;
+   (void)timeout_ms;
+   if (out)
+      *out = NULL;
+   return 1;
+}
+
+int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, char *out_id,
+                                 size_t out_id_len)
+{
+   (void)repo;
+   (void)proposal_path;
+   if (out_id && out_id_len > 0)
+      out_id[0] = '\0';
+   return 0;
+}
+
+int wfe_work_item_create(const char *workflow_name, const char *repo, const char *proposal_path,
+                         const char *mode, char out_id[80], char *err, size_t errlen)
+{
+   (void)workflow_name;
+   (void)repo;
+   (void)proposal_path;
+   (void)mode;
+   if (out_id)
+      snprintf(out_id, 80, "wi_test");
+   if (err && errlen > 0)
+      err[0] = '\0';
    return 0;
 }
 
@@ -495,6 +538,57 @@ static void test_cron_job_prompt_reports_truncation_like_snprintf(void)
    printf("  PASS: test_cron_job_prompt_reports_truncation_like_snprintf\n");
 }
 
+static void test_parse_ls_tree_valid_multiline(void)
+{
+   const char *out =
+       "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n"
+       "100644 blob fedcba9876543210fedcba9876543210fedcba98\tb.md\n";
+   trigger_ls_tree_entry_t entries[4];
+   int n = trigger_parse_ls_tree(out, entries, 4);
+   assert(n == 2);
+   assert(strcmp(entries[0].sha, "0123456789abcdef0123456789abcdef01234567") == 0);
+   assert(strcmp(entries[0].name, "docs/proposals/pending/a.md") == 0);
+   assert(strcmp(entries[1].sha, "fedcba9876543210fedcba9876543210fedcba98") == 0);
+   assert(strcmp(entries[1].name, "b.md") == 0);
+   printf("  PASS: test_parse_ls_tree_valid_multiline\n");
+}
+
+static void test_parse_ls_tree_filters_non_md_and_non_blob(void)
+{
+   const char *out = "100644 blob 0123456789abcdef0123456789abcdef01234567\ta.txt\n"
+                     "040000 tree fedcba9876543210fedcba9876543210fedcba98\tdir.md\n"
+                     "100644 blob 1111111111111111111111111111111111111111\tkeep.md\n";
+   trigger_ls_tree_entry_t entries[4];
+   int n = trigger_parse_ls_tree(out, entries, 4);
+   assert(n == 1);
+   assert(strcmp(entries[0].sha, "1111111111111111111111111111111111111111") == 0);
+   assert(strcmp(entries[0].name, "keep.md") == 0);
+   printf("  PASS: test_parse_ls_tree_filters_non_md_and_non_blob\n");
+}
+
+static void test_parse_ls_tree_empty_and_garbage(void)
+{
+   const char *out = "\nnot ls tree\n100644 blob short\tbad.md\n"
+                     "100644 blob zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\tbad.md\n";
+   trigger_ls_tree_entry_t entries[2];
+   assert(trigger_parse_ls_tree("", entries, 2) == 0);
+   assert(trigger_parse_ls_tree(out, entries, 2) == 0);
+   assert(trigger_parse_ls_tree(NULL, entries, 2) == 0);
+   printf("  PASS: test_parse_ls_tree_empty_and_garbage\n");
+}
+
+static void test_parse_ls_tree_buffer_cap(void)
+{
+   const char *out = "100644 blob 0123456789abcdef0123456789abcdef01234567\ta.md\n"
+                     "100644 blob fedcba9876543210fedcba9876543210fedcba98\tb.md\n";
+   trigger_ls_tree_entry_t entries[1];
+   int n = trigger_parse_ls_tree(out, entries, 1);
+   assert(n == 1);
+   assert(strcmp(entries[0].name, "a.md") == 0);
+   assert(trigger_parse_ls_tree(out, entries, 0) == 0);
+   printf("  PASS: test_parse_ls_tree_buffer_cap\n");
+}
+
 /* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
@@ -533,6 +627,10 @@ int main(void)
    test_cron_job_prompt_omits_empty_optional_blocks();
    test_cron_job_prompt_caps_prior_output_to_8k_tail();
    test_cron_job_prompt_reports_truncation_like_snprintf();
+   test_parse_ls_tree_valid_multiline();
+   test_parse_ls_tree_filters_non_md_and_non_blob();
+   test_parse_ls_tree_empty_and_garbage();
+   test_parse_ls_tree_buffer_cap();
    printf("All tests passed.\n");
    return 0;
 }
