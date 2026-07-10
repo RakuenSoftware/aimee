@@ -44,6 +44,7 @@ char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const c
                               int dry_run, const char *sid);
 char *tool_grep_ex(const char *path, const char *pattern, int max_results, int anchored,
                    const char *sid);
+char *tool_read_symbol(const char *identifier, const char *sid);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
@@ -1359,6 +1360,22 @@ static void test_tool_grep_anchored(void)
    unlink(tmppath);
 }
 
+static void test_tool_read_symbol(void)
+{
+   /* Missing identifier is an explicit error. */
+   char *e = tool_read_symbol("", "rsX");
+   assert(e && strstr(e, "error: missing identifier") != NULL);
+   free(e);
+
+   /* An identifier the index cannot resolve returns the explicit no-symbol error
+    * (the unit-test environment has no such symbol indexed). The anchored happy
+    * path is validated against a live index. */
+   char *n = tool_read_symbol("zzz_definitely_not_a_symbol_9f8e7d", "rsX");
+   assert(n != NULL);
+   assert(strstr(n, "no indexed symbol found") != NULL);
+   free(n);
+}
+
 static void test_parent_write_guard_blocks_parent_writes(void)
 {
    char root[512];
@@ -2585,6 +2602,7 @@ int main(void)
    test_tool_edit_file();
    test_tool_edit_file_anchored();
    test_tool_grep_anchored();
+   test_tool_read_symbol();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();

@@ -895,6 +895,20 @@ static cJSON *tp_find_symbol(void)
    return params;
 }
 
+static cJSON *tp_read_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "identifier", "string",
+           "Symbol name whose definition span to fetch (function/type/macro). Ambiguous names "
+           "return the candidate sites to disambiguate.");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("identifier"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_search_memory(void)
 {
    cJSON *params = tp_obj();
@@ -1019,6 +1033,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "indexed codebase. Returns file:line matches. Prefer this over grep for finding where "
      "something is defined or which header to include.",
      tp_find_symbol, TSURF_ALL},
+    {"read_symbol",
+     "Fetch just one symbol's definition span (function/type/macro) from the code index, with "
+     "N:hash edit anchors and a snapshot id — so you can read and then edit_file the symbol by "
+     "anchor without reading the whole file. Ambiguous names return the candidate sites.",
+     tp_read_symbol, TSURF_ALL},
     {"search_memory",
      "Search aimee's knowledge base for stored facts, prior decisions, and project context. "
      "Use before starting any task to check for relevant prior work or constraints.",

@@ -1,6 +1,7 @@
 #include "aimee.h"
 #include "agent_tools.h"
 #include "agent_source_authority.h"
+#include "dstr.h"
 #include "kb_client.h"
 #include "platform_process.h"
 #include "util.h"
@@ -411,4 +412,81 @@ char *tool_find_symbol(const char *identifier)
    }
 
    return safe_strdup(buf);
+}
+
+/* True if hit i duplicates an earlier hit (same file + start line + kind). Kind
+ * is part of the key so two distinct definitions that happen to share a file:line
+ * (e.g. a macro and a function) are surfaced as separate candidates, not merged. */
+static int rs_is_dup(const term_hit_t *hits, int i)
+{
+   for (int j = 0; j < i; j++)
+      if (hits[i].line == hits[j].line && strcmp(hits[i].file_path, hits[j].file_path) == 0 &&
+          strcmp(hits[i].kind, hits[j].kind) == 0)
+         return 1;
+   return 0;
+}
+
+char *tool_read_symbol(const char *identifier, const char *sid)
+{
+   if (!identifier || !identifier[0])
+      return safe_strdup("error: missing identifier");
+
+   term_hit_t hits[20];
+   int count = kb_client_index_find(identifier, hits, 20);
+   if (count <= 0)
+   {
+      char e[256];
+      snprintf(e, sizeof(e),
+               "error: no indexed symbol found for '%s' (try find_symbol, grep, or read_file)",
+               identifier);
+      return safe_strdup(e);
+   }
+
+   int distinct = 0;
+   for (int i = 0; i < count; i++)
+      if (!rs_is_dup(hits, i))
+         distinct++;
+
+   /* Ambiguous: never guess — list the candidate definition sites and let the
+    * caller pick (a more qualified name, or read the chosen span directly). */
+   if (distinct > 1)
+   {
+      dstr_t d;
+      dstr_init(&d);
+      dstr_appendf(&d,
+                   "'%s' resolves to %d definitions — disambiguate (use a more qualified name, or "
+                   "read_file the chosen span):\n",
+                   identifier, distinct);
+      for (int i = 0; i < count; i++)
+      {
+         if (rs_is_dup(hits, i))
+            continue;
+         if (hits[i].line_end >= hits[i].line)
+            dstr_appendf(&d, "  %s:%d-%d  [%s]\n", hits[i].file_path, hits[i].line,
+                         hits[i].line_end, hits[i].kind[0] ? hits[i].kind : "symbol");
+         else
+            dstr_appendf(&d, "  %s:%d  [%.31s]\n", hits[i].file_path, hits[i].line,
+                         hits[i].kind[0] ? hits[i].kind : "symbol");
+      }
+      return d.data ? d.data : safe_strdup("error: out of memory");
+   }
+
+   /* Unique definition: fetch just its span, anchored, so the caller can edit it
+    * by reference without reading the whole file. Reuses the anchored read path
+    * (whole-file snapshot + windowed anchored output). */
+   const term_hit_t *h = &hits[0];
+   if (!h->file_path[0])
+      return safe_strdup("error: symbol has no file path in the index");
+   int start = h->line >= 1 ? h->line : 1;
+   int span = (h->line_end >= h->line) ? (h->line_end - h->line + 1) : 1;
+   char *body = tool_read_file_ex(h->file_path, start - 1, span, 1 /*anchored*/, sid);
+
+   dstr_t d;
+   dstr_init(&d);
+   dstr_appendf(&d, "symbol %s  [%.31s]  %s:%d%s\n", identifier, h->kind[0] ? h->kind : "symbol",
+                h->file_path, start,
+                (h->line_end >= h->line) ? "" : " (span end unknown; showing the definition line)");
+   dstr_append_str(&d, body ? body : "");
+   free(body);
+   return d.data ? d.data : safe_strdup("error: out of memory");
 }
