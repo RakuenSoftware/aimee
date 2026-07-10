@@ -15,7 +15,7 @@
 #include "wfe_iface.h"
 #include "wfe_roundtable.h"
 
-/* human gate with policy: preauthorized */
+/* plain human gate — inviolable: autonomous mode parks at it, never auto-satisfies */
 static const char *AUTO = "name: auto\n"
                           "start: draft\n"
                           "nodes:\n"
@@ -26,8 +26,6 @@ static const char *AUTO = "name: auto\n"
                           "    block: gate.human\n"
                           "    in:\n"
                           "      src: draft.out\n"
-                          "    params:\n"
-                          "      policy: preauthorized\n"
                           "    next: pr\n"
                           "  - id: pr\n"
                           "    block: pr.open\n"
@@ -108,14 +106,15 @@ int main(void)
    wfe_register_roundtable_gate();
    wfe_set_panel_provider(NULL); /* live §0 -> degraded */
 
-   /* A1: autonomous + preauthorized human gate -> auto-advances to accepted */
+   /* A1: autonomous + human gate -> PARKS (inviolable; never auto-satisfied). */
    {
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("auto", "a1", "a1", "autonomous", id, err, sizeof err) == 0);
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       db1_work_item_t wi;
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.state, "accepted") == 0);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
    }
 
    /* A2: interactive + same gate -> parks pending_human (no auto-approval) */

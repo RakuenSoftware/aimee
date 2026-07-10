@@ -67,7 +67,7 @@ From the catalog in [src/workflow/wfe_def.c](../src/workflow/wfe_def.c)
 | `document` | branch | branch | action | A delegate writes docs onto the branch. Composes between implement and freeze. |
 | `freeze` | frozen_diff | branch | action | Freezes the branch to an immutable diff for review. |
 | `gate.roundtable` | verdict | proposal · plan · frozen_diff | **gate** | Runs a multi-persona review **panel**; pass/fail on quorum. |
-| `gate.human` | approval | proposal · plan · branch · frozen_diff · pr | **gate** | Parks for a human decision (or auto-passes when preauthorized). |
+| `gate.human` | approval | proposal · plan · branch · frozen_diff · pr | **gate** | Parks for a human decision — **inviolable**; never auto-satisfied in autonomous mode. |
 | `pr.open` | pr | proposal · frozen_diff | action | Opens a pull request. |
 | `merge` |, (terminal) | pr | action | Merges the PR. |
 | `gate.ci` | verdict | pr | **gate** | Polls the PR's CI; **fail-closed** (no green → fail). |
@@ -213,10 +213,12 @@ The engine advances it one step at a time
   advances along `next`.
 - A **gate** evaluates and takes `on_pass` or `on_fail`.
 - A **roundtable** gate runs its persona panel as delegates and passes on quorum.
-- A **human gate** **parks** the run (`WFE_STEP_PENDING`) until an approval is
-  recorded. In `autonomous` mode the driver
-  ([wfe_autonomy.c](../src/workflow/wfe_autonomy.c)) may auto-satisfy a gate that
-  is explicitly `policy: preauthorized` or `optional: true`; otherwise it parks.
+- A **human gate** **parks** the run (`WFE_STEP_PENDING`) until a human approval is
+  recorded — and this is **inviolable**. In `autonomous` mode the driver
+  ([wfe_autonomy.c](../src/workflow/wfe_autonomy.c)) **never** auto-satisfies a
+  human gate; authoring one as auto-satisfiable (`policy: preauthorized` or
+  `optional: true`) is rejected at validation. Only a human's signed approval
+  clears it.
 - Approvals are **signed** ([wfe_approval.c](../src/workflow/wfe_approval.c)) and
   recorded against the step's content hash, so an approval is bound to the exact
   artifact it approved.

@@ -88,26 +88,6 @@ static int wfe_autonomy_park_stuck(const char *work_item_id, const char *why)
    return 0;
 }
 
-/* Is this paused node a human gate the driver may auto-satisfy in autonomous
- * mode? (policy preauthorized, or optional:true). */
-static int human_gate_auto_ok(const wfe_node_t *node)
-{
-   if (!node || node->block != WFE_BLK_GATE_HUMAN)
-      return 0;
-   const cJSON *policy =
-       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "policy") : NULL;
-   const cJSON *optional =
-       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "optional") : NULL;
-   if (policy && cJSON_IsString(policy) && strcmp(policy->valuestring, "preauthorized") == 0)
-      return 1;
-   /* accept optional written as bool/int/string (YAML emitters vary) */
-   if (optional &&
-       (cJSON_IsTrue(optional) || (cJSON_IsNumber(optional) && optional->valuedouble != 0) ||
-        (cJSON_IsString(optional) && strcasecmp(optional->valuestring, "true") == 0)))
-      return 1;
-   return 0;
-}
-
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
 {
    /* Per-run safety ceilings (WP-5). max_turns is a CUMULATIVE cap on the persisted
@@ -193,35 +173,13 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
       if (r.last_status != WFE_STEP_PENDING)
          continue; /* ADVANCED / LOOPED: keep going */
 
-      /* parked. Only autonomous mode + an auto-OK human gate may proceed. */
-      db1_work_item_t wi;
-      if (db1_work_item_get(work_item_id, &wi) != 1)
-         return 0;
-      if (strcmp(wi.mode, "autonomous") != 0)
-         return 0; /* interactive: park */
-
-      char ferr[256];
-      wfe_def_t *def = wfe_load_workflow(wi.workflow_name, ferr, sizeof ferr);
-      const wfe_node_t *node = def ? wfe_def_node(def, wi.current_stage) : NULL;
-      int auto_ok = human_gate_auto_ok(node);
-      if (def)
-         wfe_def_free(def);
-      if (!auto_ok)
-         return 0; /* roundtable-degraded / non-preauthorized human gate: park */
-
-      /* preauthorized human gate: record a signed approval + clear the pause so
-       * the next advance passes it. (This is a standing user authorization, not
-       * a forged approval.) */
-      if (wfe_approval_record(work_item_id, wi.current_stage, wi.content_hash,
-                              "autonomous-preauth") != 0)
-      {
-         snprintf(err, errlen, "autonomy: could not record preauth approval at '%s'",
-                  wi.current_stage);
-         return -1; /* surface the failure; do not silently park forever */
-      }
-      db1_lifecycle_event_add(work_item_id, wi.current_stage, "resume", "autonomous",
-                              "preauthorized", wi.content_hash, 0);
-      db1_work_item_clear_pause(work_item_id);
+      /* Parked at a gate. A human gate is an INVIOLABLE stop: autonomous mode
+       * never self-approves it, regardless of any node params — only a human's
+       * authenticated, signed approval (POST /v1/workflow/items/<id>/gate, which
+       * attributes the decision to the caller's attested principal and records an
+       * HMAC-signed approval bound to the content hash) can clear it. So a parked
+       * step ends this autonomy pass; the run waits for the human. */
+      return 0;
    }
    snprintf(err, errlen, "autonomy run exceeded step bound");
    return -1;
