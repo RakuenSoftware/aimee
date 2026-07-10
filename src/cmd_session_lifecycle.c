@@ -244,8 +244,7 @@ static char *build_session_context(const char *client_cwd)
    /* Principles and Aimee lookup hints lead the session context for primacy
     * bias, driven by the active persona. */
    ctx_appendf(buf, cap, &pos, "%s",
-                           persona.principles_text ? persona.principles_text
-                                                   : prompt_principles_text(mode));
+               persona.principles_text ? persona.principles_text : prompt_principles_text(mode));
 
    /* Inject the active persona's own prose at the start of every primary session
     * — uniformly, for every persona. Engineer is not special here: it is simply
@@ -265,20 +264,19 @@ static char *build_session_context(const char *client_cwd)
 
    if (persona.brief_text)
       ctx_appendf(buf, cap, &pos,
-                              "# Aimee Context\n%s"
-                              "- Use `aimee session brief` to inspect the full startup brief.\n\n",
-                              persona.brief_text);
+                  "# Aimee Context\n%s"
+                  "- Use `aimee session brief` to inspect the full startup brief.\n\n",
+                  persona.brief_text);
    else
-      ctx_appendf(
-          buf, cap, &pos,
-          "# Aimee Context\n"
-          "- Use `aimee index overview` or `aimee index find <symbol>` for indexed code "
-          "lookup when it helps.\n"
-          "- Use `aimee memory search <terms>` for prior project context before "
-          "rediscovery.\n"
-          "- Use `aimee delegate <role> \"prompt\"` for bounded delegated or parallel "
-          "work.\n"
-          "- Use `aimee session brief` to inspect the full startup brief.\n\n");
+      ctx_appendf(buf, cap, &pos,
+                  "# Aimee Context\n"
+                  "- Use `aimee index overview` or `aimee index find <symbol>` for indexed code "
+                  "lookup when it helps.\n"
+                  "- Use `aimee memory search <terms>` for prior project context before "
+                  "rediscovery.\n"
+                  "- Use `aimee delegate <role> \"prompt\"` for bounded delegated or parallel "
+                  "work.\n"
+                  "- Use `aimee session brief` to inspect the full startup brief.\n\n");
 
    /* Enforce aimee's memory system as the single memory of record: steer the
     * agent to aimee memory commands rather than a native store. `.md` memory is
@@ -374,8 +372,7 @@ static char *build_session_context(const char *client_cwd)
             ctx_appendf(buf, cap, &pos, "# Key Facts\n");
             has_facts = 1;
          }
-         ctx_appendf(buf, cap, &pos, "- %s: %.300s\n", facts[i].key,
-                                 facts[i].content);
+         ctx_appendf(buf, cap, &pos, "- %s: %.300s\n", facts[i].key, facts[i].content);
       }
       if (has_facts)
          ctx_appendf(buf, cap, &pos, "\n");
@@ -423,8 +420,8 @@ static char *build_session_context(const char *client_cwd)
             ctx_appendf(buf, cap, &pos, "Hosts (%d): ", nw->host_count);
             int show = nw->host_count < 5 ? nw->host_count : 5;
             for (int i = 0; i < show && pos < cap - 128; i++)
-               ctx_appendf(buf, cap, &pos, "%s%s (%s)", i > 0 ? ", " : "",
-                                       nw->hosts[i].name, nw->hosts[i].ip);
+               ctx_appendf(buf, cap, &pos, "%s%s (%s)", i > 0 ? ", " : "", nw->hosts[i].name,
+                           nw->hosts[i].ip);
             if (nw->host_count > show)
                ctx_appendf(buf, cap, &pos, " +%d more", nw->host_count - show);
             ctx_appendf(buf, cap, &pos, "\n");
@@ -436,8 +433,8 @@ static char *build_session_context(const char *client_cwd)
                            nw->networks[i].cidr, nw->networks[i].desc);
          }
          ctx_appendf(buf, cap, &pos,
-                                 "Run `aimee agent network` or `aimee --json agent network` "
-                                 "for full host details.\n\n");
+                     "Run `aimee agent network` or `aimee --json agent network` "
+                     "for full host details.\n\n");
       }
    }
 
@@ -484,15 +481,13 @@ static char *build_session_context(const char *client_cwd)
                {
                   if (!has_section)
                   {
-                     ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n",
-                                             project_name);
+                     ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n", project_name);
                      has_section = 1;
                   }
                   const char *text =
                       like_rows[i].content[0] ? like_rows[i].content : like_rows[i].key;
                   if (like_rows[i].kind[0])
-                     ctx_appendf(buf, cap, &pos, "- [%s] %.300s\n",
-                                             like_rows[i].kind, text);
+                     ctx_appendf(buf, cap, &pos, "- [%s] %.300s\n", like_rows[i].kind, text);
                   else
                      ctx_appendf(buf, cap, &pos, "- %.300s\n", text);
                }
@@ -507,12 +502,11 @@ static char *build_session_context(const char *client_cwd)
             {
                if (!has_section)
                {
-                  ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n",
-                                          project_name);
+                  ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n", project_name);
                   has_section = 1;
                }
-               ctx_appendf(buf, cap, &pos, "- %d files indexed, %d definitions\n",
-                                       file_count, def_count);
+               ctx_appendf(buf, cap, &pos, "- %d files indexed, %d definitions\n", file_count,
+                           def_count);
             }
 
             if (has_section)
@@ -586,8 +580,8 @@ static char *build_session_context(const char *client_cwd)
             ctx_appendf(buf, cap, &pos, "- [%s] via %s: OK (%d turns, %d tools)\n", drole, dagent,
                         rows[i].turns, rows[i].tool_calls);
          else
-            ctx_appendf(buf, cap, &pos, "- [%s] via %s: FAILED (%.80s)\n", drole,
-                                    dagent, rows[i].error[0] ? rows[i].error : "unknown");
+            ctx_appendf(buf, cap, &pos, "- [%s] via %s: FAILED (%.80s)\n", drole, dagent,
+                        rows[i].error[0] ? rows[i].error : "unknown");
       }
       if (n > 0 && pos < cap - 256)
          ctx_appendf(buf, cap, &pos, "\n");
