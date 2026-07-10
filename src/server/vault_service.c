@@ -118,6 +118,31 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
    return st;
 }
 
+vault_status_t vault_service_set_server_wrap(const char *principal, const char *agent,
+                                             const char *cred, const char *secret)
+{
+   if (!principal || !principal[0] || !agent || !agent[0] || !cred || !cred[0] || !secret)
+      return VAULT_ERR_BADARG;
+   uint8_t server_kek[VAULT_KEK_LEN];
+   if (vault_server_kek(server_kek) != 0)
+      return VAULT_ERR_CRYPTO; /* fail-closed: no server KEK -> never store plaintext */
+
+   /* The principal's vault file must exist before set; create it (with its salt)
+    * so a webuser who has never unlocked can still have a server-wrapped cred
+    * sealed. The salt is unused for the server wrap (server KEK derives from the
+    * master key), but a later unlock uses this same salt to derive the user KEK. */
+   uint8_t salt[VAULT_SALT_LEN];
+   vault_status_t st;
+   if (vault_store_get_or_create_salt(principal, salt) != 0)
+      st = VAULT_ERR_IO;
+   else
+      st = vault_store_set_server(principal, server_kek, agent, cred, secret) == 0 ? VAULT_OK
+                                                                                   : VAULT_ERR_IO;
+   OPENSSL_cleanse(server_kek, sizeof(server_kek));
+   OPENSSL_cleanse(salt, sizeof(salt));
+   return st;
+}
+
 vault_status_t vault_service_unlock(const char *principal, attested_transport_t transport,
                                     const uint8_t *root_key, size_t root_key_len, long now_epoch)
 {

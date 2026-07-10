@@ -148,8 +148,7 @@ export default function Projects() {
       // Always drop the key from component state once it has left the browser —
       // never leave private-key material sitting in React state / the textarea.
       setCredSSHKey('');
-      if (r.status === 423) { setErr('unlock your vault first, then add the SSH key'); }
-      else if (!r.ok) { setErr(d.error || 'could not save SSH key'); }
+      if (!r.ok) { setErr(d.error || 'could not save SSH key'); }
       else { setErr('SSH key saved'); }
     } finally { setBusy(false); }
   }
@@ -280,8 +279,8 @@ export default function Projects() {
             <summary style={{ cursor: 'pointer' }}>SSH private key (for git over SSH)</summary>
             <div style={{ marginTop: '6px' }}>
               <div style={{ marginBottom: '6px' }}>
-                Paste an <b>unencrypted</b> OpenSSH/PEM private key (no passphrase). It is stored only in
-                your encrypted vault and never shown again. Requires your vault to be unlocked.
+                Paste an <b>unencrypted</b> OpenSSH/PEM private key (no passphrase). It is sealed
+                server-side in your encrypted vault and never shown again — no vault unlock needed.
               </div>
               <textarea style={{ ...input, width: '100%', minHeight: '110px', fontFamily: 'monospace' }}
                 placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----'}

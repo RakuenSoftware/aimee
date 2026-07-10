@@ -91,6 +91,16 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len);
 
+/* Store `secret` for (agent, cred) under `principal`, wrapped ONLY with the server
+ * master KEK — NO user unlock required, yet read back autonomously via
+ * vault_service_get_server_wrap. The write-side counterpart of that read: lets the
+ * browser set a per-webuser credential the server must load without the user's
+ * session KEK (e.g. a git SSH key), keeping the secret under the owner's own
+ * principal (not the shared "server" namespace). The principal's vault file is
+ * created if absent. VAULT_OK, or VAULT_ERR_BADARG/CRYPTO/IO (fail closed). */
+vault_status_t vault_service_set_server_wrap(const char *principal, const char *agent,
+                                             const char *cred, const char *secret);
+
 /* Autonomous per-principal read via the server wrap of a dual-wrapped credential
  * (vault_service_set stores both a user-KEK and a server-KEK wrap). Resolves
  * (agent, cred) for ANY `principal` (e.g. a `webuser:` git credential) using the
