@@ -2013,6 +2013,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/skills/patch", NULL, RM_EXACT, "skill.patch", 0, rh_dispatch_op},
     {"POST", "/v1/skills/unpin", NULL, RM_EXACT, "skill.unpin", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/create", NULL, RM_EXACT, "session.create", 0, rh_dispatch_op},
+    {"POST", "/v1/sessions/record_transcript", NULL, RM_EXACT, "session.record_transcript", 0,
+     rh_dispatch_op},
     {"POST", "/v1/sessions/close", NULL, RM_EXACT, "session.close", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/get", NULL, RM_EXACT, "session.get", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/brief", NULL, RM_EXACT, "session.brief", 0, rh_dispatch_op},

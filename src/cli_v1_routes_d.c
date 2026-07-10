@@ -715,6 +715,7 @@ static const struct
     {"session.create", "POST", "/v1/sessions/create"},
     {"session.get", "POST", "/v1/sessions/get"},
     {"session.presence", "GET", "/v1/sessions/presence"},
+    {"session.record_transcript", "POST", "/v1/sessions/record_transcript"},
     {"skill.archive", "POST", "/v1/skills/archive"},
     {"skill.autostub", "POST", "/v1/skills/autostub"},
     {"skill.create", "POST", "/v1/skills/create"},

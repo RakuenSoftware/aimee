@@ -204,6 +204,112 @@ static int handle_session_start_remote(void)
  * the hook rather than the wire. Renders only the per-turn sections (session-
  * level identity/preferences/rules already land at SessionStart). Always
  * soft-fails (exit 0) so a prompt is never blocked. */
+/* Persist the host's on-disk conversation transcript (Claude Code's
+ * transcript_path — JSONL, one message object per line) to DB1 under the real
+ * session id. This is what makes a chat that flows through the anonymous
+ * /v1/messages model gateway — which stores no conversation — logged and
+ * recoverable after a crash. Best-effort: a *failure* never blocks the turn
+ * (errors are swallowed), but the work IS synchronous, so the POST timeout is
+ * kept short for the local daemon.
+ *
+ * The transcript is bounded. When it exceeds the cap we ship the TAIL, not the
+ * head: the file is chronological, so the tail holds the newest turns (the ones
+ * that matter most for recovery) and we never truncate mid-line into corrupt
+ * JSON. The first (partial) line of a tail read is dropped so only whole JSONL
+ * objects are parsed. A capped read is thus a valid recent-window snapshot, not
+ * a stale head prefix that silently omits the latest turns.
+ *
+ * The cap is kept below the server's per-method limit for this route
+ * (LIMIT_TRANSCRIPT, 3 MiB, itself under the 4 MiB SHTTP_MAX_BODY), with headroom
+ * for the JSON envelope — a larger body is rejected/truncated server-side and
+ * stores nothing. */
+#define SS_TRANSCRIPT_MAX     (2 * 1024 * 1024)
+#define SS_TRANSCRIPT_POST_MS 5000
+static void ss_record_transcript(const char *endpoint, const char *bearer, const char *session_id,
+                                 const char *transcript_path)
+{
+   if (!endpoint || !session_id || !session_id[0] || !transcript_path || !transcript_path[0])
+      return;
+   FILE *fp = fopen(transcript_path, "rb");
+   if (!fp)
+      return;
+   if (fseek(fp, 0, SEEK_END) != 0)
+   {
+      fclose(fp);
+      return;
+   }
+   long fsz = ftell(fp);
+   if (fsz <= 0)
+   {
+      fclose(fp);
+      return;
+   }
+   /* Oversize: read only the last SS_TRANSCRIPT_MAX bytes (the newest turns). */
+   int tail = ((size_t)fsz > SS_TRANSCRIPT_MAX);
+   long start = tail ? (fsz - (long)SS_TRANSCRIPT_MAX) : 0;
+   size_t want = (size_t)(fsz - start);
+   if (fseek(fp, start, SEEK_SET) != 0)
+   {
+      fclose(fp);
+      return;
+   }
+   char *buf = malloc(want + 1);
+   if (!buf)
+   {
+      fclose(fp);
+      return;
+   }
+   size_t n = fread(buf, 1, want, fp);
+   fclose(fp);
+   buf[n] = '\0';
+
+   /* JSONL: one JSON object per line (line content never contains a raw newline).
+    * On a tail read, skip the first line — it is the cut-through tail of a line
+    * the cap split, so it is not a complete JSON object. */
+   char *scan = buf;
+   if (tail)
+   {
+      char *first_nl = strchr(buf, '\n');
+      scan = first_nl ? first_nl + 1 : buf + n; /* no newline in window → nothing whole */
+   }
+   cJSON *messages = cJSON_CreateArray();
+   for (char *p = scan; messages && p && *p;)
+   {
+      char *nl = strchr(p, '\n');
+      if (nl)
+         *nl = '\0';
+      if (*p)
+      {
+         cJSON *obj = cJSON_Parse(p);
+         if (obj)
+            cJSON_AddItemToArray(messages, obj);
+      }
+      if (!nl)
+         break;
+      p = nl + 1;
+   }
+   free(buf);
+
+   if (!messages || cJSON_GetArraySize(messages) == 0)
+   {
+      cJSON_Delete(messages);
+      return;
+   }
+
+   cJSON *body = cJSON_CreateObject();
+   cJSON_AddStringToObject(body, "session_id", session_id);
+   cJSON_AddItemToObject(body, "messages", messages); /* takes ownership */
+   char *body_s = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+   if (!body_s)
+      return;
+   int status = 0;
+   cJSON *resp = cli_http_request(endpoint, "POST", "/v1/sessions/record_transcript", body_s,
+                                  bearer, SS_TRANSCRIPT_POST_MS, &status);
+   free(body_s);
+   cJSON_Delete(resp);
+}
+
 int handle_user_prompt_submit(void)
 {
    char *stdin_data = read_stdin();
@@ -221,6 +327,19 @@ int handle_user_prompt_submit(void)
       return 0;
    }
    char *bearer = cli_v1_client_bearer();
+
+   /* Log this session's conversation to DB1 under its real host id. The hook
+    * payload carries both the session id and transcript_path (the full chat the
+    * host keeps on disk); persist it every turn so a crashed session is
+    * recoverable. Runs before the recall round-trip; best-effort. */
+   {
+      char rec_sid[64] = "";
+      const char *tpath =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook_json, "transcript_path"));
+      if (client_hook_payload_session_id(hook_json, rec_sid, sizeof(rec_sid)) && rec_sid[0] &&
+          tpath)
+         ss_record_transcript(endpoint, bearer, rec_sid, tpath);
+   }
 
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", prompt);
