@@ -45,6 +45,10 @@ char *tool_test(const char *path, const char *check);
 char *tool_request_input(const char *question);
 char *tool_code_search(const char *query, const char *project, int max_results);
 char *tool_find_symbol(const char *identifier);
+/* Fetch a single symbol's definition span (via the code index), anchored, so the
+ * caller can edit it by reference without reading the whole file. Ambiguous names
+ * return the candidate sites for disambiguation. `sid` scopes the read snapshot. */
+char *tool_read_symbol(const char *identifier, const char *sid);
 char *tool_create_note(const char *title, const char *content, const char *tags);
 char *tool_list_notes(const char *tag, int limit);
 char *tool_search_notes(const char *query);

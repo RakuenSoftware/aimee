@@ -861,6 +861,15 @@ static char *td_find_symbol(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
+static char *td_read_symbol(cJSON *args, const char *name, const char *dispatch_cwd,
+                            const char *dispatch_sid, int timeout_ms)
+{
+   cJSON *id = cJSON_GetObjectItem(args, "identifier");
+   if (!id || !cJSON_IsString(id))
+      return safe_strdup("error: missing 'identifier' parameter");
+   return tool_read_symbol(id->valuestring, dispatch_sid);
+}
+
 static char *td_search_memory(cJSON *args, const char *name, const char *dispatch_cwd,
                               const char *dispatch_sid, int timeout_ms)
 {
@@ -1677,6 +1686,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_code_search(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "find_symbol") == 0)
       result = td_find_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "read_symbol") == 0)
+      result = td_read_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "search_memory") == 0)
       result = td_search_memory(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "web_search") == 0)
