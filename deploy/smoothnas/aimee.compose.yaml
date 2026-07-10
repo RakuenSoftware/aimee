@@ -45,20 +45,24 @@ services:
 
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:gpu}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_PORT: "8742"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
+      # Synth tier chosen at runtime (small/mid/large); mid fits the 24GB card.
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-mid}
       AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
     devices:
       - "/dev/dri:/dev/dri" # AMD render path; LXC2Docker adds the cgroup allow
+    volumes:
+      - aimee-llm-models:/models # persist the downloaded per-tier GGUFs
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 600s # cold boot loads the baked GGUFs into RAM first
+      start_period: 1200s # cold first boot downloads the tier's models
 
   aimee-kb:
     restart: unless-stopped
@@ -122,4 +126,6 @@ volumes:
   aimee-server-home:
     x-smoothnas: { tier: aimee-data }
   aimee-server-workspaces:
+    x-smoothnas: { tier: aimee-data }
+  aimee-llm-models:
     x-smoothnas: { tier: aimee-data }

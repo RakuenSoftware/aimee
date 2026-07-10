@@ -1,96 +1,27 @@
 # The unified aimee-llm container: one llama.cpp (Vulkan) runtime + the aimee-llm
-# gateway, serving embeddings, reranking, and synthesis from BAKED-IN GGUFs.
-# Replaces the torch embedder + the standalone llama.cpp `llm` container.
+# gateway, serving embeddings, reranking, and synthesis. Replaces the torch
+# embedder + the standalone llama.cpp `llm` container.
 #
-# Two published images (operator-directed: models baked in, not runtime-fetched —
-# turnkey, reproducible, no HF dependency at run time):
-#   aimee-kb-cpu       (defaults): Qwen3-Embedding-0.6B + ettin-68m + gemma-4-E4B
-#   aimee-kb-gpu-small/mid/large (build args): 4B + ettin-400m + gemma-4-12B (small,
-#     16GB) OR gemma-4-26B-A4B (mid=24GB SLOTS=2 / large=32GB SLOTS=4 — same GGUF)
+# MODEL-LESS by design: the image ships with NO GGUFs baked in. At container
+# start the supervisor resolves AIMEE_LLM_TIER and DOWNLOADS + configures that
+# tier's models into the /models volume (download-once, sha256-verified):
+#   (unset)/cpu  Qwen3-Embedding-0.6B + ettin-68m  + gemma-4-E4B      (dense, CPU)
+#   small        Qwen3-Embedding-4B   + ettin-400m + gemma-4-12B      (dense, GPU)
+#   mid          Qwen3-Embedding-4B   + ettin-400m + gemma-4-26B-A4B  (MoE, SLOTS=2)
+#   large        SAME 26B-A4B as mid but SLOTS=4 (32GB card)
+# One published image for every tier; the tier table lives in the supervisor.
+# Embed+synth are plain GGUF pulls from HF; the ettin reranker is a pre-converted
+# encoder GGUF + Dense head fetched from a GitHub release (the ST score head
+# doesn't survive GGUF conversion — see benchmarks/results/unified-llm/
+# P2-serving-validation.md — so the gateway applies it; the conversion runs once
+# in .github/workflows/publish-rerank-artifacts.yml, not at build or run time).
+#
 # The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
-# Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (CPU image defaults 0).
-#
-# The reranker is ettin served as ENCODER + a gateway-side Dense head (the ST score
-# head doesn't survive GGUF conversion — see benchmarks/results/unified-llm/
-# P2-serving-validation.md): convert the ettin encoder to GGUF and keep the head
-# safetensors; the gateway applies the head.
+# Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (defaults 0 = CPU).
 
 ARG LLAMA_TAG=b9775
-ARG EMBED_REPO=Qwen/Qwen3-Embedding-0.6B-GGUF
-ARG EMBED_FILE=Qwen3-Embedding-0.6B-f16.gguf
-ARG EMBED_POOLING=last
-ARG RERANK_REPO=cross-encoder/ettin-reranker-68m-v1
-ARG SYNTH_REPO=ggml-org/gemma-4-E4B-it-GGUF
-ARG SYNTH_FILE=gemma-4-E4B-it-Q4_K_M.gguf
-# Supply-chain pins for the synth GGUF (optional; set per tier in CI). When
-# SYNTH_SHA256 is set the build verifies the download and FAILS on mismatch — a
-# compromised/MITM'd HF upload can't ship. SYNTH_REVISION pins the HF commit.
-ARG SYNTH_REVISION=main
-ARG SYNTH_SHA256=
-# Per-tier synth runtime profile (baked -> ENV; the supervisor reads these). Defaults
-# = the CPU/gemma tier (dense, no FA/MoE). The gpu-mid (gemma-4-26B-A4B MoE) tier overrides.
-ARG SYNTH_FA=off
-ARG SYNTH_KV_K=q8_0
-ARG SYNTH_KV_V=q4_0
-ARG SYNTH_MOE=0
-ARG SYNTH_MOE_LAYERS=40
-ARG SYNTH_N_CPU_MOE=0
-ARG SYNTH_SLOTS=1
 
-# ---- stage 1: prepare the baked models (convert ettin encoder + fetch GGUFs) ----
-FROM python:3.12-slim AS modelprep
-ARG LLAMA_TAG
-ARG EMBED_REPO
-ARG EMBED_FILE
-ARG RERANK_REPO
-ARG SYNTH_REPO
-ARG SYNTH_FILE
-ARG SYNTH_REVISION
-ARG SYNTH_SHA256
-ENV PIP_NO_CACHE_DIR=1 HF_HUB_DISABLE_TELEMETRY=1
-RUN apt-get update && apt-get install -y --no-install-recommends git wget ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-RUN pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --quiet transformers safetensors numpy gguf sentencepiece protobuf huggingface_hub
-# convert script + gguf-py from a recent llama.cpp (ModernBert supported)
-RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /llama
-WORKDIR /out
-# Ettin reranker: download the sentence-transformers repo, convert the ENCODER to
-# GGUF, and keep the Dense head (2_Dense/3_LayerNorm/4_Dense) for the gateway.
-RUN python - <<'PY'
-import os
-from huggingface_hub import snapshot_download
-p = snapshot_download(os.environ["RERANK_REPO"], local_dir="/tmp/ettin")
-print("ettin ->", p)
-PY
-RUN cd /llama && PYTHONPATH=/llama/gguf-py python convert_hf_to_gguf.py /tmp/ettin \
-        --outfile /out/rerank-encoder.gguf --outtype f16 \
-    && mkdir -p /out/rerank-head
-# Bake the Dense head as a numpy .npz so the slim runtime needs only numpy (no
-# safetensors). Keys match EttinRerankHead.from_npz (W2/W4/b4/gamma/beta).
-RUN python - <<'PY'
-import numpy as np
-from safetensors.numpy import load_file
-e = "/tmp/ettin"
-W2 = load_file(f"{e}/2_Dense/model.safetensors")["linear.weight"]
-d4 = load_file(f"{e}/4_Dense/model.safetensors")
-ln = load_file(f"{e}/3_LayerNorm/model.safetensors")
-np.savez("/out/rerank-head/head.npz", W2=W2, W4=d4["linear.weight"], b4=d4["linear.bias"],
-         gamma=ln["norm.weight"], beta=ln["norm.bias"])
-print("head.npz written")
-PY
-# Embedder + synth GGUFs. Synth is pinned by revision (default main) with retries so
-# a transient blip on the large mid-tier pull doesn't kill the build, then sha256-
-# verified when SYNTH_SHA256 is set (build fails on a compromised/MITM'd upload).
-RUN wget -q -O /out/embed.gguf  "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" \
-    && wget -q -c --tries=5 --timeout=30 --waitretry=10 -O /out/synth.gguf \
-        "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" \
-    && if [ -n "${SYNTH_SHA256}" ]; then \
-         echo "${SYNTH_SHA256}  /out/synth.gguf" | sha256sum -c - \
-         && echo "${SYNTH_SHA256}  synth.gguf" > /out/synth.sha256 ; \
-       fi
-
-# ---- stage 2: runtime — Vulkan llama.cpp + the gateway ----
+# ---- runtime — Vulkan llama.cpp + the gateway (no models, no torch) ----------
 # Base is Debian TRIXIE (Mesa 25.x): its RADV exposes VK_KHR_cooperative_matrix on
 # RDNA3 (gfx1100), so the prebuilt llama.cpp Vulkan binary uses the 7900 XTX WMMA
 # matrix cores. Bookworm's Mesa 22.3.6 predates RADV coopmat (added in Mesa 24.1) →
@@ -99,7 +30,6 @@ RUN wget -q -O /out/embed.gguf  "https://huggingface.co/${EMBED_REPO}/resolve/ma
 # NOTE: trixie's 64-bit time_t transition renames libcurl4 -> libcurl4t64.
 FROM debian:trixie-slim AS runtime
 ARG LLAMA_TAG
-ARG EMBED_POOLING
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget libgomp1 libcurl4t64 libvulkan1 mesa-vulkan-drivers \
         python3 python3-numpy \
@@ -113,42 +43,28 @@ ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PA
 
 COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
 COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
-RUN chmod +x /opt/aimee/supervisor.sh
-COPY --from=modelprep /out /models
+# Create /models as a REAL directory (not just a VOLUME mountpoint): a bare
+# `VOLUME /models` on an otherwise-empty path leaves no directory layer, so a
+# downstream `COPY --from=aimee-llm /models/` (the combined image bundles this
+# runtime) fails with "/models: not found". The explicit mkdir gives it a layer.
+RUN chmod +x /opt/aimee/supervisor.sh && mkdir -p /models
 
-# Per-tier synth runtime profile baked from build-args (the supervisor reads these).
-ARG SYNTH_FA
-ARG SYNTH_KV_K
-ARG SYNTH_KV_V
-ARG SYNTH_MOE
-ARG SYNTH_MOE_LAYERS
-ARG SYNTH_N_CPU_MOE
-ARG SYNTH_SLOTS
-ARG SYNTH_REPO
-ARG SYNTH_FILE
-ARG SYNTH_SHA256
-LABEL org.aimee.kb.synth.model="${SYNTH_REPO}/${SYNTH_FILE}" \
-      org.aimee.kb.synth.sha256="${SYNTH_SHA256}"
-ENV AIMEE_LLM_SYNTH_FA=${SYNTH_FA} \
-    AIMEE_LLM_SYNTH_KV_K=${SYNTH_KV_K} \
-    AIMEE_LLM_SYNTH_KV_V=${SYNTH_KV_V} \
-    AIMEE_LLM_SYNTH_MOE=${SYNTH_MOE} \
-    AIMEE_LLM_SYNTH_MOE_LAYERS=${SYNTH_MOE_LAYERS} \
-    AIMEE_LLM_SYNTH_N_CPU_MOE=${SYNTH_N_CPU_MOE} \
-    AIMEE_LLM_SYNTH_SLOTS=${SYNTH_SLOTS}
+# Persistent model cache: the supervisor downloads the tier's GGUFs here on first
+# boot. Mount a volume so restarts (and tier switches) don't re-pull multi-GB models.
+VOLUME /models
 
-# Gateway + per-role serving config (the supervisor reads these).
+# Gateway + per-role serving wiring (the supervisor reads these; per-tier model
+# identity — embedder id, pooling, rerank head dir — is exported by the supervisor).
 ENV AIMEE_LLM_PORT=8080 \
     AIMEE_LLM_EMBED_URL=http://127.0.0.1:8081 \
     AIMEE_LLM_RERANK_URL=http://127.0.0.1:8082 \
     AIMEE_LLM_SYNTH_URL=http://127.0.0.1:8083 \
-    AIMEE_LLM_RERANK_HEAD=/models/rerank-head \
-    AIMEE_LLM_EMBED_MODEL=qwen3-embedding \
-    AIMEE_LLM_EMBED_POOLING=${EMBED_POOLING} \
     AIMEE_LLM_NGL=0 \
     PYTHONPATH=/opt/aimee
 WORKDIR /opt/aimee
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
+# start-period is long: the first boot downloads the tier's models (multi-GB on the
+# GPU tiers) before /health is OK. The /models volume makes later boots fast.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=1200s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1
 ENTRYPOINT ["/opt/aimee/supervisor.sh"]

@@ -1418,11 +1418,11 @@ the server. Four compose files ship, built from three images: `aimee-server`
 `aimee-server+kb` (`Dockerfile.combined`). Every stack also brings up a
 `pgvector/pgvector:pg16` Postgres, and the kb auto-applies its DB2 schema
 (`pg_trgm` and `vector` extensions plus tables) on first boot. The combined image
-bundles a CPU inference gateway (embeddings, reranking, and synthesis) from the
-`aimee-kb` image family, so embedding and reranking work with nothing external.
-The CPU tier serves Qwen3-Embedding-0.6B at 1024 dims; the GPU tiers
-(`aimee-kb-gpu-small` 16 GB, `aimee-kb-gpu-mid` 24 GB, `aimee-kb-gpu-large` 32 GB)
-serve Qwen3-Embedding-4B at 2560 dims.
+bundles the `aimee-llm` inference gateway (embeddings, reranking, and synthesis),
+which downloads its cpu-tier models on first boot, so embedding and reranking work
+with nothing external. The tier is chosen by `AIMEE_LLM_TIER`: `cpu` serves
+Qwen3-Embedding-0.6B at 1024 dims; the GPU tiers (`small` 16 GB, `mid` 24 GB,
+`large` 32 GB) serve Qwen3-Embedding-4B at 2560 dims.
 To run a standalone embedder or curator LLM instead of the bundled gateway, use
 the `external-llm` compose profile. Backends and tiers:
 [KB_LLM_BACKENDS.md](docs/KB_LLM_BACKENDS.md) and
