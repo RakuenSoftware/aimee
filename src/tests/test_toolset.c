@@ -126,7 +126,7 @@ static void test_core_edit_flows_to_include(void)
 
 static void test_delegate_role_toolset(void)
 {
-   assert(strcmp(toolset_for_delegate_role("review"), "current_code") == 0);
+   assert(strcmp(toolset_for_delegate_role("review"), "review_indexed") == 0);
    assert(strcmp(toolset_for_delegate_role("inspect"), "current_code") == 0);
    assert(strcmp(toolset_for_delegate_role("validate"), "validate") == 0);
    assert(strcmp(toolset_for_delegate_role("test"), "validate") == 0);
@@ -138,8 +138,9 @@ static void test_delegate_role_toolset(void)
    char err[TOOLSET_ERROR_MAX] = "";
    int n = toolset_resolve(&reg, toolset_for_delegate_role("review"), tools, TOOLSET_MAX_TOOLS, err,
                            sizeof(err));
-   assert(has_tool(tools, n, "read_file"));
-   assert(!has_tool(tools, n, "find_symbol"));
+   /* review is index-only now: branch-index nav tools, no filesystem tools */
+   assert(!has_tool(tools, n, "read_file"));
+   assert(has_tool(tools, n, "find_symbol") && has_tool(tools, n, "search_memory"));
    n = toolset_resolve(&reg, toolset_for_delegate_role("validate"), tools, TOOLSET_MAX_TOOLS, err,
                        sizeof(err));
    assert(has_tool(tools, n, "bash"));
