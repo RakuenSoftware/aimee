@@ -100,7 +100,7 @@ CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_F
 # surface). A key in the generated table with no entry here renders "—" and is
 # counted as undescribed so the gap is visible (see render_config).
 CFG_KEY_DESC = {
-    "autonomous": "Run autonomously (auto-advance preauthorized gates) vs interactive.",
+    "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
@@ -839,9 +839,10 @@ def render_workflow(catalog, consts):
         "personas), `panel.eligible` (list of additional eligible personas), "
         "`quorum` (int; effective quorum is `max(2, quorum)` and at least the "
         "required-panel size).",
-        "- **`gate.human`** — `policy: preauthorized` (auto-approve in autonomous "
-        "mode) and/or `optional: true` (skippable). Without these, an autonomous run "
-        "parks at the gate for a human.",
+        "- **`gate.human`** — parks the run for a human decision. **Inviolable**: never "
+        "auto-satisfied in autonomous mode, and declaring it auto-satisfiable "
+        "(`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared "
+        "only by a human's signed approval via the gate endpoint.",
         "- Other blocks take no params today; unknown params are ignored by the "
         "validator.",
         "",

@@ -1,10 +1,12 @@
 /* wfe_autonomy.h: the autonomy driver + the human-only gate-override.
  *
  * In autonomous mode the driver auto-advances machine gates (via the engine) and
- * auto-satisfies ONLY human gates whose policy is preauthorized/optional; it
- * parks at every other human gate (pending_human) and at a degraded roundtable.
- * It NEVER forges a human approval: gate-override is a signed human action that
- * autonomous runs cannot invoke. */
+ * parks at EVERY human gate (pending_human) and at a degraded roundtable. A human
+ * gate is inviolable: the driver never auto-satisfies one — not even with node
+ * params like policy:preauthorized or optional:true (those are rejected at
+ * workflow validation) — and never forges a human approval. Only a human's
+ * signed action (gate-override / the gate endpoint, attributed to an attested
+ * principal) clears a human gate; autonomous runs cannot invoke it. */
 #ifndef DEC_WFE_AUTONOMY_H
 #define DEC_WFE_AUTONOMY_H 1
 

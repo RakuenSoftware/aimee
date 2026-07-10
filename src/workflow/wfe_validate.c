@@ -114,11 +114,23 @@ static int check_gate_rules(const wfe_node_t *n, char *err, size_t errlen)
    {
       const char *policy = param_str(n->params, "policy");
       int optional = param_bool(n->params, "optional", 0);
-      if (optional && policy && strcmp(policy, "pr_review") == 0)
+      /* A human gate is an inviolable stop: it must not be declared auto-
+       * satisfiable. policy:preauthorized and optional:true both asked the
+       * autonomy driver to clear the gate without a human — no longer permitted,
+       * so reject them at authoring time rather than silently ignoring them. */
+      if (policy && strcmp(policy, "preauthorized") == 0)
       {
          snprintf(err, errlen,
-                  "node '%s': gate.human optional:true is incompatible with "
-                  "policy pr_review",
+                  "node '%s': gate.human policy 'preauthorized' is not allowed — a "
+                  "human gate cannot be auto-satisfied in autonomous mode",
+                  n->id);
+         return -1;
+      }
+      if (optional)
+      {
+         snprintf(err, errlen,
+                  "node '%s': gate.human optional:true is not allowed — a human gate "
+                  "cannot be skipped or auto-satisfied",
                   n->id);
          return -1;
       }
