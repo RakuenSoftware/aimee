@@ -126,8 +126,9 @@ Autonomous does not mean unsupervised. The workflow reserves **human gates**
 (proposal approval, final pass/fail). In autonomous mode the driver:
 
 - auto-advances *machine* gates (CI, mergeability, roundtable verdicts);
-- auto-satisfies **only** the human gates the submitter explicitly preauthorized;
-- **parks** at every other human gate (`pending_human`) until a person acts;
+- **parks** at **every** human gate (`pending_human`) until a person acts — a human
+  gate is **inviolable** and is never auto-satisfied (declaring one auto-satisfiable
+  via `policy: preauthorized` / `optional: true` is rejected at workflow validation);
 - **never forges a human approval**, gate-override is a signed, human-only action
   capped at a small number of uses.
 
@@ -156,8 +157,9 @@ Interactive (human-driven) work items are left alone by the scheduler.
 
 Autonomous development is default-on; the guardrails are structural, not a toggle:
 
-- **Human gates** are never auto-satisfied unless preauthorized for that run, and
-  gate-override stays human-only and capped.
+- **Human gates** are never auto-satisfied — a human gate is an inviolable stop; the
+  only way past it is a human's signed approval, and gate-override stays human-only
+  and capped.
 - **Per-run budget ceiling.** A work item carries a cost cap; on breach the run
   **parks** (`budget_exceeded`) for a human, it never silently runs away.
   (Today the cap is a work-item field; setting it *from* `/v1/dev/submit` is not
