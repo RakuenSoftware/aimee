@@ -10,6 +10,11 @@ char *tool_bash(const char *command, int timeout_ms);
 char *tool_execute_script(const char *language, const char *body, int timeout_secs,
                           const char *workdir, const char *env_json);
 char *tool_read_file(const char *path, int offset, int limit);
+/* Extended read: when `anchored` is set, each emitted line is prefixed with its
+ * composite `LINE:HASH| ` anchor and a read snapshot is minted (scoped to `sid`,
+ * which may be NULL) so a subsequent edit_file can reference the anchors. When
+ * `anchored` is 0 the output is byte-identical to tool_read_file(). */
+char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, const char *sid);
 char *tool_write_file(const char *path, const char *content);
 /* Surgical edit: replace old_string with new_string in an existing file.
  * old_string must occur exactly once unless replace_all is non-zero (then all

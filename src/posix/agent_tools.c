@@ -21,6 +21,7 @@
 #include "workspace_provider.h"
 #include "diff.h"
 #include "dstr.h"
+#include "hashline_anchor.h"
 #include "lsp.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -1121,17 +1122,118 @@ static int tool_file_looks_binary(FILE *f)
    return binary;
 }
 
+/* Format the [offset,limit) window of `file_data` with composite `LINE:HASH| `
+ * anchors, prefixed by a snapshot header. Lines are split on '\n' — the SAME
+ * split hashline_snapshot_mint uses — so displayed ordinals and tags line up
+ * with the snapshot's per-line digests exactly (the fgets/4096 raw loop can
+ * split a long line, which would desync ordinals; the anchored path must not).
+ * `buf` has capacity `cap`+1; returns bytes written into buf (NUL-terminated). */
+static size_t format_anchored(char *buf, size_t cap, const char *file_data, size_t file_len,
+                              int offset, int limit, const char *snap_id)
+{
+   size_t total = 0;
+   char header[160];
+   int hlen;
+   if (snap_id)
+      hlen =
+          snprintf(header, sizeof(header),
+                   "[anchored read — snapshot %s; edit each line by its N:hash anchor]\n", snap_id);
+   else
+      hlen = snprintf(header, sizeof(header),
+                      "[anchored read — snapshot unavailable; re-read before editing by anchor]\n");
+   if (hlen > 0 && (size_t)hlen < cap)
+   {
+      memcpy(buf, header, (size_t)hlen);
+      total = (size_t)hlen;
+   }
+
+   /* Reserve room for a truncation marker so a cap hit is never silent. */
+   static const char kTrunc[] =
+       "[… output truncated at size cap; narrow with offset/limit, or raw:true for full bytes]\n";
+   size_t trunc_len = sizeof(kTrunc) - 1;
+   size_t body_cap = (cap > trunc_len) ? (cap - trunc_len) : 0;
+
+   size_t i = 0;
+   int line_num = 0;
+   int lines_emitted = 0;
+   int truncated = 0;
+   int max_lines = (limit > 0) ? limit : 100000;
+   while (i < file_len)
+   {
+      size_t s = i;
+      while (i < file_len && file_data[i] != '\n')
+         i++;
+      size_t e = i;                /* content end, excludes '\n' */
+      int has_nl = (i < file_len); /* a terminator follows */
+      if (has_nl)
+         i++;
+      line_num++;
+      if (offset > 0 && line_num <= offset)
+         continue;
+
+      uint64_t d = hashline_digest64(file_data + s, e - s, line_num == 1, has_nl);
+      char tag[HASHLINE_DISPLAY_TAG_HEX + 1];
+      hashline_display_tag(d, tag, sizeof(tag));
+      char prefix[32];
+      int plen = snprintf(prefix, sizeof(prefix), "%d:%s| ", line_num, tag);
+
+      size_t content_len = e - s;
+      size_t need = (size_t)plen + content_len + (has_nl ? 1u : 0u);
+      if (total + need >= body_cap)
+      {
+         truncated = 1; /* drop an overflowing line rather than emit a malformed anchor */
+         break;
+      }
+      memcpy(buf + total, prefix, (size_t)plen);
+      total += (size_t)plen;
+      memcpy(buf + total, file_data + s, content_len);
+      total += content_len;
+      if (has_nl)
+         buf[total++] = '\n';
+
+      lines_emitted++;
+      if (lines_emitted >= max_lines)
+      {
+         /* Hit the internal safety cap on a no-limit read while lines remain:
+          * mark it so the caller does not mistake a capped read for a full file.
+          * A user-supplied limit reaching its count is expected, not truncation. */
+         if (limit <= 0 && i < file_len)
+            truncated = 1;
+         break;
+      }
+   }
+   if (truncated && total + trunc_len < cap)
+   {
+      memcpy(buf + total, kTrunc, trunc_len);
+      total += trunc_len;
+   }
+   buf[total] = '\0';
+   return total;
+}
+
 char *tool_read_file(const char *path, int offset, int limit)
 {
-   char *resolved_proposal = NULL;
+   return tool_read_file_ex(path, offset, limit, 0, NULL);
+}
+
+char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, const char *sid)
+{
    const char *actual_path = path;
    char cwd_path[MAX_PATH_LEN];
+   char proposal_buf[MAX_PATH_LEN];
 
    if (strncmp(path, "proposal:", 9) == 0)
    {
-      resolved_proposal = resolve_proposal_path(path + 9);
+      char *resolved_proposal = resolve_proposal_path(path + 9);
       if (resolved_proposal)
-         actual_path = resolved_proposal;
+      {
+         /* Copy the resolved path into a function-lifetime buffer and free the
+          * heap copy immediately, so nothing below aliases freed memory and there
+          * is exactly one free with no per-return-path bookkeeping. */
+         snprintf(proposal_buf, sizeof(proposal_buf), "%s", resolved_proposal);
+         free(resolved_proposal);
+         actual_path = proposal_buf;
+      }
       else
          actual_path = path + 9; /* try as-is even if resolve failed */
    }
@@ -1140,11 +1242,7 @@ char *tool_read_file(const char *path, int offset, int limit)
    char resolved[MAX_PATH_LEN];
    const char *err = validate_file_path(actual_path, resolved, sizeof(resolved));
    if (err)
-   {
-      if (resolved_proposal)
-         free(resolved_proposal);
       return safe_strdup(err);
-   }
 
    /* Pull the bytes through the workspace provider (shared = direct fs), then
     * run the existing binary-detection + line/offset/limit display loop over a
@@ -1156,13 +1254,8 @@ char *tool_read_file(const char *path, int offset, int limit)
    {
       char err_msg[512];
       snprintf(err_msg, sizeof(err_msg), "error: cannot open %s", actual_path);
-      if (resolved_proposal)
-         free(resolved_proposal);
       return safe_strdup(err_msg);
    }
-
-   if (resolved_proposal)
-      free(resolved_proposal);
 
    FILE *f = fmemopen(file_data, file_len, "rb");
    if (!f)
@@ -1187,6 +1280,19 @@ char *tool_read_file(const char *path, int offset, int limit)
       free(file_data);
       return safe_strdup("error: out of memory");
    }
+
+   /* Anchored path: mint a whole-file snapshot and emit LINE:HASH-prefixed lines
+    * split on '\n' (consistent with the snapshot's per-line digests). */
+   if (anchored)
+   {
+      fclose(f);
+      char *snap = hashline_snapshot_mint(sid, actual_path, file_data, file_len);
+      format_anchored(buf, cap, file_data, file_len, offset, limit, snap);
+      free(snap);
+      free(file_data);
+      return buf;
+   }
+
    size_t total = 0;
    char line[4096];
    int line_num = 0;

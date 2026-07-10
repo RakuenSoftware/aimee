@@ -36,6 +36,7 @@ void test_responses_parser_separates_message_items(void);
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
 char *tool_read_file(const char *path, int offset, int limit);
+char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, const char *sid);
 char *tool_write_file(const char *path, const char *content);
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
@@ -1015,6 +1016,87 @@ static void test_tool_read_file(void)
    free(result);
 
    unlink(tmppath);
+}
+
+static void test_tool_read_file_anchored(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_test_anchored_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   assert(fd >= 0);
+   const char *content = "alpha\nbeta\nalpha\ngamma\n"; /* dup line "alpha" at ord 1 and 3 */
+   if (write(fd, content, strlen(content)) < 0)
+   { /* ignore */
+   }
+   close(fd);
+
+   /* raw:true (anchored=0) is byte-identical to legacy output. */
+   char *raw = tool_read_file_ex(tmppath, 0, 0, 0, "sessX");
+   assert(raw != NULL && strcmp(raw, content) == 0);
+   free(raw);
+
+   /* Anchored read: snapshot header + one 'N:hash| ' prefix per line. */
+   char *a = tool_read_file_ex(tmppath, 0, 0, 1, "sessX");
+   assert(a != NULL);
+   assert(strstr(a, "[anchored read — snapshot ") != NULL);
+   assert(strstr(a, "1:") != NULL && strstr(a, "| alpha\n") != NULL);
+   assert(strstr(a, "2:") != NULL && strstr(a, "| beta\n") != NULL);
+   assert(strstr(a, "3:") != NULL); /* ordinal 3 distinguishes the duplicate alpha */
+   assert(strstr(a, "4:") != NULL && strstr(a, "| gamma\n") != NULL);
+   free(a);
+
+   /* Windowed anchored read: offset keeps physical ordinals, limit bounds count. */
+   char *w = tool_read_file_ex(tmppath, 1, 2, 1, "sessX");
+   assert(w != NULL);
+   assert(strstr(w, "2:") != NULL && strstr(w, "| beta\n") != NULL);
+   assert(strstr(w, "3:") != NULL); /* second emitted line is physical ord 3 */
+   assert(strstr(w, "4:") == NULL); /* limit=2 stops before gamma */
+   assert(strstr(w, "1:") == NULL); /* offset=1 skips line 1 */
+   free(w);
+
+   unlink(tmppath);
+
+   /* Size-cap truncation must be marked, never silent. Write well over the 32 KB
+    * model-visible cap and confirm the anchored read appends the marker. */
+   char bigpath[512];
+   snprintf(bigpath, sizeof(bigpath), "%s/aimee_test_biganchor_XXXXXX", platform_tmpdir());
+   int bfd = platform_mkstemp(bigpath, sizeof(bigpath), "aim");
+   assert(bfd >= 0);
+   for (int n = 0; n < 6000; n++)
+   {
+      char ln[32];
+      int m = snprintf(ln, sizeof(ln), "row %d padding=xxxxxxxx\n", n);
+      if (write(bfd, ln, (size_t)m) < 0)
+      { /* ignore */
+      }
+   }
+   close(bfd);
+   char *big = tool_read_file_ex(bigpath, 0, 0, 1, "sessX");
+   assert(big != NULL);
+   assert(strstr(big, "output truncated") != NULL); /* explicit marker, not silent */
+   free(big);
+   unlink(bigpath);
+
+   /* proposal:<abs-path> resolves through resolve_proposal_path so actual_path
+    * aliases a heap allocation; the anchored read must free it only AFTER the
+    * snapshot mint copies it (regression for the round-3 use-after-free). */
+   char ppath[512];
+   snprintf(ppath, sizeof(ppath), "%s/aimee_test_prop_XXXXXX", platform_tmpdir());
+   int pfd = platform_mkstemp(ppath, sizeof(ppath), "aim");
+   assert(pfd >= 0);
+   const char *pcontent = "prop-line-1\nprop-line-2\n";
+   if (write(pfd, pcontent, strlen(pcontent)) < 0)
+   { /* ignore */
+   }
+   close(pfd);
+   char proposal_ref[600];
+   snprintf(proposal_ref, sizeof(proposal_ref), "proposal:%s", ppath); /* absolute path */
+   char *pr = tool_read_file_ex(proposal_ref, 0, 0, 1, "sessX");
+   assert(pr != NULL);
+   assert(strstr(pr, "[anchored read — snapshot ") != NULL);
+   assert(strstr(pr, "| prop-line-1\n") != NULL);
+   free(pr);
+   unlink(ppath);
 }
 
 static void test_tool_write_file(void)
@@ -2338,6 +2420,7 @@ int main(void)
    test_tool_bash();
    test_detached_skips_worktree_rewrite();
    test_tool_read_file();
+   test_tool_read_file_anchored();
    test_tool_write_file();
    test_tool_edit_file();
    test_parent_write_guard_blocks_parent_writes();

@@ -45,6 +45,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                              $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                              $(OBJDIR)/gateway_delegate.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o \
+                             $(OBJDIR)/hashline_anchor.o \
                              $(PLATFORM_AGENT_OBJS)
 
 TEST_MCP_CLIENT_OBJS = $(OBJDIR)/server/mcp_client.o \
@@ -397,6 +398,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-http-ingest \
                $(TESTPREFIX)/unit-test-kb-releases \
                $(TESTPREFIX)/unit-test-sketch \
+               $(TESTPREFIX)/unit-test-hashline-anchor \
                $(TESTPREFIX)/unit-test-kb-fusion \
                $(TESTPREFIX)/unit-test-kb-lab \
                $(TESTPREFIX)/unit-test-artifacts \
@@ -3417,6 +3419,7 @@ $(TESTPREFIX)/unit-test-otel: $(OBJDIR)/tests/test_otel.o \
                      $(OBJDIR)/server/http_retry.o \
                      $(OBJDIR)/gateway_delegate.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o \
                      $(TEST_CORE_OBJS) \
+                     $(OBJDIR)/hashline_anchor.o \
                      $(PLATFORM_AGENT_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3738,6 +3741,14 @@ $(TESTPREFIX)/unit-test-kb-releases: $(OBJDIR)/tests/test_kb_releases.o \
 
 $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(OBJDIR)/sketch.o \
+                     $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-hashline-anchor: $(OBJDIR)/tests/test_hashline_anchor.o \
+                     $(OBJDIR)/hashline_anchor.o \
+                     $(OBJDIR)/sketch.o \
+                     $(OBJDIR)/util.o \
+                     $(OBJDIR)/platform_random.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
