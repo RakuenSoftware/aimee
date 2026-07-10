@@ -7,12 +7,17 @@
  *   max_concurrent: 2
  *
  * trigger_rules:
- *   - source: "github-webhook"
+ *   - source: "github-webhook"   # valid sources include github-webhook, cron, proposals
  *     event: "push"
  *     pipeline:
  *       template: "ci"
  *       workspace: "/ws/myproject"
  *       max_spend_usd: 0.50
+ *
+ * source: "proposals" reuses existing fields: workspace is the absolute git
+ * repo to scan, pipeline.template is the workflow name, event is the
+ * repo-relative proposal dir (default docs/proposals/pending), and schedule is
+ * the git ref/branch (default auto-detect).
  */
 
 #include "aimee.h"
