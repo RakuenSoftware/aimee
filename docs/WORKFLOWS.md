@@ -237,6 +237,88 @@ the API):
 - Server `/v1/workflow/*` ([server_workflow_api.c](../src/server/server_workflow_api.c))
   exposes the def read/author surface and the work-item read surface.
 
+## Triggers
+
+A **trigger** is the *first step* that starts a workflow run — the thing that
+decides *when* a run begins and *which* workflow it begins. A trigger is
+deliberately generic: the event that fires it can be autonomous (a new proposal
+appears in a repo, a schedule elapses, a webhook arrives) or a person (clicking
+**Run** on the Workflow Actions tab is itself a trigger). The intent is a small
+set of generic trigger sources that you wire to whatever workflow you want —
+the trigger starts the run; what happens next is entirely the workflow's design.
+
+Triggers are configured as a `trigger_rules` list in `aimee.yaml`. Each rule
+names a **source** (what fires it), how the filed run should execute (**mode**),
+and the **pipeline** (which workflow, in which repo):
+
+```yaml
+trigger:
+  max_concurrent: 1          # cap on concurrently-executing triggered runs
+
+trigger_rules:
+  - source: proposals              # scan a git repo for new proposals
+    event: docs/proposals/pending  # repo-relative dir to watch (this is the default)
+    schedule: main                 # git ref/branch to read (default: auto-detected origin HEAD)
+    mode: autonomous               # autonomous (default) | interactive
+    pipeline:
+      template: build              # the workflow to start for each new proposal
+      workspace: /srv/repos/myproject   # absolute path of the git repo to scan
+```
+
+### Rule fields
+
+| Field | Meaning |
+| --- | --- |
+| `source` | What fires the rule: `proposals`, `cron`, or a webhook source. |
+| `event` | Source-specific match. For `proposals`, the repo-relative directory to scan (default `docs/proposals/pending`). |
+| `schedule` | For `cron`, the cron expression. For `proposals`, the git ref/branch to read (default: auto-detected `origin` HEAD, then `HEAD`). |
+| `mode` | Execution mode stamped on the filed work item — see below. `autonomous` (default) or `interactive`. |
+| `pipeline.template` | The workflow to start (any saved workflow name, e.g. `build`). |
+| `pipeline.workspace` | Absolute path of the git repo the run operates in (and, for `proposals`, the repo to scan). |
+| `pipeline.max_spend_usd` | Optional per-run spend cap. |
+
+### `mode`: autonomous vs. interactive
+
+`mode` selects **how the run executes once the trigger files it**, independent
+of the workflow it names:
+
+- **`autonomous`** (the default) — the autonomy scheduler drives the run
+  hands-off, start to finish. Use this when the trigger event *is* the approval:
+  merging a proposal into the watched branch, for example, is itself the decision
+  to build it, so no further human sign-off is wanted.
+- **`interactive`** — the run is filed and then **parks for a human** to drive in
+  the webchat (Workflow Actions tab). Use this when someone should review before
+  anything runs.
+
+This is distinct from **gating inside the workflow**. A `gate.human` step (or an
+`author.proposal` node marked `with_user`) parks *that step* for a person
+regardless of `mode` — it is a property of the workflow you build, not of the
+trigger. So you can compose either shape: an `autonomous` trigger into a
+workflow that still pauses at a human gate partway through, or an `interactive`
+trigger into a fully hands-off workflow. Pick the trigger `mode` for the
+*start* decision; put in-flight gates in the *workflow*.
+
+### The `proposals` source
+
+The `proposals` source turns "a proposal was committed" into a workflow run. On
+each scan (roughly once a minute) it lists the proposal directory at the
+configured git ref, and for every proposal it has not seen before it:
+
+1. materializes the proposal's content under `$AIMEE_HOME/triggers/proposals/`,
+2. files exactly one work item on `pipeline.template`, in `pipeline.workspace`,
+   with the configured `mode` (default `autonomous`),
+3. de-duplicates by proposal, so re-scanning the same tree never files twice.
+
+Merging a new proposal onto the watched branch is therefore all it takes to
+kick off a build — and with `mode: autonomous`, that build runs to its PR
+without further intervention (subject to `trigger.max_concurrent` and any
+`max_spend_usd` cap). Point the rule at a different `template` to run any other
+workflow you have authored.
+
+> The filed run still enters through the same capped, audited intake as every
+> other run (see [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)); the trigger
+> supplies the proposal text, so the *propose → … → PR* framing below still holds.
+
 ## Current limitations
 
 These are real today and worth knowing before you lean on workflows:

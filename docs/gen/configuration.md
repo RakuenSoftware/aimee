@@ -241,7 +241,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `manage`, `review`
 - **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
-- **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `pipeline`, `schedule`, `source`
+- **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
 - **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`
 - **`worktree_gc`** — `enabled`, `max_age_days`
 
