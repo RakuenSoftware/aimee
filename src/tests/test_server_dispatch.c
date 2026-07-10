@@ -7,6 +7,7 @@
 #include "aimee.h"
 #include "../db1/db.h"
 #include "../db1/eval.h"
+#include "../db1/server_sessions.h"
 #include "agent_config.h"
 #include "agent_eval.h"
 #include "hud.h"
@@ -414,6 +415,22 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
    (void)hook_input;
    (void)out;
 }
+/* handle_hooks_session_start now registers a server_sessions row; stub the two
+ * db1 accessors it uses so this dispatch-routing test need not link the db1
+ * layer. get -> miss (so create is attempted), create -> success. */
+int db1_server_session_get(const char *id, db1_server_session_t *out)
+{
+   (void)id;
+   (void)out;
+   return -1;
+}
+int db1_server_session_create(const char *id, const char *client_type, const char *principal)
+{
+   (void)id;
+   (void)client_type;
+   (void)principal;
+   return 0;
+}
 /* session.brief_assemble invokes session_brief_emit (cmd_session_lifecycle.c),
  * also not linked here. Stub it with a marker so the op handler test can assert
  * the emitted brief flows into the response envelope. */
@@ -445,6 +462,10 @@ void session_id_clear_override(void)
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.create");
+}
+int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "session.record_transcript");
 }
 int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

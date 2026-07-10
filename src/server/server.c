@@ -1133,6 +1133,22 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
+   /* Register the session in the server_sessions registry under its real host id
+    * (session_start_emit persists session_state, but NOT this listings row). This
+    * makes every session locatable after a crash — the gap that meant a Claude
+    * Code session driven through the anonymous /v1/messages gateway left no
+    * findable record. Idempotent (SessionStart also fires on resume); best-effort. */
+   if (sid && sid[0])
+   {
+      db1_server_session_t existing;
+      if (db1_server_session_get(sid, &existing) != 0)
+      {
+         char principal[32];
+         snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
+         (void)db1_server_session_create(sid, "claude-code", principal);
+      }
+   }
+
    cJSON *jnb = cJSON_GetObjectItemCaseSensitive(req, "nonblocking");
    if (cJSON_IsTrue(jnb))
    {
@@ -1322,6 +1338,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"session.brief_assemble", handle_session_brief_assemble},
     {"memory.user_capture", handle_memory_user_capture},
     {"session.create", handle_session_create},
+    {"session.record_transcript", handle_session_record_transcript},
     {"session.list", handle_session_list},
     {"session.get", handle_session_get},
     {"session.close", handle_session_close},
@@ -1578,8 +1595,13 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},    {"tool.", LIMIT_TOOL}, {"delegate", LIMIT_DELEGATE},
-       {"mcp.call", LIMIT_DELEGATE}, {"chat.", LIMIT_CHAT}, {"index.ingest", LIMIT_INGEST},
+       {"memory.", LIMIT_MEMORY},
+       {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},
+       {"mcp.call", LIMIT_DELEGATE},
+       {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST},
+       {"session.record_transcript", LIMIT_TRANSCRIPT},
        {NULL, LIMIT_DEFAULT},
    };
 

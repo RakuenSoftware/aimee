@@ -48,7 +48,9 @@ typedef struct cJSON cJSON;
 #define LIMIT_DELEGATE (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
 #define LIMIT_CHAT     (512 * 1024)      /* 512KB for chat messages */
 #define LIMIT_INGEST   (1024 * 1024)     /* 1MB: client-pushed code files (kb req cap) */
-#define LIMIT_DEFAULT  (256 * 1024)      /* 256KB default */
+#define LIMIT_TRANSCRIPT                                                                           \
+   (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
+#define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
 
 /* JSON framing limits */
 #define JSON_MAX_DEPTH          32  /* maximum nesting depth */
@@ -272,6 +274,7 @@ const method_policy_t *server_policy_for_method(const char *method);
 
 /* Session handlers (server_session.c) */
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
