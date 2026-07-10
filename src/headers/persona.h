@@ -82,6 +82,15 @@ extern "C"
    char *persona_compose_delegate_prompt(const char *name, const char *cwd,
                                          const char *base_prompt);
 
+   /* Render a persona's own prose (the "You are ..." body, role, workflow, and
+    * any work queue), with the first %s replaced by `cwd`, for injection at the
+    * start of a primary session — uniformly for every persona. Heap-owned
+    * (caller frees) or NULL if the persona has none. Built-ins use their
+    * canonical code prose (prompts.c); custom personas use their file
+    * `## Persona` body. Never used for delegate prompts (see
+    * persona_compose_delegate_prompt). */
+   char *persona_identity_prose(const persona_t *p, const char *cwd);
+
    /* Resolve persona `name`. Lookup: project file -> user file -> built-in.
     * Unknown name with no file falls back to the engineer built-in and still
     * returns 0 (callers always get a usable persona). Fills *out; heap fields

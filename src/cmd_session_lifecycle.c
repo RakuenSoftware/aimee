@@ -34,6 +34,30 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdarg.h>
+
+/* Bounded formatted append into buf[cap] at *pos. Advances *pos only when the
+ * whole formatted string fits; on truncation or a formatting error it restores
+ * the prior NUL terminator and leaves *pos unchanged. A no-op once the buffer is
+ * full. This keeps *pos <= cap for every caller, so a later append can never
+ * compute an out-of-bounds `buf + *pos` or an underflowed `cap - *pos`. Returns
+ * 1 if the whole string was written, 0 otherwise. */
+static int ctx_appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
+{
+   if (*pos >= cap)
+      return 0;
+   va_list ap;
+   va_start(ap, fmt);
+   int n = vsnprintf(buf + *pos, cap - *pos, fmt, ap);
+   va_end(ap);
+   if (n < 0 || (size_t)n >= cap - *pos)
+   {
+      buf[*pos] = '\0';
+      return 0;
+   }
+   *pos += (size_t)n;
+   return 1;
+}
 
 /* --- cmd_session_start --- */
 
@@ -150,20 +174,20 @@ static size_t session_append_scope_section(const memory_t *rows, int n_rows, cha
 
    qsort(items, (size_t)item_count, sizeof(items[0]), session_scope_item_cmp);
 
-   pos += (size_t)snprintf(buf + pos, cap - pos, "%s\n", header);
+   ctx_appendf(buf, cap, &pos, "%s\n", header);
    int emitted = 0;
    for (int i = 0; i < item_count && emitted < limit && pos < cap - 512; i++)
    {
       const char *text = items[i].content[0] ? items[i].content : items[i].key;
       if (items[i].kind[0])
-         pos += (size_t)snprintf(buf + pos, cap - pos, "- [%s] %.300s\n", items[i].kind, text);
+         ctx_appendf(buf, cap, &pos, "- [%s] %.300s\n", items[i].kind, text);
       else
-         pos += (size_t)snprintf(buf + pos, cap - pos, "- %.300s\n", text);
+         ctx_appendf(buf, cap, &pos, "- %.300s\n", text);
       emitted++;
    }
 
    if (emitted > 0)
-      pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
+      ctx_appendf(buf, cap, &pos, "\n");
    return pos;
 }
 
@@ -189,7 +213,7 @@ static int session_context_verbose_enabled(void)
 
 static char *build_session_context(const char *client_cwd)
 {
-   size_t cap = 32768;
+   size_t cap = 65536;
    char *buf = malloc(cap);
    size_t pos = 0;
    char scope_cwd[MAX_PATH_LEN];
@@ -219,32 +243,47 @@ static char *build_session_context(const char *client_cwd)
 
    /* Principles and Aimee lookup hints lead the session context for primacy
     * bias, driven by the active persona. */
-   pos += (size_t)snprintf(buf + pos, cap - pos, "%s",
-                           persona.principles_text ? persona.principles_text
-                                                   : prompt_principles_text(mode));
+   ctx_appendf(buf, cap, &pos, "%s",
+               persona.principles_text ? persona.principles_text : prompt_principles_text(mode));
+
+   /* Inject the active persona's own prose at the start of every primary session
+    * — uniformly, for every persona. Engineer is not special here: it is simply
+    * the default persona, and its prose carries the manager/work-queue framing
+    * because it is the orchestrator persona. Whichever persona resolved above,
+    * its "You are ..." identity and role lead the context so the session adopts
+    * it. Delegates never receive this block — they compose their prompt via
+    * persona_compose_delegate_prompt, which omits the engineer manager framing.
+    * Bounded append: pos is advanced only if the block fully fits, so a
+    * truncating render can never push pos past cap and corrupt later appends. */
+   {
+      char *identity = persona_identity_prose(&persona, scope_cwd);
+      if (identity && identity[0])
+         ctx_appendf(buf, cap, &pos, "\n# Persona\n%s\n", identity);
+      free(identity);
+   }
+
    if (persona.brief_text)
-      pos += (size_t)snprintf(buf + pos, cap - pos,
-                              "# Aimee Context\n%s"
-                              "- Use `aimee session brief` to inspect the full startup brief.\n\n",
-                              persona.brief_text);
+      ctx_appendf(buf, cap, &pos,
+                  "# Aimee Context\n%s"
+                  "- Use `aimee session brief` to inspect the full startup brief.\n\n",
+                  persona.brief_text);
    else
-      pos += (size_t)snprintf(
-          buf + pos, cap - pos,
-          "# Aimee Context\n"
-          "- Use `aimee index overview` or `aimee index find <symbol>` for indexed code "
-          "lookup when it helps.\n"
-          "- Use `aimee memory search <terms>` for prior project context before "
-          "rediscovery.\n"
-          "- Use `aimee delegate <role> \"prompt\"` for bounded delegated or parallel "
-          "work.\n"
-          "- Use `aimee session brief` to inspect the full startup brief.\n\n");
+      ctx_appendf(buf, cap, &pos,
+                  "# Aimee Context\n"
+                  "- Use `aimee index overview` or `aimee index find <symbol>` for indexed code "
+                  "lookup when it helps.\n"
+                  "- Use `aimee memory search <terms>` for prior project context before "
+                  "rediscovery.\n"
+                  "- Use `aimee delegate <role> \"prompt\"` for bounded delegated or parallel "
+                  "work.\n"
+                  "- Use `aimee session brief` to inspect the full startup brief.\n\n");
 
    /* Enforce aimee's memory system as the single memory of record: steer the
     * agent to aimee memory commands rather than a native store. `.md` memory is
     * retired — a write under the memory dir is intercepted into aimee and never
     * persisted as a file. */
-   pos += (size_t)snprintf(
-       buf + pos, cap - pos,
+   ctx_appendf(
+       buf, cap, &pos,
        "# Memory (use aimee, not your own store)\n"
        "- aimee is the single memory of record. Store durable memory with "
        "`aimee memory store <key> <content>`; set who-you-are / preferences with "
@@ -253,7 +292,7 @@ static char *build_session_context(const char *client_cwd)
        "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY DIR is intercepted "
        "into aimee and not persisted as a file. Writing `.md` files elsewhere (docs, READMEs, "
        "notes) is unaffected — only the memory dir is intercepted.\n");
-   pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
+   ctx_appendf(buf, cap, &pos, "\n");
 
    {
       char cwd[MAX_PATH_LEN];
@@ -278,7 +317,7 @@ static char *build_session_context(const char *client_cwd)
       free(skill_index);
    }
 
-   pos += (size_t)snprintf(buf + pos, cap - pos, "# Rules\n\n");
+   ctx_appendf(buf, cap, &pos, "# Rules\n\n");
 
    /* Aimee rules (from feedback/learning) */
 
@@ -292,7 +331,7 @@ static char *build_session_context(const char *client_cwd)
       while (*body == '\n')
          body++;
       if (*body)
-         pos += (size_t)snprintf(buf + pos, cap - pos, "%s\n", body);
+         ctx_appendf(buf, cap, &pos, "%s\n", body);
    }
    free(rules);
 
@@ -312,7 +351,7 @@ static char *build_session_context(const char *client_cwd)
             {
                if (pos + disc.bytes_used + 2 < cap)
                {
-                  pos += (size_t)snprintf(buf + pos, cap - pos, "%s\n", disc.rendered);
+                  ctx_appendf(buf, cap, &pos, "%s\n", disc.rendered);
                }
             }
             context_discovery_free(&disc);
@@ -330,14 +369,13 @@ static char *build_session_context(const char *client_cwd)
       {
          if (!has_facts)
          {
-            pos += (size_t)snprintf(buf + pos, cap - pos, "# Key Facts\n");
+            ctx_appendf(buf, cap, &pos, "# Key Facts\n");
             has_facts = 1;
          }
-         pos += (size_t)snprintf(buf + pos, cap - pos, "- %s: %.300s\n", facts[i].key,
-                                 facts[i].content);
+         ctx_appendf(buf, cap, &pos, "- %s: %.300s\n", facts[i].key, facts[i].content);
       }
       if (has_facts)
-         pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
+         ctx_appendf(buf, cap, &pos, "\n");
    }
 
    /* Open commitments + unresolved directives — phase-2-step-2 recall.
@@ -376,28 +414,27 @@ static char *build_session_context(const char *client_cwd)
       if (agent_load_config(&net_cfg) == 0 && net_cfg.network.ssh_entry[0])
       {
          agent_network_t *nw = &net_cfg.network;
-         pos += (size_t)snprintf(buf + pos, cap - pos, "# Network\nEntry: %s\n", nw->ssh_entry);
+         ctx_appendf(buf, cap, &pos, "# Network\nEntry: %s\n", nw->ssh_entry);
          if (nw->host_count > 0)
          {
-            pos += (size_t)snprintf(buf + pos, cap - pos, "Hosts (%d): ", nw->host_count);
+            ctx_appendf(buf, cap, &pos, "Hosts (%d): ", nw->host_count);
             int show = nw->host_count < 5 ? nw->host_count : 5;
             for (int i = 0; i < show && pos < cap - 128; i++)
-               pos += (size_t)snprintf(buf + pos, cap - pos, "%s%s (%s)", i > 0 ? ", " : "",
-                                       nw->hosts[i].name, nw->hosts[i].ip);
+               ctx_appendf(buf, cap, &pos, "%s%s (%s)", i > 0 ? ", " : "", nw->hosts[i].name,
+                           nw->hosts[i].ip);
             if (nw->host_count > show)
-               pos += (size_t)snprintf(buf + pos, cap - pos, " +%d more", nw->host_count - show);
-            pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
+               ctx_appendf(buf, cap, &pos, " +%d more", nw->host_count - show);
+            ctx_appendf(buf, cap, &pos, "\n");
          }
          if (nw->network_count > 0)
          {
             for (int i = 0; i < nw->network_count && pos < cap - 128; i++)
-               pos +=
-                   (size_t)snprintf(buf + pos, cap - pos, "- %s: %s (%s)\n", nw->networks[i].name,
-                                    nw->networks[i].cidr, nw->networks[i].desc);
+               ctx_appendf(buf, cap, &pos, "- %s: %s (%s)\n", nw->networks[i].name,
+                           nw->networks[i].cidr, nw->networks[i].desc);
          }
-         pos += (size_t)snprintf(buf + pos, cap - pos,
-                                 "Run `aimee agent network` or `aimee --json agent network` "
-                                 "for full host details.\n\n");
+         ctx_appendf(buf, cap, &pos,
+                     "Run `aimee agent network` or `aimee --json agent network` "
+                     "for full host details.\n\n");
       }
    }
 
@@ -444,17 +481,15 @@ static char *build_session_context(const char *client_cwd)
                {
                   if (!has_section)
                   {
-                     pos += (size_t)snprintf(buf + pos, cap - pos, "# Project Context (%s)\n",
-                                             project_name);
+                     ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n", project_name);
                      has_section = 1;
                   }
                   const char *text =
                       like_rows[i].content[0] ? like_rows[i].content : like_rows[i].key;
                   if (like_rows[i].kind[0])
-                     pos += (size_t)snprintf(buf + pos, cap - pos, "- [%s] %.300s\n",
-                                             like_rows[i].kind, text);
+                     ctx_appendf(buf, cap, &pos, "- [%s] %.300s\n", like_rows[i].kind, text);
                   else
-                     pos += (size_t)snprintf(buf + pos, cap - pos, "- %.300s\n", text);
+                     ctx_appendf(buf, cap, &pos, "- %.300s\n", text);
                }
             }
 
@@ -467,16 +502,15 @@ static char *build_session_context(const char *client_cwd)
             {
                if (!has_section)
                {
-                  pos += (size_t)snprintf(buf + pos, cap - pos, "# Project Context (%s)\n",
-                                          project_name);
+                  ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n", project_name);
                   has_section = 1;
                }
-               pos += (size_t)snprintf(buf + pos, cap - pos, "- %d files indexed, %d definitions\n",
-                                       file_count, def_count);
+               ctx_appendf(buf, cap, &pos, "- %d files indexed, %d definitions\n", file_count,
+                           def_count);
             }
 
             if (has_section)
-               pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
+               ctx_appendf(buf, cap, &pos, "\n");
          }
       }
    }
@@ -526,7 +560,7 @@ static char *build_session_context(const char *client_cwd)
          {
             char delblock[1024];
             persona_delegation_block(&persona, delblock, sizeof(delblock));
-            pos += (size_t)snprintf(buf + pos, cap - pos, "%s", delblock);
+            ctx_appendf(buf, cap, &pos, "%s", delblock);
          }
       }
    }
@@ -537,21 +571,20 @@ static char *build_session_context(const char *client_cwd)
       db1_agent_log_display_t rows[5];
       int n = db1_agent_log_list_recent(rows, 5);
       if (n > 0 && pos < cap - 256)
-         pos += (size_t)snprintf(buf + pos, cap - pos, "# Recent Delegations\n");
+         ctx_appendf(buf, cap, &pos, "# Recent Delegations\n");
       for (int i = 0; i < n && pos < cap - 256; i++)
       {
          const char *drole = rows[i].role[0] ? rows[i].role : "?";
          const char *dagent = rows[i].agent_name[0] ? rows[i].agent_name : "?";
          if (rows[i].success)
-            pos +=
-                (size_t)snprintf(buf + pos, cap - pos, "- [%s] via %s: OK (%d turns, %d tools)\n",
-                                 drole, dagent, rows[i].turns, rows[i].tool_calls);
+            ctx_appendf(buf, cap, &pos, "- [%s] via %s: OK (%d turns, %d tools)\n", drole, dagent,
+                        rows[i].turns, rows[i].tool_calls);
          else
-            pos += (size_t)snprintf(buf + pos, cap - pos, "- [%s] via %s: FAILED (%.80s)\n", drole,
-                                    dagent, rows[i].error[0] ? rows[i].error : "unknown");
+            ctx_appendf(buf, cap, &pos, "- [%s] via %s: FAILED (%.80s)\n", drole, dagent,
+                        rows[i].error[0] ? rows[i].error : "unknown");
       }
       if (n > 0 && pos < cap - 256)
-         pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
+         ctx_appendf(buf, cap, &pos, "\n");
    }
 
    /* Workspace project descriptions and style guides */
