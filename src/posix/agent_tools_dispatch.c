@@ -426,9 +426,13 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
    {
       cJSON *off = cJSON_GetObjectItem(args, "offset");
       cJSON *lim = cJSON_GetObjectItem(args, "limit");
+      cJSON *raw = cJSON_GetObjectItem(args, "raw");
       int offset = (off && cJSON_IsNumber(off)) ? off->valueint : 0;
       int limit = (lim && cJSON_IsNumber(lim)) ? lim->valueint : 0;
-      result = tool_read_file(p->valuestring, offset, limit);
+      /* Anchored output is the default for this model-facing surface; raw:true
+       * restores byte-identical legacy output for pipeline/binary consumers. */
+      int anchored = !(raw && cJSON_IsBool(raw) && cJSON_IsTrue(raw));
+      result = tool_read_file_ex(p->valuestring, offset, limit, anchored, dispatch_sid);
 
       /* Record the read in the session state for read-before-write tracking. */
       if (result && strncmp(result, "error:", 6) != 0)
