@@ -834,6 +834,45 @@ static void test_scan_proposals_custom_event_and_schedule(void)
    printf("  PASS: test_scan_proposals_custom_event_and_schedule\n");
 }
 
+static void test_scan_proposals_rejects_unsafe_ref_and_path(void)
+{
+   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-%d", (int)getpid());
+   mkdir(g_home, 0700);
+
+   trigger_rule_t rule;
+
+   /* A ref (schedule) beginning with '-' is rejected before ls-tree runs. */
+   trig_stub_reset();
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n");
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+   snprintf(rule.schedule, sizeof rule.schedule, "--all");
+   scan_proposals(&rule);
+   assert(g_ncreated == 0);
+   assert(g_lstree_ref[0] == '\0'); /* ls-tree never invoked */
+
+   /* A traversing scan dir is rejected. */
+   trig_stub_reset();
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+   snprintf(rule.event, sizeof rule.event, "../../etc");
+   scan_proposals(&rule);
+   assert(g_ncreated == 0);
+   assert(g_lstree_ref[0] == '\0');
+
+   /* An absolute scan dir is rejected. */
+   snprintf(rule.event, sizeof rule.event, "/etc");
+   scan_proposals(&rule);
+   assert(g_ncreated == 0);
+
+   printf("  PASS: test_scan_proposals_rejects_unsafe_ref_and_path\n");
+}
+
 /* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
@@ -879,6 +918,7 @@ int main(void)
    test_scan_proposals_end_to_end();
    test_scan_proposals_requires_workspace_and_workflow();
    test_scan_proposals_custom_event_and_schedule();
+   test_scan_proposals_rejects_unsafe_ref_and_path();
    printf("All tests passed.\n");
    return 0;
 }

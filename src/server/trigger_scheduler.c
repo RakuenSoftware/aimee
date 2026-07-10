@@ -424,8 +424,24 @@ static void scan_proposals(const trigger_rule_t *rule)
       return;
 
    const char *scanpath = rule->event[0] ? rule->event : PROPOSALS_DEFAULT_DIR;
+   /* Reject an absolute or traversing scan dir: `event` is repo-relative and must
+    * not be able to point git at a tree outside the workspace. */
+   if (scanpath[0] == '/' || strstr(scanpath, ".."))
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "proposals scan dir rejected (absolute/traversal): %s",
+                scanpath);
+      return;
+   }
+
    char ref[256];
    trigger_resolve_ref(rule->workspace, rule->schedule, ref, sizeof(ref));
+   /* A ref beginning with '-' would be parsed by `git ls-tree` as an option (the
+    * `--` separator only protects args after it, not the tree-ish before it). */
+   if (ref[0] == '-')
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "proposals ref rejected (leading '-'): %s", ref);
+      return;
+   }
 
    /* git ls-tree on a bare directory pathspec lists only that directory's own
     * tree entry, not the blobs inside it -- the parser (blobs only) would then
@@ -452,6 +468,11 @@ static void scan_proposals(const trigger_rule_t *rule)
    trigger_ls_tree_entry_t entries[PROPOSALS_MAX_ENTRIES];
    int n = trigger_parse_ls_tree(out ? out : "", entries, PROPOSALS_MAX_ENTRIES);
    free(out);
+   if (n == PROPOSALS_MAX_ENTRIES)
+      aimee_log(LOG_WARN, "trigger.sched",
+                "proposals scan hit the %d-entry cap for repo=%s dir=%s; extra proposals not "
+                "processed this pass",
+                PROPOSALS_MAX_ENTRIES, rule->workspace, scandir);
 
    const char *home = aimee_home();
    if (trigger_mkdir_parents(home) != 0)

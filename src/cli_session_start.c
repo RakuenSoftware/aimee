@@ -7,10 +7,12 @@
 #include "cli_session_start.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* This is a thin-client TU compiled without -I./-Idb2, and the client binary
@@ -119,27 +121,83 @@ static cJSON *ss_retry_post(const char *endpoint, const char *bearer, const char
    return NULL;
 }
 
-/* Capture the first trimmed stdout line of `cmd` into out[cap]; 1 on non-empty. */
-static int ss_git_first_line(const char *cmd, char *out, size_t cap)
+/* Run `git <argv...>` with NO shell (fork/execvp), discarding stderr. Captures
+ * the first trimmed stdout line into out[cap] (out may be NULL — status only).
+ * Returns the child's exit code (0 = success), or -1 if it could not be spawned
+ * or did not exit cleanly. Shell-free by design: session ids / repo paths never
+ * reach a shell, so there is nothing to quote or inject. */
+static int ss_git(const char *const argv[], char *out, size_t cap)
 {
-   if (cap)
+   if (out && cap)
       out[0] = '\0';
-   FILE *f = popen(cmd, "r");
-   if (!f)
-      return 0;
-   char buf[4096] = {0};
-   char *got = fgets(buf, sizeof buf, f);
-   pclose(f);
-   if (!got)
-      return 0;
-   size_t n = strlen(buf);
-   while (n > 0 &&
-          (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ' || buf[n - 1] == '\t'))
-      buf[--n] = '\0';
-   if (!buf[0])
-      return 0;
-   snprintf(out, cap, "%s", buf);
-   return 1;
+   int pfd[2];
+   if (pipe(pfd) != 0)
+      return -1;
+   pid_t pid = fork();
+   if (pid < 0)
+   {
+      close(pfd[0]);
+      close(pfd[1]);
+      return -1;
+   }
+   if (pid == 0)
+   {
+      dup2(pfd[1], STDOUT_FILENO);
+      int devnull = open("/dev/null", O_WRONLY);
+      if (devnull >= 0)
+         dup2(devnull, STDERR_FILENO);
+      close(pfd[0]);
+      close(pfd[1]);
+      execvp("git", (char *const *)argv);
+      _exit(127);
+   }
+   close(pfd[1]);
+   char buf[4096];
+   size_t got = 0;
+   ssize_t r;
+   while (got < sizeof buf - 1 && (r = read(pfd[0], buf + got, sizeof buf - 1 - got)) > 0)
+      got += (size_t)r;
+   buf[got] = '\0';
+   close(pfd[0]);
+   int status = 0;
+   if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status))
+      return -1;
+   int code = WEXITSTATUS(status);
+   if (out && cap && code == 0)
+   {
+      size_t n = 0;
+      while (buf[n] && buf[n] != '\n' && buf[n] != '\r')
+         n++;
+      buf[n] = '\0';
+      while (n > 0 && (buf[n - 1] == ' ' || buf[n - 1] == '\t'))
+         buf[--n] = '\0';
+      snprintf(out, cap, "%s", buf);
+   }
+   return code;
+}
+
+/* Collision-free worktree key for a session: a short alnum prefix of the id for
+ * human readability plus a 64-bit FNV-1a hash of the FULL id, so two distinct ids
+ * (even ones that share a sanitized prefix) never map to the same worktree/branch.
+ * Stable for a given id -> re-runs (startup/resume/compact) reuse the same one. */
+static void ss_worktree_key(const char *sid, char *out, size_t cap)
+{
+   unsigned long long h = 1469598103934665603ULL;
+   for (const char *p = sid; *p; p++)
+   {
+      h ^= (unsigned char)*p;
+      h *= 1099511628211ULL;
+   }
+   char pre[9];
+   size_t k = 0;
+   for (const char *p = sid; *p && k < 8; p++)
+   {
+      char c = *p;
+      if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+         pre[k++] = c;
+   }
+   pre[k] = '\0';
+   snprintf(out, cap, "%s%s%016llx", pre, k ? "-" : "", h);
 }
 
 /* Remote/thin session-start (handle_session_start_remote) does no local worktree
@@ -168,61 +226,47 @@ static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
    /* Need a stable session id to name the worktree; Claude Code always sends one. */
    if (!sid || !sid[0])
       return;
-   char sid_safe[64];
-   size_t si = 0;
-   for (const char *p = sid; *p && si + 1 < sizeof sid_safe; p++)
-   {
-      char c = *p;
-      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-               c == '-' || c == '_' || c == '.';
-      sid_safe[si++] = ok ? c : '-';
-   }
-   sid_safe[si] = '\0';
-   if (!sid_safe[0])
+   char key[80];
+   ss_worktree_key(sid, key, sizeof key);
+   if (!key[0])
       return;
 
-   /* A single quote in a path would break the single-quoted popen/system commands;
-    * such local repo paths are pathological -> skip rather than risk misquoting. */
-   if (strchr(cwd, '\''))
-      return;
-
-   char cmd[10240];
+   const char *const rp_argv[] = {"git", "-C", cwd, "rev-parse", "--show-toplevel", NULL};
    char git_root[4096];
-   snprintf(cmd, sizeof cmd, "git -C '%s' rev-parse --show-toplevel 2>/dev/null", cwd);
-   if (!ss_git_first_line(cmd, git_root, sizeof git_root) || strchr(git_root, '\''))
-      return; /* not a git repo (or unquotable path) -> nothing to prepare */
+   if (ss_git(rp_argv, git_root, sizeof git_root) != 0 || !git_root[0])
+      return; /* not a git repo -> nothing to prepare */
 
    /* Base the session branch on the repo's default branch (origin HEAD -> HEAD). */
    char base_ref[256];
-   snprintf(cmd, sizeof cmd, "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null",
-            git_root);
-   if (!ss_git_first_line(cmd, base_ref, sizeof base_ref))
+   const char *const oh_argv[] = {"git",      "-C",     git_root, "symbolic-ref",
+                                  "--short", "refs/remotes/origin/HEAD", NULL};
+   if (ss_git(oh_argv, base_ref, sizeof base_ref) != 0 || !base_ref[0])
    {
-      snprintf(cmd, sizeof cmd, "git -C '%s' symbolic-ref --short HEAD 2>/dev/null", git_root);
-      if (!ss_git_first_line(cmd, base_ref, sizeof base_ref))
+      const char *const h_argv[] = {"git", "-C", git_root, "symbolic-ref", "--short", "HEAD", NULL};
+      if (ss_git(h_argv, base_ref, sizeof base_ref) != 0 || !base_ref[0])
          snprintf(base_ref, sizeof base_ref, "HEAD");
    }
-   if (strchr(base_ref, '\''))
+   /* A base ref that begins with '-' would be parsed as a git option; reject it. */
+   if (base_ref[0] == '-')
       return;
 
    char wt[4200];
-   if (snprintf(wt, sizeof wt, "%s/.aimee/worktrees/%s/main", git_root, sid_safe) >=
-       (int)sizeof wt)
+   if (snprintf(wt, sizeof wt, "%s/.aimee/worktrees/%s/main", git_root, key) >= (int)sizeof wt)
+      return;
+   char branch[128];
+   if (snprintf(branch, sizeof branch, "aimee/session/%s", key) >= (int)sizeof branch)
       return;
 
    struct stat st;
    if (stat(wt, &st) != 0)
    {
       /* Prune stale registrations (best-effort), then create the worktree+branch.
-       * git worktree add makes intermediate dirs; -Wno-unused-result covers system(). */
-      snprintf(cmd, sizeof cmd, "git -C '%s' worktree prune >/dev/null 2>&1", git_root);
-      (void)system(cmd);
-      int cn = snprintf(cmd, sizeof cmd,
-                        "git -C '%s' worktree add '%s' -b 'aimee/session/%s' '%s' >/dev/null 2>&1",
-                        git_root, wt, sid_safe, base_ref);
-      if (cn < 0 || cn >= (int)sizeof cmd)
-         return; /* command truncated -> don't run a malformed git invocation */
-      (void)system(cmd);
+       * git creates intermediate dirs. Let git's exit status be authoritative. */
+      const char *const prune_argv[] = {"git", "-C", git_root, "worktree", "prune", NULL};
+      (void)ss_git(prune_argv, NULL, 0);
+      const char *const add_argv[] = {"git", "-C",     git_root, "worktree", "add", wt,
+                                      "-b",  branch, base_ref, NULL};
+      (void)ss_git(add_argv, NULL, 0);
    }
    if (stat(wt, &st) != 0 || !S_ISDIR(st.st_mode))
       return; /* creation failed -> don't point the agent at a path that isn't there */
