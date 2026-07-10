@@ -309,6 +309,73 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* session.record_transcript: persist a session's conversation to DB1 under its
+ * real host id. The hook-driven primary (e.g. Claude Code) posts the transcript
+ * it already keeps on disk (transcript_path) here each turn, so a session driven
+ * through the anonymous /v1/messages gateway — which stores no conversation — is
+ * still logged and recoverable after a crash. `messages` is the transcript JSON
+ * (array preferred; any JSON value is stored verbatim). Idempotent upsert. */
+int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
+   if (!sid || !sid[0])
+      return server_send_error(conn, "session_id required", NULL);
+   /* Enforce the same id invariant as handle_hooks_session_start: this route
+    * makes durable server_sessions + primary_sessions writes keyed by sid, so it
+    * must not admit ids the other session entry points would reject. */
+   if (!is_safe_id(sid))
+      return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
+                               NULL);
+
+   cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
+   if (!jmsgs)
+      return server_send_error(conn, "messages required", NULL);
+
+   /* Optional host metadata; the defaults suit the Claude Code hook, but a
+    * non-Claude host may identify itself. */
+   cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
+   const char *client_type =
+       (cJSON_IsString(jct) && jct->valuestring[0]) ? jct->valuestring : "claude-code";
+   cJSON *jprov = cJSON_GetObjectItemCaseSensitive(req, "provider");
+   const char *provider =
+       (cJSON_IsString(jprov) && jprov->valuestring[0]) ? jprov->valuestring : "claude-code";
+
+   char caller[DB1_SS_PRINCIPAL_LEN];
+   snprintf(caller, sizeof(caller), "uid:%d", (int)conn->peer_uid);
+
+   /* Register (idempotent) so the session is locatable even if SessionStart never
+    * ran, then enforce ownership on the FINAL row before any durable write. When
+    * the row is missing we create it and always re-read: success requires a row to
+    * actually be present afterwards (not merely a create that returned ok), which
+    * also covers a create that raced a concurrent create. Whether the row
+    * pre-existed, we just created it, or it appeared via a race, it must belong to
+    * the caller — otherwise a caller could overwrite another principal's transcript
+    * under a known session id. */
+   db1_server_session_t existing;
+   if (db1_server_session_get(sid, &existing) != 0)
+   {
+      (void)db1_server_session_create(sid, client_type, caller);
+      if (db1_server_session_get(sid, &existing) != 0)
+         return server_send_error(conn, "failed to register session", NULL);
+   }
+   if (existing.principal[0] && strcmp(existing.principal, caller) != 0)
+      return server_send_error(conn, "session_id owned by another principal", NULL);
+
+   char *messages_json = cJSON_PrintUnformatted(jmsgs);
+   if (!messages_json)
+      return server_send_error(conn, "failed to serialize transcript", NULL);
+   int rc = db1_primary_session_save(sid, client_type, provider, messages_json);
+   free(messages_json);
+   if (rc != 0)
+      return server_send_error(conn, "failed to persist transcript", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "session_id", sid);
+   return server_send_ok(conn, resp);
+}
+
 int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

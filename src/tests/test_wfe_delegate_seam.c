@@ -127,6 +127,13 @@ static const char *WF_FEAT = "name: dsf\nstart: au\nnodes:\n"
                              "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n"
                              "    params:\n      base: feature\n";
 
+/* base:trunk -> a final feature PR targets the repo's REAL default branch. pr.open is
+ * open-only, so it may target a PROTECTED trunk (main) that merge would refuse. */
+static const char *WF_TRUNK = "name: dst\nstart: au\nnodes:\n"
+                              "  - id: au\n    block: author.proposal\n    next: pr\n"
+                              "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n"
+                              "    params:\n      base: trunk\n";
+
 static int run_fresh(const char *suffix)
 {
    char id[80] = "", err[256] = "";
@@ -155,6 +162,11 @@ int main(void)
    f = fopen(p, "wb");
    assert(f);
    fputs(WF_FEAT, f);
+   fclose(f);
+   snprintf(p, sizeof p, "%s/workflows/dst.yaml", home);
+   f = fopen(p, "wb");
+   assert(f);
+   fputs(WF_TRUNK, f);
    fclose(f);
    setenv("AIMEE_HOME", home, 1);
    assert(db1_init(":memory:") == 0);
@@ -189,6 +201,52 @@ int main(void)
       assert(wfe_engine_run(id, err, sizeof err) == 0);
       assert(g_open_calls == 1);
       assert(strcmp(g_open_base, "aimee/feat/P1") == 0); /* base derived from parent linkage */
+   }
+
+   /* A3: base:trunk -> a final PR targets the repo's REAL default branch, resolved via
+    *     AIMEE_DEFAULT_BRANCH. pr.open is OPEN-ONLY, so even a PROTECTED trunk (main --
+    *     which merge would refuse) is a valid PR target: the open seam still fires and
+    *     the PR is opened against it. This is the safe terminal of the default build wf. */
+   {
+      setenv("AIMEE_DEFAULT_BRANCH", "main", 1); /* protected: wfe_base_is_protected("main")==1 */
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("dst", "r", "trunk-pr", "interactive", id, err, sizeof err) == 0);
+      g_open_calls = 0;
+      g_open_base[0] = '\0';
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(g_open_calls == 1);                /* opened even though the base is protected */
+      assert(strcmp(g_open_base, "main") == 0); /* targeted the resolved repo default branch */
+      unsetenv("AIMEE_DEFAULT_BRANCH");
+   }
+
+   /* A3b: the trunk is NOT hardcoded to "main" -- a repo whose trunk is "master" (also
+    *      protected) opens against "master". Proves base:trunk is trunk-name-agnostic. */
+   {
+      setenv("AIMEE_DEFAULT_BRANCH", "master", 1);
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("dst", "r", "trunk-master", "interactive", id, err, sizeof err) ==
+             0);
+      g_open_calls = 0;
+      g_open_base[0] = '\0';
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(g_open_calls == 1);
+      assert(strcmp(g_open_base, "master") == 0);
+      unsetenv("AIMEE_DEFAULT_BRANCH");
+   }
+
+   /* A3c: base:trunk FAILS CLOSED when the trunk is unresolvable -- no
+    *      AIMEE_DEFAULT_BRANCH and a non-git workdir (git symbolic-ref finds no
+    *      origin/HEAD), so there is NO "main" guess: pr.open must NOT open a PR. */
+   {
+      setenv("AIMEE_WORKFLOW_REPO", home, 1); /* home is a mkdtemp dir, not a git repo */
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("dst", "r", "trunk-unresolved", "interactive", id, err,
+                                  sizeof err) == 0);
+      g_open_calls = 0;
+      g_open_base[0] = '\0';
+      (void)wfe_engine_run(id, err, sizeof err); /* run parks; we assert the forge never fired */
+      assert(g_open_calls == 0);                 /* unresolved trunk -> pr.open failed closed */
+      unsetenv("AIMEE_WORKFLOW_REPO");
    }
 
    /* B: no delegate provider installed -> author still advances (fail-open to the

@@ -51,10 +51,12 @@ static void test_build_builtin_review(void)
    char *result = role_template_build(NULL, "review", "Review the auth module", NULL);
    assert(result != NULL);
    assert(strstr(result, "code reviewer") != NULL);
-   assert(strstr(result, "Inspect repository files") != NULL);
-   assert(strstr(result, "Use only current-checkout evidence") != NULL);
-   assert(strstr(result, "Do not use Aimee memory, docs, index, search") != NULL);
-   assert(strstr(result, "run `rg` in the exact worktree") != NULL);
+   /* review now trusts the index for current repo state and reviews the pushed diff */
+   assert(strstr(result, "Trust aimee's index and code graph") != NULL);
+   assert(strstr(result, "CHANGE UNDER REVIEW") != NULL);
+   assert(strstr(result, "find_symbol") != NULL);
+   assert(strstr(result, "Do not use Aimee memory, docs, index, search") == NULL);
+   assert(strstr(result, "no filesystem or shell access") != NULL);
    assert(strstr(result, "Review the auth module") != NULL);
    assert(strstr(result, "{{TASK}}") == NULL); /* placeholder substituted */
    free(result);

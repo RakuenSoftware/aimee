@@ -1,18 +1,27 @@
-# Default full-lifecycle "build" workflow (sliced-lifecycle rework).
+# Default full-lifecycle "build" workflow (sliced-lifecycle + documentation).
 #
 # input (proposal | user request)
+#   -> author.proposal
+#   -> branch.open (durable feature branch, based on the repo's DEFAULT branch)   [before the plan]
 #   -> author.plan -> roundtable {plan reviewed WITH the proposal}  (loop until convergence)
-#   -> branch.open (durable feature branch)
 #   -> split (plan -> per-slice packets)
 #   -> foreach.workflow (each packet runs the child "slice" workflow: implement ->
 #      freeze -> roundtable -> sub-PR -> GREEN CI -> merge into the feature branch)
-#   -> freeze + roundtable {acceptance: proposal completed? quality? missing tests?}
-#   -> PR (feature branch -> default branch) -> GREEN CI -> human pr_review -> merge
+#   -> freeze + roundtable {acceptance: proposal completed? quality? missing tests?}  (loop)
+#   -> document + freeze + roundtable {documentation quality}  (loop) -> pushed to the feature branch
+#   -> PR (feature branch -> the repo's DEFAULT branch).  Opened, NOT merged: the workflow ends
+#      at the human-reviewed PR (review + merge happen out-of-band on the forge).
 #
 # The roundtable always sees the originating proposal alongside the artifact under
-# review (the engine supplies it from the run's proposal), so both the plan gate and
-# the acceptance gate judge the work AGAINST what was asked. No engine privilege over
-# a user-authored workflow; clone and edit freely (`aimee workflow new`).
+# review (the engine supplies it from the run's proposal), so the plan gate, the
+# acceptance gate, and the documentation gate all judge the work AGAINST what was
+# asked. No engine privilege over a user-authored workflow; clone and edit freely
+# (`aimee workflow new`).
+#
+# "default branch" = the target repo's REAL trunk (git origin/HEAD, e.g. `main`),
+# resolved at runtime -- NOT the aimee integration branch. branch.open bases the
+# feature branch on it (clean final diff); the final pr.open targets it open-only
+# (pr.open never merges, so a PR against a protected trunk is the safe terminal).
 name: build
 intent_tags:
   - proposal
@@ -25,8 +34,16 @@ nodes:
     block: author.proposal
     params:
       with_user: true
-    next: plan
+    next: feature
     on_fail: draft
+  # Open the durable feature branch BEFORE the plan, based on the repo's default
+  # branch, so slice sub-PRs merge into it and the eventual feature->default PR is a
+  # clean diff. No `in` binding (branch.open needs none); base:trunk selects the base.
+  - id: feature
+    block: branch.open
+    params:
+      base: trunk
+    next: plan
   # The primary authors the implementation/action plan from the proposal.
   - id: plan
     block: author.plan
@@ -52,14 +69,8 @@ nodes:
       quorum: 4
       max_rounds: 6
       focus: does this implementation plan fully satisfy the proposal/request?
-    on_pass: feature
+    on_pass: split
     on_fail: plan
-  # Open the durable feature branch the per-slice sub-PRs merge into.
-  - id: feature
-    block: branch.open
-    in:
-      src: plan.out
-    next: split
   # Decompose the approved plan into independent per-slice packets.
   - id: split
     block: split
@@ -98,32 +109,46 @@ nodes:
       quorum: 4
       max_rounds: 6
       focus: was the proposal completed? assess code quality and any missing tests.
-    on_pass: final_pr
+    on_pass: document
     on_fail: split
-  # Open the final PR: feature branch -> default branch.
+  # Author the feature's documentation onto the feature branch (README/CHANGELOG/
+  # docs + inline comments). Self-loop on delegate failure.
+  - id: document
+    block: document
+    in:
+      branch: slices.out
+    next: doc_freeze
+    on_fail: document
+  # Freeze the documentation diff for review.
+  - id: doc_freeze
+    block: freeze
+    in:
+      branch: document.out
+    next: doc_gate
+  # Documentation roundtable: is the documentation complete, accurate, and clear?
+  # Findings loop back to re-document until the panel converges; on pass the docs are
+  # already committed on the feature branch.
+  - id: doc_gate
+    block: gate.roundtable
+    in:
+      src: doc_freeze.out
+    params:
+      panel:
+        required:
+          - architect
+          - qa
+          - reviewer
+      quorum: 3
+      max_rounds: 6
+      focus: is the documentation complete, accurate, and clear for this feature?
+    on_pass: final_pr
+    on_fail: document
+  # Open the final PR: feature branch -> the repo's DEFAULT branch. Terminal: the
+  # workflow ends here. pr.open only OPENS the PR (base:trunk, never merged); a human
+  # reviews and merges it on the forge.
   - id: final_pr
     block: pr.open
     in:
-      src: accept_freeze.out
-    next: final_ci
-  # The final PR must be fully green before a human may approve it.
-  - id: final_ci
-    block: gate.ci
-    in:
-      pr: final_pr.out
-    on_pass: human
-    on_fail: split
-  # Human-gated approval of the feature PR.
-  - id: human
-    block: gate.human
-    in:
-      pr: final_pr.out
+      src: doc_freeze.out
     params:
-      policy: pr_review
-    on_pass: merge
-    on_fail: split
-  # Merge the approved, green feature PR into the default branch.
-  - id: merge
-    block: merge
-    in:
-      pr: final_pr.out
+      base: trunk

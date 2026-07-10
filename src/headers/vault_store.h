@@ -73,6 +73,15 @@ int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN]
                          const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
                          const char *cred, const char *secret);
 
+/* Encrypt `secret` for (principal, agent, cred) wrapped ONLY under `server_kek`
+ * (the "wrapped_dek_server" field; NO user-KEK wrap) and upsert it into the
+ * principal's vault file. The write-side counterpart of vault_store_get_server:
+ * lets a per-`principal` credential (e.g. a webuser git SSH key) be SET with no
+ * user unlock, yet read back autonomously by the server. The vault file must
+ * already exist (the caller creates the salt). 0 on success, -1 on error. */
+int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
+                           const char *agent, const char *cred, const char *secret);
+
 /* Decrypt the (agent, cred) credential for `principal` using the SERVER wrap
  * ("wrapped_dek_server") under `server_kek` — NO user KEK / unlock required. This
  * is the autonomous server use-path. Returns 0 on success, VAULT_STORE_NO_ENTRY

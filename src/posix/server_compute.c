@@ -410,6 +410,62 @@ static int chat_model_passthrough_allowed(const char *model)
    return model && model[0] && strcmp(model, "aimee") != 0 && strncmp(model, "aimee:", 6) != 0;
 }
 
+/* Register the aimee session in DB1 (idempotent) so a chat that goes through ANY
+ * provider path — including the tmux CLI agent worker and inbound ACP/MCP serve
+ * turns — is locatable in `server_sessions` after a crash/restart. Previously
+ * only clients that explicitly called session.create had a registry row, so a
+ * session started purely by a chat turn (e.g. an editor over ACP) could not be
+ * found again. Best-effort; a missing sid is a no-op. */
+static void chat_session_register(const char *aimee_sid, const char *client_type)
+{
+   if (!aimee_sid || !aimee_sid[0])
+      return;
+   db1_server_session_t row;
+   if (db1_server_session_get(aimee_sid, &row) == 0)
+      return; /* already registered */
+   const char *principal = agent_get_request_vault_principal();
+   (void)db1_server_session_create(aimee_sid,
+                                   (client_type && client_type[0]) ? client_type : "chat",
+                                   principal ? principal : "");
+}
+
+/* Append one user/assistant turn to the durable `primary_sessions` transcript so
+ * chats served by the agent (tmux CLI) worker — which otherwise persists nothing
+ * to DB1 — are logged and survive a crash. The direct primary-session adapter
+ * already writes its own full provider-formatted transcript, so this is only
+ * needed for the agent path. Best-effort; keyed by the aimee session id so
+ * db1_primary_session_get_latest can recover it. */
+static void chat_log_turn_transcript(const char *aimee_sid, const char *agent_name,
+                                     const char *provider, const char *user_msg,
+                                     const char *assistant_reply)
+{
+   if (!aimee_sid || !aimee_sid[0] || !assistant_reply || !assistant_reply[0])
+      return;
+   char *existing = db1_primary_session_load(aimee_sid, agent_name, provider);
+   cJSON *messages = existing ? cJSON_Parse(existing) : NULL;
+   free(existing);
+   if (!messages || !cJSON_IsArray(messages))
+   {
+      cJSON_Delete(messages);
+      messages = cJSON_CreateArray();
+   }
+   if (!messages)
+      return;
+   cJSON *um = cJSON_CreateObject();
+   cJSON_AddStringToObject(um, "role", "user");
+   cJSON_AddStringToObject(um, "content", user_msg ? user_msg : "");
+   cJSON_AddItemToArray(messages, um);
+   cJSON *am = cJSON_CreateObject();
+   cJSON_AddStringToObject(am, "role", "assistant");
+   cJSON_AddStringToObject(am, "content", assistant_reply);
+   cJSON_AddItemToArray(messages, am);
+   char *json = cJSON_PrintUnformatted(messages);
+   cJSON_Delete(messages);
+   if (json)
+      (void)db1_primary_session_save(aimee_sid, agent_name, provider, json);
+   free(json);
+}
+
 static int chat_codex_effort_allowed(const char *effort)
 {
    return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
@@ -818,6 +874,11 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       return;
    }
 
+   /* Log this turn to the durable DB1 transcript. The agent (tmux CLI) worker is
+    * the one chat path that otherwise persists nothing, so a session started here
+    * (e.g. over inbound ACP/MCP) was previously unrecoverable after a crash. */
+   chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
+
    /* If the reply already streamed incrementally, don't re-emit it whole. */
    if (!sctx.emitted && result.response && result.response[0])
       stream_event(cctx, "text", "content", result.response);
@@ -1133,6 +1194,14 @@ void chat_stream_worker(void *arg)
       compute_error(cctx, "missing message");
       compute_ctx_free(cctx);
       return;
+   }
+
+   /* Register the session in DB1 up front so it is locatable in `server_sessions`
+    * regardless of which provider path serves the turn below (codex / primary-
+    * session / agent). Idempotent and best-effort. */
+   {
+      cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
+      chat_session_register(aimee_sid, cJSON_IsString(jct) ? jct->valuestring : NULL);
    }
 
    /* The S1/S2 request->workflow router now runs at the UNIFIED gateway seam

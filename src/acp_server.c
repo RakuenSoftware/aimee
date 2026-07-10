@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #ifndef AIMEE_VERSION
 #define AIMEE_VERSION "dev"
@@ -87,14 +89,29 @@ int acp_server_build_initialize(const char *id_json, char *out, size_t out_n)
    return acp_initialize_for_id(id, out, out_n);
 }
 
-/* session/new: mint a fresh ACP session id. Phase 1 keeps it in-process; phase 3
- * maps it onto a persistent DB1 aimee session so editor reconnects restore
- * history. The id is unique per acp-serve process. */
+/* session/new: mint a fresh ACP session id. The chat turn that follows persists
+ * to DB1 under this id (server_sessions + primary_sessions transcript), so the id
+ * must be unique across acp-serve processes — a bare per-process counter reset to
+ * 1 on every restart, colliding with a prior (e.g. crashed) session's DB rows and
+ * making it unrecoverable. Qualify it with the pid and process start time; the
+ * editor stores the returned id and replays it on session/load to resume. */
 static int acp_session_new_for_id(cJSON *id, char *out, size_t out_n)
 {
+   /* acp_server_run drives session/new from a single stdin loop, so this static
+    * seq is never touched concurrently. Seed the id with the process start time to
+    * nanosecond resolution (not whole seconds) so two acp-serve processes that
+    * reuse a pid can't collide on the same second. */
    static unsigned long seq = 0;
+   static long long proc_seed = 0;
+   if (proc_seed == 0)
+   {
+      struct timespec ts;
+      proc_seed = (clock_gettime(CLOCK_REALTIME, &ts) == 0)
+                      ? (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec
+                      : (long long)time(NULL);
+   }
    char sid[64];
-   snprintf(sid, sizeof(sid), "acp-sess-%lu", ++seq);
+   snprintf(sid, sizeof(sid), "acp-%d-%lld-%lu", (int)getpid(), proc_seed, ++seq);
    cJSON *root = cJSON_CreateObject();
    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
    acp_add_id(root, id);

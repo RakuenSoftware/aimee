@@ -778,14 +778,66 @@ static void feature_branch_name(const char *wi_id, char *buf, size_t n)
    snprintf(buf, n, "aimee/feat/%s", (wi_id && wi_id[0]) ? wi_id : "orphan");
 }
 
+/* Resolve the target repo's REAL default branch (its trunk: the branch a final,
+ * human-reviewed PR targets). Resolution order:
+ *   1. AIMEE_DEFAULT_BRANCH override -- deterministic operator knob + test seam;
+ *   2. else `git symbolic-ref --short refs/remotes/origin/HEAD` in `repo_dir`
+ *      (the repo's advertised default, e.g. "origin/main" -> "main").
+ * Returns 0 with `buf` filled on success; returns -1 (and clears `buf`) if the trunk
+ * cannot be determined -- there is NO "main" guess: a base:trunk PR is safety-relevant
+ * (it drives allow_protected), so an unresolved trunk FAILS CLOSED at the caller rather
+ * than opening a PR against a guessed branch that may not be the real trunk. This is the
+ * repo's own trunk, NOT wfe_autonomous_base() (the aimee integration branch "testing"). */
+static int wfe_repo_default_branch(const char *repo_dir, char *buf, size_t n)
+{
+   if (!buf || n < 2)
+      return -1;
+   buf[0] = '\0';
+   const char *env = getenv("AIMEE_DEFAULT_BRANCH");
+   if (env && env[0])
+   {
+      snprintf(buf, n, "%s", env);
+      return 0;
+   }
+   if (repo_dir && repo_dir[0])
+   {
+      const char *argv[] = {
+          "git", "-C", repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", NULL};
+      char *o = NULL;
+      if (safe_exec_capture(argv, &o, 1 << 14) == 0 && o)
+      {
+         size_t l = strlen(o);
+         while (l && (o[l - 1] == '\n' || o[l - 1] == '\r' || o[l - 1] == ' ' || o[l - 1] == '\t'))
+            o[--l] = '\0';
+         const char *name = (strncmp(o, "origin/", 7) == 0) ? o + 7 : o;
+         if (name[0])
+         {
+            snprintf(buf, n, "%s", name);
+            free(o);
+            return 0;
+         }
+      }
+      free(o);
+   }
+   return -1; /* unresolved -> caller fails closed (no "main" guess) */
+}
+
 /* Resolve a pr.open node's target base branch into `buf`. params.base:
  *   "feature" -> the parent feature branch aimee/feat/<parent_id> (a slice sub-PR
  *                merges INTO the feature branch); requires the run to have a parent.
- *   "default"/absent -> the autonomous base (a top-level / final PR).
- * Returns 0 on success, -1 if a feature base was requested but the run has no parent
- * (a misconfiguration -> the caller fails closed). */
-static int resolve_pr_base(wfe_ctx *ctx, const wfe_node_t *node, char *buf, size_t n)
+ *   "trunk"   -> the repo's REAL default branch (wfe_repo_default_branch). A final
+ *                feature PR targets the trunk; sets *allow_protected so exec_pr_open
+ *                may OPEN a PR against main/master (it never merges -- merge keeps its
+ *                own wfe_autonomous_target_ok() rail).
+ *   "default"/absent -> the autonomous base (the aimee integration branch).
+ * *allow_protected defaults to 0; only "trunk" sets it. Returns 0 on success, -1 if a
+ * feature base was requested but the run has no parent (a misconfiguration -> the
+ * caller fails closed). */
+static int resolve_pr_base(wfe_ctx *ctx, const wfe_node_t *node, char *buf, size_t n,
+                           int *allow_protected)
 {
+   if (allow_protected)
+      *allow_protected = 0;
    const cJSON *b = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "base") : NULL;
    const char *base_kind = (b && cJSON_IsString(b) && b->valuestring) ? b->valuestring : "default";
    if (strcmp(base_kind, "feature") == 0)
@@ -797,6 +849,14 @@ static int resolve_pr_base(wfe_ctx *ctx, const wfe_node_t *node, char *buf, size
       feature_branch_name(row.parent_id, buf, n);
       return 0;
    }
+   if (strcmp(base_kind, "trunk") == 0)
+   {
+      char wd[1024];
+      resolve_workdir(ctx, wd, sizeof wd);
+      if (allow_protected)
+         *allow_protected = 1; /* open-only against the repo trunk (never merged here) */
+      return wfe_repo_default_branch(wd, buf, n);
+   }
    const char *ab = wfe_autonomous_base();
    snprintf(buf, n, "%s", (ab && ab[0]) ? ab : "");
    return buf[0] ? 0 : -1;
@@ -806,11 +866,17 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   /* Resolve the target base (autonomous base, or the parent feature branch for a
-    * slice sub-PR). Safety rail: refuse a base that resolves to a protected branch
-    * (main/master/release*) -> fail closed rather than open a PR against it. */
+   /* Resolve the target base (autonomous base, the parent feature branch for a slice
+    * sub-PR, or the repo trunk for a final feature PR). Safety rail: refuse a base that
+    * resolves to a protected branch (main/master/release*) UNLESS this is an explicit
+    * base:trunk final PR -- pr.open only OPENS a PR (never merges), so a human-reviewed
+    * PR against the trunk is the intended, safe terminal. merge keeps its own
+    * wfe_autonomous_target_ok() rail, so nothing can auto-merge into a protected base. */
    char base[256] = "";
-   if (resolve_pr_base(ctx, node, base, sizeof base) != 0 || wfe_base_is_protected(base))
+   int allow_protected = 0;
+   if (resolve_pr_base(ctx, node, base, sizeof base, &allow_protected) != 0)
+      return wfe_step_failed();
+   if (!allow_protected && wfe_base_is_protected(base))
       return wfe_step_failed();
    if (g_forge->open)
    {
@@ -1258,10 +1324,25 @@ static wfe_step_result_t exec_gate_deliver(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, "", 0.0); /* terminal: engine logs "terminal" */
 }
 
+/* 1 if `ref` resolves to a commit in `wd` (used to pick a startpoint that exists). */
+static int git_ref_ok(const char *wd, const char *ref)
+{
+   char spec[192];
+   snprintf(spec, sizeof spec, "%s^{commit}", ref);
+   const char *argv[] = {"git", "-C", wd, "rev-parse", "--verify", "--quiet", spec, NULL};
+   char *o = NULL;
+   int rc = safe_exec_capture(argv, &o, 1 << 12);
+   free(o);
+   return rc == 0;
+}
+
 /* branch.open: open/return the durable feature branch that the per-slice sub-PRs
  * target and merge into. Produces the branch head SHA as its artifact (mirrors
  * freeze/document). Creating + pushing a named durable branch is the live-forge
- * concern (integration-gated); with no repo available it fails closed. */
+ * concern (integration-gated); with no repo available it fails closed.
+ * params.base:trunk bases the feature branch on the repo's REAL default branch
+ * (origin/<trunk>) so the eventual feature->trunk PR is a clean diff; absent, it
+ * bases at HEAD (the run's current base) as before. */
 static wfe_step_result_t exec_branch_open(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char wd[1024];
@@ -1269,17 +1350,34 @@ static wfe_step_result_t exec_branch_open(wfe_ctx *ctx, const wfe_node_t *node)
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0);
-   /* The durable feature branch slice sub-PRs merge into: aimee/feat/<work-item>.
-    * Create it locally at HEAD (best-effort) and publish it to the forge so the base
-    * exists remotely; the live forge registers publish_base, tests/no-forge stub it
-    * (the branch name is still produced so the graph advances). */
+   /* The durable feature branch slice sub-PRs merge into: aimee/feat/<work-item>. */
    const char *wi = wfe_ctx_work_item(ctx);
    char feat[200];
    feature_branch_name(wi, feat, sizeof feat);
-   /* Create the local branch at HEAD if absent; NO `-f`, so a re-entry never resets an
-    * existing feature branch back to base (which would discard already-merged slices).
-    * "already exists" is a harmless non-zero rc here (best-effort). */
-   const char *br[] = {"git", "-C", wd, "branch", feat, "HEAD", NULL};
+   /* Startpoint: base:trunk -> the repo trunk (prefer origin/<trunk>, else a local
+    * <trunk>); absent -> HEAD (prior behavior). base:trunk FAILS CLOSED (parks) if the
+    * trunk can't be resolved to a real ref -- a feature branch silently based off the
+    * wrong point would produce a noisy/incorrect feature->trunk diff, so we refuse
+    * rather than guess. */
+   const char *startpoint = "HEAD";
+   char sp[192];
+   const cJSON *bp = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "base") : NULL;
+   if (bp && cJSON_IsString(bp) && bp->valuestring && strcmp(bp->valuestring, "trunk") == 0)
+   {
+      char db[64];
+      if (wfe_repo_default_branch(wd, db, sizeof db) != 0)
+         return wfe_step_failed(); /* trunk name unresolved (no env + no origin/HEAD) */
+      snprintf(sp, sizeof sp, "origin/%s", db);
+      if (!git_ref_ok(wd, sp))
+         snprintf(sp, sizeof sp, "%s", db);
+      if (!git_ref_ok(wd, sp))
+         return wfe_step_failed(); /* trunk resolved but no local ref -> fail closed */
+      startpoint = sp;
+   }
+   /* Create the local branch at the startpoint if absent; NO `-f`, so a re-entry never
+    * resets an existing feature branch back to base (which would discard already-merged
+    * slices). "already exists" is a harmless non-zero rc here (best-effort). */
+   const char *br[] = {"git", "-C", wd, "branch", feat, startpoint, NULL};
    char *o = NULL;
    (void)safe_exec_capture(br, &o, 1 << 14);
    free(o);

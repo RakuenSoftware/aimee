@@ -1,13 +1,16 @@
 # Proposal: User-configurable curator pipeline — reorder, constraints, presets, user-defined stages
 
-- **State:** PENDING — design + phased build. Authored autonomously overnight
-  (2026-07-08) at the product owner's direction ("users order stages any valid
-  way; enforce constraints and disallow impossible configs; presets starting at 3,
-  ultimately user-defined; ultimately users add their own stages"). The design
-  decisions here would normally be validated by the delegate roundtable, but the
-  roundtable was unavailable this session (narrow default panel; the `.254`
-  `ensemble.reference_models` config edit failed — codex delegate exhausted budget
-  with "glob failed"). Flagged for review.
+- **State:** DONE — every §8 acceptance criterion is met and verified. Shipped
+  across Phase A reorder + DAG (#1175), Phase C presets (#1177), Phase D composed
+  custom stages backend (#1211) and GUI (#1212); Phase B GUI reorder shipped
+  earlier. Authored autonomously (2026-07-08) at the product owner's direction
+  ("users order stages any valid way; enforce constraints and disallow impossible
+  configs; presets starting at 3, ultimately user-defined; ultimately users add
+  their own stages"). The design and every implementing change were validated
+  through the delegate roundtable on 2026-07-09. **Phase E (plugin-contributed
+  stages) is explicitly out of scope here — future and trust-gated — and belongs
+  in its own proposal;** it carries no §8 acceptance criterion, so it does not hold
+  this one open.
 - **Author:** JBailes (assisted)
 - **Date:** 2026-07-08
 - **Builds on:** the modular curator pipeline (Phases 1–5, shipped): the
@@ -92,12 +95,26 @@ that actually gate a valid order.
 A stage today is a C struct with a **function pointer** (`run`). Arbitrary
 user-supplied code is a non-starter (correctness + security). Phased, safe path:
 
-- **v1 — composed stages:** a user stage is `{name, base_op, lane, budget}` in
-  `kb.curator.custom_stages`, where `base_op` **references an existing, vetted
-  registry op** (e.g. an operator defines a second `index_claims`-style pass over a
-  different source, or renames/relanes an existing op). The registry the workers
-  iterate becomes `built-in ⊕ custom` (custom validated against the same DAG rules
-  + lane legality). No new executable code — only recomposition of shipped ops.
+- **v1 — composed stages (SHIPPED, Phase D):** a user stage is
+  `{name, base_op, budget, enabled?}` in `kb.curator.custom_stages`, where `base_op`
+  **references an existing, vetted registry op** — it reuses that op's `run`
+  function pointer under a new name/budget. The registry the workers iterate becomes
+  `built-in ⊕ custom` (custom validated: `base_op` must resolve to a built-in;
+  strict `[A-Za-z0-9_-]` ≤63-char names; count-capped; fail-safe skip-with-WARN on
+  any bad entry). No new executable code — only recomposition of shipped ops.
+  - **Scope correction (roundtable, 2026-07-09):** a composed stage can only *reuse*
+    an existing `run()`, and every `run()` drains its **own hardcoded queue** via a
+    non-atomic `SELECT … LIMIT 1 → commit`. So a custom stage cannot target "a
+    different source" (that needs a new pull spec — v2/v3), and it **must run on its
+    `base_op`'s native lane**: re-laning would put two consumers on one queue across
+    two concurrent lane threads, double-draining it (wasted LLM cost, racy commits).
+    v1 therefore **disallows re-laning** (a differing `lane` is rejected). Re-laning
+    is deferred to a future phase gated on an atomic transactional dequeue.
+  - **Enable model:** presence in `custom_stages` = enabled; optional
+    `"enabled": false` keeps an entry (surfaced on the endpoint for the GUI) without
+    composing it into the runner. A non-bool `enabled` is rejected, not coerced.
+  - **Ordering:** custom stages append after the built-ins; they do not yet
+    participate in `stage_order` (unknown names there are already safely ignored).
 - **v2 — declarative stages:** a small, sandboxed spec (source selector →
   transform op → sink) built from a fixed vocabulary of vetted primitives. Still
   no arbitrary code.
@@ -110,14 +127,17 @@ Full arbitrary user code is explicitly out of scope.
 
 ## 6. Phase plan
 
-- **Phase A** — DAG + `requires` on the endpoint; `kb.curator.stage_order` config;
-  validation; runtime reorder (fail-safe). *(core buildable now)*
-- **Phase B** — GUI: drag/▲▼ reorder with client-side constraint enforcement;
-  persist `stage_order`.
-- **Phase C** — user-defined presets (save/apply/delete). *(builds on #1173)*
-- **Phase D** — composed user-defined stages (`custom_stages`), DAG- and
-  lane-validated.
-- **Phase E** — plugin-contributed stages (future; trust-gated).
+- **Phase A (SHIPPED, #1175)** — DAG + `requires` on the endpoint;
+  `kb.curator.stage_order` config; validation; runtime reorder (fail-safe).
+- **Phase B (SHIPPED)** — GUI: drag/▲▼ reorder with client-side constraint
+  enforcement; persist `stage_order`.
+- **Phase C (SHIPPED, #1177)** — user-defined presets (save/apply/delete).
+- **Phase D (SHIPPED, #1211 backend + #1212 GUI)** — composed user-defined stages
+  (`custom_stages`), base_op-validated, same-lane, fail-safe; surfaced on the
+  `curator.stages` endpoint (`custom:true`, `base_op`, `base_op_eligible`) and
+  managed in a Custom stages panel on the Pipeline page (add / enable / delete).
+- **Phase E** — plugin-contributed stages (future; trust-gated). Also the home of
+  re-laning + new-source composition, both gated on an atomic transactional dequeue.
 
 ## 7. Risks
 
@@ -127,13 +147,20 @@ Full arbitrary user code is explicitly out of scope.
 - **`config.set` rejecting invalid orders** needs a per-key validation hook — small
   but new surface; keep the runner fail-safe regardless.
 - **Composed stages** must validate `base_op` against the vetted op set and reject
-  unknown ops (no code injection); lane legality enforced.
+  unknown ops (no code injection); lane legality enforced. *(Resolved: base_op is
+  allowlisted to built-in run()-backed stages; re-laning is rejected outright in v1
+  so built-in ⊕ custom stays single-threaded per lane — no concurrent double-drain
+  of a queue whose dequeue is non-atomic.)*
 
 ## 8. Acceptance
+
+All criteria below are **met and verified** (unit tests + green CI on each PR):
 
 - Invalid `stage_order` is rejected at the API and the GUI, and the runner logs one
   WARN and uses registry order if a bad order reaches config.
 - A valid reorder changes the per-pass stage sequence within a lane (observable in
   the drain debug log) without changing curated output.
 - Saved user presets round-trip through config and apply correctly.
-- A composed custom stage runs its `base_op` on its lane and is DAG-validated.
+- A composed custom stage runs its `base_op` on its (native) lane, reusing the base
+  op's `run`; base_op/name/lane validation is exercised by
+  `test_curator_custom_stages` and bad entries fail safe (skip + one WARN).

@@ -333,13 +333,15 @@ static int add_b64_field(cJSON *obj, const char *name, const uint8_t *bin, size_
    return 0;
 }
 
-/* Shared set implementation. When `server_kek` is non-NULL the DEK is wrapped a
- * second time under it ("wrapped_dek_server") for dual-access (WP-C.4). */
-static int vault_store_set_impl(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+/* Shared set implementation. `kek` (user wrap) and `server_kek` (server wrap,
+ * "wrapped_dek_server", WP-C.4 dual-access) are each optional, but at least one
+ * must be present: kek-only = vault_store_set, both = _set_dual, server_kek-only
+ * = _set_server (a server-readable cred set with no user KEK / unlock). */
+static int vault_store_set_impl(const char *principal, const uint8_t *kek,
                                 const uint8_t *server_kek, const char *agent, const char *cred,
                                 const char *secret)
 {
-   if (!principal || !kek || !agent || !agent[0] || !cred || !cred[0] || !secret)
+   if (!principal || (!kek && !server_kek) || !agent || !agent[0] || !cred || !cred[0] || !secret)
       return -1;
    size_t pt_len = strlen(secret);
    if (pt_len > VAULT_SECRET_MAX)
@@ -368,7 +370,9 @@ static int vault_store_set_impl(const char *principal, const uint8_t kek[VAULT_K
    if (vault_secret_encrypt(dek, (const uint8_t *)aad, strlen(aad), (const uint8_t *)secret, pt_len,
                             nonce, ct, tag) != 0)
       goto out;
-   if (vault_dek_wrap(kek, dek, wrapped) != 0)
+   /* User wrap: optional (a server-only entry has no wrapped_dek — it is read
+    * back exclusively via the server wrap). Fail-closed on a wrap error. */
+   if (kek && vault_dek_wrap(kek, dek, wrapped) != 0)
       goto out;
    /* Dual-access: a second wrap of the same DEK under the server KEK. Fail-closed
     * — if requested but it can't be produced, store nothing (never a credential
@@ -387,7 +391,7 @@ static int vault_store_set_impl(const char *principal, const uint8_t kek[VAULT_K
          goto out;
       cJSON_AddStringToObject(obj, "agent", agent);
       cJSON_AddStringToObject(obj, "cred", cred);
-      if (add_b64_field(obj, "wrapped_dek", wrapped, sizeof(wrapped)) != 0 ||
+      if ((kek && add_b64_field(obj, "wrapped_dek", wrapped, sizeof(wrapped)) != 0) ||
           add_b64_field(obj, "nonce", nonce, sizeof(nonce)) != 0 ||
           add_b64_field(obj, "ciphertext", ct, pt_len) != 0 ||
           add_b64_field(obj, "tag", tag, sizeof(tag)) != 0 ||
@@ -427,6 +431,16 @@ int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN]
    if (!server_kek)
       return -1;
    return vault_store_set_impl(principal, kek, server_kek, agent, cred, secret);
+}
+
+int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
+                           const char *agent, const char *cred, const char *secret)
+{
+   if (!server_kek)
+      return -1;
+   /* No user KEK: the entry carries only a server wrap, so it can be set without
+    * an unlocked user vault and read back via vault_store_get_server. */
+   return vault_store_set_impl(principal, NULL, server_kek, agent, cred, secret);
 }
 
 int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,

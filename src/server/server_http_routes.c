@@ -1476,13 +1476,13 @@ static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
               : err_json(resp, cap, 500, "too large");
 }
 
-/* Per-webuser SSH private key for git over SSH. Stored in the caller's OWN
- * encrypted vault under (webuser:<name>, "git", "ssh_key") — dual-wrapped so the
- * server can load it into the user's in-memory ssh-agent autonomously
- * (git_ssh_agent_ensure → git_forge_vault_sshkey), while the key never reaches
- * the browser (write-only) and never lands on disk. Storing needs the caller's
- * vault unlocked (the per-principal KEK); a locked vault returns 423 so the UI
- * can prompt an unlock. The secret is never logged. */
+/* Per-webuser SSH private key for git over SSH. Stored under the caller's OWN
+ * principal (webuser:<name>, "git", "ssh_key") but sealed with the SERVER master
+ * KEK (a server-only wrap), so the server can load it into the user's in-memory
+ * ssh-agent autonomously (git_ssh_agent_ensure → git_forge_vault_sshkey) AND
+ * storing it needs NO vault unlock — parity with per-host git tokens and delegate
+ * keys. The key never reaches the browser (write-only) and never lands on disk.
+ * The secret is never logged. */
 static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
 {
    if (!git_surface_enabled())
@@ -1540,8 +1540,12 @@ static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
                       "passphrase-encrypted keys are not supported; provide an unencrypted key");
    }
 
-   vault_status_t st = vault_service_set(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED,
-                                         key, (long)time(NULL));
+   /* Seal the key under the SERVER master KEK (not the caller's per-user KEK) so
+    * storing needs NO vault unlock — parity with per-host git tokens and delegate
+    * keys. It is read back the same way (git_forge_vault_sshkey ->
+    * vault_service_get_server_wrap), so there is never a VAULT_ERR_LOCKED here. */
+   vault_status_t st =
+       vault_service_set_server_wrap(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, key);
    /* Zero our parsed copy of the secret before freeing the JSON tree. */
    if (jkey && jkey->valuestring)
    {
@@ -1550,8 +1554,6 @@ static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
          p[i] = 0;
    }
    cJSON_Delete(body);
-   if (st == VAULT_ERR_LOCKED)
-      return err_json(resp, cap, 423, "vault is locked — unlock it, then add the key");
    if (st != VAULT_OK)
       return err_json(resp, cap, 500, "vault store failed");
    /* A freshly stored key supersedes any agent already running with the old one. */
@@ -2013,6 +2015,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/skills/patch", NULL, RM_EXACT, "skill.patch", 0, rh_dispatch_op},
     {"POST", "/v1/skills/unpin", NULL, RM_EXACT, "skill.unpin", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/create", NULL, RM_EXACT, "session.create", 0, rh_dispatch_op},
+    {"POST", "/v1/sessions/record_transcript", NULL, RM_EXACT, "session.record_transcript", 0,
+     rh_dispatch_op},
     {"POST", "/v1/sessions/close", NULL, RM_EXACT, "session.close", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/get", NULL, RM_EXACT, "session.get", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/brief", NULL, RM_EXACT, "session.brief", 0, rh_dispatch_op},

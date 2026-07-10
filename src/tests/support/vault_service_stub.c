@@ -56,6 +56,18 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
    return VAULT_OK;
 }
 
+/* rh_git_sshkey now seals the key under the server KEK (no unlock); same clean
+ * success for tests linking server_http.o without the real vault. */
+vault_status_t vault_service_set_server_wrap(const char *principal, const char *agent,
+                                             const char *cred, const char *secret)
+{
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   (void)secret;
+   return VAULT_OK;
+}
+
 vault_status_t vault_service_delete(const char *principal, const char *agent, const char *cred)
 {
    (void)principal;

@@ -328,6 +328,8 @@ const config_field_t config_fields[] = {
      sizeof(((config_t *)0)->kb_curator_stage_order), 0, CFG_STRING},
     {"kb_curator_user_presets", offsetof(config_t, kb_curator_user_presets),
      sizeof(((config_t *)0)->kb_curator_user_presets), 0, CFG_STRING},
+    {"kb_curator_custom_stages", offsetof(config_t, kb_curator_custom_stages),
+     sizeof(((config_t *)0)->kb_curator_custom_stages), 0, CFG_STRING},
     {"kb_curator_extract_code_enabled", offsetof(config_t, kb_curator_extract_code_enabled),
      sizeof(int), 0, CFG_BOOL},
     {"kb_curator_resolve_entities_enabled", offsetof(config_t, kb_curator_resolve_entities_enabled),

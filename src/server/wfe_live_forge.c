@@ -10,9 +10,12 @@
  * AND the merge-target rail via forge_allowed() and fails closed if either is off —
  * including immediately before each mutating git/gh call, so a config flip or a
  * base misconfig mid-op can't slip a push/PR/merge through (TOCTOU-safe). An
- * autonomous run can never open or merge a PR against a protected branch. Turning
- * the flag on is a deliberate operator deployment action gated on branch protection
- * + scoped creds (the security-roundtable deviation from §7's default-on). */
+ * autonomous run can never MERGE into a protected branch; it may OPEN a
+ * human-reviewed PR against the repo's own default branch (trunk) -- open-only, never
+ * auto-merged (the default "build" workflow's terminal). Any OTHER protected base
+ * stays refused. Turning the flag on is a deliberate operator deployment action gated
+ * on branch protection + scoped creds (the security-roundtable deviation from §7's
+ * default-on). */
 #include "aimee.h"
 
 #include "wfe_live_forge.h"
@@ -192,6 +195,43 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    return res;
 }
 
+/* The repo's real default branch as the vaulted runner sees it: AIMEE_DEFAULT_BRANCH
+ * override, else origin/HEAD (e.g. "origin/main" -> "main"). Returns 0 with `buf`
+ * filled on success, -1 (and clears `buf`) if the trunk can't be determined -- there is
+ * NO "main" guess, so a protected base can be permitted ONLY when we positively
+ * resolved it to be the real trunk. Mirrors wfe_repo_default_branch() in the engine so
+ * base:trunk means the same trunk on both sides of the forge seam. */
+static int live_default_branch(char *buf, size_t n)
+{
+   if (!buf || n < 2)
+      return -1;
+   buf[0] = '\0';
+   const char *env = getenv("AIMEE_DEFAULT_BRANCH");
+   if (env && env[0])
+   {
+      snprintf(buf, n, "%s", env);
+      return 0;
+   }
+   int rc = -1;
+   char *out = mcp_git_run("git symbolic-ref --short refs/remotes/origin/HEAD 2>&1", &rc);
+   if (rc == 0 && out)
+   {
+      size_t l = strlen(out);
+      while (l &&
+             (out[l - 1] == '\n' || out[l - 1] == '\r' || out[l - 1] == ' ' || out[l - 1] == '\t'))
+         out[--l] = '\0';
+      const char *name = (strncmp(out, "origin/", 7) == 0) ? out + 7 : out;
+      if (name[0])
+      {
+         snprintf(buf, n, "%s", name);
+         free(out);
+         return 0;
+      }
+   }
+   free(out);
+   return -1; /* unresolved -> caller refuses a protected base (no "main" guess) */
+}
+
 static int live_open(const char *repo, const char *branch, const char *base, const char *title,
                      const char *body, char out_pr_ref[128])
 {
@@ -200,11 +240,24 @@ static int live_open(const char *repo, const char *branch, const char *base, con
       out_pr_ref[0] = '\0';
    if (!forge_allowed() || !branch || !branch[0])
       return -1;
-   /* `base` is resolved + guaranteed non-protected by exec_pr_open (the autonomous
-    * base for a top-level PR, or aimee/feat/<parent> for a slice sub-PR). Defence in
-    * depth: refuse an empty or protected base here too. */
-   if (!base || !base[0] || wfe_base_is_protected(base))
+   /* Defence in depth beyond exec_pr_open: refuse an empty base, and refuse a protected
+    * base UNLESS it is the repo's own default branch (trunk). pr.open only OPENS a PR
+    * (never merges), so a human-reviewed PR against the trunk is the intended terminal;
+    * any other protected base (a release-train branch, a non-trunk master, ...) is a
+    * misconfig and stays refused. live_merge never merges into a protected base. */
+   if (!base || !base[0])
       return -1;
+   if (wfe_base_is_protected(base))
+   {
+      char trunk[64];
+      if (live_default_branch(trunk, sizeof trunk) != 0 || strcmp(base, trunk) != 0)
+      {
+         aimee_log(LOG_WARN, "wfe-forge",
+                   "refusing PR open against protected base '%s' (not the resolved repo trunk)",
+                   base);
+         return -1;
+      }
+   }
 
    /* Escape every interpolated value; ABORT on any truncation (never run a
     * half-built shell command). */

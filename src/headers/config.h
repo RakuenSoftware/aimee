@@ -1603,13 +1603,25 @@ typedef struct config
    /* Comma-separated stage-name order for the curator pipeline (GUI reorder).
     * Empty = registry (default) order. Validated against the dependency DAG; an
     * invalid order falls back to registry order with a WARN. Opt-in: unset changes
-    * nothing. See docs/proposals/pending/user-configurable-curator-pipeline.md. */
+    * nothing. See docs/proposals/done/user-configurable-curator-pipeline.md. */
    char kb_curator_stage_order[512];
    /* User-defined curator presets as a JSON array string:
     * [{"name":"...","enabled":["kb_curator_..._enabled",...]}]. Merged with the
     * built-in presets on the curator.stages endpoint; the GUI saves/deletes named
     * profiles here via config.set (flat string, no bespoke op). Empty = none. */
    char kb_curator_user_presets[4096];
+   /* User-defined composed curator stages (Phase D) as a JSON array string:
+    * [{"name":"...","base_op":"<built-in stage>","budget":N,"enabled":true}].
+    * Each recomposes a vetted built-in op (reuses its run fn) under a new
+    * name/budget, appended to the built-in registry the lane workers iterate.
+    * base_op MUST name a built-in run()-backed stage (no arbitrary code); the
+    * custom stage runs on that base op's NATIVE lane — re-laning is disallowed in
+    * v1 because two consumers of one queue on two threads would double-drain it
+    * (the dequeue is a non-atomic SELECT-then-commit). Invalid entries are skipped
+    * with one WARN (fail-safe); unknown fields are ignored (forward-compat).
+    * The GUI edits this via config.set (flat string, no bespoke op). Empty = none.
+    * See docs/proposals/done/user-configurable-curator-pipeline.md §5. */
+   char kb_curator_custom_stages[4096];
    int kb_curator_extract_max_tokens;
    int kb_curator_max_attempts;
    /* Curator LLM provider (curator-llm-backend §2), operator-owned and kb-level

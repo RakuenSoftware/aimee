@@ -334,9 +334,18 @@ static void test_current_code_only_role_tool_policy(void)
    cJSON *tools = build_tools_array();
    assert(tools_array_has_name(tools, "read_file") && tools_array_has_name(tools, "find_symbol"));
    agent_tools_filter_for_role(tools, "review");
-   assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "find_symbol"));
-   assert(!tools_array_has_name(tools, "search_memory") &&
-          !tools_array_has_name(tools, "search_docs"));
+   /* review now uses the index-only toolset (review_indexed): the branch-index nav
+    * tools survive the filter, the filesystem/shell tools do not (the change under
+    * review reaches it as a diff in the prompt). */
+   assert(tools_array_has_name(tools, "find_symbol") &&
+          tools_array_has_name(tools, "search_memory"));
+   assert(!tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "bash"));
+   assert(agent_tools_tool_allowed_for_role("review", "find_symbol") == 1);
+   assert(agent_tools_tool_allowed_for_role("review", "search_docs") == 1);
+   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("review", "create_note") == 0);
+   /* diagnose stays on the current_code toolset (no index tools). */
+   assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);
    cJSON_Delete(tools);
    tools = build_tools_array_anthropic();
    agent_tools_filter_for_role(tools, "diagnose");
