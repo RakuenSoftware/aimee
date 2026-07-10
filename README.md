@@ -23,7 +23,7 @@ Two parts:
   cheapest model that can do it. A local GPU model or a subscription plan costs nothing
   extra. The primary gets a compact result back. See [DELEGATES.md](docs/DELEGATES.md).
 - **Guardrails.** `.env`, keys, and prod configs are blocked before the AI touches them.
-  Planning mode freezes writes. Every session runs in its own git worktree.
+  Planning mode freezes writes. Every session is fully isolated by aimee.
   See [SECURITY.md](docs/SECURITY.md).
 - **Any model, any provider.** Point a tool's OpenAI or Anthropic compatible API at aimee
   and it runs the turn on any model: Claude, GPT, Gemini, a model on your own GPU. Or run
