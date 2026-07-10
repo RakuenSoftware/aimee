@@ -7,13 +7,15 @@
 #include "cli_session_start.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/wait.h>
+#endif
 
 /* This is a thin-client TU compiled without -I./-Idb2, and the client binary
  * links none of workspace.o/guardrails.o/config.o — so worktree creation here
@@ -121,6 +123,7 @@ static cJSON *ss_retry_post(const char *endpoint, const char *bearer, const char
    return NULL;
 }
 
+#ifndef _WIN32
 /* Run `git <argv...>` with NO shell (fork/execvp), discarding stderr. Captures
  * the first trimmed stdout line into out[cap] (out may be NULL — status only).
  * Returns the child's exit code (0 = success), or -1 if it could not be spawned
@@ -238,8 +241,8 @@ static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
 
    /* Base the session branch on the repo's default branch (origin HEAD -> HEAD). */
    char base_ref[256];
-   const char *const oh_argv[] = {"git",      "-C",     git_root, "symbolic-ref",
-                                  "--short", "refs/remotes/origin/HEAD", NULL};
+   const char *const oh_argv[] = {
+       "git", "-C", git_root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", NULL};
    if (ss_git(oh_argv, base_ref, sizeof base_ref) != 0 || !base_ref[0])
    {
       const char *const h_argv[] = {"git", "-C", git_root, "symbolic-ref", "--short", "HEAD", NULL};
@@ -264,25 +267,34 @@ static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
        * git creates intermediate dirs. Let git's exit status be authoritative. */
       const char *const prune_argv[] = {"git", "-C", git_root, "worktree", "prune", NULL};
       (void)ss_git(prune_argv, NULL, 0);
-      const char *const add_argv[] = {"git", "-C",     git_root, "worktree", "add", wt,
-                                      "-b",  branch, base_ref, NULL};
+      const char *const add_argv[] = {"git", "-C", git_root, "worktree", "add",
+                                      wt,    "-b", branch,   base_ref,   NULL};
       (void)ss_git(add_argv, NULL, 0);
    }
    if (stat(wt, &st) != 0 || !S_ISDIR(st.st_mode))
       return; /* creation failed -> don't point the agent at a path that isn't there */
 
    ss_add(ctx, "\n# Isolated Checkout (REQUIRED before editing)\n");
-   ss_add(ctx,
-          "This session runs against a remote aimee-server, and session-worktree isolation "
-          "(`require_session_worktree`) is ON. You are NOT in a managed worktree, so every "
-          "edit/write/mutating shell command WILL be blocked until you enter one. An isolated "
-          "worktree has been prepared for you:\n\n  ");
+   ss_add(ctx, "This session runs against a remote aimee-server, and session-worktree isolation "
+               "(`require_session_worktree`) is ON. You are NOT in a managed worktree, so every "
+               "edit/write/mutating shell command WILL be blocked until you enter one. An isolated "
+               "worktree has been prepared for you:\n\n  ");
    ss_add(ctx, wt);
    ss_add(ctx,
           "\n\nBefore your first mutating tool call, switch into it — Claude Code: call "
           "`EnterWorktree` with that path; or `cd` into it for shell work. Do not edit the shared "
           "checkout.\n\n");
 }
+#else  /* _WIN32 */
+/* Session-worktree isolation (require_session_worktree) and the .aimee/worktrees
+ * layout are a POSIX/Linux-server feature; the Windows build ships only the thin
+ * client, and preparing a worktree needs POSIX process primitives. No-op there. */
+static void ss_append_worktree_isolation(struct ss_sbuf *ctx, const char *sid)
+{
+   (void)ctx;
+   (void)sid;
+}
+#endif /* _WIN32 */
 
 static int handle_session_start_remote(const char *sid)
 {

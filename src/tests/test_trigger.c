@@ -97,8 +97,8 @@ int db1_cron_jobs_load(cron_job_t *out, int max, int enabled_only)
 /* ------------------------------------------------------------------ */
 
 static char g_home[512] = "/tmp/aimee-test";
-static char g_symref_out[256]; /* canned `git symbolic-ref` stdout ("" -> rc!=0) */
-static char g_lstree_out[8192]; /* canned `git ls-tree` stdout */
+static char g_symref_out[256];      /* canned `git symbolic-ref` stdout ("" -> rc!=0) */
+static char g_lstree_out[8192];     /* canned `git ls-tree` stdout */
 static char g_lstree_ref[256];      /* captured ref arg passed to ls-tree */
 static char g_lstree_pathspec[512]; /* captured pathspec arg passed to ls-tree */
 static struct
@@ -215,7 +215,8 @@ int wfe_work_item_create(const char *workflow_name, const char *repo, const char
 {
    if (g_ncreated < (int)(sizeof g_created / sizeof g_created[0]))
    {
-      snprintf(g_created[g_ncreated].wf, sizeof g_created[0].wf, "%s", workflow_name ? workflow_name : "");
+      snprintf(g_created[g_ncreated].wf, sizeof g_created[0].wf, "%s",
+               workflow_name ? workflow_name : "");
       snprintf(g_created[g_ncreated].repo, sizeof g_created[0].repo, "%s", repo ? repo : "");
       snprintf(g_created[g_ncreated].path, sizeof g_created[0].path, "%s",
                proposal_path ? proposal_path : "");
@@ -720,10 +721,11 @@ static void test_scan_proposals_end_to_end(void)
    snprintf(g_blobs[1].content, sizeof g_blobs[1].content, "# Proposal B\n");
    g_nblobs = 2;
    /* Includes a non-.md (.gitkeep) row to prove the filter runs in the glue too. */
-   snprintf(g_lstree_out, sizeof g_lstree_out,
-            "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n"
-            "100644 blob fedcba9876543210fedcba9876543210fedcba98\tdocs/proposals/pending/b.md\n"
-            "100644 blob 1111111111111111111111111111111111111111\tdocs/proposals/pending/.gitkeep\n");
+   snprintf(
+       g_lstree_out, sizeof g_lstree_out,
+       "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n"
+       "100644 blob fedcba9876543210fedcba9876543210fedcba98\tdocs/proposals/pending/b.md\n"
+       "100644 blob 1111111111111111111111111111111111111111\tdocs/proposals/pending/.gitkeep\n");
 
    trigger_rule_t rule;
    memset(&rule, 0, sizeof rule);
@@ -821,15 +823,15 @@ static void test_scan_proposals_custom_event_and_schedule(void)
    snprintf(rule.source, sizeof rule.source, "proposals");
    snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "manual-review");
-   snprintf(rule.event, sizeof rule.event, "rfcs"); /* custom scan dir */
+   snprintf(rule.event, sizeof rule.event, "rfcs");       /* custom scan dir */
    snprintf(rule.schedule, sizeof rule.schedule, "main"); /* custom branch */
 
    scan_proposals(&rule);
    assert(g_ncreated == 1);
-   assert(strcmp(g_lstree_ref, "main") == 0);             /* schedule used as ref */
-   assert(strncmp(g_lstree_pathspec, "rfcs", 4) == 0);    /* custom event dir */
+   assert(strcmp(g_lstree_ref, "main") == 0);          /* schedule used as ref */
+   assert(strncmp(g_lstree_pathspec, "rfcs", 4) == 0); /* custom event dir */
    size_t pl = strlen(g_lstree_pathspec);
-   assert(g_lstree_pathspec[pl - 1] == '/');              /* still trailing-slashed */
+   assert(g_lstree_pathspec[pl - 1] == '/'); /* still trailing-slashed */
    assert(strcmp(g_created[0].wf, "manual-review") == 0);
    printf("  PASS: test_scan_proposals_custom_event_and_schedule\n");
 }
