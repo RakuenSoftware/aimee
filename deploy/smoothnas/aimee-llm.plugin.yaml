@@ -2,15 +2,17 @@ apiVersion: smoothnas.io/v1
 kind: Plugin
 metadata:
   name: aimee-llm
-  version: 0.2.57
+  version: 0.2.58
   description: >-
     aimee-llm — the unified Vulkan llama.cpp container: one GPU-offloaded
     runtime + the aimee-llm gateway, serving embeddings (/embed, /embed_batch),
-    reranking (/rerank), and synthesis (/v1/chat/completions) from baked-in
-    GGUFs. Replaces the torch aimee-embedder + the standalone llama.cpp `llm`
-    container. The aimee-kb plugin points AIMEE_EMBEDDER_URL at this service.
-    GPU tier (.254): Qwen3-Embedding-4B (2560-dim) + ettin-reranker-400m +
-    gemma-4-26B-A4B, offloaded to the AMD 7900 XTX via Vulkan/RADV (AIMEE_LLM_NGL=99).
+    reranking (/rerank), and synthesis (/v1/chat/completions). One model-less
+    image; the tier is chosen at runtime via AIMEE_LLM_TIER and the models are
+    downloaded to the models volume on first boot. Replaces the torch
+    aimee-embedder + the standalone llama.cpp `llm` container. The aimee-kb plugin
+    points AIMEE_EMBEDDER_URL at this service. GPU tier (.254): AIMEE_LLM_TIER=mid
+    → Qwen3-Embedding-4B (2560-dim) + ettin-reranker-400m + gemma-4-26B-A4B,
+    offloaded to the AMD 7900 XTX via Vulkan/RADV (AIMEE_LLM_NGL=99).
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee
 profiles:
@@ -31,25 +33,30 @@ services:
       # publish-images.yml). On `testing`, pin to :testing instead to validate a
       # tested-but-unreleased build (publish-llm-testing.yml).
       #
-      # SYNTH TIER = which image you reference (embed+rerank identical on the GPU
-      # tiers, so switching is an image swap, no KB re-embed):
-      #   aimee-kb-gpu-small  Gemma-4-12B synth (dense; fits 16GB+)
-      #   aimee-kb-gpu-mid    Gemma-4-26B-A4B synth (MoE, 4B active; ~14GB fits a 24GB
-      #                       card fully GPU-resident, baked AIMEE_LLM_SYNTH_N_CPU_MOE=0)
-      #   aimee-kb-gpu-large  SAME 26B-A4B GGUF as gpu-mid but baked SYNTH_SLOTS=4 for a
-      #                       32GB card — deploy AIMEE_LLM_SYNTH_CTX=1048576 (4 × 256K)
-      # aimee-kb-cpu is the CPU tier (1024-dim; NGL=0). See docs/AIMEE_KB_SYNTH_TIERS.md.
-      # This .254 plugin stays on gpu-mid (its card is 24GB); gpu-large is for 32GB hosts.
-      image: ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest
+      # SYNTH TIER = AIMEE_LLM_TIER (embed+rerank identical on the GPU tiers, so
+      # switching is an env change, no KB re-embed — but a different tier downloads
+      # to its own /models subdir on first boot):
+      #   small  Gemma-4-12B synth (dense; fits 16GB+)
+      #   mid    Gemma-4-26B-A4B synth (MoE, 4B active; ~14GB fits a 24GB card fully
+      #          GPU-resident, N_CPU_MOE=0; SLOTS=2)
+      #   large  SAME 26B-A4B GGUF as mid but SLOTS=4 for a 32GB card — deploy
+      #          AIMEE_LLM_SYNTH_CTX=1048576 (4 × 256K)
+      # cpu is the CPU tier (1024-dim; NGL=0). See docs/AIMEE_KB_SYNTH_TIERS.md.
+      # This .254 plugin stays on the mid tier (its card is 24GB); large is for 32GB.
+      image: ghcr.io/rakuensoftware/aimee-llm:latest
     container:
       restartPolicy: unless-stopped
     env:
       # Offload all layers to the GPU (the 7900 XTX has the VRAM for the 4B embed +
-      # the ~14GB gemma-4-26B-A4B synth, fully resident). The CPU image defaults NGL to 0.
+      # the ~14GB gemma-4-26B-A4B synth, fully resident). The cpu tier defaults NGL to 0.
       AIMEE_LLM_NGL: "99"
-      # gpu-mid bakes SYNTH_SLOTS=2, so ctx-size is split 2 × 128K. Gemma's sliding-window
-      # KV is cheap; 262144 (256K total) fits alongside the resident synth on 24GB. Lower
-      # this (or raise the baked N_CPU_MOE) only if the container logs a VRAM alloc failure.
+      # Synth tier for this 24GB card. mid = gemma-4-26B-A4B MoE, SLOTS=2, fully
+      # GPU-resident. Models download to /models on first boot (persisted below).
+      AIMEE_LLM_TIER: "mid"
+      # The mid tier serves SYNTH_SLOTS=2, so ctx-size is split 2 × 128K. Gemma's
+      # sliding-window KV is cheap; 262144 (256K total) fits alongside the resident
+      # synth on 24GB. Lower this (or raise AIMEE_LLM_SYNTH_N_CPU_MOE) only if the
+      # container logs a VRAM alloc failure.
       AIMEE_LLM_SYNTH_CTX: "262144"
       # Gateway port. 8742 (aimee's 874x range: server 8740, kb 8741) — NOT 8080,
       # which Wolf's WolfLeash UI host-publishes. A hostExpose port is published on
@@ -77,6 +84,15 @@ services:
       # from the secret store (vault / Docker secret / .gitignore'd per-host .env)
       # — NEVER a checked-in plaintext value. Document its rotation (runbook §3).
       # AIMEE_LLM_AUTH_TOKEN: "<set-at-deploy-time-not-in-git>"
+    volumes:
+      # Persist the per-tier model cache: the supervisor downloads the tier's GGUFs
+      # here on first boot (~14GB for the mid tier), so a restart doesn't re-fetch.
+      # SSD slot for fast model load into VRAM. NOTE (tierd bind gotcha): the bind
+      # source must be pre-created on the host before install, or the mount fails.
+      - name: models
+        mode: tier-bound
+        slot: SSD
+        bind: /models
     ports:
       # The embed/rerank/synth gateway. hostExpose so the aimee-kb plugin can reach
       # it across the runtime bridge gateway at http://10.100.0.1:8742 — set the

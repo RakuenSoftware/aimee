@@ -20,16 +20,17 @@ ARG WITH_WEBCHAT=1
 # default — the editor is a first-class feature; build with --build-arg
 # WITH_VSCODE=0 to omit it (saves ~100 MB).
 ARG WITH_VSCODE=1
-# WITH_LLM bundles the aimee-llm CPU runtime + baked GGUFs (the unified
-# llama.cpp/Vulkan gateway: embed + rerank + Tier-A synth) INTO this image, so
-# the combined container is self-contained — no external embedder/llm service.
-# ON by default; build with --build-arg WITH_LLM=0 for the lean server+kb image
-# that points at an external AIMEE_LLM_URL (saves ~5.5 GB of baked models). The
-# runtime is COPYd from the prebuilt aimee-llm-cpu image (AIMEE_LLM_CPU_IMAGE),
-# so this build does NOT re-download or re-convert models; that image must exist
-# (CI: aimee-llm-cpu:testing / release: :latest, published by publish-llm-*.yml).
+# WITH_LLM bundles the aimee-llm runtime (the unified llama.cpp/Vulkan gateway:
+# embed + rerank + Tier-A synth) INTO this image, so the combined container is
+# self-contained — no external embedder/llm service. The bundled LLM is the SAME
+# model-less aimee-llm image as everything else: its runtime (/opt/llama,
+# /opt/aimee) is COPYd here, and the supervisor DOWNLOADS the cpu-tier models to
+# /models on first boot (nothing is baked). ON by default; build --build-arg
+# WITH_LLM=0 for the lean server+kb image that points at an external AIMEE_LLM_URL.
+# AIMEE_LLM_CPU_IMAGE must exist (CI: aimee-llm:testing / release: :latest,
+# published by publish-llm-*.yml).
 ARG WITH_LLM=1
-ARG AIMEE_LLM_CPU_IMAGE=ghcr.io/rakuensoftware/aimee-llm-cpu:latest
+ARG AIMEE_LLM_CPU_IMAGE=ghcr.io/rakuensoftware/aimee-llm:latest
 FROM debian:bookworm-slim AS build
 
 # Union of the aimee-server and aimee-kb build deps: server links libsqlite3
@@ -113,11 +114,11 @@ FROM debian:bookworm-slim AS code-server-stage-0
 RUN mkdir -p /opt/codeserver/usr
 FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
-# Optional bundled aimee-llm (CPU). "1" pulls the prebuilt aimee-llm-cpu image
-# (llama.cpp/Vulkan runtime at /opt/llama, the gateway + supervisor under
-# /opt/aimee, and the baked GGUFs under /models) — BuildKit only materializes the
-# stage the final selector references, so WITH_LLM=0 never pulls this multi-GB
-# image. "0" is an empty stage so the COPYs below are no-ops.
+# Optional bundled aimee-llm. "1" pulls the model-less aimee-llm image (the
+# llama.cpp/Vulkan runtime at /opt/llama and the gateway + supervisor under
+# /opt/aimee; /models is empty — the supervisor fetches the cpu tier on first
+# boot) — BuildKit only materializes the stage the final selector references, so
+# WITH_LLM=0 never pulls it. "0" is an empty stage so the COPYs below are no-ops.
 FROM ${AIMEE_LLM_CPU_IMAGE} AS llm-stage-1
 FROM debian:bookworm-slim AS llm-stage-0
 RUN mkdir -p /opt/llama /opt/aimee /models
@@ -149,11 +150,11 @@ RUN apt-get update \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-# Bundled aimee-llm (CPU) runtime deps — only when WITH_LLM=1, so the lean image
-# isn't burdened with the Vulkan driver stack. The llama.cpp release binary is the
+# Bundled aimee-llm runtime deps — only when WITH_LLM=1, so the lean image isn't
+# burdened with the Vulkan driver stack. The llama.cpp release binary is the
 # vendor-agnostic Vulkan build (needs libvulkan1 + an ICD even at NGL=0 on CPU);
 # the gateway is python3 (already present) + numpy for the rerank head; the
-# supervisor is a bash script.
+# supervisor is a bash script that fetches the tier's GGUFs with wget on first boot.
 ARG WITH_LLM=1
 RUN if [ "$WITH_LLM" = "1" ]; then \
         apt-get update \
@@ -163,6 +164,7 @@ RUN if [ "$WITH_LLM" = "1" ]; then \
             libvulkan1 \
             mesa-vulkan-drivers \
             python3-numpy \
+            wget \
         && rm -rf /var/lib/apt/lists/*; \
     fi
 
@@ -217,17 +219,16 @@ ENV AIMEE_LLM_PORT=8742
 ENV AIMEE_BUNDLED_LLM=auto
 # Bundled aimee-llm gateway wiring — mirrors Dockerfile.aimee-llm's runtime ENV
 # (the COPY only brings the files, not that image's ENV). Without these the
-# gateway 503s on /rerank (no AIMEE_LLM_RERANK_HEAD) and /v1/chat/completions (no
-# AIMEE_LLM_SYNTH_URL); embeds would default-resolve but rerank/synth would fail.
-# The per-role llama-servers the supervisor starts are loopback 8081/8082/8083;
-# the gateway itself binds loopback only (same container/netns as the kb/server).
-# Harmless when WITH_LLM=0 (no gateway runs).
-ENV AIMEE_LLM_EMBED_URL=http://127.0.0.1:8081 \
+# gateway 503s on /v1/chat/completions (no AIMEE_LLM_SYNTH_URL). The supervisor
+# resolves AIMEE_LLM_TIER (cpu here), downloads that tier's models to /models on
+# first boot, and EXPORTS the per-tier AIMEE_LLM_RERANK_HEAD (/models/cpu/...) +
+# embed identity, so those aren't baked here. The per-role llama-servers the
+# supervisor starts are loopback 8081/8082/8083; the gateway itself binds loopback
+# only (same container/netns as the kb/server). Harmless when WITH_LLM=0.
+ENV AIMEE_LLM_TIER=cpu \
+    AIMEE_LLM_EMBED_URL=http://127.0.0.1:8081 \
     AIMEE_LLM_RERANK_URL=http://127.0.0.1:8082 \
     AIMEE_LLM_SYNTH_URL=http://127.0.0.1:8083 \
-    AIMEE_LLM_RERANK_HEAD=/models/rerank-head \
-    AIMEE_LLM_EMBED_MODEL=qwen3-embedding \
-    AIMEE_LLM_EMBED_POOLING=last \
     AIMEE_LLM_NGL=0 \
     AIMEE_LLM_BIND=127.0.0.1
 # Mirror tier (workspace-resource-plane §3): durable bare mirrors + worktrees on
@@ -255,15 +256,18 @@ VOLUME /var/lib/aimee-workspaces
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 
-# Bundled aimee-llm (CPU): the llama.cpp/Vulkan runtime, the unified gateway +
-# rerank head + supervisor, and the baked GGUFs. From the empty llm-stage-0 when
-# WITH_LLM=0 these are no-op copies of empty dirs (the entrypoint then finds no
+# Bundled aimee-llm: the llama.cpp/Vulkan runtime and the unified gateway +
+# supervisor. /models is empty (model-less image) — the supervisor downloads the
+# cpu tier there on first boot. From the empty llm-stage-0 when WITH_LLM=0 these
+# are no-op copies of empty dirs (the entrypoint then finds no
 # /opt/aimee/supervisor.sh and starts no gateway). The gateway files land in
 # /opt/aimee/ so the supervisor's hardcoded paths (PYTHONPATH=/opt/aimee,
 # /opt/aimee/aimee_llm_gateway.py) resolve unchanged.
 COPY --from=llm-stage /opt/llama/ /opt/llama/
 COPY --from=llm-stage /opt/aimee/ /opt/aimee/
 COPY --from=llm-stage /models/ /models/
+# Persist the bundled LLM's downloaded model cache (empty when WITH_LLM=0).
+VOLUME /models
 
 # kb sidecar clients (LLM/embedder access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \
@@ -323,12 +327,13 @@ EXPOSE 8740 8743 8741 8443
 # 401 — which still proves the listener is up. Treat 200/401 as healthy; only a
 # connection failure ("000") is unhealthy. Mirrors Dockerfile.server.
 # start-period is generous: with the bundled aimee-llm (WITH_LLM=1) the entrypoint
-# waits for the gateway's cold multi-GB model load before starting the server, so
-# the server /v1 listener can take minutes to appear. A long start-period prevents
-# the orchestrator marking the container unhealthy during that load (a success
-# during the period still flips it healthy immediately, so the fast WITH_LLM=0
-# path is unaffected). Override AIMEE_LLM_WAIT_SECONDS to bound the entrypoint wait.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=660s --retries=5 \
+# waits for the gateway, which on FIRST boot DOWNLOADS the cpu tier's GGUFs before
+# it is healthy, so the server /v1 listener can take minutes to appear. A long
+# start-period prevents the orchestrator marking the container unhealthy during
+# that fetch (a success during the period still flips it healthy immediately, so
+# the fast WITH_LLM=0 path is unaffected). Later boots reuse the /models volume.
+# Override AIMEE_LLM_WAIT_SECONDS to bound the entrypoint wait.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=1200s --retries=5 \
     CMD curl -s -o /dev/null -w '%{http_code}' \
         http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$'
 

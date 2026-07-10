@@ -1,32 +1,37 @@
-# aimee-kb image synth tiers
+# aimee-llm synth tiers
 
-The `aimee-kb-*` image is the unified Vulkan llama.cpp stack: one runtime serving
+The `aimee-llm` image is the unified Vulkan llama.cpp stack: one runtime serving
 **embeddings** (`/embed`), **reranking** (`/rerank`), and **synthesis**
-(`/v1/chat/completions`) from baked-in GGUFs. Four published tiers differ only in the
-**synth model** (and its runtime profile); embed + rerank are identical within a
-CPU/GPU class, so a KB stays byte-portable when you swap the GPU synth tier.
+(`/v1/chat/completions`). It is a single **model-less** image — the **tier** is
+chosen at runtime via `AIMEE_LLM_TIER` and the models are **downloaded on first
+boot** into the `/models` volume. The four tiers differ only in the **synth
+model** (and its runtime profile); embed + rerank are identical within a CPU/GPU
+class, so a KB stays byte-portable when you switch the GPU synth tier.
 
-| Image | Embed / Rerank | Synth | Runtime (target card) | Pull size |
+| `AIMEE_LLM_TIER` | Embed / Rerank | Synth | Runtime (target card) | Model download |
 |---|---|---|---|---|
-| `aimee-kb-cpu` | Qwen3-Emb-0.6B / ettin-68m (1024-dim) | gemma-4-E4B (**Tier A only**) | CPU (`NGL=0`) | ~6.5 GB |
-| `aimee-kb-gpu-small` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 12B** `qat-UD-Q4_K_XL` | GPU, dense, FA+K8V4 — 16 GB | ~11.4 GB |
-| `aimee-kb-gpu-mid` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | GPU, MoE (4B active), FA+K8V4, fully resident, 2 slots — 24 GB | ~17.8 GB |
-| `aimee-kb-gpu-large` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | Same GGUF as `gpu-mid`, 4 slots — 32 GB | ~17.8 GB |
+| `cpu` | Qwen3-Emb-0.6B / ettin-68m (1024-dim) | gemma-4-E4B (**Tier A only**) | CPU (`NGL=0`) | ~6.5 GB |
+| `small` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 12B** `qat-UD-Q4_K_XL` | GPU, dense, FA+K8V4 — 16 GB | ~11.4 GB |
+| `mid` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | GPU, MoE (4B active), FA+K8V4, fully resident, 2 slots — 24 GB | ~17.8 GB |
+| `large` | Qwen3-Emb-4B / ettin-400m (2560-dim) | **Gemma 4 26B-A4B** `qat-UD-Q4_K_XL` | Same GGUF as `mid`, 4 slots — 32 GB | ~17.8 GB |
 
-`gpu-large` is byte-identical to `gpu-mid` (same synth GGUF/revision/SHA + MoE/FA profile);
-it only bakes `SYNTH_SLOTS=4` instead of `2`, so a 32 GB card runs **4 concurrent agents**
+`large` is identical to `mid` (same synth GGUF/revision/SHA + MoE/FA profile); it
+only serves `SYNTH_SLOTS=4` instead of `2`, so a 32 GB card runs **4 concurrent agents**
 each with the model's full native **256 K** window (deploy `AIMEE_LLM_SYNTH_CTX=1048576`).
 Gemma-4 uses interleaved sliding-window attention (only 5 of 30 layers are full-attention),
-so even 4×256 K KV stays ~28.5 GiB — validated against the 24 GB `gpu-mid` card (2×128 K =
-22.4/24 GiB). `gpu-small`, `gpu-mid`, and `gpu-large` share the **same embedder + reranker**
+so even 4×256 K KV stays ~28.5 GiB — validated against the 24 GB `mid` card (2×128 K =
+22.4/24 GiB). `small`, `mid`, and `large` share the **same embedder + reranker**
 (2560-dim), so a KB embedded on one is byte-compatible with the others — switching the synth
-tier is a plugin **image swap**, no re-embed.
+tier is an `AIMEE_LLM_TIER` change, no re-embed.
 
-**Image size** (amd64, compressed pull from ghcr): `cpu` ~6.5 GB, `gpu-small` ~11.4 GB,
-`gpu-mid` / `gpu-large` **~17.8 GB**. The mid/large image bakes ~19.3 GB of GGUFs
-(embed 4.28 GB + rerank 0.79 GB + synth 14.25 GB) → ~20 GB uncompressed on disk. `gpu-large`
-carries the *same* layers as `gpu-mid` (only the `SYNTH_SLOTS=4` env differs), so it is the
-same size — allow ~20 GB free disk on the host per GPU image, plus transient build headroom.
+**Model download** (the first-boot fetch into the `/models` volume, per tier): `cpu`
+~6.5 GB, `small` ~11.4 GB, `mid` / `large` **~17.8 GB** (embed 4.28 GB + rerank 0.79 GB +
+synth 14.25 GB). The **image itself is small** (no baked GGUFs) — allow ~20 GB free on the
+`/models` volume per GPU tier for the downloaded models. `mid` and `large` download the same
+models (only `SYNTH_SLOTS` differs); each tier caches under its own `/models/<tier>` subdir,
+so switching tiers keeps both. Embed + synth pull straight from Hugging Face; the ettin
+reranker is a pre-converted encoder GGUF + Dense head fetched from a GitHub release
+(published by `.github/workflows/publish-rerank-artifacts.yml`).
 
 ## Tier-A vs Tier-B synthesis
 
@@ -36,29 +41,32 @@ The curator synthesizes in two tiers:
 - **Tier B**, the reasoning passes: judge, resolve entities, reconcile contradictions,
   synthesize, promote.
 
-`aimee-kb-cpu` runs **Tier A only**. Its gemma-4-E4B synth is not wired as a Tier-B provider (a weak model would poison the graph), so a CPU-only deployment gets retrieval + Tier-A
-synthesis and nothing more. **Tier B needs a GPU tier (`gpu-small` / `gpu-mid` / `gpu-large`)
+The `cpu` tier runs **Tier A only**. Its gemma-4-E4B synth is not wired as a Tier-B provider (a weak model would poison the graph), so a CPU-only deployment gets retrieval + Tier-A
+synthesis and nothing more. **Tier B needs a GPU tier (`small` / `mid` / `large`)
 or an external LLM.** With no Tier-B provider the reasoning passes are skipped, not errored. Full
 config surface: [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md).
 
 ## Package names
 
-Two image families share the `aimee-kb` prefix. Keep them straight:
+Keep the two `aimee-*` inference-adjacent images straight:
 
-- **`aimee-kb`** (no suffix): the KB service (DB2 + curator). Runs no model; it calls one
+- **`aimee-kb`**: the KB service (DB2 + curator). Runs no model; it calls one
   over HTTP. See [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md).
-- **`aimee-kb-{cpu,gpu-small,gpu-mid,gpu-large}`**: the inference tiers in this doc (embed +
-  rerank + synth), built from `Dockerfile.aimee-llm`, deployed as the SmoothNAS `aimee-llm` plugin.
+- **`aimee-llm`**: the single model-less inference image in this doc (embed +
+  rerank + synth), built from `Dockerfile.aimee-llm`, deployed as the SmoothNAS
+  `aimee-llm` plugin. The tier is `AIMEE_LLM_TIER`, not the image name.
 
-Retired names: `aimee-llm-cpu`/`aimee-llm-gpu` were the old tier names (now
-`aimee-kb-cpu`/`aimee-kb-gpu-small`); `aimee-embedder`/`aimee-embedder-4b` were the
-standalone torch embedder, now baked into the tiers.
+Retired names: `aimee-kb-{cpu,gpu-small,gpu-mid,gpu-large}` (and before them
+`aimee-llm-cpu`/`aimee-llm-gpu`) were the old **baked per-tier** images — replaced
+by the one model-less `aimee-llm` image + `AIMEE_LLM_TIER`. `aimee-embedder`/
+`aimee-embedder-4b` were the standalone torch embedder, now served by `aimee-llm`.
 
-## Deploy: one plugin image swap
+## Deploy: one env knob
 
-The synth tier is chosen by which image the SmoothNAS `aimee-llm` plugin references,
-e.g. `ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest` for Gemma 4 26B-A4B. No separate synth
-container, no `SYNTH_LOCAL` juggling: the tier *is* the synth.
+The synth tier is chosen by `AIMEE_LLM_TIER` on the SmoothNAS `aimee-llm` plugin
+(or any compose topology), e.g. `AIMEE_LLM_TIER=mid` for Gemma 4 26B-A4B. No separate synth
+container, no `SYNTH_LOCAL` juggling, no image swap: the tier *is* the synth, and its models
+download on first boot.
 
 ### Two consumers of the gateway synth (`/v1/chat/completions`)
 
@@ -67,12 +75,12 @@ independent callers, one automatic, one an explicit operator step:
 
 1. **KB curator synthesis (automatic).** The `aimee-kb` plugin points `LLM_ENDPOINT` /
    `LLM_MODEL` at the gateway, so the curator's `tier_a`/`tier_b` use the synth tier the
-   moment the image is deployed. Swapping tiers needs no KB change.
+   moment the container is deployed. Switching tiers needs no KB change.
 
 2. **aimee-server delegate, an explicit runtime registration (NOT automatic).** To make
    the local synth usable as an `aimee` delegate (roundtable / fallback), register it once
    against the server (endpoint is model-neutral, so the registration survives synth-tier
-   swaps):
+   switches):
 
    ```sh
    aimee agent local local-synth http://<runtime-gw>:8742/v1 \
@@ -83,18 +91,20 @@ independent callers, one automatic, one an explicit operator step:
    This lives in the server's `agents.json` (runtime/per-deployment state, not baked into
    the image). On `.254` this is registered as `local-synth` and sits in `fallback_chain`.
 
-## Synth runtime knobs (baked per tier; overridable via plugin env)
+## Synth runtime knobs (tier defaults; overridable via plugin env)
+
+Each tier sets these from the tier table in the supervisor; an explicit env still wins.
 
 | Env | Default (per tier) | Meaning |
 |---|---|---|
-| `AIMEE_LLM_SYNTH_CTX` | 32768 baked; gpu-mid deploys `262144` (2 × 128 K), gpu-large `1048576` (4 × 256 K) | synth context window (total across slots) |
-| `AIMEE_LLM_SYNTH_SLOTS` | 1 (2 on gpu-mid, 4 on gpu-large) | `--parallel` concurrent slots |
+| `AIMEE_LLM_SYNTH_CTX` | 32768; `mid` deploys `262144` (2 × 128 K), `large` `1048576` (4 × 256 K) | synth context window (total across slots) |
+| `AIMEE_LLM_SYNTH_SLOTS` | 1 (2 on `mid`, 4 on `large`) | `--parallel` concurrent slots |
 | `AIMEE_LLM_SYNTH_FA` | `off` cpu / `on` gpu | flash-attention (required for quantized V-cache) |
 | `AIMEE_LLM_SYNTH_KV_K` / `_KV_V` | `q8_0` / `q4_0` (K8V4) | KV cache quant on the gpu tiers |
-| `AIMEE_LLM_SYNTH_MOE` | `1` on gpu-mid | enable the `--n-cpu-moe` expert-offload knob |
-| `AIMEE_LLM_SYNTH_N_CPU_MOE` | `0` on gpu-mid | MoE layers whose experts live in system RAM (0 = fully GPU-resident) |
+| `AIMEE_LLM_SYNTH_MOE` | `1` on `mid`/`large` | enable the `--n-cpu-moe` expert-offload knob |
+| `AIMEE_LLM_SYNTH_N_CPU_MOE` | `0` on `mid`/`large` | MoE layers whose experts live in system RAM (0 = fully GPU-resident) |
 
-### Tuning `N_CPU_MOE` on gpu-mid (Gemma 4 26B-A4B, ~14 GB synth)
+### Tuning `N_CPU_MOE` on the `mid` tier (Gemma 4 26B-A4B, ~14 GB synth)
 
 The mid tier is **Gemma 4 26B-A4B**, a MoE with only **4B active parameters/token** at
 `qat-UD-Q4_K_XL` (~14 GB). Unlike a 22 GB synth, it **co-fits embed+rerank (~7 GB) on a
@@ -124,7 +134,7 @@ The GPU tiers are based on `debian:trixie-slim` (Mesa 25) on purpose: its RADV e
 cores. On an older Mesa without coopmat (bookworm's 22.3.6) llama.cpp falls back to scalar
 shaders. The synth goes compute-bound, the memory bus sits idle, and generation crawls.
 
-Measured on the 7900 XTX, gpu-mid resident: **~1265 tok/s prompt, ~62–95 tok/s generation**
+Measured on the 7900 XTX, `mid` tier resident: **~1265 tok/s prompt, ~62–95 tok/s generation**
 with coopmat; ~33–76 / ~30 without it. If a GPU tier is slow, check the base image is
 trixie (Mesa ≥ 24.1) and that `mem_busy` climbs under load. A pegged GPU with an idle
 memory bus means the matrix cores aren't in play.

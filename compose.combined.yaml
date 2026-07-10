@@ -111,6 +111,9 @@ services:
       # AIMEE_BUNDLED_LLM=off and uncomment the external-llm wiring below.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-}
       AIMEE_BUNDLED_LLM: ${AIMEE_BUNDLED_LLM:-auto}
+      # Bundled LLM tier — cpu by default; the supervisor downloads it to /models
+      # on first boot. Raise to small/mid/large only with a GPU (AIMEE_LLM_NGL=99).
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       # Override only for a GPU/external tier (the bundled CPU tier is 1024).
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       LLM_MODEL: ${LLM_MODEL:-gemma-3n-e4b}
@@ -161,10 +164,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      # Long: the bundled aimee-llm downloads the cpu tier's GGUFs on first boot
+      # before the entrypoint brings up the server /v1 listener. Later boots reuse
+      # the aimee-combined-llm-models volume and come up fast.
+      start_period: 1200s
     volumes:
       - aimee-combined-home:/var/lib/aimee
       - aimee-combined-workspaces:/var/lib/aimee-workspaces
+      # Persist the bundled LLM's downloaded per-tier model cache.
+      - aimee-combined-llm-models:/models
 
   # External curator LLM — OFF by default (the bundled aimee-llm gateway already
   # serves synthesis at /v1). This standalone llama.cpp is only for the lean
@@ -197,3 +205,4 @@ volumes:
   aimee-combined-postgres:
   aimee-embedder-models:
   aimee-llm-models:
+  aimee-combined-llm-models:

@@ -57,6 +57,15 @@ fi
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 [ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
+# The bundled aimee-llm supervisor runs as "aimee" and DOWNLOADS the tier's GGUFs
+# to /models on first boot — make the (possibly root-owned, freshly-mounted) cache
+# writable by uid 1000. Recurse ONLY when the root isn't already aimee-owned (a
+# fresh/root volume or a migration): once aimee owns /models the supervisor creates
+# its per-tier files as aimee, so later restarts skip the multi-GB `chown -R` walk.
+# Harmless when WITH_LLM=0 (/models is an empty dir).
+if [ -d /models ] && [ "$(stat -c %u /models 2>/dev/null || echo 0)" != "1000" ]; then
+    chown -R aimee:aimee /models 2>/dev/null || true
+fi
 
 kb_pid=""
 server_pid=""

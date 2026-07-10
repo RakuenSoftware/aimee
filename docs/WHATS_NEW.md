@@ -33,14 +33,16 @@ credentials live in the server's **sealed vault**; see
   transcripts and build progress dropped), with the full output spilled for lossless
   recovery. Fail-open and byte-identical when off. Toggle it in the web Settings page. See
   [features/tool-output-condensation.md](features/tool-output-condensation.md).
-- **Self-hosted GPU inference tiers**: the `aimee-kb` inference image ships four tiers you
-  swap with one plugin image. `aimee-kb-cpu` runs retrieval on any host (~6.5 GB image),
-  `aimee-kb-gpu-small` bakes a Gemma 4 12B synth (~11.4 GB, 16 GB card), `aimee-kb-gpu-mid`
-  bakes a Gemma 4 26B-A4B synth that fits a 24 GB card fully resident (~17.8 GB, 2 slots),
-  and `aimee-kb-gpu-large` reuses that same synth on a 32 GB card with 4 concurrent agents at
-  the full 256 K window (same ~17.8 GB image, only `SYNTH_SLOTS=4`). The GPU tiers build on a
-  Mesa 25 base so RADV uses the RDNA3 matrix cores. The local synth also registers as a free
-  delegate. See [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
+- **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a single
+  **model-less** image whose **tier** is chosen at runtime via `AIMEE_LLM_TIER` — the models
+  download on first boot into a `/models` volume, so there is nothing baked and no per-tier
+  image to pull. `cpu` runs retrieval on any host (~6.5 GB download), `small` a Gemma 4 12B
+  synth (~11.4 GB, 16 GB card), `mid` a Gemma 4 26B-A4B synth that fits a 24 GB card fully
+  resident (~17.8 GB, 2 slots), and `large` reuses that synth on a 32 GB card with 4
+  concurrent agents at the full 256 K window (only `SYNTH_SLOTS=4`). The GPU tiers build on a
+  Mesa 25 base so RADV uses the RDNA3 matrix cores. The bundled all-in-one image
+  (`aimee-server-kb`) uses the same image and downloads the cpu tier on first boot. The local
+  synth also registers as a free delegate. See [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 - **Cross-repo code graph**: the symbol and call graph resolves dependency edges across the
   repositories in your workspace, so blast radius and caller lookups cross repo boundaries.
   Ask in three directions: what a project depends on, what depends on it, or both. See
