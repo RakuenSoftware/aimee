@@ -4,6 +4,7 @@
  * Phase A of full-autonomous-development: producing blocks dispatch real work
  * through registered hooks; with no provider they fail closed; tests inject
  * mocks to assert the wiring. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,7 +149,7 @@ int main(void)
 {
    printf("wfe-delegate-seam: ");
    char home[] = "/tmp/wfe_ds_XXXXXX";
-   assert(mkdtemp(home));
+   assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);
    mkdir(wf, 0755);
@@ -361,7 +362,7 @@ int main(void)
     *    idempotent; cleanup removes it. */
    {
       char repo[] = "/tmp/wfe_f2_repo_XXXXXX";
-      assert(mkdtemp(repo));
+      assert(wfe_test_mkdtemp(repo));
       char cmd[640];
       snprintf(cmd, sizeof cmd,
                "cd %s && git init -q && git -c user.email=t@t -c user.name=t "

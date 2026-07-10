@@ -2,6 +2,7 @@
  * (real DB1 + router + engine, stub executors). Asserts: only enforced-routed
  * turns bind, dial-off is inert, binding is idempotent per session, and a bind
  * lifecycle event is recorded. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +65,7 @@ static const char *WF_MC = "name: mc\n"
 static void setup_home(void)
 {
    char tmpl[] = "/tmp/wfe_bind_home_XXXXXX";
-   char *dir = mkdtemp(tmpl);
+   char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);

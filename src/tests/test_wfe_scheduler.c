@@ -1,6 +1,7 @@
 /* test_wfe_scheduler.c -- the autonomy scheduler drives ACTIVE AUTONOMOUS work
  * items forward and leaves interactive ones for the human (Phase B). Uses the
  * synchronous wfe_scheduler_run_once + stub executors for determinism. */
+#include "wfe_test_home.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +27,7 @@ int main(void)
 {
    printf("wfe-scheduler: ");
    char home[] = "/tmp/wfe_sc_XXXXXX";
-   assert(mkdtemp(home));
+   assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);
    mkdir(wf, 0755);
