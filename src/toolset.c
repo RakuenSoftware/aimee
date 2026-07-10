@@ -481,7 +481,12 @@ const char *toolset_for_delegate_role(const char *role)
       role = "search";
    else if (strcmp(role, "reviewer") == 0)
       role = "review";
-   if (strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0)
+   /* review works index-only: the change under review reaches it as a diff in the
+    * prompt, and it navigates the current repo via the branch-indexed tools rather
+    * than sweeping a worktree a remote delegate may not even be able to reach. */
+   if (strcmp(role, "review") == 0)
+      return "review_indexed";
+   if (strcmp(role, "diagnose") == 0)
       return "current_code";
    if (strcmp(role, "validate") == 0)
       return "validate";

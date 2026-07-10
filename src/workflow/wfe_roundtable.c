@@ -8,12 +8,16 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "util.h" /* safe_exec_capture — compute the change-under-review diff */
 #include "wfe_store.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 
 #define WFE_PANEL_MAX 16
+/* Cap the diff pushed to the panel. A change larger than this is truncated (the
+ * panel still sees the head of the diff + can navigate the rest via the index). */
+#define WFE_REVIEW_DIFF_MAX 200000
 
 /* Default (live) provider: calls the ensemble engine. Gated on
  * roundtable-panel-composition (§0) — until that ships the engine passes no
@@ -123,17 +127,33 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    const char *workdir = (worktree && worktree[0]) ? worktree : getenv("AIMEE_WORKFLOW_REPO");
    if (!workdir || !workdir[0])
       workdir = ".";
+
+   /* Push the change under review to the panel: the branch diff vs the autonomous
+    * base ("what changed from the default repo"). Computed once here so panelists
+    * read the delta directly and lean on the aimee index for surrounding context,
+    * instead of each re-running git and sweeping the worktree. Empty at a plan gate
+    * (HEAD == base -> no diff) or when the base ref is absent; capped for size. */
+   char *diff = NULL;
+   {
+      char range[128];
+      snprintf(range, sizeof range, "%s...HEAD", wfe_autonomous_base());
+      const char *dargv[] = {"git", "-C", workdir, "--no-pager", "diff", range, NULL};
+      (void)safe_exec_capture(dargv, &diff, WFE_REVIEW_DIFF_MAX);
+   }
+
    wfe_review_packet_t pkt = {
        .artifact_hash = artifact_hash,
        .proposal = proposal ? proposal : "",
        .focus =
            (focus_j && cJSON_IsString(focus_j) && focus_j->valuestring) ? focus_j->valuestring : "",
        .workdir = workdir,
+       .diff = diff ? diff : "",
    };
 
    wfe_verdict_t verdicts[WFE_PANEL_MAX];
    int nv = g_provider(&pkt, req, nreq, elig, nelig, verdicts, WFE_PANEL_MAX);
    free(proposal);
+   free(diff);
    if (nv < 0)
       return wfe_step_pending(WFE_PAUSE_PANEL_UNREACHABLE);
 

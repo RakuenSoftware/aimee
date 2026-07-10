@@ -125,22 +125,36 @@ static char *dispatch_review(const char *workdir, const char *persona, const cha
    return out;
 }
 
-/* Build the per-persona review prompt from the review packet's focus + proposal. */
-static void build_prompt(char *buf, size_t n, const char *persona, const wfe_review_packet_t *pkt)
+/* Build the per-persona review prompt. The change under review is embedded directly
+ * as a diff so the panelist reads the delta and navigates surrounding code via the
+ * aimee index (find_symbol/search_memory) instead of re-running git and sweeping the
+ * worktree. Returns a malloc'd prompt sized to fit the diff (caller frees), or NULL
+ * on allocation failure. */
+static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
 {
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
-   snprintf(buf, n,
-            "You are the %s lens on a review roundtable. Review the work in this git worktree "
-            "(inspect the current change: `git diff` / `git log -p -1` and read the touched "
-            "files, or the plan/proposal artifact if there is no diff yet) AGAINST what was "
-            "asked. Do NOT edit files.\n\nFOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
+   const char *proposal = (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)";
+   const char *diff = (pkt->diff && pkt->diff[0])
+                          ? pkt->diff
+                          : "(no code diff — review the plan/proposal artifact against the ask)";
+   size_t cap = 2048 + strlen(focus) + strlen(proposal) + strlen(diff);
+   char *buf = malloc(cap);
+   if (!buf)
+      return NULL;
+   snprintf(buf, cap,
+            "You are the %s lens on a review roundtable. Review the CHANGE UNDER REVIEW below "
+            "AGAINST what was asked. Do NOT edit files, and do NOT sweep or re-read the repo to "
+            "reconstruct context: trust aimee's index/graph (find_symbol, search_memory) as the "
+            "authoritative source for the current codebase, and open a file only to confirm what "
+            "the index cannot resolve.\n\nFOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
+            "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
             "End your reply with EXACTLY one JSON line and nothing after it: "
             "{\"verdict\":\"approve\"} if it satisfies the ask with no high-severity blocker, "
             "{\"verdict\":\"request_changes\",\"high_sev_blockers\":<N>} if there is a real "
             "blocker, or {\"verdict\":\"comment\"} if you only have non-blocking remarks.",
-            persona, focus,
-            (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)");
+            persona, focus, proposal, diff);
+   return buf;
 }
 
 static int live_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
@@ -154,9 +168,11 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    int filled = 0;
    for (int i = 0; i < nreq && filled < max; i++)
    {
-      char prompt[5120];
-      build_prompt(prompt, sizeof prompt, required[i], pkt);
+      char *prompt = build_prompt(required[i], pkt);
+      if (!prompt)
+         continue; /* OOM building the prompt -> leave this lens unfilled (gate degrades) */
       char *resp = dispatch_review(pkt->workdir, required[i], prompt);
+      free(prompt);
       if (!resp)
       {
          /* This required persona couldn't be dispatched: leave it WITHOUT a verdict so
