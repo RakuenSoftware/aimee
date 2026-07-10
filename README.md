@@ -6,10 +6,10 @@ alongside. Your context follows you between tools.
 
 Two parts:
 
-- **aimee-server** — an assistant to one human. Learns how you work and what you expect.
+- **aimee-server** is an assistant to one human. Learns how you work and what you expect.
   General purpose, but coding is what it does best, especially across large or multi-repo
   work.
-- **aimee-kb** — a knowledge base for a whole corpus: a subject, a company, a team.
+- **aimee-kb** is a knowledge base for a whole corpus: a subject, a company, a team.
 
 ## What it does
 
@@ -20,13 +20,13 @@ Two parts:
   repos. The AI finds callers and traces an edit's blast radius before it writes.
   See [CODE_INTELLIGENCE.md](docs/CODE_INTELLIGENCE.md).
 - **Delegates that cut the bill.** Route review, summarization, and boilerplate to the
-  cheapest model that can do it — a local GPU model or a subscription plan costs nothing
+  cheapest model that can do it. A local GPU model or a subscription plan costs nothing
   extra. The primary gets a compact result back. See [DELEGATES.md](docs/DELEGATES.md).
 - **Guardrails.** `.env`, keys, and prod configs are blocked before the AI touches them.
   Planning mode freezes writes. Every session runs in its own git worktree.
   See [SECURITY.md](docs/SECURITY.md).
-- **Any model, any provider.** Point a tool's OpenAI- or Anthropic-compatible API at aimee
-  and it runs the turn on any model — Claude, GPT, Gemini, a model on your own GPU. Or run
+- **Any model, any provider.** Point a tool's OpenAI or Anthropic compatible API at aimee
+  and it runs the turn on any model: Claude, GPT, Gemini, a model on your own GPU. Or run
   aimee beside the tool over MCP/ACP and it keeps its own model. Switch tools whenever.
 - **Workflows.** Compose a job from typed steps and aimee runs it to a PR, with review
   panels and human sign-off gates where you want them. See [WORKFLOWS.md](docs/WORKFLOWS.md).
@@ -94,6 +94,6 @@ Questions and discussion on the aimee Discord: <https://discord.gg/FjGjvcgAqz>.
 Copyright (C) 2026 The aimee authors. Licensed under the **GNU AGPL v3.0** (AGPL-3.0). See
 [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-If the AGPL doesn't suit you, other terms can be discussed — contact <jbailes@gmail.com>.
+If the AGPL doesn't suit you, other terms can be discussed. Contact <jbailes@gmail.com>.
 Bundled third-party components (cJSON, the generated SDKs under `api/sdks/`) are licensed
 separately; see [NOTICE](NOTICE).
