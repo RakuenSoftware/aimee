@@ -15,6 +15,13 @@ char *tool_read_file(const char *path, int offset, int limit);
  * which may be NULL) so a subsequent edit_file can reference the anchors. When
  * `anchored` is 0 the output is byte-identical to tool_read_file(). */
 char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, const char *sid);
+/* Anchor-based edit: apply `edits` (a cJSON array of {op, at|from,to, text}) to
+ * `path` against the read snapshot `snapshot_id` (scoped to `sid`). Returns a
+ * JSON result string (caller frees): the write payload on success, a structured
+ * stale_anchor / conflict / bad-op payload otherwise. dry_run computes the diff +
+ * blast advisory without writing. `edits` is a `struct cJSON *`. */
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const struct cJSON *edits,
+                              int dry_run, const char *sid);
 char *tool_write_file(const char *path, const char *content);
 /* Surgical edit: replace old_string with new_string in an existing file.
  * old_string must occur exactly once unless replace_all is non-zero (then all

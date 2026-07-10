@@ -40,6 +40,8 @@ char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, c
 char *tool_write_file(const char *path, const char *content);
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const cJSON *edits,
+                              int dry_run, const char *sid);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
@@ -1196,6 +1198,96 @@ static void test_tool_edit_file(void)
    assert(readback && strcmp(readback, "alpha\nB\nGAMMA\nB\n") == 0);
    free(readback);
 
+   unlink(tmppath);
+}
+
+/* Extract the snapshot id and a given line's "N:hash" anchor from an anchored
+ * read_file result. Returns 0 on success. */
+static int parse_anchored(const char *rd, char *snap, size_t snapsz, int line, char *anchor,
+                          size_t anchorsz)
+{
+   const char *sp = strstr(rd, "snapshot ");
+   if (!sp)
+      return -1;
+   sp += 9;
+   size_t i = 0;
+   while (sp[i] && sp[i] != ';' && i + 1 < snapsz)
+   {
+      snap[i] = sp[i];
+      i++;
+   }
+   snap[i] = '\0';
+   char needle[16];
+   snprintf(needle, sizeof(needle), "\n%d:", line);
+   const char *lp = strstr(rd, needle);
+   if (!lp)
+      return -1;
+   lp++; /* skip the '\n' */
+   size_t j = 0;
+   while (lp[j] && lp[j] != '|' && j + 1 < anchorsz)
+   {
+      anchor[j] = lp[j];
+      j++;
+   }
+   anchor[j] = '\0';
+   return 0;
+}
+
+static void test_tool_edit_file_anchored(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_test_aedit_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   assert(fd >= 0);
+   const char *content = "one\ntwo\nthree\n";
+   if (write(fd, content, strlen(content)) < 0)
+   { /* ignore */
+   }
+   close(fd);
+   const char *sid = "aeditX";
+
+   /* Anchored read to mint a snapshot and get line 2's anchor. */
+   char *rd = tool_read_file_ex(tmppath, 0, 0, 1, sid);
+   assert(rd != NULL);
+   char snap[80], anchor2[24];
+   assert(parse_anchored(rd, snap, sizeof(snap), 2, anchor2, sizeof(anchor2)) == 0);
+   free(rd);
+
+   /* dry_run: reports a diff but writes nothing. */
+   cJSON *edits = cJSON_CreateArray();
+   cJSON *op = cJSON_CreateObject();
+   cJSON_AddStringToObject(op, "op", "replace");
+   cJSON_AddStringToObject(op, "at", anchor2);
+   cJSON_AddStringToObject(op, "text", "TWO");
+   cJSON_AddItemToArray(edits, op);
+   char *dr = tool_edit_file_anchored(tmppath, snap, edits, 1 /*dry_run*/, sid);
+   assert(dr && strstr(dr, "\"status\":\"dry_run\"") != NULL);
+   free(dr);
+   char *still = tool_read_file_ex(tmppath, 0, 0, 0, sid);
+   assert(still && strcmp(still, "one\ntwo\nthree\n") == 0); /* unchanged by dry_run */
+   free(still);
+
+   /* Real apply: line 2 replaced, other lines byte-preserved. */
+   char *res = tool_edit_file_anchored(tmppath, snap, edits, 0, sid);
+   assert(res && strstr(res, "\"status\":\"ok\"") != NULL);
+   free(res);
+   char *after = tool_read_file_ex(tmppath, 0, 0, 0, sid);
+   assert(after && strcmp(after, "one\nTWO\nthree\n") == 0);
+   free(after);
+
+   /* Editing again against the now-stale snapshot returns a structured
+    * stale_anchor payload (file diverged), never a blind apply. */
+   char *stale = tool_edit_file_anchored(tmppath, snap, edits, 0, sid);
+   assert(stale && strstr(stale, "\"status\":\"stale_anchor\"") != NULL);
+   assert(strstr(stale, "\"snapshot_id\"") != NULL); /* fresh snapshot handed back */
+   free(stale);
+
+   /* An unknown snapshot id yields snapshot_missing, not a crash/apply. */
+   char *miss = tool_edit_file_anchored(tmppath, "s-nope", edits, 0, sid);
+   assert(miss && strstr(miss, "snapshot_missing") != NULL);
+   free(miss);
+
+   cJSON_Delete(edits);
    unlink(tmppath);
 }
 
@@ -2423,6 +2515,7 @@ int main(void)
    test_tool_read_file_anchored();
    test_tool_write_file();
    test_tool_edit_file();
+   test_tool_edit_file_anchored();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();
