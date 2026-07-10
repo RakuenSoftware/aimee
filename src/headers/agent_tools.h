@@ -15,6 +15,10 @@ char *tool_read_file(const char *path, int offset, int limit);
  * which may be NULL) so a subsequent edit_file can reference the anchors. When
  * `anchored` is 0 the output is byte-identical to tool_read_file(). */
 char *tool_read_file_ex(const char *path, int offset, int limit, int anchored, const char *sid);
+/* read_file mode:"outline" — return the file's tree-sitter/extractor symbol
+ * skeleton: one anchored signature line (N:hash + a snapshot id) per top-level
+ * definition, no bodies, so one call maps a large file. */
+char *tool_read_file_outline(const char *path, const char *sid);
 /* Anchor-based edit: apply `edits` (a cJSON array of {op, at|from,to, text}) to
  * `path` against the read snapshot `snapshot_id` (scoped to `sid`). Returns a
  * JSON result string (caller frees): the write payload on success, a structured
