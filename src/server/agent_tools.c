@@ -630,16 +630,30 @@ static cJSON *tp_edit_file(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "path", "string",
            "File path to edit. Prefer paths relative to the current workspace directory.");
+   /* Anchored path (preferred): edit by the N:hash anchors read_file returned. */
+   tp_prop(props, "snapshot_id", "string",
+           "Anchored edit: the snapshot id from the anchored read_file whose anchors you are "
+           "editing. Provide with `edits`; do NOT combine with old_string.");
+   cJSON *edits = cJSON_CreateObject();
+   cJSON_AddStringToObject(edits, "type", "array");
+   cJSON_AddStringToObject(
+       edits, "description",
+       "Anchored edit: a batch of {op, at|from,to, text} applied all-or-nothing against the "
+       "snapshot. op is replace (at,text), replace_range (from,to,text), insert_after (at,text), "
+       "or delete_range (from,to). Anchors are the 'N:hash' tokens from the anchored read.");
+   cJSON_AddItemToObject(props, "edits", edits);
+   tp_prop(props, "dry_run", "boolean",
+           "Anchored edit: return the unified diff + blast-radius advisory without writing.");
+   /* Legacy path (retained one release): exact-text replacement. */
    tp_prop(props, "old_string", "string",
-           "Exact existing text to replace (must be unique unless replace_all).");
-   tp_prop(props, "new_string", "string", "Replacement text.");
+           "Legacy edit: exact existing text to replace (unique unless replace_all). Do NOT "
+           "combine with snapshot_id/edits — prefer the anchored path.");
+   tp_prop(props, "new_string", "string", "Legacy edit: replacement text.");
    tp_prop(props, "replace_all", "boolean",
-           "Replace every occurrence instead of requiring uniqueness.");
+           "Legacy edit: replace every occurrence instead of requiring uniqueness.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("old_string"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("new_string"));
    cJSON_AddItemToObject(params, "required", req);
    return params;
 }
@@ -928,10 +942,13 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_tool_output_get, TSURF_ALL},
     {"write_file", "Write content to a file (overwrites).", tp_write_file, TSURF_ALL},
     {"edit_file",
-     "Make a surgical edit to an existing file by replacing old_string with new_string. "
-     "Prefer this over write_file when changing part of a file — you do not need to "
-     "reproduce the whole file. old_string must match the file exactly (including "
-     "whitespace/indentation) and be unique unless replace_all is true.",
+     "Make a surgical edit to an existing file. PREFERRED: edit by anchor — pass the "
+     "snapshot_id from an anchored read_file plus an `edits` batch of {op, at|from,to, text} "
+     "referencing the 'N:hash' anchors you read; the batch is applied all-or-nothing, unchanged "
+     "lines keep their exact bytes, and a stale/moved anchor returns a structured re-anchor "
+     "payload instead of corrupting the file. dry_run returns the diff + blast radius without "
+     "writing. LEGACY (one release): old_string/new_string exact-text replacement. Provide "
+     "either the anchored fields or the legacy fields, never both.",
      tp_edit_file, TSURF_ALL},
     {"list_files", "List files in a directory, optionally matching a glob pattern.", tp_list_files,
      TSURF_ALL},

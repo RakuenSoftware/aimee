@@ -22,6 +22,8 @@
 #include "diff.h"
 #include "dstr.h"
 #include "hashline_anchor.h"
+#include "hashline_edit.h"
+#include "guardrails_blast_radius.h"
 #include "lsp.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -1390,6 +1392,301 @@ char *tool_write_file(const char *path, const char *content)
 
    free(old_content);
    return safe_strdup("ok");
+}
+
+/* Parse an anchor token "N:tag" (or bare "N") into ordinal + display tag.
+ * Returns 1 on success, 0 if malformed. `tag` is set to "" when no ":tag". */
+static int hl_parse_anchor(const char *s, int *ord, char *tag, size_t tagsz)
+{
+   if (!s || !*s)
+      return 0;
+   char *end = NULL;
+   long v = strtol(s, &end, 10);
+   if (end == s || v < 1 || v > 1000000000)
+      return 0;
+   *ord = (int)v;
+   tag[0] = '\0';
+   if (*end == ':')
+   {
+      end++;
+      size_t i = 0;
+      while (*end && i + 1 < tagsz)
+         tag[i++] = *end++;
+      tag[i] = '\0';
+   }
+   return 1;
+}
+
+/* Build anchored context rows [start,end] (1-based, clamped) from `content` as a
+ * cJSON array of {anchor:"N:hash", text:"..."} — the re-anchor payload lets the
+ * model retry without a blind full re-read. */
+static cJSON *hl_context_rows(const char *content, size_t len, int start, int end)
+{
+   cJSON *rows = cJSON_CreateArray();
+   if (!rows)
+      return NULL;
+   size_t i = 0;
+   int ord = 0;
+   while (i < len)
+   {
+      size_t s = i;
+      while (i < len && content[i] != '\n')
+         i++;
+      size_t e = i;
+      int has_nl = (i < len);
+      if (has_nl)
+         i++;
+      ord++;
+      if (ord < start)
+         continue;
+      if (ord > end)
+         break;
+      uint64_t d = hashline_digest64(content + s, e - s, ord == 1, has_nl);
+      char tag[HASHLINE_DISPLAY_TAG_HEX + 1];
+      hashline_display_tag(d, tag, sizeof(tag));
+      char anchor[32];
+      snprintf(anchor, sizeof(anchor), "%d:%s", ord, tag);
+      char *text = strndup(content + s, e - s);
+      cJSON *row = cJSON_CreateObject();
+      cJSON_AddStringToObject(row, "anchor", anchor);
+      cJSON_AddStringToObject(row, "text", text ? text : "");
+      cJSON_AddItemToArray(rows, row);
+      free(text);
+   }
+   return rows;
+}
+
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, const cJSON *edits,
+                              int dry_run, const char *sid)
+{
+   if (!path || !path[0])
+      return safe_strdup("error: missing 'path' parameter");
+   if (!snapshot_id || !snapshot_id[0])
+      return safe_strdup("error: missing 'snapshot_id'; read the file (anchored) to obtain one");
+   if (!edits || !cJSON_IsArray(edits) || cJSON_GetArraySize(edits) == 0)
+      return safe_strdup("error: 'edits' must be a non-empty array");
+   if (!dry_run && agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+
+   char cwd_path[MAX_PATH_LEN];
+   const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
+   char resolved[MAX_PATH_LEN];
+   const char *perr = validate_file_path(actual_path, resolved, sizeof(resolved));
+   if (perr)
+      return safe_strdup(perr);
+
+   const workspace_provider_t *ws = workspace_provider_active();
+   ws_stat_t stt;
+   ws->stat(ws, actual_path, &stt);
+   if (!stt.exists)
+   {
+      char e[512];
+      snprintf(e, sizeof(e), "error: cannot open %s", actual_path);
+      return safe_strdup(e);
+   }
+   if (stt.size >= 8 * 1024 * 1024)
+      return safe_strdup("error: file too large to edit (limit 8MB); use write_file instead");
+   char *content = NULL;
+   size_t clen = 0;
+   if (ws->read_all(ws, actual_path, &content, &clen) != 0)
+   {
+      char e[512];
+      snprintf(e, sizeof(e), "error: cannot open %s", actual_path);
+      return safe_strdup(e);
+   }
+
+   /* Resolve the read snapshot the anchors came from. */
+   hashline_snapshot_view_t view;
+   if (!hashline_snapshot_get(sid, snapshot_id, &view))
+   {
+      cJSON *p = cJSON_CreateObject();
+      cJSON_AddStringToObject(p, "status", "stale_anchor");
+      cJSON_AddStringToObject(p, "path", actual_path);
+      cJSON_AddStringToObject(p, "reason", "snapshot_missing");
+      cJSON_AddStringToObject(p, "hint",
+                              "snapshot expired or unknown; re-read the file (anchored) to get "
+                              "fresh anchors and a new snapshot_id, then retry");
+      char *out = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      free(content);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   /* Parse edits into hl_edit_op_t[]. Text pointers borrow the cJSON strings. */
+   int nops = cJSON_GetArraySize(edits);
+   hl_edit_op_t *ops = calloc((size_t)nops, sizeof(hl_edit_op_t));
+   if (!ops)
+   {
+      hashline_snapshot_view_free(&view);
+      free(content);
+      return safe_strdup("error: out of memory");
+   }
+   int parse_bad = -1;
+   for (int k = 0; k < nops; k++)
+   {
+      cJSON *o = cJSON_GetArrayItem(edits, k);
+      cJSON *opn = cJSON_GetObjectItem(o, "op");
+      cJSON *at = cJSON_GetObjectItem(o, "at");
+      cJSON *from = cJSON_GetObjectItem(o, "from");
+      cJSON *to = cJSON_GetObjectItem(o, "to");
+      cJSON *txt = cJSON_GetObjectItem(o, "text");
+      const char *ops_s = (opn && cJSON_IsString(opn)) ? opn->valuestring : "";
+      ops[k].text = (txt && cJSON_IsString(txt)) ? txt->valuestring : NULL;
+      int a = 0, b = 0;
+      if (strcmp(ops_s, "replace") == 0)
+      {
+         ops[k].kind = HL_OP_REPLACE;
+         if (!at || !cJSON_IsString(at) ||
+             !hl_parse_anchor(at->valuestring, &a, ops[k].from_tag, sizeof(ops[k].from_tag)))
+         {
+            parse_bad = k;
+            break;
+         }
+         ops[k].from = ops[k].to = a;
+      }
+      else if (strcmp(ops_s, "insert_after") == 0)
+      {
+         ops[k].kind = HL_OP_INSERT_AFTER;
+         if (!at || !cJSON_IsString(at) ||
+             !hl_parse_anchor(at->valuestring, &a, ops[k].from_tag, sizeof(ops[k].from_tag)))
+         {
+            parse_bad = k;
+            break;
+         }
+         ops[k].from = ops[k].to = a;
+      }
+      else if (strcmp(ops_s, "replace_range") == 0 || strcmp(ops_s, "delete_range") == 0)
+      {
+         ops[k].kind = (ops_s[0] == 'r') ? HL_OP_REPLACE_RANGE : HL_OP_DELETE_RANGE;
+         if (!from || !cJSON_IsString(from) || !to || !cJSON_IsString(to) ||
+             !hl_parse_anchor(from->valuestring, &a, ops[k].from_tag, sizeof(ops[k].from_tag)) ||
+             !hl_parse_anchor(to->valuestring, &b, ops[k].to_tag, sizeof(ops[k].to_tag)))
+         {
+            parse_bad = k;
+            break;
+         }
+         ops[k].from = a;
+         ops[k].to = b;
+      }
+      else
+      {
+         parse_bad = k;
+         break;
+      }
+   }
+   if (parse_bad >= 0)
+   {
+      free(ops);
+      hashline_snapshot_view_free(&view);
+      free(content);
+      char e[160];
+      snprintf(e, sizeof(e),
+               "error: edits[%d] is malformed (op/op-anchor); expected op in "
+               "{replace,replace_range,insert_after,delete_range} with N:hash anchors",
+               parse_bad);
+      return safe_strdup(e);
+   }
+
+   char *newc = NULL;
+   size_t newlen = 0;
+   hl_edit_fail_t fail;
+   hl_edit_status_t est =
+       hashline_edit_apply(content, clen, &view, ops, (size_t)nops, &newc, &newlen, &fail);
+   free(ops);
+   hashline_snapshot_view_free(&view);
+
+   if (est != HL_EDIT_OK)
+   {
+      cJSON *p = cJSON_CreateObject();
+      const char *status = (est == HL_EDIT_CONFLICT) ? "conflict"
+                           : (est == HL_EDIT_BADOP)  ? "bad_op"
+                                                     : "stale_anchor";
+      cJSON_AddStringToObject(p, "status", status);
+      cJSON_AddStringToObject(p, "path", actual_path);
+      cJSON_AddStringToObject(p, "reason", fail.reason ? fail.reason : "error");
+      if (fail.failed_op >= 0)
+         cJSON_AddNumberToObject(p, "op_index", fail.failed_op);
+      if (est == HL_EDIT_STALE)
+      {
+         int wrong_tag = (fail.reason && strcmp(fail.reason, "hash_mismatch") == 0);
+         if (wrong_tag)
+         {
+            /* The file still matches the read snapshot; only the op's anchor hash
+             * was wrong (a mis-referenced ordinal). The ORIGINAL snapshot is still
+             * valid — echo it and tell the model to fix the anchor, not re-read. */
+            cJSON_AddStringToObject(p, "snapshot_id", snapshot_id);
+            cJSON_AddStringToObject(
+                p, "hint",
+                "the anchor hash does not match this line; the file is unchanged — retry against "
+                "the same snapshot_id with the correct N:hash anchor (the ordinal is "
+                "authoritative; you may omit the hash)");
+         }
+         else
+         {
+            /* The file diverged from the snapshot. Mint a fresh snapshot of the
+             * current bytes so the model can retry without a blind re-read. */
+            char *fresh = hashline_snapshot_mint(sid, actual_path, content, clen);
+            if (fresh)
+               cJSON_AddStringToObject(p, "snapshot_id", fresh);
+            cJSON_AddStringToObject(p, "hint",
+                                    "file changed since read; retry edits against the new "
+                                    "snapshot_id using these anchors");
+            free(fresh);
+         }
+         int cs = fail.ctx_start > 0 ? fail.ctx_start : 1;
+         int ce = fail.ctx_end > 0 ? fail.ctx_end : cs;
+         cs = (cs > 3) ? cs - 3 : 1;
+         ce = ce + 3;
+         cJSON *rows = hl_context_rows(content, clen, cs, ce);
+         if (rows)
+            cJSON_AddItemToObject(p, "context", rows);
+      }
+      else
+         cJSON_AddStringToObject(
+             p, "hint", "ops conflict or reference invalid lines; fix the batch and retry");
+      char *out = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      free(content);
+      free(newc);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   if (dry_run)
+   {
+      diff_result_t dr;
+      cJSON *p = cJSON_CreateObject();
+      cJSON_AddStringToObject(p, "status", "dry_run");
+      cJSON_AddStringToObject(p, "path", actual_path);
+      if (diff_compute(content, newc, &dr) == 0)
+      {
+         char *summary = diff_format_summary(&dr);
+         char *unified = diff_format_unified(content, newc, &dr);
+         cJSON_AddStringToObject(p, "summary", summary ? summary : "no change");
+         cJSON_AddItemToObject(p, "diff", diff_result_to_json(&dr));
+         if (unified && unified[0])
+            cJSON_AddStringToObject(p, "unified_diff", unified);
+         free(summary);
+         free(unified);
+      }
+      char blast[2048];
+      blast[0] = '\0';
+      guardrails_blast_radius_advisory(resolved, blast, sizeof(blast));
+      if (blast[0])
+         cJSON_AddStringToObject(p, "blast_radius", blast);
+      cJSON_AddStringToObject(p, "hint", "dry_run only — no file was written");
+      char *out = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      free(content);
+      free(newc);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   /* Commit through the gated writer (re-resolves path, enforces write guards,
+    * returns the structured diff). Byte-preserving new image built above. */
+   char *result = tool_write_file(path, newc);
+   free(content);
+   free(newc);
+   return result;
 }
 
 char *append_write_slop_advisory(const char *result, const slop_finding_t *slop, int nslop)

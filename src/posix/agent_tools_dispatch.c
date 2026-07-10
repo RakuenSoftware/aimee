@@ -449,6 +449,50 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
    return result;
 }
 
+/* Shared write-path guards for edit_file (both legacy and anchored). Returns a
+ * newly-allocated error string if blocked, or NULL to proceed. */
+static char *td_edit_write_guards(const char *path, const char *dispatch_cwd)
+{
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+   if (agent_tools_parent_write_guard_blocks(path, dispatch_cwd))
+      return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+   if (agent_tools_session_isolation_blocks(path, dispatch_cwd))
+      return safe_strdup("error: write blocked: require_session_worktree is enabled and this "
+                         "target is outside an aimee-managed worktree (.aimee/worktrees/...)");
+   return NULL;
+}
+
+static void td_edit_record_write(const char *path, const char *dispatch_cwd,
+                                 const char *dispatch_sid)
+{
+   char abs_path[MAX_PATH_LEN];
+   normalize_path(path, dispatch_cwd, abs_path, sizeof(abs_path));
+   const char *write_key = delegation_active_id();
+   (void)db1_session_write_path_record(write_key ? write_key : dispatch_sid, abs_path);
+}
+
+/* True only when `result` reflects an APPLIED write. tool_write_file returns
+ * either the bare string "ok" (no textual change) or a JSON payload with
+ * status "ok"; a stale_anchor/conflict/bad_op payload is non-error JSON that did
+ * NOT write, so a substring match would wrongly record it. Parse to be exact. */
+static int td_result_is_write_ok(const char *result)
+{
+   if (!result || strncmp(result, "error:", 6) == 0)
+      return 0;
+   if (strcmp(result, "ok") == 0)
+      return 1;
+   cJSON *j = cJSON_Parse(result);
+   int ok = 0;
+   if (j)
+   {
+      cJSON *s = cJSON_GetObjectItem(j, "status");
+      ok = (s && cJSON_IsString(s) && strcmp(s->valuestring, "ok") == 0);
+      cJSON_Delete(j);
+   }
+   return ok;
+}
+
 static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cwd,
                           const char *dispatch_sid, int timeout_ms)
 {
@@ -457,43 +501,59 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
    cJSON *o = cJSON_GetObjectItem(args, "old_string");
    cJSON *nw = cJSON_GetObjectItem(args, "new_string");
    cJSON *ra = cJSON_GetObjectItem(args, "replace_all");
+   cJSON *edits = cJSON_GetObjectItem(args, "edits");
+   cJSON *snap = cJSON_GetObjectItem(args, "snapshot_id");
+   cJSON *dryj = cJSON_GetObjectItem(args, "dry_run");
+   int has_edits = (edits && cJSON_IsArray(edits));
+   int has_old = (o && cJSON_IsString(o));
+   int dry_run = (dryj && cJSON_IsBool(dryj) && cJSON_IsTrue(dryj));
+
    if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
-   else if (!o || !cJSON_IsString(o))
-      result = safe_strdup("error: missing 'old_string' parameter");
-   else
+      return safe_strdup("error: missing 'path' parameter");
+
+   /* Disjoint dual-path: never silently fall back — a call mixing legacy and
+    * anchor fields is rejected outright. */
+   if (has_edits && has_old)
+      return safe_strdup("error: provide EITHER old_string (legacy) OR snapshot_id+edits "
+                         "(anchored), not both");
+
+   /* dry_run is an anchored-path feature. Reject it on the legacy path so a model
+    * expecting a no-write preview can never get a real write. */
+   if (dry_run && !has_edits)
+      return safe_strdup("error: dry_run is only supported on the anchored path "
+                         "(provide snapshot_id + edits)");
+
+   if (has_edits)
    {
-      const char *new_str = (nw && cJSON_IsString(nw)) ? nw->valuestring : "";
-      int replace_all = (ra && cJSON_IsBool(ra)) ? cJSON_IsTrue(ra) : 0;
-      if (agent_tools_readonly_delegate_blocks())
+      const char *snap_id = (snap && cJSON_IsString(snap)) ? snap->valuestring : NULL;
+      if (!dry_run)
       {
-         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
-      }
-      else if (agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
-      {
-         result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
-      }
-      else if (agent_tools_session_isolation_blocks(p->valuestring, dispatch_cwd))
-      {
-         result = safe_strdup("error: write blocked: require_session_worktree is enabled and this "
-                              "target is outside an aimee-managed worktree (.aimee/worktrees/...)");
-      }
-      else
-      {
-         /* Auto-snapshot: record pre-edit state in the persistent rewind DB */
+         char *blocked = td_edit_write_guards(p->valuestring, dispatch_cwd);
+         if (blocked)
+            return blocked;
          auto_snapshot_record(p->valuestring);
-         result = tool_edit_file(p->valuestring, o->valuestring, new_str, replace_all);
       }
-      /* Record the write under the active delegation id (mirrors write_file). */
-      if (result && strncmp(result, "error:", 6) != 0)
-      {
-         char abs_path[MAX_PATH_LEN];
-         normalize_path(p->valuestring, dispatch_cwd, abs_path, sizeof(abs_path));
-         const char *write_key = delegation_active_id();
-         (void)db1_session_write_path_record(write_key ? write_key : dispatch_sid, abs_path);
-      }
+      result = tool_edit_file_anchored(p->valuestring, snap_id, edits, dry_run, dispatch_sid);
+      /* Record only a real apply; a stale_anchor/conflict/bad_op response wrote
+       * nothing (non-error JSON), so parse the status rather than substring-match. */
+      if (!dry_run && td_result_is_write_ok(result))
+         td_edit_record_write(p->valuestring, dispatch_cwd, dispatch_sid);
+      return result;
    }
 
+   /* Legacy old_string path (retained one release behind the anchor path). */
+   if (!has_old)
+      return safe_strdup("error: provide old_string (legacy) or snapshot_id+edits (anchored)");
+
+   const char *new_str = (nw && cJSON_IsString(nw)) ? nw->valuestring : "";
+   int replace_all = (ra && cJSON_IsBool(ra)) ? cJSON_IsTrue(ra) : 0;
+   char *blocked = td_edit_write_guards(p->valuestring, dispatch_cwd);
+   if (blocked)
+      return blocked;
+   auto_snapshot_record(p->valuestring);
+   result = tool_edit_file(p->valuestring, o->valuestring, new_str, replace_all);
+   if (result && strncmp(result, "error:", 6) != 0)
+      td_edit_record_write(p->valuestring, dispatch_cwd, dispatch_sid);
    return result;
 }
 
