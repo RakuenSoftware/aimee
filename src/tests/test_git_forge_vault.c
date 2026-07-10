@@ -86,8 +86,8 @@ int main(void)
     * this change removes). GREEN: the server-sealed intake below just works. */
    assert(vault_service_set(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, ckey, T0) ==
           VAULT_ERR_LOCKED);
-   assert(vault_service_set_server_wrap(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, ckey) ==
-          VAULT_OK);
+   assert(vault_service_set_server_wrap(carol, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED,
+                                        ckey) == VAULT_OK);
    vault_kek_cache_clear();
    assert(git_forge_vault_sshkey(carol, out, sizeof(out)) == 1);
    assert(strcmp(out, ckey) == 0);

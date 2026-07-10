@@ -1544,8 +1544,8 @@ static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
     * storing needs NO vault unlock — parity with per-host git tokens and delegate
     * keys. It is read back the same way (git_forge_vault_sshkey ->
     * vault_service_get_server_wrap), so there is never a VAULT_ERR_LOCKED here. */
-   vault_status_t st = vault_service_set_server_wrap(principal, GIT_FORGE_VAULT_AGENT,
-                                                     GIT_FORGE_SSHKEY_CRED, key);
+   vault_status_t st =
+       vault_service_set_server_wrap(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, key);
    /* Zero our parsed copy of the secret before freeing the JSON tree. */
    if (jkey && jkey->valuestring)
    {
