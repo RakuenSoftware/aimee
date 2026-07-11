@@ -608,13 +608,14 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    if (feedback[0])
       snprintf(prompt, sizeof prompt,
                "%s\n\nA prior review roundtable REQUESTED CHANGES on your last revision. You MUST "
-               "address every blocker below and commit the improved artifact:\n\n%s", base_prompt,
-               feedback);
+               "address every blocker below and commit the improved artifact:\n\n%s",
+               base_prompt, feedback);
    else
       snprintf(prompt, sizeof prompt, "%s", base_prompt);
    char commit[64] = "";
    double cost = 0.0;
-   int drc = wfe_delegate_dispatch(wd, "architect", node_delegate(node), prompt, path, commit, &cost);
+   int drc =
+       wfe_delegate_dispatch(wd, "architect", node_delegate(node), prompt, path, commit, &cost);
    /* Hash the artifact file as the produced content, and note whether it holds
     * any content at all. */
    char hash[65] = "";
