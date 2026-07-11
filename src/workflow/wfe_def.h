@@ -177,7 +177,7 @@ int wfe_sha256_raw(const void *data, size_t len, unsigned char out[32]);
  * them on request_changes; the re-authoring author node reads them so it refines
  * against the objections). Stored at $AIMEE_HOME/wfe-feedback/<id>.md, outside any
  * git tree. All best-effort. */
-int wfe_feedback_write(const char *work_item_id, const char *text); /* 0 on success */
+int wfe_feedback_write(const char *work_item_id, const char *text);     /* 0 on success */
 int wfe_feedback_read(const char *work_item_id, char *buf, size_t cap); /* bytes read (0=none) */
 void wfe_feedback_clear(const char *work_item_id);
 

@@ -175,7 +175,8 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    {
       /* Persist the panel's blockers so the re-authoring delegate (via on_fail)
        * refines against the actual objections instead of re-authoring blind. */
-      const cJSON *fj = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+      const cJSON *fj =
+          node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
       const char *focus = (fj && cJSON_IsString(fj)) ? fj->valuestring : "";
       char agg[4096];
       int off = snprintf(agg, sizeof agg,

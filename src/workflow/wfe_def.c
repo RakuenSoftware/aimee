@@ -5,7 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#ifdef _WIN32
+#include <direct.h>
+#define WFE_MKDIR(p) _mkdir(p)
+#else
 #include <sys/stat.h>
+#define WFE_MKDIR(p) mkdir((p), 0700)
+#endif
 
 #include "yaml.h"
 
@@ -416,7 +422,7 @@ int wfe_feedback_write(const char *work_item_id, const char *text)
    const char *home = getenv("AIMEE_HOME");
    char dir[1024];
    snprintf(dir, sizeof dir, "%s/wfe-feedback", (home && home[0]) ? home : ".");
-   mkdir(dir, 0700);
+   WFE_MKDIR(dir);
    char path[1200];
    wfe_feedback_path(work_item_id, path, sizeof path);
    FILE *f = fopen(path, "wb");
