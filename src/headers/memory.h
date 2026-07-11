@@ -544,6 +544,16 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
 /* --- Conversation Scanning --- */
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count);
 
+/* Sink invoked once per salient, genuinely user-authored turn found while
+ * scanning conversation transcripts. `key` is a stable content hash (for
+ * dedup); `user_text` is the first-person user text with tool_result echoes
+ * stripped. The KB backend registers a sink that ingests it as a durable
+ * memory, which feeds the typed-fact extractor so aimee learns from the user's
+ * own words. Unset (NULL) → the scan just skips user-fact mining. */
+typedef void (*memory_conv_user_fact_sink_fn)(const char *session_id, const char *key,
+                                              const char *user_text);
+void memory_scan_register_user_fact_sink(memory_conv_user_fact_sink_fn fn);
+
 /* --- Window Compaction --- */
 int memory_compact_windows(int *summary_count, int *fact_count);
 
