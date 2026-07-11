@@ -18,7 +18,9 @@
 # release (published by .github/workflows/publish-rerank-artifacts.yml) — the ST
 # score head doesn't survive GGUF conversion, so the gateway applies it.
 set -u
-LLAMA=/opt/llama/llama-server
+# The llama.cpp server binary. Overridable so the role-decouple test can shim it
+# (and so a custom install can point elsewhere); defaults to the image path.
+LLAMA="${AIMEE_LLM_LLAMA_BIN:-/opt/llama/llama-server}"
 NGL="${AIMEE_LLM_NGL:-0}"
 MODELS_DIR="${AIMEE_LLM_MODELS_DIR:-/models}"
 # Base URL for the pre-converted ettin rerank artifacts (override for a mirror).
@@ -77,6 +79,32 @@ tier_config() {
 }
 tier_config
 
+# ---- per-role backend mode (local | external | off) -------------------------
+# Each LLM role is independently local (a baked llama-server), external (the
+# gateway forwards to an operator-provided OpenAI-compatible upstream), or off
+# (the role is gated). Default is `local` for every role => byte-for-byte the
+# prior all-local behavior. A role that is NOT local is neither downloaded nor
+# launched: the plugin fetches and serves ONLY the roles it hosts. When every
+# role is external/off the supervisor pulls nothing and starts no llama-server —
+# the gateway is a pure forwarder (the deploy layer normally skips deploying the
+# plugin at all in that case).
+EMBED_MODE="${AIMEE_LLM_EMBED_MODE:-local}"
+RERANK_MODE="${AIMEE_LLM_RERANK_MODE:-local}"
+SYNTH_MODE="${AIMEE_LLM_SYNTH_MODE:-local}"
+# Back-compat: the older AIMEE_LLM_SYNTH_LOCAL=0 knob means "external synth".
+if [ "${AIMEE_LLM_SYNTH_LOCAL:-1}" = "0" ] && [ -z "${AIMEE_LLM_SYNTH_MODE:-}" ]; then
+  SYNTH_MODE="external"
+fi
+validate_mode() { # env-name value
+  case "$2" in
+    local|external|off) ;;
+    *) echo "aimee-llm: invalid $1='$2' (valid: local, external, off)" >&2; exit 1;;
+  esac
+}
+validate_mode AIMEE_LLM_EMBED_MODE "$EMBED_MODE"
+validate_mode AIMEE_LLM_RERANK_MODE "$RERANK_MODE"
+validate_mode AIMEE_LLM_SYNTH_MODE "$SYNTH_MODE"
+
 # Per-tier model cache (persist /models to a volume so restarts don't re-fetch).
 D="$MODELS_DIR/$TIER"
 
@@ -93,7 +121,7 @@ SLOTS="${AIMEE_LLM_SYNTH_SLOTS:-$TIER_SLOTS}"
 # last-token pooling — the gateway reads these for /health + the drift guard).
 export AIMEE_LLM_EMBED_MODEL="${AIMEE_LLM_EMBED_MODEL:-qwen3-embedding}"
 export AIMEE_LLM_EMBED_POOLING="${AIMEE_LLM_EMBED_POOLING:-last}"
-export AIMEE_LLM_RERANK_HEAD="$D/rerank-head"
+# AIMEE_LLM_RERANK_HEAD is set per-mode in resolve_upstreams (local rerank only).
 POOL="$AIMEE_LLM_EMBED_POOLING"
 
 pids=()
@@ -113,44 +141,87 @@ fetch() {
     || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
 }
 
-# download_models — populate $D for the resolved tier ONCE (guarded by $D/.ready).
-# Embed+synth pull straight from HF; the rerank encoder+head come from the GH
-# release, and everything sha256-verified where a checksum is known.
+# download_models — populate $D with ONLY the roles served locally, each guarded
+# by its own $D/.<role>.ready marker so switching one role to external/off never
+# re-pulls the others. Embed+synth pull straight from HF; the rerank encoder+head
+# come from the GH release, everything sha256-verified where a checksum is known.
 download_models() {
-  if [ -f "$D/.ready" ]; then
-    echo "aimee-llm: tier '$TIER' models present in $D (skip download)" >&2
-    return 0
-  fi
-  echo "aimee-llm: fetching tier '$TIER' models into $D" >&2
   mkdir -p "$D/rerank-head" || return 1
 
-  # Embedder GGUF (repo default branch).
-  fetch "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" "$D/embed.gguf" || return 1
+  # Migrate the legacy single all-roles marker: a volume provisioned before the
+  # per-role split has $D/.ready (all three fetched). Honor it so an upgrade does
+  # not needlessly re-download multi-GB GGUFs.
+  if [ -f "$D/.ready" ]; then
+    touch "$D/.embed.ready" "$D/.synth.ready" "$D/.rerank.ready"
+  fi
+
+  # Embedder GGUF (repo default branch) — local embed only.
+  if [ "$EMBED_MODE" = "local" ] && [ ! -f "$D/.embed.ready" ]; then
+    echo "aimee-llm: fetching tier '$TIER' embed model into $D" >&2
+    fetch "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" "$D/embed.gguf" || return 1
+    touch "$D/.embed.ready"
+  fi
 
   # Synth GGUF, pinned to the tier's HF revision; sha256-verified when known so a
-  # compromised/MITM'd upload can't ship.
-  fetch "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" "$D/synth.gguf" || return 1
-  if [ -n "$SYNTH_SHA256" ]; then
-    echo "${SYNTH_SHA256}  $D/synth.gguf" | sha256sum -c - >&2 || {
-      echo "aimee-llm: synth.gguf sha256 MISMATCH — refusing to serve" >&2; return 1; }
+  # compromised/MITM'd upload can't ship — local synth only.
+  if [ "$SYNTH_MODE" = "local" ] && [ ! -f "$D/.synth.ready" ]; then
+    echo "aimee-llm: fetching tier '$TIER' synth model into $D" >&2
+    fetch "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" "$D/synth.gguf" || return 1
+    if [ -n "$SYNTH_SHA256" ]; then
+      echo "${SYNTH_SHA256}  $D/synth.gguf" | sha256sum -c - >&2 || {
+        echo "aimee-llm: synth.gguf sha256 MISMATCH — refusing to serve" >&2; return 1; }
+    fi
+    touch "$D/.synth.ready"
   fi
 
   # Pre-converted ettin rerank artifacts (encoder GGUF + Dense head npz) from the
-  # GH release, verified against its SHA256SUMS.
-  local rr="rerank-ettin-${RERANK_SIZE}"
-  fetch "${RERANK_ASSET_BASE}/${rr}.gguf"     "$D/rerank-encoder.gguf"   || return 1
-  fetch "${RERANK_ASSET_BASE}/${rr}.head.npz" "$D/rerank-head/head.npz"  || return 1
-  if fetch "${RERANK_ASSET_BASE}/SHA256SUMS" "$D/SHA256SUMS"; then
-    ( cd "$D" \
-      && grep -E "  ${rr}\.gguf\$" SHA256SUMS | sed "s#${rr}\.gguf#rerank-encoder.gguf#" | sha256sum -c - \
-      && grep -E "  ${rr}\.head\.npz\$" SHA256SUMS | sed "s#${rr}\.head\.npz#rerank-head/head.npz#" | sha256sum -c - ) >&2 || {
-      echo "aimee-llm: rerank artifact sha256 MISMATCH — refusing to serve" >&2; return 1; }
-  else
-    echo "aimee-llm: WARNING — no SHA256SUMS for rerank artifacts (unverified)" >&2
+  # GH release, verified against its SHA256SUMS — local rerank only.
+  if [ "$RERANK_MODE" = "local" ] && [ ! -f "$D/.rerank.ready" ]; then
+    echo "aimee-llm: fetching tier '$TIER' rerank artifacts into $D" >&2
+    local rr="rerank-ettin-${RERANK_SIZE}"
+    fetch "${RERANK_ASSET_BASE}/${rr}.gguf"     "$D/rerank-encoder.gguf"   || return 1
+    fetch "${RERANK_ASSET_BASE}/${rr}.head.npz" "$D/rerank-head/head.npz"  || return 1
+    if fetch "${RERANK_ASSET_BASE}/SHA256SUMS" "$D/SHA256SUMS"; then
+      ( cd "$D" \
+        && grep -E "  ${rr}\.gguf\$" SHA256SUMS | sed "s#${rr}\.gguf#rerank-encoder.gguf#" | sha256sum -c - \
+        && grep -E "  ${rr}\.head\.npz\$" SHA256SUMS | sed "s#${rr}\.head\.npz#rerank-head/head.npz#" | sha256sum -c - ) >&2 || {
+        echo "aimee-llm: rerank artifact sha256 MISMATCH — refusing to serve" >&2; return 1; }
+    else
+      echo "aimee-llm: WARNING — no SHA256SUMS for rerank artifacts (unverified)" >&2
+    fi
+    touch "$D/.rerank.ready"
   fi
 
-  touch "$D/.ready"
-  echo "aimee-llm: tier '$TIER' models ready in $D" >&2
+  echo "aimee-llm: model provisioning done (embed=$EMBED_MODE rerank=$RERANK_MODE synth=$SYNTH_MODE)" >&2
+}
+
+# resolve_upstreams — point the gateway's per-role upstream at the right place for
+# each mode: local => the baked llama-server; external => the operator's upstream
+# (must be set to a non-local base); off => empty so the gateway gates the role.
+# The rerank Dense head is applied locally by the gateway, so only a LOCAL rerank
+# encoder carries a head dir; external/off rerank clears it (gated).
+resolve_upstreams() {
+  resolve_one EMBED  "$EMBED_MODE"  "http://127.0.0.1:8081"
+  resolve_one RERANK "$RERANK_MODE" "http://127.0.0.1:8082"
+  resolve_one SYNTH  "$SYNTH_MODE"  "http://127.0.0.1:8083"
+  if [ "$RERANK_MODE" = "local" ]; then
+    export AIMEE_LLM_RERANK_HEAD="$D/rerank-head"
+  else
+    export AIMEE_LLM_RERANK_HEAD=""
+  fi
+}
+resolve_one() { # ROLE MODE localurl
+  local role="$1" mode="$2" localurl="$3" var="AIMEE_LLM_${1}_URL" cur
+  eval "cur=\${$var:-}"
+  case "$mode" in
+    local) export "$var=$localurl" ;;
+    external)
+      if [ -z "$cur" ] || [ "$cur" = "$localurl" ]; then
+        echo "aimee-llm: ${role} mode=external requires $var set to the external upstream base" >&2
+        exit 1
+      fi ;;
+    off) export "$var=" ;;
+  esac
 }
 
 # STUB mode (CI/dev): no GGUFs, no downloads, no llama-servers — the gateway serves
@@ -160,15 +231,18 @@ case "${AIMEE_LLM_STUB:-}" in
   ""|0|false)
     download_models || { echo "aimee-llm: model provisioning failed; shutting down" >&2; exit 1; }
     # Embedder: one vector per input, no prompt-cache fragmentation (P2 flags).
-    start embed 8081 -m "$D/embed.gguf" --embeddings --pooling "$POOL" \
-      --ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
+    if [ "$EMBED_MODE" = "local" ]; then
+      start embed 8081 -m "$D/embed.gguf" --embeddings --pooling "$POOL" \
+        --ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
+    fi
     # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
-    start rerank 8082 -m "$D/rerank-encoder.gguf" --embeddings --pooling cls -fa on
+    if [ "$RERANK_MODE" = "local" ]; then
+      start rerank 8082 -m "$D/rerank-encoder.gguf" --embeddings --pooling cls -fa on
+    fi
     # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja). The
     # synth MODEL + its runtime profile come from the TIER table above; explicit
-    # AIMEE_LLM_SYNTH_* envs still override per deploy. AIMEE_LLM_SYNTH_LOCAL=0 lets
-    # an operator disable the local synth and forward via AIMEE_LLM_SYNTH_URL instead.
-    if [ "${AIMEE_LLM_SYNTH_LOCAL:-1}" != "0" ] && [ -f "$D/synth.gguf" ]; then
+    # AIMEE_LLM_SYNTH_* envs still override per deploy.
+    if [ "$SYNTH_MODE" = "local" ] && [ -f "$D/synth.gguf" ]; then
       synth_args=(-m "$D/synth.gguf" --ctx-size "$SYNTH_CTX" --jinja --parallel "$SLOTS")
       # Flash-attention + quantized KV (K8V4 by default). NOTE: quantized V-cache
       # REQUIRES fa (llama.cpp refuses otherwise), so a healthy start proves fa on.
@@ -190,6 +264,10 @@ case "${AIMEE_LLM_STUB:-}" in
     echo "aimee-llm: STUB mode — skipping model fetch + llama-servers; gateway serves deterministic responses" >&2
     ;;
 esac
+
+# Point the gateway at each role's resolved upstream (local server / external base
+# / gated) now that the local servers, if any, are launching.
+resolve_upstreams
 
 # Gateway (foreground-ish; backgrounded so we can reap any child exit).
 echo "aimee-llm: starting gateway on :${AIMEE_LLM_PORT:-8080}" >&2
