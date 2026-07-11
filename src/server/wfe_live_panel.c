@@ -50,16 +50,17 @@ static void panel_git(const char *workdir, const char *const extra[], int extra_
  * Returns the agent's response (malloc'd, caller frees), or NULL if no eligible agent
  * could run. Any edit the reviewer makes is discarded (hard reset) — read-only is
  * enforced, not merely requested. */
-static char *dispatch_review(const char *workdir, const char *persona, const char *prompt)
+static char *dispatch_review(const char *workdir, const char *persona, const char *prompt,
+                             const char *const used[], int nused, char *out_agent,
+                             size_t out_agent_n)
 {
+   if (out_agent && out_agent_n)
+      out_agent[0] = '\0';
    agent_config_t acfg;
    memset(&acfg, 0, sizeof acfg);
    if (agent_load_config(&acfg) != 0)
       return NULL;
    char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-   persona_t pinfo;
-   memset(&pinfo, 0, sizeof pinfo);
-   persona_load(NULL, persona, &pinfo);
 
    char pre_head[64] = "";
    {
@@ -76,38 +77,44 @@ static char *dispatch_review(const char *workdir, const char *persona, const cha
    }
 
    run_cmd_set_cwd(workdir);
+
+   /* Ask for a viable `review` delegate. The persona rides in the system prompt as
+    * the review lens; agent selection is purely by the `review` role, so non-review
+    * agents (e.g. gpu-mid, which lacks the role) are never picked. Exclude agents
+    * already seated on this panel (diversity) and any that fail this round, and
+    * retry until one lands — a flaky agent no longer degrades the whole gate. */
+   const char *tried[MAX_AGENTS];
+   int ntried = 0;
+   for (int i = 0; i < nused && ntried < MAX_AGENTS; i++)
+      tried[ntried++] = used[i];
+
    agent_result_t res;
    memset(&res, 0, sizeof res);
    agent_t *chosen = NULL;
-   const char *chosen_role = NULL;
-   int best_tier = 0;
-   for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
-   {
-      const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
-      for (int ai = 0; ai < acfg.agent_count; ai++)
-      {
-         agent_t *ag = &acfg.agents[ai];
-         if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
-             !agent_is_available_for_routing(ag))
-            continue;
-         if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-            continue;
-         if (!chosen || ag->cost_tier < best_tier)
-         {
-            chosen = ag;
-            chosen_role = r;
-            best_tier = ag->cost_tier;
-         }
-      }
-   }
    int rc = -1;
-   if (chosen)
-      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
+   while (ntried < MAX_AGENTS)
+   {
+      int idx = delegate_pick_for_role(&acfg, "review", tried, ntried);
+      if (idx < 0)
+         break;
+      chosen = &acfg.agents[idx];
+      memset(&res, 0, sizeof res);
+      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, "review",
                                              sys_prompt ? sys_prompt : "", prompt,
                                              AGENT_DEFAULT_MAX_TOKENS, 0.2, &res);
+      if (rc == 0 && res.response && res.response[0])
+         break;
+      provider_catalog_record_failure(chosen->name,
+                                      agent_error_is_retryable(res.error) ? "retryable" : "error");
+      free(res.response);
+      memset(&res, 0, sizeof res);
+      tried[ntried++] = chosen->name;
+      chosen = NULL;
+      rc = -1;
+   }
+
    run_cmd_set_cwd(NULL);
    free(sys_prompt);
-   persona_free(&pinfo);
 
    /* Enforce read-only: hard-reset to the pre-review HEAD + clean untracked. */
    if (pre_head[0])
@@ -119,8 +126,13 @@ static char *dispatch_review(const char *workdir, const char *persona, const cha
    }
 
    char *out = NULL;
-   if (rc == 0 && res.response && res.response[0])
+   if (rc == 0 && chosen && res.response && res.response[0])
+   {
       out = strdup(res.response);
+      provider_catalog_record_success(chosen->name);
+      if (out_agent && out_agent_n)
+         snprintf(out_agent, out_agent_n, "%s", chosen->name);
+   }
    free(res.response);
    return out;
 }
@@ -165,24 +177,38 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (!pkt || !pkt->workdir || !pkt->workdir[0])
       return -1; /* no worktree to review in -> panel can't compose -> park */
 
+   /* Distinct agent per seated lens: each review delegate excludes the agents
+    * already used on this panel, so the roundtable is a genuinely diverse panel. */
+   char used_buf[MAX_AGENTS][MAX_AGENT_NAME];
+   const char *used[MAX_AGENTS];
+   int nused = 0;
+
    int filled = 0;
    for (int i = 0; i < nreq && filled < max; i++)
    {
       char *prompt = build_prompt(required[i], pkt);
       if (!prompt)
          continue; /* OOM building the prompt -> leave this lens unfilled (gate degrades) */
-      char *resp = dispatch_review(pkt->workdir, required[i], prompt);
+      char agent_name[MAX_AGENT_NAME] = "";
+      char *resp = dispatch_review(pkt->workdir, required[i], prompt, used, nused, agent_name,
+                                   sizeof agent_name);
       free(prompt);
       if (!resp)
       {
-         /* This required persona couldn't be dispatched: leave it WITHOUT a verdict so
-          * the gate DEGRADES (a missing required lens must never be papered over). */
-         aimee_log(LOG_WARN, "wfe-panel", "no agent for required persona '%s' -> degrade",
+         /* No viable review agent remains for this lens: leave it WITHOUT a verdict
+          * so the gate DEGRADES (a missing required lens must never be papered over). */
+         aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for lens '%s' -> degrade",
                    required[i]);
          continue;
       }
       wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, resp, &out[filled]);
       free(resp);
+      if (agent_name[0] && nused < MAX_AGENTS)
+      {
+         snprintf(used_buf[nused], sizeof used_buf[0], "%s", agent_name);
+         used[nused] = used_buf[nused];
+         nused++;
+      }
       filled++;
    }
    /* filled==0 (nothing composed) -> the gate sees no required verdicts -> DEGRADED. */

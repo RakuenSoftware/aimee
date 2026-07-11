@@ -11,6 +11,7 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include <ctype.h>
+#include <stdlib.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -1360,6 +1361,62 @@ int agent_is_claude_cli(const agent_t *agent)
    return strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0 ||
           strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
           strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) == 0;
+}
+
+/* --- generalized role dispatch: a viable delegate for a role ---
+ * Return the index of an enabled, routable agent that serves `role` and is not
+ * named in `exclude`, chosen uniformly at random among the eligible set (so
+ * repeated requests for the same role vary — a roundtable of N `review`
+ * delegates, excluding those already used, gets diverse reviewers). Returns -1
+ * when none remain. Callers loop: pick -> run -> on failure add the agent to
+ * `exclude` -> pick again, until one works. Eligibility + retry-until-viable is
+ * the whole mechanism; a specific agent is used only when a caller pins one. */
+static unsigned g_role_rand_seed;
+static int g_role_rand_seeded;
+void delegate_role_pick_seed(unsigned seed)
+{
+   g_role_rand_seed = seed;
+   g_role_rand_seeded = 1;
+}
+static unsigned delegate_role_rand(void)
+{
+   if (g_role_rand_seeded)
+      return (unsigned)rand_r(&g_role_rand_seed);
+   unsigned v = 0;
+   FILE *f = fopen("/dev/urandom", "rb");
+   if (f)
+   {
+      if (fread(&v, 1, sizeof v, f) != sizeof v)
+         v = 0;
+      fclose(f);
+   }
+   if (!v)
+      v = (unsigned)time(NULL);
+   return v;
+}
+int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *const exclude[],
+                           int nexclude)
+{
+   if (!cfg || !role || !role[0])
+      return -1;
+   int elig[MAX_AGENTS];
+   int n = 0;
+   for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+         continue;
+      int skip = 0;
+      for (int e = 0; e < nexclude && !skip; e++)
+         if (exclude[e] && strcmp(exclude[e], ag->name) == 0)
+            skip = 1;
+      if (skip)
+         continue;
+      elig[n++] = i;
+   }
+   if (n == 0)
+      return -1;
+   return elig[delegate_role_rand() % (unsigned)n];
 }
 
 agent_t *agent_route(agent_config_t *cfg, const char *role)
