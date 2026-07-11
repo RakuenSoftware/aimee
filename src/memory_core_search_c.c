@@ -60,8 +60,10 @@ static int memory_collect_graph_candidates(const char *raw_query, const char *no
       if ((int)strlen(qtokens[i]) < 3)
          continue;
 
-      memory_t scratch[32];
-      int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+      MEMORY_AUTOFREE memory_t *scratch = calloc(32, sizeof(*scratch));
+      if (!scratch)
+         break;
+      int cap = 32;
       int rel_lim = fetch_limit < 8 ? fetch_limit : 8;
       int got = db2_memory_collect_relation_token_matches(qtokens[i], rel_lim, scratch, cap);
       for (int s = 0; s < got && count < max; s++)
@@ -212,8 +214,10 @@ int memory_generate_candidates(const char *query, const char *norm_query,
          int neg_count = extract_negation_tokens(query, neg_q, sizeof(neg_q));
          if (neg_count > 0 && neg_q[0])
          {
-            memory_t scratch[64];
-            int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+            MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+            if (!scratch)
+               return count;
+            int cap = 64;
             const char *embed_cmd = config_embedding_command(&neg_cfg, NULL);
             /* Negation tokens aren't in the vector payload yet, so this falls
              * back to memory-level semantic search of the synthetic
@@ -234,9 +238,10 @@ int memory_generate_candidates(const char *query, const char *norm_query,
    }
 
    /* Fallback: LIKE search */
-   memory_t like_matches[128];
-   int like_count = memory_find_facts_like(norm_query, fetch_limit, like_matches,
-                                           (int)(sizeof(like_matches) / sizeof(like_matches[0])));
+   MEMORY_AUTOFREE memory_t *like_matches = calloc(128, sizeof(*like_matches));
+   if (!like_matches)
+      return count;
+   int like_count = memory_find_facts_like(norm_query, fetch_limit, like_matches, 128);
    if (like_count > 0)
       memory_record_query_stage_metric(plan, "like");
    for (int i = 0; i < like_count && count < max; i++)
@@ -473,8 +478,10 @@ int memory_expand_to_session_window(memory_t *out, int count, int max, int windo
       if (!out[i].source_session[0])
          continue;
 
-      memory_t scratch[32];
-      int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+      MEMORY_AUTOFREE memory_t *scratch = calloc(32, sizeof(*scratch));
+      if (!scratch)
+         break;
+      int cap = 32;
 
       int got = db2_memory_session_neighbors_before(out[i].source_session, out[i].id, window_radius,
                                                     scratch, cap);
@@ -724,7 +731,13 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       int orig_sem_count = 0;
       memory_candidate_source_t orig_src[128];
       int orig_src_count = 0;
-      memory_t extra[MEMORY_RERANK_BUFFER];
+      MEMORY_AUTOFREE memory_t *extra = calloc(MEMORY_RERANK_BUFFER, sizeof(*extra));
+      if (!extra)
+      {
+         pgvec_memory_vector_scope_hint_clear();
+         free(candidates);
+         return -1;
+      }
       int extra_count = memory_generate_candidates(
           query, norm_query, intent, &plan, fetch_limit / 2 > 0 ? fetch_limit / 2 : 8, extra,
           MEMORY_RERANK_BUFFER, orig_sem_ids, orig_sem_scores, &orig_sem_count, orig_src,
@@ -755,7 +768,9 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       int sub_sem_count = 0;
       memory_candidate_source_t sub_src[128];
       int sub_src_count = 0;
-      memory_t sub_cands[MEMORY_RERANK_BUFFER / 2];
+      MEMORY_AUTOFREE memory_t *sub_cands = calloc(MEMORY_RERANK_BUFFER / 2, sizeof(*sub_cands));
+      if (!sub_cands)
+         break;
       int sub_count = memory_generate_candidates(
           rewrite.sub_questions[q], sub_norm,
           memory_query_intent(rewrite.sub_questions[q], sub_norm), &sub_plan,
@@ -975,7 +990,12 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
    int semantic_hit_count = 0;
    memory_candidate_source_t source_stats[128];
    int source_stats_count = 0;
-   memory_t candidates[MEMORY_RERANK_BUFFER];
+   MEMORY_AUTOFREE memory_t *candidates = calloc(MEMORY_RERANK_BUFFER, sizeof(*candidates));
+   if (!candidates)
+   {
+      pgvec_memory_vector_scope_hint_clear();
+      return -1;
+   }
    int scope_rank[MEMORY_RERANK_BUFFER];
 
    int count = memory_generate_candidates(query, norm_query, intent, &plan, fetch_limit, candidates,

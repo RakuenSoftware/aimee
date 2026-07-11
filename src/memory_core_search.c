@@ -356,8 +356,10 @@ static int memory_collect_via(memory_db2_collect_fn collect, const char *term, i
 {
    if (!term || !term[0] || !out || count >= max)
       return count;
-   memory_t scratch[64];
-   int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+   MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+   if (!scratch)
+      return count;
+   int cap = 64;
    int got = collect(term, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -402,8 +404,10 @@ int memory_collect_chunk_matches(const char *query, int limit, memory_t *out, in
 {
    if (!query || !query[0] || !out || count >= max)
       return count;
-   memory_t scratch[64];
-   int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+   MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+   if (!scratch)
+      return count;
+   int cap = 64;
    config_t cm_cfg;
    config_load(&cm_cfg);
    const char *embed_cmd = config_embedding_command(&cm_cfg, NULL);
@@ -429,8 +433,10 @@ int memory_collect_unit_matches(const char *query, int limit, memory_t *out, int
    }
    if (useful < 2)
       return count;
-   memory_t scratch[64];
-   int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+   MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+   if (!scratch)
+      return count;
+   int cap = 64;
    config_t mc_cfg;
    config_load(&mc_cfg);
    const char *embed_cmd = config_embedding_command(&mc_cfg, NULL);
