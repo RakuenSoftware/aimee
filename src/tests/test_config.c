@@ -2181,6 +2181,56 @@ int main(void)
       cJSON_Delete(root);
    }
 
+   /* --- config_emit_deploy_env: page-2 record -> compose env --- */
+   {
+      char env[2048];
+
+      /* Local kb; embed local(mid), rerank off, synth external. */
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
+      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
+      snprintf(cfg.llm_rerank_backend, sizeof(cfg.llm_rerank_backend), "off");
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
+      snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.x/v1");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_EMBED_MODE=local\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_EMBED_TIER=mid\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_RERANK_MODE=off\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_SYNTH_MODE=external\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_SYNTH_URL=https://api.x/v1\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
+      assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
+
+      /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "remote");
+      snprintf(cfg.kb_client_url, sizeof(cfg.kb_client_url), "https://kb.remote:4010");
+      snprintf(cfg.kb_client_bearer_token, sizeof(cfg.kb_client_bearer_token), "tok-x");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=\n") != NULL);
+      assert(strstr(env, "AIMEE_KB_API_URL=https://kb.remote:4010\n") != NULL);
+      assert(strstr(env, "AIMEE_KB_API_BEARER_TOKEN=tok-x\n") != NULL);
+      assert(strstr(env, "AIMEE_LLM_") == NULL);
+
+      /* All external (local kb): kb profile only, no llm container, external embed
+       * with a pinned dim is emitted. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "external");
+      snprintf(cfg.embedding_endpoint, sizeof(cfg.embedding_endpoint), "https://emb.x/v1");
+      cfg.embedding_dim = 2560;
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
+      snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://synth.x/v1");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=kb\n") != NULL); /* no ,llm */
+      assert(strstr(env, "AIMEE_LLM_URL=") == NULL);
+      assert(strstr(env, "AIMEE_LLM_EMBED_URL=https://emb.x/v1\n") != NULL);
+      assert(strstr(env, "AIMEE_EMBEDDING_DIM=2560\n") != NULL);
+   }
+
    printf("all tests passed\n");
    return 0;
 }
