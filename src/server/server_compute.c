@@ -35,9 +35,11 @@
 #include "delegate_role.h"
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"
+#include "aimee_home.h"
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"
+#include "platform_path.h"
 #include "model_registry.h"
 #include "openai_runs_store.h"
 #include "platform_process.h"
@@ -1287,6 +1289,39 @@ void delegate_worker(void *arg)
    platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
    /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
    int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
+   /* A background/durable delegate has no live client connection to serve a
+    * DETACHED (client-served) workspace: by the time the worker runs, the
+    * dispatching client has disconnected, so the reverse channel is dead and every
+    * shell/file tool marshalled to it fails (previously a silent exit_code:-1).
+    * Unbind and run tools in a server-side ephemeral workspace so they execute
+    * locally on the server instead. NOTE: this workspace does NOT contain the
+    * client's repo — a background *code* delegate that must edit the client tree
+    * needs it provisioned server-side (tracked separately). */
+   if (detached_bound && cctx->background_job_id > 0)
+   {
+      workspace_turn_unbind_active();
+      detached_bound = 0;
+      char srv_ws[MAX_PATH_LEN];
+      const char *home = aimee_home();
+      if (home && home[0] &&
+          snprintf(srv_ws, sizeof(srv_ws), "%s/delegate-ws/%s", home, deleg_id) <
+              (int)sizeof(srv_ws) &&
+          platform_mkdir_p(srv_ws, 0700) == 0)
+      {
+         run_cmd_set_cwd(srv_ws);
+         aimee_log(LOG_WARN, "delegate",
+                   "delegate %s: background job cannot serve its detached (client) workspace; "
+                   "running tools in server-side ephemeral workspace %s",
+                   deleg_id, srv_ws);
+      }
+      else
+      {
+         aimee_log(LOG_ERROR, "delegate",
+                   "delegate %s: background job on a detached workspace but could not create a "
+                   "server-side ephemeral workspace; shell tools will fail",
+                   deleg_id);
+      }
+   }
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                            max_tokens, force_tools, delegate_allows_writes,
