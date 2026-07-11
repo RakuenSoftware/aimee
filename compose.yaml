@@ -83,8 +83,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # required:false so the kb starts even when the aimee-llm service is not in
+      # the active profile set (all-external / remote-kb): it fail-opens on
+      # embedding until an LLM is reachable. When the `llm` profile IS on, it
+      # still waits for aimee-llm to be healthy first.
       aimee-llm:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
@@ -168,6 +173,11 @@ services:
   # builds a tiny python-only stub (no llama.cpp / GGUFs) — see e2e-matrix.sh.
   aimee-llm:
     restart: unless-stopped
+    # Profile-gated: brought up only when the page-2 config puts a role local (the
+    # translation `aimee config deploy-env` emits COMPOSE_PROFILES=...,llm). An
+    # all-external / remote-kb stack never starts it. CI opts it in via
+    # COMPOSE_PROFILES=llm (see e2e-matrix.sh) to exercise the kb->gateway contract.
+    profiles: ["llm"]
     image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     build:
       context: .
