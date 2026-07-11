@@ -19,6 +19,7 @@ export const READINESS_KEYS = [
   'provider',
   'embedding_command',
   'embedding_endpoint',
+  'llm_embed_backend',
   'db2_url',
   'kb_api_http_port',
 ] as const;
@@ -55,6 +56,10 @@ export function computeReadiness(cfg: Record<string, unknown>, hasProject: boole
   const provider = asStr(cfg, 'provider');
   const embCmd = asStr(cfg, 'embedding_command');
   const embEndpoint = asStr(cfg, 'embedding_endpoint');
+  // The deploy-topology page places the embedder as a role (local container or
+  // external), which also configures a real embedder.
+  const embBackend = asStr(cfg, 'llm_embed_backend');
+  const embConfigured = embCmd !== '' || embEndpoint !== '' || embBackend === 'local' || embBackend === 'external';
   const db2 = asStr(cfg, 'db2_url');
   const kbPort = asNum(cfg, 'kb_api_http_port');
 
@@ -64,10 +69,10 @@ export function computeReadiness(cfg: Record<string, unknown>, hasProject: boole
       detail: provider !== '' ? `primary: ${provider}` : 'no primary provider set',
     },
     embedding: {
-      // A real embedder is a command or an endpoint; blank means the built-in
-      // 384-dim hash fallback, which only works in a test setup.
-      ok: embCmd !== '' || embEndpoint !== '',
-      detail: embCmd !== '' || embEndpoint !== '' ? 'embedder configured' : 'built-in hash fallback (test-only)',
+      // A real embedder is a command, an endpoint, or a placed embed role; blank
+      // means the built-in 384-dim hash fallback, which only works in a test setup.
+      ok: embConfigured,
+      detail: embConfigured ? 'embedder configured' : 'built-in hash fallback (test-only)',
     },
     db2: {
       ok: db2 !== '',

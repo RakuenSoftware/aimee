@@ -18,14 +18,17 @@ export interface WizardStep {
   route?: string;
   /** One-line "what you lose if you skip", shown for optional steps. */
   skipNote?: string;
-  /** A step whose body is a bespoke component (the primary chooser) rather than
-   * the generic key inputs. Rendered specially by SetupWizard. */
-  kind?: 'chooser';
+  /** A step whose body is a bespoke component rather than the generic key
+   * inputs: 'chooser' = the primary chooser, 'deploy' = the deploy-topology page.
+   * Rendered specially by SetupWizard. */
+  kind?: 'chooser' | 'deploy';
 }
 
 export const WIZARD_STEPS: WizardStep[] = [
   { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },
-  { id: 'embedding', title: 'Embedding backend', keys: ['embedding_command', 'embedding_endpoint', 'embedding_model', 'embedding_dim'] },
+  // Deploy topology (page 2) — kb_mode + per-role LLM placement, incl. the
+  // embedder + its dimensions. Bespoke component; owns its own config writes.
+  { id: 'embedding', title: 'Deploy topology', keys: [], kind: 'deploy' },
   { id: 'db2', title: 'Shared store (DB2)', keys: ['db2_url'] },
   { id: 'kb_api', title: 'Knowledge-base API', keys: ['kb_api_http_port', 'kb_api_bearer_token'], optional: true, skipNote: 'Skipping leaves the KB REST API off — no external programmatic access to the knowledge base.' },
   { id: 'project', title: 'Connect a project', keys: [], route: '/projects', skipNote: 'Without a connected project, tools have no repository to act on.' },
