@@ -10,6 +10,7 @@
 #include "index.h"
 #include "code_span.h"
 #include "db1.h"
+#include "util.h" /* is_safe_id */
 #include "kb_client.h"
 #include "dashboard.h"
 #include "work_queue.h"
@@ -1610,6 +1611,26 @@ static cJSON *mcp_tool_describe_tool(cJSON *args)
    return json_result_content(found);
 }
 
+/* Idempotently register an MCP session in the server_sessions registry, tagged
+ * client_type "mcp", so a session is locatable after a crash/restart -- matching
+ * every other session entry seam (handle_hooks_session_start,
+ * handle_session_create, chat_session_register). MCP sessions are pure tool calls
+ * and never drive a chat turn, so the MCP request handlers are the only seam that
+ * can log them; without this an MCP serve session left no findable record.
+ * Best-effort: a NULL/empty/unsafe sid or a DB failure is a silent no-op and must
+ * never fail the request. */
+void mcp_session_register(server_conn_t *conn, const char *sid)
+{
+   if (!conn || !sid || !sid[0] || !is_safe_id(sid))
+      return;
+   db1_server_session_t existing;
+   if (db1_server_session_get(sid, &existing) == 0)
+      return; /* already registered */
+   char principal[32];
+   snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
+   (void)db1_server_session_create(sid, "mcp", principal);
+}
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
@@ -1617,6 +1638,9 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
    cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
    const char *sid = (jsid && cJSON_IsString(jsid)) ? jsid->valuestring : NULL;
+
+   /* Log this MCP session in server_sessions before dispatching the tool. */
+   mcp_session_register(conn, sid);
 
    if (!cJSON_IsString(jtool))
       return server_send_error(conn, "missing 'tool' parameter", NULL);
