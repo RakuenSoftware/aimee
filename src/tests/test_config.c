@@ -123,6 +123,15 @@ int main(void)
       snprintf(cfg.memory_rerank_mode, sizeof(cfg.memory_rerank_mode), "slow");
       snprintf(cfg.kb_client_url, sizeof(cfg.kb_client_url), "https://kb.example:4010");
       snprintf(cfg.kb_client_bearer_token, sizeof(cfg.kb_client_bearer_token), "tok-abc123");
+      /* Setup-wizard page-2 backend record (kb_mode + per-role llm_* fields). */
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
+      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "mid");
+      snprintf(cfg.llm_embed_gpu, sizeof(cfg.llm_embed_gpu), "0");
+      snprintf(cfg.llm_rerank_backend, sizeof(cfg.llm_rerank_backend), "off");
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "external");
+      snprintf(cfg.llm_synth_endpoint, sizeof(cfg.llm_synth_endpoint), "https://api.example/v1");
+      snprintf(cfg.llm_synth_model, sizeof(cfg.llm_synth_model), "gpt-5.5");
       cfg.server_api_http_port = 8910;
       snprintf(cfg.server_api_bearer_token, sizeof(cfg.server_api_bearer_token), "tok-api-xyz");
       cfg.server_api_rate_limit_per_min = 60;
@@ -369,6 +378,15 @@ int main(void)
       assert(strcmp(cfg2.model_reasoning_effort, "high") == 0);
       assert(strcmp(cfg2.memory_rerank_mode, "slow") == 0);
       assert(strcmp(cfg2.kb_client_bearer_token, "tok-abc123") == 0);
+      /* Setup-wizard page-2 backend record survives save/load. */
+      assert(strcmp(cfg2.kb_mode, "local") == 0);
+      assert(strcmp(cfg2.llm_embed_backend, "local") == 0);
+      assert(strcmp(cfg2.llm_embed_tier, "mid") == 0);
+      assert(strcmp(cfg2.llm_embed_gpu, "0") == 0);
+      assert(strcmp(cfg2.llm_rerank_backend, "off") == 0);
+      assert(strcmp(cfg2.llm_synth_backend, "external") == 0);
+      assert(strcmp(cfg2.llm_synth_endpoint, "https://api.example/v1") == 0);
+      assert(strcmp(cfg2.llm_synth_model, "gpt-5.5") == 0);
       assert(cfg2.server_api_http_port == 8910);
       assert(strcmp(cfg2.server_api_bearer_token, "tok-api-xyz") == 0);
       assert(cfg2.server_api_rate_limit_per_min == 60);

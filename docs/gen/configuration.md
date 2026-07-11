@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (158)
+## CLI-settable keys (176)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -92,6 +92,8 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `integrity_enabled` | bool | Enable the integrity gate. |
 | `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
+| `kb_client_bearer_token` | string | — |
+| `kb_client_url` | string | — |
 | `kb_curator_cross_repo_graph_enabled` | bool | — |
 | `kb_curator_custom_stages` | string | — |
 | `kb_curator_detect_contradictions_enabled` | bool | — |
@@ -113,6 +115,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `kb_fusion_static_alpha` | float | Lexical/dense blend weight (0-1) for the static_alpha fusion mode. |
 | `kb_mining_enabled` | bool | Enable background KB mining. |
 | `kb_mining_min_poll_s` | int | Minimum interval (s) between KB mining polls. |
+| `kb_mode` | string | — |
 | `kb_pdf_assets_enabled` | bool | Render structured-PDF figure/table crops to the content-addressed blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm). |
 | `kb_pdf_blob_dir` | string | Override the structured-PDF blob store root (default <kb-config-dir>/kb-blobs). |
 | `kb_pdf_blob_orphan_alarm_mb` | int | Warn when reclaimable orphan blob bytes exceed this many MB (default 1024; <=0 disables the alarm). |
@@ -131,6 +134,21 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `learning_max_commits_per_week` | int | Cap on learning-derived commits per week. |
 | `learning_proposal_ttl_days` | int | TTL (days) for learning proposals. |
 | `learning_router_enabled` | bool | Enable the learning router. |
+| `llm_embed_backend` | string | — |
+| `llm_embed_gpu` | string | — |
+| `llm_embed_host` | string | — |
+| `llm_embed_tier` | string | — |
+| `llm_rerank_backend` | string | — |
+| `llm_rerank_endpoint` | string | — |
+| `llm_rerank_gpu` | string | — |
+| `llm_rerank_host` | string | — |
+| `llm_rerank_tier` | string | — |
+| `llm_synth_backend` | string | — |
+| `llm_synth_endpoint` | string | — |
+| `llm_synth_gpu` | string | — |
+| `llm_synth_host` | string | — |
+| `llm_synth_model` | string | — |
+| `llm_synth_tier` | string | — |
 | `max_iterations` | int | Per-turn iteration cap for interactive chat (default 15). |
 | `max_iterations_delegate` | int | Per-turn iteration cap for delegate sessions (default 25). |
 | `memory_abstain_enabled` | bool | Allow memory recall to abstain on low confidence. |
@@ -185,7 +203,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | — |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `wfe_live_forge_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `llm_embed_backend`, `llm_embed_gpu`, `llm_embed_host`, `llm_embed_tier`, `llm_rerank_backend`, `llm_rerank_endpoint`, `llm_rerank_gpu`, `llm_rerank_host`, `llm_rerank_tier`, `llm_synth_backend`, `llm_synth_endpoint`, `llm_synth_gpu`, `llm_synth_host`, `llm_synth_model`, `llm_synth_tier`, `wfe_live_forge_enabled`
 
 ## Config-file sections (53)
 
@@ -245,11 +263,11 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`
 - **`worktree_gc`** — `enabled`, `max_age_days`
 
-## Other top-level config-file keys (5)
+## Other top-level config-file keys (3)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `kb_client_bearer_token`, `kb_client_url`, `proxy_token`, `toolsets`
+`db2_pool_size`, `proxy_token`, `toolsets`
 
 ## Environment variables
 
