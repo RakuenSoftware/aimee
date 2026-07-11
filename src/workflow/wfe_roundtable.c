@@ -152,8 +152,7 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
            (focus_j && cJSON_IsString(focus_j) && focus_j->valuestring) ? focus_j->valuestring : "",
        .workdir = workdir,
        .diff = diff ? diff : "",
-       .roundtable =
-           (rt_j && cJSON_IsString(rt_j) && rt_j->valuestring) ? rt_j->valuestring : "",
+       .roundtable = (rt_j && cJSON_IsString(rt_j) && rt_j->valuestring) ? rt_j->valuestring : "",
    };
 
    wfe_verdict_t verdicts[WFE_PANEL_MAX];

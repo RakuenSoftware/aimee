@@ -412,8 +412,8 @@ static int positional_change_0_100(const char *prev, const char *next)
 
 static int token_jaccard_change_0_100(const char *prev, const char *next)
 {
-   char(*a)[64] = calloc(512, sizeof(*a));
-   char(*b)[64] = calloc(512, sizeof(*b));
+   char (*a)[64] = calloc(512, sizeof(*a));
+   char (*b)[64] = calloc(512, sizeof(*b));
    if (!a || !b)
    {
       free(a);
@@ -1283,8 +1283,8 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
    {
       snprintf(cfg->ensemble_reference_models[i], sizeof cfg->ensemble_reference_models[i], "%s",
                models[i]);
-      snprintf(cfg->ensemble_reference_personas[i], sizeof cfg->ensemble_reference_personas[i], "%s",
-               personas[i]);
+      snprintf(cfg->ensemble_reference_personas[i], sizeof cfg->ensemble_reference_personas[i],
+               "%s", personas[i]);
    }
    cfg->ensemble_reference_count = n;
    cfg->ensemble_reference_persona_count = n;
