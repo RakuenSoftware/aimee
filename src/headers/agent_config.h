@@ -114,4 +114,14 @@ void agent_request_creds_restore(const agent_request_creds_t *creds);
  * return 0. */
 int agent_is_claude_cli(const agent_t *agent);
 
+/* Generalized role dispatch. delegate_pick_for_role returns the index of a
+ * viable agent (enabled, routable, serves `role`) not named in `exclude`,
+ * uniformly at random among the eligible set — or -1 if none remain. Callers
+ * loop pick->run->exclude-on-failure->repick until one works. A roundtable of N
+ * `review` delegates excludes those already used to get diverse reviewers. */
+int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *const exclude[],
+                           int nexclude);
+/* Seed the picker's RNG for deterministic tests (otherwise /dev/urandom). */
+void delegate_role_pick_seed(unsigned seed);
+
 #endif /* DEC_AGENT_CONFIG_H */
