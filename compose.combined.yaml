@@ -110,7 +110,6 @@ services:
       # from AIMEE_LLM_URL. The default points at the compose service; override to
       # a GPU/external endpoint (and drop the `llm` profile). No LLM is bundled.
       AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
-      AIMEE_BUNDLED_LLM: "off"
       # Embedding dim — unset lets the kb derive it from the embedder /health
       # probe; pin it (e.g. 1024/2560) only for an external embedder.
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
