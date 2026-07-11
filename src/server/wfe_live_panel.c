@@ -46,96 +46,13 @@ static void panel_git(const char *workdir, const char *const extra[], int extra_
    free(o);
 }
 
-/* Dispatch persona `persona` as a READ-ONLY reviewer in `workdir` with `prompt`.
- * Returns the agent's response (malloc'd, caller frees), or NULL if no eligible agent
- * could run. Any edit the reviewer makes is discarded (hard reset) — read-only is
- * enforced, not merely requested. */
-static char *dispatch_review(const char *workdir, const char *persona, const char *prompt,
-                             const char *const used[], int nused, char *out_agent,
-                             size_t out_agent_n)
-{
-   if (out_agent && out_agent_n)
-      out_agent[0] = '\0';
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof acfg);
-   if (agent_load_config(&acfg) != 0)
-      return NULL;
-   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-
-   char pre_head[64] = "";
-   {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         size_t n = strlen(o);
-         while (n > 0 && (o[n - 1] == '\n' || o[n - 1] == '\r'))
-            o[--n] = '\0';
-         snprintf(pre_head, sizeof pre_head, "%s", o);
-      }
-      free(o);
-   }
-
-   run_cmd_set_cwd(workdir);
-
-   /* Ask for a viable `review` delegate. The persona rides in the system prompt as
-    * the review lens; agent selection is purely by the `review` role, so non-review
-    * agents (e.g. gpu-mid, which lacks the role) are never picked. Exclude agents
-    * already seated on this panel (diversity) and any that fail this round, and
-    * retry until one lands — a flaky agent no longer degrades the whole gate. */
-   const char *tried[MAX_AGENTS];
-   int ntried = 0;
-   for (int i = 0; i < nused && ntried < MAX_AGENTS; i++)
-      tried[ntried++] = used[i];
-
-   agent_result_t res;
-   memset(&res, 0, sizeof res);
-   agent_t *chosen = NULL;
-   int rc = -1;
-   while (ntried < MAX_AGENTS)
-   {
-      int idx = delegate_pick_for_role(&acfg, "review", tried, ntried);
-      if (idx < 0)
-         break;
-      chosen = &acfg.agents[idx];
-      memset(&res, 0, sizeof res);
-      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, "review",
-                                             sys_prompt ? sys_prompt : "", prompt,
-                                             AGENT_DEFAULT_MAX_TOKENS, 0.2, &res);
-      if (rc == 0 && res.response && res.response[0])
-         break;
-      provider_catalog_record_failure(chosen->name,
-                                      agent_error_is_retryable(res.error) ? "retryable" : "error");
-      free(res.response);
-      memset(&res, 0, sizeof res);
-      tried[ntried++] = chosen->name;
-      chosen = NULL;
-      rc = -1;
-   }
-
-   run_cmd_set_cwd(NULL);
-   free(sys_prompt);
-
-   /* Enforce read-only: hard-reset to the pre-review HEAD + clean untracked. */
-   if (pre_head[0])
-   {
-      const char *reset[] = {"reset", "--hard", pre_head};
-      panel_git(workdir, reset, 3);
-      const char *clean[] = {"clean", "-fd"};
-      panel_git(workdir, clean, 2);
-   }
-
-   char *out = NULL;
-   if (rc == 0 && chosen && res.response && res.response[0])
-   {
-      out = strdup(res.response);
-      provider_catalog_record_success(chosen->name);
-      if (out_agent && out_agent_n)
-         snprintf(out_agent, out_agent_n, "%s", chosen->name);
-   }
-   free(res.response);
-   return out;
-}
+/* Max panel seats (matches the verdict-array bound the gate.roundtable executor
+ * passes as `max`). */
+#define WFE_PANEL_MAX 16
+/* Per-round wall-clock ceiling for the parallel panel: a panelist still running
+ * at the deadline is abandoned (its lens left unfilled) so one hung model can
+ * never wedge the round. */
+#define WFE_PANEL_DEADLINE_MS 300000
 
 /* Build the per-persona review prompt. The change under review is embedded directly
  * as a diff so the panelist reads the delta and navigates surrounding code via the
@@ -169,6 +86,15 @@ static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
    return buf;
 }
 
+/* Compose the review roundtable IN PARALLEL: assign a DISTINCT viable `review`
+ * delegate to each required lens (persona rides in the system prompt as the lens;
+ * selection is purely by the `review` role, so non-review agents like gpu-mid are
+ * never seated), then dispatch them ALL concurrently via agent_run_parallel
+ * (bounded by the compute-thread ceiling; a panelist past the deadline is
+ * abandoned). A second parallel round retries any lens whose agent failed on a
+ * different agent, so a flaky agent doesn't degrade the gate. Reviews are
+ * read-only (the `review` role grants no write tools); one hard-reset after the
+ * panel defends the worktree regardless. Returns the number of lenses filled. */
 static int live_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
@@ -177,41 +103,114 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (!pkt || !pkt->workdir || !pkt->workdir[0])
       return -1; /* no worktree to review in -> panel can't compose -> park */
 
-   /* Distinct agent per seated lens: each review delegate excludes the agents
-    * already used on this panel, so the roundtable is a genuinely diverse panel. */
-   char used_buf[MAX_AGENTS][MAX_AGENT_NAME];
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof acfg);
+   if (agent_load_config(&acfg) != 0)
+      return -1;
+
+   int nlens = nreq < max ? nreq : max;
+   if (nlens > WFE_PANEL_MAX)
+      nlens = WFE_PANEL_MAX;
+
+   /* Per-lens prompts: the persona system prompt is the review lens; the user
+    * prompt embeds the change under review. */
+   char *sysp[WFE_PANEL_MAX];
+   char *usrp[WFE_PANEL_MAX];
+   int done[WFE_PANEL_MAX];
+   memset(sysp, 0, sizeof sysp);
+   memset(usrp, 0, sizeof usrp);
+   memset(done, 0, sizeof done);
+   for (int i = 0; i < nlens; i++)
+   {
+      sysp[i] = persona_compose_delegate_prompt(required[i], pkt->workdir, "");
+      usrp[i] = build_prompt(required[i], pkt);
+   }
+
+   /* Snapshot HEAD once for the post-panel read-only reset. */
+   char pre_head[64] = "";
+   {
+      const char *argv[] = {"git", "-C", pkt->workdir, "rev-parse", "HEAD", NULL};
+      char *o = NULL;
+      if (safe_exec_capture(argv, &o, 256) == 0 && o)
+      {
+         size_t n = strlen(o);
+         while (n > 0 && (o[n - 1] == '\n' || o[n - 1] == '\r'))
+            o[--n] = '\0';
+         snprintf(pre_head, sizeof pre_head, "%s", o);
+      }
+      free(o);
+   }
+
+   run_cmd_set_cwd(pkt->workdir);
+
    const char *used[MAX_AGENTS];
    int nused = 0;
-
    int filled = 0;
-   for (int i = 0; i < nreq && filled < max; i++)
+   /* Up to two parallel rounds: assign distinct agents to the still-unfilled
+    * lenses, fan out concurrently, then retry the failures once on other agents. */
+   for (int round = 0; round < 2 && filled < nlens; round++)
    {
-      char *prompt = build_prompt(required[i], pkt);
-      if (!prompt)
-         continue; /* OOM building the prompt -> leave this lens unfilled (gate degrades) */
-      char agent_name[MAX_AGENT_NAME] = "";
-      char *resp = dispatch_review(pkt->workdir, required[i], prompt, used, nused, agent_name,
-                                   sizeof agent_name);
-      free(prompt);
-      if (!resp)
+      agent_task_t tasks[WFE_PANEL_MAX];
+      int lensmap[WFE_PANEL_MAX];
+      memset(tasks, 0, sizeof tasks);
+      int nt = 0;
+      for (int i = 0; i < nlens; i++)
       {
-         /* No viable review agent remains for this lens: leave it WITHOUT a verdict
-          * so the gate DEGRADES (a missing required lens must never be papered over). */
+         if (done[i])
+            continue;
+         int idx = delegate_pick_for_role(&acfg, "review", used, nused);
+         if (idx < 0)
+            break; /* no more distinct review agents remain */
+         if (nused < MAX_AGENTS)
+            used[nused++] = acfg.agents[idx].name;
+         tasks[nt].role = "review";
+         tasks[nt].agent = acfg.agents[idx].name;
+         tasks[nt].system_prompt = sysp[i] ? sysp[i] : "";
+         tasks[nt].user_prompt = usrp[i] ? usrp[i] : "";
+         tasks[nt].temperature = 0.2;
+         tasks[nt].max_tokens = AGENT_DEFAULT_MAX_TOKENS;
+         lensmap[nt] = i;
+         nt++;
+      }
+      if (nt == 0)
+         break;
+
+      agent_result_t results[WFE_PANEL_MAX];
+      memset(results, 0, sizeof results);
+      agent_run_parallel(&acfg, tasks, nt, results, WFE_PANEL_DEADLINE_MS);
+      for (int t = 0; t < nt; t++)
+      {
+         int i = lensmap[t];
+         if (results[t].response && results[t].response[0])
+         {
+            wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
+                                          &out[filled]);
+            filled++;
+            done[i] = 1;
+         }
+         free(results[t].response);
+      }
+   }
+
+   run_cmd_set_cwd(NULL);
+
+   /* Read-only enforcement: hard-reset to the pre-panel HEAD + clean untracked. */
+   if (pre_head[0])
+   {
+      const char *reset[] = {"reset", "--hard", pre_head};
+      panel_git(pkt->workdir, reset, 3);
+      const char *clean[] = {"clean", "-fd"};
+      panel_git(pkt->workdir, clean, 2);
+   }
+
+   for (int i = 0; i < nlens; i++)
+   {
+      if (!done[i])
          aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for lens '%s' -> degrade",
                    required[i]);
-         continue;
-      }
-      wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, resp, &out[filled]);
-      free(resp);
-      if (agent_name[0] && nused < MAX_AGENTS)
-      {
-         snprintf(used_buf[nused], sizeof used_buf[0], "%s", agent_name);
-         used[nused] = used_buf[nused];
-         nused++;
-      }
-      filled++;
+      free(sysp[i]);
+      free(usrp[i]);
    }
-   /* filled==0 (nothing composed) -> the gate sees no required verdicts -> DEGRADED. */
    return filled;
 }
 
