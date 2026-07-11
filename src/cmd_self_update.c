@@ -269,10 +269,15 @@ void aimee_self_update_apply_async(void)
    char stamp[1024] = "";
    if (home && home[0])
    {
-      snprintf(stamp, sizeof stamp, "%s/.self-update-stamp", home);
-      struct stat st;
-      if (stat(stamp, &st) == 0 && (time(NULL) - st.st_mtime) < 3600)
-         return; /* attempted within the last hour -> back off */
+      /* A truncated path could point elsewhere -> skip the stamp entirely. */
+      if (snprintf(stamp, sizeof stamp, "%s/.self-update-stamp", home) >= (int)sizeof stamp)
+         stamp[0] = '\0';
+      else
+      {
+         struct stat st;
+         if (stat(stamp, &st) == 0 && (time(NULL) - st.st_mtime) < 3600)
+            return; /* attempted within the last hour -> back off */
+      }
    }
 
    char server_ver[64];
@@ -311,16 +316,26 @@ void aimee_self_update_apply_async(void)
       dup2(devnull, STDOUT_FILENO);
       dup2(devnull, STDERR_FILENO);
    }
+   else
+   {
+      /* Cannot even open /dev/null: close the inherited hook stdio so a later
+       * write fails (EBADF) rather than corrupting the hook's JSON channel. */
+      close(STDIN_FILENO);
+      close(STDOUT_FILENO);
+      close(STDERR_FILENO);
+   }
    if (home && home[0])
    {
       char logp[1024];
-      snprintf(logp, sizeof logp, "%s/self-update.log", home);
-      int lf = open(logp, O_WRONLY | O_CREAT | O_APPEND, 0644);
-      if (lf >= 0)
+      if (snprintf(logp, sizeof logp, "%s/self-update.log", home) < (int)sizeof logp)
       {
-         dup2(lf, STDOUT_FILENO);
-         dup2(lf, STDERR_FILENO);
-         close(lf);
+         int lf = open(logp, O_WRONLY | O_CREAT | O_APPEND, 0644);
+         if (lf >= 0)
+         {
+            dup2(lf, STDOUT_FILENO);
+            dup2(lf, STDERR_FILENO);
+            close(lf);
+         }
       }
    }
    if (devnull >= 0)
@@ -424,11 +439,9 @@ int cmd_self_update(int argc, char **argv)
       return 0;
    }
 
+   /* tnorm is a semver here (non-semver targets returned above). */
    int cmp = aimee_version_compare(tnorm, AIMEE_VERSION);
-   /* Only prefix 'v' for semver-looking targets; a non-semver server string
-    * (e.g. a dev "testing-<sha>" build) is shown verbatim. */
-   const char *tpfx = (tnorm[0] >= '0' && tnorm[0] <= '9') ? "v" : "";
-   printf("client v%s, target %s%s\n", vnum(AIMEE_VERSION), tpfx, tnorm);
+   printf("client v%s, target v%s\n", vnum(AIMEE_VERSION), tnorm);
    if (cmp < 0)
    {
       printf("Client is ahead of the target; nothing to do (self-update never downgrades).\n");
@@ -516,6 +529,23 @@ int cmd_self_update(int argc, char **argv)
       return 1;
    }
 
+   /* Back up the current binary NOW, before verification, so the verify->rename
+    * steps below are adjacent and the window in which `tmp` could be swapped out
+    * is minimal. Trust boundary: `tmp` lives in the install directory; a
+    * principal able to modify it between verify and rename can already replace
+    * the installed binary directly (they have write access to the dir), so this
+    * is defense-in-depth, not a new attack surface -- we minimize the window
+    * regardless. */
+   char bak[PATH_MAX];
+   if (snprintf(bak, sizeof bak, "%s.bak", self) < (int)sizeof bak)
+   {
+      char cpcmd[PATH_MAX * 2 + 32];
+      snprintf(cpcmd, sizeof cpcmd, "cp -p '%s' '%s' 2>/dev/null", self, bak);
+      int crc = 0;
+      char *co = run_cmd(cpcmd, &crc);
+      free(co);
+   }
+
    /* Strong integrity check: verify the download's SHA-256 against the digest
     * GitHub publishes for this release asset. A confirmed mismatch is fatal. If
     * the digest cannot be fetched (offline / API rate-limited), fall back to the
@@ -592,16 +622,8 @@ int cmd_self_update(int argc, char **argv)
    }
    free(vout);
 
-   /* Back up the current binary for rollback, then atomically swap. */
-   char bak[PATH_MAX];
-   if (snprintf(bak, sizeof bak, "%s.bak", self) < (int)sizeof bak)
-   {
-      char cpcmd[PATH_MAX * 2 + 32];
-      snprintf(cpcmd, sizeof cpcmd, "cp -p '%s' '%s' 2>/dev/null", self, bak);
-      int crc = 0;
-      char *co = run_cmd(cpcmd, &crc);
-      free(co);
-   }
+   /* Verified (SHA-256 + version self-check); the backup was taken above.
+    * Atomically swap -- a running process keeps the old inode. */
    if (rename(tmp, self) != 0)
    {
       fprintf(stderr,
