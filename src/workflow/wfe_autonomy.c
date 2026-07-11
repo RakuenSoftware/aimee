@@ -45,11 +45,14 @@ static long wfe_env_long(const char *name, long def)
    return n;
 }
 
-/* Park an active, not-yet-parked autonomous work item with budget_exceeded and
- * audit the reason. Returns 0 on a clean park, 1 if it was already parked (still
+/* Park an active, not-yet-parked autonomous work item at a runaway-backstop cap
+ * and audit the reason. `reason` is the accurate pause token for the breach that
+ * fired (turn_cap_exceeded / wall_cap_exceeded — NOT the dollar cost cap, which
+ * is a separate ceiling that parks budget_exceeded); `why` is the human-readable
+ * audit detail. Returns 0 on a clean park, 1 if it was already parked (still
  * audits the breach), -1 if the row could not be read (caller hard-stops — a
  * safety rail must not silently no-op on a read failure). */
-static int wfe_autonomy_park_budget(const char *work_item_id, const char *why)
+static int wfe_autonomy_park_cap(const char *work_item_id, const char *reason, const char *why)
 {
    db1_work_item_t wi;
    if (db1_work_item_get(work_item_id, &wi) != 1)
@@ -58,10 +61,10 @@ static int wfe_autonomy_park_budget(const char *work_item_id, const char *why)
    {
       /* already parked (e.g. at a gate): record the breach for audit, don't
        * overwrite the existing pause reason. */
-      db1_lifecycle_event_add(work_item_id, wi.current_stage, "budget", "engine", why, "", 0);
+      db1_lifecycle_event_add(work_item_id, wi.current_stage, "cap", "engine", why, "", 0);
       return 1;
    }
-   db1_work_item_set_pause(work_item_id, "budget_exceeded", wi.current_stage);
+   db1_work_item_set_pause(work_item_id, reason, wi.current_stage);
    db1_lifecycle_event_add(work_item_id, wi.current_stage, "pause", "engine", why, "", 0);
    return 0;
 }
@@ -95,7 +98,9 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
     * because one advance emits several events it is a deliberately CONSERVATIVE upper
     * bound on advances — fine for a runaway backstop. max_wall bounds THIS resume's
     * wall-clock (a single hung resume); total run time is bounded transitively by the
-    * cumulative turn cap. On breach -> park budget_exceeded (never silently continue).
+    * cumulative turn cap. On breach -> park with the accurate cap reason
+    * (turn_cap_exceeded / wall_cap_exceeded); never silently continue. These are
+    * runaway backstops, NOT the dollar cost cap (which parks budget_exceeded).
     * Env-overridable; a bad override falls back to the default. */
    long max_turns = wfe_env_long("AIMEE_AUTONOMY_MAX_TURNS", 300);
    long max_wall = wfe_env_long("AIMEE_AUTONOMY_MAX_WALL_SECS", 1800);
@@ -120,23 +125,33 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
       db1_lifecycle_event_t *evs = NULL;
       int nev = db1_lifecycle_event_list(work_item_id, &evs);
       free(evs);
-      const char *breach = NULL;
+      const char *breach = NULL; /* human-readable audit detail */
+      const char *reason = NULL; /* accurate pause token for the breach */
       if (nev < 0)
+      {
          breach = "turn cap: audit log unreadable"; /* can't evaluate -> fail closed */
+         reason = "turn_cap_exceeded";
+      }
       else if ((long)nev >= max_turns)
+      {
          breach = "turn cap reached";
+         reason = "turn_cap_exceeded";
+      }
       else
       {
          struct timespec ts;
          clock_gettime(CLOCK_MONOTONIC, &ts);
          if ((long)(ts.tv_sec - ts0.tv_sec) >= max_wall)
+         {
             breach = "wall-clock cap reached (this resume)";
+            reason = "wall_cap_exceeded";
+         }
       }
       if (breach)
       {
-         if (wfe_autonomy_park_budget(work_item_id, breach) < 0)
+         if (wfe_autonomy_park_cap(work_item_id, reason, breach) < 0)
          {
-            snprintf(err, errlen, "autonomy: budget breach but work item unreadable to park");
+            snprintf(err, errlen, "autonomy: run cap breach but work item unreadable to park");
             return -1; /* surface; never leave a breached run un-parked + claim success */
          }
          return 0;
