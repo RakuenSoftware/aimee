@@ -291,8 +291,8 @@ static void test_preflight_remote_scp_path_skipped(void)
 
    char errbuf[512] = {0};
    const char *paths[] = {extracted[0]};
-   int rc = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee", errbuf,
-                                            sizeof(errbuf));
+   int rc = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
+                                            errbuf, sizeof(errbuf));
    assert(rc == 0);
    assert(errbuf[0] == '\0');
    printf("  preflight_remote_scp_path_skipped: ok\n");
@@ -304,9 +304,9 @@ static void test_preflight_absolute_outside_worktree_skipped(void)
     * file, not an in-repo create target — pre-flight must not hard-fail. */
    char errbuf[512] = {0};
    const char *paths[] = {"/mnt/media/other/thing.c"};
-   int rc = delegate_check_named_file_drift(
-       paths, 1, "Update /mnt/media/other/thing.c on the remote host.", NULL,
-       "/home/virant/dev/aimee", errbuf, sizeof(errbuf));
+   int rc = delegate_check_named_file_drift(paths, 1,
+                                            "Update /mnt/media/other/thing.c on the remote host.",
+                                            NULL, "/home/virant/dev/aimee", errbuf, sizeof(errbuf));
    assert(rc == 0);
    printf("  preflight_absolute_outside_worktree_skipped: ok\n");
 }
