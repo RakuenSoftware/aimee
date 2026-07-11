@@ -7,6 +7,13 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
+- **Roundtable panels run in parallel**: the workflow `gate.roundtable` now
+  dispatches all reviewers concurrently (bounded by the compute-thread ceiling,
+  with a per-round deadline so one hung model can't wedge the panel) instead of
+  one at a time. Each lens still gets a distinct review agent (diverse panel), and
+  a second parallel round retries any lens whose agent failed on a different agent.
+  Cuts a review pass from ~N×(model latency) to ~one model latency.
+
 - **Generalized delegate dispatch (viable delegate for a role, retry until one works)**:
   `agent_run_ex` no longer walks a configured `fallback_chain` — it routes to the
   preferred agent for the role, then retries other **viable** agents (enabled,
