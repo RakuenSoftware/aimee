@@ -11,6 +11,14 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **`author.proposal` accepts a pre-supplied proposal**: an autonomous run whose
+  proposal is already complete (the proposals trigger materializes a finished,
+  merged proposal — the merge is the approval) no longer loops the `draft` step to
+  `max_iters`. When the author delegate makes no change, `author.proposal` now
+  advances on the existing non-empty proposal instead of treating the no-op as a
+  failure. The guard is strict: with no proposal on disk yet, a failed author
+  dispatch still loops, and `author.plan`/code roles still treat a no-op as the
+  real failure it is.
 - **Trigger `mode` (autonomous by default)**: `trigger_rules` now take a `mode`
   field selecting how a triggered run executes — `autonomous` (the default: the
   autonomy scheduler drives it hands-off, right for "merging a proposal *is* the
