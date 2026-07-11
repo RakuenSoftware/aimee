@@ -8,6 +8,11 @@
 
 #define WFE_VERDICT_SCHEMA 1
 
+/* Max length of a panelist's captured critique (the reasoning that precedes the
+ * final JSON verdict line). Threaded back to the re-authoring delegate on a
+ * request_changes so the planner refines against the actual objections. */
+#define WFE_VERDICT_FEEDBACK_MAX 1024
+
 typedef enum
 {
    WFE_V_APPROVE = 0,
@@ -23,7 +28,9 @@ typedef struct
    int schema_version;
    char reviewed_content_hash[72];
    wfe_verdict_kind_t kind;
-   int high_sev_blockers; /* count of unresolved high-severity blockers */
+   int high_sev_blockers;                   /* count of unresolved high-severity blockers */
+   char feedback[WFE_VERDICT_FEEDBACK_MAX]; /* the panelist's critique text (reasoning before
+                                             * the JSON verdict line); may be empty */
 } wfe_verdict_t;
 
 typedef enum

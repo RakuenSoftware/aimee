@@ -593,15 +593,29 @@ static wfe_step_result_t with_cost(wfe_step_result_t r, double cost)
 static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *path = wfe_ctx_proposal_path(ctx);
-   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed). */
+   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed).
+    * If a prior review roundtable left blockers for this work item (persisted via
+    * on_fail), fold them into the prompt so this pass REFINES against the panel's
+    * objections rather than re-authoring blind — the plan<->roundtable loop can
+    * then converge instead of churning to max_iters. */
    char wd[1024];
    resolve_workdir(ctx, wd, sizeof wd);
+   char feedback[4096];
+   wfe_feedback_read(wfe_ctx_work_item(ctx), feedback, sizeof feedback);
+   const char *base_prompt = "Author or revise the workflow artifact at the given path per the "
+                             "work item, then commit it.";
+   char prompt[4096 + 512];
+   if (feedback[0])
+      snprintf(prompt, sizeof prompt,
+               "%s\n\nA prior review roundtable REQUESTED CHANGES on your last revision. You MUST "
+               "address every blocker below and commit the improved artifact:\n\n%s",
+               base_prompt, feedback);
+   else
+      snprintf(prompt, sizeof prompt, "%s", base_prompt);
    char commit[64] = "";
    double cost = 0.0;
-   int drc = wfe_delegate_dispatch(wd, "architect", node_delegate(node),
-                                   "Author or revise the workflow artifact at the given path "
-                                   "per the work item, then commit it.",
-                                   path, commit, &cost);
+   int drc =
+       wfe_delegate_dispatch(wd, "architect", node_delegate(node), prompt, path, commit, &cost);
    /* Hash the artifact file as the produced content, and note whether it holds
     * any content at all. */
    char hash[65] = "";
