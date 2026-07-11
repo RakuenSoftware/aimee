@@ -89,3 +89,88 @@ int config_embedding_dim_is_pinned(const config_t *cfg)
 {
    return config_resolve_embedding_dim(cfg) > 0;
 }
+
+/* Map a role backend string to the plugin's AIMEE_LLM_<ROLE>_MODE value. Empty
+ * (unconfigured) yields "" so the caller can skip emitting it. */
+static const char *deploy_role_mode(const char *backend)
+{
+   if (strcmp(backend, "local") == 0)
+      return "local";
+   if (strcmp(backend, "external") == 0)
+      return "external";
+   if (strcmp(backend, "off") == 0)
+      return "off";
+   return "";
+}
+
+void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
+{
+   if (!buf || n == 0)
+      return;
+   buf[0] = '\0';
+   size_t pos = 0;
+/* Append a line, never overflowing buf. */
+#define EMITF(...)                                                                                 \
+   do                                                                                              \
+   {                                                                                               \
+      if (pos < n)                                                                                 \
+         pos += (size_t)snprintf(buf + pos, n - pos, __VA_ARGS__);                                 \
+   } while (0)
+
+   const int remote_kb = strcmp(cfg->kb_mode, "remote") == 0;
+   const char *eb = cfg->llm_embed_backend, *rb = cfg->llm_rerank_backend,
+              *sb = cfg->llm_synth_backend;
+   const int any_local =
+       strcmp(eb, "local") == 0 || strcmp(rb, "local") == 0 || strcmp(sb, "local") == 0;
+
+   /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb"
+    * service, plus "llm" whenever any role is served locally on this host. */
+   char profiles[64] = "";
+   if (!remote_kb)
+   {
+      snprintf(profiles, sizeof(profiles), "kb%s", any_local ? ",llm" : "");
+   }
+   EMITF("COMPOSE_PROFILES=%s\n", profiles);
+
+   if (remote_kb)
+   {
+      if (cfg->kb_client_url[0])
+         EMITF("AIMEE_KB_API_URL=%s\n", cfg->kb_client_url);
+      if (cfg->kb_client_bearer_token[0])
+         EMITF("AIMEE_KB_API_BEARER_TOKEN=%s\n", cfg->kb_client_bearer_token);
+      return; /* connect to the existing kb; nothing else is deployed */
+   }
+
+   /* Per-role plugin env (Phase-0 AIMEE_LLM_<ROLE>_MODE/TIER/URL). */
+   if (deploy_role_mode(eb)[0])
+      EMITF("AIMEE_LLM_EMBED_MODE=%s\n", deploy_role_mode(eb));
+   if (strcmp(eb, "local") == 0 && cfg->llm_embed_tier[0])
+      EMITF("AIMEE_LLM_EMBED_TIER=%s\n", cfg->llm_embed_tier);
+   if (strcmp(eb, "external") == 0 && cfg->embedding_endpoint[0])
+      EMITF("AIMEE_LLM_EMBED_URL=%s\n", cfg->embedding_endpoint);
+
+   if (deploy_role_mode(rb)[0])
+      EMITF("AIMEE_LLM_RERANK_MODE=%s\n", deploy_role_mode(rb));
+   if (strcmp(rb, "local") == 0 && cfg->llm_rerank_tier[0])
+      EMITF("AIMEE_LLM_RERANK_TIER=%s\n", cfg->llm_rerank_tier);
+   if (strcmp(rb, "external") == 0 && cfg->llm_rerank_endpoint[0])
+      EMITF("AIMEE_LLM_RERANK_URL=%s\n", cfg->llm_rerank_endpoint);
+
+   if (deploy_role_mode(sb)[0])
+      EMITF("AIMEE_LLM_SYNTH_MODE=%s\n", deploy_role_mode(sb));
+   if (strcmp(sb, "local") == 0 && cfg->llm_synth_tier[0])
+      EMITF("AIMEE_LLM_SYNTH_TIER=%s\n", cfg->llm_synth_tier);
+   if (strcmp(sb, "external") == 0 && cfg->llm_synth_endpoint[0])
+      EMITF("AIMEE_LLM_SYNTH_URL=%s\n", cfg->llm_synth_endpoint);
+
+   /* When any role is local, aimee-server reaches the co-deployed aimee-llm
+    * compose service by name; an all-external stack keeps its per-role URLs. */
+   if (any_local)
+      EMITF("AIMEE_LLM_URL=http://aimee-llm:8742\n");
+
+   /* Only a pinned dim (external embedder) is emitted; a local/unset dim is
+    * derived from the embedder /health probe at runtime. */
+   if (config_embedding_dim_is_pinned(cfg) && cfg->embedding_dim > 0)
+      EMITF("AIMEE_EMBEDDING_DIM=%d\n", cfg->embedding_dim);
+#undef EMITF
+}

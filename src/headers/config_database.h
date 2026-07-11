@@ -35,4 +35,18 @@ int config_resolve_embedding_dim(const config_t *cfg);
  * an unset cfg->embedding_dim. Pass to db2_set_embedding_dim_pinned(). */
 int config_embedding_dim_is_pinned(const config_t *cfg);
 
+/* Emit the deploy-time environment the compose stack consumes for the page-2
+ * backend record (setup wizard). Writes shell-sourceable KEY=VALUE lines to buf:
+ *   COMPOSE_PROFILES  — which optional services to bring up ("kb" for a local kb,
+ *                       "llm" when any LLM role is local; empty for a remote kb).
+ *   AIMEE_LLM_<ROLE>_MODE/TIER/URL — per Phase-0 plugin env (local => TIER,
+ *                       external => URL, off => mode=off).
+ *   AIMEE_LLM_URL     — the compose aimee-llm service, when any role is local.
+ *   AIMEE_EMBEDDING_DIM — only when the operator pinned it (external embedder);
+ *                       a local/unset dim is derived from the embedder /health.
+ *   AIMEE_KB_API_URL/BEARER — when kb_mode=remote (connect out, deploy nothing).
+ * Pure/non-mutating; the single translation both the entrypoint and an operator
+ * `compose up` wrapper source. */
+void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n);
+
 #endif
