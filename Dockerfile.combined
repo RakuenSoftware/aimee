@@ -29,7 +29,7 @@ ARG WITH_VSCODE=1
 # WITH_LLM=0 for the lean server+kb image that points at an external AIMEE_LLM_URL.
 # AIMEE_LLM_CPU_IMAGE must exist (CI: aimee-llm:testing / release: :latest,
 # published by publish-llm-*.yml).
-ARG WITH_LLM=1
+ARG WITH_LLM=0
 ARG AIMEE_LLM_CPU_IMAGE=ghcr.io/rakuensoftware/aimee-llm:latest
 FROM debian:bookworm-slim AS build
 
@@ -155,7 +155,7 @@ RUN apt-get update \
 # vendor-agnostic Vulkan build (needs libvulkan1 + an ICD even at NGL=0 on CPU);
 # the gateway is python3 (already present) + numpy for the rerank head; the
 # supervisor is a bash script that fetches the tier's GGUFs with wget on first boot.
-ARG WITH_LLM=1
+ARG WITH_LLM=0
 RUN if [ "$WITH_LLM" = "1" ]; then \
         apt-get update \
         && apt-get install -y --no-install-recommends \
