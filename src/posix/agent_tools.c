@@ -2,6 +2,7 @@
 #include "util.h"
 #include "agent_tools.h"
 #include "aimee_home.h"
+#include "delegate_ephemeral_ws.h"
 #include "tool_condense.h"
 #include "log.h"
 #include "agent_tools_internal.h"
@@ -725,10 +726,7 @@ char *tool_bash(const char *command, int timeout_ms)
        * clear error rather than a bare exit_code:-1 that looks like a real failure.
        * A real command with empty output returns "" (non-NULL). */
       if (!out)
-         return safe_strdup(
-             "{\"stdout\":\"\",\"stderr\":\"detached workspace reverse-channel unavailable: the "
-             "serving client is not connected — a background/durable delegate cannot run shell "
-             "tools against a client-served (detached) workspace\",\"exit_code\":-1}");
+         return safe_strdup(DELEGATE_DETACHED_CHANNEL_DOWN_JSON);
       cJSON *r = cJSON_CreateObject();
       cJSON_AddStringToObject(r, "stdout", out);
       cJSON_AddStringToObject(r, "stderr", "");
