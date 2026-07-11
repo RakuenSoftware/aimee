@@ -147,58 +147,29 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       }
    }
 
-   for (int pass = 0; pass < 2; pass++)
+   /* Route to the best agent for the role (cost-tier), then retry other viable
+    * agents at random until one succeeds. This replaces the configured
+    * fallback_chain: eligibility + retry-until-viable is the whole mechanism. A
+    * DOWN agent is never tried (agent_is_available_for_routing filters it). */
+   const char *tried[MAX_AGENTS];
+   int ntried = 0;
+   for (int attempt = 0; attempt <= MAX_AGENTS; attempt++)
    {
-      for (int i = 0; i < cfg->fallback_count; i++)
+      agent_t *ag;
+      if (attempt == 0)
+         ag = agent_route(cfg, role); /* preferred (cost-tier) pick first */
+      else
       {
-         agent_t *ag = agent_find(cfg, cfg->fallback_chain[i]);
-         if (!ag || !ag->enabled || !agent_has_role(ag, role))
-            continue;
-         if (pass == 0 && provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-         {
-            aimee_log(LOG_DEBUG, "agent", "skipping DOWN agent '%s' in fallback (pass 0)",
-                      ag->name);
-            continue;
-         }
-
-         int use_tools =
-             agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
-         agent_apply_runtime_config(ag);
-         ag->ablation = cfg->ablation;
-         ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
-         int rc;
-         if (use_tools)
-            rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                   user_prompt, max_tokens, temperature, out);
-         else
-            rc = agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
-
-         if (rc == 0)
-         {
-            provider_catalog_record_success(ag->name);
-            agent_log_call(out, role);
-            agent_store_feedback(out, role, user_prompt);
-
-            agent_outcome_t oc;
-            classify_outcome(out, ag->max_turns, &oc);
-            record_outcome(out->agent_name, role, &oc);
-
-            if (cache_enabled && out->response)
-               db1_agent_cache_put(role, user_prompt, out->response);
-            return 0;
-         }
-         {
-            const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
-            provider_catalog_record_failure(ag->name, err_class);
-         }
-         free(out->response);
-         out->response = NULL;
+         int idx = delegate_pick_for_role(cfg, role, tried, ntried);
+         ag = idx >= 0 ? &cfg->agents[idx] : NULL;
       }
-   }
+      if (!ag)
+      {
+         if (attempt == 0)
+            continue; /* no primary route -> fall through to the random picker */
+         break;       /* no viable agent remains */
+      }
 
-   agent_t *ag = agent_route(cfg, role);
-   if (ag)
-   {
       int use_tools =
           agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
       agent_apply_runtime_config(ag);
@@ -228,7 +199,6 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
                                                 effective_prompt, max_tokens, temperature, out);
       else
          rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, temperature, out);
-
       free(enhanced);
 
       if (rc == 0)
@@ -249,6 +219,10 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
          provider_catalog_record_failure(ag->name, err_class);
       }
+      if (ntried < MAX_AGENTS)
+         tried[ntried++] = ag->name;
+      free(out->response);
+      out->response = NULL;
    }
 
    agent_store_feedback(out, role, user_prompt);

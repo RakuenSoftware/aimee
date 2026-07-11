@@ -7,6 +7,17 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
+- **Generalized delegate dispatch (viable delegate for a role, retry until one works)**:
+  `agent_run_ex` no longer walks a configured `fallback_chain` — it routes to the
+  preferred agent for the role, then retries other **viable** agents (enabled,
+  routable, serving the role; a DOWN agent is skipped) at random until one
+  succeeds. The roundtable panel is now just N `review` delegate requests: it
+  dispatches by the `review` role (the persona rides in the prompt as the lens),
+  excludes agents already seated for a **diverse** panel, and retries a flaky
+  agent onto a different one instead of degrading the gate. Non-review agents
+  (e.g. `gpu-mid`, which lacks the `review` role) are never seated. A specific
+  agent is used only when explicitly pinned.
+
 Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
