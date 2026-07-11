@@ -95,6 +95,7 @@ var methodRoutes = map[string]methodRoute{
 	"agent.disable":          {http.MethodPost, "/v1/agent/disable"},
 	"agent.probe":            {http.MethodPost, "/v1/agent/probe"},
 	"agent.set":              {http.MethodPost, "/v1/agent/set"},
+	"hosts.list":             {http.MethodGet, "/v1/hosts"},
 	// Subscription-OAuth setup (Claude / Codex "sign in with your plan").
 	"agent.cli_oauth_start":    {http.MethodPost, "/v1/agent/cli_oauth_start"},
 	"agent.cli_oauth_code":     {http.MethodPost, "/v1/agent/cli_oauth_code"},

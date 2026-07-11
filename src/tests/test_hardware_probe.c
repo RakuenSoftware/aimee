@@ -79,9 +79,41 @@ static void test_cached_no_gpu_is_terminal(void)
    db1_shutdown();
 }
 
+static void test_gpu_csv_list_parse(void)
+{
+   hardware_gpu_list_t gl;
+
+   /* Two NVIDIA GPUs (the uniform probe appends the vendor field). */
+   int n = hardware_probe_parse_gpu_csv_list("0, NVIDIA GeForce RTX 4090, 24564, nvidia\n"
+                                             "1, NVIDIA GeForce RTX 3060, 12288, nvidia\n",
+                                             NULL, &gl);
+   assert(n == 2 && gl.count == 2);
+   assert(gl.gpus[0].index == 0 && gl.gpus[0].vram_mb == 24564);
+   assert(strcmp(gl.gpus[0].name, "NVIDIA GeForce RTX 4090") == 0);
+   assert(strcmp(gl.gpus[0].vendor, "nvidia") == 0);
+   assert(gl.gpus[1].index == 1 && gl.gpus[1].vram_mb == 12288);
+
+   /* AMD, and a name that itself contains a comma must still split correctly. */
+   n = hardware_probe_parse_gpu_csv_list("0, Radeon RX 7900 XTX, Rev A, 24560, amd\n", NULL, &gl);
+   assert(n == 1);
+   assert(strcmp(gl.gpus[0].name, "Radeon RX 7900 XTX, Rev A") == 0);
+   assert(gl.gpus[0].vram_mb == 24560);
+   assert(strcmp(gl.gpus[0].vendor, "amd") == 0);
+
+   /* Blank + malformed lines are skipped; empty input => no GPUs, no crash. */
+   n = hardware_probe_parse_gpu_csv_list("\n  \ngarbage\n0, x, notanumber, nvidia\n", NULL, &gl);
+   assert(n == 0 && gl.count == 0);
+   assert(hardware_probe_parse_gpu_csv_list("", NULL, &gl) == 0);
+
+   /* vendor_hint fills in when the vendor field is present but empty. */
+   n = hardware_probe_parse_gpu_csv_list("0, Some GPU, 8192, \n", "amd", &gl);
+   assert(n == 1 && gl.gpus[0].vram_mb == 8192 && strcmp(gl.gpus[0].vendor, "amd") == 0);
+}
+
 int main(void)
 {
    test_nvidia_csv_parse();
+   test_gpu_csv_list_parse();
    test_amd_vram_parse();
    test_vram_context_tiers();
    test_model_estimate();

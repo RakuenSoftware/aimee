@@ -395,6 +395,7 @@ SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
 SERVER_CMD_OBJS = $(OBJDIR)/server/cmd_session_lifecycle.o \
                   $(OBJDIR)/server/cmd_hooks_scope.o \
                   $(OBJDIR)/memory_redirect.o \
+                  $(OBJDIR)/hardware_probe.o \
                   $(OBJDIR)/server/server_session_start_stubs.o
 
 # kb_client objects — request-side glue from the daemon to the

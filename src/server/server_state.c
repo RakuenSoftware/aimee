@@ -23,9 +23,11 @@
 #include "dogfood.h"
 #include "commands.h"
 #include "platform_path.h"
-#include "server_http.h"  /* session_primary_set/get/clear */
-#include "agent_config.h" /* agent_load_config / agent_find */
+#include "server_http.h"    /* session_primary_set/get/clear */
+#include "agent_config.h"   /* agent_load_config / agent_find */
+#include "hardware_probe.h" /* hardware_probe_list_local/remote — host GPU inventory */
 #include <errno.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
@@ -1175,6 +1177,77 @@ int handle_wm_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* --- Per-session primary agent handlers (mirror the /v1/sessions/<id>/primary
  *     HTTP routes; both transports share the in-memory store). --- */
+
+/* Attach a host's enumerated GPU inventory (and any probe error) to its JSON. */
+static void hosts_add_gpus(cJSON *host, const hardware_gpu_list_t *gl)
+{
+   cJSON *garr = cJSON_CreateArray();
+   for (int i = 0; i < gl->count; i++)
+   {
+      cJSON *g = cJSON_CreateObject();
+      cJSON_AddNumberToObject(g, "index", gl->gpus[i].index);
+      jo_add_str(g, "name", gl->gpus[i].name);
+      jo_add_str(g, "vendor", gl->gpus[i].vendor);
+      cJSON_AddNumberToObject(g, "vram_mb", gl->gpus[i].vram_mb);
+      cJSON_AddItemToArray(garr, g);
+   }
+   cJSON_AddItemToObject(host, "gpus", garr);
+   if (gl->error[0])
+      jo_add_str(host, "error", gl->error);
+}
+
+/* hosts.list — enumerate the hosts the wizard can place a local LLM tier on, each
+ * with its LIVE GPU inventory: the local host (aimee-server's own box, probed via
+ * popen) plus every registered network host (probed over ssh). Read-only. Backs
+ * GET /v1/hosts -> the page-2 host + GPU pickers. */
+int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   cJSON *resp = jo_ok();
+   cJSON *arr = cJSON_CreateArray();
+
+   /* Local host. */
+   {
+      cJSON *h = cJSON_CreateObject();
+      char hn[128] = "";
+      if (gethostname(hn, sizeof(hn)) != 0 || !hn[0])
+         snprintf(hn, sizeof(hn), "local");
+      jo_add_str(h, "name", hn);
+      jo_add_str(h, "kind", "local");
+      hardware_gpu_list_t gl;
+      hardware_probe_list_local(&gl);
+      hosts_add_gpus(h, &gl);
+      cJSON_AddItemToArray(arr, h);
+   }
+
+   /* Registered network hosts, probed live over ssh. */
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) == 0)
+   {
+      for (int i = 0; i < cfg.network.host_count; i++)
+      {
+         const agent_net_host_t *nh = &cfg.network.hosts[i];
+         cJSON *h = cJSON_CreateObject();
+         jo_add_str(h, "name", nh->name);
+         jo_add_str(h, "kind", "remote");
+         if (nh->ip[0])
+            jo_add_str(h, "ip", nh->ip);
+         char target[128];
+         if (nh->user[0] && nh->ip[0])
+            snprintf(target, sizeof(target), "%s@%s", nh->user, nh->ip);
+         else
+            snprintf(target, sizeof(target), "%s", nh->ip[0] ? nh->ip : nh->name);
+         hardware_gpu_list_t gl;
+         hardware_probe_list_remote(target, nh->port, &gl);
+         hosts_add_gpus(h, &gl);
+         cJSON_AddItemToArray(arr, h);
+      }
+   }
+
+   cJSON_AddItemToObject(resp, "hosts", arr);
+   return send_and_free(conn, resp);
+}
 
 int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
