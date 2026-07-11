@@ -72,12 +72,13 @@ export AIMEE_LLM_STUB="${AIMEE_LLM_STUB:-1}"
 export AIMEE_LLM_STUB_DIM="${AIMEE_LLM_STUB_DIM:-2560}"
 export AIMEE_LLM_DOCKERFILE="${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm-stub}"
 
-# Disable the bundled curator LLM in CI: the committed .env enables the
-# `curator-llm` profile by default, but the smoke tests don't exercise the
-# curator and the multi-GB Gemma GGUF would blow the runner's disk/time. An
-# explicit (empty) COMPOSE_PROFILES overrides the .env so the `llm` service is
-# never started here.
-export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
+# COMPOSE_PROFILES: the `aimee-llm` service is now profile-gated (`llm`) — it only
+# starts when a page-2 role is local — so CI opts it in to exercise the kb->gateway
+# contract (with the stub image above). The separate `curator-llm` profile stays
+# OFF: the smoke tests don't exercise the curator and its multi-GB Gemma GGUF would
+# blow the runner's disk/time. Selecting only `llm` overrides the committed .env's
+# curator-llm default. T3 (standalone) has no aimee-llm service, so this is a no-op there.
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-llm}"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
