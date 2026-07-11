@@ -20,9 +20,12 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "config.h"
 #include "delegate_role.h"
 #include "persona.h"
 #include "provider_catalog.h"
+#include "roundtable_preset.h"
+#include "roundtable_seat_resolve.h"
 #include "log.h"
 #include "util.h"
 
@@ -86,44 +89,113 @@ static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
    return buf;
 }
 
-/* Compose the review roundtable IN PARALLEL: assign a DISTINCT viable `review`
- * delegate to each required lens (persona rides in the system prompt as the lens;
- * selection is purely by the `review` role, so non-review agents like gpu-mid are
- * never seated), then dispatch them ALL concurrently via agent_run_parallel
- * (bounded by the compute-thread ceiling; a panelist past the deadline is
- * abandoned). A second parallel round retries any lens whose agent failed on a
- * different agent, so a flaky agent doesn't degrade the gate. Reviews are
+/* The seat model bound to `persona` in the active roundtable preset, or NULL when
+ * no seat matches (the caller then treats the lens as "$random"). The model may
+ * itself be the "$random" sentinel — a seat the user explicitly set to random. */
+static const char *seat_model_for_persona(const roundtable_preset_t *preset, const char *persona)
+{
+   if (!preset || !persona || !persona[0])
+      return NULL;
+   for (int i = 0; i < preset->seat_count; i++)
+      if (strcmp(preset->seats[i].persona, persona) == 0)
+         return preset->seats[i].model;
+   return NULL;
+}
+
+/* Load the active roundtable preset (config.roundtable_default, else "default")
+ * into *preset for its persona->model bindings. Returns 1 on success, 0 when no
+ * preset exists — in which case every lens resolves as "$random", preserving the
+ * pre-preset "any review-capable agent per persona" behaviour. */
+static int load_default_preset(roundtable_preset_t *preset)
+{
+   memset(preset, 0, sizeof *preset);
+   config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   const char *name = "default";
+   if (config_load(&cfg) == 0 && cfg.roundtable_default[0])
+      name = cfg.roundtable_default;
+   return roundtable_preset_load(name, preset) == 0 ? 1 : 0;
+}
+
+/* Compose the review roundtable IN PARALLEL, honoring each required lens's seat
+ * model from the active roundtable preset:
+ *   - a PINNED model dispatches to that EXACT agent; if it is not enabled/routable
+ *     for the review role (or its dispatch fails), the run FAILS — a pinned model
+ *     is never silently swapped (returns WFE_PANEL_PINNED_FAIL);
+ *   - a "$random" seat (or a lens with no matching seat) picks any review-capable
+ *     agent and retries a different one on the second round if the first fails.
+ * Panelists fan out concurrently via agent_run_parallel (bounded by the compute-
+ * thread ceiling; a panelist past the deadline is abandoned). Reviews are
  * read-only (the `review` role grants no write tools); one hard-reset after the
- * panel defends the worktree regardless. Returns the number of lenses filled. */
+ * panel defends the worktree regardless. Returns the number of lenses filled, or a
+ * WFE_PANEL_* sentinel (<0). */
 static int live_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
    (void)eligible;
    (void)nelig;
    if (!pkt || !pkt->workdir || !pkt->workdir[0])
-      return -1; /* no worktree to review in -> panel can't compose -> park */
+      return WFE_PANEL_UNREACHABLE; /* no worktree to review in -> park */
 
    agent_config_t acfg;
    memset(&acfg, 0, sizeof acfg);
    if (agent_load_config(&acfg) != 0)
-      return -1;
+      return WFE_PANEL_UNREACHABLE;
 
    int nlens = nreq < max ? nreq : max;
    if (nlens > WFE_PANEL_MAX)
       nlens = WFE_PANEL_MAX;
 
-   /* Per-lens prompts: the persona system prompt is the review lens; the user
-    * prompt embeds the change under review. */
-   char *sysp[WFE_PANEL_MAX];
-   char *usrp[WFE_PANEL_MAX];
-   int done[WFE_PANEL_MAX];
+   /* Persona->model bindings for this panel come from the active roundtable preset. */
+   roundtable_preset_t preset;
+   int have_preset = load_default_preset(&preset);
+
+   char *sysp[WFE_PANEL_MAX];             /* per-lens review-persona system prompt */
+   char *usrp[WFE_PANEL_MAX];             /* per-lens user prompt (change under review) */
+   int done[WFE_PANEL_MAX];               /* lens has a verdict */
+   int pinned[WFE_PANEL_MAX];             /* lens pinned to a specific model */
+   const char *pin_agent[WFE_PANEL_MAX];  /* resolved pinned agent name (into acfg) */
    memset(sysp, 0, sizeof sysp);
    memset(usrp, 0, sizeof usrp);
    memset(done, 0, sizeof done);
+   memset(pinned, 0, sizeof pinned);
+   memset(pin_agent, 0, sizeof pin_agent);
+
+   const char *used[MAX_AGENTS];
+   int nused = 0;
+
+   /* Resolve seats up front. A pinned model that cannot be fulfilled fails the run
+    * (no substitution): abort before dispatching anything. Pinned agents are added
+    * to `used` so a later $random pick never collides with them (diversity). */
+   int pinned_fail = 0;
    for (int i = 0; i < nlens; i++)
    {
       sysp[i] = persona_compose_delegate_prompt(required[i], pkt->workdir, "");
       usrp[i] = build_prompt(required[i], pkt);
+      const char *model = have_preset ? seat_model_for_persona(&preset, required[i]) : NULL;
+      if (rt_seat_is_random(model))
+         continue; /* $random / unmatched -> resolved per-round below */
+      int idx = -1;
+      if (rt_resolve_seat_model(&acfg, model, "review", used, nused, &idx) != RT_SEAT_OK)
+      {
+         aimee_log(LOG_WARN, "wfe-panel", "pinned model '%s' for lens '%s' unavailable -> fail run",
+                   model, required[i]);
+         pinned_fail = 1;
+         continue;
+      }
+      pinned[i] = 1;
+      pin_agent[i] = acfg.agents[idx].name;
+      if (nused < MAX_AGENTS)
+         used[nused++] = pin_agent[i];
+   }
+   if (pinned_fail)
+   {
+      for (int i = 0; i < nlens; i++)
+      {
+         free(sysp[i]);
+         free(usrp[i]);
+      }
+      return WFE_PANEL_PINNED_FAIL;
    }
 
    /* Snapshot HEAD once for the post-panel read-only reset. */
@@ -143,14 +215,15 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
    run_cmd_set_cwd(pkt->workdir);
 
-   const char *used[MAX_AGENTS];
-   int nused = 0;
    int filled = 0;
-   /* Up to two parallel rounds: assign distinct agents to the still-unfilled
-    * lenses, fan out concurrently, then retry the failures once on other agents. */
-   for (int round = 0; round < 2 && filled < nlens; round++)
+   int pinned_dispatch_fail = 0;
+   /* Up to two parallel rounds. A pinned lens dispatches once to its fixed agent (a
+    * pinned dispatch failure fails the run — no retry); a $random lens retries a
+    * different agent on the second round so one flaky pick doesn't degrade the gate. */
+   for (int round = 0; round < 2 && filled < nlens && !pinned_dispatch_fail; round++)
    {
       agent_task_t tasks[WFE_PANEL_MAX];
+      const char *taskagent[WFE_PANEL_MAX];
       int lensmap[WFE_PANEL_MAX];
       memset(tasks, 0, sizeof tasks);
       int nt = 0;
@@ -158,17 +231,30 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       {
          if (done[i])
             continue;
-         int idx = delegate_pick_for_role(&acfg, "review", used, nused);
-         if (idx < 0)
-            break; /* no more distinct review agents remain */
-         if (nused < MAX_AGENTS)
-            used[nused++] = acfg.agents[idx].name;
+         const char *agent = NULL;
+         if (pinned[i])
+         {
+            if (round > 0)
+               continue; /* pinned does not retry */
+            agent = pin_agent[i];
+         }
+         else
+         {
+            int idx = -1;
+            if (rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx) !=
+                RT_SEAT_OK)
+               continue; /* $random exhausted -> leave unfilled (gate degrades) */
+            agent = acfg.agents[idx].name;
+            if (nused < MAX_AGENTS)
+               used[nused++] = agent;
+         }
          tasks[nt].role = "review";
-         tasks[nt].agent = acfg.agents[idx].name;
+         tasks[nt].agent = agent;
          tasks[nt].system_prompt = sysp[i] ? sysp[i] : "";
          tasks[nt].user_prompt = usrp[i] ? usrp[i] : "";
          tasks[nt].temperature = 0.2;
          tasks[nt].max_tokens = AGENT_DEFAULT_MAX_TOKENS;
+         taskagent[nt] = agent;
          lensmap[nt] = i;
          nt++;
       }
@@ -185,8 +271,18 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          {
             wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
                                           &out[filled]);
+            snprintf(out[filled].model, sizeof out[filled].model, "%s", taskagent[t]);
             filled++;
             done[i] = 1;
+         }
+         else if (pinned[i])
+         {
+            /* Reachable at resolve time but its dispatch failed -> still "cannot be
+             * fulfilled" for a pinned model, so fail the run (no substitution). */
+            aimee_log(LOG_WARN, "wfe-panel",
+                      "pinned model '%s' for lens '%s' failed to respond -> fail run", taskagent[t],
+                      required[i]);
+            pinned_dispatch_fail = 1;
          }
          free(results[t].response);
       }
@@ -205,12 +301,14 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
    for (int i = 0; i < nlens; i++)
    {
-      if (!done[i])
+      if (!done[i] && !pinned[i] && !pinned_dispatch_fail)
          aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for lens '%s' -> degrade",
                    required[i]);
       free(sysp[i]);
       free(usrp[i]);
    }
+   if (pinned_dispatch_fail)
+      return WFE_PANEL_PINNED_FAIL;
    return filled;
 }
 

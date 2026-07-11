@@ -154,6 +154,11 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    int nv = g_provider(&pkt, req, nreq, elig, nelig, verdicts, WFE_PANEL_MAX);
    free(proposal);
    free(diff);
+   if (nv == WFE_PANEL_PINNED_FAIL)
+      /* A user-pinned seat model could not be fulfilled. A pinned model is a hard
+       * requirement — never silently swapped — so the run FAILS terminally rather
+       * than degrading to a different panel. */
+      return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
    if (nv < 0)
       return wfe_step_pending(WFE_PAUSE_PANEL_UNREACHABLE);
 
