@@ -162,23 +162,16 @@ jobs:
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
-          # Bundled aimee-llm in the combined image is AMD64-ONLY: the llama.cpp Vulkan
-          # runtime is the x64 binary, so the arm64 combined leg builds lean (WITH_LLM=0)
-          # and points at an external llm. CAVEAT (ordering): the amd64 combined leg
-          # COPYs the runtime from aimee-llm:latest — i.e. the PREVIOUS release's llm
-          # image, since this run's llm tags aren't manifest-merged until after the build
-          # matrix. The gateway contract is stable across releases (and the image is now
-          # model-less, so there are no baked GGUFs to drift); digest-pinned ordering
-          # (combined `needs` the llm digest) is the follow-up.
+          # The combined image is server+kb only (WITH_LLM=0, the Dockerfile default):
+          # the aimee-llm runtime is no longer bundled. Both arches build lean and the
+          # deploy stack brings up a separate, profile-gated aimee-llm container only
+          # when the setup wizard's page-2 config puts a role local.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_WEBCHAT=1
             ${{ matrix.image.embedder_arg }}
             ${{ matrix.image.reranker_arg }}
             ${{ matrix.image.extra_args }}
-            ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'amd64') && 'WITH_LLM=1' || '' }}
-            ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'amd64') && format('AIMEE_LLM_CPU_IMAGE=ghcr.io/{0}/aimee-llm:latest', env.OWNER) || '' }}
-            ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'arm64') && 'WITH_LLM=0' || '' }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
