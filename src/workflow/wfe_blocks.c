@@ -587,30 +587,32 @@ static wfe_step_result_t with_cost(wfe_step_result_t r, double cost)
 /* ---- executors ---- */
 
 /* author.proposal / author.plan: drive a delegate to produce/edit the artifact,
- * then hash the artifact file. */
+ * then hash the artifact file. A failed dispatch loops to retry — except
+ * author.proposal accepts an already-present, non-empty proposal (see below), so
+ * a pre-supplied complete proposal (the proposals-trigger case) is not looped. */
 static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *path = wfe_ctx_proposal_path(ctx);
-   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed;
-    * a failed run loops). Then hash the artifact file as the produced content; if
-    * it is absent (no provider ran) the gate that follows simply re-loops. */
+   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed). */
    char wd[1024];
    resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(wd, "architect", node_delegate(node),
-                             "Author or revise the workflow artifact at the given path "
-                             "per the work item, then commit it.",
-                             path, commit, &cost) < 0)
-      return with_cost(wfe_step_looped(), cost);
+   int drc = wfe_delegate_dispatch(wd, "architect", node_delegate(node),
+                                   "Author or revise the workflow artifact at the given path "
+                                   "per the work item, then commit it.",
+                                   path, commit, &cost);
+   /* Hash the artifact file as the produced content, and note whether it holds
+    * any content at all. */
    char hash[65] = "";
+   long sz = 0;
    if (path && path[0])
    {
       FILE *f = fopen(path, "rb");
       if (f)
       {
          fseek(f, 0, SEEK_END);
-         long sz = ftell(f);
+         sz = ftell(f);
          if (sz < 0)
             sz = 0;
          fseek(f, 0, SEEK_SET);
@@ -627,6 +629,21 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    }
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
+   if (drc < 0)
+   {
+      /* The delegate did not advance the artifact (no provider, an error, or a
+       * no-op that changed no files). For author.proposal that is acceptable when
+       * the proposal artifact is ALREADY present and non-empty: the proposals
+       * trigger supplies a complete, already-approved proposal (the merge IS the
+       * approval), so a "revise" delegate correctly changes nothing — accept the
+       * existing proposal instead of looping to max_iters. With no artifact yet
+       * (empty/missing file) it is a genuine non-advance, so loop and retry.
+       * author.plan and every other author node have no pre-supplied artifact, so
+       * they always loop on a failed dispatch. */
+      if (node->block == WFE_BLK_AUTHOR_PROPOSAL && sz > 0 && hash[0])
+         return wfe_step_advanced(handle, hash, cost);
+      return with_cost(wfe_step_looped(), cost);
+   }
    return wfe_step_advanced(handle, hash, cost);
 }
 
