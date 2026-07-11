@@ -33,7 +33,16 @@ permissions:
   packages: write
 
 jobs:
+  # Ensure the rerank artifacts release exists BEFORE the image is published, so a
+  # container pulling :testing never crash-loops on a missing rerank fetch. Cheap +
+  # idempotent: only converts when the release is missing an asset (see the workflow).
+  rerank-artifacts:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-rerank-artifacts.yml
+
   build:
+    needs: rerank-artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

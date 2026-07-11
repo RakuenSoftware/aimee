@@ -64,9 +64,17 @@ jobs:
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+  # Ensure the rerank artifacts release exists BEFORE any image is published, so a
+  # container pulling :latest never crash-loops on a missing rerank fetch. Cheap +
+  # idempotent: only converts when the release is missing an asset (see the workflow).
+  rerank-artifacts:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-rerank-artifacts.yml
+
   # Build each image for each arch on a native runner; push by digest only.
   build:
-    needs: prep
+    needs: [prep, rerank-artifacts]
     strategy:
       fail-fast: false
       matrix:
