@@ -58,7 +58,8 @@ int main(void)
    assert(rt_resolve_seat_model(&cfg, "agentB", "review", NULL, 0, &idx) == RT_SEAT_OK);
    assert(idx == 1 && strcmp(cfg.agents[idx].name, "agentB") == 0);
 
-   assert(rt_resolve_seat_model(&cfg, "nope", "review", NULL, 0, &idx) == RT_SEAT_PINNED_UNAVAILABLE);
+   assert(rt_resolve_seat_model(&cfg, "nope", "review", NULL, 0, &idx) ==
+          RT_SEAT_PINNED_UNAVAILABLE);
    assert(rt_resolve_seat_model(&cfg, "agentD", "review", NULL, 0, &idx) ==
           RT_SEAT_PINNED_UNAVAILABLE); /* disabled */
    assert(rt_resolve_seat_model(&cfg, "agentE", "review", NULL, 0, &idx) ==

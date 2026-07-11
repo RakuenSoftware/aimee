@@ -29,9 +29,10 @@ typedef struct
 } wfe_review_packet_t;
 
 /* Panel-provider return sentinels (negative), distinct from a verdict count (>=0). */
-#define WFE_PANEL_UNREACHABLE (-1) /* panel could not be reached/composed -> gate parks DEGRADED */
-#define WFE_PANEL_PINNED_FAIL                                                                       \
-   (-2) /* a PINNED seat model could not be fulfilled -> the run FAILS (no substitution) */
+/* panel could not be reached/composed -> gate parks DEGRADED */
+#define WFE_PANEL_UNREACHABLE (-1)
+/* a PINNED seat model could not be fulfilled -> the run FAILS (no substitution) */
+#define WFE_PANEL_PINNED_FAIL (-2)
 
 /* A panel provider runs the configured panel against the review packet and fills
  * up to `max` verdicts. Returns the number of verdicts (>=0), or a WFE_PANEL_*

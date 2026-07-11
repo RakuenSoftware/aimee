@@ -161,11 +161,11 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    roundtable_preset_t preset;
    int have_preset = load_panel_preset(&preset, pkt->roundtable);
 
-   char *sysp[WFE_PANEL_MAX];             /* per-lens review-persona system prompt */
-   char *usrp[WFE_PANEL_MAX];             /* per-lens user prompt (change under review) */
-   int done[WFE_PANEL_MAX];               /* lens has a verdict */
-   int pinned[WFE_PANEL_MAX];             /* lens pinned to a specific model */
-   const char *pin_agent[WFE_PANEL_MAX];  /* resolved pinned agent name (into acfg) */
+   char *sysp[WFE_PANEL_MAX];            /* per-lens review-persona system prompt */
+   char *usrp[WFE_PANEL_MAX];            /* per-lens user prompt (change under review) */
+   int done[WFE_PANEL_MAX];              /* lens has a verdict */
+   int pinned[WFE_PANEL_MAX];            /* lens pinned to a specific model */
+   const char *pin_agent[WFE_PANEL_MAX]; /* resolved pinned agent name (into acfg) */
    memset(sysp, 0, sizeof sysp);
    memset(usrp, 0, sizeof usrp);
    memset(done, 0, sizeof done);

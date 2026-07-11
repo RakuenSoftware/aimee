@@ -288,6 +288,23 @@ int agent_is_available_for_routing(const agent_t *agent)
       return 0;
    return 1;
 }
+/* Stubs for the seat resolver pulled in via ensemble_resolve_random_seats. These
+ * test seats are all specific model names (never "$random"), so rt_seat_is_random
+ * returns 0 and the resolver passes them through unchanged; delegate_pick_for_role
+ * is only reached for a "$random" seat and is never called here. */
+int rt_seat_is_random(const char *model)
+{
+   return (!model || !model[0]) ? 1 : (strcmp(model, "$random") == 0);
+}
+int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *const exclude[],
+                           int nexclude)
+{
+   (void)cfg;
+   (void)role;
+   (void)exclude;
+   (void)nexclude;
+   return -1;
+}
 static int g_cost_fold_calls = 0;
 static double g_cost_fold_total = 0.0;
 int db1_cost_fold_record(const char *parent_sid, const char *child_sid, double cost,
