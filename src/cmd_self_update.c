@@ -298,13 +298,18 @@ void aimee_self_update_apply_async(void)
    pid_t pid = fork();
    if (pid != 0)
       return; /* parent (or fork failure): do not block the session */
-   /* Child: detach and run the verified self-update, output to a log. */
+   /* Child: detach and run the verified self-update. CRITICAL: this runs inside
+    * the SessionStart hook, whose stdout IS the hook's JSON channel -- redirect
+    * ALL of stdin/stdout/stderr away before the update writes anything, so its
+    * output never corrupts the hook response. Prefer a log file; fall back to
+    * /dev/null when there is no resolvable home. */
    setsid();
-   int devnull = open("/dev/null", O_RDONLY);
+   int devnull = open("/dev/null", O_RDWR);
    if (devnull >= 0)
    {
       dup2(devnull, STDIN_FILENO);
-      close(devnull);
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
    }
    if (home && home[0])
    {
@@ -318,6 +323,8 @@ void aimee_self_update_apply_async(void)
          close(lf);
       }
    }
+   if (devnull >= 0)
+      close(devnull);
    execl(self, "aimee", "self-update", "--yes", "--require-verify", (char *)NULL);
    _exit(127);
 }
