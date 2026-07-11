@@ -98,16 +98,13 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
           # WITH_WEBCHAT bundles the browser UI (default for server/combined; the
-          # aimee-kb image ignores it). WITH_LLM=1 + AIMEE_LLM_CPU_IMAGE make the
-          # combined image bundle the aimee-llm runtime by COPYing from the prebuilt
-          # model-less aimee-llm:testing (published by publish-llm-testing.yml, which
-          # must have run first). The split server/kb Dockerfiles don't declare these
-          # args (a harmless "not consumed" warning).
+          # aimee-kb image ignores it). WITH_LLM=0: the combined image is server+kb
+          # ONLY — the LLM is no longer bundled; the deploy stack runs a separate,
+          # profile-gated aimee-llm container instead (see compose.combined.yaml).
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_WEBCHAT=1
-            WITH_LLM=1
-            AIMEE_LLM_CPU_IMAGE=ghcr.io/${{ env.OWNER }}/aimee-llm:testing
+            WITH_LLM=0
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing-${{ env.SHA7 }}

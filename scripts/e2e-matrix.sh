@@ -150,18 +150,18 @@ run_docker_topology T1 "Docker kb-only"            aimee-kb-docker-smoke.sh     
 run_docker_topology T2 "Docker server+kb split"    aimee-server-docker-smoke.sh            compose.server.yaml              "aimee-server=${SERVER_PORT}:8743" "aimee-kb=${KB_PORT}:8741"
 run_docker_topology T3 "Docker server standalone"  aimee-server-standalone-docker-smoke.sh compose.server-standalone.yaml   "aimee-server=${SERVER_PORT}:8743"
 
-# T4 combined COPYs the aimee-llm runtime (/opt/llama + /opt/aimee + /models) from
-# AIMEE_LLM_CPU_IMAGE. In prod that is the published aimee-llm image (built by the
-# publish-* workflows first); in CI there is no freshly-published tag, so build the
-# model-less image locally (llama binary + gateway, no GGUFs — fast) and inject it.
-# The bundled LLM then runs in STUB mode (AIMEE_LLM_STUB=1, exported above), so it
-# serves deterministic responses with no model download.
+# T4 combined is now server+kb ONLY (the LLM is no longer bundled); it reaches the
+# separate, profile-gated `aimee-llm` service in compose.combined.yaml. In prod that
+# is the published aimee-llm image; in CI there is no freshly-published tag, so build
+# the model-less image locally (llama binary + gateway, no GGUFs — fast) and point the
+# service at it. It runs in STUB mode (AIMEE_LLM_STUB=1, exported above) — deterministic
+# responses, no model download — and COMPOSE_PROFILES=llm (above) brings it up.
 if selected T4 && have_docker; then
-  bold "==> Building local aimee-llm image for the T4 combined bundled LLM"
+  bold "==> Building local aimee-llm image for the T4 aimee-llm service"
   if docker build -f "$ROOT/Dockerfile.aimee-llm" -t aimee-llm-local:e2e "$ROOT"; then
-    export AIMEE_LLM_CPU_IMAGE="aimee-llm-local:e2e"
+    export AIMEE_LLM_IMAGE="aimee-llm-local:e2e"
   else
-    bold "==> WARNING: local aimee-llm build failed; T4 will use the default AIMEE_LLM_CPU_IMAGE"
+    bold "==> WARNING: local aimee-llm build failed; T4 will fall back to the default AIMEE_LLM_IMAGE"
   fi
 fi
 run_docker_topology T4 "Docker combined server+kb" aimee-combined-docker-smoke.sh          compose.combined.yaml            "aimee-server-kb=${SERVER_PORT}:8743,${KB_PORT}:8741"
