@@ -32,6 +32,28 @@ void wfe_panel_verdict_from_review(const char *persona, const char *artifact_has
    size_t start = len;
    while (start > 0 && r[start - 1] != '\n')
       start--;
+
+   /* Capture the reviewer's critique — everything before the final JSON verdict
+    * line — so a request_changes can be threaded back to the re-authoring
+    * delegate. Keep the TAIL when it overflows the buffer: reviewers tend to
+    * conclude with their concrete blockers just above the verdict line. Done for
+    * every kind (incl. MALFORMED, which the gate coerces to request_changes). */
+   size_t body = start;
+   while (body > 0 &&
+          (r[body - 1] == '\n' || r[body - 1] == '\r' || r[body - 1] == ' ' || r[body - 1] == '\t'))
+      body--;
+   if (body > 0)
+   {
+      size_t keep = body, off = 0;
+      if (keep >= sizeof out->feedback)
+      {
+         keep = sizeof out->feedback - 1;
+         off = body - keep;
+      }
+      memcpy(out->feedback, r + off, keep);
+      out->feedback[keep] = '\0';
+   }
+
    size_t llen = len - start;
    char line[1024];
    if (llen == 0 || llen >= sizeof line)
