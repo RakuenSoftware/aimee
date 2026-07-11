@@ -270,6 +270,45 @@ int main(void)
    assert(g_deleg_calls == 1);
    assert(g_open_calls == 0); /* open is NULL -> not called, no crash */
 
+   /* C2: author.proposal accepts a pre-supplied, non-empty proposal even when the
+    *     delegate changes nothing (dispatch fails / no-op). The proposals trigger
+    *     supplies a complete, already-approved proposal (the merge IS the approval),
+    *     so a "revise" delegate correctly makes no change — this must advance, NOT
+    *     loop the draft to max_iters. */
+   wfe_set_delegate_provider(&MOCK_DELEG);
+   wfe_set_forge_provider(&MOCK_FORGE);
+   {
+      char pp[300];
+      snprintf(pp, sizeof pp, "%s/complete-proposal.md", home);
+      FILE *pf = fopen(pp, "wb");
+      assert(pf);
+      fputs("# A complete, already-approved proposal\n\nBody.\n", pf);
+      fclose(pf);
+
+      g_deleg_rc = -1; /* delegate reports success-but-no-change / failure */
+      g_deleg_calls = 0;
+      g_open_calls = 0;
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("ds", "r", pp, "interactive", id, err, sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(g_deleg_calls >= 1); /* the author delegate WAS dispatched */
+      assert(g_open_calls == 1);  /* author accepted the proposal and advanced to pr.open */
+   }
+
+   /* C3: the acceptance is strictly for an ALREADY-PRESENT proposal — with no
+    *     artifact on disk, a failed author dispatch still loops (and the run never
+    *     reaches pr.open). Guards against blindly advancing an empty proposal. */
+   {
+      char pp[300];
+      snprintf(pp, sizeof pp, "%s/missing-proposal.md", home); /* never created */
+      g_deleg_rc = -1;
+      g_open_calls = 0;
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("ds", "r", pp, "interactive", id, err, sizeof err) == 0);
+      (void)wfe_engine_run(id, err, sizeof err); /* author loops -> parks at max_iters */
+      assert(g_open_calls == 0);                 /* never advanced past the author node */
+   }
+
    /* D: implement verify gate (WP-1b) — a unit advances ONLY on a top-level
     *    verdict:passed; everything else (incl. NO provider) fails closed. */
    {
