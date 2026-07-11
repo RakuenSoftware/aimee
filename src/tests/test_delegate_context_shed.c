@@ -274,6 +274,57 @@ static void test_preflight_relative_existing_file_with_base(void)
    printf("  preflight_relative_existing_file_with_base: ok\n");
 }
 
+static void test_preflight_remote_scp_path_skipped(void)
+{
+   /* An ops/deploy brief that names a remote scp target must NOT hard-fail the
+    * delegate: the tokenizer strips the `user@host:` prefix and extracts the bare
+    * absolute host path, which does not resolve under the worktree. */
+   const char *prompt =
+       "Update aimee-server on the host. The server config lives at "
+       "admin@192.168.1.254:/mnt/media/.plugins/aimee-server/server/home/aimee.yaml; "
+       "read it over SSH and confirm the bearer token.";
+
+   char extracted[DELEGATE_DRIFT_MAX_PATHS][DELEGATE_DRIFT_PATH_MAX];
+   int n = delegate_extract_named_paths(prompt, extracted, DELEGATE_DRIFT_MAX_PATHS);
+   assert(n == 1);
+   assert(strcmp(extracted[0], "/mnt/media/.plugins/aimee-server/server/home/aimee.yaml") == 0);
+
+   char errbuf[512] = {0};
+   const char *paths[] = {extracted[0]};
+   int rc = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
+                                            errbuf, sizeof(errbuf));
+   assert(rc == 0);
+   assert(errbuf[0] == '\0');
+   printf("  preflight_remote_scp_path_skipped: ok\n");
+}
+
+static void test_preflight_absolute_outside_worktree_skipped(void)
+{
+   /* A bare absolute path outside the worktree root is a referenced external
+    * file, not an in-repo create target — pre-flight must not hard-fail. */
+   char errbuf[512] = {0};
+   const char *paths[] = {"/mnt/media/other/thing.c"};
+   int rc = delegate_check_named_file_drift(paths, 1,
+                                            "Update /mnt/media/other/thing.c on the remote host.",
+                                            NULL, "/home/virant/dev/aimee", errbuf, sizeof(errbuf));
+   assert(rc == 0);
+   printf("  preflight_absolute_outside_worktree_skipped: ok\n");
+}
+
+static void test_preflight_relative_under_worktree_still_fails(void)
+{
+   /* Regression guard: a relative, in-worktree path that doesn't exist and has no
+    * create verb MUST still hard-fail — the external-path skip must not weaken
+    * the guard for real in-repo targets. */
+   char errbuf[512] = {0};
+   const char *paths[] = {"src/nonexistent_xyz.c"};
+   int rc = delegate_check_named_file_drift(paths, 1, "Edit src/nonexistent_xyz.c to fix the bug.",
+                                            NULL, "/home/virant/dev/aimee", errbuf, sizeof(errbuf));
+   assert(rc == -1);
+   assert(strstr(errbuf, "create intent") != NULL);
+   printf("  preflight_relative_under_worktree_still_fails: ok\n");
+}
+
 /* ---- delegate_prompt_allows_writes ---- */
 
 static void test_prompt_write_intent(void)
@@ -605,6 +656,9 @@ int main(void)
    test_preflight_readonly_missing_file_as_context();
    test_preflight_existing_file_no_error();
    test_preflight_relative_existing_file_with_base();
+   test_preflight_remote_scp_path_skipped();
+   test_preflight_absolute_outside_worktree_skipped();
+   test_preflight_relative_under_worktree_still_fails();
    test_prompt_write_intent();
    test_validation_bundle_identifies_source_worktree();
    test_validation_bundle_keeps_large_diff_handlers();
