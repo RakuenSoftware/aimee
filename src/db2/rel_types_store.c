@@ -3,6 +3,7 @@
 #include "../headers/aimee.h" /* edge_t (used by entity_edges.h) */
 #include "rel_types_store.h"
 #include "../headers/rel_types.h"
+#include "../headers/memory_pii_gate.h" /* memory_pii_rel_sensitivity — personal-data boundary */
 #include "entity_edges.h"
 #include "entity_registry.h"    /* db2_entity_register_named (§3 endpoint resolution) */
 #include "ontology_evolution.h" /* db2_ontology_eval_observe (§2 / P4) */
@@ -205,6 +206,17 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
 
    if (v != FACT_GATE_ACCEPT && v != FACT_GATE_NOVEL)
       return v; /* REJECT_KIND / BADARG: never write an unvalidated semantic edge */
+
+   /* Personal-data boundary (Track A): a credential relation (password / api_key /
+    * token / private_key / ...) is never a durable "fact to remember" and must not
+    * land in the shareable knowledge store — it is WITHHELD from DB2 here as
+    * defense-in-depth (the memory-layer secret gate is the first line). PII-classed
+    * relations (email, city, address, age, ...) are intentionally NOT dropped: the
+    * typed-fact layer is designed to capture them, and recall already gates their
+    * injection. Removing personal PII facts from DB2 entirely is a broader change
+    * (relocating them to DB1), out of scope for this narrow gate. */
+   if (memory_pii_rel_sensitivity(rel_type) == SENS_SECRET)
+      return FACT_GATE_REJECT_SENSITIVE;
 
    /* §5: provenance-keyed class. user -> A, model+ACCEPT -> B, model NOVEL -> C. */
    const char *cls = fact_class_for(authority, v);

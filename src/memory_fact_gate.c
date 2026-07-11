@@ -36,6 +36,8 @@ const char *fact_gate_verdict_to_text(fact_gate_verdict_t v)
       return "bad_argument";
    case FACT_GATE_DEFER:
       return "defer";
+   case FACT_GATE_REJECT_SENSITIVE:
+      return "reject_sensitive";
    }
    return "unknown";
 }
