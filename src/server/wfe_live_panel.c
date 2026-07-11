@@ -102,11 +102,14 @@ static const char *seat_model_for_persona(const roundtable_preset_t *preset, con
    return NULL;
 }
 
-/* Load the active roundtable preset (config.roundtable_default, else "default")
- * into *preset for its persona->model bindings. Returns 1 on success, 0 when no
- * preset exists — in which case every lens resolves as "$random", preserving the
- * pre-preset "any review-capable agent per persona" behaviour. */
-static int load_default_preset(roundtable_preset_t *preset)
+/* Load the roundtable preset this gate convenes into *preset for its
+ * persona->model bindings. `requested` is the node's params.roundtable (the gate
+ * may name a specific preset); when empty it falls back to the configured default
+ * (roundtable.default, else "default"). Returns 1 on success, 0 when no preset
+ * loads — in which case every lens resolves as "$random", preserving the
+ * pre-preset "any review-capable agent per persona" behaviour. A NAMED preset
+ * that does not load is logged, since it is likely a workflow authoring error. */
+static int load_panel_preset(roundtable_preset_t *preset, const char *requested)
 {
    memset(preset, 0, sizeof *preset);
    config_t cfg;
@@ -114,7 +117,14 @@ static int load_default_preset(roundtable_preset_t *preset)
    const char *name = "default";
    if (config_load(&cfg) == 0 && cfg.roundtable_default[0])
       name = cfg.roundtable_default;
-   return roundtable_preset_load(name, preset) == 0 ? 1 : 0;
+   if (requested && requested[0])
+      name = requested; /* the node's explicit choice wins over the default */
+   if (roundtable_preset_load(name, preset) == 0)
+      return 1;
+   if (requested && requested[0])
+      aimee_log(LOG_WARN, "wfe-panel",
+                "roundtable preset '%s' not found -> every lens falls back to $random", requested);
+   return 0;
 }
 
 /* Compose the review roundtable IN PARALLEL, honoring each required lens's seat
@@ -146,9 +156,10 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (nlens > WFE_PANEL_MAX)
       nlens = WFE_PANEL_MAX;
 
-   /* Persona->model bindings for this panel come from the active roundtable preset. */
+   /* Persona->model bindings for this panel come from the roundtable preset this
+    * gate convenes: the node's named preset (pkt->roundtable) or the default. */
    roundtable_preset_t preset;
-   int have_preset = load_default_preset(&preset);
+   int have_preset = load_panel_preset(&preset, pkt->roundtable);
 
    char *sysp[WFE_PANEL_MAX];             /* per-lens review-persona system prompt */
    char *usrp[WFE_PANEL_MAX];             /* per-lens user prompt (change under review) */

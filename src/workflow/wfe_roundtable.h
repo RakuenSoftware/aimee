@@ -23,6 +23,9 @@ typedef struct
    const char *diff;    /* the change under review vs the base repo, pushed to the panel so it
                          * reads the delta directly (trusting the index for context) instead of
                          * re-running git; "" at a plan gate (no code change yet) */
+   const char *roundtable; /* the roundtable preset this gate convenes (from the node's
+                            * params.roundtable), for its persona->model seat bindings; "" (or
+                            * NULL) means the configured default (roundtable.default) */
 } wfe_review_packet_t;
 
 /* Panel-provider return sentinels (negative), distinct from a verdict count (>=0). */
