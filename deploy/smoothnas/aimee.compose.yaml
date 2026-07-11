@@ -45,6 +45,9 @@ services:
 
   aimee-llm:
     restart: unless-stopped
+    # Profile-gated: brought up only when the page-2 config puts a role local
+    # (COMPOSE_PROFILES=...,llm, emitted by `aimee config deploy-env`).
+    profiles: ["llm"]
     image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_PORT: "8742"
@@ -80,7 +83,8 @@ services:
       - "8741:8741"
     depends_on:
       postgres: { condition: service_healthy }
-      aimee-llm: { condition: service_healthy }
+      # required:false: kb fail-opens on embedding when the llm profile is off.
+      aimee-llm: { condition: service_healthy, required: false }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
