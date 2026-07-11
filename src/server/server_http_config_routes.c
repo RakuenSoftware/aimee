@@ -13,6 +13,7 @@
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
+#include "roundtable_preset.h"
 #include "role_templates.h"
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
@@ -284,6 +285,138 @@ int route_role_template_remove(const char *name, char *resp, int cap)
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "role", name);
    cJSON_AddBoolToObject(o, "deleted", 1);
+   return emit(resp, cap, o);
+}
+
+/* ── named roundtable presets (the roundtable analog of personas) ─────────────
+ * Presets are stored one-per-file as JSON (roundtable_preset.{c,h}); the active
+ * one is named by config.roundtable_default and its values are mirrored into the
+ * live ensemble and roundtable config that the runtime reads. */
+
+/* The current active-preset name (config.roundtable_default), or "" if none. */
+static void rt_active_name(char *out, size_t out_n)
+{
+   config_t cfg;
+   if (out && out_n)
+      out[0] = '\0';
+   if (config_load(&cfg) == 0 && out && out_n)
+      snprintf(out, out_n, "%s", cfg.roundtable_default);
+}
+
+int route_roundtables_list(char *resp, int cap)
+{
+   enum
+   {
+      RT_LIST_MAX = 128
+   };
+   char names[RT_LIST_MAX][RT_PRESET_NAME_MAX];
+   int n = roundtable_preset_list(names, RT_LIST_MAX);
+   char active[RT_PRESET_NAME_MAX];
+   rt_active_name(active, sizeof(active));
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(root, "roundtables");
+   for (int i = 0; i < n; i++)
+   {
+      roundtable_preset_t p;
+      cJSON *item = cJSON_CreateObject();
+      cJSON_AddStringToObject(item, "name", names[i]);
+      if (roundtable_preset_load(names[i], &p) == 0)
+         cJSON_AddStringToObject(item, "description", p.description);
+      cJSON_AddBoolToObject(item, "active", active[0] && strcmp(active, names[i]) == 0 ? 1 : 0);
+      cJSON_AddItemToArray(arr, item);
+   }
+   /* Empty store: surface an implicit "default" synthesized from today's live
+    * config so the GUI opens showing the effective roundtable rather than blank.
+    * It is materialized only — saving it (PUT) is what writes a file. */
+   if (n == 0)
+   {
+      const char *implicit = active[0] ? active : "default";
+      cJSON *item = cJSON_CreateObject();
+      cJSON_AddStringToObject(item, "name", implicit);
+      cJSON_AddStringToObject(item, "description", "current configuration (unsaved)");
+      cJSON_AddBoolToObject(item, "active", 1);
+      cJSON_AddBoolToObject(item, "synthesized", 1);
+      cJSON_AddItemToArray(arr, item);
+   }
+   cJSON_AddStringToObject(root, "active", active);
+   return emit(resp, cap, root);
+}
+
+int route_roundtable_show(const char *name, char *resp, int cap)
+{
+   if (!name || !name[0])
+      return err_json(resp, cap, 400, "missing preset name");
+   if (!roundtable_preset_name_valid(name))
+      return err_json(resp, cap, 400, "invalid preset name");
+   roundtable_preset_t p;
+   if (roundtable_preset_load(name, &p) != 0)
+   {
+      /* Fall back to a synthesized preset from the live config when the store is
+       * empty, so the implicit "default" shown by the list is fetchable. */
+      char names[1][RT_PRESET_NAME_MAX];
+      if (roundtable_preset_list(names, 1) == 0)
+      {
+         roundtable_preset_from_current_config(name, &p);
+         cJSON *j = roundtable_preset_to_json(&p);
+         cJSON_AddBoolToObject(j, "synthesized", 1);
+         return emit(resp, cap, j);
+      }
+      return err_json(resp, cap, 404, "no such roundtable preset");
+   }
+   return emit(resp, cap, roundtable_preset_to_json(&p));
+}
+
+/* Create (POST, name in body) or edit (PUT /v1/roundtables/<name>) a preset. If
+ * the saved preset is the active one, re-apply it so live config stays in sync. */
+int route_roundtable_upsert(const char *url_name, const char *body, char *resp, int cap)
+{
+   roundtable_preset_t p;
+   const char *errmsg = NULL;
+   if (roundtable_preset_from_json(body, url_name, &p, &errmsg) != 0)
+      return err_json(resp, cap, 400, errmsg ? errmsg : "bad request");
+   if (roundtable_preset_save(&p) != 0)
+      return err_json(resp, cap, 500, "failed to write roundtable preset");
+   char active[RT_PRESET_NAME_MAX];
+   rt_active_name(active, sizeof(active));
+   if (active[0] && strcmp(active, p.name) == 0)
+      (void)roundtable_preset_apply_to_config(p.name, NULL, 0);
+   roundtable_preset_t loaded;
+   if (roundtable_preset_load(p.name, &loaded) != 0)
+      return err_json(resp, cap, 500, "failed to reload roundtable preset");
+   return emit(resp, cap, roundtable_preset_to_json(&loaded));
+}
+
+int route_roundtable_remove(const char *name, char *resp, int cap)
+{
+   if (!name || !roundtable_preset_name_valid(name))
+      return err_json(resp, cap, 400, "invalid preset name");
+   if (roundtable_preset_delete(name) != 0)
+      return err_json(resp, cap, 404, "no roundtable preset to remove");
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "name", name);
+   cJSON_AddBoolToObject(o, "deleted", 1);
+   return emit(resp, cap, o);
+}
+
+/* POST /v1/roundtables/active {name}: make a preset the active roundtable — copy
+ * its values into the live ensemble/roundtable config and persist. */
+int route_roundtable_set_active(const char *body, char *resp, int cap)
+{
+   cJSON *req = body ? cJSON_Parse(body) : NULL;
+   cJSON *jn = req ? cJSON_GetObjectItemCaseSensitive(req, "name") : NULL;
+   char name[RT_PRESET_NAME_MAX] = {0};
+   if (cJSON_IsString(jn) && jn->valuestring)
+      snprintf(name, sizeof(name), "%s", jn->valuestring);
+   cJSON_Delete(req);
+   if (!name[0] || !roundtable_preset_name_valid(name))
+      return err_json(resp, cap, 400, "missing or invalid preset name");
+   char err[128];
+   if (roundtable_preset_apply_to_config(name, err, sizeof(err)) != 0)
+      return err_json(resp, cap, 404, err[0] ? err : "could not activate preset");
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "name", name);
+   cJSON_AddBoolToObject(o, "active", 1);
    return emit(resp, cap, o);
 }
 

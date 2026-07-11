@@ -275,6 +275,8 @@ const config_field_t config_fields[] = {
     {"roundtable.deadline_ms", offsetof(config_t, roundtable_deadline_ms), sizeof(int), 0, CFG_INT},
     {"roundtable.turns", offsetof(config_t, roundtable_turns),
      sizeof(((config_t *)0)->roundtable_turns), 0, CFG_STRING},
+    {"roundtable.default", offsetof(config_t, roundtable_default),
+     sizeof(((config_t *)0)->roundtable_default), 0, CFG_STRING},
     {"roundtable.pipeline_done_bar", offsetof(config_t, roundtable_pipeline_done_bar),
      sizeof(((config_t *)0)->roundtable_pipeline_done_bar), 0, CFG_STRING},
     {"roundtable.pipeline_max_passes", offsetof(config_t, roundtable_pipeline_max_passes),

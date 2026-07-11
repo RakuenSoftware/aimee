@@ -100,7 +100,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
        cfg->roundtable_pipeline_max_total_cost_usd != 0.0 ||
        cfg->roundtable_pipeline_gate_ttl_h != 0 ||
        cfg->roundtable_pipeline_parked_releases_slot != 1 ||
-       cfg->roundtable_pipeline_unknown_context_tokens != 8000)
+       cfg->roundtable_pipeline_unknown_context_tokens != 8000 || cfg->roundtable_default[0])
    {
       cJSON *rt = cJSON_AddObjectToObject(root, "roundtable");
       if (rt)
@@ -109,6 +109,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
          cJSON_AddNumberToObject(rt, "converge_threshold", cfg->roundtable_converge_threshold);
          cJSON_AddNumberToObject(rt, "deadline_ms", cfg->roundtable_deadline_ms);
          cJSON_AddStringToObject(rt, "turns", cfg->roundtable_turns);
+         if (cfg->roundtable_default[0])
+            cJSON_AddStringToObject(rt, "default", cfg->roundtable_default);
          cJSON_AddStringToObject(rt, "pipeline_done_bar", cfg->roundtable_pipeline_done_bar);
          cJSON_AddNumberToObject(rt, "pipeline_max_passes", cfg->roundtable_pipeline_max_passes);
          cJSON_AddNumberToObject(rt, "pipeline_max_attempts_per_pass",
