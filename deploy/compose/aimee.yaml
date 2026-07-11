@@ -34,6 +34,9 @@ services:
   # runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
   aimee-llm:
     restart: unless-stopped
+    # Profile-gated: brought up only when the page-2 config puts a role local
+    # (COMPOSE_PROFILES=...,llm, emitted by `aimee config deploy-env`).
+    profiles: ["llm"]
     image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_PORT: "8742"
@@ -76,8 +79,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # required:false so the kb starts (fail-open on embedding) when the aimee-llm
+      # profile is off; it still waits for aimee-llm to be healthy when on.
       aimee-llm:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
