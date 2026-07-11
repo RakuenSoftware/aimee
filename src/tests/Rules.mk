@@ -3137,6 +3137,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/compute_pool.o \
                            $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
+                           $(OBJDIR)/roundtable_preset.o \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
                            $(OBJDIR)/server/roundtable_pipeline_capture.o \
