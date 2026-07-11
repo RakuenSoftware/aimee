@@ -51,6 +51,18 @@ int aimee_version_compare(const char *a, const char *b)
    return 0;
 }
 
+int aimee_version_is_semver(const char *s)
+{
+   if (!s)
+      return 0;
+   if (*s == 'v' || *s == 'V')
+      s++;
+   /* Comparable only if it starts with a numeric component. A dev/branch build
+    * version like "testing-b4a856b" is deliberately NOT a semver (see
+    * publish-testing.yml), so ordering against it is meaningless. */
+   return *s >= '0' && *s <= '9';
+}
+
 int aimee_version_is_safe(const char *s)
 {
    if (!s || !s[0])

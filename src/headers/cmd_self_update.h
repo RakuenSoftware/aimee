@@ -18,6 +18,11 @@ int aimee_version_compare(const char *a, const char *b);
  * of [0-9A-Za-z._-] (so it is safe to interpolate into a release URL/command). */
 int aimee_version_is_safe(const char *s);
 
+/* True if `s` is a comparable semantic version (starts with a numeric component,
+ * after an optional leading 'v'). A deliberately non-semver dev/branch build
+ * version (e.g. "testing-<sha>") returns 0 -- ordering against it is meaningless. */
+int aimee_version_is_semver(const char *s);
+
 /* Release asset base name for the current platform (e.g. "aimee-linux-x86_64",
  * "aimee-linux-arm64", "aimee-macos-universal"). Returns a pointer to static
  * storage, or NULL on an unsupported platform. */
@@ -34,8 +39,13 @@ int aimee_fetch_server_version(char *out, size_t cap);
  * check could not be completed. Never blocks longer than a few seconds. */
 int aimee_self_update_notice(char *out, size_t cap);
 
-/* `aimee self-update [--check] [--version vX.Y.Z] [--yes]`. Returns a process
- * exit code. --check reports drift without downloading. */
+/* `aimee self-update [--check] [--version vX.Y.Z] [--yes] [--require-verify]`.
+ * Returns a process exit code. --check reports drift without downloading. */
 int cmd_self_update(int argc, char **argv);
+
+/* When aimee.yaml sets `update_mode: apply` and the server is a strictly newer
+ * semver, spawn a detached, SHA-256-verified self-update (rate-limited to once
+ * per hour). No-op otherwise. Non-blocking; safe to call from SessionStart. */
+void aimee_self_update_apply_async(void);
 
 #endif /* DEC_CMD_SELF_UPDATE_H */
