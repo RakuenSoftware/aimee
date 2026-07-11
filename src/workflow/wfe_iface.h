@@ -79,11 +79,15 @@ typedef enum
    WFE_PAUSE_NONE = 0,
    WFE_PAUSE_PENDING_HUMAN,
    WFE_PAUSE_PANEL_DEGRADED,
-   WFE_PAUSE_BUDGET_EXCEEDED,
+   WFE_PAUSE_BUDGET_EXCEEDED, /* the dollar cost cap (WFE_STEP: real spend ceiling) */
    WFE_PAUSE_PANEL_UNREACHABLE,
    WFE_PAUSE_CI_PENDING,   /* gate.ci: CI still running / not yet conclusive */
-   WFE_PAUSE_MERGE_PENDING /* check.mergeable / merge: forge merge state could not
-                            * be determined (transient/unknown) -- re-drive later */
+   WFE_PAUSE_MERGE_PENDING, /* check.mergeable / merge: forge merge state could not
+                             * be determined (transient/unknown) -- re-drive later */
+   WFE_PAUSE_TURN_CAP,  /* autonomy runaway backstop: cumulative audit-event
+                         * (turn) cap reached -- NOT a spend issue */
+   WFE_PAUSE_WALL_CAP   /* autonomy runaway backstop: this resume exceeded its
+                         * wall-clock ceiling -- NOT a spend issue */
 } wfe_pause_reason_t;
 
 /* Failure taxonomy (Phase-C Q4): how the autonomy run loop should react to a

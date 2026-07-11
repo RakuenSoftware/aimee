@@ -183,6 +183,10 @@ static const char *pause_name(wfe_pause_reason_t r)
       return "ci_pending";
    case WFE_PAUSE_MERGE_PENDING:
       return "merge_pending";
+   case WFE_PAUSE_TURN_CAP:
+      return "turn_cap_exceeded";
+   case WFE_PAUSE_WALL_CAP:
+      return "wall_cap_exceeded";
    default:
       return "";
    }
@@ -204,6 +208,10 @@ static wfe_pause_reason_t pause_from_name(const char *s)
       return WFE_PAUSE_CI_PENDING;
    if (strcmp(s, "merge_pending") == 0)
       return WFE_PAUSE_MERGE_PENDING;
+   if (strcmp(s, "turn_cap_exceeded") == 0)
+      return WFE_PAUSE_TURN_CAP;
+   if (strcmp(s, "wall_cap_exceeded") == 0)
+      return WFE_PAUSE_WALL_CAP;
    return WFE_PAUSE_NONE;
 }
 

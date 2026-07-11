@@ -198,8 +198,9 @@ int main(void)
    }
 
    /* A7: per-run turn cap (WP-5) — once the cumulative audit-event count reaches
-    * the cap, an autonomous run parks budget_exceeded BEFORE advancing further
-    * (so a runaway loop can't burn unbounded turns). */
+    * the cap, an autonomous run parks turn_cap_exceeded BEFORE advancing further
+    * (so a runaway loop can't burn unbounded turns). The pause reason names the
+    * ACTUAL breach (the turn cap), not the unrelated dollar cost cap. */
    {
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("auto", "cap1", "cap1", "autonomous", id, err, sizeof err) == 0);
@@ -211,7 +212,7 @@ int main(void)
       db1_work_item_t wi;
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "active") == 0);
-      assert(strcmp(wi.pause_reason, "budget_exceeded") == 0);
+      assert(strcmp(wi.pause_reason, "turn_cap_exceeded") == 0);
    }
 
    /* A8: server-side cost estimate (WP-5) — wall-clock seconds * rate; negative
