@@ -335,6 +335,23 @@ static char *build_session_context(const char *client_cwd)
    }
    free(rules);
 
+   /* Learned per-user working profile (DB1-local): inject the interaction
+    * preferences aimee has observed about this user (verbosity, communication
+    * style, trust calibration) so the primary adapts to how they work. Personal
+    * and local — sourced from DB1, never the shared KB. Renders nothing when the
+    * switch is off or nothing has been learned yet. The observer that fills it is
+    * memory_recall_handler (per user turn). */
+   {
+      config_t wp_cfg;
+      if (config_load(&wp_cfg) == 0)
+      {
+         char *wp = prompt_apply_working_profile("", &wp_cfg);
+         if (wp && wp[0])
+            ctx_appendf(buf, cap, &pos, "%s", wp);
+         free(wp);
+      }
+   }
+
    /* Hierarchical local context: walk cwd up to project root and inject nearby
     * rule/convention files (.aimee-rules, AGENTS.md, CONTRIBUTING.md, ...). */
    {
