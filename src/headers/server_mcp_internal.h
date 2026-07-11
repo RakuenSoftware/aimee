@@ -2,6 +2,14 @@
 #define SERVER_MCP_INTERNAL_H
 #include "server.h"
 /* Cross-TU decls split from server_mcp.c. */
+
+/* Idempotently register an MCP session in the server_sessions registry (tagged
+ * client_type "mcp"), so an MCP serve session -- which is pure tool calls and
+ * never drives a chat turn -- is locatable after a crash/restart. Best-effort:
+ * a NULL/empty/unsafe sid or a DB failure is a silent no-op. Called from the
+ * mcp.call seam (tools/list is a bodyless GET that carries no session id). */
+void mcp_session_register(server_conn_t *conn, const char *sid);
+
 /* promoted cross-TU (former .inc statics) */
 cJSON *text_content(const char *text);
 cJSON *tool_ast_grep_search(cJSON *args);
