@@ -23,11 +23,21 @@ typedef struct
    const char *diff;    /* the change under review vs the base repo, pushed to the panel so it
                          * reads the delta directly (trusting the index for context) instead of
                          * re-running git; "" at a plan gate (no code change yet) */
+   const char *roundtable; /* the roundtable preset this gate convenes (from the node's
+                            * params.roundtable), for its persona->model seat bindings; "" (or
+                            * NULL) means the configured default (roundtable.default) */
 } wfe_review_packet_t;
 
+/* Panel-provider return sentinels (negative), distinct from a verdict count (>=0). */
+/* panel could not be reached/composed -> gate parks DEGRADED */
+#define WFE_PANEL_UNREACHABLE (-1)
+/* a PINNED seat model could not be fulfilled -> the run FAILS (no substitution) */
+#define WFE_PANEL_PINNED_FAIL (-2)
+
 /* A panel provider runs the configured panel against the review packet and fills
- * up to `max` verdicts. Returns the number of verdicts, or -1 if the panel could
- * not be reached/composed (-> the gate parks DEGRADED). */
+ * up to `max` verdicts. Returns the number of verdicts (>=0), or a WFE_PANEL_*
+ * sentinel: WFE_PANEL_UNREACHABLE (-1) -> park DEGRADED; WFE_PANEL_PINNED_FAIL
+ * (-2) -> fail the run (a user-pinned seat model was unavailable). */
 typedef int (*wfe_panel_run_fn)(const wfe_review_packet_t *pkt, const char *const *required,
                                 int nreq, const char *const *eligible, int nelig,
                                 wfe_verdict_t *out, int max);
