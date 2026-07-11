@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type workflowSessionInfo struct {
@@ -73,27 +74,31 @@ type methodRoute struct {
 // byte-for-byte, so every caller's response parsing is unchanged.
 var methodRoutes = map[string]methodRoute{
 	// Dashboard read views (GET, no args).
-	"dashboard.all":            {http.MethodGet, "/v1/dashboard/all"},
-	"dashboard.audit":          {http.MethodGet, "/v1/dashboard/audit"},
-	"dashboard.delegations":    {http.MethodGet, "/v1/dashboard/delegations"},
-	"dashboard.metrics":        {http.MethodGet, "/v1/dashboard/metrics"},
-	"dashboard.logs":           {http.MethodGet, "/v1/dashboard/logs"},
-	"dashboard.plans":          {http.MethodGet, "/v1/dashboard/plans"},
-	"dashboard.traces":         {http.MethodGet, "/v1/dashboard/traces"},
-	"dashboard.plugins":        {http.MethodGet, "/v1/dashboard/plugins"},
-	"dashboard.memory_stats":   {http.MethodGet, "/v1/dashboard/memory_stats"},
-	"dashboard.onboard":        {http.MethodGet, "/v1/dashboard/onboard"},
-	"plugin.list":              {http.MethodGet, "/v1/plugins"},
-	"plugin.enable":            {http.MethodPost, "/v1/plugins/enable"},
-	"plugin.disable":           {http.MethodPost, "/v1/plugins/disable"},
-	"agent.list":               {http.MethodGet, "/v1/agent/list"},
-	"agent.stats":              {http.MethodGet, "/v1/agent/stats"},
-	"agent.add":                {http.MethodPost, "/v1/agent/add"},
-	"agent.remove":             {http.MethodPost, "/v1/agent/remove"},
-	"agent.enable":             {http.MethodPost, "/v1/agent/enable"},
-	"agent.disable":            {http.MethodPost, "/v1/agent/disable"},
-	"agent.probe":              {http.MethodPost, "/v1/agent/probe"},
-	"agent.set":                {http.MethodPost, "/v1/agent/set"},
+	"dashboard.all":          {http.MethodGet, "/v1/dashboard/all"},
+	"dashboard.audit":        {http.MethodGet, "/v1/dashboard/audit"},
+	"dashboard.delegations":  {http.MethodGet, "/v1/dashboard/delegations"},
+	"dashboard.metrics":      {http.MethodGet, "/v1/dashboard/metrics"},
+	"dashboard.logs":         {http.MethodGet, "/v1/dashboard/logs"},
+	"dashboard.plans":        {http.MethodGet, "/v1/dashboard/plans"},
+	"dashboard.traces":       {http.MethodGet, "/v1/dashboard/traces"},
+	"dashboard.plugins":      {http.MethodGet, "/v1/dashboard/plugins"},
+	"dashboard.memory_stats": {http.MethodGet, "/v1/dashboard/memory_stats"},
+	"dashboard.onboard":      {http.MethodGet, "/v1/dashboard/onboard"},
+	"plugin.list":            {http.MethodGet, "/v1/plugins"},
+	"plugin.enable":          {http.MethodPost, "/v1/plugins/enable"},
+	"plugin.disable":         {http.MethodPost, "/v1/plugins/disable"},
+	"agent.list":             {http.MethodGet, "/v1/agent/list"},
+	"agent.stats":            {http.MethodGet, "/v1/agent/stats"},
+	"agent.add":              {http.MethodPost, "/v1/agent/add"},
+	"agent.remove":           {http.MethodPost, "/v1/agent/remove"},
+	"agent.enable":           {http.MethodPost, "/v1/agent/enable"},
+	"agent.disable":          {http.MethodPost, "/v1/agent/disable"},
+	"agent.probe":            {http.MethodPost, "/v1/agent/probe"},
+	"agent.set":              {http.MethodPost, "/v1/agent/set"},
+	// Subscription-OAuth setup (Claude / Codex "sign in with your plan").
+	"agent.cli_oauth_start":    {http.MethodPost, "/v1/agent/cli_oauth_start"},
+	"agent.cli_oauth_code":     {http.MethodPost, "/v1/agent/cli_oauth_code"},
+	"agent.cli_oauth_poll":     {http.MethodPost, "/v1/agent/cli_oauth_poll"},
 	"collab_rules.list":        {http.MethodGet, "/v1/collab_rules"},
 	"collab_rules.list_active": {http.MethodGet, "/v1/collab_rules/active"},
 	// Mutations + arg-bearing calls (POST, body carries the args; the server
@@ -213,6 +218,49 @@ func (s *server) agentOpHandler(method string) http.HandlerFunc {
 			return
 		}
 		// resp is map[string]json.RawMessage; the values marshal back verbatim.
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// cliOauthHandler proxies the browser's subscription-OAuth setup to the
+// agent.cli_oauth_{start,code,poll} RPC ops — the Claude / Codex "sign in with
+// your subscription" flow that installs + logs the vendor CLI in server-side and
+// registers it as a primary-capable agent. The browser POSTs {vendor, session?,
+// code?}; only those fields cross. The access token is minted, vaulted, and
+// refreshed entirely server-side and never returns to the browser — the response
+// carries only the verification URL, an optional device code, the opaque session
+// handle, and the login state. `start`'s first call may install the vendor CLI
+// (a cold `npm i -g` runs well past the default 10s socket timeout), so each op
+// gets a timeout sized to its work.
+func (s *server) cliOauthHandler(method string, timeout time.Duration) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Vendor  string `json:"vendor"`
+			Session string `json:"session"`
+			Code    string `json:"code"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if body.Vendor == "" {
+			writeJSONError(w, http.StatusBadRequest, "vendor required")
+			return
+		}
+		req := map[string]any{"method": method, "vendor": body.Vendor}
+		if body.Session != "" {
+			req["session"] = body.Session
+		}
+		if body.Code != "" {
+			req["code"] = body.Code
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		resp, err := s.rpcV1Call(ctx, req)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, err.Error())
+			return
+		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
