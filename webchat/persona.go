@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // aimeeHTTPSockPath returns the path to aimee-server's /v1 HTTP-over-UDS socket,
@@ -23,8 +24,18 @@ func (s *server) aimeeHTTPSockPath() string {
 // /v1, never the legacy RPC socket. Returns status, body, and a transport error.
 func (s *server) v1Request(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
 	sock := s.aimeeHTTPSockPath()
+	// Bound the call at socketCallTimeout by default, but let a caller that passed
+	// a longer ctx deadline (e.g. the subscription-OAuth `start` proxy, whose first
+	// call installs the vendor CLI server-side) extend it. Never shorten below the
+	// default floor, so every existing 10s-ctx caller is unaffected.
+	timeout := socketCallTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		if d := time.Until(dl); d > timeout {
+			timeout = d
+		}
+	}
 	client := &http.Client{
-		Timeout: socketCallTimeout,
+		Timeout: timeout,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
