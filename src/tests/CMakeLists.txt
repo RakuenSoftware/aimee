@@ -78,6 +78,7 @@ add_test(NAME test_context_engine COMMAND test_context_engine)
 set_tests_properties(test_context_engine PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_util test_util.c)
+aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_audit_action_log test_audit_action_log.c)
 aimee_add_test(test_audit_ledger test_audit_ledger.c)
