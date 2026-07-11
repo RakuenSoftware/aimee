@@ -315,6 +315,40 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelsList' }
+  /hosts:
+    get:
+      summary: Enumerate hosts and their live GPU inventory
+      description: >
+        The local host plus every registered network host, each probed for its
+        GPUs (local via a device query, remote over ssh). Backs the setup
+        wizard's host + GPU pickers.
+      responses:
+        "200":
+          description: Hosts with per-host live GPU inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  hosts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        kind: { type: string, enum: [local, remote] }
+                        ip: { type: string }
+                        error: { type: string }
+                        gpus:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              index: { type: integer }
+                              name: { type: string }
+                              vendor: { type: string }
+                              vram_mb: { type: integer }
   /rules:
     get:
       summary: List active collaboration rules
