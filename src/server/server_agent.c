@@ -1012,7 +1012,7 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * record). Backs the Web GUI's per-agent Edit modal. Args are CLI-style:
  *   set <name> [--model M] [--endpoint E] [--provider P] [--cost-tier N]
  *       [--max-turns N] [--max-parallel N] [--context-window N] [--tools on|off]
- *       [--roles csv] [--personas csv] [--enabled true|false] [--key K]
+ *       [--roles csv] [--personas csv] [--enabled true|false] [--key K] [--default]
  * A flag that is absent leaves that field untouched. */
 int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1021,9 +1021,13 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
       return server_send_error(conn, "agent.set requires name", NULL);
-   /* All --flags carry a value (no bool flags), so each is present iff opt_get
-    * returns non-NULL — that presence check is what makes the patch surgical. */
-   static const char *bool_flags[] = {NULL};
+   /* Value --flags are present iff opt_get returns non-NULL — that presence check
+    * is what makes the patch surgical. `--default` is the one BOOL flag: when
+    * given it promotes this agent to the global primary (default_agent), the same
+    * effect `agent add --default` has, but without resetting the record — the only
+    * way to make an already-registered agent (e.g. a cli-oauth subscription
+    * agent) the primary. */
+   static const char *bool_flags[] = {"default", NULL};
    opt_parsed_t opts;
    opt_parse(argc - 1, argv + 1, bool_flags, &opts);
 
@@ -1094,6 +1098,9 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          vault_audit_server_write(conn, ag->name, VAULT_API_KEY_CRED, key);
       }
    }
+
+   if (opt_has(&opts, "default"))
+      snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);

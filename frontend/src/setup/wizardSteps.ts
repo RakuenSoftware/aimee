@@ -18,10 +18,13 @@ export interface WizardStep {
   route?: string;
   /** One-line "what you lose if you skip", shown for optional steps. */
   skipNote?: string;
+  /** A step whose body is a bespoke component (the primary chooser) rather than
+   * the generic key inputs. Rendered specially by SetupWizard. */
+  kind?: 'chooser';
 }
 
 export const WIZARD_STEPS: WizardStep[] = [
-  { id: 'provider', title: 'Primary provider', keys: ['provider', 'claude_model', 'openai_endpoint', 'openai_model', 'openai_key_cmd'] },
+  { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },
   { id: 'embedding', title: 'Embedding backend', keys: ['embedding_command', 'embedding_endpoint', 'embedding_model', 'embedding_dim'] },
   { id: 'db2', title: 'Shared store (DB2)', keys: ['db2_url'] },
   { id: 'kb_api', title: 'Knowledge-base API', keys: ['kb_api_http_port', 'kb_api_bearer_token'], optional: true, skipNote: 'Skipping leaves the KB REST API off — no external programmatic access to the knowledge base.' },

@@ -6,6 +6,7 @@ import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi'
 import { WIZARD_STEPS, isRestartKey, helpFor } from '../setup/wizardSteps';
 import { computeReadiness } from '../setup/readiness';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
+import PrimaryChooser from '../setup/PrimaryChooser';
 
 /* First-run setup wizard. A modal over the app that walks the operator through
  * the minimum path to a working turn — provider → embedding → shared store →
@@ -88,6 +89,17 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   function advance() {
     if (idx < WIZARD_STEPS.length - 1) setIdx(idx + 1);
     else setShowSummary(true);
+  }
+
+  // The primary chooser configures the primary through the agent endpoints; once
+  // it succeeds we stamp the legacy `provider` breadcrumb (which readiness + the
+  // header chip read) and move on. A breadcrumb-save failure is non-fatal: the
+  // primary is already set server-side, so we still advance.
+  async function handlePrimaryConfigured(provider: string) {
+    const res = await saveConfigValue('provider', provider);
+    setCfg((c) => ({ ...c, provider: res.ok ? res.value ?? provider : provider }));
+    notifySetupUpdated();
+    advance();
   }
 
   // Save every edited key in the current step. Any failure aborts advance and
@@ -191,7 +203,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {step.title}{step.optional ? <span style={{ color: '#9aa', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
             </div>
 
-            {step.keys.length > 0 ? (
+            {step.kind === 'chooser' ? (
+              <PrimaryChooser onConfigured={handlePrimaryConfigured} />
+            ) : step.keys.length > 0 ? (
               <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
                 {step.keys.map((key) => (
                   <label key={key} style={{ display: 'block' }}>

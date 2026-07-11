@@ -230,6 +230,11 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/roles", s.requireAuth(s.agentOpHandler("agent.roles")))
 	mux.HandleFunc("POST /api/agents/personas", s.requireAuth(s.agentOpHandler("agent.personas")))
 	mux.HandleFunc("POST /api/agents/set", s.requireAuth(s.agentOpHandler("agent.set")))
+	// Subscription-OAuth setup (Claude / Codex). `start` may install the vendor
+	// CLI server-side, so it carries a much longer timeout than the poll/code hops.
+	mux.HandleFunc("POST /api/agents/oauth/start", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_start", 180*time.Second)))
+	mux.HandleFunc("POST /api/agents/oauth/code", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_code", 30*time.Second)))
+	mux.HandleFunc("POST /api/agents/oauth/poll", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_poll", 15*time.Second)))
 	// Role registry (the shared vocabulary matched between personas and agents).
 	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
 	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))
