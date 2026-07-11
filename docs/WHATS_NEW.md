@@ -25,6 +25,17 @@ current version and prints it once after an upgrade.
   (e.g. `gpu-mid`, which lacks the `review` role) are never seated. A specific
   agent is used only when explicitly pinned.
 
+- **Roundtable seats: pin a model or set it Random**: each seat in the roundtable
+  preset (the panel the GUI edits) now honors its model two ways. A **specific**
+  model is dispatched to that **exact** agent — if it can't be reached (disabled,
+  unroutable, or its dispatch fails), the workflow run **fails** rather than
+  silently swapping in another model. A seat set to **Random** (`$random`) picks
+  any review-capable agent and retries a different one until one is accepted. The
+  workflow `gate.roundtable` resolves each required persona to its matching seat's
+  model this way; the interactive `aimee delegate roundtable` (ensemble) path
+  honors the same two kinds. The Roundtable page gains a **🎲 Random** toggle per
+  seat so you can choose per seat in the GUI.
+
 Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).

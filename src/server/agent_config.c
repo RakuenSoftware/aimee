@@ -1419,6 +1419,25 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
    return elig[delegate_role_rand() % (unsigned)n];
 }
 
+int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char *role)
+{
+   if (!cfg || !name || !name[0] || !role || !role[0])
+      return -1;
+   for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (strcmp(ag->name, name) != 0)
+         continue;
+      /* Same eligibility triple delegate_pick_for_role applies — a pinned seat
+       * resolves with NO substitution, so an agent that exists but is disabled,
+       * lacks the role, or is unroutable reports -1 (caller fails the run). */
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+         return -1;
+      return i;
+   }
+   return -1;
+}
+
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
    agent_t *def = NULL;

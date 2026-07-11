@@ -121,6 +121,12 @@ int agent_is_claude_cli(const agent_t *agent);
  * `review` delegates excludes those already used to get diverse reviewers. */
 int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *const exclude[],
                            int nexclude);
+/* Pinned-model analog of delegate_pick_for_role: return the index of the agent
+ * NAMED `name` iff it is enabled, serves `role`, and is routable right now — the
+ * same eligibility triple, but no random draw and NO substitution. A pinned
+ * roundtable seat resolves through this; -1 means the pinned model cannot be
+ * fulfilled, so the caller fails the run rather than seating a different agent. */
+int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char *role);
 /* Seed the picker's RNG for deterministic tests (otherwise /dev/urandom). */
 void delegate_role_pick_seed(unsigned seed);
 

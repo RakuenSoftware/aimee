@@ -16,6 +16,7 @@
 #include "log.h"
 #include "persona.h"
 #include "dstr.h"
+#include "roundtable_seat_resolve.h"
 #include "roundtable_verify.h"
 #include "token_tracker.h"
 
@@ -1234,8 +1235,77 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
                cfg->ensemble_reference_models[0]);
 }
 
+void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
+{
+   /* Replace each "$random" seat with a concretely-picked review-capable agent,
+    * excluding models already seated (pinned seats + prior random picks) for
+    * diversity. A $random seat that cannot be filled (roster exhausted) is DROPPED
+    * — an interactive roundtable degrades rather than fails; the fail-on-
+    * unfulfillable rule is the autonomous gate's, where a pinned model is a hard
+    * requirement. Pinned seats pass through untouched (the availability filter
+    * below drops an unavailable pinned model). Runs before the authorization /
+    * availability filters so a resolved seat is a real, filterable agent. */
+   char models[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_models[0]];
+   char personas[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_personas[0]];
+   const char *used[ENSEMBLE_MAX_REFS];
+   int n = 0, nused = 0;
+
+   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
+      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
+         used[nused++] = cfg->ensemble_reference_models[i];
+
+   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
+   {
+      const char *persona =
+          (i < cfg->ensemble_reference_persona_count) ? cfg->ensemble_reference_personas[i] : "";
+      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
+      {
+         snprintf(models[n], sizeof models[n], "%s", cfg->ensemble_reference_models[i]);
+         snprintf(personas[n], sizeof personas[n], "%s", persona);
+         n++;
+         continue;
+      }
+      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
+      if (idx < 0)
+      {
+         aimee_log(LOG_WARN, "delegate.panel",
+                   "no review-capable agent left for a $random seat -> dropping it");
+         continue;
+      }
+      snprintf(models[n], sizeof models[n], "%s", acfg->agents[idx].name);
+      snprintf(personas[n], sizeof personas[n], "%s", persona);
+      if (nused < ENSEMBLE_MAX_REFS)
+         used[nused++] = acfg->agents[idx].name; /* stable pointer into acfg for this call */
+      n++;
+   }
+
+   for (int i = 0; i < n; i++)
+   {
+      snprintf(cfg->ensemble_reference_models[i], sizeof cfg->ensemble_reference_models[i], "%s",
+               models[i]);
+      snprintf(cfg->ensemble_reference_personas[i], sizeof cfg->ensemble_reference_personas[i], "%s",
+               personas[i]);
+   }
+   cfg->ensemble_reference_count = n;
+   cfg->ensemble_reference_persona_count = n;
+
+   /* An aggregator explicitly set to "$random" resolves the same way. */
+   if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
+   {
+      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
+      if (idx >= 0)
+         snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
+                  acfg->agents[idx].name);
+      else
+         cfg->ensemble_aggregator[0] = '\0';
+   }
+}
+
 void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg)
 {
+   /* Resolve "$random" seats to concrete agents FIRST, so the eligibility check
+    * below (and the availability filter after it) see real, filterable agents. */
+   ensemble_resolve_random_seats(cfg, acfg);
    /* Applies the same eligibility rule to an EXPLICITLY configured
     * ensemble.reference_models list: drop any entry that names a configured agent
     * which is not panel-eligible (an unauthorized / disabled / client-only
