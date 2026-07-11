@@ -292,7 +292,6 @@ static const config_schema_entry_t config_schema[] = {
     {"audit_worm_enabled", SCHEMA_BOOL, 0},
     {"css_render_command", SCHEMA_STRING, 0},
     {"typed_facts_enabled", SCHEMA_BOOL, 0},
-    {"learn_from_conversations_enabled", SCHEMA_BOOL, 0},
     {"kb_pdf_ingest_enabled", SCHEMA_BOOL, 0},
     {"kb_pdf_vector_enabled", SCHEMA_BOOL, 0},
     {"kb_pdf_tsr_enabled", SCHEMA_BOOL, 0},
@@ -637,10 +636,6 @@ static void config_set_defaults(config_t *cfg)
     * for an accelerated backend. An explicit config value always wins. HyDE mode
     * defaults on so the rewrite, once enabled, generates a hypothetical answer. */
    cfg->typed_facts_enabled = 1;
-   /* Mine the user's own conversation turns into durable facts (feeds the typed-
-    * fact extractor). Default on so aimee learns from interactions; an operator
-    * can disable it to stop writing conversation content to the memory store. */
-   cfg->learn_from_conversations_enabled = 1;
    cfg->memory_rewrite_enabled = 0;
    cfg->memory_rewrite_hyde = 1;
    /* Replayable-evidence roundtable verification (Part A): default-on. config_t
@@ -841,7 +836,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->mcp_osv_allow_count = 0;
    config_computer_use_defaults(cfg);
    cfg->trigger_max_concurrent = 2;
-   cfg->identity_working_profile_injection_enabled = 0;
+   /* Master switch for DB1-local per-user interaction learning: observe the
+    * user's own turns into the working profile (memory_recall_handler) AND inject
+    * the learned profile into the session context (build_session_context) so the
+    * primary adapts to how they work. Default on; empty until something is
+    * learned, so it is a no-op for a fresh user. An empty field allow-list means
+    * all learned fields inject. */
+   cfg->identity_working_profile_injection_enabled = 1;
    cfg->identity_working_profile_injection_fields_count = 0;
    cfg->memory_recall_lanes_floor_summary = 4;
    cfg->memory_recall_lanes_floor_fact = 4;
@@ -1166,10 +1167,6 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
    if (cJSON_IsBool(item))
       cfg->typed_facts_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "learn_from_conversations_enabled");
-   if (cJSON_IsBool(item))
-      cfg->learn_from_conversations_enabled = cJSON_IsTrue(item);
 
    /* structured-PDF gates. These have config_fields[] rows (CLI/server-settable) but
     * historically lacked a file parse, so a value set in aimee.yaml never loaded back on a

@@ -55,6 +55,12 @@ VOLUME /models
 
 # Gateway + per-role serving wiring (the supervisor reads these; per-tier model
 # identity — embedder id, pooling, rerank head dir — is exported by the supervisor).
+# Per-role backend is chosen at runtime (NOT baked, so they stay unset by default
+# and the supervisor can honor the legacy AIMEE_LLM_SYNTH_LOCAL=0 knob):
+#   AIMEE_LLM_EMBED_MODE  / AIMEE_LLM_RERANK_MODE / AIMEE_LLM_SYNTH_MODE = local|external|off
+# `local` (default) bakes+serves the tier's model; `external` forwards to the
+# operator-set AIMEE_LLM_<ROLE>_URL; `off` gates the role. A non-local role is
+# neither downloaded nor launched — only what is served locally is fetched.
 ENV AIMEE_LLM_PORT=8080 \
     AIMEE_LLM_EMBED_URL=http://127.0.0.1:8081 \
     AIMEE_LLM_RERANK_URL=http://127.0.0.1:8082 \
