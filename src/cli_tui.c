@@ -372,6 +372,15 @@ builtin_chat_send_ex(const char *sock, const char *provider_session_id,
       if (attach_env && attach_env[0])
          cJSON_AddStringToObject(req, "attach_id", attach_env);
    }
+   /* Client type of the host driving this turn (e.g. "acp" for an editor over the
+    * ACP serve loop). The server records it on the server_sessions row via
+    * chat_session_register, so a turn is logged under its real surface instead of
+    * the generic "chat" default. Absent → server defaults to "chat", as before. */
+   {
+      const char *ct_env = getenv("AIMEE_CLIENT_TYPE");
+      if (ct_env && ct_env[0])
+         cJSON_AddStringToObject(req, "client_type", ct_env);
+   }
    if (aimee_session_id && aimee_session_id[0])
       cJSON_AddStringToObject(req, "aimee_session_id", aimee_session_id);
    if (provider_session_id && provider_session_id[0])

@@ -190,6 +190,11 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
+   /* NOTE: a session that ONLY lists tools (never calls one) is not logged here:
+    * mcp.tools_list is served over a bodyless GET /v1/mcp/tools_list, so no
+    * session_id reaches this handler. Sessions that call any tool are logged at
+    * the mcp.call seam (mcp_session_register). Closing this residual gap would
+    * require threading the session id through the GET route (query/header). */
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
