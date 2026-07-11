@@ -1,6 +1,7 @@
 #ifndef DEC_AGENT_TYPES_H
 #define DEC_AGENT_TYPES_H 1
 
+#include <limits.h>
 #include <pthread.h>
 #include <sys/types.h>
 
@@ -86,6 +87,41 @@ static inline int agent_loop_per_call_timeout_ms(int agent_timeout_ms, int total
    if (remaining < min_call)
       return -1;
    return agent_timeout_ms < remaining ? agent_timeout_ms : remaining;
+}
+
+/* Whole-loop wall-clock budget (ms) for a delegate's multi-turn tool loop. The
+ * loop breaks once elapsed > this budget. It MUST be large enough for the run's
+ * resolved turn cap: the old fixed `agent->timeout_ms * 4` was independent of
+ * max_turns, so a delegate with a 25-turn cap on a slow provider (each call
+ * near the per-call timeout) exhausted the budget after ~4 turns and returned
+ * unfinished ("tool loop budget exhausted (Nms of Nms used)"). Size it to allow
+ * up to `max_turns` calls at the per-call timeout, floored at the historical 4x
+ * (no regression for tiny caps) and capped by an absolute ceiling so an
+ * unbounded (INT_MAX) cap or a large product can neither overflow int nor run
+ * away. Pure — unit-tested in test_agent_apikey.c.
+ *   AGENT_LOOP_BUDGET_DEFAULT_TURNS mirrors CONFIG_DEFAULT_MAX_ITERATIONS_DELEGATE
+ *   (kept as a local literal so this header need not depend on config.h). */
+#define AGENT_LOOP_BUDGET_FLOOR_MULT   4
+#define AGENT_LOOP_BUDGET_DEFAULT_TURNS 25
+#define AGENT_LOOP_BUDGET_CEIL_MS      (2 * 60 * 60 * 1000) /* 2h hard cap */
+static inline int agent_loop_total_budget_ms(int agent_timeout_ms, int max_turns)
+{
+   if (agent_timeout_ms <= 0)
+      agent_timeout_ms = AGENT_DEFAULT_TIMEOUT_MS;
+   /* An unbounded (INT_MAX / non-positive) cap budgets as the delegate default. */
+   long turns = (max_turns > 0 && max_turns != INT_MAX) ? (long)max_turns
+                                                        : (long)AGENT_LOOP_BUDGET_DEFAULT_TURNS;
+   long budget = (long)agent_timeout_ms * turns;
+   long floor_ms = (long)agent_timeout_ms * AGENT_LOOP_BUDGET_FLOOR_MULT;
+   if (budget < floor_ms)
+      budget = floor_ms;
+   if (budget > AGENT_LOOP_BUDGET_CEIL_MS)
+      budget = AGENT_LOOP_BUDGET_CEIL_MS;
+   /* A single call must always be allowed to run to its per-call timeout, even
+    * if that timeout alone exceeds the ceiling. */
+   if (budget < (long)agent_timeout_ms)
+      budget = agent_timeout_ms;
+   return (int)budget;
 }
 
 /* Effective per-call timeout for a delegate run. A delegate must NEVER run with

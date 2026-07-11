@@ -207,6 +207,29 @@ static void test_agent_loop_per_call_timeout(void)
    assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
 }
 
+/* The whole-loop wall-clock budget must scale with the resolved turn cap, not a
+ * fixed 4x the per-call timeout (which truncated a 25-turn delegate on a slow
+ * provider to ~4 turns). Floored at the historical 4x, capped by a 2h ceiling,
+ * and always big enough for at least one full per-call timeout. */
+static void test_agent_loop_total_budget(void)
+{
+   /* Default delegate cap (25) sizes the budget to 25 calls. */
+   assert(agent_loop_total_budget_ms(180000, 25) == 4500000);
+   /* A 4-turn cap reproduces the old 12-min budget (no regression). */
+   assert(agent_loop_total_budget_ms(180000, 4) == 720000);
+   /* A tiny cap still gets the 4x floor so multi-turn work is possible. */
+   assert(agent_loop_total_budget_ms(180000, 1) == 720000);
+   /* Unbounded (INT_MAX) or 0 budgets as the delegate default (25 turns). */
+   assert(agent_loop_total_budget_ms(180000, INT_MAX) == 4500000);
+   assert(agent_loop_total_budget_ms(180000, 0) == 4500000);
+   /* A large product is clamped to the 2h ceiling. */
+   assert(agent_loop_total_budget_ms(600000, 25) == AGENT_LOOP_BUDGET_CEIL_MS);
+   /* A non-positive per-call timeout falls back to the default before scaling. */
+   assert(agent_loop_total_budget_ms(0, 25) == 4500000);
+   /* One call must always fit even if its timeout alone exceeds the ceiling. */
+   assert(agent_loop_total_budget_ms(9000000, 1) == 9000000);
+}
+
 static void test_claude_cli_predicate(void)
 {
    agent_t a;
@@ -282,6 +305,7 @@ int main(void)
 
    test_agent_route_health_filter();
    test_agent_loop_per_call_timeout();
+   test_agent_loop_total_budget();
    test_reasoning_timeout_default();
    test_claude_cli_predicate();
    printf("agent_apikey: all tests passed\n");

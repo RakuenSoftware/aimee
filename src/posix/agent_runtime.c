@@ -505,7 +505,9 @@ native_provider_http:
 
    struct timespec loop_start;
    clock_gettime(CLOCK_MONOTONIC, &loop_start);
-   int total_timeout_ms = agent->timeout_ms * 4;
+   /* Whole-loop wall-clock budget is sized to the resolved turn cap below (once
+    * max_t is known), not a fixed multiple of the per-call timeout. */
+   int total_timeout_ms = 0;
 
    /* Ephemeral SSH setup */
    char ephemeral_key[MAX_PATH_LEN] = {0};
@@ -667,6 +669,9 @@ native_provider_http:
    int tok = agent_request_max_tokens(agent, max_tokens);
    int max_t = agent_resolve_max_turns(agent, role);
    int initial_max_t = max_t;
+   /* Size the whole-loop wall-clock budget to the resolved turn cap so a delegate
+    * on a slow provider isn't truncated to ~4 turns (see agent_loop_total_budget_ms). */
+   total_timeout_ms = agent_loop_total_budget_ms(agent->timeout_ms, max_t);
    int final_after_turns = delegate_final_after_turns_for_role(role);
 
    /* Stuck detection state */
