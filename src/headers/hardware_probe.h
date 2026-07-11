@@ -16,10 +16,10 @@ typedef struct
 /* One discrete GPU on a host (an entry in an enumerated inventory). */
 typedef struct
 {
-   int index;         /* the vendor tool's device ordinal (nvidia-smi index / drm cardN) */
-   char name[128];    /* product name */
-   char vendor[32];   /* "nvidia" | "amd" */
-   int vram_mb;       /* total VRAM in MiB */
+   int index;       /* the vendor tool's device ordinal (nvidia-smi index / drm cardN) */
+   char name[128];  /* product name */
+   char vendor[32]; /* "nvidia" | "amd" */
+   int vram_mb;     /* total VRAM in MiB */
 } hardware_gpu_t;
 
 #define HARDWARE_MAX_GPUS 16

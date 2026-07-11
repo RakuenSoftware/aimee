@@ -23,8 +23,8 @@
 #include "dogfood.h"
 #include "commands.h"
 #include "platform_path.h"
-#include "server_http.h"  /* session_primary_set/get/clear */
-#include "agent_config.h" /* agent_load_config / agent_find */
+#include "server_http.h"    /* session_primary_set/get/clear */
+#include "agent_config.h"   /* agent_load_config / agent_find */
 #include "hardware_probe.h" /* hardware_probe_list_local/remote — host GPU inventory */
 #include <errno.h>
 #include <unistd.h>

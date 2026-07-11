@@ -84,10 +84,9 @@ static void test_gpu_csv_list_parse(void)
    hardware_gpu_list_t gl;
 
    /* Two NVIDIA GPUs (the uniform probe appends the vendor field). */
-   int n = hardware_probe_parse_gpu_csv_list(
-       "0, NVIDIA GeForce RTX 4090, 24564, nvidia\n"
-       "1, NVIDIA GeForce RTX 3060, 12288, nvidia\n",
-       NULL, &gl);
+   int n = hardware_probe_parse_gpu_csv_list("0, NVIDIA GeForce RTX 4090, 24564, nvidia\n"
+                                             "1, NVIDIA GeForce RTX 3060, 12288, nvidia\n",
+                                             NULL, &gl);
    assert(n == 2 && gl.count == 2);
    assert(gl.gpus[0].index == 0 && gl.gpus[0].vram_mb == 24564);
    assert(strcmp(gl.gpus[0].name, "NVIDIA GeForce RTX 4090") == 0);
