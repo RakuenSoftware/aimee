@@ -1092,9 +1092,11 @@ int memory_find_facts_lexical_fallback(const char *query, const char *scope_type
    if (limit > max)
       limit = max;
 
-   memory_t scratch[64];
+   MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+   if (!scratch)
+      return 0;
    int fetch_limit = limit * 4;
-   int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+   int cap = 64;
    if (fetch_limit < limit)
       fetch_limit = limit;
    if (fetch_limit > cap)
@@ -1138,9 +1140,11 @@ int memory_find_facts_visible_lexical_fallback(const char *query, const char *wo
    if (limit > max)
       limit = max;
 
-   memory_t scratch[64];
+   MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+   if (!scratch)
+      return 0;
    int fetch_limit = limit * 4;
-   int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+   int cap = 64;
    if (fetch_limit < limit)
       fetch_limit = limit;
    if (fetch_limit > cap)
@@ -1161,8 +1165,10 @@ int memory_find_facts_visible_lexical_fallback(const char *query, const char *wo
    {
       if (!memory_is_signal_token(tokens[t]))
          continue;
-      memory_t term_matches[64];
-      int term_cap = (int)(sizeof(term_matches) / sizeof(term_matches[0]));
+      MEMORY_AUTOFREE memory_t *term_matches = calloc(64, sizeof(*term_matches));
+      if (!term_matches)
+         break;
+      int term_cap = 64;
       got = memory_find_facts_like(tokens[t], fetch_limit, term_matches, term_cap);
       if (got < 0)
          return got;
@@ -1244,8 +1250,10 @@ static int memory_collect_code_matches(const char *query, int fetch_limit, memor
 {
    if (!query || !query[0] || !out || count >= max || fetch_limit <= 0)
       return count;
-   memory_t scratch[64];
-   int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+   MEMORY_AUTOFREE memory_t *scratch = calloc(64, sizeof(*scratch));
+   if (!scratch)
+      return count;
+   int cap = 64;
    config_t code_cfg;
    config_load(&code_cfg);
    const char *embed_cmd = config_embedding_command(&code_cfg, NULL);
@@ -1684,8 +1692,10 @@ int memory_collect_variant_candidates(const char *raw_query, const char *norm_va
    }
 
    {
-      memory_t lexical_scratch[64];
-      int lexical_cap = (int)(sizeof(lexical_scratch) / sizeof(lexical_scratch[0]));
+      MEMORY_AUTOFREE memory_t *lexical_scratch = calloc(64, sizeof(*lexical_scratch));
+      if (!lexical_scratch)
+         return count;
+      int lexical_cap = 64;
       const char *lexical_embed_cmd = config_embedding_command(&qe_cfg, NULL);
       config_t lanes_cfg;
       config_load(&lanes_cfg);
