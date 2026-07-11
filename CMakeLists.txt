@@ -789,6 +789,10 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    # Thin-client self-update (cli_main dispatch + cli_session_start drift notice
+    # both call these; the CLI does not link aimee-cmd, so they build in here).
+    ${AIMEE_SRC_DIR}/cmd_self_update.c
+    ${AIMEE_SRC_DIR}/self_update_util.c
     # memory_redirect_check (the CLI's remote-only hooks-pre interception) calls
     # hmem_resolve_project/_scope_for_client/_audit/_spill; the standalone `aimee`
     # CLI does not link aimee-core, so their definers must build into the CLI
