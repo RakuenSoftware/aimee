@@ -32,9 +32,9 @@
 #define CCU_SIDECAR_TIMEOUT_S 300
 /* A job left in 'running' longer than this lease was orphaned (worker crash/
  * restart or a wedged call) — comfortably above the sidecar cap above. */
-#define CCU_STALE_LEASE       "-15 minutes"
+#define CCU_STALE_LEASE "-15 minutes"
 /* Reclaim runs at most this often (throttled; the drain calls the entry per job). */
-#define CCU_RECLAIM_EVERY_S   60
+#define CCU_RECLAIM_EVERY_S 60
 
 typedef struct
 {
@@ -377,8 +377,8 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
     * shell semantics popen() gave it (env-var prefixes like `FOO=bar python …`,
     * builtins, operators) — passing it as timeout's own argv would break those
     * and let compound commands escape the bound. `cmd` is trusted config. */
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s",
-            CCU_SIDECAR_TIMEOUT_S, cmd, tmppath);
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s", CCU_SIDECAR_TIMEOUT_S,
+            cmd, tmppath);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)
