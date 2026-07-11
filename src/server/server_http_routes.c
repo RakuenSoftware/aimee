@@ -1827,6 +1827,7 @@ static const http_route_t g_v1_routes[] = {
      * CAP_SESSION_READ). Mutating skill and work methods are not exposed here. */
     {"GET", "/v1/skills", NULL, RM_EXACT, "skill.list", 0, rh_dispatch_op},
     {"POST", "/v1/skills/show", NULL, RM_EXACT, "skill.show", 0, rh_dispatch_op},
+    {"GET", "/v1/hosts", NULL, RM_EXACT, "hosts.list", 0, rh_dispatch_op},
     {"GET", "/v1/work", NULL, RM_EXACT, "work.list", 0, rh_dispatch_op},
     {"GET", "/v1/work/stats", NULL, RM_EXACT, "work.stats", 0, rh_dispatch_op},
 
