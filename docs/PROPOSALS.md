@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 13 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 14 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,8 +50,15 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — thirteen proposals (all but one not yet implemented).
+The genuinely open work — fourteen proposals (all but one not yet implemented).
 
+- [The code graph should carry the architecture, not just the symbols](proposals/pending/code-graph-architecture-surface.md)
+  — five slices that turn the symbol/call graph into an architecture surface: route
+  and storage node kinds with framework-aware extraction, a repo-level orientation
+  pass injected at session-start, baseline/diff as a workflow review gate,
+  coverage + provenance as an honesty envelope, and hop-grouped/confidence-scored
+  impact. Slices 2/5 ship on today's graph; slice 1 is the only real extractor work.
+  **Extract / Detect-Cluster / Recall / Calibrate / Constrain-Verify.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.
