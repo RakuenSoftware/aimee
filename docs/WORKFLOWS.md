@@ -116,7 +116,41 @@ A roundtable node carries its panel in `params`:
 
 Panel entries are **persona** names, see [Personas](personas.md). Each panelist
 is a persona run on a delegate model; the gate passes when the quorum of
-panelists approve (or fails after `max_rounds`).
+panelists approve (or fails after `max_rounds`). Panelists are dispatched **in
+parallel**, so a round costs roughly one model's latency rather than the sum.
+
+**Which model reviews each persona** comes from the active roundtable preset (the
+one the GUI edits and `roundtable.default` selects). For each required persona the
+gate looks up the matching seat and honors its model:
+
+- a **specific pinned model** is dispatched to that **exact** agent. If that model
+  is not enabled/routable for the `review` role — or its dispatch fails — the run
+  **fails** (a pinned model is a hard requirement, never silently swapped);
+- a **`$random`** seat (or a persona with no matching seat) picks **any**
+  review-capable agent and retries a different one until one is accepted, so a
+  flaky agent doesn't stall the gate.
+
+Set a seat to a specific model or to *Random* in the Roundtable page of the GUI.
+An agent is "review-capable" unless its `exec_roles` explicitly omit `review`
+(e.g. a specialized `gpu-mid` is never seated). If no panel of reviewers can be
+composed at all the gate parks `panel_degraded` for a human.
+
+A gate convenes the configured default roundtable (`roundtable.default`) unless
+the node names a specific preset with `params.roundtable` — so different gates in
+one workflow can use different panels:
+
+```yaml
+- id: plan_gate
+  block: gate.roundtable
+  params:
+    roundtable: security-review     # convene this preset's seats (else the default)
+    panel:
+      required: [security, architect, qa, reviewer]
+    quorum: 4
+```
+
+If the named preset does not exist the gate logs a warning and every lens falls
+back to `$random`.
 
 There is **no engine privilege** over a user-authored workflow: `build` is just
 one composition of the same catalog you compose from. Clone it and edit freely.

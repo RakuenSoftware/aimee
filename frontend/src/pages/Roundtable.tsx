@@ -232,10 +232,16 @@ export default function Roundtable() {
   // free-typed value the list may not include.
   const modelList = "rt-models";
   const personaList = "rt-personas";
+  // Sentinel: a seat set to RANDOM_MODEL is filled at runtime with any agent that
+  // can serve the review role (retried until one is accepted). Kept in sync with
+  // the server (RT_SEAT_RANDOM in roundtable_seat_resolve.h). A specific model is
+  // instead HONORED exactly — if it cannot be fulfilled the workflow run fails.
+  const RANDOM_MODEL = "$random";
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <datalist id={modelList}>
+        <option value={RANDOM_MODEL}>Random — any review-capable agent</option>
         {models.map((m) => (
           <option key={m} value={m} />
         ))}
@@ -296,15 +302,30 @@ export default function Roundtable() {
               <div style={{ marginTop: 14, marginBottom: 4, fontSize: 13, fontWeight: 600 }}>
                 Seats ({form.seats.length}) — a model + the persona it reviews as
               </div>
-              {form.seats.map((seat, i) => (
+              <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+                A <strong>specific</strong> model is honored exactly — if it can't be reached, the
+                workflow run fails (never silently swapped). <strong>Random</strong> lets any
+                review-capable agent fill the seat, retrying a different one until one is accepted.
+              </p>
+              {form.seats.map((seat, i) => {
+                const isRandom = seat.model === RANDOM_MODEL;
+                return (
                 <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
                   <input
                     list={modelList}
-                    style={{ ...input, flex: 1 }}
+                    style={{ ...input, flex: 1, ...(isRandom ? { color: "#0a58ca", fontStyle: "italic" } : {}) }}
                     placeholder="model / agent (e.g. codex)"
-                    value={seat.model}
+                    value={isRandom ? "Random — any review-capable" : seat.model}
+                    readOnly={isRandom}
                     onChange={(e) => setSeat(i, { model: e.target.value })}
                   />
+                  <button
+                    onClick={() => setSeat(i, { model: isRandom ? "" : RANDOM_MODEL })}
+                    style={{ ...btn, padding: "4px 8px", background: isRandom ? "#e8eef9" : "#fff", fontWeight: isRandom ? 700 : 400 }}
+                    title={isRandom ? "switch to a specific pinned model" : "let any review-capable agent fill this seat (retried until one is accepted)"}
+                  >
+                    🎲 Random
+                  </button>
                   <input
                     list={personaList}
                     style={{ ...input, flex: 1 }}
@@ -320,7 +341,8 @@ export default function Roundtable() {
                     ×
                   </button>
                 </div>
-              ))}
+                );
+              })}
               <button onClick={addSeat} style={{ ...btn, borderStyle: "dashed", marginBottom: 8 }}>
                 + Add seat
               </button>
