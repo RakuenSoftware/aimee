@@ -10,6 +10,7 @@ import WorkflowActions from './pages/WorkflowActions';
 import Agents from './pages/Agents';
 import Personas from './pages/Personas';
 import Roles from './pages/Roles';
+import Roundtable from './pages/Roundtable';
 import Pipeline from './pages/Pipeline';
 import Settings from './pages/Settings';
 import Projects from './pages/Projects';
@@ -254,6 +255,7 @@ export default function App() {
                 <Route path="/delegates" element={<Navigate to="/agents" replace />} />
                 <Route path="/personas" element={<Personas />} />
                 <Route path="/roles" element={<Roles />} />
+                <Route path="/roundtable" element={<Roundtable />} />
                 <Route path="/pipeline" element={<Pipeline />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />

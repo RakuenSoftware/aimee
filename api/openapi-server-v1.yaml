@@ -3821,6 +3821,136 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /roundtables:
+    get:
+      summary: List named roundtable presets (with the active one flagged)
+      responses:
+        "200":
+          description: Preset summaries and the active preset name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: string }
+                  roundtables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+                        active: { type: boolean }
+                        synthesized: { type: boolean }
+    post:
+      summary: Create a roundtable preset (name in body)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: The created preset (reloaded from disk)
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or invalid preset name
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /roundtables/active:
+    post:
+      summary: Make a preset the active roundtable (mirror its values into live config)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  active: { type: boolean }
+        "404":
+          description: No such preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /roundtables/{name}:
+    get:
+      summary: Show a roundtable preset by name
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The named preset (or a synthesized default when the store is empty)
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: No such preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    put:
+      summary: Create or edit the named roundtable preset
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: The preset after the write
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid preset name or body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      summary: Remove a roundtable preset
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  deleted: { type: boolean }
+        "404":
+          description: No preset to remove
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /sessions:
     get:
       summary: List the owner's live presences (sessions)

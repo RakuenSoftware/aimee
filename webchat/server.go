@@ -131,6 +131,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Code-graph visualization (§8): a read-only SPA page backed by the /api/graph/*
 	// proxies (which forward aimee-server's index_graph_* MCP tools).
 	mux.HandleFunc("/graph", s.requireAuth(s.handleSPA))
+	// Roundtable configuration tab (named presets: seats, models, personas, loop
+	// knobs). SPA route so a hard refresh / direct link serves index.html.
+	mux.HandleFunc("/roundtable", s.requireAuth(s.handleSPA))
 	// The Editor tab is a SPA page that embeds the in-app VSCode in an iframe, so
 	// the nav shell stays visible. The iframe's src is the /vscode proxy below.
 	mux.HandleFunc("/editor", s.requireAuth(s.handleSPA))
@@ -230,6 +233,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Role registry (the shared vocabulary matched between personas and agents).
 	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
 	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))
+	// Named roundtable presets (the Roundtable tab).
+	mux.HandleFunc("/api/roundtables", s.requireAuth(s.handleRoundtables))
+	mux.HandleFunc("/api/roundtables/", s.requireAuth(s.handleRoundtableItem))
 	mux.HandleFunc("/api/rules", s.requireAuth(s.handleCollabRulesList))
 	mux.HandleFunc("/api/rules/active", s.requireAuth(s.handleCollabRulesActive))
 	mux.HandleFunc("POST /api/rules/{id}/{action}", s.requireAuth(s.handleCollabRuleAction))
