@@ -11,6 +11,14 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Roundtable panels use the configured default preset's models**: a review
+  persona that no agent advertises (e.g. `qa`/`reviewer`) no longer degrades the
+  gate. The live panel now falls back to the active `roundtable.default` preset,
+  dispatching each persona on the **model bound to its seat** (e.g.
+  `qa → mistral-medium-3-5`, `security → mimo-v2.5-pro`). So a `gate.roundtable`
+  composes from the operator's configured roundtable instead of failing closed to
+  `panel_degraded` when a bare persona has no assigned agent.
+
 - **Roundtable ↔ planner now refine together**: when a `gate.roundtable` requests
   changes, the panel's blockers are captured and persisted for the work item, and
   the next `author.proposal`/`author.plan` pass folds them into its prompt — so the

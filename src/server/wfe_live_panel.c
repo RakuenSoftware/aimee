@@ -20,9 +20,11 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "config.h"
 #include "delegate_role.h"
 #include "persona.h"
 #include "provider_catalog.h"
+#include "roundtable_preset.h"
 #include "log.h"
 #include "util.h"
 
@@ -97,6 +99,38 @@ static char *dispatch_review(const char *workdir, const char *persona, const cha
             chosen = ag;
             chosen_role = r;
             best_tier = ag->cost_tier;
+         }
+      }
+   }
+   /* No agent advertises this review persona (roles + persona-support). Fall back
+    * to the configured DEFAULT ROUNDTABLE preset (roundtable.default): each seat
+    * binds a persona to a concrete model, so dispatch the persona on that model's
+    * agent. This lets the panel compose from the operator's configured roundtable
+    * instead of failing closed to DEGRADED when the bare persona has no agent. */
+   if (!chosen)
+   {
+      config_t cfg;
+      roundtable_preset_t pr;
+      if (config_load(&cfg) == 0 && cfg.roundtable_default[0] &&
+          roundtable_preset_load(cfg.roundtable_default, &pr) == 0)
+      {
+         for (int si = 0; si < pr.seat_count && !chosen; si++)
+         {
+            if (strcmp(pr.seats[si].persona, persona) != 0 || !pr.seats[si].model[0])
+               continue;
+            for (int ai = 0; ai < acfg.agent_count; ai++)
+            {
+               agent_t *ag = &acfg.agents[ai];
+               if (ag->enabled && strcmp(ag->name, pr.seats[si].model) == 0 &&
+                   agent_is_available_for_routing(ag) &&
+                   provider_catalog_get_health(ag->name) != CATALOG_HEALTH_DOWN)
+               {
+                  chosen = ag;
+                  chosen_role =
+                      delegate_role_canonicalize(pinfo.roles_count > 0 ? pinfo.roles[0] : "review");
+                  break;
+               }
+            }
          }
       }
    }
