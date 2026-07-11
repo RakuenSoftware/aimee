@@ -35,8 +35,12 @@
  * semantic passes share this set so an entity is linked at most once). */
 #define LINK_MAX_LINKED 128
 
-/* Dimension of the curator entity embedding space (matches resolve_entities). */
-#define CURATOR_LINK_ENTITY_DIM 384
+/* Buffer for the curator entity embedding, sized to the max embedder output so
+ * the concept embedding keeps the embedder's native dimension (matches
+ * resolve_entities, which uses EMBED_MAX_DIM). A hardcoded 384 truncated the
+ * concept vector and made it undimensionable against the runtime-dim entity
+ * vectors it NN-searches, breaking semantic entity linking. */
+#define CURATOR_LINK_ENTITY_DIM EMBED_MAX_DIM
 
 /* Top-K nearest entity vectors fetched per concept for semantic linking. */
 #define CURATOR_LINK_SEMANTIC_TOPK 5
@@ -134,8 +138,11 @@ static int link_concept_semantic(const char *code_id, const char *concept, const
    /* Entities with no context were embedded from their bare name, so embedding
     * the concept string directly keeps both sides in the same space. */
    float vec[CURATOR_LINK_ENTITY_DIM];
+   /* Keep the embedder's native dimension (matches resolve_entities: accept
+    * whatever the model emits, then NN-search the runtime-dim entity vectors
+    * with that same dim). */
    int dim = memory_embed_text(concept, embed_cmd, vec, CURATOR_LINK_ENTITY_DIM);
-   if (dim != CURATOR_LINK_ENTITY_DIM)
+   if (dim <= 0)
       return 0;
 
    int64_t ids[CURATOR_LINK_SEMANTIC_TOPK];

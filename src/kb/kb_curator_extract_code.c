@@ -19,11 +19,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define CCU_ERRBUF     256
 #define CCU_OUTBUF     (256 * 1024)
 #define CCU_BODY_LINES 100
+
+/* Hard wall-clock cap for the extraction sidecar (which runs the model —
+ * "seconds to minutes" on a CPU model). An unbounded popen/pclose wedges the
+ * drain thread forever when the sidecar hangs. */
+#define CCU_SIDECAR_TIMEOUT_S 300
+/* A job left in 'running' longer than this lease was orphaned (worker crash/
+ * restart or a wedged call) — comfortably above the sidecar cap above. */
+#define CCU_STALE_LEASE       "-15 minutes"
+/* Reclaim runs at most this often (throttled; the drain calls the entry per job). */
+#define CCU_RECLAIM_EVERY_S   60
 
 typedef struct
 {
@@ -123,6 +134,48 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
    snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "unknown error");
    aimee_pg_bind_text(st, "?2", errbuf);
    aimee_pg_bind_int64(st, "?3", job_id);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
+/* Reclaim code-unit jobs orphaned in 'running'. The claim only ever selects
+ * status='pending', so a job whose worker crashed/restarted or whose sidecar
+ * wedged stays 'running' forever — lost work, and (until the fix above) a
+ * permanently shrunk drain. Reset rows older than the lease back to 'pending'
+ * so they retry, or to 'failed' once attempts are exhausted so a poison job
+ * cannot loop. attempts is preserved (it was incremented at claim time).
+ * Throttled to at most once per CCU_RECLAIM_EVERY_S since the drain calls the
+ * entry point once per job. */
+static void ccu_reclaim_stale_running(int max_attempts)
+{
+   static time_t last_run = 0;
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < CCU_RECLAIM_EVERY_S)
+      return;
+   last_run = now;
+
+   if (max_attempts < 1)
+      max_attempts = 1;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+   char err[CCU_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "UPDATE kb_code_unit_jobs"
+       " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
+       "     claimed_by = '', claimed_at = '',"
+       "     last_error = CASE WHEN attempts >= ?1"
+       "                       THEN 'stale running lease reclaimed after max attempts'"
+       "                       ELSE last_error END,"
+       "     updated_at = pg_now_text()"
+       " WHERE status = 'running' AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_int(st, "?1", max_attempts);
+   aimee_pg_bind_text(st, "?2", CCU_STALE_LEASE);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
 }
@@ -316,7 +369,16 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
    close(fd);
 
    char full_cmd[1024];
-   snprintf(full_cmd, sizeof(full_cmd), "%s < %s", cmd, tmppath);
+   /* Bound the sidecar with coreutils `timeout` (present on the kb image):
+    * SIGTERM at the ceiling, SIGKILL 10s later if it ignores TERM. Without this
+    * a hung sidecar wedges the drain thread forever via pclose(); on timeout
+    * pclose() returns non-zero and the caller retries/fails the job instead.
+    * Run the configured command under `sh -c` INSIDE timeout so it keeps the
+    * shell semantics popen() gave it (env-var prefixes like `FOO=bar python …`,
+    * builtins, operators) — passing it as timeout's own argv would break those
+    * and let compound commands escape the bound. `cmd` is trusted config. */
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s",
+            CCU_SIDECAR_TIMEOUT_S, cmd, tmppath);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)
@@ -511,6 +573,10 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
 {
    ccu_job_t job;
    memset(&job, 0, sizeof(job));
+
+   /* Recover jobs orphaned in 'running' before claiming fresh work, so a crash/
+    * restart or a previously-wedged sidecar cannot permanently strand them. */
+   ccu_reclaim_stale_running(opts ? opts->max_attempts : 1);
 
    if (!ccu_claim_job(&job))
       return 0; /* queue empty */
