@@ -9,6 +9,9 @@
 # re-embed (the kb_meta drift guard refuses a stale mismatch).
 services:
   aimee-llm:
+    # Kept in sync with the base file's profile so `-f aimee.yaml -f aimee.gpu.yaml`
+    # keeps aimee-llm gated on the `llm` profile.
+    profiles: ["llm"]
     image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
