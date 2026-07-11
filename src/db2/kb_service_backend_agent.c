@@ -773,6 +773,18 @@ cJSON *db2_kb_service_directive_expire_session_json(void)
    return resp;
 }
 
+/* Ingest one salient user turn as a durable memory. The insert path enqueues a
+ * "memory_facts" job (when typed facts are enabled), so the typed-fact extractor
+ * mines the user's own words offline into durable, gated, auto-injected facts.
+ * Best-effort; keyed by content hash so repeated phrasings dedup. */
+static void kbs_conversation_user_fact_sink(const char *session_id, const char *key,
+                                            const char *user_text)
+{
+   cJSON *r = db2_kb_service_memory_insert_ex_json("L1", "conversation", key, user_text, "", 0.5,
+                                                   session_id);
+   cJSON_Delete(r);
+}
+
 cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -794,7 +806,18 @@ cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs)
       if (cJSON_IsString(d))
          snprintf(buf[n++], MAX_PATH_LEN, "%s", d->valuestring);
    }
+   /* Enable user-turn fact mining only when both gates are on; register NULL
+    * otherwise so a prior enabled run's sink never leaks into a disabled one. */
+   {
+      config_t cfg;
+      config_load(&cfg);
+      memory_scan_register_user_fact_sink(
+          (cfg.learn_from_conversations_enabled && cfg.typed_facts_enabled)
+              ? kbs_conversation_user_fact_sink
+              : NULL);
+   }
    int rc = memory_scan_conversations(buf, n);
+   memory_scan_register_user_fact_sink(NULL); /* scan done — clear the sink */
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "count", rc);
    return resp;
