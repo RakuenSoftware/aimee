@@ -125,8 +125,8 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
       db1_lifecycle_event_t *evs = NULL;
       int nev = db1_lifecycle_event_list(work_item_id, &evs);
       free(evs);
-      const char *breach = NULL;    /* human-readable audit detail */
-      const char *reason = NULL;    /* accurate pause token for the breach */
+      const char *breach = NULL; /* human-readable audit detail */
+      const char *reason = NULL; /* accurate pause token for the breach */
       if (nev < 0)
       {
          breach = "turn cap: audit log unreadable"; /* can't evaluate -> fail closed */
