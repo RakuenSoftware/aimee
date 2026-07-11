@@ -28,14 +28,18 @@ int main(void)
       assert(strcmp(v.reviewed_content_hash, "HASH123") == 0); /* gate integrity check */
       assert(v.schema_version == WFE_VERDICT_SCHEMA);
       assert(v.high_sev_blockers == 0);
+      assert(strcmp(v.feedback, "looks good overall.") == 0); /* critique captured */
    }
-   /* request_changes with blocker count */
+   /* request_changes with blocker count + captured critique (threaded to re-author) */
    {
       wfe_verdict_t v =
           map("found a bug.\n{\"verdict\":\"request_changes\",\"high_sev_blockers\":2}");
       assert(v.kind == WFE_V_REQUEST_CHANGES);
       assert(v.high_sev_blockers == 2);
+      assert(strcmp(v.feedback, "found a bug.") == 0);
    }
+   /* no reasoning (verdict line only) -> feedback empty */
+   assert(map("{\"verdict\":\"request_changes\"}").feedback[0] == '\0');
    /* comment */
    assert(map("{\"verdict\":\"comment\"}").kind == WFE_V_COMMENT);
 

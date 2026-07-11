@@ -164,12 +164,33 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    {
    case WFE_GATE_APPROVE:
    {
+      /* Passed: drop any stale review feedback so it can't bleed into a later
+       * author step for this work item. */
+      wfe_feedback_clear(wi);
       char handle[80];
       snprintf(handle, sizeof handle, "%s.out", node->id);
       return wfe_step_advanced(handle, artifact_hash, 0.0);
    }
    case WFE_GATE_CHANGES:
+   {
+      /* Persist the panel's blockers so the re-authoring delegate (via on_fail)
+       * refines against the actual objections instead of re-authoring blind. */
+      const cJSON *fj = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+      const char *focus = (fj && cJSON_IsString(fj)) ? fj->valuestring : "";
+      char agg[4096];
+      int off = snprintf(agg, sizeof agg,
+                         "The review roundtable requested changes%s%s. Revise to resolve the "
+                         "reviewers' blockers below, then commit:\n",
+                         focus[0] ? " — focus: " : "", focus);
+      for (int i = 0; i < nv && off > 0 && (size_t)off < sizeof agg; i++)
+         if ((verdicts[i].kind == WFE_V_REQUEST_CHANGES || verdicts[i].kind == WFE_V_MALFORMED) &&
+             verdicts[i].feedback[0])
+            off += snprintf(agg + off, sizeof agg - (size_t)off, "\n## %s\n%s\n",
+                            verdicts[i].persona[0] ? verdicts[i].persona : "reviewer",
+                            verdicts[i].feedback);
+      wfe_feedback_write(wi, agg);
       return wfe_step_looped();
+   }
    case WFE_GATE_DEGRADED:
    default:
       return wfe_step_pending(WFE_PAUSE_PANEL_DEGRADED);

@@ -23,15 +23,16 @@ static int g_deleg_calls;
 static int g_deleg_rc; /* 0 success, -1 failure */
 static char g_deleg_last_role[32];
 static char g_deleg_last_delegate[32];
+static char g_deleg_last_prompt[8192];
 static int mock_deleg_run(const char *workdir, const char *role, const char *delegate,
                           const char *prompt, const char *artifact_path, char out_commit_sha[64],
                           char *err, size_t n)
 {
    (void)workdir;
-   (void)prompt;
    (void)artifact_path;
    (void)err;
    (void)n;
+   snprintf(g_deleg_last_prompt, sizeof g_deleg_last_prompt, "%s", prompt ? prompt : "");
    g_deleg_calls++;
    snprintf(g_deleg_last_role, sizeof g_deleg_last_role, "%s", role ? role : "");
    snprintf(g_deleg_last_delegate, sizeof g_deleg_last_delegate, "%s", delegate ? delegate : "");
@@ -307,6 +308,28 @@ int main(void)
       assert(wfe_work_item_create("ds", "r", pp, "interactive", id, err, sizeof err) == 0);
       (void)wfe_engine_run(id, err, sizeof err); /* author loops -> parks at max_iters */
       assert(g_open_calls == 0);                 /* never advanced past the author node */
+   }
+
+   /* C4: roundtable feedback is folded into the re-authoring prompt. A gate that
+    *     requested changes persists blockers for the work item; the next author
+    *     pass must carry them so it refines against the panel's objections rather
+    *     than re-authoring blind. */
+   {
+      char pp[300];
+      snprintf(pp, sizeof pp, "%s/fb-proposal.md", home);
+      FILE *pf = fopen(pp, "wb");
+      assert(pf);
+      fputs("# proposal\n", pf);
+      fclose(pf);
+      g_deleg_rc = 0; /* author advances normally */
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("ds", "r", pp, "autonomous", id, err, sizeof err) == 0);
+      /* the roundtable persisted these blockers on a prior request_changes */
+      assert(wfe_feedback_write(id, "## qa\nNo tests specified. Add acceptance criteria.") == 0);
+      g_deleg_last_prompt[0] = '\0';
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(strstr(g_deleg_last_prompt, "No tests specified") != NULL); /* blockers threaded */
+      wfe_feedback_clear(id);
    }
 
    /* D: implement verify gate (WP-1b) — a unit advances ONLY on a top-level

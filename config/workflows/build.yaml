@@ -45,10 +45,16 @@ nodes:
       base: trunk
     next: plan
   # The primary authors the implementation/action plan from the proposal.
+  # max_iters gives the plan<->plan_gate refinement loop enough re-author rounds
+  # to converge: each rejection persists the panel's blockers, which the next
+  # author.plan pass folds into its prompt (see wfe_blocks exec_author). The
+  # roundtable's own debate is separately bounded by plan_gate.max_rounds.
   - id: plan
     block: author.plan
     in:
       proposal: draft.out
+    params:
+      max_iters: 60
     next: plan_gate
     on_fail: plan
   # Roundtable approves the plan AGAINST the proposal (focus lens). Standard
