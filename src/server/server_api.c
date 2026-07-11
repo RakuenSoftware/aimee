@@ -10,6 +10,7 @@
 #include "server_http.h"
 #include "kb_client.h"
 #include "config.h"
+#include "working_profile.h" /* working_profile_autoobserve_from_feedback */
 #include "agent_config.h"
 #include "agent_types.h"
 #include "cJSON.h"
@@ -183,6 +184,20 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
                           : 1024;
    const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session_start");
    int session_start = cJSON_IsTrue(js) ? 1 : 0;
+
+   /* Learn how to work with THIS user from their own turns: the UserPromptSubmit
+    * hook posts each turn's prompt here as task_hint, and this handler runs in the
+    * DB1-owning aimee-server, so it is the right seam to observe interaction
+    * preferences (e.g. "be terse", "ask first") into the DB1-local working
+    * profile. Personal and strictly local — nothing leaves for the shared KB.
+    * Only real user turns (not the session-start context fetch); best-effort, and
+    * never affects the recall response. Gated by the working-profile switch. */
+   if (!session_start)
+   {
+      config_t wp_cfg;
+      if (config_load(&wp_cfg) == 0 && wp_cfg.identity_working_profile_injection_enabled)
+         (void)working_profile_autoobserve_from_feedback(jh->valuestring);
+   }
 
    /* Graph-code fusion is always on for recall. */
    char *j = kb_client_memory_recall_json_ex(jh->valuestring, limit_tokens, session_start, "on");

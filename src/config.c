@@ -841,7 +841,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->mcp_osv_allow_count = 0;
    config_computer_use_defaults(cfg);
    cfg->trigger_max_concurrent = 2;
-   cfg->identity_working_profile_injection_enabled = 0;
+   /* Master switch for DB1-local per-user interaction learning: observe the
+    * user's own turns into the working profile (memory_recall_handler) AND inject
+    * the learned profile into the session context (build_session_context) so the
+    * primary adapts to how they work. Default on; empty until something is
+    * learned, so it is a no-op for a fresh user. An empty field allow-list means
+    * all learned fields inject. */
+   cfg->identity_working_profile_injection_enabled = 1;
    cfg->identity_working_profile_injection_fields_count = 0;
    cfg->memory_recall_lanes_floor_summary = 4;
    cfg->memory_recall_lanes_floor_fact = 4;
