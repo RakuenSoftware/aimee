@@ -7,6 +7,7 @@
 #include "cli_session_start.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
+#include "cmd_self_update.h"     /* aimee_self_update_notice */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -373,6 +374,19 @@ static int handle_session_start_remote(const char *sid)
 
    free(endpoint);
    free(bearer);
+
+   /* Thin-client version drift: this client talks 1:1 to the remote server, so
+    * if the server has moved ahead, surface a one-line notice steering the agent
+    * (or user) to `aimee self-update`. Best-effort; never blocks the session. */
+   {
+      char notice[256];
+      if (aimee_self_update_notice(notice, sizeof notice))
+      {
+         ss_add(&ctx, "\n# aimee update available\n");
+         ss_add(&ctx, notice);
+         ss_add(&ctx, "\n");
+      }
+   }
 
    /* Local worktree isolation: even though compute is remote, the guard runs on
     * THIS host. Prepare + direct the agent into an isolated worktree so mutating
