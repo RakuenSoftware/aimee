@@ -300,6 +300,10 @@ void aimee_self_update_apply_async(void)
          fclose(fp);
    }
 
+   /* fork/setsid/execl are POSIX; the swap itself is Linux-only (resolve_self_path
+    * returned above on non-Linux), so the detached spawn is compiled only where it
+    * can run. Windows has no fork(). */
+#ifndef _WIN32
    pid_t pid = fork();
    if (pid != 0)
       return; /* parent (or fork failure): do not block the session */
@@ -342,6 +346,7 @@ void aimee_self_update_apply_async(void)
       close(devnull);
    execl(self, "aimee", "self-update", "--yes", "--require-verify", (char *)NULL);
    _exit(127);
+#endif
 }
 
 /* After a successful swap, warn if PATH exposes other `aimee` binaries that now
