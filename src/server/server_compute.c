@@ -1301,7 +1301,8 @@ void delegate_worker(void *arg)
    char ephemeral_ws[MAX_PATH_LEN] = "";
    if (detached_bound && cctx->background_job_id > 0)
    {
-      if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0)
+      if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0 &&
+          ephemeral_ws[0])
       {
          workspace_turn_unbind_active();
          detached_bound = 0;

@@ -15,13 +15,18 @@
 
 /* A deleg_id is server-generated (e.g. "deleg-105-1783801198975185376-10"), but
  * it is interpolated into a filesystem path, so validate defensively against
- * traversal / separators regardless of the trusted source. */
+ * traversal / separators / dotted specials regardless of the trusted source. */
 static int deleg_id_is_safe(const char *id)
 {
    if (!id || !id[0])
       return 0;
    size_t n = strlen(id);
    if (n > 128)
+      return 0;
+   /* A leading '.' covers ".", ".." and hidden names — "." / ".." would collapse
+    * the path onto <home>/delegate-ws itself (a subsequent remove would then walk
+    * every sibling workspace). Reject the whole class. */
+   if (id[0] == '.')
       return 0;
    if (strstr(id, ".."))
       return 0;
@@ -48,6 +53,11 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
    char path[1024];
    if (snprintf(path, sizeof(path), "%s/delegate-ws/%s", home, deleg_id) >= (int)sizeof(path))
       return -1;
+   /* Confirm the caller's buffer fits the full path BEFORE creating anything, so a
+    * truncation return never leaves an orphaned dir+note on disk. */
+   if (strlen(path) >= out_cap)
+      return -1;
+
    if (platform_mkdir_p(path, 0700) != 0)
       return -1;
 
@@ -68,23 +78,28 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
       }
    }
 
-   if ((size_t)snprintf(out, out_cap, "%s", path) >= out_cap)
-   {
-      out[0] = '\0';
-      return -1;
-   }
+   snprintf(out, out_cap, "%s", path); /* fits: checked above */
    return 0;
 }
 
-/* best-effort recursive delete */
+/* Best-effort recursive delete that NEVER follows a symlink: lstat the entry
+ * first and only descend into a real directory; a symlink (even to a directory)
+ * is unlinked, not followed. Prevents a symlinked component from escaping the
+ * intended subtree. */
 static void ephemeral_rm_rf(const char *path)
 {
-   DIR *d = opendir(path);
-   if (!d)
+   struct stat st;
+   if (lstat(path, &st) != 0)
+      return;
+   if (!S_ISDIR(st.st_mode))
    {
-      unlink(path);
+      unlink(path); /* symlink or regular file: remove the link/file itself */
       return;
    }
+
+   DIR *d = opendir(path);
+   if (!d)
+      return;
    struct dirent *e;
    while ((e = readdir(d)) != NULL)
    {
@@ -93,11 +108,7 @@ static void ephemeral_rm_rf(const char *path)
       char child[2048];
       if (snprintf(child, sizeof(child), "%s/%s", path, e->d_name) >= (int)sizeof(child))
          continue;
-      struct stat st;
-      if (lstat(child, &st) == 0 && S_ISDIR(st.st_mode))
-         ephemeral_rm_rf(child);
-      else
-         unlink(child);
+      ephemeral_rm_rf(child);
    }
    closedir(d);
    rmdir(path);
@@ -113,8 +124,13 @@ void delegate_ephemeral_ws_remove(const char *path)
    char prefix[1024];
    if (snprintf(prefix, sizeof(prefix), "%s/delegate-ws/", home) >= (int)sizeof(prefix))
       return;
-   /* Safety: only remove paths that live under <home>/delegate-ws/. */
+   /* Lexical guard: only paths under <home>/delegate-ws/ are eligible... */
    if (strncmp(path, prefix, strlen(prefix)) != 0)
+      return;
+   /* ...and the target itself must be a real directory, not a symlink, before we
+    * descend (ephemeral_rm_rf is symlink-safe internally too). */
+   struct stat st;
+   if (lstat(path, &st) != 0 || !S_ISDIR(st.st_mode))
       return;
    ephemeral_rm_rf(path);
 }

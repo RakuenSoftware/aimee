@@ -36,6 +36,11 @@ int main(void)
    assert(delegate_ephemeral_ws_create("a/b", out, sizeof(out)) == -1);
    assert(delegate_ephemeral_ws_create("a/../b", out, sizeof(out)) == -1);
    assert(delegate_ephemeral_ws_create("bad;rm -rf", out, sizeof(out)) == -1);
+   /* dotted specials: "." / ".." collapse onto delegate-ws itself; leading-'.'
+    * hidden names are rejected too. */
+   assert(delegate_ephemeral_ws_create(".", out, sizeof(out)) == -1);
+   assert(delegate_ephemeral_ws_create("..", out, sizeof(out)) == -1);
+   assert(delegate_ephemeral_ws_create(".x", out, sizeof(out)) == -1);
    assert(out[0] == '\0');
    printf("  rejects_unsafe_ids: ok\n");
 
@@ -63,6 +68,29 @@ int main(void)
    delegate_ephemeral_ws_remove("/tmp"); /* outside home -> no-op */
    assert(path_exists(keep));
    printf("  remove_refuses_outside_prefix: ok\n");
+
+   /* 5. remove() must NOT follow a symlink under delegate-ws to delete outside it. */
+   char victim_dir[700];
+   snprintf(victim_dir, sizeof(victim_dir), "%s/victim", home);
+   assert(platform_mkdir_p(victim_dir, 0700) == 0);
+   char victim_file[820];
+   snprintf(victim_file, sizeof(victim_file), "%s/precious.txt", victim_dir);
+   FILE *vf = fopen(victim_file, "w");
+   assert(vf != NULL);
+   fputs("do not delete\n", vf);
+   fclose(vf);
+
+   char wsroot[700];
+   snprintf(wsroot, sizeof(wsroot), "%s/delegate-ws", home);
+   assert(platform_mkdir_p(wsroot, 0700) == 0);
+   char evil_link[820];
+   snprintf(evil_link, sizeof(evil_link), "%s/evil", wsroot);
+   assert(symlink(victim_dir, evil_link) == 0); /* delegate-ws/evil -> ../victim */
+
+   delegate_ephemeral_ws_remove(evil_link); /* lexical prefix OK, but it's a symlink */
+   assert(path_exists(victim_dir));  /* target dir untouched */
+   assert(path_exists(victim_file)); /* target contents untouched */
+   printf("  remove_refuses_symlink_escape: ok\n");
 
    platform_test_rmrf(home);
    printf("All delegate_ephemeral_ws tests passed.\n");
