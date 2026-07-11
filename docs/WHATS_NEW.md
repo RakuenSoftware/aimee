@@ -11,6 +11,15 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Roundtable ↔ planner now refine together**: when a `gate.roundtable` requests
+  changes, the panel's blockers are captured and persisted for the work item, and
+  the next `author.proposal`/`author.plan` pass folds them into its prompt — so the
+  re-author addresses the actual objections instead of re-authoring blind. Before
+  this, the panel's critique was discarded (only the pass/fail enum survived), so
+  the plan↔gate loop couldn't converge and churned until the per-node `max_iters`
+  backstop parked the run. The build workflow's `plan` step also gets a larger
+  `max_iters` so a genuinely converging refinement loop isn't cut off early.
+
 - **`author.proposal` accepts a pre-supplied proposal**: an autonomous run whose
   proposal is already complete (the proposals trigger materializes a finished,
   merged proposal — the merge is the approval) no longer loops the `draft` step to

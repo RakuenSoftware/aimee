@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 
 #include "yaml.h"
 
@@ -394,6 +395,63 @@ int wfe_node_max_iters(const wfe_node_t *n)
    if (cJSON_IsNumber(m) && m->valueint > 0)
       return m->valueint;
    return WFE_DEFAULT_MAX_ITERS;
+}
+
+/* ---- roundtable -> re-author feedback channel ----
+ * A gate.roundtable persists the panel's blockers here on request_changes; the
+ * re-authoring delegate (author.proposal / author.plan) reads them so it refines
+ * against the actual objections instead of re-authoring blind. Keyed by work item
+ * under $AIMEE_HOME/wfe-feedback/<id>.md (outside any git tree, so it is never
+ * committed). Best-effort: a missing/failed file is simply "no feedback". */
+static void wfe_feedback_path(const char *wid, char *buf, size_t n)
+{
+   const char *home = getenv("AIMEE_HOME");
+   snprintf(buf, n, "%s/wfe-feedback/%s.md", (home && home[0]) ? home : ".", wid ? wid : "");
+}
+
+int wfe_feedback_write(const char *work_item_id, const char *text)
+{
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *home = getenv("AIMEE_HOME");
+   char dir[1024];
+   snprintf(dir, sizeof dir, "%s/wfe-feedback", (home && home[0]) ? home : ".");
+   mkdir(dir, 0700);
+   char path[1200];
+   wfe_feedback_path(work_item_id, path, sizeof path);
+   FILE *f = fopen(path, "wb");
+   if (!f)
+      return -1;
+   if (text && text[0])
+      fwrite(text, 1, strlen(text), f);
+   fclose(f);
+   return 0;
+}
+
+int wfe_feedback_read(const char *work_item_id, char *buf, size_t cap)
+{
+   if (buf && cap)
+      buf[0] = '\0';
+   if (!work_item_id || !work_item_id[0] || !buf || cap == 0)
+      return 0;
+   char path[1200];
+   wfe_feedback_path(work_item_id, path, sizeof path);
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return 0;
+   size_t rd = fread(buf, 1, cap - 1, f);
+   buf[rd] = '\0';
+   fclose(f);
+   return (int)rd;
+}
+
+void wfe_feedback_clear(const char *work_item_id)
+{
+   if (!work_item_id || !work_item_id[0])
+      return;
+   char path[1200];
+   wfe_feedback_path(work_item_id, path, sizeof path);
+   remove(path);
 }
 
 wfe_on_max_t wfe_node_on_max(const wfe_node_t *n)
