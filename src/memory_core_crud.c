@@ -15,6 +15,7 @@
 #include "db1_optional.h"
 #include "db2/entity_edges.h"
 #include "db2/kb_runtime_state.h"
+#include "db2/lifecycle.h" /* db2_embedding_dim — runtime embedding dimension */
 #include "db2/memory_health.h"
 #include "db2/memory_payload.h"
 #include "db2/feature_rows.h"
@@ -598,7 +599,14 @@ int memory_rebuild_vector_index_for_version(const char *version, int *failed_out
    struct timespec t_start;
    clock_gettime(CLOCK_MONOTONIC, &t_start);
 
-   if (pgvec_memory_vector_collection_recreate(384) != 0)
+   /* Recreate the memory vector collection at the deployment's embedding
+    * dimension (the runtime dim the halfvec memory_embeddings column uses:
+    * 2560 GPU / 1024 CPU / external cap 4000), not a hardcoded 384 that would
+    * never match the column and leave every upsert failing. */
+   int mem_embed_dim = db2_embedding_dim();
+   if (mem_embed_dim <= 0 || mem_embed_dim > EMBED_MAX_DIM)
+      mem_embed_dim = 1024;
+   if (pgvec_memory_vector_collection_recreate(mem_embed_dim) != 0)
    {
       db2_kb_runtime_state_vector_rebuild_lock_release();
       return -1;
