@@ -5,11 +5,24 @@
  * build. Unstable/private. */
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 #include "aimee.h"
 #include "config.h"
 #include "memory.h"
 #include "cJSON.h"
+
+/* Auto-free a heap pointer on scope exit. The memory-search chain declares large
+ * memory_t[] scratch buffers (sizeof(memory_t) ~4.4KB, e.g. [128] = 566KB); with
+ * -flto inlining the deep query chain into ~1MB frames these nest and overflow the
+ * stack (worker threads especially). Moving them to the heap keeps the chain off
+ * the stack without threading free() through every early return. */
+static inline void memory_autofree_impl(void *p)
+{
+   free(*(void **)p);
+}
+#define MEMORY_AUTOFREE __attribute__((cleanup(memory_autofree_impl)))
+
 /* memory_core real-branch shared types (moved from memory_core.c #else) */
 typedef enum
 {
