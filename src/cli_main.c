@@ -5,6 +5,7 @@
 #include "cli_client.h"
 #include "cli_agent_keys.h"
 #include "cli_session_start.h"
+#include "cmd_self_update.h"
 #include "cli_attention_guard.h"
 #include "cli_agent_setup.h"
 #include "cli_code_audit.h"
@@ -1765,6 +1766,8 @@ int main(int argc, char **argv)
          printf("%s %s\n", prog, AIMEE_VERSION);
       return 0;
    }
+   if (strcmp(cmd, "self-update") == 0)
+      return cmd_self_update(sub_argc, sub_argv);
    if (strcmp(cmd, "--help") == 0)
    {
       usage();
