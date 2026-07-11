@@ -386,6 +386,9 @@ static int handle_session_start_remote(const char *sid)
          ss_add(&ctx, notice);
          ss_add(&ctx, "\n");
       }
+      /* With `update_mode: apply`, catch up automatically (verified, rate-limited,
+       * detached — never blocks this session). No-op in the default notify mode. */
+      aimee_self_update_apply_async();
    }
 
    /* Local worktree isolation: even though compute is remote, the guard runs on

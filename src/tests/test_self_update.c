@@ -47,6 +47,19 @@ static void test_version_is_safe(void)
    printf("  test_version_is_safe ok\n");
 }
 
+static void test_version_is_semver(void)
+{
+   assert(aimee_version_is_semver("0.2.182"));
+   assert(aimee_version_is_semver("v0.2.182"));
+   assert(aimee_version_is_semver("v0.2.180-31-g3342b09e"));
+   assert(aimee_version_is_semver("1"));
+   assert(!aimee_version_is_semver("testing-b4a856b")); /* deliberate dev/branch build */
+   assert(!aimee_version_is_semver("vtesting"));
+   assert(!aimee_version_is_semver(""));
+   assert(!aimee_version_is_semver(NULL));
+   printf("  test_version_is_semver ok\n");
+}
+
 static void test_asset(void)
 {
    /* On the platforms we support, the asset name is non-NULL and starts with
@@ -65,6 +78,7 @@ int main(void)
 {
    test_version_compare();
    test_version_is_safe();
+   test_version_is_semver();
    test_asset();
    printf("test_self_update: all passed\n");
    return 0;
