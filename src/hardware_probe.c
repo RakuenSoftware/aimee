@@ -71,7 +71,8 @@ int hardware_probe_parse_amd_vram_bytes(const char *bytes_text, int *mb_out)
  * double-quotes inside, and no single-quotes, so the whole string can be wrapped
  * in single-quotes for the remote `ssh <target> '<cmd>'` without local expansion. */
 const char *const HARDWARE_GPU_PROBE_CMD =
-    "out=$(nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null); "
+    "out=$(nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits "
+    "2>/dev/null); "
     "if [ -n \"$out\" ]; then echo \"$out\" | awk 'NF{print $0\", nvidia\"}'; else "
     "i=0; for d in /sys/class/drm/card[0-9]*; do "
     "[ -e \"$d/device/vendor\" ] || continue; "
@@ -121,7 +122,8 @@ int hardware_probe_parse_gpu_csv_list(const char *csv, const char *vendor_hint,
                g->index = (int)strtol(idx, NULL, 10);
                g->vram_mb = (int)mb;
                snprintf(g->name, sizeof(g->name), "%s", name);
-               const char *v = (vendor && vendor[0]) ? vendor : (vendor_hint ? vendor_hint : "unknown");
+               const char *v =
+                   (vendor && vendor[0]) ? vendor : (vendor_hint ? vendor_hint : "unknown");
                snprintf(g->vendor, sizeof(g->vendor), "%s", v);
             }
          }
