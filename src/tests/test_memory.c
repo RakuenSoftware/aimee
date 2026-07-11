@@ -2034,6 +2034,73 @@ static void test_memory_scan_preserves_message_boundaries(void)
    teardown();
 }
 
+/* --- user-turn fact mining sink capture --- */
+static int g_mined_count;
+static char g_mined_text[8][512];
+static void test_user_fact_sink(const char *session_id, const char *key, const char *user_text)
+{
+   (void)session_id;
+   assert(key && key[0]); /* a content-hash key is always supplied */
+   if (g_mined_count < 8 && user_text)
+      snprintf(g_mined_text[g_mined_count], sizeof(g_mined_text[0]), "%s", user_text);
+   g_mined_count++;
+}
+
+/* The scan hands ONLY salient, genuinely user-authored turns to the sink: filler
+ * and slash-commands are dropped, tool_result echoes under the "user" role are
+ * never mistaken for the user's words, and assistant turns are ignored. */
+static void test_memory_scan_mines_user_turns(void)
+{
+   setup();
+
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/aimee-test-userfacts-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(dir) != NULL);
+
+   char path[768];
+   snprintf(path, sizeof(path), "%s/session.jsonl", dir);
+   FILE *fp = fopen(path, "w");
+   assert(fp != NULL);
+   /* [captured] first-person durable preference */
+   fputs("{\"role\":\"user\",\"content\":\"I always prefer tabs over spaces in my code.\"}\n", fp);
+   /* [dropped] single-word filler */
+   fputs("{\"role\":\"user\",\"content\":\"ok\"}\n", fp);
+   /* [dropped] slash-command */
+   fputs("{\"role\":\"user\",\"content\":\"/compact the conversation now\"}\n", fp);
+   /* [dropped] tool_result echoed under the user role — NOT the user's words */
+   fputs("{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\","
+         "\"content\":\"wrote 200 lines to /tmp/foo successfully\"}]}\n",
+         fp);
+   /* [dropped] assistant turn */
+   fputs("{\"role\":\"assistant\",\"content\":\"Noted, you prefer tabs.\"}\n", fp);
+   /* [captured] durable fact carried in a typed text block */
+   fputs("{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"My timezone is "
+         "Europe/London for scheduling.\"}]}\n",
+         fp);
+   fclose(fp);
+
+   g_mined_count = 0;
+   memset(g_mined_text, 0, sizeof(g_mined_text));
+   memory_scan_register_user_fact_sink(test_user_fact_sink);
+
+   char dirs[1][MAX_PATH_LEN];
+   snprintf(dirs[0], sizeof(dirs[0]), "%s", dir);
+   assert(memory_scan_conversations(dirs, 1) == 1);
+
+   memory_scan_register_user_fact_sink(NULL);
+
+   /* Exactly the two salient user turns were mined. */
+   assert(g_mined_count == 2);
+   assert(strcmp(g_mined_text[0], "I always prefer tabs over spaces in my code.") == 0);
+   assert(strcmp(g_mined_text[1], "My timezone is Europe/London for scheduling.") == 0);
+   /* Tool output never leaks into what aimee "learns" the user said. */
+   for (int i = 0; i < g_mined_count; i++)
+      assert(strstr(g_mined_text[i], "wrote 200 lines") == NULL);
+
+   platform_test_rmrf(dir);
+   teardown();
+}
+
 static void test_memory_promote_uses_calibration_profile(void)
 {
    write_calibration_config(3);
@@ -2453,6 +2520,7 @@ int main(void)
    test_memory_promote_delegation_patterns_uses_db1_agent_log();
    test_memory_synthesize_failure_episodes_uses_db1_agent_log();
    test_memory_scan_preserves_message_boundaries();
+   test_memory_scan_mines_user_turns();
 
    /* --- cosine_similarity: known vectors --- */
    {

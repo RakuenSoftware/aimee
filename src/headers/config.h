@@ -423,7 +423,8 @@ typedef struct config
     * model, P1). Single-model Anthropic-compatible shims (llama.cpp/vLLM) enable
     * this so an arbitrary client model name is not forwarded and rejected upstream. */
    int gateway_pin_model;
-   int typed_facts_enabled; /* typed-fact knowledge layer master gate (default off) */
+   int typed_facts_enabled;              /* typed-fact knowledge layer master gate (default off) */
+   int learn_from_conversations_enabled; /* mine user turns into durable facts (default on) */
    /* kb.typed_facts.* — KB-owned autonomous reconciliation knobs (proposal §7.2/§8). */
    int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional
                                                relations */

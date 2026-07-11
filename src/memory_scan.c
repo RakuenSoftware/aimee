@@ -22,6 +22,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -200,6 +201,132 @@ static void scan_collect_content_text(cJSON *node, char **buf, size_t *len, size
       (void)scan_append_text(buf, len, cap, text->valuestring);
 }
 
+/* --- User-turn fact mining (feeds the typed-fact extractor) --- */
+
+static const char *scan_message_role(cJSON *msg); /* defined just below */
+
+static memory_conv_user_fact_sink_fn g_user_fact_sink = NULL;
+
+void memory_scan_register_user_fact_sink(memory_conv_user_fact_sink_fn fn)
+{
+   g_user_fact_sink = fn;
+}
+
+/* Collect ONLY genuinely user-authored text from a user message's content:
+ * plain strings and {type:"text"} blocks. Skips tool_result echoes and any
+ * block carrying tool output (tool_use_id / output / result) so a tool result
+ * the host stores under the "user" role is never mistaken for the user's words.
+ * (scan_collect_content_text deliberately harvests output/result for search
+ * indexing; fact mining must not, or aimee would "learn" tool output as if the
+ * user said it.) */
+static void scan_collect_user_authored_text(cJSON *node, char **buf, size_t *len, size_t *cap)
+{
+   if (!node)
+      return;
+   if (cJSON_IsString(node))
+   {
+      (void)scan_append_text(buf, len, cap, node->valuestring);
+      return;
+   }
+   if (cJSON_IsArray(node))
+   {
+      cJSON *item;
+      cJSON_ArrayForEach(item, node) scan_collect_user_authored_text(item, buf, len, cap);
+      return;
+   }
+   if (!cJSON_IsObject(node))
+      return;
+
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(node, "type"));
+   if (type && strcmp(type, "text") != 0)
+      return; /* tool_result, image, thinking, … — not the user's prose */
+   if (cJSON_GetObjectItemCaseSensitive(node, "tool_use_id") ||
+       cJSON_GetObjectItemCaseSensitive(node, "output") ||
+       cJSON_GetObjectItemCaseSensitive(node, "result"))
+      return; /* defensive: a tool_result block without an explicit type */
+
+   cJSON *text = cJSON_GetObjectItemCaseSensitive(node, "text");
+   if (cJSON_IsString(text))
+      (void)scan_append_text(buf, len, cap, text->valuestring);
+}
+
+/* A user turn is worth an (LLM-priced) extraction only if it plausibly carries a
+ * durable fact. Conservative on cost, permissive on content: reject empties,
+ * very short turns, slash-commands, and single-word acknowledgements; keep the
+ * rest and let the extractor's own confidence floor discard non-facts. */
+static int scan_user_turn_is_salient(const char *text)
+{
+   if (!text)
+      return 0;
+   while (*text && isspace((unsigned char)*text))
+      text++;
+   if (text[0] == '/') /* slash-command, not natural language */
+      return 0;
+   size_t n = strlen(text);
+   while (n > 0 && isspace((unsigned char)text[n - 1]))
+      n--;
+   if (n < 12) /* too short to assert a durable fact */
+      return 0;
+
+   static const char *fillers[] = {"ok",      "okay",   "yes",    "yep",         "yeah", "no",
+                                   "nope",    "sure",   "thanks", "thank you",   "go",   "continue",
+                                   "proceed", "please", "do it",  "sounds good", NULL};
+   for (int i = 0; fillers[i]; i++)
+      if (n == strlen(fillers[i]) && strncasecmp(text, fillers[i], n) == 0)
+         return 0;
+   return 1;
+}
+
+/* If the line is a genuine user turn with salient prose, hand it to the
+ * registered sink for durable-memory ingest (which feeds fact extraction).
+ * Best-effort and self-contained: parsing/allocation failures just skip. */
+static void scan_maybe_mine_user_turn(const char *session_id, const char *line)
+{
+   if (!g_user_fact_sink || !line)
+      return;
+   cJSON *root = cJSON_Parse(line);
+   if (!root)
+      return;
+
+   cJSON *msg = root;
+   cJSON *content = cJSON_GetObjectItemCaseSensitive(msg, "content");
+   if (!content)
+   {
+      cJSON *nested = cJSON_GetObjectItemCaseSensitive(root, "message");
+      if (!cJSON_IsObject(nested))
+         nested = cJSON_GetObjectItemCaseSensitive(root, "item");
+      if (cJSON_IsObject(nested))
+      {
+         msg = nested;
+         content = cJSON_GetObjectItemCaseSensitive(msg, "content");
+      }
+   }
+   const char *role = scan_message_role(msg);
+   if (!content || !role || strcmp(role, "user") != 0)
+   {
+      cJSON_Delete(root);
+      return;
+   }
+
+   char *buf = NULL;
+   size_t len = 0, cap = 0;
+   scan_collect_user_authored_text(content, &buf, &len, &cap);
+   if (buf && scan_user_turn_is_salient(buf))
+   {
+      /* FNV-1a/64 content hash → stable dedup key ("conv-<hex>"): the same
+       * user phrasing maps to the same memory key, so repeats upsert instead of
+       * piling up. Self-contained to keep this shared TU dependency-light. */
+      uint64_t h = 1469598103934665603ULL;
+      for (const unsigned char *p = (const unsigned char *)buf; *p; p++)
+         h = (h ^ *p) * 1099511628211ULL;
+      char key[32];
+      snprintf(key, sizeof(key), "conv-%016llx", (unsigned long long)h);
+      g_user_fact_sink(session_id ? session_id : "", key, buf);
+   }
+   free(buf);
+   cJSON_Delete(root);
+}
+
 static const char *scan_message_role(cJSON *msg)
 {
    const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(msg, "role"));
@@ -374,7 +501,13 @@ static int scan_file(const char *session_id, const char *file_path)
          char role[16];
          char *text = NULL;
          if (scan_extract_message_text(line_buf, role, sizeof(role), &text))
+         {
+            /* Mine the user's own words for durable facts (only new lines reach
+             * here — see the max_end_line skip above). */
+            if (strcmp(role, "user") == 0)
+               scan_maybe_mine_user_turn(session_id, line_buf);
             (void)scan_add_message_part(message_parts, &message_count, role, text);
+         }
       }
 
       /* Extract file refs from any line */
