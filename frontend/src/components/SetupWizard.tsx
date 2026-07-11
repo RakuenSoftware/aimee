@@ -7,6 +7,7 @@ import { WIZARD_STEPS, isRestartKey, helpFor } from '../setup/wizardSteps';
 import { computeReadiness } from '../setup/readiness';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import PrimaryChooser from '../setup/PrimaryChooser';
+import DeployTopology from '../setup/DeployTopology';
 
 /* First-run setup wizard. A modal over the app that walks the operator through
  * the minimum path to a working turn — provider → embedding → shared store →
@@ -98,6 +99,17 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   async function handlePrimaryConfigured(provider: string) {
     const res = await saveConfigValue('provider', provider);
     setCfg((c) => ({ ...c, provider: res.ok ? res.value ?? provider : provider }));
+    notifySetupUpdated();
+    advance();
+  }
+
+  // The deploy-topology page writes its own config keys (kb_mode + per-role
+  // llm_*). It reports the restart-class keys it changed; we refresh cfg so the
+  // summary's readiness reflects the new embedder, track restart-pending, advance.
+  async function handleDeploySaved(restartKeys: string[]) {
+    const c = await loadConfig();
+    setCfg(c);
+    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
     notifySetupUpdated();
     advance();
   }
@@ -203,7 +215,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {step.title}{step.optional ? <span style={{ color: '#9aa', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
             </div>
 
-            {step.kind === 'chooser' ? (
+            {step.kind === 'deploy' ? (
+              <DeployTopology onSaved={handleDeploySaved} />
+            ) : step.kind === 'chooser' ? (
               <PrimaryChooser onConfigured={handlePrimaryConfigured} />
             ) : step.keys.length > 0 ? (
               <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>

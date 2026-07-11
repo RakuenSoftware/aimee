@@ -11,6 +11,16 @@ describe('WIZARD_STEPS structure', () => {
     expect(new Set(ids).size).toBe(ids.length); // no dupes
   });
 
+  it('provider is the chooser and page 2 is the bespoke deploy-topology step', () => {
+    const provider = WIZARD_STEPS.find((s) => s.id === 'provider')!;
+    expect(provider.kind).toBe('chooser');
+    // Page 2 (the second step) is the deploy-topology page: bespoke, no generic keys.
+    const page2 = WIZARD_STEPS[1];
+    expect(page2.kind).toBe('deploy');
+    expect(page2.keys).toEqual([]);
+    expect(page2.title).toMatch(/deploy/i);
+  });
+
   it('kb_api is optional and project is a hand-off (route, no keys)', () => {
     const kb = WIZARD_STEPS.find((s) => s.id === 'kb_api')!;
     const project = WIZARD_STEPS.find((s) => s.id === 'project')!;
