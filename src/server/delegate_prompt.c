@@ -618,6 +618,31 @@ static int drift_stat_named_path(const char *path, const char *base_path, struct
    return stat(full, st);
 }
 
+/* Return 1 if an absolute path does not resolve under the worktree root — i.e. a
+ * referenced EXTERNAL path (another machine's file named by an scp target such as
+ * `admin@host:/mnt/.../aimee.yaml`, or the `//host/...` residue of a URL) rather
+ * than an in-worktree create target.  A delegate creates files inside its
+ * worktree, never at an arbitrary absolute host path, so the pre-flight
+ * create-intent guard must not hard-fail on these.  Relative paths always resolve
+ * under the worktree and are never external. */
+static int drift_path_is_external(const char *path, const char *wt_path)
+{
+   if (!path || path[0] != '/')
+      return 0;
+   if (!wt_path || !wt_path[0])
+      return 1; /* absolute with no worktree root to anchor to */
+
+   size_t wlen = strlen(wt_path);
+   while (wlen > 0 && wt_path[wlen - 1] == '/')
+      wlen--;
+   if (strncmp(path, wt_path, wlen) != 0)
+      return 1; /* outside the worktree subtree */
+   /* Guard against prefix aliasing (wt=/a/b matching /a/bc): the char after the
+    * root must be a separator or end-of-string for the path to be truly under it. */
+   char after = path[wlen];
+   return (after != '\0' && after != '/');
+}
+
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
                                     const char *response, const char *wt_path, char *errbuf,
                                     size_t errbuf_size)
@@ -655,6 +680,14 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
           * rather than naming a real project file — skip it silently. */
          if (!exists && prompt)
          {
+            /* A path that can't be an in-worktree create target — an absolute
+             * host/scp/URL path outside the worktree — is a referenced external
+             * file, not an output.  Merely naming one (e.g. an ops/deploy brief
+             * that mentions admin@host:/mnt/.../aimee.yaml) must not hard-fail the
+             * delegate before it runs. */
+            if (drift_path_is_external(path, wt_path))
+               continue;
+
             if (!delegate_prompt_allows_writes(prompt))
                continue;
 
