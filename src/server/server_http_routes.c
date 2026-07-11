@@ -603,6 +603,32 @@ static int rh_role_template_delete(const route_req_t *rq, char *resp, int cap)
    return route_role_template_remove(rq->id, resp, cap);
 }
 
+static int rh_roundtables_list(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_roundtables_list(resp, cap);
+}
+static int rh_roundtables_create(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_upsert(NULL, rq->body, resp, cap);
+}
+static int rh_roundtable_set_active(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_set_active(rq->body, resp, cap);
+}
+static int rh_roundtable_show(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_show(rq->id, resp, cap);
+}
+static int rh_roundtable_put(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_upsert(rq->id, rq->body, resp, cap);
+}
+static int rh_roundtable_delete(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_remove(rq->id, resp, cap);
+}
+
 static int rh_sessions_list(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -2120,6 +2146,17 @@ static const http_route_t g_v1_routes[] = {
     {"PUT", "/v1/role_templates/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_role_template_put},
     {"DELETE", "/v1/role_templates/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
      rh_role_template_delete},
+
+    /* Named roundtable presets: read like personas, mutate as admin. The exact
+     * POST /v1/roundtables/active (set active preset) precedes the prefix routes
+     * so it is not captured as a preset name. */
+    {"GET", "/v1/roundtables", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_roundtables_list},
+    {"POST", "/v1/roundtables", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN, rh_roundtables_create},
+    {"POST", "/v1/roundtables/active", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN,
+     rh_roundtable_set_active},
+    {"GET", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_roundtable_show},
+    {"PUT", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_put},
+    {"DELETE", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_delete},
 
     /* Unified presence: list / attach / detach / persona / events are
      * session-scoped on the owner's own presence. */

@@ -1769,6 +1769,11 @@ typedef struct config
    int roundtable_converge_threshold;
    int roundtable_deadline_ms;
    char roundtable_turns[16];
+   /* Name of the active roundtable preset (see roundtable_preset.{c,h}). Empty =
+    * no named preset selected; the ensemble and roundtable fields above are used
+    * as-is. Setting a preset "active" copies its values into those fields and
+    * records the name here so the GUI can show the current selection. */
+   char roundtable_default[64];
 
    /* Roundtable authoring pipeline (roundtable.pipeline_*). The outer
     * REVIEW<->revise loop, done-bar, and cost/pass backstops; see

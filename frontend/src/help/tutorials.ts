@@ -90,6 +90,16 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     ],
     seeAlso: '/personas',
   },
+  '/roundtable': {
+    title: 'Roundtable',
+    body: [
+      'Configure the multi-model review panels — the “roundtables” aimee convenes.',
+      'Each preset sets the seats (a model + a persona per seat), the aggregator, and the',
+      'loop knobs (rounds, convergence, deadline, turns) plus authoring-pipeline caps.',
+      'Save several named presets and pick one as the active default.',
+    ],
+    seeAlso: '/agents',
+  },
   '/projects': {
     title: 'Projects',
     body: [

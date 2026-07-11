@@ -16,6 +16,7 @@ export const NAV_ITEMS: Tab[] = [
   { label: 'Agents', icon: '🤝', route: '/agents' },
   { label: 'Personas', icon: '🎭', route: '/personas' },
   { label: 'Roles', icon: '🎬', route: '/roles' },
+  { label: 'Roundtable', icon: '⚖️', route: '/roundtable' },
   { label: 'Projects', icon: '📁', route: '/projects' },
   { label: 'Graph', icon: '🕸️', route: '/graph' },
   { label: 'Pipeline', icon: '🧩', route: '/pipeline' },
