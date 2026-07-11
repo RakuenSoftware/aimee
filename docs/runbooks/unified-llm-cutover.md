@@ -47,10 +47,13 @@ CI builds + publishes the **one** model-less `aimee-llm` image as part of the no
 - **testing:** `.github/workflows/publish-llm-testing.yml` builds `aimee-llm` on `testing`
   pushes that touch `Dockerfile.aimee-llm` or the gateway/supervisor scripts, tagged `:testing`
   (+ `:testing-<sha>`, amd64).
-- **rerank artifacts (prerequisite):** `.github/workflows/publish-rerank-artifacts.yml` is a
-  dispatch job that converts the ettin rerankers once and uploads them to the
-  `rerank-artifacts-v1` GitHub release. **Run it before any container starts** — the supervisor
-  fetches the rerank encoder + head from that release on first boot.
+- **rerank artifacts (automatic):** `.github/workflows/publish-rerank-artifacts.yml` converts
+  the ettin rerankers and uploads them to the `rerank-artifacts-v1` GitHub release, which the
+  supervisor fetches on first boot. Both publish workflows above CALL it as a prerequisite
+  (`needs`), so a container image is never published without the release existing — no manual
+  step. It is idempotent: the expensive conversion runs only when an asset is missing (first
+  run, or after you delete the release / dispatch it with `force=true` to bump the reranker);
+  every other run just confirms the assets are present and skips.
 
 To build out-of-band (e.g. on a PVE CT with docker) — one model-less image, no model build-args:
 
