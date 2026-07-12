@@ -193,12 +193,24 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       }
       free(hint);
 
+      /* Respect the agent's max_parallel cap (same rationale as agent_run_named):
+       * a saturated agent is SKIPPED for a different one rather than piled on.
+       * Being at the limit is a saturation signal, not a provider fault, so it is
+       * added to `tried` (excluded from the next pick) WITHOUT a health failure. */
+      if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
+      {
+         free(enhanced);
+         if (ntried < MAX_AGENTS)
+            tried[ntried++] = ag->name;
+         continue;
+      }
       int rc;
       if (use_tools)
          rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
                                                 effective_prompt, max_tokens, temperature, out);
       else
          rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, temperature, out);
+      provider_catalog_concurrent_release(ag->name);
       free(enhanced);
 
       if (rc == 0)
@@ -338,7 +350,24 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    local.ablation = cfg->ablation;
    local.write_capable = 0; /* ensemble references answer a prompt; no write tools */
 
+   /* Enforce the agent's max_parallel cap (process-wide, keyed by name) BEFORE
+    * dispatch. The parallel panel/ensemble fan-out (parallel_worker) reaches this
+    * by-name path for every lens; without the cap a single model gets many
+    * SIMULTANEOUS reviews — tripping provider rate limits / 400s (this is exactly
+    * how a reused agent, or a busy provider like mistral with max_parallel=2, gets
+    * hammered). At the limit, report the agent unavailable so the caller (the
+    * panel's round-2 retry / the ensemble) picks a different agent instead of
+    * piling on. Return BEFORE the health-record block so "at limit" — a
+    * saturation signal, not a provider fault — never counts as a health failure. */
+   if (!provider_catalog_concurrent_acquire(local.name, local.max_parallel))
+   {
+      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
+      snprintf(out->error, sizeof(out->error), "agent '%s' at concurrency limit (max_parallel=%d)",
+               local.name, local.max_parallel);
+      return -1;
+   }
    int rc = agent_execute(&local, system_prompt, user_prompt, max_tokens, temperature, out);
+   provider_catalog_concurrent_release(local.name);
    if (rc == 0)
       provider_catalog_record_success(local.name);
    else
