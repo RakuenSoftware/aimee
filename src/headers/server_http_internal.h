@@ -130,5 +130,14 @@ int rh_wf_repo_file(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_device_start(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_device_poll(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_device_config(const route_req_t *rq, char *resp, int cap);
+/* GitHub device + web (redirect) sign-in and the server-orchestrated deploy
+ * handlers, also relocated to server_http_config_routes.c. */
+int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_github_web_start(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_github_web_callback(const route_req_t *rq, char *resp, int cap);
+int rh_deploy_apply(const route_req_t *rq, char *resp, int cap);
+int rh_deploy_status(const route_req_t *rq, char *resp, int cap);
 
 #endif /* SERVER_HTTP_INTERNAL_H */

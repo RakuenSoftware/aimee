@@ -12,6 +12,9 @@
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include "git_oauth_device.h"          /* GitLab/Gitea device-flow (relocated route handlers) */
+#include "git_oauth_github.h"          /* GitHub device + web (redirect) flow (relocated handlers) */
+#include "deploy_apply.h"              /* server-orchestrated container deploy (relocated handlers) */
+#include <limits.h>
 #include <time.h>
 #include "persona.h"
 #include "roundtable_preset.h"
@@ -681,5 +684,238 @@ int rh_git_oauth_device_config(const route_req_t *rq, char *resp, int cap)
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);
    cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* ── Relocated from server_http_routes.c (git-oauth-github + deploy handlers) ──
+ * Kept beside rh_git_oauth_device_config so the git-sign-in + deploy route
+ * handlers live together and server_http_routes.c stays under the line cap. */
+/* POST /v1/git/oauth/github/start — begin GitHub device-flow sign-in. Returns
+ * {ok, user_code, verification_uri, interval}; 503 if not configured. */
+int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   if (!device_git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+   if (!git_oauth_github_available())
+      return err_json(resp, cap, 503, "GitHub sign-in is not configured");
+
+   char user_code[64], verify_uri[256], err[256];
+   int interval = 5;
+   if (git_oauth_github_start(principal, user_code, sizeof(user_code), verify_uri,
+                              sizeof(verify_uri), &interval, err, sizeof(err)) != 0)
+      return err_json(resp, cap, 502, err[0] ? err : "GitHub sign-in failed to start");
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "user_code", user_code);
+   cJSON_AddStringToObject(out, "verification_uri", verify_uri);
+   cJSON_AddNumberToObject(out, "interval", interval);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/git/oauth/github/poll — poll device-flow completion. Returns
+ * {status: "pending"|"done"|"error", error?}. On done the token is stored. */
+int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   if (!device_git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   char err[256] = "";
+   int rc = git_oauth_github_poll(principal, err, sizeof(err));
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "status", rc == 1 ? "done" : rc == 0 ? "pending" : "error");
+   if (rc < 0 && err[0])
+      cJSON_AddStringToObject(out, "error", err);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* GET/POST /v1/git/oauth/github/config — read or set the GitHub OAuth App client
+ * ID from the UI (public; persisted server-side), so the "Sign in with GitHub"
+ * button can be configured without touching env vars. */
+int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap)
+{
+   if (!device_git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   if (strcmp(rq->method, "POST") == 0)
+   {
+      cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+      const cJSON *jid = body ? cJSON_GetObjectItemCaseSensitive(body, "client_id") : NULL;
+      const char *id = (cJSON_IsString(jid) && jid->valuestring) ? jid->valuestring : NULL;
+      /* client_secret is optional: setting it enables the seamless web (redirect)
+       * flow. It is write-only (sealed in the vault, never read back). */
+      const cJSON *jsec = body ? cJSON_GetObjectItemCaseSensitive(body, "client_secret") : NULL;
+      const char *secret = (cJSON_IsString(jsec) && jsec->valuestring) ? jsec->valuestring : NULL;
+      int rc = (id && id[0]) ? git_oauth_github_set_client_id(id) : 0;
+      if (rc == 0 && secret && secret[0])
+         rc = git_oauth_github_set_client_secret(secret);
+      cJSON_Delete(body);
+      if (rc != 0)
+         return err_json(resp, cap, 400, "client_id required");
+      return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
+                 ? 200
+                 : err_json(resp, cap, 500, "too large");
+   }
+
+   /* GET → report whether configured (the client ID is public, so return it) and
+    * whether the seamless web flow is available (a client secret is set). */
+   char id[256];
+   int have = git_oauth_github_get_client_id(id, sizeof(id));
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "configured", have);
+   cJSON_AddStringToObject(out, "client_id", have ? id : "");
+   cJSON_AddBoolToObject(out, "web", git_oauth_github_web_available());
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/git/oauth/github/web/start {redirect_uri} — begin the web
+ * (authorization-code) sign-in. Returns {ok, authorize_url} for the browser to
+ * navigate to; the caller derives redirect_uri from its public origin. */
+int rh_git_oauth_github_web_start(const route_req_t *rq, char *resp, int cap)
+{
+   if (!device_git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *jr = body ? cJSON_GetObjectItemCaseSensitive(body, "redirect_uri") : NULL;
+   const char *redirect = (cJSON_IsString(jr) && jr->valuestring) ? jr->valuestring : NULL;
+   char url[1280], err[256];
+   int rc = git_oauth_github_web_start(principal, redirect, url, sizeof(url), err, sizeof(err));
+   cJSON_Delete(body);
+   if (rc != 0)
+      return err_json(resp, cap, 400, err[0] ? err : "could not start GitHub sign-in");
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "authorize_url", url);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/git/oauth/github/web/callback {code, state} — complete the web flow:
+ * exchange the code for a token and store the github.com credential. Returns
+ * {status: "done"|"error", error?}. */
+int rh_git_oauth_github_web_callback(const route_req_t *rq, char *resp, int cap)
+{
+   if (!device_git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *jc = body ? cJSON_GetObjectItemCaseSensitive(body, "code") : NULL;
+   const cJSON *js = body ? cJSON_GetObjectItemCaseSensitive(body, "state") : NULL;
+   const char *code = (cJSON_IsString(jc) && jc->valuestring) ? jc->valuestring : NULL;
+   const char *state = (cJSON_IsString(js) && js->valuestring) ? js->valuestring : NULL;
+   char err[256] = "";
+   int rc = git_oauth_github_web_callback(principal, code, state, err, sizeof(err));
+   cJSON_Delete(body);
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "status", rc == 0 ? "done" : "error");
+   if (rc != 0 && err[0])
+      cJSON_AddStringToObject(out, "error", err);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* Both deploy routes require the server-orchestrated deploy to be enabled (the
+ * deploy compose mounts the Docker socket + managed compose file and sets
+ * AIMEE_DEPLOY_ENABLED=1) and a webchat user identity (same gate as the wizard's
+ * git routes). Returns 0 when allowed, else an HTTP status already written. */
+static int deploy_route_guard(char *resp, int cap)
+{
+   if (!deploy_apply_enabled())
+      return err_json(resp, cap, 503,
+                      "server-orchestrated deploy is disabled (no Docker socket / "
+                      "AIMEE_DEPLOY_ENABLED)");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "deploy requires a webchat user");
+   return 0;
+}
+
+/* POST /v1/deploy/apply — bring up the managed sibling services (postgres +
+ * aimee-kb + aimee-llm) for the current wizard config via `docker compose up -d`
+ * on a background thread. Returns {ok, status:"started"|"running"}. */
+int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   int g = deploy_route_guard(resp, cap);
+   if (g)
+      return g;
+   int rc = deploy_apply_start();
+   if (rc < 0)
+      return err_json(resp, cap, 500, "could not start the deploy");
+   int n = snprintf(resp, (size_t)cap, "{\"ok\":true,\"status\":\"%s\"}",
+                    rc == 1 ? "running" : "started");
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* GET /v1/deploy/status — the background deploy's state plus `docker compose ps`.
+ * Returns {enabled, running, last_exit|null, output, ps}. */
+int rh_deploy_status(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   int g = deploy_route_guard(resp, cap);
+   if (g)
+      return g;
+
+   int running = 0, last_exit = 0;
+   char out[8192];
+   deploy_apply_state(&running, &last_exit, out, sizeof(out));
+
+   char ps[8192];
+   int ps_code = -1;
+   (void)deploy_apply_status(ps, sizeof(ps), &ps_code);
+
+   cJSON *o = cJSON_CreateObject();
+   if (!o)
+      return err_json(resp, cap, 500, "out of memory");
+   cJSON_AddBoolToObject(o, "enabled", 1);
+   cJSON_AddBoolToObject(o, "running", running);
+   if (last_exit == INT_MIN)
+      cJSON_AddNullToObject(o, "last_exit");
+   else
+      cJSON_AddNumberToObject(o, "last_exit", last_exit);
+   cJSON_AddStringToObject(o, "output", out);
+   cJSON_AddStringToObject(o, "ps", ps_code == 0 ? ps : "");
+   char *s = cJSON_PrintUnformatted(o);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(o);
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
