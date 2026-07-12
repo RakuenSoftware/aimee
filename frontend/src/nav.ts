@@ -12,7 +12,7 @@ export const NAV_ITEMS: Tab[] = [
   { label: 'Dashboard', icon: '📊', route: '/dashboard' },
   { label: 'Logs', icon: '📜', route: '/logs' },
   { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows' },
-  { label: 'Workflow Actions', icon: '📝', route: '/workflow-actions' },
+  { label: 'Workflows', icon: '📝', route: '/workflow-actions' },
   { label: 'Agents', icon: '🤝', route: '/agents' },
   { label: 'Personas', icon: '🎭', route: '/personas' },
   { label: 'Roles', icon: '🎬', route: '/roles' },
