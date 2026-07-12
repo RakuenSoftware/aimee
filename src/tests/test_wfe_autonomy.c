@@ -482,8 +482,51 @@ int main(void)
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
 
+      /* negative value is also treated as malformed -> default (retry stays
+       * enabled, NOT disabled like an explicit 0): a fresh item still retries. */
+      g_stub_panel_calls = 0;
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "-3", 1);
+      char idn[80] = "";
+      assert(wfe_work_item_create("rta", "a14n", "a14n", "autonomous", idn, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(idn, err, sizeof err) == 0); /* initial park */
+      assert(wfe_autonomy_run(idn, err, sizeof err) == 0); /* retry #1 -> not disabled */
+      assert(g_stub_panel_calls == 2);
+
       unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
       wfe_set_panel_provider(NULL);
+   }
+
+   /* A15: a NON-transient park (pending_human) is left UNTOUCHED by the retry path.
+    * It is neither short-circuited early nor retried — it falls through to the
+    * advance loop, which re-parks it without re-running work. This pins the
+    * invariant H1 depends on: adding the transient-retry branch did not change
+    * behavior for any other park class. */
+   {
+      g_stub_panel_calls = 0;
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("auto", "a15", "a15", "autonomous", id, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* parks pending_human */
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      char stage0[64];
+      snprintf(stage0, sizeof stage0, "%s", wi.current_stage);
+
+      /* a second sweep must NOT touch it: same reason, same stage, no panel activity. */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      assert(strcmp(wi.current_stage, stage0) == 0);
+      assert(g_stub_panel_calls == 0);
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int retries = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "panel_retry") == 0)
+            retries++;
+      free(evs);
+      assert(retries == 0); /* the transient-retry branch never fired for pending_human */
    }
 
    printf("ok\n");
