@@ -27,8 +27,12 @@ static int g_running;
 static int g_notified;
 
 /* Drive every active autonomous work item one autonomy pass. wfe_autonomy_run is
- * safe to call on a human-parked item (it re-parks without re-running work), so a
- * sweep never double-executes a delegate. Terminal/interactive items are skipped. */
+ * safe to call on a human-parked item (pending_human / stuck / operator_paused):
+ * it re-parks without re-running work, so a sweep never double-executes a gated
+ * delegate. A TRANSIENT roundtable park (panel_degraded / panel_unreachable) is
+ * the deliberate exception — autonomy re-runs the panel a bounded number of times
+ * (one attempt per sweep) so a momentary provider blip self-heals rather than
+ * dead-ending the run. Terminal/interactive items are skipped. */
 void wfe_scheduler_run_once(void)
 {
    db1_work_item_t *items = NULL;
