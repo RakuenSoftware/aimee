@@ -426,6 +426,7 @@ The binaries read 149 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
+| `AIMEE_AUTONOMY_PANEL_RETRIES` | Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry (a degraded panel escalates immediately — the pre-feature behavior, useful during a known provider incident); a malformed/negative value floors to the default so a typo can't silently disable the rail. |
 | `AIMEE_DEFAULT_BRANCH` | Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged). |
 | `AIMEE_WORKFLOW_BASE` | Base branch for the engine's freeze/diff. |
 | `AIMEE_WORKFLOW_REPO` | Local repository directory the workflow engine operates on. |
@@ -469,7 +470,7 @@ The binaries read 149 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_PANEL_RETRIES`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_OCR_URL`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_OCR_URL`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 

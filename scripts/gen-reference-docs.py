@@ -597,6 +597,7 @@ ENV_DESC = {
     # Workflow engine
     "AIMEE_WORKFLOW_REPO": ("Workflow engine", "Local repository directory the workflow engine operates on."),
     "AIMEE_WORKFLOW_BASE": ("Workflow engine", "Base branch for the engine's freeze/diff."),
+    "AIMEE_AUTONOMY_PANEL_RETRIES": ("Workflow engine", "Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry (a degraded panel escalates immediately — the pre-feature behavior, useful during a known provider incident); a malformed/negative value floors to the default so a typo can't silently disable the rail."),
     "AIMEE_DEFAULT_BRANCH": ("Workflow engine", "Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged)."),
     # Git verify / MCP
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),

@@ -14,6 +14,13 @@
 
 #define WFE_MAX_OVERRIDES 2
 
+/* Default per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable
+ * park (panel_degraded / panel_unreachable). With one retry per scheduler backstop
+ * sweep this is roughly "how many sweeps a persistent degradation is tolerated
+ * before it escalates to a human." Override with AIMEE_AUTONOMY_PANEL_RETRIES
+ * (an explicit 0 disables auto-retry; a malformed/negative value floors here). */
+#define WFE_AUTONOMY_PANEL_RETRY_CAP_DEFAULT 6
+
 /* Drive a work item as far as its mode + gate policies allow. Returns 0 on a
  * clean stop (terminal or parked), -1 on error. */
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen);
