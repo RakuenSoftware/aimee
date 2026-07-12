@@ -64,7 +64,14 @@ static int autonomy_panel_retries_used(const char *work_item_id, const char *sta
 {
    db1_lifecycle_event_t *evs = NULL;
    int n = db1_lifecycle_event_list(work_item_id, &evs);
+   if (n <= 0)
+   {
+      free(evs); /* NULL-safe: nothing read -> 0 retries used (fail toward retry) */
+      return 0;
+   }
    int used = 0;
+   /* kind[] and stage[] are fixed-size arrays in db1_lifecycle_event_t, never
+    * NULL, so strcmp is safe without a null guard. */
    for (int i = 0; i < n; i++)
       if (strcmp(evs[i].kind, "panel_retry") == 0 && strcmp(evs[i].stage, stage) == 0)
          used++;
@@ -158,13 +165,26 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
             return 0;
          if (autonomy_pause_is_transient(wi0.pause_reason))
          {
+            /* Budget is per (work item, stage): a stage revisited after a loop
+             * inherits its earlier retry count on purpose — a stage that has
+             * already burned its budget and comes back still-degrading should
+             * escalate to a human, not silently reset. wfe_env_long floors a
+             * junk/<=0 override to the default, so cap is always >= 1 (retries
+             * cannot be accidentally disabled to 0). */
             long cap = wfe_env_long("AIMEE_AUTONOMY_PANEL_RETRIES", 6);
             if (autonomy_panel_retries_used(work_item_id, wi0.current_stage) >= cap)
-               return 0; /* budget spent: stay parked for a human resume */
+               return 0; /* budget spent: stay parked to escalate to a human */
+            /* Clear the pause FIRST, then record the retry, so the budget counts
+             * only retries that ACTUALLY happened. If the clear fails the item
+             * stays parked and no panel_retry event is written — a persistent
+             * clear failure therefore escalates via the human gate instead of
+             * silently burning the budget on retries that never ran. (This path
+             * is single-threaded: the scheduler drives work items sequentially,
+             * so there is no concurrent same-item retry to race.) */
+            if (db1_work_item_clear_pause(work_item_id) != 0)
+               return 0; /* could not clear -> leave parked, retry next sweep (no budget spent) */
             db1_lifecycle_event_add(work_item_id, wi0.current_stage, "panel_retry", "engine",
                                     wi0.pause_reason, "", 0);
-            if (db1_work_item_clear_pause(work_item_id) != 0)
-               return 0; /* could not clear the pause -> leave it, retry next sweep */
             /* pause cleared -> fall through to the advance loop, which re-runs the
              * parked roundtable node for a fresh panel. */
          }
