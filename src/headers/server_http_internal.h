@@ -124,5 +124,11 @@ int rh_wf_item_stop(const route_req_t *rq, char *resp, int cap);
 int rh_wf_item_delete(const route_req_t *rq, char *resp, int cap);
 int rh_wf_repo_tree(const route_req_t *rq, char *resp, int cap);
 int rh_wf_repo_file(const route_req_t *rq, char *resp, int cap);
+/* GitLab/Gitea OAuth device-flow route handlers — defined in
+ * server_http_config_routes.c (relocated to keep server_http_routes.c under the
+ * line-check ceiling). Referenced by the route table in server_http_routes.c. */
+int rh_git_oauth_device_start(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_device_poll(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_device_config(const route_req_t *rq, char *resp, int cap);
 
 #endif /* SERVER_HTTP_INTERNAL_H */

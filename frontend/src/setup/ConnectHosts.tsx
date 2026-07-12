@@ -2,16 +2,64 @@ import { useCallback, useEffect, useState } from 'react';
 
 /* Wizard — Connection (git hosts). Authenticate aimee-server to the git hosts it
  * will clone from, so the next step (Workspaces & projects) can enumerate + clone
- * private repos. Three ways in, all via the existing /api/git/* routes (which
- * forward to aimee-server's sealed vault — tokens/keys are write-only, never read
- * back to the browser):
+ * private repos. Three ways in, all via the /api/git/* routes (which forward to
+ * aimee-server's sealed vault — tokens/keys are write-only, never read back):
  *
- *  • Sign in with GitHub — OAuth device flow (needs a GitHub OAuth App client ID).
- *  • Per-host access token — any host/provider (GitHub, GitLab, Gitea, Bitbucket…).
+ *  • OAuth device flow — GitHub, GitLab, or Gitea/Forgejo (needs an OAuth App
+ *    client ID for the chosen provider/host; the client ID is public).
+ *  • Per-host access token — any host/provider (incl. Bitbucket).
  *  • SSH private key — for git over SSH.
  *
- * Optional step: public repos clone without any of this. A distilled version of
- * the Projects page's "Git accounts" panel, scoped to first-run setup. */
+ * Optional step: public repos clone without any of this. GitHub uses its dedicated
+ * /api/git/oauth/github/* routes; GitLab/Gitea use the generic
+ * /api/git/oauth/device/* routes with a {provider, host} selector. */
+
+type OAuthProvider = 'github' | 'gitlab' | 'gitea';
+
+interface ProviderMeta {
+  label: string;
+  needsHost: boolean;
+  defaultHost: string;
+  appHelp: React.ReactNode;
+}
+
+const PROVIDERS: Record<OAuthProvider, ProviderMeta> = {
+  github: {
+    label: 'GitHub',
+    needsHost: false,
+    defaultHost: 'github.com',
+    appHelp: (
+      <>
+        Create a GitHub OAuth App (
+        <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">github.com/settings/developers</a>
+        {' '}→ New OAuth App → enable <b>Device flow</b>), then paste its <b>Client ID</b>.
+      </>
+    ),
+  },
+  gitlab: {
+    label: 'GitLab',
+    needsHost: true,
+    defaultHost: 'gitlab.com',
+    appHelp: (
+      <>
+        Create a GitLab application (User Settings → Applications, or Admin → Applications) with the{' '}
+        <b>read_api</b> + <b>read_repository</b> scopes and no redirect URI, then paste its{' '}
+        <b>Application ID</b>.
+      </>
+    ),
+  },
+  gitea: {
+    label: 'Gitea / Forgejo',
+    needsHost: true,
+    defaultHost: '',
+    appHelp: (
+      <>
+        Create an OAuth2 application (Settings → Applications) on your Gitea/Forgejo instance, then
+        paste its <b>Client ID</b>. Requires Gitea ≥ 1.19 (device flow support).
+      </>
+    ),
+  },
+};
 
 function csrf(): string {
   try {
@@ -41,6 +89,13 @@ export interface ConnectHostsProps {
   onHostsChanged?: (count: number) => void;
 }
 
+interface Pending {
+  code: string;
+  uri: string;
+  provider: OAuthProvider;
+  host: string;
+}
+
 export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsProps) {
   const [hosts, setHosts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -51,10 +106,16 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
   const [credToken, setCredToken] = useState('');
   const [sshKey, setSshKey] = useState('');
 
-  const [ghConfigured, setGhConfigured] = useState(false);
-  const [ghClientId, setGhClientId] = useState('');
-  const [ghCode, setGhCode] = useState('');
-  const [ghUri, setGhUri] = useState('');
+  // OAuth (device flow) — provider-generic.
+  const [provider, setProvider] = useState<OAuthProvider>('github');
+  const [oauthHost, setOauthHost] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [configured, setConfigured] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+
+  const meta = PROVIDERS[provider];
+  // The host this provider's flow targets (github ignores host; gitlab defaults).
+  const effHost = provider === 'github' ? '' : oauthHost.trim() || meta.defaultHost;
 
   const loadHosts = useCallback(async () => {
     try {
@@ -70,42 +131,57 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
     }
   }, [onHostsChanged]);
 
-  const loadGhConfig = useCallback(async () => {
+  // Config (client ID) for the current provider/host. GitHub has its own route;
+  // GitLab/Gitea share the device route with a provider+host query.
+  const loadConfig = useCallback(async () => {
+    setConfigured(false);
+    setClientId('');
     try {
-      const r = await api('/api/git/oauth/github/config', { method: 'GET' });
+      const path =
+        provider === 'github'
+          ? '/api/git/oauth/github/config'
+          : `/api/git/oauth/device/config?provider=${provider}&host=${encodeURIComponent(effHost)}`;
+      const r = await api(path, { method: 'GET' });
       const d = await r.json();
       if (r.ok) {
-        setGhConfigured(!!d.configured);
-        setGhClientId(d.client_id || '');
+        setConfigured(!!d.configured);
+        setClientId(d.client_id || '');
       }
     } catch {
       /* leave unconfigured */
     }
-  }, []);
+  }, [provider, effHost]);
 
   useEffect(() => {
     loadHosts();
-    loadGhConfig();
-  }, [loadHosts, loadGhConfig]);
-
-  // GitHub device-flow: once a user code is shown, poll until the user authorizes.
+  }, [loadHosts]);
   useEffect(() => {
-    if (!ghCode) return;
+    loadConfig();
+  }, [loadConfig]);
+
+  // Device-flow poll: once a user code is shown, poll the right endpoint until the
+  // user authorizes (or it errors).
+  useEffect(() => {
+    if (!pending) return;
     let alive = true;
     const id = setInterval(async () => {
       try {
-        const r = await api('/api/git/oauth/github/poll', { method: 'POST' });
+        const r =
+          pending.provider === 'github'
+            ? await api('/api/git/oauth/github/poll', { method: 'POST' })
+            : await api('/api/git/oauth/device/poll', {
+                method: 'POST',
+                body: JSON.stringify({ provider: pending.provider, host: pending.host }),
+              });
         const d = await r.json();
         if (!alive) return;
         if (d.status === 'done') {
-          setGhCode('');
-          setGhUri('');
-          setMsg('GitHub connected.');
+          setPending(null);
+          setMsg(`${PROVIDERS[pending.provider].label} connected.`);
           await loadHosts();
         } else if (d.status === 'error') {
-          setGhCode('');
-          setGhUri('');
-          setErr(d.error || 'GitHub sign-in failed');
+          setPending(null);
+          setErr(d.error || 'sign-in failed');
         }
       } catch {
         /* transient; keep polling */
@@ -115,37 +191,57 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
       alive = false;
       clearInterval(id);
     };
-  }, [ghCode, loadHosts]);
+  }, [pending, loadHosts]);
 
-  async function saveGhConfig() {
-    if (!ghClientId.trim()) return;
+  async function saveConfig() {
+    if (!clientId.trim()) return;
     setBusy(true);
     setErr('');
     try {
-      const r = await api('/api/git/oauth/github/config', {
-        method: 'POST',
-        body: JSON.stringify({ client_id: ghClientId.trim() }),
-      });
+      const r =
+        provider === 'github'
+          ? await api('/api/git/oauth/github/config', {
+              method: 'POST',
+              body: JSON.stringify({ client_id: clientId.trim() }),
+            })
+          : await api('/api/git/oauth/device/config', {
+              method: 'POST',
+              body: JSON.stringify({ provider, host: effHost, client_id: clientId.trim() }),
+            });
       const d = await r.json();
       if (!r.ok) setErr(d.error || 'could not save client ID');
-      else await loadGhConfig();
+      else await loadConfig();
     } finally {
       setBusy(false);
     }
   }
 
-  async function startGithub() {
+  async function startSignIn() {
     setErr('');
     setMsg('');
+    if (meta.needsHost && !effHost) {
+      setErr('Enter the host for this provider.');
+      return;
+    }
     try {
-      const r = await api('/api/git/oauth/github/start', { method: 'POST' });
+      const r =
+        provider === 'github'
+          ? await api('/api/git/oauth/github/start', { method: 'POST' })
+          : await api('/api/git/oauth/device/start', {
+              method: 'POST',
+              body: JSON.stringify({ provider, host: effHost }),
+            });
       const d = await r.json();
       if (!r.ok) {
-        setErr(d.error || 'GitHub sign-in unavailable');
+        setErr(d.error || 'sign-in unavailable');
         return;
       }
-      setGhCode(d.user_code || '');
-      setGhUri(d.verification_uri || 'https://github.com/login/device');
+      setPending({
+        code: d.user_code || '',
+        uri: d.verification_uri || '',
+        provider,
+        host: effHost,
+      });
     } catch {
       setErr('aimee-server unavailable');
     }
@@ -222,39 +318,47 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
         and never shown again.
       </div>
 
-      {/* GitHub OAuth */}
+      {/* OAuth device flow */}
       <section style={{ display: 'grid', gap: 8 }}>
-        <div style={sectionTitle}>Sign in with GitHub</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            style={{ ...primaryBtn, background: ghConfigured ? '#24292e' : '#888', borderColor: '#24292e' }}
-            disabled={busy || !!ghCode || !ghConfigured}
-            onClick={startGithub}
-          >
-            Sign in with GitHub
-          </button>
-          {ghCode && (
-            <span style={{ fontSize: 12.5, color: '#444' }}>
-              Go to <a href={ghUri} target="_blank" rel="noreferrer">{ghUri}</a> and enter{' '}
-              <code style={{ background: '#eee', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>{ghCode}</code>
-              <span style={{ color: '#888' }}> — waiting…</span>
-            </span>
+        <div style={sectionTitle}>Sign in with OAuth</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select style={{ ...input, width: 150 }} value={provider}
+            onChange={(e) => { setProvider(e.target.value as OAuthProvider); setPending(null); setErr(''); setMsg(''); }}>
+            {(Object.keys(PROVIDERS) as OAuthProvider[]).map((p) => (
+              <option key={p} value={p}>{PROVIDERS[p].label}</option>
+            ))}
+          </select>
+          {meta.needsHost && (
+            <input style={{ ...input, flex: 1, minWidth: 160 }}
+              placeholder={`host (e.g. ${meta.defaultHost || 'gitea.example.com'})`}
+              value={oauthHost} onChange={(e) => setOauthHost(e.target.value)} />
           )}
+          <button
+            style={{ ...primaryBtn, background: configured ? '#2c8f56' : '#888', borderColor: configured ? '#2c6' : '#888' }}
+            disabled={busy || !!pending || !configured}
+            onClick={startSignIn}
+          >
+            Sign in
+          </button>
         </div>
-        <details style={{ fontSize: 12, color: '#666' }} open={!ghConfigured}>
+        {pending && (
+          <div style={{ fontSize: 12.5, color: '#444' }}>
+            Go to <a href={pending.uri} target="_blank" rel="noreferrer">{pending.uri}</a> and enter{' '}
+            <code style={{ background: '#eee', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>{pending.code}</code>
+            <span style={{ color: '#888' }}> — waiting…</span>
+          </div>
+        )}
+        <details style={{ fontSize: 12, color: '#666' }} open={!configured}>
           <summary style={{ cursor: 'pointer' }}>
-            GitHub OAuth App {ghConfigured ? '(configured ✓ — click to change)' : '— set this to enable the button'}
+            {meta.label} OAuth App {configured ? '(configured ✓ — click to change)' : '— set this to enable sign-in'}
           </summary>
           <div style={{ marginTop: 6 }}>
-            <div style={{ marginBottom: 4 }}>
-              Create a GitHub OAuth App (
-              <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">github.com/settings/developers</a>
-              {' '}→ New OAuth App → enable <b>Device flow</b>), then paste its <b>Client ID</b>:
-            </div>
+            <div style={{ marginBottom: 4 }}>{meta.appHelp}</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <input style={{ ...input, flex: 1, minWidth: 200 }} placeholder="GitHub OAuth App Client ID"
-                value={ghClientId} onChange={(e) => setGhClientId(e.target.value)} />
-              <button style={ghostBtn} disabled={busy || !ghClientId.trim()} onClick={saveGhConfig}>Save</button>
+              <input style={{ ...input, flex: 1, minWidth: 200 }} placeholder={`${meta.label} OAuth App Client ID`}
+                value={clientId} onChange={(e) => setClientId(e.target.value)} />
+              <button style={ghostBtn} disabled={busy || !clientId.trim() || (meta.needsHost && !effHost)}
+                onClick={saveConfig}>Save</button>
             </div>
           </div>
         </details>

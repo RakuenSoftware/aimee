@@ -75,6 +75,20 @@ aimee_enable_test_asserts(test_git_org_repos)
 add_test(NAME test_git_org_repos COMMAND test_git_org_repos)
 set_tests_properties(test_git_org_repos PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# test_git_oauth_device: provider-name parsing + endpoint construction for the
+# GitLab/Gitea device flow. HTTP + vault externals stubbed in the test (never
+# invoked by the pure functions under test).
+add_executable(test_git_oauth_device test_git_oauth_device.c
+  ../server/git_oauth_device.c ../vendor/cJSON.c)
+target_include_directories(test_git_oauth_device PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+aimee_enable_test_asserts(test_git_oauth_device)
+add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
+set_tests_properties(test_git_oauth_device PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_executable(test_context_engine test_context_engine.c)
 target_include_directories(test_context_engine PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..

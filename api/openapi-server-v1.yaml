@@ -4811,6 +4811,153 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/device/start:
+    post:
+      summary: Begin a GitLab/Gitea device-flow sign-in
+      description: >
+        Start the OAuth 2.0 device flow for a non-GitHub provider (GitLab or
+        Gitea/Forgejo) to populate the host's credential. Returns a user code +
+        verification URI; the opaque device_code is held server-side for the poll
+        endpoint. Requires a client ID registered for (provider, host).
+        Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider: { type: string, enum: [gitlab, gitea] }
+                host: { type: string, description: Host (defaults to gitlab.com for GitLab; required for Gitea) }
+      responses:
+        "200":
+          description: Device code issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  user_code: { type: string }
+                  verification_uri: { type: string }
+                  interval: { type: integer }
+        "400":
+          description: Unknown provider or missing host
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/device/poll:
+    post:
+      summary: Poll GitLab/Gitea device-flow completion
+      description: >
+        Poll for the user completing the device flow. On completion the access
+        token is stored as the host's credential. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider: { type: string, enum: [gitlab, gitea] }
+                host: { type: string }
+      responses:
+        "200":
+          description: Poll result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [pending, done, error] }
+                  error: { type: string }
+        "400":
+          description: Unknown provider
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/device/config:
+    get:
+      summary: Read a GitLab/Gitea OAuth App client ID
+      description: >
+        Whether an OAuth App client ID is configured for (provider, host), and the
+        value (public). provider + host come from the query string. Capability:
+        tool:execute.
+      parameters:
+        - in: query
+          name: provider
+          required: true
+          schema: { type: string, enum: [gitlab, gitea] }
+        - in: query
+          name: host
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured: { type: boolean }
+                  client_id: { type: string }
+        "400":
+          description: Unknown provider
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    post:
+      summary: Set a GitLab/Gitea OAuth App client ID
+      description: >
+        Persist the OAuth App client ID for (provider, host) server-side so device
+        sign-in works. The client ID is public. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, client_id]
+              properties:
+                provider: { type: string, enum: [gitlab, gitea] }
+                host: { type: string }
+                client_id: { type: string }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { type: boolean } }
+        "400":
+          description: Unknown provider or missing client_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)
