@@ -6,7 +6,6 @@ import {
   ROLES,
   type Role,
   type Placement,
-  type KbMode,
   type HostInfo,
   placementOptions,
   placementOptionId,
@@ -15,12 +14,14 @@ import {
   buildDesiredConfig,
 } from './deployTopology';
 
-/* Wizard page 2 — Deploy topology. Places the three LLM roles and the knowledge
- * base onto the page-2 config record (kb_mode + per-role llm_*), which
- * `aimee config deploy-env` translates to the compose stack. Every write goes
- * through the existing /api/config/set allowlist (no new backend). All local
- * roles share ONE aimee-llm container on the chosen host; a remote KB deploys
- * nothing locally, so the LLM section is hidden for it.
+/* Wizard — Deploy topology (local knowledge base only). Places the three LLM
+ * roles (embedder / reranker / synthesizer) onto the page-2 config record (per-role
+ * llm_* keys), which `aimee config deploy-env` translates to the compose stack.
+ * Every write goes through the existing /api/config/set allowlist (no new backend).
+ * All local roles share ONE aimee-llm container on the chosen host.
+ *
+ * The knowledge-base local/remote choice lives in the preceding KnowledgeBase step;
+ * this step is only shown for kb_mode='local', so it no longer renders the KB fork.
  *
  * Self-contained like PrimaryChooser: it loads config + GET /api/hosts, guards
  * every save (Toast + stay put on failure), and reports the restart-class keys it
@@ -67,10 +68,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const [kbMode, setKbMode] = useState<KbMode>('local');
-  const [kbUrl, setKbUrl] = useState('');
-  const [kbBearer, setKbBearer] = useState('');
-
   const [hostName, setHostName] = useState('');
   const [roleUi, setRoleUi] = useState<Record<Role, RoleUi>>({
     embed: { optionId: 'cpu', endpoint: '' },
@@ -89,9 +86,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       if (!alive) return;
       setCfg(c);
       setHosts(h);
-      setKbMode(String(c.kb_mode ?? 'local') === 'remote' ? 'remote' : 'local');
-      setKbUrl(String(c.kb_client_url ?? ''));
-      setKbBearer(String(c.kb_client_bearer_token ?? ''));
       setSynthModel(String(c.llm_synth_model ?? ''));
       setEmbedModel(String(c.embedding_model ?? ''));
       setEmbedDim(c.embedding_dim == null ? '' : String(c.embedding_dim));
@@ -162,11 +156,13 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     setSaving(true);
     setError('');
 
-    // Build the full desired {key: value} map for the current selection.
+    // Build the full desired {key: value} map for the current selection. This step
+    // is local-only, so kb_mode is fixed to 'local' (the KnowledgeBase step already
+    // recorded the choice; re-asserting it is idempotent).
     const desired = buildDesiredConfig({
-      kbMode,
-      kbUrl,
-      kbBearer,
+      kbMode: 'local',
+      kbUrl: '',
+      kbBearer: '',
       placements: { embed: resolvePlacement('embed'), rerank: resolvePlacement('rerank'), synth: resolvePlacement('synth') },
       embedModel,
       embedDim,
@@ -203,96 +199,64 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading hosts…</div>;
   }
 
-  const remote = kbMode === 'remote';
-
   return (
     <div style={{ display: 'grid', gap: 16, marginBottom: 8 }}>
-      {/* Section A — Knowledge base */}
-      <section style={{ display: 'grid', gap: 8 }}>
-        <div style={sectionTitle}>Knowledge base</div>
-        <label style={radioRow}>
-          <input type="radio" checked={!remote} onChange={() => setKbMode('local')} />
-          <span>Deploy a local knowledge base (recommended)</span>
-        </label>
-        <label style={radioRow}>
-          <input type="radio" checked={remote} onChange={() => setKbMode('remote')} />
-          <span>Connect to an existing aimee-kb</span>
-        </label>
-        {remote && (
-          <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
-            <div style={{ fontSize: 11.5, color: '#778' }}>
-              A remote KB deploys nothing here — aimee-server just connects to it. LLM placement below is skipped.
-            </div>
-            <Field label="aimee-kb URL">
-              <input style={input} value={kbUrl} onChange={(e) => setKbUrl(e.target.value)} placeholder="https://kb.example:8760" />
-            </Field>
-            <Field label="Bearer token">
-              <input style={input} type="password" autoComplete="off" value={kbBearer}
-                onChange={(e) => setKbBearer(e.target.value)} placeholder="token" />
-            </Field>
-          </div>
+      <section style={{ display: 'grid', gap: 10 }}>
+        <div style={sectionTitle}>LLM placement</div>
+        <Field label="Host for the local LLM container">
+          <select style={input} value={hostName} onChange={(e) => setHostName(e.target.value)}>
+            {hosts.map((h) => (
+              <option key={h.name} value={h.name}>
+                {h.name} ({h.kind}){h.gpus.length ? ` · ${h.gpus.length} GPU${h.gpus.length > 1 ? 's' : ''}` : ' · CPU only'}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {host?.error && (
+          <div style={{ fontSize: 11.5, color: '#a33' }}>Probe error on {host.name}: {host.error} — CPU still available.</div>
         )}
+        <div style={{ fontSize: 11.5, color: '#778', marginTop: -2 }}>
+          All GPU/CPU-placed roles run on one aimee-llm container on this host.
+        </div>
+
+        {ROLES.map(({ role, label, blurb }) => {
+          const ui = roleUi[role];
+          const p = resolvePlacement(role);
+          const tierA = synthIsTierAOnly(role, p);
+          return (
+            <div key={role} style={roleCard}>
+              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{label}</div>
+              <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>{blurb}</div>
+              <select style={input} value={ui.optionId} onChange={(e) => setRole(role, { optionId: e.target.value })}>
+                {options.map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+              {ui.optionId === 'external' && (
+                <input style={{ ...input, marginTop: 6 }} value={ui.endpoint}
+                  onChange={(e) => setRole(role, { endpoint: e.target.value })}
+                  placeholder={role === 'embed' ? 'https://embedder.example/v1' : 'https://llm.example/v1'} />
+              )}
+              {role === 'embed' && ui.optionId === 'external' && (
+                <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+                  <input style={input} value={embedModel} onChange={(e) => setEmbedModel(e.target.value)} placeholder="embedding model" />
+                  <input style={input} value={embedDim} onChange={(e) => setEmbedDim(e.target.value)} placeholder="embedding dim (e.g. 1024)" inputMode="numeric" />
+                </div>
+              )}
+              {role === 'embed' && ui.optionId !== 'external' && ui.optionId !== 'off' && (
+                <div style={{ fontSize: 11, color: '#889', marginTop: 4 }}>Dimension auto-detected from the tier at runtime.</div>
+              )}
+              {role === 'synth' && p.backend !== 'off' && ui.optionId !== 'external' && (
+                <input style={{ ...input, marginTop: 6 }} value={synthModel}
+                  onChange={(e) => setSynthModel(e.target.value)} placeholder="synth model" />
+              )}
+              {tierA && (
+                <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 4 }}>CPU runs the Tier-A synth model only.</div>
+              )}
+            </div>
+          );
+        })}
       </section>
-
-      {/* Section B — LLM placement (local KB only) */}
-      {!remote && (
-        <section style={{ display: 'grid', gap: 10 }}>
-          <div style={sectionTitle}>LLM placement</div>
-          <Field label="Host for the local LLM container">
-            <select style={input} value={hostName} onChange={(e) => setHostName(e.target.value)}>
-              {hosts.map((h) => (
-                <option key={h.name} value={h.name}>
-                  {h.name} ({h.kind}){h.gpus.length ? ` · ${h.gpus.length} GPU${h.gpus.length > 1 ? 's' : ''}` : ' · CPU only'}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {host?.error && (
-            <div style={{ fontSize: 11.5, color: '#a33' }}>Probe error on {host.name}: {host.error} — CPU still available.</div>
-          )}
-          <div style={{ fontSize: 11.5, color: '#778', marginTop: -2 }}>
-            All GPU/CPU-placed roles run on one aimee-llm container on this host.
-          </div>
-
-          {ROLES.map(({ role, label, blurb }) => {
-            const ui = roleUi[role];
-            const p = resolvePlacement(role);
-            const tierA = synthIsTierAOnly(role, p);
-            return (
-              <div key={role} style={roleCard}>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{label}</div>
-                <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>{blurb}</div>
-                <select style={input} value={ui.optionId} onChange={(e) => setRole(role, { optionId: e.target.value })}>
-                  {options.map((o) => (
-                    <option key={o.id} value={o.id}>{o.label}</option>
-                  ))}
-                </select>
-                {ui.optionId === 'external' && (
-                  <input style={{ ...input, marginTop: 6 }} value={ui.endpoint}
-                    onChange={(e) => setRole(role, { endpoint: e.target.value })}
-                    placeholder={role === 'embed' ? 'https://embedder.example/v1' : 'https://llm.example/v1'} />
-                )}
-                {role === 'embed' && ui.optionId === 'external' && (
-                  <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
-                    <input style={input} value={embedModel} onChange={(e) => setEmbedModel(e.target.value)} placeholder="embedding model" />
-                    <input style={input} value={embedDim} onChange={(e) => setEmbedDim(e.target.value)} placeholder="embedding dim (e.g. 1024)" inputMode="numeric" />
-                  </div>
-                )}
-                {role === 'embed' && ui.optionId !== 'external' && ui.optionId !== 'off' && (
-                  <div style={{ fontSize: 11, color: '#889', marginTop: 4 }}>Dimension auto-detected from the tier at runtime.</div>
-                )}
-                {role === 'synth' && p.backend !== 'off' && ui.optionId !== 'external' && (
-                  <input style={{ ...input, marginTop: 6 }} value={synthModel}
-                    onChange={(e) => setSynthModel(e.target.value)} placeholder="synth model" />
-                )}
-                {tierA && (
-                  <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 4 }}>CPU runs the Tier-A synth model only.</div>
-                )}
-              </div>
-            );
-          })}
-        </section>
-      )}
 
       {error && (
         <div style={{ fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
@@ -310,7 +274,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
 }
 
 const sectionTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#233' };
-const radioRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
 const roleCard: React.CSSProperties = {
   display: 'grid', gap: 2, padding: '10px 12px', borderRadius: 9, border: '1px solid #dde', background: '#fbfcfe',
 };
