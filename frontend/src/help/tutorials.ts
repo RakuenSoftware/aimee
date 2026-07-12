@@ -55,7 +55,7 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     seeAlso: '/workflow-actions',
   },
   '/workflow-actions': {
-    title: 'Workflow Actions',
+    title: 'Workflows',
     body: [
       'The runtime queue: workflow items waiting on you to approve or reject.',
       'This is the human-in-the-loop gate.',
