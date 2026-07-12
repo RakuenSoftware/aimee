@@ -1769,7 +1769,13 @@ static int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap
       cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
       const cJSON *jid = body ? cJSON_GetObjectItemCaseSensitive(body, "client_id") : NULL;
       const char *id = (cJSON_IsString(jid) && jid->valuestring) ? jid->valuestring : NULL;
-      int rc = (id && id[0]) ? git_oauth_github_set_client_id(id) : -1;
+      /* client_secret is optional: setting it enables the seamless web (redirect)
+       * flow. It is write-only (sealed in the vault, never read back). */
+      const cJSON *jsec = body ? cJSON_GetObjectItemCaseSensitive(body, "client_secret") : NULL;
+      const char *secret = (cJSON_IsString(jsec) && jsec->valuestring) ? jsec->valuestring : NULL;
+      int rc = (id && id[0]) ? git_oauth_github_set_client_id(id) : 0;
+      if (rc == 0 && secret && secret[0])
+         rc = git_oauth_github_set_client_secret(secret);
       cJSON_Delete(body);
       if (rc != 0)
          return err_json(resp, cap, 400, "client_id required");
@@ -1778,12 +1784,75 @@ static int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap
                  : err_json(resp, cap, 500, "too large");
    }
 
-   /* GET → report whether configured (the client ID is public, so return it). */
+   /* GET → report whether configured (the client ID is public, so return it) and
+    * whether the seamless web flow is available (a client secret is set). */
    char id[256];
    int have = git_oauth_github_get_client_id(id, sizeof(id));
    cJSON *out = cJSON_CreateObject();
    cJSON_AddBoolToObject(out, "configured", have);
    cJSON_AddStringToObject(out, "client_id", have ? id : "");
+   cJSON_AddBoolToObject(out, "web", git_oauth_github_web_available());
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/git/oauth/github/web/start {redirect_uri} — begin the web
+ * (authorization-code) sign-in. Returns {ok, authorize_url} for the browser to
+ * navigate to; the caller derives redirect_uri from its public origin. */
+static int rh_git_oauth_github_web_start(const route_req_t *rq, char *resp, int cap)
+{
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *jr = body ? cJSON_GetObjectItemCaseSensitive(body, "redirect_uri") : NULL;
+   const char *redirect = (cJSON_IsString(jr) && jr->valuestring) ? jr->valuestring : NULL;
+   char url[1280], err[256];
+   int rc = git_oauth_github_web_start(principal, redirect, url, sizeof(url), err, sizeof(err));
+   cJSON_Delete(body);
+   if (rc != 0)
+      return err_json(resp, cap, 400, err[0] ? err : "could not start GitHub sign-in");
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "authorize_url", url);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/git/oauth/github/web/callback {code, state} — complete the web flow:
+ * exchange the code for a token and store the github.com credential. Returns
+ * {status: "done"|"error", error?}. */
+static int rh_git_oauth_github_web_callback(const route_req_t *rq, char *resp, int cap)
+{
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *jc = body ? cJSON_GetObjectItemCaseSensitive(body, "code") : NULL;
+   const cJSON *js = body ? cJSON_GetObjectItemCaseSensitive(body, "state") : NULL;
+   const char *code = (cJSON_IsString(jc) && jc->valuestring) ? jc->valuestring : NULL;
+   const char *state = (cJSON_IsString(js) && js->valuestring) ? js->valuestring : NULL;
+   char err[256] = "";
+   int rc = git_oauth_github_web_callback(principal, code, state, err, sizeof(err));
+   cJSON_Delete(body);
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "status", rc == 0 ? "done" : "error");
+   if (rc != 0 && err[0])
+      cJSON_AddStringToObject(out, "error", err);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);
@@ -2427,6 +2496,10 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_github_config},
     {"POST", "/v1/git/oauth/github/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_github_config},
+    {"POST", "/v1/git/oauth/github/web/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_web_start},
+    {"POST", "/v1/git/oauth/github/web/callback", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_web_callback},
     {"POST", "/v1/git/oauth/device/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_device_start},
     {"POST", "/v1/git/oauth/device/poll", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,

@@ -56,9 +56,16 @@ services:
       AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
       AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
-      # "Sign in with OAuth" default client IDs (public; see oauth_defaults.h).
+      # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the
+      # GitHub client ID + secret for the seamless "click → GitHub → back, logged
+      # in" web flow (register the OAuth App's callback URL as
+      # <this-origin>/api/git/oauth/github/callback). Omit the secret to fall back
+      # to the device-code flow. AIMEE_OAUTH_REDIRECT_BASE overrides the callback
+      # origin behind a reverse proxy (e.g. https://aimee.example.com).
       AIMEE_GITHUB_OAUTH_CLIENT_ID: ${AIMEE_GITHUB_OAUTH_CLIENT_ID:-}
+      AIMEE_GITHUB_OAUTH_CLIENT_SECRET: ${AIMEE_GITHUB_OAUTH_CLIENT_SECRET:-}
       AIMEE_GITLAB_OAUTH_CLIENT_ID: ${AIMEE_GITLAB_OAUTH_CLIENT_ID:-}
+      AIMEE_OAUTH_REDIRECT_BASE: ${AIMEE_OAUTH_REDIRECT_BASE:-}
     ports:
       - "8743:8743"
       - "8443:8443"

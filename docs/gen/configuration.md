@@ -315,7 +315,9 @@ The binaries read 149 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_API_REMOTE_WRITES` | Gate remote (TCP) write methods: `off` | `data` | `full`. |
 | `AIMEE_BACKGROUND_THREADS` | Background worker thread count. |
 | `AIMEE_COMPUTE_THREADS` | Compute-pool thread count. |
-| `AIMEE_GITHUB_OAUTH_CLIENT_ID` | Client ID of a GitHub OAuth App (device flow enabled) for the webchat "Sign in with GitHub" button; populates the github.com git credential. Public, no secret needed. Overrides the built-in default baked in via `oauth_defaults.h`. |
+| `AIMEE_GITHUB_OAUTH_CLIENT_ID` | Client ID of a GitHub OAuth App for the webchat "Sign in with GitHub" button; populates the github.com git credential. Public. Overrides the built-in default baked in via `oauth_defaults.h`. |
+| `AIMEE_GITHUB_OAUTH_CLIENT_SECRET` | Client secret of the GitHub OAuth App. Enables the seamless web (redirect) sign-in ("click → GitHub → back, logged in"); without it the button falls back to the device-code flow. Secret — set per deployment, never baked into an image. |
+| `AIMEE_OAUTH_REDIRECT_BASE` | Overrides the webchat origin used to build the GitHub OAuth callback URL (`<base>/api/git/oauth/github/callback`), for reverse-proxied deployments where the request host isn't the public one. Defaults to the request's scheme+host. |
 | `AIMEE_GITLAB_OAUTH_CLIENT_ID` | Client ID of a GitLab OAuth application (device flow enabled) for the webchat "Sign in with GitLab" button on gitlab.com. Public, no secret needed. Overrides the built-in default baked in via `oauth_defaults.h`. |
 | `AIMEE_INGRESS_PROXY_SECRET` | Shared secret authenticating a trusted ingress proxy's identity headers. |
 | `AIMEE_PARALLEL_MAX` | Maximum parallel agent fan-out. |

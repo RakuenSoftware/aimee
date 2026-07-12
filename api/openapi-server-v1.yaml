@@ -4811,6 +4811,70 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/web/start:
+    post:
+      summary: Begin the GitHub web (authorization-code) sign-in
+      description: >
+        Seamless redirect sign-in: stash a CSRF state and return the GitHub
+        authorize URL for the browser to navigate to. Needs a client ID + secret
+        (the secret enables this flow; without it, use the device flow). The caller
+        supplies redirect_uri (its public callback origin). Capability: tool:execute.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { redirect_uri: { type: string } }
+      responses:
+        "200":
+          description: Authorize URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  authorize_url: { type: string }
+        "400":
+          description: Not configured / missing redirect_uri
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/web/callback:
+    post:
+      summary: Complete the GitHub web sign-in
+      description: >
+        Validate the state, exchange the authorization code (+ the client secret and
+        the stashed redirect_uri) for an access token, and store it as the github.com
+        credential. Capability: tool:execute.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string }
+                state: { type: string }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [done, error] }
+                  error: { type: string }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /git/oauth/device/start:
     post:
       summary: Begin a GitLab/Gitea device-flow sign-in
