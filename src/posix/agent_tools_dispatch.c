@@ -5,6 +5,7 @@
 #include "agent_tools.h"
 #include "agent_tools_internal.h"
 #include "aimee_home.h"
+#include "delegate_ephemeral_ws.h"
 #include "log.h"
 #include "tool_condense.h"
 #include "tool_args_coerce.h"
@@ -342,8 +343,15 @@ static char *td_bash(cJSON *args, const char *name, const char *dispatch_cwd,
    {
       int exit_code = -1;
       char *out = ws->exec_shell(ws, cmd->valuestring, &exit_code);
+      /* A NULL result means the reverse channel returned no usable response — the
+       * serving client is not connected (e.g. a background/durable delegate, whose
+       * dispatching client disconnects before the worker runs). Surface that as a
+       * clear error instead of a bare exit_code:-1 that reads like the command ran
+       * and failed. A real command with empty output returns "" (non-NULL). */
+      if (!out)
+         return safe_strdup(DELEGATE_DETACHED_CHANNEL_DOWN_JSON);
       cJSON *r = cJSON_CreateObject();
-      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stdout", out);
       cJSON_AddStringToObject(r, "stderr", "");
       cJSON_AddNumberToObject(r, "exit_code", exit_code);
       free(out);

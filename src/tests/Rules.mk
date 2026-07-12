@@ -261,6 +261,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-prompts \
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
+               $(TESTPREFIX)/unit-test-delegate-ephemeral-ws \
                $(TESTPREFIX)/unit-test-delegate-handoff \
                $(TESTPREFIX)/unit-test-delegate-economics \
                $(TESTPREFIX)/unit-test-delegate-patch-coordinator \
@@ -1317,7 +1318,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
 		                               $(OBJDIR)/model_registry.o \
 		                               $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
 		                               $(OBJDIR)/server/server_delegate_status.o \
-		                               $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/delegate_prompt.o $(OBJDIR)/server/delegate_run_phases.o $(OBJDIR)/server/delegate_checkout.o $(OBJDIR)/server/liveness.o \
+		                               $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/delegate_prompt.o $(OBJDIR)/server/delegate_ephemeral_ws.o $(OBJDIR)/server/delegate_run_phases.o $(OBJDIR)/server/delegate_checkout.o $(OBJDIR)/server/liveness.o \
                                $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/config_mode.o $(OBJDIR)/config_fields.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                                $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -2557,6 +2558,12 @@ $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_tok
 
 $(TESTPREFIX)/unit-test-delegate-context-shed: $(OBJDIR)/tests/test_delegate_context_shed.o \
                                        $(OBJDIR)/server/delegate_prompt.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-delegate-ephemeral-ws: $(OBJDIR)/tests/test_delegate_ephemeral_ws.o \
+                                       $(OBJDIR)/server/delegate_ephemeral_ws.o \
+                                       $(OBJDIR)/aimee_home.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
