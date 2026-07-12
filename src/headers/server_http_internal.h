@@ -116,6 +116,8 @@ int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
  * (relocated out of server_http_routes.c to stay under the line-check ceiling).
  * Referenced by the route table in server_http_routes.c. */
 long rh_query_long(const char *key, long dflt);
+/* Percent-decoded string query param into out[cap] ("" if absent). */
+void rh_query_str(const char *key, char *out, size_t cap);
 int rh_wf_item_pause(const route_req_t *rq, char *resp, int cap);
 int rh_wf_item_resume(const route_req_t *rq, char *resp, int cap);
 int rh_wf_item_stop(const route_req_t *rq, char *resp, int cap);

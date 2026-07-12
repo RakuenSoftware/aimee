@@ -16,6 +16,10 @@ import (
 )
 
 const socketCallTimeout = 10 * time.Second
+
+// cloneOrgTimeout bounds a bulk org clone (up to 100 repos, each a full git
+// clone) — far longer than a normal socket call.
+const cloneOrgTimeout = 5 * time.Minute
 const chatReconnectTimeout = 30 * time.Second
 const chatReconnectStep = 250 * time.Millisecond
 
