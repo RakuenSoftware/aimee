@@ -4,8 +4,9 @@
 #include "aimee.h"      /* MAX_PATH_LEN (needed by agent_types.h via agent_exec.h) */
 #include "agent_exec.h" /* agent_http_post_content_type */
 #include "cJSON.h"
-#include "git_host_cred.h" /* git_host_cred_set */
-#include "vault_service.h" /* store the client_id server-side (set from the UI) */
+#include "git_host_cred.h"  /* git_host_cred_set */
+#include "oauth_defaults.h" /* AIMEE_DEFAULT_GITHUB_OAUTH_CLIENT_ID */
+#include "vault_service.h"  /* store the client_id server-side (set from the UI) */
 
 #include <pthread.h>
 #include <stdio.h>
@@ -27,8 +28,10 @@ static char g_principal[256];
 #define GH_CLIENT_ID_CRED  "github_oauth_client_id"
 
 /* Resolve the GitHub OAuth App client_id: a value set from the UI (stored in the
- * server vault) takes precedence, else the AIMEE_GITHUB_OAUTH_CLIENT_ID env. The
- * client_id is public (device flow needs no secret). Returns 1 + fills buf, or 0. */
+ * server vault) takes precedence, else the AIMEE_GITHUB_OAUTH_CLIENT_ID env, else
+ * the built-in default baked into the build (oauth_defaults.h). The client_id is
+ * public (device flow needs no secret), so a distribution can ship a default and
+ * every deployment signs in out of the box. Returns 1 + fills buf, or 0. */
 static int get_client_id(char *buf, size_t cap)
 {
    if (buf && cap)
@@ -45,6 +48,12 @@ static int get_client_id(char *buf, size_t cap)
    if (env && env[0])
    {
       snprintf(buf, cap, "%s", env);
+      return 1;
+   }
+   const char *builtin = AIMEE_DEFAULT_GITHUB_OAUTH_CLIENT_ID;
+   if (builtin[0])
+   {
+      snprintf(buf, cap, "%s", builtin);
       return 1;
    }
    buf[0] = '\0';

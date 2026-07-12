@@ -105,8 +105,8 @@ credentials live in the server's **sealed vault**; see
   synth (~11.4 GB, 16 GB card), `mid` a Gemma 4 26B-A4B synth that fits a 24 GB card fully
   resident (~17.8 GB, 2 slots), and `large` reuses that synth on a 32 GB card with 4
   concurrent agents at the full 256 K window (only `SYNTH_SLOTS=4`). The GPU tiers build on a
-  Mesa 25 base so RADV uses the RDNA3 matrix cores. The bundled all-in-one image
-  (`aimee-server-kb`) uses the same image and downloads the cpu tier on first boot. The local
+  Mesa 25 base so RADV uses the RDNA3 matrix cores. The default split stack
+  (`compose.server.yaml`) runs this image as its `aimee-llm` service and downloads the cpu tier on first boot. The local
   synth also registers as a free delegate. See [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 - **Cross-repo code graph**: the symbol and call graph resolves dependency edges across the
   repositories in your workspace, so blast radius and caller lookups cross repo boundaries.
@@ -193,9 +193,9 @@ Delegation defaults and the roundtable, see [DELEGATES.md](DELEGATES.md).
 
 ## v0.2.0
 
-- **Docker-first deployment**: run `aimee-server` + `aimee-kb` as containers, either one
-  combined image (`compose.combined.yaml`, recommended) or split
-  (`compose.server.yaml`), and install only the thin client on each developer
+- **Docker-first deployment**: run `aimee-server` + `aimee-kb` as containers, brought up
+  together via the split stack (`compose.server.yaml`, recommended), and install only the
+  thin client on each developer
   machine. See the README "Run in Docker" and Manual §27.1.
 - **Cross-platform thin client**: the `aimee` CLI now drives a remote server over
   HTTP from Linux, macOS, and Windows. Point it with `--server` /

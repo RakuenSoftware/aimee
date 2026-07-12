@@ -70,7 +70,7 @@ export const FIELD_HELP: Record<string, string> = {
   // Providers & delegates
   guardrail_mode:
     "How aimee handles a risky tool call: 'approve' asks you first (default), 'prompt' warns but proceeds, 'deny' refuses it outright.",
-  db2_url: "Postgres connection URL for the shared knowledge store (DB2). Changing it needs a server restart.",
+  db2_url: "Postgres connection URL for the shared knowledge store (DB2). Leave blank to use the bundled Postgres the deploy stack spawns automatically; set it only to point at an existing database. Changing it needs a server restart.",
   provider: "Which primary agent aimee drives — e.g. claude, codex, or an openai-compatible endpoint.",
   default_persona:
     "The persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set. Defaults to 'engineer' (e.g. qa, security, reviewer, architect, or a custom persona).",

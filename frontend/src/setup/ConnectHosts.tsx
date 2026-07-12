@@ -341,6 +341,12 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
             Sign in
           </button>
         </div>
+        {!configured && !pending && (
+          <div style={{ fontSize: 11.5, color: '#a67c00' }}>
+            No {meta.label} sign-in is configured on this server yet — set an OAuth App Client ID
+            below to enable it.
+          </div>
+        )}
         {pending && (
           <div style={{ fontSize: 12.5, color: '#444' }}>
             Go to <a href={pending.uri} target="_blank" rel="noreferrer">{pending.uri}</a> and enter{' '}

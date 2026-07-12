@@ -140,11 +140,17 @@ services:
       AIMEE_WEBCHAT_ENABLED: "1"
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
+      # "Sign in with OAuth" (webchat → git host) default client IDs. Device-flow
+      # client IDs are public, so a registered OAuth App's ID can be shipped and
+      # every deployment signs in with no per-instance setup. Set these to your
+      # registered apps' client IDs (or bake them into the build via
+      # oauth_defaults.h) and the wizard's Sign-in button works out of the box.
+      AIMEE_GITHUB_OAUTH_CLIENT_ID: ${AIMEE_GITHUB_OAUTH_CLIENT_ID:-}
+      AIMEE_GITLAB_OAUTH_CLIENT_ID: ${AIMEE_GITLAB_OAUTH_CLIENT_ID:-}
       # Delegate-vault auto-provisioning (optional): seal delegate API keys into
       # the server-principal vault at startup so delegates work with no manual
       # `aimee vault set`. Env form (agent lowercased) or a mounted JSON file;
-      # non-destructive unless AIMEE_DELEGATE_SECRETS_OVERWRITE=1. See
-      # compose.combined.yaml for the full notes.
+      # non-destructive unless AIMEE_DELEGATE_SECRETS_OVERWRITE=1.
       # AIMEE_DELEGATE_KEY_MISTRAL: ${AIMEE_DELEGATE_KEY_MISTRAL:-}
       # AIMEE_DELEGATE_SECRETS_FILE: /run/secrets/aimee-delegates.json
     ports:

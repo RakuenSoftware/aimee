@@ -33,6 +33,7 @@
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
@@ -49,6 +50,7 @@
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
 #include "git_forge_vault.h"  /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
 #include "git_host_cred.h"    /* per-host git credential store for /v1/git/credentials */
+#include "deploy_apply.h"     /* server-orchestrated container deploy (/v1/deploy routes) */
 #include "git_oauth_github.h" /* GitHub device-flow sign-in (/v1/git/oauth/github) */
 #include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
 #include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
@@ -1789,6 +1791,74 @@ static int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
+/* Both deploy routes require the server-orchestrated deploy to be enabled (the
+ * deploy compose mounts the Docker socket + managed compose file and sets
+ * AIMEE_DEPLOY_ENABLED=1) and a webchat user identity (same gate as the wizard's
+ * git routes). Returns 0 when allowed, else an HTTP status already written. */
+static int deploy_route_guard(char *resp, int cap)
+{
+   if (!deploy_apply_enabled())
+      return err_json(resp, cap, 503,
+                      "server-orchestrated deploy is disabled (no Docker socket / "
+                      "AIMEE_DEPLOY_ENABLED)");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "deploy requires a webchat user");
+   return 0;
+}
+
+/* POST /v1/deploy/apply — bring up the managed sibling services (postgres +
+ * aimee-kb + aimee-llm) for the current wizard config via `docker compose up -d`
+ * on a background thread. Returns {ok, status:"started"|"running"}. */
+static int rh_deploy_apply(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   int g = deploy_route_guard(resp, cap);
+   if (g)
+      return g;
+   int rc = deploy_apply_start();
+   if (rc < 0)
+      return err_json(resp, cap, 500, "could not start the deploy");
+   int n = snprintf(resp, (size_t)cap, "{\"ok\":true,\"status\":\"%s\"}",
+                    rc == 1 ? "running" : "started");
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* GET /v1/deploy/status — the background deploy's state plus `docker compose ps`.
+ * Returns {enabled, running, last_exit|null, output, ps}. */
+static int rh_deploy_status(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   int g = deploy_route_guard(resp, cap);
+   if (g)
+      return g;
+
+   int running = 0, last_exit = 0;
+   char out[8192];
+   deploy_apply_state(&running, &last_exit, out, sizeof(out));
+
+   char ps[8192];
+   int ps_code = -1;
+   (void)deploy_apply_status(ps, sizeof(ps), &ps_code);
+
+   cJSON *o = cJSON_CreateObject();
+   if (!o)
+      return err_json(resp, cap, 500, "out of memory");
+   cJSON_AddBoolToObject(o, "enabled", 1);
+   cJSON_AddBoolToObject(o, "running", running);
+   if (last_exit == INT_MIN)
+      cJSON_AddNullToObject(o, "last_exit");
+   else
+      cJSON_AddNumberToObject(o, "last_exit", last_exit);
+   cJSON_AddStringToObject(o, "output", out);
+   cJSON_AddStringToObject(o, "ps", ps_code == 0 ? ps : "");
+   char *s = cJSON_PrintUnformatted(o);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(o);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -2365,6 +2435,8 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_device_config},
     {"POST", "/v1/git/oauth/device/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_device_config},
+    {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
+    {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

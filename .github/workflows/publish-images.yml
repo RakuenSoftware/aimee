@@ -4,7 +4,6 @@
 #
 #   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
 #   aimee-kb         (Dockerfile)             ghcr.io/<owner>/aimee-kb
-#   aimee-server-kb  (Dockerfile.combined)    ghcr.io/<owner>/aimee-server-kb
 #   aimee-embedder   (Dockerfile.embedder)    ghcr.io/<owner>/aimee-embedder (+ -4b)
 #   aimee-llm        (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-llm (model-less; amd64)
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
@@ -81,7 +80,6 @@ jobs:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
-          - { name: aimee-server-kb, dockerfile: Dockerfile.combined }
           - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
           # Higher-fidelity alternate tier: same Dockerfile, 4b embedder + 1b reranker
           # baked in. Pair with embedding_dim: 2560 (see docs). Default (above) is
@@ -117,22 +115,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The combined (aimee-server-kb) image bundles the aimee-llm runtime + webchat
-      # + code-server, a large transient build footprint. It no longer bakes GGUFs
-      # (the model-less aimee-llm downloads them at runtime), but reclaiming the
-      # preinstalled toolchains keeps its build comfortably within a stock runner.
-      # The model-less aimee-llm image is small and needs none of this.
-      - name: Free disk space (combined leg)
-        if: matrix.image.name == 'aimee-server-kb'
-        run: |
-          echo "before:"; df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache /usr/local/.ghcup /usr/local/share/boost \
-            /usr/share/swift /usr/local/share/powershell /usr/local/lib/node_modules \
-            /opt/microsoft /opt/az "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
-          sudo apt-get clean || true
-          echo "after:"; df -h /
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -162,10 +144,8 @@ jobs:
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
-          # The combined image is server+kb only (WITH_LLM=0, the Dockerfile default):
-          # the aimee-llm runtime is no longer bundled. Both arches build lean and the
-          # deploy stack brings up a separate, profile-gated aimee-llm container only
-          # when the setup wizard's page-2 config puts a role local.
+          # The deploy stack brings up a separate, profile-gated aimee-llm container
+          # only when the setup wizard's page-2 config puts a role local.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_WEBCHAT=1
@@ -196,16 +176,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-llm, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-embedder, aimee-embedder-4b, aimee-llm, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
       # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy:
-      # `digest-aimee-server-*` also matches `digest-aimee-server-kb-*` (one image
-      # name is a prefix of another), which previously pulled the combined image's
-      # digests into the aimee-server manifest and broke the push. Anchor on the
-      # exact arch suffixes instead (brace expansion, no wildcard across `-`).
+      # `digest-aimee-embedder-*` also matches `digest-aimee-embedder-4b-*` (one
+      # image name is a prefix of another), which would pull another image's digests
+      # into this manifest and break the push. Anchor on the exact arch suffixes
+      # instead (brace expansion, no wildcard across `-`).
       - name: Download this image's digests
         uses: actions/download-artifact@v4
         with:

@@ -5,10 +5,12 @@
 
 /* git_oauth_github — "Sign in with GitHub" via the OAuth device flow, to populate
  * the github.com entry of the per-host credential store (git_host_cred) without
- * the user creating a PAT by hand. Requires AIMEE_GITHUB_OAUTH_CLIENT_ID (a
- * registered GitHub OAuth App with device flow enabled — the client_id is public,
- * no secret needed for device flow). Other providers (Gitea/GitLab/...) use the
- * token field instead. */
+ * the user creating a PAT by hand. Uses a GitHub OAuth App with device flow
+ * enabled (the client_id is public, no secret needed): resolved from the UI-set
+ * value, else AIMEE_GITHUB_OAUTH_CLIENT_ID, else the built-in default baked into
+ * the build (oauth_defaults.h) so a distribution can ship one and every deployment
+ * signs in with no setup. Other providers (Gitea/GitLab/...) use the token field
+ * or the generic device flow (git_oauth_device). */
 
 /* 1 iff a client ID is configured (stored from the UI, or the env) — flow usable. */
 int git_oauth_github_available(void);

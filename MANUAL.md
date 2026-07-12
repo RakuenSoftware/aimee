@@ -128,46 +128,50 @@ gates each tool call; PostToolUse re-indexes edited files.
 ## 3. Installation
 
 aimee ships four binaries: the **`aimee`** thin client, **`aimee-server`**,
-**`aimee-kb`**, and **`aimee-webchat`**. For a guided, step-by-step path (combined
-Docker server + per-OS thin-client setup), see the
+**`aimee-kb`**, and **`aimee-webchat`**. For a guided, step-by-step path (Docker
+server + per-OS thin-client setup), see the
 [Quickstart](docs/QUICKSTART.md); this chapter is the exhaustive reference. There
 are two ways to stand it up:
 
 - **Docker services + thin client (recommended, [§3.1](#31-run-the-services-in-docker-recommended) to [§3.2](#32-install-the-thin-client)).**
-  Run `aimee-server` and `aimee-kb` as containers (one combined container or two
-  split) and install only the thin `aimee` CLI on each developer machine, pointed
-  at the server. This is the intended deployment and the path the operations
-  chapter ([§27](#27-operations-and-deployment)) details.
+  Deploy the single `aimee-server` container (`compose.server-managed.yaml`) and let
+  the setup wizard bring up `aimee-kb`, `aimee-llm`, and Postgres; install only the
+  thin `aimee` CLI on each developer machine, pointed at the server. This is the
+  intended deployment and the path the operations chapter
+  ([§27](#27-operations-and-deployment)) details.
 - **Single-box source build ([§3.3](#33-single-box-source-build)).** Build and run
   everything on one host with `install.sh`, no Docker. The classic
   single-developer setup.
 
 ### 3.1 Run the services in Docker (recommended)
 
-The combined image co-locates both binaries in one container; Postgres (pgvector)
-comes up alongside it, and the CPU inference gateway is bundled in the image:
+Deploy one container. `aimee-server` runs with the host Docker socket mounted, so
+the setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres
+(pgvector) itself:
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
-docker compose -f compose.combined.yaml up --build -d
+docker compose -f compose.server-managed.yaml up -d
 ```
 
 The server fronts the `/v1` API over native TLS on `:8743` (default bearer
-`aimee-local-dev`; plaintext `:8740` is loopback-only and not published) and
-reaches the in-container kb on `:8741`:
+`aimee-local-dev`; plaintext `:8740` is loopback-only and not published); the
+webchat wizard is on `:8443`. Open it, run the wizard, and hit **Deploy** on the
+last screen. Then:
 
 ```bash
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/kb/status
 ```
 
-Split the two binaries into separate containers with `compose.server.yaml` when
-you want to scale, update, or place them independently (the horizontal-scaling
-model in [§27.5](#275-scaling-and-multi-user-deployment)). See
-[§27.1](#271-containerized-deployment) for every compose file, the container
-lifecycle (start/logs/stop/update), volumes, and the end-to-end smoke tests.
-Override the default `aimee-local-dev` bearer on any networked deployment.
+Mounting the Docker socket is root-equivalent on the host, so run this only where you
+trust the server. To run each service as its own container instead — to scale, update,
+or place them independently — use the split `compose.server.yaml` (the
+horizontal-scaling model in [§27.5](#275-scaling-and-multi-user-deployment)). See
+[§27.1](#271-containerized-deployment) for every compose file, the container lifecycle,
+volumes, and the smoke tests. Override the default `aimee-local-dev` bearer on any
+networked deployment.
 
 ### 3.2 Install the thin client
 
@@ -1413,44 +1417,43 @@ limits and restart on failure. Logs go to the journal (Linux) or
 
 Running the services in containers is the recommended deployment: developers
 install only the thin client ([§3.2](#32-install-the-thin-client)) and point it at
-the server. Four compose files ship, built from three images: `aimee-server`
-(`Dockerfile.server`), `aimee-kb` (`Dockerfile`), and the co-located
-`aimee-server+kb` (`Dockerfile.combined`). Every stack also brings up a
+the server. Three compose files ship, built from two images: `aimee-server`
+(`Dockerfile.server`) and `aimee-kb` (`Dockerfile`). Every stack also brings up a
 `pgvector/pgvector:pg16` Postgres, and the kb auto-applies its DB2 schema
-(`pg_trgm` and `vector` extensions plus tables) on first boot. The combined image
-bundles the `aimee-llm` inference gateway (embeddings, reranking, and synthesis),
+(`pg_trgm` and `vector` extensions plus tables) on first boot. The stacks run the
+`aimee-llm` inference gateway (embeddings, reranking, and synthesis) as a service,
 which downloads its cpu-tier models on first boot, so embedding and reranking work
 with nothing external. The tier is chosen by `AIMEE_LLM_TIER`: `cpu` serves
 Qwen3-Embedding-0.6B at 1024 dims; the GPU tiers (`small` 16 GB, `mid` 24 GB,
 `large` 32 GB) serve Qwen3-Embedding-4B at 2560 dims.
-To run a standalone embedder or curator LLM instead of the bundled gateway, use
-the `external-llm` compose profile. Backends and tiers:
+To run a standalone embedder or curator LLM instead, use
+the `curator-llm` compose profile. Backends and tiers:
 [KB_LLM_BACKENDS.md](docs/KB_LLM_BACKENDS.md) and
 [AIMEE_KB_SYNTH_TIERS.md](docs/AIMEE_KB_SYNTH_TIERS.md).
 
 | Compose file | Brings up | Use when |
 |--------------|-----------|----------|
-| `compose.combined.yaml` | **`aimee-server+kb`** (one container, inference bundled) + Postgres | **Recommended default.** Both binaries co-located; server `/v1` over TLS on `:8743`, kb `:8741`. |
-| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + the `aimee-llm` inference gateway | Split stack: scale/update/place server and kb independently. |
+| `compose.server-managed.yaml` | `aimee-server` only; the wizard's Deploy step then launches `aimee-kb` + `aimee-llm` + Postgres via the mounted Docker socket | **Recommended default.** One container to deploy; the browser wizard brings up the rest. |
+| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + the `aimee-llm` inference gateway | Advanced: the full split stack brought up together, no socket mount. Scale/update/place server and kb independently. |
 | `compose.yaml` | `aimee-kb` + Postgres + the `aimee-llm` inference gateway | The knowledge service alone: building block for a shared/scaled kb. |
 | `compose.server-standalone.yaml` | `aimee-server` only (SQLite DB1, no kb) | DB1-backed `/v1` with no shared knowledge. |
 
-**Bring up the recommended (combined) stack:**
+**Bring up the self-deploying server:**
 
 ```bash
-docker compose -f compose.combined.yaml up --build -d
+docker compose -f compose.server-managed.yaml up -d
+# open https://localhost:8443, run the wizard, hit Deploy on the last screen
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
-curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/kb/status
 ```
 
-The combined container runs **both** aimee binaries: the kb on loopback `:8741`
-inside the container, the server fronting `/v1` over TLS on `:8743` (plaintext
-`:8740` is loopback-only) with `AIMEE_KB_API_URL=http://127.0.0.1:8741`. The split stack
-(`compose.server.yaml`) instead runs `aimee-kb` as its own container the server
-reaches at `http://aimee-kb:8741`. The combined image already bundles the synthesis
-and curator gateway; to run a standalone llama.cpp curator LLM instead, add
-`--profile curator-llm` on the split stacks (`compose.server.yaml`, `compose.yaml`)
-or `--profile external-llm` on the combined stack. Each container runs as a
+The rest of this section covers the **split stack** (`compose.server.yaml`) for
+advanced operators who run each service as its own container. It runs **both** aimee binaries as separate services: `aimee-kb` serving
+`/v1` on `:8741`, and the server fronting `/v1` over TLS on `:8743` (plaintext
+`:8740` is loopback-only) with `AIMEE_KB_API_URL=http://aimee-kb:8741`, so server
+and kb communicate over the internal network. The `aimee-llm` service provides the
+synthesis and curator gateway; to run a standalone llama.cpp curator LLM instead,
+add `--profile curator-llm` (works on `compose.server.yaml` and `compose.yaml`).
+Each container runs as a
 non-root user; the kb uses Python sidecars (`scripts/embed-remote.py`,
 `llm-chat.py`, `curator-extract.py`, `learning-synthesize.py`) for embeddings,
 synthesis, and curation, with container defaults from `deploy/container/aimee.yaml`.
@@ -1459,12 +1462,12 @@ synthesis, and curation, with container defaults from `deploy/container/aimee.ya
 (PID 1), supervised by Docker's restart policy, not systemd/launchd:
 
 ```bash
-docker compose -f compose.combined.yaml ps           # container + health status
-docker compose -f compose.combined.yaml logs -f      # follow logs (add a service to scope)
-docker compose -f compose.combined.yaml restart aimee-server-kb
-docker compose -f compose.combined.yaml down         # stop + remove containers (volumes persist)
-docker compose -f compose.combined.yaml down -v      # also DROP data volumes (destroys DB2 + state)
-docker compose -f compose.combined.yaml up -d --build # update: rebuild images, recreate containers
+docker compose -f compose.server.yaml ps           # container + health status
+docker compose -f compose.server.yaml logs -f      # follow logs (add a service to scope)
+docker compose -f compose.server.yaml restart aimee-server aimee-kb
+docker compose -f compose.server.yaml down         # stop + remove containers (volumes persist)
+docker compose -f compose.server.yaml down -v      # also DROP data volumes (destroys DB2 + state)
+docker compose -f compose.server.yaml up -d --build # update: rebuild images, recreate containers
 ```
 
 **State and volumes.** Durable data lives in named volumes, not the container
@@ -1476,7 +1479,7 @@ worktrees; `*-models` volumes cache embedder/LLM weights. The server's worker
 threads need a 64 MB stack, so every server container sets `ulimits.stack:
 67108864` (a plain `docker run` must pass `--ulimit stack=67108864`). Override the
 baked `aimee-local-dev` bearer and other config by mounting your own `aimee.yaml`
-at `/var/lib/aimee/aimee.yaml` (see `compose.remote-writes.combined.yaml`).
+at `/var/lib/aimee/aimee.yaml`.
 
 **Verify a stack end to end.** Each topology ships a smoke test that brings it up,
 waits for health, exercises the live surface (DB + vector readiness, search,
@@ -1484,11 +1487,10 @@ embeddings, and the server→kb path), then tears down; `e2e-matrix.sh` runs sev
 and prints one pass/fail table:
 
 ```bash
-scripts/aimee-combined-docker-smoke.sh --up --down            # combined server+kb
 scripts/aimee-server-docker-smoke.sh --up --down              # split server + kb
 scripts/aimee-kb-docker-smoke.sh --up --down                  # kb-only
 scripts/aimee-server-standalone-docker-smoke.sh --up --down   # server standalone
-scripts/e2e-matrix.sh --only T1,T2,T3,T4                      # all Docker topologies
+scripts/e2e-matrix.sh --only T1,T2,T3                         # all Docker topologies
 ```
 
 A proxy front-end is available via `Dockerfile.proxy` + `docker-compose.proxy.yml`.
@@ -1609,7 +1611,7 @@ Vector search rides inside the same Postgres and scales with it:
 
 | Topology | Shape | When |
 |----------|-------|------|
-| **Containerized server + KB (default)** | `aimee-server` + `aimee-kb` as containers (combined or split) + Postgres + a bundled inference gateway ([§27.1](#271-containerized-deployment)); developers run only the thin client. | The recommended deployment for one user or a team. |
+| **Containerized server + KB (default)** | `aimee-server` + `aimee-kb` as containers (brought up together via `compose.server.yaml`) + Postgres + the `aimee-llm` inference gateway ([§27.1](#271-containerized-deployment)); developers run only the thin client. | The recommended deployment for one user or a team. |
 | **Single developer, source build** | One `aimee-server` + one local `aimee-kb` + local Postgres, all on one host via service units. | The `install.sh` no-Docker setup. |
 | **Shared KB** | Many users' `aimee-server` instances point at one `aimee-kb`/Postgres over HTTP. DB1 stays per-user/per-machine; only KB-scoped knowledge crosses the boundary. | A team or a single user across several machines wanting shared knowledge. |
 | **Scaled KB** | Several `aimee-kb` replicas behind a load balancer (`:8741`) over one Postgres (with pooling and, if needed, read replicas + pgvectorscale). | Many users and/or a large corpus where one KB instance or plain HNSW is the bottleneck. |

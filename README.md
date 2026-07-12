@@ -42,10 +42,13 @@ Core services are C. Hot paths run in single-digit milliseconds. Nothing phones 
 Run the services in Docker, install the `aimee` CLI on each machine.
 
 ```bash
-# Run the stack (server, kb, Postgres, embedder)
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
-docker compose -f compose.combined.yaml up --build -d
+
+# Deploy one container. Then open https://localhost:8443 and run the setup wizard —
+# its Deploy step brings up aimee-kb, the LLM, and Postgres for you. (Mounts the
+# host Docker socket so the server can launch them.)
+docker compose -f compose.server-managed.yaml up -d
 
 # Confirm it's live (default bearer: aimee-local-dev; -k for the self-signed cert)
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health

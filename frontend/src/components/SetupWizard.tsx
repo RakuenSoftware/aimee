@@ -8,6 +8,8 @@ import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import PrimaryChooser from '../setup/PrimaryChooser';
 import KnowledgeBase from '../setup/KnowledgeBase';
 import DeployTopology from '../setup/DeployTopology';
+import SharedStore from '../setup/SharedStore';
+import DeployPanel from '../setup/DeployPanel';
 import ConnectHosts from '../setup/ConnectHosts';
 import ConnectWorkspace from '../setup/ConnectWorkspace';
 import type { KbMode } from '../setup/deployTopology';
@@ -158,6 +160,16 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     advance();
   }
 
+  // The shared-store (DB2) step writes db2_url ('' for the bundled Postgres, or an
+  // existing-database URL). Refresh cfg, track restart-pending, advance.
+  async function handleDb2Saved(restartKeys: string[]) {
+    const c = await loadConfig();
+    setCfg(c);
+    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
+    notifySetupUpdated();
+    advance();
+  }
+
   // Save every edited key in the current (generic keyed) step. Any failure aborts
   // advance and Toasts; successes update the live cfg + restart tracking.
   async function saveStep() {
@@ -246,6 +258,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 ⏳ Restart required for: {pendingRestart.map(humanize).join(', ')} — these take effect after the server restarts.
               </div>
             )}
+            {/* Local KB: offer to bring up the managed services (kb + llm + postgres)
+                straight from here when the server can orchestrate Docker. */}
+            <DeployPanel kbMode={kbMode} />
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <button style={ghostBtn} onClick={() => { setShowSummary(false); setIdx(0); }}>Back</button>
               <button style={primaryBtn} onClick={() => { setDismissed(true); notifySetupUpdated(); close(); }}>Finish</button>
@@ -264,6 +279,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               <KnowledgeBase onSaved={handleKbSaved} />
             ) : step.kind === 'deploy' ? (
               <DeployTopology onSaved={handleDeploySaved} />
+            ) : step.kind === 'db2' ? (
+              <SharedStore onSaved={handleDb2Saved} />
             ) : step.kind === 'connection' ? (
               <ConnectHosts onDone={advance} onHostsChanged={setHostsConnected} />
             ) : step.kind === 'workspace' ? (
@@ -297,7 +314,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 {step.optional && <button style={ghostBtn} onClick={advance}>Skip</button>}
                 {step.keys.length > 0 ? (
                   <button style={primaryBtn} disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</button>
-                ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'connection' || step.kind === 'workspace' ? (
+                ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
                   // Bespoke steps own their own primary action (they call advance()).
                   null
                 ) : (

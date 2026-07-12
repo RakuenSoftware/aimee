@@ -1356,9 +1356,10 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
    /* No explicit command: if the deployment points us at an embedder service,
     * embed against it in-process (memory_embed_text speaks http:// directly, no
     * fork, no python). This makes a configured embedder the default with zero
-    * config and survives a config reseed -- the combined image always exports
-    * AIMEE_EMBEDDER_URL. Only when nothing is configured do we fall back to the
-    * 384-dim builtin (correct for an unconfigured shim/test setup). */
+    * config and survives a config reseed -- the deploy stack exports
+    * AIMEE_EMBEDDER_URL / AIMEE_LLM_URL for the aimee-llm container. Only when
+    * nothing is configured do we fall back to the 384-dim builtin (correct for an
+    * unconfigured shim/test setup). */
    const char *env = getenv("AIMEE_EMBEDDER_URL");
    if (env && env[0])
       return env;

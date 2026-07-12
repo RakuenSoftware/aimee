@@ -33,8 +33,8 @@ execution of a workflow for one proposal. The **primary agent** is the manager
 
 ## Prerequisites
 
-- A running aimee server (`aimee-server`, or the combined image). The feature is
-  default-on, there is nothing to enable.
+- A running aimee server (`aimee-server`, e.g. via the `compose.server.yaml` stack).
+  The feature is default-on, there is nothing to enable.
 - An API token for the `/v1` surface (`Authorization: Bearer …`). On a remote
   client this is your configured server token; locally the dev bearer works.
 - The default `build` workflow is **seeded automatically** into
@@ -241,7 +241,7 @@ Scope of the current implementation (the design allows for more):
 ## Configuration
 
 - **Default workflow.** `build` is seeded into `$AIMEE_HOME/workflows` at standup
-  (baked into the server/combined images). Custom workflows live alongside it.
+  (baked into the aimee-server image). Custom workflows live alongside it.
 - **Choosing a workflow.** Pass `workflow` to `/v1/dev/submit`, or author your
   own with `aimee workflow new` and submit against it.
 - **Delegate roster.** The shipped roster + roundtable panel are used as-is; see

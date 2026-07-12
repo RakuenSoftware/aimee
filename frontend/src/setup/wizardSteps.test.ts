@@ -26,6 +26,11 @@ describe('WIZARD_STEPS structure', () => {
     expect(embedding.kind).toBe('deploy');
     expect(embedding.showWhen!('local')).toBe(true);
     expect(embedding.showWhen!('remote')).toBe(false);
+    // DB2 is a bespoke step (bundled vs existing Postgres); db2_url is no longer a
+    // required generic key.
+    expect(db2.kind).toBe('db2');
+    expect(db2.keys).toEqual([]);
+    expect(db2.showWhen!('local')).toBe(true);
     expect(db2.showWhen!('remote')).toBe(false);
 
     const connection = WIZARD_STEPS.find((s) => s.id === 'connection')!;

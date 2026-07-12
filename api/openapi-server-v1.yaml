@@ -4958,6 +4958,63 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /deploy/apply:
+    post:
+      summary: Bring up the managed sibling services
+      description: >
+        Server-orchestrated deploy: run `docker compose up -d` for the managed
+        services (postgres + aimee-kb + aimee-llm) the current wizard config selects,
+        on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
+        socket. Capability: tool:execute.
+      responses:
+        "200":
+          description: Deploy started (or already running)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { type: string, enum: [started, running] }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Server-orchestrated deploy is disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /deploy/status:
+    get:
+      summary: Deploy progress + docker compose ps
+      description: >
+        The background deploy's state (running / last exit / output tail) plus
+        `docker compose ps` for the managed services. Capability: tool:execute.
+      responses:
+        "200":
+          description: Deploy status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  running: { type: boolean }
+                  last_exit: { type: integer, nullable: true }
+                  output: { type: string }
+                  ps: { type: string }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Server-orchestrated deploy is disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)

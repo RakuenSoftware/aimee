@@ -224,6 +224,10 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/git/oauth/device/poll", s.requireAuth(s.handleGitOauthDevicePoll))
 	mux.HandleFunc("/api/git/oauth/device/config", s.requireAuth(s.handleGitOauthDeviceConfig))
 
+	// Server-orchestrated container deploy (setup wizard → docker compose up).
+	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
+	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
+
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
 	mux.HandleFunc("/api/hosts", s.requireAuth(s.handleHosts))

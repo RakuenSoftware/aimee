@@ -122,6 +122,36 @@ RUN apt-get update \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
+# Docker CLI + compose plugin (static client binaries — no daemon). Lets
+# aimee-server orchestrate the managed sibling services (postgres + aimee-kb +
+# aimee-llm) with `docker compose up -d` against a mounted host Docker socket, so
+# the setup wizard can bring the stack up itself (server-orchestrated deploy). This
+# is inert unless the deploy compose mounts /var/run/docker.sock and sets
+# AIMEE_DEPLOY_ENABLED=1 (compose.server-managed.yaml); the plain image is
+# unprivileged.
+ARG TARGETARCH
+ARG DOCKER_CLI_VERSION=27.5.1
+ARG DOCKER_COMPOSE_VERSION=2.32.4
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) darch=x86_64; carch=x86_64 ;; \
+      arm64) darch=aarch64; carch=aarch64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" \
+      | tar -xz -C /tmp docker/docker; \
+    install -m0755 /tmp/docker/docker /usr/local/bin/docker; \
+    rm -rf /tmp/docker; \
+    mkdir -p /usr/local/lib/docker/cli-plugins; \
+    curl -fsSL "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${carch}" \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose; \
+    chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
+    docker --version; docker compose version
+
+# The managed compose the server launches for the orchestrated deploy (default
+# AIMEE_DEPLOY_COMPOSE_FILE). Inert until AIMEE_DEPLOY_ENABLED=1 + a mounted socket.
+COPY deploy/container/aimee-managed.compose.yaml /opt/aimee/deploy/aimee-managed.compose.yaml
+
 ENV AIMEE_HOME=/var/lib/aimee
 # On-demand-installed OAuth CLI agents (claude-code / codex) global-install here,
 # on the persistent home volume, so the CLI binaries survive container recreate

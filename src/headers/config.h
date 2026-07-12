@@ -1277,9 +1277,9 @@ typedef struct config
    char kb_client_bearer_token[256];
 
    /* Setup-wizard page 2 (LLM / embedding / KB backend). The wizard RECORDS the
-    * operator's choices here; the deploy layer (combined-entrypoint.sh / compose)
-    * reads them and brings up only what is configured — nothing is deployed until
-    * page 2 is set. Empty kb_mode means "not configured yet" (a fresh install).
+    * operator's choices here; the deploy layer (compose) reads them and brings up
+    * only what is configured — nothing is deployed until page 2 is set. Empty
+    * kb_mode means "not configured yet" (a fresh install).
     *
     * kb_mode:
     *   "remote" — connect to an existing aimee-kb (kb_client_url/bearer above);
