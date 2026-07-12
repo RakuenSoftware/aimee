@@ -78,8 +78,12 @@ static long autonomy_panel_retry_cap(void)
  * degraded panel eventually escalates to a human instead of retrying forever.
  * Returns the count; on a read failure it
  * returns 0 (fail toward retrying — a transient DB fault must not permanently
- * strand an otherwise-healthy run), with the cumulative turn cap as the ultimate
- * runaway backstop.
+ * strand an otherwise-healthy run). This fail-open is best-effort but bounded: a
+ * PERSISTENT audit-log read failure is caught on the very next step by the
+ * turn-cap check at the top of the advance loop, which fail-CLOSES to
+ * turn_cap_exceeded when db1_lifecycle_event_list is unreadable — so an
+ * unreadable log parks the run rather than looping. The turn cap is the hard
+ * runaway backstop; the panel-retry cap is the precise-but-best-effort bound.
  *
  * Durability: the budget is derived from the audit log rather than a counter
  * column, which is safe because lifecycle events are never pruned/compacted/
