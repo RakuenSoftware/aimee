@@ -1333,8 +1333,14 @@ void delegate_worker(void *arg)
    delegate_run_ctx_restore(&run_ctx);
    if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
       workspace_turn_unbind_active();
-   if (ephemeral_ws[0]) /* remove the server-side ephemeral workspace we created above */
+   if (ephemeral_ws[0])
+   {
+      /* Clear the thread-local cwd BEFORE removing the workspace so any post-run
+       * teardown exec (transcript capture, etc.) does not try to `cd` into a
+       * directory we just deleted (a harmless-but-noisy "cd: can't cd" error). */
+      run_cmd_set_cwd(NULL);
       delegate_ephemeral_ws_remove(ephemeral_ws);
+   }
    (void)db1_delegation_spawn_complete(deleg_id);
 
    /* Post-run named-file drift check: verify named existing paths appear in response. */
