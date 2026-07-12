@@ -11,10 +11,12 @@
 #include "delegate_ephemeral_ws.h"
 
 #include "aimee_home.h"
+#include "log.h"
 #include "platform_path.h"
 
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -116,7 +118,17 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
     * no-follow fd (no path re-resolution -> no TOCTOU). Best-effort: if git is
     * missing the workspace still exists, only writes stay guarded. */
    pid_t pid = fork();
-   if (pid == 0)
+   if (pid < 0)
+   {
+      /* Could not fork: the workspace stays a plain dir, so the write-guard will
+       * block writes here. Surface it so operators can diagnose read-only-delegate
+       * symptoms rather than it failing silently. */
+      aimee_log(LOG_WARN, "delegate",
+                "ephemeral workspace %s: fork for 'git init' failed (%s); file writes here will "
+                "be blocked by the write-guard",
+                deleg_id, strerror(errno));
+   }
+   else if (pid == 0)
    {
       if (fchdir(leaf) != 0)
          _exit(127);
@@ -129,10 +141,14 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
       execlp("git", "git", "init", "-q", (char *)NULL);
       _exit(127);
    }
-   if (pid > 0)
+   else
    {
       int status = 0;
-      waitpid(pid, &status, 0);
+      if (waitpid(pid, &status, 0) == pid && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
+         aimee_log(LOG_WARN, "delegate",
+                   "ephemeral workspace %s: 'git init' did not succeed (wait status %d); file "
+                   "writes here will be blocked by the write-guard (is git installed?)",
+                   deleg_id, status);
    }
 
    close(leaf);
