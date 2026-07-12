@@ -123,6 +123,15 @@ int db1_work_item_gate_apply(const char *work_item_id, const char *expect_stage,
                              const char *terminal_state);
 int db1_work_item_set_pause(const char *work_item_id, const char *reason, const char *paused_state);
 int db1_work_item_clear_pause(const char *work_item_id);
+/* Compare-and-clear: clear the pause only while it still equals (expect_reason,
+ * expect_stage). Returns 1 if this caller cleared it, 0 if the row no longer
+ * matched (another driver moved it first), -1 on error (incl. SQLITE_BUSY — a
+ * transient lock is deliberately folded into -1: the autonomy caller treats -1
+ * and 0 identically as "did not claim; retry next sweep", so a lock just defers
+ * the attempt). Lets the autonomy retry path claim a transient park atomically,
+ * so at most one retry runs per park. */
+int db1_work_item_clear_pause_if(const char *work_item_id, const char *expect_reason,
+                                 const char *expect_stage);
 int db1_work_item_add_cost(const char *work_item_id, double cost);
 int db1_work_item_set_cost_cap(const char *work_item_id, double cap);
 int db1_work_item_inc_override(const char *work_item_id); /* returns new count, -1 err */

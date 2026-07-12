@@ -484,6 +484,33 @@ int db1_work_item_clear_pause(const char *wi)
                             wi);
 }
 
+int db1_work_item_clear_pause_if(const char *wi, const char *expect_reason,
+                                 const char *expect_stage)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !wi)
+      return -1;
+   /* Compare-and-clear: clear the pause ONLY while the row still shows exactly the
+    * (pause_reason, current_stage) the caller observed. A single UPDATE, so two
+    * drivers of the same parked item cannot both win — the loser's WHERE no longer
+    * matches (pause already ''), guaranteeing at most one retry per park even if
+    * the single-threaded-scheduler invariant is ever relaxed. */
+   static const char *sql = "UPDATE lifecycle_work_item SET pause_reason='', paused_state='', "
+                            "updated_at=datetime('now') "
+                            "WHERE work_item_id=? AND pause_reason=? AND current_stage=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, wi, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, expect_reason ? expect_reason : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 3, expect_stage ? expect_stage : "", -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (rc != SQLITE_DONE)
+      return -1;
+   return sqlite3_changes(db) > 0 ? 1 : 0; /* 1 = won the clear, 0 = row no longer matched */
+}
+
 int db1_work_item_delete(const char *wi)
 {
    if (!wi || !wi[0])
