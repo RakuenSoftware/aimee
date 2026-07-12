@@ -83,13 +83,16 @@ int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
  * check passes. g_stub_panel_calls counts convenings — the retry tests assert on
  * it to prove that clearing the pause actually RE-RUNS the roundtable node. */
 static int g_stub_panel_calls;
-static int g_stub_degrade_calls;
+static int g_stub_degrade_calls; /* degrade the first N convenings; a large value (e.g. 1000) is
+                                  * the "always degrade" sentinel */
 static int g_stub_return_unreachable;
 static int stub_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
    (void)eligible;
    (void)nelig;
+   if (!pkt)
+      return 0; /* defensive: the real seam never passes NULL, fail closed to DEGRADED */
    g_stub_panel_calls++;
    if (g_stub_panel_calls <= g_stub_degrade_calls)
       return g_stub_return_unreachable ? WFE_PANEL_UNREACHABLE : 0;
@@ -365,6 +368,9 @@ int main(void)
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "active") == 0);
       assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+      /* the retry key is stable: every degraded re-park lands on the same node id,
+       * so the per-stage budget does not drift across retries. */
+      assert(strcmp(wi.current_stage, "gate") == 0);
       assert(g_stub_panel_calls == 3); /* 1 initial + 2 retries, then capped */
 
       db1_lifecycle_event_t *evs = NULL;
@@ -407,6 +413,43 @@ int main(void)
             retries++;
       free(evs);
       assert(retries == 1);
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A13: AIMEE_AUTONOMY_PANEL_RETRIES=0 is the operator escape hatch — auto-retry
+    * is disabled and a transient park escalates to a human immediately (the
+    * pre-feature behavior), with the panel never re-convened. */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = 1000;
+      g_stub_return_unreachable = 0;
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "0", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a13", "a13", "autonomous", id, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* initial -> parks panel_degraded */
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+      assert(g_stub_panel_calls == 1);
+      /* subsequent sweeps do NOT retry: no re-convene, stays parked for a human. */
+      for (int k = 0; k < 3; k++)
+         assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(g_stub_panel_calls == 1);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int retries = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "panel_retry") == 0)
+            retries++;
+      free(evs);
+      assert(retries == 0); /* disabled -> no retry events at all */
 
       unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
       wfe_set_panel_provider(NULL);

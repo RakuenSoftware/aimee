@@ -53,10 +53,30 @@ static int autonomy_pause_is_transient(const char *reason)
    return strcmp(reason, "panel_degraded") == 0 || strcmp(reason, "panel_unreachable") == 0;
 }
 
+/* The per-(work item, stage) transient-park retry cap. Unlike wfe_env_long (which
+ * floors junk/<=0 to the default so a safety rail can't be silently disabled by a
+ * typo), this ACCEPTS an explicit 0 as a deliberate operator escape hatch: 0 means
+ * "do not auto-retry transient panel parks — escalate to a human immediately" (the
+ * pre-feature behavior), useful to set during a known provider incident. A
+ * malformed or negative override still falls back to the default. */
+static long autonomy_panel_retry_cap(void)
+{
+   const char *v = getenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+   if (!v || !v[0])
+      return 6;
+   errno = 0;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   if (errno == ERANGE || !end || *end != '\0' || n < 0)
+      return 6;
+   return n; /* n >= 0; an explicit 0 disables auto-retry (escalate immediately) */
+}
+
 /* Count how many times this run has already auto-retried a transient roundtable
- * park at `stage` — one "panel_retry" audit event is written per retry. Bounds
- * the retry budget so a persistently-degraded panel eventually escalates to a
- * human instead of retrying forever. Returns the count; on a read failure it
+ * park at `stage` — one "panel_retry" audit event is written per retry. The
+ * caller compares this against the cap to bound retries, so a persistently-
+ * degraded panel eventually escalates to a human instead of retrying forever.
+ * Returns the count; on a read failure it
  * returns 0 (fail toward retrying — a transient DB fault must not permanently
  * strand an otherwise-healthy run), with the cumulative turn cap as the ultimate
  * runaway backstop.
@@ -174,12 +194,14 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
             /* Budget is per (work item, stage): a stage revisited after a loop
              * inherits its earlier retry count on purpose — a stage that has
              * already burned its budget and comes back still-degrading should
-             * escalate to a human, not silently reset. wfe_env_long floors a
-             * junk/<=0 override to the default, so cap is always >= 1 (retries
-             * cannot be accidentally disabled to 0). */
-            long cap = wfe_env_long("AIMEE_AUTONOMY_PANEL_RETRIES", 6);
-            if (autonomy_panel_retries_used(work_item_id, wi0.current_stage) >= cap)
-               return 0; /* budget spent: stay parked to escalate to a human */
+             * escalate to a human, not silently reset. current_stage here is the
+             * workflow node id (a stable machine string, not user input), so the
+             * per-stage key does not drift across a degraded-park/retry cycle. The
+             * cap accepts an explicit 0 (escalate immediately) but floors a
+             * malformed/negative override to the default. */
+            long cap = autonomy_panel_retry_cap();
+            if (cap == 0 || autonomy_panel_retries_used(work_item_id, wi0.current_stage) >= cap)
+               return 0; /* budget spent (or disabled): stay parked to escalate to a human */
             /* Clear the pause FIRST, then record the retry, so the budget counts
              * only retries that ACTUALLY happened. If the clear fails the item
              * stays parked and no panel_retry event is written — a persistent
