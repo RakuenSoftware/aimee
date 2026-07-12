@@ -59,7 +59,13 @@ static int autonomy_pause_is_transient(const char *reason)
  * human instead of retrying forever. Returns the count; on a read failure it
  * returns 0 (fail toward retrying — a transient DB fault must not permanently
  * strand an otherwise-healthy run), with the cumulative turn cap as the ultimate
- * runaway backstop. */
+ * runaway backstop.
+ *
+ * Durability: the budget is derived from the audit log rather than a counter
+ * column, which is safe because lifecycle events are never pruned/compacted/
+ * rotated mid-run — the only DELETE on lifecycle_event is the terminal
+ * whole-work-item purge (db1_work_item_delete). So while a run is active its
+ * panel_retry history is complete and the derived count is authoritative. */
 static int autonomy_panel_retries_used(const char *work_item_id, const char *stage)
 {
    db1_lifecycle_event_t *evs = NULL;
@@ -183,10 +189,21 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
              * so there is no concurrent same-item retry to race.) */
             if (db1_work_item_clear_pause(work_item_id) != 0)
                return 0; /* could not clear -> leave parked, retry next sweep (no budget spent) */
-            db1_lifecycle_event_add(work_item_id, wi0.current_stage, "panel_retry", "engine",
-                                    wi0.pause_reason, "", 0);
-            /* pause cleared -> fall through to the advance loop, which re-runs the
-             * parked roundtable node for a fresh panel. */
+            /* Symmetric on the write side: if the panel_retry audit write fails the
+             * retry would run UNCOUNTED and could bypass the cap, so treat it like a
+             * failed clear — re-park with the original reason and do not advance.
+             * (Belt-and-braces: even if the process died in the tiny window between
+             * the clear and this write, the re-convened panel writes its own "pause"
+             * lifecycle event, which the cumulative turn cap counts, so the runaway
+             * backstop still holds.) */
+            if (db1_lifecycle_event_add(work_item_id, wi0.current_stage, "panel_retry", "engine",
+                                        wi0.pause_reason, "", 0) != 0)
+            {
+               db1_work_item_set_pause(work_item_id, wi0.pause_reason, wi0.current_stage);
+               return 0;
+            }
+            /* pause cleared + retry durably recorded -> fall through to the advance
+             * loop, which re-runs the parked roundtable node for a fresh panel. */
          }
       }
    }
