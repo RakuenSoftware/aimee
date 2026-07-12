@@ -37,9 +37,15 @@ int agent_http_get(const char *url, const char *extra_headers, char **response_b
 
 /* ── Tests ──────────────────────────────────────────────────────────────────── */
 
-static int repo_count(cJSON *arr) { return cJSON_GetArraySize(arr); }
+static int repo_count(cJSON *arr)
+{
+   return cJSON_GetArraySize(arr);
+}
 
-static cJSON *repo_at(cJSON *arr, int i) { return cJSON_GetArrayItem(arr, i); }
+static cJSON *repo_at(cJSON *arr, int i)
+{
+   return cJSON_GetArrayItem(arr, i);
+}
 
 static const char *sval(cJSON *o, const char *k)
 {
@@ -64,11 +70,10 @@ static void test_detect(void)
 
 static void test_parse_github(void)
 {
-   const char *body =
-       "[{\"name\":\"repo-a\",\"clone_url\":\"https://github.com/o/repo-a.git\","
-       "\"ssh_url\":\"git@github.com:o/repo-a.git\",\"private\":true},"
-       "{\"name\":\"repo-b\",\"clone_url\":\"https://github.com/o/repo-b.git\","
-       "\"ssh_url\":\"git@github.com:o/repo-b.git\",\"private\":false}]";
+   const char *body = "[{\"name\":\"repo-a\",\"clone_url\":\"https://github.com/o/repo-a.git\","
+                      "\"ssh_url\":\"git@github.com:o/repo-a.git\",\"private\":true},"
+                      "{\"name\":\"repo-b\",\"clone_url\":\"https://github.com/o/repo-b.git\","
+                      "\"ssh_url\":\"git@github.com:o/repo-b.git\",\"private\":false}]";
    cJSON *out = cJSON_CreateArray();
    int n = git_org_parse(GIT_ORG_GITHUB, body, out);
    assert(n == 2 && repo_count(out) == 2);
@@ -83,9 +88,11 @@ static void test_parse_github(void)
 static void test_parse_gitlab(void)
 {
    const char *body =
-       "[{\"name\":\"P A\",\"path\":\"proj-a\",\"http_url_to_repo\":\"https://gitlab.com/g/proj-a.git\","
+       "[{\"name\":\"P "
+       "A\",\"path\":\"proj-a\",\"http_url_to_repo\":\"https://gitlab.com/g/proj-a.git\","
        "\"ssh_url_to_repo\":\"git@gitlab.com:g/proj-a.git\",\"visibility\":\"private\"},"
-       "{\"name\":\"P B\",\"path\":\"proj-b\",\"http_url_to_repo\":\"https://gitlab.com/g/proj-b.git\","
+       "{\"name\":\"P "
+       "B\",\"path\":\"proj-b\",\"http_url_to_repo\":\"https://gitlab.com/g/proj-b.git\","
        "\"ssh_url_to_repo\":\"git@gitlab.com:g/proj-b.git\",\"visibility\":\"public\"}]";
    cJSON *out = cJSON_CreateArray();
    int n = git_org_parse(GIT_ORG_GITLAB, body, out);
@@ -101,10 +108,9 @@ static void test_parse_gitlab(void)
 
 static void test_parse_bitbucket(void)
 {
-   const char *body =
-       "{\"values\":[{\"name\":\"bb-a\",\"is_private\":true,\"links\":{\"clone\":["
-       "{\"name\":\"https\",\"href\":\"https://bitbucket.org/t/bb-a.git\"},"
-       "{\"name\":\"ssh\",\"href\":\"git@bitbucket.org:t/bb-a.git\"}]}}]}";
+   const char *body = "{\"values\":[{\"name\":\"bb-a\",\"is_private\":true,\"links\":{\"clone\":["
+                      "{\"name\":\"https\",\"href\":\"https://bitbucket.org/t/bb-a.git\"},"
+                      "{\"name\":\"ssh\",\"href\":\"git@bitbucket.org:t/bb-a.git\"}]}}]}";
    cJSON *out = cJSON_CreateArray();
    int n = git_org_parse(GIT_ORG_BITBUCKET, body, out);
    assert(n == 1);
@@ -152,7 +158,8 @@ static void test_list_bad_args(void)
    assert(git_org_repos_list("github.com", "bad owner!", &out, provider, sizeof(provider), err,
                              sizeof(err)) == 400);
    assert(out == NULL);
-   assert(git_org_repos_list("", "owner", &out, provider, sizeof(provider), err, sizeof(err)) == 400);
+   assert(git_org_repos_list("", "owner", &out, provider, sizeof(provider), err, sizeof(err)) ==
+          400);
    printf("  list bad args: OK\n");
 }
 

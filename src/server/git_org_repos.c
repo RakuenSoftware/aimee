@@ -17,10 +17,10 @@
  * stay in lockstep with agent_exec.h. */
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms);
 
-#define ORG_PER_PAGE 100 /* GitHub / GitLab / Bitbucket page size */
-#define GITEA_LIMIT 50   /* Gitea caps `limit` at 50 */
-#define MAX_PAGES 20
-#define MAX_REPOS 500
+#define ORG_PER_PAGE    100 /* GitHub / GitLab / Bitbucket page size */
+#define GITEA_LIMIT     50  /* Gitea caps `limit` at 50 */
+#define MAX_PAGES       20
+#define MAX_REPOS       500
 #define HTTP_TIMEOUT_MS 20000
 
 git_org_provider_t git_org_detect(const char *host)
@@ -301,25 +301,32 @@ int git_org_repos_list(const char *host, const char *owner, cJSON **out, char *p
    switch (p)
    {
    case GIT_ORG_GITHUB:
-      snprintf(org_base, sizeof(org_base), "https://api.github.com/orgs/%s/repos?per_page=%d", owner, ORG_PER_PAGE);
-      snprintf(user_base, sizeof(user_base), "https://api.github.com/users/%s/repos?per_page=%d", owner, ORG_PER_PAGE);
+      snprintf(org_base, sizeof(org_base), "https://api.github.com/orgs/%s/repos?per_page=%d",
+               owner, ORG_PER_PAGE);
+      snprintf(user_base, sizeof(user_base), "https://api.github.com/users/%s/repos?per_page=%d",
+               owner, ORG_PER_PAGE);
       break;
    case GIT_ORG_GITLAB:
    {
       /* gitlab.com or a self-hosted host; both serve /api/v4. */
-      snprintf(org_base, sizeof(org_base), "https://%s/api/v4/groups/%s/projects?per_page=%d", host, owner, ORG_PER_PAGE);
-      snprintf(user_base, sizeof(user_base), "https://%s/api/v4/users/%s/projects?per_page=%d", host, owner, ORG_PER_PAGE);
+      snprintf(org_base, sizeof(org_base), "https://%s/api/v4/groups/%s/projects?per_page=%d", host,
+               owner, ORG_PER_PAGE);
+      snprintf(user_base, sizeof(user_base), "https://%s/api/v4/users/%s/projects?per_page=%d",
+               host, owner, ORG_PER_PAGE);
       break;
    }
    case GIT_ORG_BITBUCKET:
-      snprintf(org_base, sizeof(org_base), "https://api.bitbucket.org/2.0/repositories/%s?pagelen=%d", owner, ORG_PER_PAGE);
+      snprintf(org_base, sizeof(org_base),
+               "https://api.bitbucket.org/2.0/repositories/%s?pagelen=%d", owner, ORG_PER_PAGE);
       /* Bitbucket has no org/user split. */
       break;
    case GIT_ORG_GITEA:
    default:
       page_size = GITEA_LIMIT;
-      snprintf(org_base, sizeof(org_base), "https://%s/api/v1/orgs/%s/repos?limit=%d", host, owner, GITEA_LIMIT);
-      snprintf(user_base, sizeof(user_base), "https://%s/api/v1/users/%s/repos?limit=%d", host, owner, GITEA_LIMIT);
+      snprintf(org_base, sizeof(org_base), "https://%s/api/v1/orgs/%s/repos?limit=%d", host, owner,
+               GITEA_LIMIT);
+      snprintf(user_base, sizeof(user_base), "https://%s/api/v1/users/%s/repos?limit=%d", host,
+               owner, GITEA_LIMIT);
       break;
    }
 
