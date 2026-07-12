@@ -105,6 +105,80 @@ static int mock_delegate(const char *wd, const char *role, const char *delegate,
 }
 static const wfe_delegate_provider_t MOCK = {mock_delegate};
 
+/* ---- TDD implement (two agents): a recording mock that captures the (role,
+ * delegate) of every dispatch + whether the prompt is the RED/GREEN step, and
+ * still writes a valid intent so understand advances into implement. ---- */
+#define REC_MAX 32
+static char g_rec_role[REC_MAX][32];
+static char g_rec_deleg[REC_MAX][32];
+static int g_rec_red[REC_MAX];   /* prompt carried the RED (test-author) step */
+static int g_rec_green[REC_MAX]; /* prompt carried the GREEN (implementer) step */
+static int g_rec_n;
+static int rec_delegate(const char *wd, const char *role, const char *delegate, const char *prompt,
+                        const char *artifact_path, char out_sha[64], char *err, size_t errlen)
+{
+   (void)wd;
+   (void)err;
+   (void)errlen;
+   snprintf(out_sha, 64, "cafe0003");
+   if (g_rec_n < REC_MAX)
+   {
+      snprintf(g_rec_role[g_rec_n], 32, "%s", role ? role : "");
+      snprintf(g_rec_deleg[g_rec_n], 32, "%s", delegate ? delegate : "");
+      g_rec_red[g_rec_n] = prompt && strstr(prompt, "RED") != NULL;
+      g_rec_green[g_rec_n] = prompt && strstr(prompt, "GREEN") != NULL;
+      g_rec_n++;
+   }
+   /* let understand advance so the run reaches implement (implement then parks at
+    * the freeze against the non-git repo, AFTER its dispatches have fired). */
+   if (artifact_path && artifact_path[0] && strstr(artifact_path, "understand"))
+   {
+      FILE *f = fopen(artifact_path, "wb");
+      if (f)
+      {
+         const char *j = "{\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"x\","
+                         "\"acceptance_criteria\":[\"ok\"]}";
+         fwrite(j, 1, strlen(j), f);
+         fclose(f);
+      }
+   }
+   return 0;
+}
+static const wfe_delegate_provider_t REC = {rec_delegate};
+
+/* understand -> implement, implement in TDD mode: a test author (test_delegate)
+ * then the implementer (delegate). Non-enforced (terminates at implement). */
+static const char *WF_TDD = "name: tddwf\n"
+                            "start: understand\n"
+                            "nodes:\n"
+                            "  - id: understand\n"
+                            "    block: understand\n"
+                            "    next: impl\n"
+                            "  - id: impl\n"
+                            "    block: implement\n"
+                            "    in:\n"
+                            "      intent: understand.out\n"
+                            "    params:\n"
+                            "      tdd: true\n"
+                            "      persona: builder\n"
+                            "      delegate: coder\n"
+                            "      test_persona: sdet\n"
+                            "      test_delegate: tester\n";
+
+/* the same shape with TDD OFF: a single implementer dispatch, no test author. */
+static const char *WF_PLAIN = "name: plainwf\n"
+                              "start: understand\n"
+                              "nodes:\n"
+                              "  - id: understand\n"
+                              "    block: understand\n"
+                              "    next: impl\n"
+                              "  - id: impl\n"
+                              "    block: implement\n"
+                              "    in:\n"
+                              "      intent: understand.out\n"
+                              "    params:\n"
+                              "      delegate: coder\n";
+
 /* stub-advance: stand in for implement/freeze/roundtable so the test avoids git
  * and the live panel; the engine still logs an "advance" for the node (which
  * gate.deliver's re-verify relies on for the roundtable gate). */
@@ -129,6 +203,16 @@ static void setup_home(void)
    FILE *f = fopen(path, "wb");
    assert(f);
    fputs(WF, f);
+   fclose(f);
+   snprintf(path, sizeof path, "%s/tddwf.yaml", wf);
+   f = fopen(path, "wb");
+   assert(f);
+   fputs(WF_TDD, f);
+   fclose(f);
+   snprintf(path, sizeof path, "%s/plainwf.yaml", wf);
+   f = fopen(path, "wb");
+   assert(f);
+   fputs(WF_PLAIN, f);
    fclose(f);
    setenv("AIMEE_HOME", dir, 1);
    /* producing blocks act in this writable dir (the mock writes artifacts here). */
@@ -184,6 +268,61 @@ int main(void)
    }
    free(ev);
    assert(adv_understand && adv_split && adv_review && adv_deliver_terminal);
+
+   /* ---- TDD implement: two agents, tests before code ---- */
+   wfe_reset_block_executors();
+   wfe_register_default_executors(); /* REAL implement (not the stub above) */
+   wfe_set_delegate_provider(&REC);
+
+   /* TDD on: implement dispatches the test author (qa@tester) THEN the
+    * implementer (engineer@coder), RED before GREEN. The run then parks at the
+    * freeze (non-git repo), but both dispatches have already fired. */
+   g_rec_n = 0;
+   {
+      char id2[80] = "", e2[256] = "";
+      int rc2 = wfe_work_item_create("tddwf", "git@github.com:x/tdd.git", "docs/tdd.md",
+                                     "interactive", id2, e2, sizeof e2);
+      if (rc2 != 0)
+         fprintf(stderr, "\n  tddwf create failed: %s\n", e2);
+      assert(rc2 == 0);
+      (void)wfe_engine_run(id2, e2, sizeof e2);
+      /* the persona is carried in the dispatch role slot: test author = the
+       * specified `test_persona` (sdet) on `test_delegate` (tester); implementer =
+       * the node's `persona` (builder) on `delegate` (coder). */
+      int i_test = -1, i_code = -1;
+      for (int i = 0; i < g_rec_n; i++)
+      {
+         if (strcmp(g_rec_role[i], "sdet") == 0 && strcmp(g_rec_deleg[i], "tester") == 0)
+            i_test = i;
+         if (strcmp(g_rec_role[i], "builder") == 0 && strcmp(g_rec_deleg[i], "coder") == 0)
+            i_code = i;
+      }
+      assert(i_test >= 0);         /* the test author ran with its specified persona */
+      assert(i_code >= 0);         /* the implementer ran with its specified persona */
+      assert(i_test < i_code);     /* RED (tests) before GREEN (code) */
+      assert(g_rec_red[i_test]);   /* the test author got the RED prompt */
+      assert(g_rec_green[i_code]); /* the implementer got the GREEN prompt */
+   }
+
+   /* TDD off: a plain implement dispatches exactly ONE implementer (engineer) and
+    * NO separate test author (qa). */
+   g_rec_n = 0;
+   {
+      char id3[80] = "", e3[256] = "";
+      assert(wfe_work_item_create("plainwf", "git@github.com:x/plain.git", "docs/plain.md",
+                                  "interactive", id3, e3, sizeof e3) == 0);
+      (void)wfe_engine_run(id3, e3, sizeof e3);
+      int qa_calls = 0, eng_calls = 0;
+      for (int i = 0; i < g_rec_n; i++)
+      {
+         if (strcmp(g_rec_role[i], "qa") == 0)
+            qa_calls++;
+         if (strcmp(g_rec_role[i], "engineer") == 0)
+            eng_calls++;
+      }
+      assert(qa_calls == 0);  /* no TDD -> no separate test author */
+      assert(eng_calls == 1); /* the single implement dispatch */
+   }
 
    printf("ok\n");
    return 0;

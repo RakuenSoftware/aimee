@@ -14,6 +14,26 @@ static int sh(const char *cmd)
    return system(cmd);
 }
 
+/* Capture `git -C dir rev-parse HEAD` into out[64]. Returns 0 on success. */
+static int git_head(const char *dir, char out[64])
+{
+   char cmd[1200];
+   snprintf(cmd, sizeof cmd, "git -C %s rev-parse HEAD 2>/dev/null", dir);
+   FILE *p = popen(cmd, "r");
+   if (!p)
+      return -1;
+   char buf[128] = "";
+   char *got = fgets(buf, sizeof buf, p);
+   pclose(p);
+   if (!got)
+      return -1;
+   size_t n = strlen(buf);
+   while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+      buf[--n] = '\0';
+   snprintf(out, 64, "%s", buf);
+   return out[0] ? 0 : -1;
+}
+
 int main(void)
 {
    printf("wfe-blocks: ");
@@ -71,6 +91,33 @@ int main(void)
    const char *bb = base2[0] ? "master" : "main";
    wfe_git_freeze(dir, bb, b3, h3, hh3, err, sizeof err);
    assert(strcmp(hh3, h_change) == 0);
+
+   /* --- TDD anti-deletion guard: red-authored tests must survive GREEN --- */
+   /* red commit: add a test file (currently on branch feat). */
+   snprintf(cmd, sizeof cmd,
+            "cd %s && printf 'test\\n' > test_x.c && git add -A && git commit -q -m red", dir);
+   assert(sh(cmd) == 0);
+   char red[64] = "";
+   assert(git_head(dir, red) == 0);
+
+   /* good GREEN: change production code, keep the test -> survives. */
+   snprintf(cmd, sizeof cmd,
+            "cd %s && printf 'a\\nb\\nc\\n' > f.txt && git add -A && git commit -q -m green_good",
+            dir);
+   assert(sh(cmd) == 0);
+   assert(wfe_tdd_tests_survive(dir, red) == 1);
+
+   /* bad GREEN: delete the red-authored test -> does not survive. */
+   snprintf(cmd, sizeof cmd, "cd %s && git rm test_x.c >/dev/null && git commit -q -m green_bad",
+            dir);
+   assert(sh(cmd) == 0);
+   assert(wfe_tdd_tests_survive(dir, red) == 0);
+
+   /* not applicable (empty args / unresolvable) -> permissive (1), the freeze +
+    * aggregate verify are the backstop. */
+   assert(wfe_tdd_tests_survive(dir, "") == 1);
+   assert(wfe_tdd_tests_survive("", red) == 1);
+   assert(wfe_tdd_tests_survive(dir, "0000000000000000000000000000000000000000") == 1);
 
    snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
    sh(cmd);

@@ -137,6 +137,28 @@ int wfe_implement_adversarial_ok(const char *workdir);
  * unparseable, or any non-pass verdict) -> FAIL CLOSED. Exposed for the unit test. */
 int wfe_implement_verify_ok(const char *workdir);
 
+/* The TDD RED gate: after the test author commits (implement node `tdd: true`), a
+ * genuine red step must leave at least one FAILING test — the change must NOT
+ * already pass. Returns 1 to proceed to the GREEN (implementer) step, 0 to loop
+ * (re-run the test author). Cases:
+ *   - no verify provider installed -> 1 (cannot enforce mechanically; proceed, the
+ *     same drivable-without-a-provider stance as the rest of implement),
+ *   - a produced verdict that is anything OTHER than "passed" -> 1 (a real red),
+ *   - an explicit "passed" verdict (tests pass / none were added), a gate that
+ *     could not run, or an unparseable verdict -> 0 (red unconfirmed). It is the
+ *     logical inverse of wfe_implement_verify_ok in the provider-present cases.
+ * Exposed for the unit test. */
+int wfe_tdd_red_ok(const char *workdir);
+
+/* TDD anti-deletion guard: after the GREEN implementer commits, every file the RED
+ * commit `red_sha` ADDED or MODIFIED (its tests) must still exist at HEAD — GREEN
+ * makes them pass, it does not delete them. Returns 1 if all survive OR the check
+ * is not applicable (empty args, or git cannot resolve the commit — the mandatory
+ * freeze + aggregate verify remain the backstop), 0 if GREEN deleted a red-authored
+ * file. Best-effort by design so a non-git/degraded workdir stays drivable. Exposed
+ * for the unit test. */
+int wfe_tdd_tests_survive(const char *workdir, const char *red_sha);
+
 /* ---- Child-workflow fan-out seam for foreach.workflow (sliced-lifecycle build).
  * The block decomposes the split packets into one CHILD workflow run per packet
  * (the "slice" workflow: implement -> freeze -> roundtable -> sub-PR -> green CI ->
