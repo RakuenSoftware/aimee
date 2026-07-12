@@ -17,6 +17,9 @@ static int agent_run_tool_command(const agent_t *agent, const char *type, const 
    (void)timeout_ms; /* passed through agent config */
    char sys[128];
    snprintf(sys, sizeof(sys), "Execute the %s command and report the result.", type);
+   /* Composite plan/step helper: a sub-turn of an outer plan execution, so it uses
+    * the PRIMITIVE agent_execute (not agent_dispatch_one) — re-acquiring the same
+    * agent's max_parallel slot here would self-throttle the plan. */
    return agent_execute(agent, sys, cmd, 2048, 0.2, out);
 }
 
@@ -301,6 +304,9 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
 
    agent_result_t plan_res;
    memset(&plan_res, 0, sizeof(plan_res));
+   /* Composite (plan generation + step execution): sub-turns use the PRIMITIVE
+    * agent_execute, not the slot-acquiring agent_dispatch_one (nested acquisition
+    * of the same agent's slot would self-throttle the plan). */
    int rc = agent_execute(agent, system_prompt, plan_prompt, max_tokens, temperature, &plan_res);
    if (rc != 0 || !plan_res.response)
    {

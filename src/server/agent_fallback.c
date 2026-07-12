@@ -32,6 +32,20 @@ int agent_error_is_retryable(const char *error)
           strstr(error, "no content in response") != NULL;
 }
 
+/* Should a fallback/retry caller try a DIFFERENT agent for this result? Yes for a
+ * saturation refusal (AGENT_RC_AT_LIMIT — the agent is momentarily at its
+ * max_parallel ceiling, so a peer may be free) OR a retryable provider error. A
+ * plain success (0) or a non-retryable hard failure is terminal for the fallback
+ * path. Centralises the at-limit-triggers-fallback rule so callers don't rely on
+ * the error-string classifier (which does NOT — and must not — treat the
+ * "at concurrency limit" message as retryable, so at-limit never records health). */
+int agent_rc_should_try_another(int rc, const char *error)
+{
+   if (rc == 0)
+      return 0;
+   return rc == AGENT_RC_AT_LIMIT || agent_error_is_retryable(error);
+}
+
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)
 {
    return ag && role && (agent_has_role(ag, role) || agent_is_exec_role(ag, role));
@@ -54,7 +68,9 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
                                  int enforce_writes, agent_result_t *out, int rc)
 {
    agent_t *ag = current ? *current : NULL;
-   if (!cfg || !ag || !out || rc == 0 || !agent_error_is_retryable(out->error))
+   /* Proceed for a retryable failure OR a saturation refusal (AGENT_RC_AT_LIMIT):
+    * a same-tier peer may be free even if the primary was momentarily at its cap. */
+   if (!cfg || !ag || !out || !agent_rc_should_try_another(rc, out->error))
       return rc;
 
    /* Cost-tier fallback: a tier is a pool. Even when fallback_chain is stale
@@ -80,35 +96,21 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
       out->error[0] = '\0';
 
       aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s'", peer->name);
-      rc = agent_execute_with_tools_for_role(peer, &cfg->network, role, system_prompt, user_prompt,
-                                             max_tokens, 0.3, out);
+      /* Through the single guarded executor: enforces peer->max_parallel and
+       * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
+       * non-zero so the loop simply moves to the next same-tier peer. */
+      rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                              0.3, 1 /* use_tools */, out);
       if (rc == 0)
       {
          ag = peer;
          if (current)
             *current = peer;
       }
-      else
-      {
-         const char *pec = agent_error_is_retryable(out->error) ? "retryable" : "error";
-         provider_catalog_record_failure(peer->name, pec);
-      }
    }
 
    return rc;
 }
-
-int agent_execute_guarded(agent_t *ag, const agent_network_t *net, const char *role,
-                          const char *system_prompt, const char *user_prompt, int max_tokens,
-                          agent_result_t *out)
-{
-   if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
-   {
-      snprintf(out->error, sizeof(out->error), "agent '%s' at concurrency limit", ag->name);
-      return -1;
-   }
-   int rc = agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt, max_tokens,
-                                              0.3, out);
-   provider_catalog_concurrent_release(ag->name);
-   return rc;
-}
+/* agent_execute_guarded was removed: the concurrency guard + health recording it
+ * provided now live in the single agent_dispatch_one (agent_runtime.c), which
+ * EVERY dispatch path routes through. */
