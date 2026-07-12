@@ -45,7 +45,7 @@ int git_org_parse(git_org_provider_t p, const char *json, struct cJSON *out);
  * (400 bad args, 401 unauthorized upstream, 404 owner not found, 502 upstream/parse
  * failure) and fills err[errlen]. Uses the per-host token from git_host_cred when
  * present; unauthenticated otherwise. */
-int git_org_repos_list(const char *host, const char *owner, struct cJSON **out,
-                       char *provider, size_t provider_cap, char *err, size_t errlen);
+int git_org_repos_list(const char *host, const char *owner, struct cJSON **out, char *provider,
+                       size_t provider_cap, char *err, size_t errlen);
 
 #endif /* GIT_ORG_REPOS_H */
