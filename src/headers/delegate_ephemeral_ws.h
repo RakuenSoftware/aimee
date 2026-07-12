@@ -8,9 +8,9 @@
  * durable delegate whose dispatching client disconnected). Shared by both shell
  * executors so the wording never drifts. ASCII only (no em-dash) for portability
  * across log pipelines / non-UTF-8 environments. */
-#define DELEGATE_DETACHED_CHANNEL_DOWN_JSON                                                          \
-   "{\"stdout\":\"\",\"stderr\":\"detached workspace reverse-channel unavailable: the serving "     \
-   "client is not connected -- a background/durable delegate cannot run shell tools against a "     \
+#define DELEGATE_DETACHED_CHANNEL_DOWN_JSON                                                        \
+   "{\"stdout\":\"\",\"stderr\":\"detached workspace reverse-channel unavailable: the serving "    \
+   "client is not connected -- a background/durable delegate cannot run shell tools against a "    \
    "client-served (detached) workspace\",\"exit_code\":-1}"
 
 /* Create a server-side ephemeral workspace for a background delegate whose
