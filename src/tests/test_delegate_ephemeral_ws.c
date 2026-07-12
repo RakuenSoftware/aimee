@@ -53,6 +53,16 @@ int main(void)
    char note[1100];
    snprintf(note, sizeof(note), "%s/AIMEE_WORKSPACE_NOTE.txt", out);
    assert(path_exists(note));
+   /* The workspace is git-init'd so aimee's write-guard (cwd_is_git_checkout)
+    * permits file writes in it — a plain dir would block every edit. git init is
+    * best-effort, so only assert .git when git is actually available (git-less CI
+    * runners still exercise the rest of the suite). */
+   if (system("git --version >/dev/null 2>&1") == 0)
+   {
+      char gitdir[1100];
+      snprintf(gitdir, sizeof(gitdir), "%s/.git", out);
+      assert(path_exists(gitdir));
+   }
    printf("  creates_dir_and_note: ok\n");
 
    /* 3. remove() cleans up the workspace it created. */

@@ -11,14 +11,17 @@
 #include "delegate_ephemeral_ws.h"
 
 #include "aimee_home.h"
+#include "log.h"
 #include "platform_path.h"
 
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* A deleg_id is server-generated (e.g. "deleg-105-1783801198975185376-10"), but
@@ -101,12 +104,53 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
    if (nfd >= 0)
    {
       static const char note[] =
-          "This is a server-side ephemeral workspace for a background aimee delegate.\n"
+          "This is a server-side ephemeral git workspace for a background aimee delegate.\n"
           "The dispatching client disconnected, so the client's repository is NOT present\n"
-          "here -- file/shell tools run against this empty directory. A background code\n"
-          "delegate that must edit the client tree needs the repo provisioned server-side.\n";
+          "here -- file/shell tools run against this initially-empty checkout. A background\n"
+          "code delegate that must edit the client tree needs the repo provisioned here.\n";
       (void)!write(nfd, note, sizeof(note) - 1);
       close(nfd);
+   }
+
+   /* Make the workspace a git checkout: aimee's write-guard permits file writes
+    * only in a git checkout / worktree (cwd_is_git_checkout), so a plain dir would
+    * block every edit. `git init` in the leaf via fchdir on the already-opened
+    * no-follow fd (no path re-resolution -> no TOCTOU). Best-effort: if git is
+    * missing the workspace still exists, only writes stay guarded.
+    * fd hygiene: anchor/leaf/note (and the child's devnull) are all O_CLOEXEC, so
+    * only the intended dirfd survives into the exec'd git. */
+   pid_t pid = fork();
+   if (pid < 0)
+   {
+      /* Could not fork: the workspace stays a plain dir, so the write-guard will
+       * block writes here. Surface it so operators can diagnose read-only-delegate
+       * symptoms rather than it failing silently. */
+      aimee_log(LOG_WARN, "delegate",
+                "ephemeral workspace %s: fork for 'git init' failed (%s); file writes here will "
+                "be blocked by the write-guard",
+                deleg_id, strerror(errno));
+   }
+   else if (pid == 0)
+   {
+      if (fchdir(leaf) != 0)
+         _exit(127);
+      int devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
+      if (devnull >= 0)
+      {
+         dup2(devnull, STDOUT_FILENO);
+         dup2(devnull, STDERR_FILENO);
+      }
+      execlp("git", "git", "init", "-q", (char *)NULL);
+      _exit(127);
+   }
+   else
+   {
+      int status = 0;
+      if (waitpid(pid, &status, 0) == pid && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
+         aimee_log(LOG_WARN, "delegate",
+                   "ephemeral workspace %s: 'git init' did not succeed (wait status %d); file "
+                   "writes here will be blocked by the write-guard (is git installed?)",
+                   deleg_id, status);
    }
 
    close(leaf);
