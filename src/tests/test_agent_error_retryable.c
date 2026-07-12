@@ -21,6 +21,7 @@ int main(void)
    assert(agent_error_is_retryable("HTTP 429 rate limit") == 1);
    assert(agent_error_is_retryable("upstream overloaded") == 1);
    assert(agent_error_is_retryable("connection failed") == 1);
+   assert(agent_error_is_retryable("Connection failed") == 1);
    assert(agent_error_is_retryable("request timed out") == 1);
 
    /* Hard errors stay non-retryable. */
