@@ -4,6 +4,7 @@
  * only HTTP parsing / routing, not the real git-clone or indexer subsystems.
  * Binaries that need the real behavior (unit-test-git-project) link the real
  * objects and must NOT also link this TU. */
+#include "deploy_apply.h"
 #include "git_host_cred.h"
 #include "git_oauth_device.h"
 #include "git_oauth_github.h"
@@ -178,6 +179,40 @@ int git_oauth_github_get_client_id(char *out, size_t out_len)
    return 0;
 }
 
+int git_oauth_github_set_client_secret(const char *client_secret)
+{
+   (void)client_secret;
+   return -1;
+}
+
+int git_oauth_github_web_available(void)
+{
+   return 0;
+}
+
+int git_oauth_github_web_start(const char *principal, const char *redirect_uri, char *out_url,
+                               size_t url_len, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)redirect_uri;
+   if (out_url && url_len)
+      out_url[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+   return -1;
+}
+
+int git_oauth_github_web_callback(const char *principal, const char *code, const char *state,
+                                  char *err, size_t errlen)
+{
+   (void)principal;
+   (void)code;
+   (void)state;
+   if (err && errlen)
+      err[0] = '\0';
+   return -1;
+}
+
 /* GitLab/Gitea device-flow stubs (git_oauth_device.h) — the HTTP-routing tests link
  * server_http_routes.o (whose device-flow oauth handlers reference these) but
  * exercise only routing, not the real OAuth device grant. */
@@ -243,6 +278,37 @@ int oauth_dev_poll(oauth_dev_provider_t p, const char *host, const char *princip
    (void)principal;
    if (err && errlen)
       err[0] = '\0';
+   return -1;
+}
+
+/* Server-orchestrated deploy stubs (deploy_apply.h): the HTTP-routing tests link
+ * the relocated /v1/deploy handlers but never launch containers. */
+int deploy_apply_enabled(void)
+{
+   return 0;
+}
+
+int deploy_apply_start(void)
+{
+   return -1;
+}
+
+void deploy_apply_state(int *running, int *last_exit, char *out, size_t out_cap)
+{
+   if (running)
+      *running = 0;
+   if (last_exit)
+      *last_exit = 0;
+   if (out && out_cap)
+      out[0] = '\0';
+}
+
+int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (exit_code)
+      *exit_code = -1;
    return -1;
 }
 
