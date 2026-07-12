@@ -463,7 +463,7 @@ static int rh_hex(char c)
 /* Read a percent-decoded string query param into `out` ("" if absent). A path may
  * arrive percent-encoded (encodeURIComponent turns '/' into %2F), so %XX escapes
  * are decoded; a malformed escape is copied literally. */
-static void rh_query_str(const char *key, char *out, size_t cap)
+void rh_query_str(const char *key, char *out, size_t cap)
 {
    if (cap)
       out[0] = '\0';
