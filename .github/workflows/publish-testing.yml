@@ -23,6 +23,7 @@ on:
       - "scripts/**"
       - "Dockerfile"
       - "Dockerfile.server"
+      - "Dockerfile.combined"
       - ".github/workflows/publish-testing.yml"
   workflow_dispatch:
 
@@ -47,6 +48,7 @@ jobs:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
+          - { name: aimee-combined,  dockerfile: Dockerfile.combined }
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +64,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The combined appliance bundles server + kb + webchat + code-server + the
+      # llama.cpp runtime — reclaim preinstalled toolchains to fit a stock runner.
+      - name: Free disk space (combined leg)
+        if: matrix.image.name == 'aimee-combined'
+        run: |
+          echo "before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/.ghcup /usr/local/share/boost \
+            /usr/share/swift /usr/local/share/powershell /usr/local/lib/node_modules \
+            /opt/microsoft /opt/az "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo apt-get clean || true
+          echo "after:"; df -h /
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

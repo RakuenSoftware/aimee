@@ -3,7 +3,21 @@ package main
 import (
 	"context"
 	"net/http"
+	"os"
 )
+
+// GET /api/setup/appliance — whether this instance is the all-in-one appliance
+// (AIMEE_WIZARD_APPLIANCE=1), so the setup wizard hides the baked KB/LLM/store
+// steps and only asks for the provider, git connection, and workspaces.
+func (s *server) handleSetupAppliance(w http.ResponseWriter, r *http.Request) {
+	appliance := os.Getenv("AIMEE_WIZARD_APPLIANCE") == "1"
+	w.Header().Set("Content-Type", "application/json")
+	if appliance {
+		w.Write([]byte(`{"appliance":true}`))
+	} else {
+		w.Write([]byte(`{"appliance":false}`))
+	}
+}
 
 // Server-orchestrated container deploy. The setup wizard, after recording the
 // page-2 backend config, asks aimee-server to bring up the managed sibling

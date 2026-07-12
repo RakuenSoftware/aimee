@@ -1,0 +1,57 @@
+# Default all-in-one aimee appliance (server + kb + llm) configuration.
+#
+# In the combined image the server and kb share AIMEE_HOME, and both read their
+# config from $AIMEE_HOME/aimee.yaml. So this single merged file carries BOTH the
+# server's /v1 listener settings AND the kb's sidecar-command selection. The
+# entrypoint seeds it into $AIMEE_HOME on first start, so it survives a bind-mounted
+# (empty) volume — see deploy/container/combined-entrypoint.sh.
+#
+# Endpoints for the bundled llm come from the environment (AIMEE_LLM_URL /
+# AIMEE_EMBEDDER_URL / LLM_ENDPOINT, resolved to loopback :8080 by the entrypoint).
+
+# --- server: inbound /v1 HTTP API ---
+aimee:
+  api:
+    http_port: 8740          # plaintext /v1: loopback-only by design
+    tls_port: 8743           # native-TLS /v1 for remote thin clients (0.0.0.0)
+    bearer_token: "aimee-local-dev"
+    rate_limit_per_min: 0
+    # Trusted-network dogfood appliance: full so a thin client can drive
+    # delegates/roundtables/tools. Forced by AIMEE_API_REMOTE_WRITES too, so it
+    # survives a reseed. For any exposed deployment set your own bearer + TLS and
+    # lower this (data / "off").
+    remote_writes: "full"
+
+# Delegate roundtable / MoA ensemble, on by default with the seeded agents.json
+# roster; a thin client pushes the per-agent keys per session.
+ensemble:
+  enabled: true
+
+# --- baked backend topology (setup-wizard page-2 record) ---
+# Everything runs in-container on CPU: a local knowledge base whose embedder,
+# reranker, and synthesizer are served by the bundled aimee-llm at the cpu tier.
+# Recording it here makes the wizard's readiness see the KB + embedder as
+# configured, so appliance mode (AIMEE_WIZARD_APPLIANCE=1) can present a short setup
+# that only asks for a provider, git connection, and workspaces. DB2 comes from
+# AIMEE_DB2_URL (the Postgres sibling).
+kb_mode: local
+llm_embed_backend: local
+llm_embed_tier: cpu
+llm_rerank_backend: local
+llm_rerank_tier: cpu
+llm_synth_backend: local
+llm_synth_tier: cpu
+
+# --- kb: real semantic embeddings via the bundled aimee-llm ---
+# No embedding_command: with it unset the kb embeds in-process against
+# $AIMEE_EMBEDDER_URL (the entrypoint points it at the loopback llm), speaking
+# http:// directly — no fork, no python.
+
+learning:
+  synthesize:
+    enabled: false
+    command: "python3 /opt/aimee/scripts/learning-synthesize.py"
+
+kb:
+  curator:
+    extract_command: "python3 /opt/aimee/scripts/curator-extract.py"

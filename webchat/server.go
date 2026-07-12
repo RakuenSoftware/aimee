@@ -233,6 +233,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Server-orchestrated container deploy (setup wizard → docker compose up).
 	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
 	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
+	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))
 
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))

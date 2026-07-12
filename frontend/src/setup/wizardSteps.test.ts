@@ -50,6 +50,13 @@ describe('WIZARD_STEPS structure', () => {
     expect(remote).toEqual(['provider', 'knowledge_base', 'connection', 'project']);
   });
 
+  it('appliance mode hides the baked-infra steps (kb/deploy/db2)', () => {
+    const applianceLocal = visibleSteps('local', true).map((s) => s.id);
+    expect(applianceLocal).toEqual(['provider', 'connection', 'project']);
+    // Same regardless of kb mode — the appliance bakes it.
+    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['provider', 'connection', 'project']);
+  });
+
   it('every keyed step references documented config keys', () => {
     for (const step of WIZARD_STEPS) {
       for (const k of step.keys) {

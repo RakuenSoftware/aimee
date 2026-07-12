@@ -45,10 +45,13 @@ Run the services in Docker, install the `aimee` CLI on each machine.
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 
-# Deploy one container. Then open https://localhost:8443 and run the setup wizard —
-# its Deploy step brings up aimee-kb, the LLM, and Postgres for you. (Mounts the
-# host Docker socket so the server can launch them.)
-docker compose -f compose.server-managed.yaml up -d
+# Simplest: the all-in-one CPU appliance — server + kb + llm + Postgres in one
+# stack, with a short setup wizard (add an agent, connect GitHub, pick workspaces).
+docker compose -f compose.combined.yaml up -d
+
+# Or deploy just aimee-server and let the wizard's Deploy step bring up aimee-kb,
+# the LLM, and Postgres (CPU or GPU; mounts the host Docker socket to launch them):
+#   docker compose -f compose.server-managed.yaml up -d
 
 # Confirm it's live (default bearer: aimee-local-dev; -k for the self-signed cert)
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health

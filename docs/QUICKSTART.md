@@ -13,7 +13,12 @@ The model is the same on every developer machine: **the services run in Docker (
 
 ## Part 1, Run the server (in Docker)
 
-Deploy one container — `aimee-server` — with the host Docker socket mounted. The setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres (DB2 + pgvector) from there.
+Two one-container ways in:
+
+- **All-in-one CPU appliance** — `docker compose -f compose.combined.yaml up -d`. One image runs `aimee-server` + `aimee-kb` + the LLM, all on CPU, paired with Postgres. The setup wizard is short: add an agent, connect GitHub, pick workspaces — no KB/LLM/store questions. No Docker socket. Best for getting started fast.
+- **Self-deploying server** — the rest of this section. Deploy just `aimee-server` with the host Docker socket mounted; the wizard's **Deploy** step then brings up `aimee-kb`, `aimee-llm`, and Postgres (CPU or GPU). Best when you want the real split topology or a GPU.
+
+The self-deploying server: deploy one container — `aimee-server` — with the host Docker socket mounted. The setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres (DB2 + pgvector) from there.
 
 ### Prerequisites
 

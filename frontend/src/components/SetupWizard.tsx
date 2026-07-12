@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useToast } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
-import { visibleSteps, isRestartKey, helpFor, type WizardKbMode } from '../setup/wizardSteps';
-import { computeReadiness } from '../setup/readiness';
+import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
+import { computeReadiness, type StepId } from '../setup/readiness';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import PrimaryChooser from '../setup/PrimaryChooser';
 import KnowledgeBase from '../setup/KnowledgeBase';
@@ -67,6 +67,18 @@ async function fetchHostCount(): Promise<number> {
   }
 }
 
+// Whether this instance is the all-in-one appliance (KB + LLM + store baked in),
+// so the wizard hides the infra steps. Network failure ⇒ full wizard.
+async function fetchAppliance(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/setup/appliance', { headers: { 'X-CSRF-Token': csrf() } });
+    const d = await r.json();
+    return r.ok && !!d.appliance;
+  } catch {
+    return false;
+  }
+}
+
 export default function SetupWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
   const { active } = useSessions();
@@ -79,9 +91,12 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [pendingRestart, setPendingRestart] = useState<string[]>([]);
   const [showSummary, setShowSummary] = useState(false);
   const [hostsConnected, setHostsConnected] = useState(0);
+  // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
+  // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
+  const [appliance, setAppliance] = useState(false);
 
   const kbMode: WizardKbMode = String(cfg.kb_mode) === 'remote' ? 'remote' : 'local';
-  const steps = useMemo(() => visibleSteps(kbMode), [kbMode]);
+  const steps = useMemo(() => visibleSteps(kbMode, appliance), [kbMode, appliance]);
   const total = steps.length;
   // Clamp the cursor: switching to a remote KB shrinks the visible list.
   const safeIdx = Math.min(idx, total - 1);
@@ -105,6 +120,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
       setDraft(d);
     });
     fetchHostCount().then(setHostsConnected);
+    fetchAppliance().then(setAppliance);
   }, [open]);
 
   const close = useCallback(() => { onClose(); }, [onClose]);
@@ -245,7 +261,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {readiness.ready ? 'Everything required is configured. 🎉' : 'Here’s what’s left:'}
             </p>
             <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
-              {(Object.entries(readiness.steps)).map(([id, s]) => (
+              {(Object.entries(readiness.steps))
+                .filter(([id]) => !(appliance && APPLIANCE_HIDDEN_STEPS.has(id as StepId)))
+                .map(([id, s]) => (
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <span aria-hidden>{s.ok ? '✅' : s.optional ? '⚪' : '⛔'}</span>
                   <span style={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 92 }}>{id.replace(/_/g, ' ')}</span>
@@ -259,8 +277,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               </div>
             )}
             {/* Local KB: offer to bring up the managed services (kb + llm + postgres)
-                straight from here when the server can orchestrate Docker. */}
-            <DeployPanel kbMode={kbMode} />
+                straight from here when the server can orchestrate Docker. The
+                appliance already runs everything in-container, so skip it there. */}
+            {!appliance && <DeployPanel kbMode={kbMode} />}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <button style={ghostBtn} onClick={() => { setShowSummary(false); setIdx(0); }}>Back</button>
               <button style={primaryBtn} onClick={() => { setDismissed(true); notifySetupUpdated(); close(); }}>Finish</button>

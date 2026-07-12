@@ -54,10 +54,23 @@ export const WIZARD_STEPS: WizardStep[] = [
   { id: 'project', title: 'Workspaces & projects', keys: [], kind: 'workspace', skipNote: 'Without a connected repo, tools have no repository to act on.' },
 ];
 
+/** Infra steps the all-in-one appliance bakes (KB + LLM + shared store), so its
+ * wizard hides them and only asks for the provider, git connection, and
+ * workspaces. */
+export const APPLIANCE_HIDDEN_STEPS: ReadonlySet<StepId> = new Set<StepId>([
+  'knowledge_base',
+  'embedding',
+  'db2',
+]);
+
 /** The steps visible for the given kb mode, in order (drives the wizard's Step
- * N of M and next/back navigation). */
-export function visibleSteps(kbMode: WizardKbMode): WizardStep[] {
-  return WIZARD_STEPS.filter((s) => !s.showWhen || s.showWhen(kbMode));
+ * N of M and next/back navigation). In `appliance` mode the baked-infra steps are
+ * hidden regardless of kb mode. */
+export function visibleSteps(kbMode: WizardKbMode, appliance = false): WizardStep[] {
+  return WIZARD_STEPS.filter((s) => {
+    if (appliance && APPLIANCE_HIDDEN_STEPS.has(s.id)) return false;
+    return !s.showWhen || s.showWhen(kbMode);
+  });
 }
 
 /** True when a config key only takes effect after a server restart. */
