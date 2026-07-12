@@ -2,6 +2,7 @@
 #include "util.h"
 #include "agent_tools.h"
 #include "aimee_home.h"
+#include "delegate_ephemeral_ws.h"
 #include "tool_condense.h"
 #include "log.h"
 #include "agent_tools_internal.h"
@@ -720,8 +721,14 @@ char *tool_bash(const char *command, int timeout_ms)
    {
       int exit_code = -1;
       char *out = ws->exec_shell(ws, command, &exit_code);
+      /* NULL result = the reverse channel returned no usable response: the serving
+       * client is not connected (e.g. a background/durable delegate). Report a
+       * clear error rather than a bare exit_code:-1 that looks like a real failure.
+       * A real command with empty output returns "" (non-NULL). */
+      if (!out)
+         return safe_strdup(DELEGATE_DETACHED_CHANNEL_DOWN_JSON);
       cJSON *r = cJSON_CreateObject();
-      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stdout", out);
       cJSON_AddStringToObject(r, "stderr", "");
       cJSON_AddNumberToObject(r, "exit_code", exit_code);
       free(out);
