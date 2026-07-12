@@ -131,23 +131,37 @@ static void record_outcome(const char *agent_name, const char *role, const agent
 }
 
 /* THE single per-agent turn executor — see agent_exec.h. Every model turn (panel
- * lens, ensemble reference, delegate, fallback peer, chat passthrough, ping)
- * routes through here so the per-agent max_parallel cap and provider-health
+ * lens, ensemble reference, delegate, fallback peer, chat/responses passthrough,
+ * aux) routes through here so the per-agent max_parallel cap and provider-health
  * recording are enforced in ONE place instead of being re-implemented (and
- * forgotten) per dispatch path. */
+ * forgotten) per dispatch path.
+ *
+ * Health-domain note: this deliberately WIDENS provider-health accounting to the
+ * OpenAI-compatible ingress and the aux router, which previously bypassed it — a
+ * failing model on those paths now degrades its catalog health like any other
+ * turn (intended: one health signal per provider, whatever drove the call).
+ *
+ * Slot safety: there is no non-local exit between acquire and release — the
+ * executors (agent_execute / agent_execute_with_tools_for_role) return normally
+ * (C has no exceptions), so the release always runs and a slot is never leaked. */
 int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
                        const char *system_prompt, const char *user_prompt, int max_tokens,
                        double temperature, int use_tools, agent_result_t *out)
 {
    if (!ag || !out)
       return -1;
+   /* Own `out` from the first instruction, exactly like the executors: memset it so
+    * EVERY early-return path (at-limit, bad-precondition) leaves a clean result —
+    * out->response == NULL — and a caller that frees out->response after a non-zero
+    * return can never hit stale/garbage. (No caller passes a live out->response
+    * here; the executors also memset, so this is the established contract.) */
+   memset(out, 0, sizeof(*out));
    /* The tools executor dereferences `net`; a plain completion ignores it. Enforce
     * the precondition (net != NULL when use_tools) so a future caller that flips
     * use_tools without supplying a network fails cleanly instead of crashing. */
    if (use_tools && !net)
    {
-      if (out)
-         snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
+      snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
       return -1;
    }
    /* Concurrency choke point: acquire the agent's max_parallel slot. At the limit,
