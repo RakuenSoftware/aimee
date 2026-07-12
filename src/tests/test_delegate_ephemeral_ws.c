@@ -92,6 +92,46 @@ int main(void)
    assert(path_exists(victim_file)); /* target contents untouched */
    printf("  remove_refuses_symlink_escape: ok\n");
 
+   /* 6. ANCESTOR symlink: when <home>/delegate-ws is itself a symlink, both
+    * remove() and create() must refuse (open the anchor with O_NOFOLLOW). Uses a
+    * fresh home so the anchor does not already exist as a real dir. */
+   {
+      char home2[512];
+      snprintf(home2, sizeof(home2), "%s/aimee_ews2_XXXXXX", platform_tmpdir());
+      assert(platform_mkdtemp(home2) != NULL);
+      setenv("AIMEE_HOME", home2, 1);
+
+      char target[700];
+      snprintf(target, sizeof(target), "%s/realtarget", home2);
+      assert(platform_mkdir_p(target, 0700) == 0);
+      char keepf[820];
+      snprintf(keepf, sizeof(keepf), "%s/keep.txt", target);
+      FILE *kf = fopen(keepf, "w");
+      assert(kf != NULL);
+      fputs("keep me\n", kf);
+      fclose(kf);
+
+      char anchor[700];
+      snprintf(anchor, sizeof(anchor), "%s/delegate-ws", home2);
+      assert(symlink(target, anchor) == 0); /* delegate-ws -> realtarget (ancestor symlink) */
+
+      /* remove() on an in-prefix path that resolves through the symlinked anchor */
+      char rmpath[820];
+      snprintf(rmpath, sizeof(rmpath), "%s/delegate-ws/keep.txt", home2);
+      delegate_ephemeral_ws_remove(rmpath);
+      assert(path_exists(keepf)); /* target file untouched — anchor was not followed */
+
+      /* create() must also refuse a symlinked anchor */
+      char out2[1024];
+      assert(delegate_ephemeral_ws_create("deleg-y", out2, sizeof(out2)) == -1);
+      assert(out2[0] == '\0');
+      assert(path_exists(target)); /* target dir untouched */
+      printf("  refuses_ancestor_symlink_anchor: ok\n");
+
+      setenv("AIMEE_HOME", home, 1);
+      platform_test_rmrf(home2);
+   }
+
    platform_test_rmrf(home);
    printf("All delegate_ephemeral_ws tests passed.\n");
    return 0;
