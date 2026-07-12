@@ -82,9 +82,9 @@ int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
  * required persona, echoing the packet's artifact_hash so the gate's hash-identity
  * check passes. g_stub_panel_calls counts convenings — the retry tests assert on
  * it to prove that clearing the pause actually RE-RUNS the roundtable node. */
+#define ALWAYS_DEGRADE 1000 /* g_stub_degrade_calls sentinel: degrade every convening */
 static int g_stub_panel_calls;
-static int g_stub_degrade_calls; /* degrade the first N convenings; a large value (e.g. 1000) is
-                                  * the "always degrade" sentinel */
+static int g_stub_degrade_calls; /* degrade the first N convenings (ALWAYS_DEGRADE = every one) */
 static int g_stub_return_unreachable;
 static int stub_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
@@ -354,7 +354,7 @@ int main(void)
     * (per (work item, stage)), and no further convenings happen once spent. */
    {
       g_stub_panel_calls = 0;
-      g_stub_degrade_calls = 1000; /* always degrade */
+      g_stub_degrade_calls = ALWAYS_DEGRADE; /* always degrade */
       g_stub_return_unreachable = 0;
       wfe_set_panel_provider(stub_panel);
       setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "2", 1);
@@ -390,7 +390,7 @@ int main(void)
     * transient class and is auto-retried too, not escalated immediately. */
    {
       g_stub_panel_calls = 0;
-      g_stub_degrade_calls = 1000;
+      g_stub_degrade_calls = ALWAYS_DEGRADE;
       g_stub_return_unreachable = 1; /* provider returns WFE_PANEL_UNREACHABLE */
       wfe_set_panel_provider(stub_panel);
       setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "3", 1);
@@ -423,7 +423,7 @@ int main(void)
     * pre-feature behavior), with the panel never re-convened. */
    {
       g_stub_panel_calls = 0;
-      g_stub_degrade_calls = 1000;
+      g_stub_degrade_calls = ALWAYS_DEGRADE;
       g_stub_return_unreachable = 0;
       wfe_set_panel_provider(stub_panel);
       setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "0", 1);
@@ -450,6 +450,26 @@ int main(void)
             retries++;
       free(evs);
       assert(retries == 0); /* disabled -> no retry events at all */
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A14: a malformed AIMEE_AUTONOMY_PANEL_RETRIES falls back to the default cap
+    * (retry stays ENABLED — a typo must not silently disable the rail like 0
+    * does, nor crash the parser). */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = ALWAYS_DEGRADE;
+      g_stub_return_unreachable = 0;
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "not-a-number", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a14", "a14", "autonomous", id, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* initial park */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* retry #1: default cap, NOT disabled */
+      assert(g_stub_panel_calls == 2); /* malformed -> default -> a retry still happens */
 
       unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
       wfe_set_panel_provider(NULL);
