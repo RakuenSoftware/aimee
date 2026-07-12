@@ -86,6 +86,16 @@ interface Participant {
 }
 
 const ROUNDTABLE_BLOCK = "gate.roundtable";
+const IMPLEMENT_BLOCK = "implement";
+
+// Read an implement node's TDD test-author participant (test_persona/test_delegate).
+function readTddTest(node: GNode): Participant {
+  const p = (node.params || {}) as Record<string, unknown>;
+  return {
+    persona: typeof p.test_persona === "string" ? p.test_persona : "",
+    delegate: typeof p.test_delegate === "string" ? p.test_delegate : "",
+  };
+}
 
 // Read the participants a node currently declares, from whichever param shape it
 // uses: a roundtable's panel (required = delegates, personas = the lenses) or a
@@ -117,9 +127,18 @@ function nodeTitle(node: GNode): string {
 }
 
 // A compact "persona@delegate, …" line for the node card, or "" when unset.
+// implement nodes in TDD mode also list the test author and a "TDD" marker.
 function participantSummary(node: GNode): string {
   const ps = readParticipants(node).filter((p) => p.persona || p.delegate);
-  if (!ps.length) return "";
+  const tddOn =
+    node.block === IMPLEMENT_BLOCK &&
+    ((node.params as Record<string, unknown> | undefined)?.tdd === true ||
+      (node.params as Record<string, unknown> | undefined)?.tdd === "true");
+  if (tddOn) {
+    const test = readTddTest(node);
+    if (test.persona || test.delegate) ps.push(test);
+  }
+  if (!ps.length) return tddOn ? "TDD" : "";
   const parts = ps
     .slice(0, 2)
     .map((p) =>
@@ -127,7 +146,9 @@ function participantSummary(node: GNode): string {
         ? `${p.persona}@${p.delegate}`
         : p.persona || p.delegate,
     );
-  return parts.join(", ") + (ps.length > 2 ? ` +${ps.length - 2}` : "");
+  const summary =
+    parts.join(", ") + (ps.length > 2 ? ` +${ps.length - 2}` : "");
+  return tddOn ? `${summary} · TDD` : summary;
 }
 
 /* ---- block-style YAML emitter (aimee's yaml.c is block-style only: no flow
@@ -979,12 +1000,20 @@ function NodeInspector({
   // A roundtable runs a panel of lenses (several persona+delegate participants);
   // every other action runs a single persona on a single delegate.
   const isMulti = node.block === ROUNDTABLE_BLOCK;
+  // implement steps can opt into TDD: a second (test-author) agent writes the
+  // failing tests before the implementer makes them pass.
+  const isImplement = node.block === IMPLEMENT_BLOCK;
 
   const [title, setTitle] = useState("");
   const [task, setTask] = useState("");
   const [parts, setParts] = useState<Participant[]>([]);
   const [quorum, setQuorum] = useState(0);
   const [focus, setFocus] = useState("");
+  const [tdd, setTdd] = useState(false);
+  const [testPart, setTestPart] = useState<Participant>({
+    persona: "",
+    delegate: "",
+  });
   const [showAdv, setShowAdv] = useState(false);
   const [paramsText, setParamsText] = useState("");
   const [paramsErr, setParamsErr] = useState("");
@@ -1003,6 +1032,8 @@ function NodeInspector({
     setParts(ps);
     setQuorum(typeof p.quorum === "number" ? p.quorum : 0);
     setFocus(typeof p.focus === "string" ? p.focus : "");
+    setTdd(p.tdd === true || p.tdd === "true");
+    setTestPart(readTddTest(node));
     setParamsText(node.params ? JSON.stringify(node.params, null, 2) : "");
     setParamsErr("");
     setShowAdv(false);
@@ -1020,17 +1051,23 @@ function NodeInspector({
     parts?: Participant[];
     quorum?: number;
     focus?: string;
+    tdd?: boolean;
+    testPart?: Participant;
   }) => {
     const t = next.title ?? title;
     const tk = next.task ?? task;
     const pr = next.parts ?? parts;
     const q = next.quorum ?? quorum;
     const fc = next.focus ?? focus;
+    const td = next.tdd ?? tdd;
+    const tp = next.testPart ?? testPart;
     if (next.title !== undefined) setTitle(next.title);
     if (next.task !== undefined) setTask(next.task);
     if (next.parts !== undefined) setParts(next.parts);
     if (next.quorum !== undefined) setQuorum(next.quorum);
     if (next.focus !== undefined) setFocus(next.focus);
+    if (next.tdd !== undefined) setTdd(next.tdd);
+    if (next.testPart !== undefined) setTestPart(next.testPart);
     mutate((g) => {
       const n = g.nodes.find((x) => x.id === node.id);
       if (!n) return g;
@@ -1074,6 +1111,22 @@ function NodeInspector({
         else delete params.persona;
         if (one?.delegate) params.delegate = one.delegate;
         else delete params.delegate;
+        // implement TDD: a second (test-author) agent + the tdd flag. The
+        // implementer reuses persona/delegate above; the test author is
+        // test_persona/test_delegate. All cleared when TDD is off or unset.
+        if (isImplement && td) {
+          params.tdd = true;
+          const tperson = tp.persona.trim();
+          const tdeleg = tp.delegate.trim();
+          if (tperson) params.test_persona = tperson;
+          else delete params.test_persona;
+          if (tdeleg) params.test_delegate = tdeleg;
+          else delete params.test_delegate;
+        } else {
+          delete params.tdd;
+          delete params.test_persona;
+          delete params.test_delegate;
+        }
       }
       n.params = Object.keys(params).length ? params : undefined;
       return g;
@@ -1170,7 +1223,11 @@ function NodeInspector({
       />
 
       <label style={{ ...lbl, marginTop: 8 }}>
-        {isMulti ? "Panel — personas & delegates" : "Persona & delegate"}
+        {isMulti
+          ? "Panel — personas & delegates"
+          : isImplement && tdd
+            ? "Implementation — persona & delegate"
+            : "Persona & delegate"}
       </label>
       {parts.map((p, i) => (
         <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
@@ -1228,6 +1285,59 @@ function NodeInspector({
             style={{ ...inp, width: "100%" }}
           />
         </>
+      )}
+      {isImplement && (
+        <div style={{ marginTop: 8 }}>
+          <label
+            style={{
+              ...lbl,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              cursor: "pointer",
+              margin: "4px 0",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={tdd}
+              onChange={(e) => commitStep({ tdd: e.target.checked })}
+            />
+            TDD — a second agent writes the failing tests, then the implementer
+            makes them pass
+          </label>
+          {tdd && (
+            <>
+              <label style={{ ...lbl, marginTop: 6 }}>
+                Test author — persona & delegate
+              </label>
+              <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                <input
+                  list="wf-persona-opts"
+                  value={testPart.persona}
+                  placeholder="persona"
+                  onChange={(e) =>
+                    commitStep({
+                      testPart: { ...testPart, persona: e.target.value },
+                    })
+                  }
+                  style={{ ...inp, flex: 1, minWidth: 0 }}
+                />
+                <input
+                  list="wf-delegate-opts"
+                  value={testPart.delegate}
+                  placeholder="delegate"
+                  onChange={(e) =>
+                    commitStep({
+                      testPart: { ...testPart, delegate: e.target.value },
+                    })
+                  }
+                  style={{ ...inp, flex: 1, minWidth: 0 }}
+                />
+              </div>
+            </>
+          )}
+        </div>
       )}
       <datalist id="wf-persona-opts">
         {personas.map((p) => (
