@@ -550,9 +550,19 @@ static int build_synthesis_prompt(char *buf, size_t cap, const char *original_pr
 }
 
 static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char *synthesis_prompt,
-                          agent_result_t *out)
+                          long deadline_abs_ms, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+
+   /* Bound the fallback loop below. Without a deadline a flaky/empty primary
+    * aggregator followed by N panelist fallbacks — each up to the provider HTTP
+    * timeout x retries (~9 min) — can run for ~an hour, wedging the whole
+    * roundtable far past its deadline (the panel is deadline-bounded, this was
+    * not). Prefer the caller's absolute monotonic deadline; otherwise fall back to
+    * an internal cap sized like the roundtable deadline so every call site is
+    * bounded. */
+   long agg_cap_ms = cfg->roundtable_deadline_ms > 0 ? cfg->roundtable_deadline_ms : 300000;
+   long agg_deadline_ms = deadline_abs_ms > 0 ? deadline_abs_ms : (monotonic_ms() + agg_cap_ms);
 
    agent_config_t agg_cfg = *acfg;
 
@@ -602,6 +612,13 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
     * degrade when other capable panelists are available. */
    for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
+      if (monotonic_ms() >= agg_deadline_ms)
+      {
+         aimee_log(LOG_WARN, "delegate_roundtable",
+                   "aggregator: deadline reached; abandoning remaining fallback candidates so a "
+                   "flaky synthesis model cannot wedge the roundtable");
+         break;
+      }
       const char *cand = cfg->ensemble_reference_models[i];
       if (!cand[0] || (primary_name && strcmp(cand, primary_name) == 0))
          continue;
@@ -865,7 +882,7 @@ static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const ch
       return -1;
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = run_aggregator(acfg, cfg, full, &res);
+   int rc = run_aggregator(acfg, cfg, full, 0, &res);
    free(full);
    if (rc != 0 || !res.response || !res.response[0])
    {
@@ -1487,7 +1504,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
       free(results[i].response);
 
    agent_result_t agg_result;
-   int agg_rc = run_aggregator(acfg, cfg, synthesis_buf, &agg_result);
+   int agg_rc = run_aggregator(acfg, cfg, synthesis_buf, 0, &agg_result);
    free(synthesis_buf);
 
    if (agg_rc == 0 && agg_result.response && agg_result.response[0])
@@ -1833,7 +1850,10 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          break;
       }
       agent_result_t agg_result;
-      int agg_rc = run_aggregator(acfg, cfg, synthesis_prompt, &agg_result);
+      /* Bound synthesis by the roundtable's own deadline so the fallback loop
+       * cannot run long past it (the panel already respects this deadline). */
+      long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
+      int agg_rc = run_aggregator(acfg, cfg, synthesis_prompt, agg_deadline_abs, &agg_result);
       free(synthesis_prompt);
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])
       {
