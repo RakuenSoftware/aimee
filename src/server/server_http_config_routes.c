@@ -12,8 +12,8 @@
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include "git_oauth_device.h"          /* GitLab/Gitea device-flow (relocated route handlers) */
-#include "git_oauth_github.h"          /* GitHub device + web (redirect) flow (relocated handlers) */
-#include "deploy_apply.h"              /* server-orchestrated container deploy (relocated handlers) */
+#include "git_oauth_github.h" /* GitHub device + web (redirect) flow (relocated handlers) */
+#include "deploy_apply.h"     /* server-orchestrated container deploy (relocated handlers) */
 #include <limits.h>
 #include <time.h>
 #include "persona.h"

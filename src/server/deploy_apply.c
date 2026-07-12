@@ -181,8 +181,7 @@ static void *deploy_worker(void *arg)
    (void)arg;
    char file[512];
    deploy_apply_compose_file(file, sizeof(file));
-   const char *argv[] = {"docker",         "compose", "-f", file, "up",
-                         "-d", "--remove-orphans", NULL};
+   const char *argv[] = {"docker", "compose", "-f", file, "up", "-d", "--remove-orphans", NULL};
    char **envp = build_deploy_envp();
 
    char out[DEPLOY_OUT_CAP];

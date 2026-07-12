@@ -34,9 +34,9 @@ static char g_web_state[128];
 static char g_web_principal[256];
 static char g_web_redirect[512];
 
-#define GH_CLIENT_ID_AGENT     "git"
-#define GH_CLIENT_ID_CRED      "github_oauth_client_id"
-#define GH_CLIENT_SECRET_CRED  "github_oauth_client_secret"
+#define GH_CLIENT_ID_AGENT    "git"
+#define GH_CLIENT_ID_CRED     "github_oauth_client_id"
+#define GH_CLIENT_SECRET_CRED "github_oauth_client_secret"
 
 /* Resolve the GitHub OAuth App client_id: a value set from the UI (stored in the
  * server vault) takes precedence, else the AIMEE_GITHUB_OAUTH_CLIENT_ID env, else

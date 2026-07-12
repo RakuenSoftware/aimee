@@ -47,29 +47,29 @@
 #include <stdatomic.h>
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
-#include "git_forge_vault.h"  /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
-#include "git_host_cred.h"    /* per-host git credential store for /v1/git/credentials */
-#include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
-#include "vault_service.h"    /* vault_service_set/delete for the per-webuser ssh-key route */
-#include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
-#include "git_org_repos.h"    /* git_org_repos_list for /v1/workspace/org-repos */
-#include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
-#include "webchat_live.h"     /* db1_webchat_live_get — the browser's live-turn poll */
-#include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
-#include "aimee_home.h"       /* aimee_home — proposal artifact dir for /v1/dev/submit */
-#include <math.h>             /* isfinite — validate the /v1/dev/submit budget cap */
-#include <errno.h>            /* strtol overflow detection for /v1/dev/submit caps */
-#include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
-#include "json_fluent.h"      /* jo_cstr — parse the CI-event webhook body */
-#include <openssl/hmac.h>     /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
-#include "router_advise.h"    /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"     /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"        /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>         /* mkdir for the proposal artifact dir */
-#include <time.h>             /* unique proposal artifact filename */
+#include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
+#include "git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
+#include "git_ops.h"         /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
+#include "git_project.h"     /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
+#include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "webchat_live.h"    /* db1_webchat_live_get — the browser's live-turn poll */
+#include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
+#include "aimee_home.h"      /* aimee_home — proposal artifact dir for /v1/dev/submit */
+#include <math.h>            /* isfinite — validate the /v1/dev/submit budget cap */
+#include <errno.h>           /* strtol overflow detection for /v1/dev/submit caps */
+#include "wfe_engine.h"      /* wfe_work_item_create — POST /v1/dev/submit intake */
+#include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
+#include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
+#include "router_advise.h"   /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h"   /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"    /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"       /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>        /* mkdir for the proposal artifact dir */
+#include <time.h>            /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -1694,7 +1694,6 @@ static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
               ? 200
               : err_json(resp, cap, 500, "too large");
 }
-
 
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
