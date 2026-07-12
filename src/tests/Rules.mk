@@ -261,6 +261,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-prompts \
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
+               $(TESTPREFIX)/unit-test-agent-error-retryable \
                $(TESTPREFIX)/unit-test-delegate-ephemeral-ws \
                $(TESTPREFIX)/unit-test-delegate-handoff \
                $(TESTPREFIX)/unit-test-delegate-economics \
@@ -2558,6 +2559,11 @@ $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_tok
 
 $(TESTPREFIX)/unit-test-delegate-context-shed: $(OBJDIR)/tests/test_delegate_context_shed.o \
                                        $(OBJDIR)/server/delegate_prompt.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-agent-error-retryable: $(OBJDIR)/tests/test_agent_error_retryable.o \
+                                       $(OBJDIR)/server/agent_fallback.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

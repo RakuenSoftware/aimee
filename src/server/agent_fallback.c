@@ -23,7 +23,13 @@ int agent_error_is_retryable(const char *error)
           strstr(error, "Connection failed") != NULL || strstr(error, "timeout") != NULL ||
           strstr(error, "timed out") != NULL || strstr(error, "unreachable") != NULL ||
           strstr(error, "Loading model") != NULL || strstr(error, "Model is loading") != NULL ||
-          strstr(error, "model is loading") != NULL || strstr(error, "model loading") != NULL;
+          strstr(error, "model is loading") != NULL || strstr(error, "model loading") != NULL ||
+          /* An empty completion on an otherwise-successful HTTP 200 is a transient
+           * provider glitch (e.g. a fast degenerate response), not a hard error —
+           * a retry / fallback usually gets a real completion. Treating it as
+           * retryable stops one blank response from degrading a provider or
+           * failing a pinned roundtable seat. */
+          strstr(error, "no content in response") != NULL;
 }
 
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)
