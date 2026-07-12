@@ -17,7 +17,7 @@ static int agent_run_tool_command(const agent_t *agent, const char *type, const 
    (void)timeout_ms; /* passed through agent config */
    char sys[128];
    snprintf(sys, sizeof(sys), "Execute the %s command and report the result.", type);
-   return agent_execute(agent, sys, cmd, 2048, 0.2, out);
+   return agent_dispatch_one(agent, NULL, NULL, sys, cmd, 2048, 0.2, 0 /* use_tools */, out);
 }
 
 static void plan_record_evidence(int plan_id, int step_id, const char *kind, const char *content,
@@ -301,7 +301,8 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
 
    agent_result_t plan_res;
    memset(&plan_res, 0, sizeof(plan_res));
-   int rc = agent_execute(agent, system_prompt, plan_prompt, max_tokens, temperature, &plan_res);
+   int rc = agent_dispatch_one(agent, network, NULL, system_prompt, plan_prompt, max_tokens,
+                               temperature, 0 /* use_tools */, &plan_res);
    if (rc != 0 || !plan_res.response)
    {
       snprintf(out->error, sizeof(out->error), "plan generation failed: %s", plan_res.error);
@@ -316,7 +317,8 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
       cJSON_Delete(json);
       /* Fallback to direct execution */
       free(plan_res.response);
-      return agent_execute(agent, system_prompt, user_prompt, max_tokens, temperature, out);
+      return agent_dispatch_one(agent, NULL, NULL, system_prompt, user_prompt, max_tokens,
+                                temperature, 0 /* use_tools */, out);
    }
 
    int plan_id = db1_execution_plan_create(agent->name, user_prompt, json);
@@ -324,7 +326,8 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
    free(plan_res.response);
    if (plan_id < 0)
    {
-      return agent_execute(agent, system_prompt, user_prompt, max_tokens, temperature, out);
+      return agent_dispatch_one(agent, NULL, NULL, system_prompt, user_prompt, max_tokens,
+                                temperature, 0 /* use_tools */, out);
    }
 
    plan_t plan;
