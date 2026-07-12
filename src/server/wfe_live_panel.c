@@ -252,9 +252,19 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          else
          {
             int idx = -1;
-            if (rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx) !=
-                RT_SEAT_OK)
-               continue; /* $random exhausted -> leave unfilled (gate degrades) */
+            /* Prefer a UNIQUE agent per lens (the `used` exclusion gives panel
+             * diversity). But when there are fewer eligible review agents than
+             * lenses, insisting on distinctness would leave the surplus lenses
+             * unfilled and needlessly DEGRADE the whole gate. So on exhaustion,
+             * DOWNGRADE: reuse an already-seated agent (drop the exclusion) — the
+             * same model reviews this lens under its own persona prompt. The gate
+             * then degrades only when NO review agent is eligible at all. */
+            rt_seat_resolve_t rc =
+                rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
+            if (rc == RT_SEAT_RANDOM_EXHAUSTED)
+               rc = rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
+            if (rc != RT_SEAT_OK)
+               continue; /* no eligible review agent at all -> unfilled (gate degrades) */
             agent = acfg.agents[idx].name;
             if (nused < MAX_AGENTS)
                used[nused++] = agent;
