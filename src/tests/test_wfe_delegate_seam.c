@@ -365,6 +365,31 @@ int main(void)
       wfe_set_verify_provider(NULL);
    }
 
+   /* D1b: TDD RED gate — after the test author commits, a genuine red must NOT
+    *      already pass. It is the inverse of the verify gate when a provider is
+    *      present, and proceeds (1) with no provider (drivable). */
+   {
+      wfe_set_verify_provider(NULL);
+      assert(wfe_tdd_red_ok(".") == 1); /* no provider -> cannot enforce -> proceed */
+
+      wfe_set_verify_provider(&MOCK_VERIFY);
+      g_verify_rc = 0;
+      snprintf(g_verdict, sizeof g_verdict, "{\"schema_version\":1,\"verdict\":\"passed\"}");
+      assert(wfe_tdd_red_ok(".") == 0); /* already passes -> no failing test -> loop */
+
+      snprintf(g_verdict, sizeof g_verdict, "{\"schema_version\":1,\"verdict\":\"failed\"}");
+      assert(wfe_tdd_red_ok(".") == 1); /* tests fail -> a real red -> proceed */
+
+      g_verify_rc = -1; /* gate could not run -> red unconfirmed */
+      assert(wfe_tdd_red_ok(".") == 0);
+
+      g_verify_rc = 0;
+      snprintf(g_verdict, sizeof g_verdict, "not json");
+      assert(wfe_tdd_red_ok(".") == 0); /* unparseable -> red unconfirmed */
+
+      wfe_set_verify_provider(NULL);
+   }
+
    /* D2: adversarial gate (PC3) — reviewer + N skeptics; config-gated, majority-refute
     *     rejects, fail-closed without a provider. */
    {
