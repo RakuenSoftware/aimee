@@ -1,6 +1,13 @@
 /* delegate_ephemeral_ws.c: server-side ephemeral workspace for a background
  * delegate whose detached (client-served) workspace has no live client. See
- * delegate_ephemeral_ws.h. */
+ * delegate_ephemeral_ws.h.
+ *
+ * Symlink policy: the only path components under our control are the
+ * `delegate-ws` anchor and the `<deleg_id>` leaf. Both create and remove open
+ * those components with O_NOFOLLOW so a symlink planted at EITHER (an ancestor
+ * `delegate-ws` symlink or a leaf symlink) is refused rather than followed —
+ * closing the ancestor-symlink escape a lexical prefix check cannot prevent. */
+#define _GNU_SOURCE
 #include "delegate_ephemeral_ws.h"
 
 #include "aimee_home.h"
@@ -8,14 +15,16 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 /* A deleg_id is server-generated (e.g. "deleg-105-1783801198975185376-10"), but
- * it is interpolated into a filesystem path, so validate defensively against
- * traversal / separators / dotted specials regardless of the trusted source. */
+ * it is interpolated into a filesystem path, so validate defensively: non-empty,
+ * <=128 chars, only [A-Za-z0-9._-], no separators, no "..", and no leading '.'
+ * (covers "." / ".." / hidden names). */
 static int deleg_id_is_safe(const char *id)
 {
    if (!id || !id[0])
@@ -23,9 +32,6 @@ static int deleg_id_is_safe(const char *id)
    size_t n = strlen(id);
    if (n > 128)
       return 0;
-   /* A leading '.' covers ".", ".." and hidden names — "." / ".." would collapse
-    * the path onto <home>/delegate-ws itself (a subsequent remove would then walk
-    * every sibling workspace). Reject the whole class. */
    if (id[0] == '.')
       return 0;
    if (strstr(id, ".."))
@@ -39,6 +45,22 @@ static int deleg_id_is_safe(const char *id)
    return 1;
 }
 
+/* Open <home>/delegate-ws as a directory fd, refusing to follow a symlink at the
+ * `delegate-ws` component (O_NOFOLLOW). Returns the fd (caller closes) or -1.
+ * `create` mkdir's the anchor first. */
+static int open_anchor_fd(int create)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return -1;
+   char base[1024];
+   if (snprintf(base, sizeof(base), "%s/delegate-ws", home) >= (int)sizeof(base))
+      return -1;
+   if (create)
+      (void)platform_mkdir_p(base, 0700); /* best-effort; open below is the gate */
+   return open(base, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC);
+}
+
 int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap)
 {
    if (out && out_cap > 0)
@@ -50,68 +72,83 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
    if (!home || !home[0])
       return -1;
 
+   /* Confirm the caller's buffer fits the full path BEFORE creating anything, so a
+    * truncation return never leaves an orphaned dir on disk. */
    char path[1024];
    if (snprintf(path, sizeof(path), "%s/delegate-ws/%s", home, deleg_id) >= (int)sizeof(path))
       return -1;
-   /* Confirm the caller's buffer fits the full path BEFORE creating anything, so a
-    * truncation return never leaves an orphaned dir+note on disk. */
    if (strlen(path) >= out_cap)
       return -1;
 
-   if (platform_mkdir_p(path, 0700) != 0)
+   /* Open the anchor without following a symlinked `delegate-ws`, then create and
+    * open the leaf relative to it, again refusing to follow a symlink. */
+   int anchor = open_anchor_fd(1);
+   if (anchor < 0)
       return -1;
 
-   /* Best-effort note: read-only tools (grep/git/ls) then surface a clear signal
-    * instead of misleading empty results in an otherwise-empty workspace. */
-   char note[1088];
-   if (snprintf(note, sizeof(note), "%s/AIMEE_WORKSPACE_NOTE.txt", path) < (int)sizeof(note))
+   (void)mkdirat(anchor, deleg_id, 0700); /* EEXIST tolerated; open below is the gate */
+   int leaf = openat(anchor, deleg_id, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC);
+   if (leaf < 0)
    {
-      FILE *f = fopen(note, "w");
-      if (f)
-      {
-         fputs("This is a server-side ephemeral workspace for a background aimee delegate.\n"
-               "The dispatching client disconnected, so the client's repository is NOT present\n"
-               "here -- file/shell tools run against this empty directory. A background code\n"
-               "delegate that must edit the client tree needs the repo provisioned server-side.\n",
-               f);
-         fclose(f);
-      }
+      close(anchor);
+      return -1; /* leaf is a symlink or not a directory */
    }
 
+   /* Best-effort note (fd-relative, no-follow): read-only tools (grep/git/ls) then
+    * surface a clear signal instead of misleading empty results in an empty dir. */
+   int nfd = openat(leaf, "AIMEE_WORKSPACE_NOTE.txt",
+                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+   if (nfd >= 0)
+   {
+      static const char note[] =
+          "This is a server-side ephemeral workspace for a background aimee delegate.\n"
+          "The dispatching client disconnected, so the client's repository is NOT present\n"
+          "here -- file/shell tools run against this empty directory. A background code\n"
+          "delegate that must edit the client tree needs the repo provisioned server-side.\n";
+      (void)!write(nfd, note, sizeof(note) - 1);
+      close(nfd);
+   }
+
+   close(leaf);
+   close(anchor);
    snprintf(out, out_cap, "%s", path); /* fits: checked above */
    return 0;
 }
 
-/* Best-effort recursive delete that NEVER follows a symlink: lstat the entry
- * first and only descend into a real directory; a symlink (even to a directory)
- * is unlinked, not followed. Prevents a symlinked component from escaping the
- * intended subtree. */
-static void ephemeral_rm_rf(const char *path)
+/* Recursively delete everything reachable from directory fd `dfd` (which this
+ * function closes), following NO symlinks: each entry is fstatat'd with
+ * AT_SYMLINK_NOFOLLOW; sub-directories are descended via openat(O_NOFOLLOW) and
+ * removed with unlinkat(AT_REMOVEDIR); files/symlinks are unlinked in place. */
+static void purge_dir_fd(int dfd)
 {
-   struct stat st;
-   if (lstat(path, &st) != 0)
-      return;
-   if (!S_ISDIR(st.st_mode))
+   DIR *d = fdopendir(dfd); /* takes ownership of dfd */
+   if (!d)
    {
-      unlink(path); /* symlink or regular file: remove the link/file itself */
+      close(dfd);
       return;
    }
-
-   DIR *d = opendir(path);
-   if (!d)
-      return;
+   int here = dirfd(d);
    struct dirent *e;
    while ((e = readdir(d)) != NULL)
    {
       if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
          continue;
-      char child[2048];
-      if (snprintf(child, sizeof(child), "%s/%s", path, e->d_name) >= (int)sizeof(child))
+      struct stat st;
+      if (fstatat(here, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
          continue;
-      ephemeral_rm_rf(child);
+      if (S_ISDIR(st.st_mode))
+      {
+         int child = openat(here, e->d_name, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC);
+         if (child >= 0)
+            purge_dir_fd(child); /* recurse (closes child) */
+         unlinkat(here, e->d_name, AT_REMOVEDIR);
+      }
+      else
+      {
+         unlinkat(here, e->d_name, 0); /* file or symlink: remove the link itself */
+      }
    }
-   closedir(d);
-   rmdir(path);
+   closedir(d); /* closes dfd */
 }
 
 void delegate_ephemeral_ws_remove(const char *path)
@@ -121,16 +158,31 @@ void delegate_ephemeral_ws_remove(const char *path)
    const char *home = aimee_home();
    if (!home || !home[0])
       return;
-   char prefix[1024];
+   char prefix[1088];
    if (snprintf(prefix, sizeof(prefix), "%s/delegate-ws/", home) >= (int)sizeof(prefix))
       return;
-   /* Lexical guard: only paths under <home>/delegate-ws/ are eligible... */
    if (strncmp(path, prefix, strlen(prefix)) != 0)
       return;
-   /* ...and the target itself must be a real directory, not a symlink, before we
-    * descend (ephemeral_rm_rf is symlink-safe internally too). */
-   struct stat st;
-   if (lstat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+   const char *leaf = path + strlen(prefix);
+   /* leaf must be exactly one safe component. */
+   if (!deleg_id_is_safe(leaf) || strchr(leaf, '/'))
       return;
-   ephemeral_rm_rf(path);
+
+   /* Open the anchor without following a symlinked `delegate-ws` (refuses the
+    * ancestor-symlink escape), then the leaf without following a symlink. */
+   int anchor = open_anchor_fd(0);
+   if (anchor < 0)
+      return;
+   int leaffd = openat(anchor, leaf, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC);
+   if (leaffd >= 0)
+   {
+      purge_dir_fd(leaffd); /* closes leaffd */
+      unlinkat(anchor, leaf, AT_REMOVEDIR);
+   }
+   else
+   {
+      /* leaf is a symlink or not a directory: remove the link only, never follow. */
+      unlinkat(anchor, leaf, 0);
+   }
+   close(anchor);
 }
