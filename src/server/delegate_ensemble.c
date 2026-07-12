@@ -554,15 +554,17 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 {
    memset(out, 0, sizeof(*out));
 
-   /* Bound the fallback loop below. Without a deadline a flaky/empty primary
-    * aggregator followed by N panelist fallbacks — each up to the provider HTTP
-    * timeout x retries (~9 min) — can run for ~an hour, wedging the whole
-    * roundtable far past its deadline (the panel is deadline-bounded, this was
-    * not). Prefer the caller's absolute monotonic deadline; otherwise fall back to
-    * an internal cap sized like the roundtable deadline so every call site is
-    * bounded. */
-   long agg_cap_ms = cfg->roundtable_deadline_ms > 0 ? cfg->roundtable_deadline_ms : 300000;
-   long agg_deadline_ms = deadline_abs_ms > 0 ? deadline_abs_ms : (monotonic_ms() + agg_cap_ms);
+   /* deadline_abs_ms (absolute CLOCK_MONOTONIC ms; 0 = UNBOUNDED) caps the FALLBACK
+    * FAN-OUT below. Without it a flaky/empty primary aggregator followed by N
+    * panelist fallbacks — each up to the provider HTTP timeout x retries (~9 min) —
+    * can run ~an hour and wedge the roundtable past its deadline (the panel is
+    * deadline-bounded; this path was not).
+    *
+    * This is a FAN-OUT limit, not a hard per-call bound: a call already in flight
+    * can still overrun by up to one provider timeout (delegate_run_inline exposes
+    * no per-call timeout hook). Only the roundtable round-loop passes a deadline;
+    * other callers pass 0 and keep their original unbounded behavior, so this never
+    * silently couples non-roundtable synthesis to the roundtable config. */
 
    agent_config_t agg_cfg = *acfg;
 
@@ -612,11 +614,12 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
     * degrade when other capable panelists are available. */
    for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
-      if (monotonic_ms() >= agg_deadline_ms)
+      if (deadline_abs_ms > 0 && monotonic_ms() >= deadline_abs_ms)
       {
          aimee_log(LOG_WARN, "delegate_roundtable",
-                   "aggregator: deadline reached; abandoning remaining fallback candidates so a "
-                   "flaky synthesis model cannot wedge the roundtable");
+                   "aggregator: deadline reached at fallback candidate %d/%d; abandoning the "
+                   "remaining %d (a flaky synthesis model must not wedge the roundtable)",
+                   i, cfg->ensemble_reference_count, cfg->ensemble_reference_count - i);
          break;
       }
       const char *cand = cfg->ensemble_reference_models[i];
