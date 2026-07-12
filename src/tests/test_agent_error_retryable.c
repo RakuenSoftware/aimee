@@ -31,6 +31,12 @@ int main(void)
    assert(agent_error_is_retryable("HTTP 401 unauthorized") == 0);
    assert(agent_error_is_retryable("model refused the request") == 0);
 
+   /* Saturation is NOT a retryable provider error. agent_dispatch_one signals it
+    * out-of-band via AGENT_RC_AT_LIMIT and callers key off that rc (never this
+    * string), so the "at concurrency limit" message must stay non-retryable — else
+    * it would wrongly record provider health and be misclassified as a fault. */
+   assert(agent_error_is_retryable("agent 'codex' at concurrency limit (max_parallel=2)") == 0);
+
    printf("  classify: ok\n");
    printf("All agent_error_retryable tests passed.\n");
    return 0;

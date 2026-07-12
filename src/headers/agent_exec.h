@@ -71,6 +71,10 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
 
 /* Delegate fallback helpers */
 int agent_error_is_retryable(const char *error);
+/* Should a fallback/retry caller try a different agent for this result? True for a
+ * saturation refusal (AGENT_RC_AT_LIMIT) or a retryable provider error; false for
+ * success (0) or a non-retryable hard failure. */
+int agent_rc_should_try_another(int rc, const char *error);
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
                                  const char *system_prompt, const char *user_prompt, int max_tokens,
                                  int enforce_writes, agent_result_t *out, int rc);
@@ -89,7 +93,13 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
  * AGENT_RC_AT_LIMIT if the agent was at its ceiling (NO health recorded), or -1 on
  * a run failure (health recorded). Agent RESOLUTION (by name/role/route),
  * retry/fallback loops, write_capable, and outcome/feedback/cache logging stay in
- * the callers — only the model turn itself goes through here. */
+ * the callers — only the model turn itself goes through here.
+ * PRECONDITION: `net` must be non-NULL when use_tools != 0 (the tools executor
+ * dereferences it); a plain completion (use_tools == 0) ignores `net`.
+ * This is an EXTERNAL model-turn boundary — do NOT call it from a helper that
+ * already runs inside another agent_dispatch_one for the same agent, or the inner
+ * call re-acquires the same max_parallel slot (self-throttle). Such composite
+ * helpers use the primitive agent_execute() directly. */
 int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
                        const char *system_prompt, const char *user_prompt, int max_tokens,
                        double temperature, int use_tools, agent_result_t *out);

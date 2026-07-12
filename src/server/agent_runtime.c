@@ -141,6 +141,15 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
 {
    if (!ag || !out)
       return -1;
+   /* The tools executor dereferences `net`; a plain completion ignores it. Enforce
+    * the precondition (net != NULL when use_tools) so a future caller that flips
+    * use_tools without supplying a network fails cleanly instead of crashing. */
+   if (use_tools && !net)
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
+      return -1;
+   }
    /* Concurrency choke point: acquire the agent's max_parallel slot. At the limit,
     * report a DISTINCT at-limit signal (so a fan-out/retry caller picks a different
     * agent) and return BEFORE any health recording — saturation is a load signal,
@@ -335,6 +344,8 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
     * drafter's max_parallel + records its health, like every other turn.) */
    int rc = agent_dispatch_one(&local, &cfg->network, NULL /* role */, system_prompt, user_prompt,
                                max_tokens, temperature, 0 /* use_tools: plain completion */, out);
+   /* Stamp the drafter name for the caller even on the early-guard paths that
+    * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
    return rc;
 }
@@ -436,10 +447,10 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                0.3, 1 /* use_tools */, out);
    free(enhanced);
 
-   if (rc != 0 && agent_error_is_retryable(out->error) && cfg->fallback_count > 0)
+   if (agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
-                "delegate agent '%s' returned retryable error, trying fallback chain (%d entries)",
+                "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
                 ag->name, cfg->fallback_count);
 
       for (int fi = 0; fi < cfg->fallback_count && rc != 0; fi++)
