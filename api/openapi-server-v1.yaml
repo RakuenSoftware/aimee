@@ -4331,6 +4331,112 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/org-repos:
+    get:
+      summary: List the repositories under an owner/org on a git host
+      description: >
+        Enumerate the repos under `owner` on git `host` (provider-agnostic:
+        GitHub, GitLab, Gitea/Forgejo, Bitbucket), so the wizard can bulk-clone a
+        workspace. Auth is the attested `webuser:` principal; enumeration uses the
+        per-host token from the sealed vault (or unauthenticated for a public org).
+        Nothing is cloned. Capability: index:read.
+      parameters:
+        - in: query
+          name: host
+          required: true
+          schema: { type: string }
+          description: Git host (e.g. github.com, gitlab.com, gitea.example.com)
+        - in: query
+          name: owner
+          required: true
+          schema: { type: string }
+          description: Owner / org / group slug
+      responses:
+        "200":
+          description: The owner's repositories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider: { type: string }
+                  repos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        clone_url: { type: string }
+                        ssh_url: { type: string }
+                        private: { type: boolean }
+        "400":
+          description: Missing or invalid host/owner
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "401":
+          description: Not authorized upstream (add a token for this host)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/clone-org:
+    post:
+      summary: Bulk-clone a selection of a workspace's repos
+      description: >
+        Clone each of `repos` (by `clone_url`) into the authenticated `webuser:`
+        principal's scoped workspace, reusing the per-host credential resolution of
+        /workspace/clone. Individual failures do not abort the batch; a per-repo
+        result list is returned (max 100 repos per request). Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, owner, repos]
+              properties:
+                host: { type: string }
+                owner: { type: string }
+                repos:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, clone_url]
+                    properties:
+                      name: { type: string }
+                      clone_url: { type: string }
+      responses:
+        "200":
+          description: Per-repo clone results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        ok: { type: boolean }
+                        project: { type: string, nullable: true }
+                        error: { type: string, nullable: true }
+        "400":
+          description: Missing host/owner/repos, or too many repos (max 100)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspace/git:
     post:
       summary: Run a git operation on the calling webchat user's project

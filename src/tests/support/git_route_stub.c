@@ -7,6 +7,7 @@
 #include "git_host_cred.h"
 #include "git_oauth_github.h"
 #include "git_ops.h"
+#include "git_org_repos.h"
 #include "git_project.h"
 #include "git_ssh_agent.h"
 #include "index.h"
@@ -46,6 +47,20 @@ int git_project_list(const char *principal, char out[][GIT_PROJECT_NAME_MAX], in
    (void)out;
    (void)max;
    return 0;
+}
+
+int git_org_repos_list(const char *host, const char *owner, struct cJSON **out, char *provider,
+                       size_t provider_cap, char *err, size_t errlen)
+{
+   (void)host;
+   (void)owner;
+   if (out)
+      *out = NULL;
+   if (provider && provider_cap)
+      provider[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return 502;
 }
 
 int git_ops_run(const char *principal, const char *project, const char *op, const char *text_arg,

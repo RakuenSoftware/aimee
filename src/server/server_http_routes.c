@@ -54,6 +54,7 @@
 #include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
 #include "vault_service.h"    /* vault_service_set/delete for the per-webuser ssh-key route */
 #include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "git_org_repos.h"    /* git_org_repos_list for /v1/workspace/org-repos */
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
 #include "webchat_live.h"     /* db1_webchat_live_get — the browser's live-turn poll */
@@ -1205,6 +1206,112 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
+/* GET /v1/workspace/org-repos?host=&owner= — list the repositories under an owner
+ * on a git host (provider-agnostic: GitHub/GitLab/Gitea/Bitbucket), so the wizard
+ * can bulk-clone a workspace. Auth is the attested webuser principal; enumeration
+ * uses the per-host token from the sealed vault (or unauthenticated for a public
+ * org). Nothing is cloned here. */
+static int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   char host[256], owner[192];
+   rh_query_str("host", host, sizeof(host));
+   rh_query_str("owner", owner, sizeof(owner));
+
+   cJSON *repos = NULL;
+   char provider[32], err[256];
+   int st = git_org_repos_list(host, owner, &repos, provider, sizeof(provider), err, sizeof(err));
+   if (st != 0)
+      return err_json(resp, cap, st, err);
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "provider", provider);
+   cJSON_AddItemToObject(out, "repos", repos); /* transfers ownership */
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/workspace/clone-org {host, owner, repos:[{name, clone_url}]} — bulk
+ * clone a selection of a workspace's repos into the calling webuser's scoped tree.
+ * Each repo is cloned via git_project_clone (identity + credential handling as
+ * /v1/workspace/clone); individual failures do not abort the batch. Returns a
+ * per-repo result list. */
+static int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
+{
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jrepos = cJSON_GetObjectItemCaseSensitive(body, "repos");
+   if (!cJSON_IsArray(jrepos) || cJSON_GetArraySize(jrepos) == 0)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "repos[] required");
+   }
+   if (cJSON_GetArraySize(jrepos) > 100)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "too many repos (max 100 per request)");
+   }
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON *results = cJSON_AddArrayToObject(out, "results");
+   const cJSON *jrepo = NULL;
+   cJSON_ArrayForEach(jrepo, jrepos)
+   {
+      const cJSON *jname = cJSON_GetObjectItemCaseSensitive(jrepo, "name");
+      const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(jrepo, "clone_url");
+      const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
+      const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
+
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "name", name ? name : "");
+      char dest[MAX_PATH_LEN], pname[128], err[256];
+      /* token=NULL → the host's stored credential (or server identity) is used. */
+      int rc = url ? git_project_clone(principal, url, name, NULL, dest, sizeof(dest), pname,
+                                       sizeof(pname), err, sizeof(err))
+                   : -1;
+      if (rc == 0)
+      {
+         index_scan_project(pname, dest, 0); /* best-effort: make it searchable */
+         cJSON_AddBoolToObject(r, "ok", 1);
+         cJSON_AddStringToObject(r, "project", pname);
+         cJSON_AddNullToObject(r, "error");
+      }
+      else
+      {
+         cJSON_AddBoolToObject(r, "ok", 0);
+         cJSON_AddNullToObject(r, "project");
+         cJSON_AddStringToObject(r, "error", url ? err : "missing clone_url");
+      }
+      cJSON_AddItemToArray(results, r);
+   }
+   cJSON_Delete(body);
+
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* POST /v1/workspace/git {project, op, message?, branch?, n?} — run a git
  * operation on the calling webchat user's project (webchat-git WP-E). Identity
  * is the attested X-Aimee-Webuser principal; the project + op are scoped +
@@ -2232,6 +2339,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
+    {"GET", "/v1/workspace/org-repos", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
+     rh_workspace_org_repos},
+    {"POST", "/v1/workspace/clone-org", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_workspace_clone_org},
     {"POST", "/v1/workspace/editor", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_editor},
     {"GET", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
     {"POST", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
