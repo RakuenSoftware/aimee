@@ -92,7 +92,7 @@ char *aux_call(const config_t *cfg, const char *task_name, const char *prompt, i
 
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = agent_execute(&local, NULL, prompt, tok, 0.0, &res);
+   int rc = agent_dispatch_one(&local, NULL, NULL, NULL, prompt, tok, 0.0, 0 /* use_tools */, &res);
    if (rc != 0 || !res.response || !res.response[0])
    {
       LOG_WARN("aux", "aux_call task '%s': %s", task_name,

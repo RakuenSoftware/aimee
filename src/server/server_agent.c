@@ -1165,6 +1165,10 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!opt_has(&opts, "no-run"))
    {
       agent_result_t result;
+      /* Deliberate low-level exemption: this is a diagnostic PROBE ("agent test").
+       * It must NOT go through agent_dispatch_one — the concurrency cap would make
+       * a merely-busy agent report as failing, and a manual test should not feed the
+       * production health catalog. So it calls the plain agent_execute primitive. */
       int rc = agent_execute(ag, NULL, "Respond with ok.", 16, 0.0, &result);
       run_ok = (rc == 0);
       latency_ms = result.latency_ms;

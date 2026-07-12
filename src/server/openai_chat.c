@@ -242,7 +242,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    memset(&result, 0, sizeof(result));
    /* pi_env (the <aimee-context> envelope) was built up front for the dedup key;
     * reuse it as the system prompt here. */
-   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
+                                0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
    free(prompt);
 
@@ -637,7 +638,8 @@ static int responses_handler(const char *body, char *resp, int cap)
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    char *pi_env = gw_memory_system_prompt(full);
-   int erc = agent_execute(ag, pi_env, full, max_tokens, temperature, &result);
+   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, full, max_tokens, temperature,
+                                0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
 
    if (erc != 0 || !result.response)
@@ -750,7 +752,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    char *pi_env = gw_memory_system_prompt(prompt);
-   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
+                                0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
    free(prompt);
 
@@ -820,7 +823,8 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    char *pi_env = gw_memory_system_prompt(prompt);
-   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
+                                0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
    free(prompt);
 

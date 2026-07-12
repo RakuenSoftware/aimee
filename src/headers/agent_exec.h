@@ -75,13 +75,24 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
                                  const char *system_prompt, const char *user_prompt, int max_tokens,
                                  int enforce_writes, agent_result_t *out, int rc);
 
-/* Execute with per-agent concurrency guard. Acquires a slot from the
- * provider catalog before calling agent_execute_with_tools_for_role and
- * releases it on return. Returns -1 immediately if the agent is at its
- * max_parallel ceiling. */
-int agent_execute_guarded(agent_t *ag, const agent_network_t *net, const char *role,
-                          const char *system_prompt, const char *user_prompt, int max_tokens,
-                          agent_result_t *out);
+/* AGENT_RC_AT_LIMIT: agent_dispatch_one refused because the agent is already at
+ * its max_parallel ceiling — a saturation signal DISTINCT from a run failure, so
+ * a fan-out/retry caller tries a different agent and it is never recorded as a
+ * provider-health fault. */
+#define AGENT_RC_AT_LIMIT (-2)
+
+/* THE single per-agent turn executor: the one place that enforces the per-agent
+ * max_parallel concurrency cap and records provider-health for a model turn.
+ * Acquires the agent's slot, runs the turn (use_tools -> the tool loop
+ * agent_execute_with_tools_for_role, else a plain completion agent_execute),
+ * releases, and records success/failure health. Returns 0 on success,
+ * AGENT_RC_AT_LIMIT if the agent was at its ceiling (NO health recorded), or -1 on
+ * a run failure (health recorded). Agent RESOLUTION (by name/role/route),
+ * retry/fallback loops, write_capable, and outcome/feedback/cache logging stay in
+ * the callers — only the model turn itself goes through here. */
+int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
+                       const char *system_prompt, const char *user_prompt, int max_tokens,
+                       double temperature, int use_tools, agent_result_t *out);
 
 /* Logging */
 void agent_log_call(const agent_result_t *result, const char *role);
