@@ -252,12 +252,35 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          else
          {
             int idx = -1;
-            if (rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx) !=
-                RT_SEAT_OK)
-               continue; /* $random exhausted -> leave unfilled (gate degrades) */
+            /* Prefer a UNIQUE agent per lens (the `used` exclusion gives panel
+             * diversity). But when there are fewer eligible review agents than
+             * lenses, insisting on distinctness would leave the surplus lenses
+             * unfilled and needlessly DEGRADE the whole gate. So on exhaustion,
+             * DOWNGRADE: reuse an already-seated agent (drop the exclusion) — the
+             * same model reviews this lens under its own persona prompt. The gate
+             * then degrades only when NO review agent is eligible at all. */
+            int reused = 0;
+            rt_seat_resolve_t rc =
+                rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
+            if (rc == RT_SEAT_RANDOM_EXHAUSTED)
+            {
+               rc = rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
+               reused = 1;
+            }
+            /* rt_resolve_seat_model only sets a valid idx on RT_SEAT_OK; bound-check
+             * defensively anyway before indexing acfg.agents. */
+            if (rc != RT_SEAT_OK || idx < 0 || idx >= acfg.agent_count)
+               continue; /* no eligible review agent at all -> unfilled (gate degrades) */
             agent = acfg.agents[idx].name;
-            if (nused < MAX_AGENTS)
-               used[nused++] = agent;
+            if (reused)
+               /* surface the degraded-diversity composition so operators can see the
+                * panel ran with fewer distinct agents than lenses. */
+               aimee_log(LOG_INFO, "wfe-panel",
+                         "reusing agent '%s' for lens '%s' (fewer eligible review agents "
+                         "than lenses)",
+                         agent, required[i]);
+            else if (nused < MAX_AGENTS)
+               used[nused++] = agent; /* only DISTINCT picks join the diversity set */
          }
          tasks[nt].role = "review";
          tasks[nt].agent = agent;
