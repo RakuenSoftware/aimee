@@ -131,6 +131,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Code-graph visualization (§8): a read-only SPA page backed by the /api/graph/*
 	// proxies (which forward aimee-server's index_graph_* MCP tools).
 	mux.HandleFunc("/graph", s.requireAuth(s.handleSPA))
+	// Roundtable configuration tab (named presets: seats, models, personas, loop
+	// knobs). SPA route so a hard refresh / direct link serves index.html.
+	mux.HandleFunc("/roundtable", s.requireAuth(s.handleSPA))
 	// The Editor tab is a SPA page that embeds the in-app VSCode in an iframe, so
 	// the nav shell stays visible. The iframe's src is the /vscode proxy below.
 	mux.HandleFunc("/editor", s.requireAuth(s.handleSPA))
@@ -208,6 +211,8 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// forwarded to /v1/workspace/* with the user's webuser: assertion.
 	mux.HandleFunc("/api/git/projects", s.requireAuth(s.handleGitProjects))
 	mux.HandleFunc("/api/git/clone", s.requireAuth(s.handleGitClone))
+	mux.HandleFunc("/api/git/org-repos", s.requireAuth(s.handleGitOrgRepos))
+	mux.HandleFunc("/api/git/clone-org", s.requireAuth(s.handleGitCloneOrg))
 	mux.HandleFunc("/api/git/op", s.requireAuth(s.handleGitOp))
 	mux.HandleFunc("/api/git/session-dir", s.requireAuth(s.handleGitSessionDir))
 	mux.HandleFunc("/api/git/credentials", s.requireAuth(s.handleGitCredentials))
@@ -215,9 +220,13 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/git/oauth/github/start", s.requireAuth(s.handleGitOauthGithubStart))
 	mux.HandleFunc("/api/git/oauth/github/poll", s.requireAuth(s.handleGitOauthGithubPoll))
 	mux.HandleFunc("/api/git/oauth/github/config", s.requireAuth(s.handleGitOauthGithubConfig))
+	mux.HandleFunc("/api/git/oauth/device/start", s.requireAuth(s.handleGitOauthDeviceStart))
+	mux.HandleFunc("/api/git/oauth/device/poll", s.requireAuth(s.handleGitOauthDevicePoll))
+	mux.HandleFunc("/api/git/oauth/device/config", s.requireAuth(s.handleGitOauthDeviceConfig))
 
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
+	mux.HandleFunc("/api/hosts", s.requireAuth(s.handleHosts))
 	mux.HandleFunc("GET /api/agents/stats", s.requireAuth(s.handleAgentStats))
 	mux.HandleFunc("POST /api/agents/add", s.requireAuth(s.handleAgentAdd))
 	mux.HandleFunc("POST /api/agents/remove", s.requireAuth(s.agentOpHandler("agent.remove")))
@@ -227,9 +236,17 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/roles", s.requireAuth(s.agentOpHandler("agent.roles")))
 	mux.HandleFunc("POST /api/agents/personas", s.requireAuth(s.agentOpHandler("agent.personas")))
 	mux.HandleFunc("POST /api/agents/set", s.requireAuth(s.agentOpHandler("agent.set")))
+	// Subscription-OAuth setup (Claude / Codex). `start` may install the vendor
+	// CLI server-side, so it carries a much longer timeout than the poll/code hops.
+	mux.HandleFunc("POST /api/agents/oauth/start", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_start", 180*time.Second)))
+	mux.HandleFunc("POST /api/agents/oauth/code", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_code", 30*time.Second)))
+	mux.HandleFunc("POST /api/agents/oauth/poll", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_poll", 15*time.Second)))
 	// Role registry (the shared vocabulary matched between personas and agents).
 	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
 	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))
+	// Named roundtable presets (the Roundtable tab).
+	mux.HandleFunc("/api/roundtables", s.requireAuth(s.handleRoundtables))
+	mux.HandleFunc("/api/roundtables/", s.requireAuth(s.handleRoundtableItem))
 	mux.HandleFunc("/api/rules", s.requireAuth(s.handleCollabRulesList))
 	mux.HandleFunc("/api/rules/active", s.requireAuth(s.handleCollabRulesActive))
 	mux.HandleFunc("POST /api/rules/{id}/{action}", s.requireAuth(s.handleCollabRuleAction))

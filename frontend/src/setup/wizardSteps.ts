@@ -1,32 +1,61 @@
 /* Ordered wizard step definitions + small helpers. Pure data/logic (no DOM), so
- * the ordering and restart-key classification are unit-tested. The step order is
- * the real dependency order for a working turn (provider → embedding → shared
- * store → optional KB API → project). Each step's config keys reuse the
- * plain-English copy in settingsHelp.ts (single source of truth). */
+ * the ordering and restart-key classification are unit-tested.
+ *
+ * The wizard forks on the knowledge-base choice (step 2): connecting to a REMOTE
+ * aimee-kb deploys nothing locally, so the deploy-topology + shared-store (DB2)
+ * steps are hidden. A step's `showWhen` predicate decides whether it appears for
+ * the current kb_mode; a step with no predicate always shows. The tail is always
+ * Connection (git hosts, optional) → Workspaces & projects. Each keyed step's
+ * config keys reuse the plain-English copy in settingsHelp.ts (single source of
+ * truth). */
 
 import { FIELD_HELP, RESTART_KEYS } from '../pages/settingsHelp';
 import type { StepId } from './readiness';
 
+/** The knowledge-base mode that drives conditional step visibility. */
+export type WizardKbMode = 'local' | 'remote';
+
 export interface WizardStep {
   id: StepId;
   title: string;
-  /** Config keys this step edits, in display order. Empty for a hand-off step. */
+  /** Config keys this step edits, in display order. Empty for a bespoke step. */
   keys: string[];
   /** Optional steps are skippable and never block "ready". */
   optional?: boolean;
-  /** For a hand-off step (e.g. project), the route to send the operator to. */
-  route?: string;
-  /** One-line "what you lose if you skip", shown for optional steps. */
+  /** One-line "what you lose if you skip", shown for optional/hand-off steps. */
   skipNote?: string;
+  /** A step whose body is a bespoke component rather than the generic key inputs:
+   * 'chooser' = primary chooser, 'kb' = knowledge-base fork, 'deploy' = deploy
+   * topology (LLM placement), 'connection' = git-host auth, 'workspace' = org
+   * enumerate + bulk clone. Rendered specially by SetupWizard. */
+  kind?: 'chooser' | 'kb' | 'deploy' | 'connection' | 'workspace';
+  /** When present, the step is only shown for the kb modes it returns true for.
+   * Absent ⇒ always shown. */
+  showWhen?: (kbMode: WizardKbMode) => boolean;
 }
 
 export const WIZARD_STEPS: WizardStep[] = [
-  { id: 'provider', title: 'Primary provider', keys: ['provider', 'claude_model', 'openai_endpoint', 'openai_model', 'openai_key_cmd'] },
-  { id: 'embedding', title: 'Embedding backend', keys: ['embedding_command', 'embedding_endpoint', 'embedding_model', 'embedding_dim'] },
-  { id: 'db2', title: 'Shared store (DB2)', keys: ['db2_url'] },
-  { id: 'kb_api', title: 'Knowledge-base API', keys: ['kb_api_http_port', 'kb_api_bearer_token'], optional: true, skipNote: 'Skipping leaves the KB REST API off — no external programmatic access to the knowledge base.' },
-  { id: 'project', title: 'Connect a project', keys: [], route: '/projects', skipNote: 'Without a connected project, tools have no repository to act on.' },
+  { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },
+  // Step 2 — the knowledge-base fork. Local deploys an aimee-kb here (needs the
+  // deploy-topology + DB2 steps below); remote connects to an existing one and
+  // skips all local infra.
+  { id: 'knowledge_base', title: 'Knowledge base', keys: [], kind: 'kb' },
+  // Local-only: LLM role placement for the deployed knowledge base.
+  { id: 'embedding', title: 'Deploy topology', keys: [], kind: 'deploy', showWhen: (m) => m === 'local' },
+  // Local-only: the shared Postgres (DB2) store the local KB writes to.
+  { id: 'db2', title: 'Shared store (DB2)', keys: ['db2_url'], showWhen: (m) => m === 'local' },
+  // Always: authenticate to git hosts (OAuth / token / SSH). Optional — public
+  // repos clone without it.
+  { id: 'connection', title: 'Connection', keys: [], kind: 'connection', optional: true, skipNote: 'Skipping leaves no git host connected — you can still clone public repos and connect private hosts later.' },
+  // Always: point at an owner/org, list its repos, and bulk-clone into the workspace.
+  { id: 'project', title: 'Workspaces & projects', keys: [], kind: 'workspace', skipNote: 'Without a connected repo, tools have no repository to act on.' },
 ];
+
+/** The steps visible for the given kb mode, in order (drives the wizard's Step
+ * N of M and next/back navigation). */
+export function visibleSteps(kbMode: WizardKbMode): WizardStep[] {
+  return WIZARD_STEPS.filter((s) => !s.showWhen || s.showWhen(kbMode));
+}
 
 /** True when a config key only takes effect after a server restart. */
 export function isRestartKey(key: string): boolean {

@@ -7,9 +7,74 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
+- **Roundtable panels run in parallel**: the workflow `gate.roundtable` now
+  dispatches all reviewers concurrently (bounded by the compute-thread ceiling,
+  with a per-round deadline so one hung model can't wedge the panel) instead of
+  one at a time. Each lens still gets a distinct review agent (diverse panel), and
+  a second parallel round retries any lens whose agent failed on a different agent.
+  Cuts a review pass from ~N×(model latency) to ~one model latency.
+
+- **Generalized delegate dispatch (viable delegate for a role, retry until one works)**:
+  `agent_run_ex` no longer walks a configured `fallback_chain` — it routes to the
+  preferred agent for the role, then retries other **viable** agents (enabled,
+  routable, serving the role; a DOWN agent is skipped) at random until one
+  succeeds. The roundtable panel is now just N `review` delegate requests: it
+  dispatches by the `review` role (the persona rides in the prompt as the lens),
+  excludes agents already seated for a **diverse** panel, and retries a flaky
+  agent onto a different one instead of degrading the gate. Non-review agents
+  (e.g. `gpu-mid`, which lacks the `review` role) are never seated. A specific
+  agent is used only when explicitly pinned.
+
+- **Roundtable seats: pin a model or set it Random**: each seat in the roundtable
+  preset (the panel the GUI edits) now honors its model two ways. A **specific**
+  model is dispatched to that **exact** agent — if it can't be reached (disabled,
+  unroutable, or its dispatch fails), the workflow run **fails** rather than
+  silently swapping in another model. A seat set to **Random** (`$random`) picks
+  any review-capable agent and retries a different one until one is accepted. The
+  workflow `gate.roundtable` resolves each required persona to its matching seat's
+  model this way; the interactive `aimee delegate roundtable` (ensemble) path
+  honors the same two kinds. The Roundtable page gains a **🎲 Random** toggle per
+  seat so you can choose per seat in the GUI.
+
 Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
+
+- **Roundtable ↔ planner now refine together**: when a `gate.roundtable` requests
+  changes, the panel's blockers are captured and persisted for the work item, and
+  the next `author.proposal`/`author.plan` pass folds them into its prompt — so the
+  re-author addresses the actual objections instead of re-authoring blind. Before
+  this, the panel's critique was discarded (only the pass/fail enum survived), so
+  the plan↔gate loop couldn't converge and churned until the per-node `max_iters`
+  backstop parked the run. The build workflow's `plan` step also gets a larger
+  `max_iters` so a genuinely converging refinement loop isn't cut off early.
+
+- **`author.proposal` accepts a pre-supplied proposal**: an autonomous run whose
+  proposal is already complete (the proposals trigger materializes a finished,
+  merged proposal — the merge is the approval) no longer loops the `draft` step to
+  `max_iters`. When the author delegate makes no change, `author.proposal` now
+  advances on the existing non-empty proposal instead of treating the no-op as a
+  failure. The guard is strict: with no proposal on disk yet, a failed author
+  dispatch still loops, and `author.plan`/code roles still treat a no-op as the
+  real failure it is.
+- **Trigger `mode` (autonomous by default)**: `trigger_rules` now take a `mode`
+  field selecting how a triggered run executes — `autonomous` (the default: the
+  autonomy scheduler drives it hands-off, right for "merging a proposal *is* the
+  approval") or `interactive` (file it and park for a human to drive in the
+  webchat). The `proposals` source now files its runs `autonomous` by default, so
+  a merged proposal builds out end-to-end without further sign-off. In-flight
+  human gates remain a property of the *workflow* you name (`gate.human`),
+  independent of the trigger's `mode`. See
+  [WORKFLOWS.md § Triggers](WORKFLOWS.md#triggers).
+- **Human gates are inviolable**: a `gate.human` step can no longer be
+  auto-satisfied in autonomous mode. The autonomy driver's preauthorized/optional
+  auto-pass is removed — an autonomous run now **parks at every human gate** until
+  a person acts, and workflow validation **rejects** `policy: preauthorized` /
+  `optional: true` on a human gate so an overridable one can't even be authored.
+  The only way past a human gate remains a human's signed approval via
+  `POST /v1/workflow/items/<id>/gate` (operator-gated `CAP_WORKFLOW_ADMIN`,
+  attributed to the caller's attested principal, HMAC-signed and content-hash-bound).
+  See [WORKFLOWS.md](WORKFLOWS.md) and [AUTONOMOUS_DEVELOPMENT.md](AUTONOMOUS_DEVELOPMENT.md).
 
 - **Dashboard overhaul + Logs tab**: the web UI **Dashboard** is now a customizable
   grid of **server-incurred** metric panels: delegations, per-role metrics, token/cost,
@@ -33,14 +98,16 @@ credentials live in the server's **sealed vault**; see
   transcripts and build progress dropped), with the full output spilled for lossless
   recovery. Fail-open and byte-identical when off. Toggle it in the web Settings page. See
   [features/tool-output-condensation.md](features/tool-output-condensation.md).
-- **Self-hosted GPU inference tiers**: the `aimee-kb` inference image ships four tiers you
-  swap with one plugin image. `aimee-kb-cpu` runs retrieval on any host (~6.5 GB image),
-  `aimee-kb-gpu-small` bakes a Gemma 4 12B synth (~11.4 GB, 16 GB card), `aimee-kb-gpu-mid`
-  bakes a Gemma 4 26B-A4B synth that fits a 24 GB card fully resident (~17.8 GB, 2 slots),
-  and `aimee-kb-gpu-large` reuses that same synth on a 32 GB card with 4 concurrent agents at
-  the full 256 K window (same ~17.8 GB image, only `SYNTH_SLOTS=4`). The GPU tiers build on a
-  Mesa 25 base so RADV uses the RDNA3 matrix cores. The local synth also registers as a free
-  delegate. See [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
+- **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a single
+  **model-less** image whose **tier** is chosen at runtime via `AIMEE_LLM_TIER` — the models
+  download on first boot into a `/models` volume, so there is nothing baked and no per-tier
+  image to pull. `cpu` runs retrieval on any host (~6.5 GB download), `small` a Gemma 4 12B
+  synth (~11.4 GB, 16 GB card), `mid` a Gemma 4 26B-A4B synth that fits a 24 GB card fully
+  resident (~17.8 GB, 2 slots), and `large` reuses that synth on a 32 GB card with 4
+  concurrent agents at the full 256 K window (only `SYNTH_SLOTS=4`). The GPU tiers build on a
+  Mesa 25 base so RADV uses the RDNA3 matrix cores. The bundled all-in-one image
+  (`aimee-server-kb`) uses the same image and downloads the cpu tier on first boot. The local
+  synth also registers as a free delegate. See [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 - **Cross-repo code graph**: the symbol and call graph resolves dependency edges across the
   repositories in your workspace, so blast radius and caller lookups cross repo boundaries.
   Ask in three directions: what a project depends on, what depends on it, or both. See

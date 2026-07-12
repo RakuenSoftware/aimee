@@ -71,6 +71,7 @@ const method_policy_t method_registry[] = {
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
     {"audit.snapshot", CAP_TOOL_EXECUTE, "WORM audit metric snapshot"},
     {"plugin.list", CAP_DASHBOARD_READ, "plugin list"},
+    {"hosts.list", CAP_DASHBOARD_READ, "host + GPU inventory"},
     {"plugin.enable", CAP_TOOL_EXECUTE, "enable plugin"},
     {"plugin.disable", CAP_TOOL_EXECUTE, "disable plugin"},
     {"lsp.*", CAP_DASHBOARD_READ, "lsp status"},

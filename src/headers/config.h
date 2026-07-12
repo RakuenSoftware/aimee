@@ -194,6 +194,7 @@ typedef struct
 #define TRIGGER_RULE_MAX_SCHEDULE 64
 #define TRIGGER_RULE_MAX_TEMPLATE 128
 #define TRIGGER_RULE_MAX_WS       256
+#define TRIGGER_RULE_MAX_MODE     32
 #define TRIGGER_RULES_MAX         32
 
 typedef struct
@@ -203,6 +204,10 @@ typedef struct
    char schedule[TRIGGER_RULE_MAX_SCHEDULE]; /* cron expression (source=cron only) */
    char pipeline_template[TRIGGER_RULE_MAX_TEMPLATE];
    char workspace[TRIGGER_RULE_MAX_WS];
+   char mode[TRIGGER_RULE_MAX_MODE]; /* work-item mode the rule files: "autonomous"
+                                      * (default — the run advances hands-off) or
+                                      * "interactive" (parks for a human to drive in
+                                      * the webchat). Empty => "autonomous". */
    double max_spend_usd;
 } trigger_rule_t;
 
@@ -1271,6 +1276,41 @@ typedef struct config
    char kb_client_url[CONFIG_DB2_URL_LEN];
    char kb_client_bearer_token[256];
 
+   /* Setup-wizard page 2 (LLM / embedding / KB backend). The wizard RECORDS the
+    * operator's choices here; the deploy layer (combined-entrypoint.sh / compose)
+    * reads them and brings up only what is configured — nothing is deployed until
+    * page 2 is set. Empty kb_mode means "not configured yet" (a fresh install).
+    *
+    * kb_mode:
+    *   "remote" — connect to an existing aimee-kb (kb_client_url/bearer above);
+    *              NOTHING is deployed locally (no kb, no llm).
+    *   "local"  — run a local aimee-kb and deploy the per-role LLM backends below.
+    *
+    * Each LLM role is external (forward to llm_<role>_endpoint), local (a baked
+    * llama-server at llm_<role>_tier on llm_<role>_host / _gpu — mapped to the
+    * plugin's AIMEE_LLM_<ROLE>_MODE/TIER env), or off (rerank/synth only). The
+    * embedder's external endpoint/model/dim reuse embedding_endpoint/model/dim;
+    * an unset embedding_dim (0) is derived from the embedder /health probe. */
+   char kb_mode[16]; /* "" | "local" | "remote" */
+
+   char llm_embed_backend[16]; /* "" | "external" | "local" */
+   char llm_embed_host[128];
+   char llm_embed_gpu[64];
+   char llm_embed_tier[16]; /* cpu | small | mid | large */
+
+   char llm_rerank_backend[16]; /* "" | "external" | "local" | "off" */
+   char llm_rerank_host[128];
+   char llm_rerank_gpu[64];
+   char llm_rerank_tier[16];
+   char llm_rerank_endpoint[512];
+
+   char llm_synth_backend[16]; /* "" | "external" | "local" | "off" */
+   char llm_synth_host[128];
+   char llm_synth_gpu[64];
+   char llm_synth_tier[16];
+   char llm_synth_endpoint[512];
+   char llm_synth_model[128];
+
    /* aimee-server public HTTP API (aimee.api.*). The /v1 surface is always
     * served over the UDS (aimee-http.sock, filesystem-permission auth, no
     * token). These add an optional localhost TCP listener for OpenAI-style
@@ -1769,6 +1809,11 @@ typedef struct config
    int roundtable_converge_threshold;
    int roundtable_deadline_ms;
    char roundtable_turns[16];
+   /* Name of the active roundtable preset (see roundtable_preset.{c,h}). Empty =
+    * no named preset selected; the ensemble and roundtable fields above are used
+    * as-is. Setting a preset "active" copies its values into those fields and
+    * records the name here so the GUI can show the current selection. */
+   char roundtable_default[64];
 
    /* Roundtable authoring pipeline (roundtable.pipeline_*). The outer
     * REVIEW<->revise loop, done-bar, and cost/pass backstops; see

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WIZARD_STEPS, isRestartKey, helpFor } from './wizardSteps';
+import { WIZARD_STEPS, visibleSteps, isRestartKey, helpFor } from './wizardSteps';
 import { RESTART_KEYS, FIELD_HELP } from '../pages/settingsHelp';
 import { saveConfigValue, loadConfig } from './configApi';
 import type { StepId } from './readiness';
@@ -7,16 +7,42 @@ import type { StepId } from './readiness';
 describe('WIZARD_STEPS structure', () => {
   it('covers every readiness StepId exactly once, in dependency order', () => {
     const ids = WIZARD_STEPS.map((s) => s.id);
-    expect(ids).toEqual<StepId[]>(['provider', 'embedding', 'db2', 'kb_api', 'project']);
+    expect(ids).toEqual<StepId[]>(['provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
     expect(new Set(ids).size).toBe(ids.length); // no dupes
   });
 
-  it('kb_api is optional and project is a hand-off (route, no keys)', () => {
-    const kb = WIZARD_STEPS.find((s) => s.id === 'kb_api')!;
+  it('provider is the chooser and step 2 is the bespoke knowledge-base fork', () => {
+    const provider = WIZARD_STEPS.find((s) => s.id === 'provider')!;
+    expect(provider.kind).toBe('chooser');
+    const step2 = WIZARD_STEPS[1];
+    expect(step2.id).toBe('knowledge_base');
+    expect(step2.kind).toBe('kb');
+    expect(step2.keys).toEqual([]);
+  });
+
+  it('deploy-topology + DB2 are local-only; the tail is connection → workspaces', () => {
+    const embedding = WIZARD_STEPS.find((s) => s.id === 'embedding')!;
+    const db2 = WIZARD_STEPS.find((s) => s.id === 'db2')!;
+    expect(embedding.kind).toBe('deploy');
+    expect(embedding.showWhen!('local')).toBe(true);
+    expect(embedding.showWhen!('remote')).toBe(false);
+    expect(db2.showWhen!('remote')).toBe(false);
+
+    const connection = WIZARD_STEPS.find((s) => s.id === 'connection')!;
     const project = WIZARD_STEPS.find((s) => s.id === 'project')!;
-    expect(kb.optional).toBe(true);
+    expect(connection.optional).toBe(true);
+    expect(connection.kind).toBe('connection');
+    expect(project.kind).toBe('workspace');
+    // Folded in: no longer a route hand-off.
     expect(project.keys).toEqual([]);
-    expect(project.route).toBe('/projects');
+    expect('route' in project).toBe(false);
+  });
+
+  it('visibleSteps forks on kb_mode: remote hides deploy + db2', () => {
+    const local = visibleSteps('local').map((s) => s.id);
+    const remote = visibleSteps('remote').map((s) => s.id);
+    expect(local).toEqual(['provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
+    expect(remote).toEqual(['provider', 'knowledge_base', 'connection', 'project']);
   });
 
   it('every keyed step references documented config keys', () => {

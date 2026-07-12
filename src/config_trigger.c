@@ -9,6 +9,7 @@
  * trigger_rules:
  *   - source: "github-webhook"   # valid sources include github-webhook, cron, proposals
  *     event: "push"
+ *     mode: "autonomous"         # "autonomous" (default) | "interactive"
  *     pipeline:
  *       template: "ci"
  *       workspace: "/ws/myproject"
@@ -18,6 +19,13 @@
  * repo to scan, pipeline.template is the workflow name, event is the
  * repo-relative proposal dir (default docs/proposals/pending), and schedule is
  * the git ref/branch (default auto-detect).
+ *
+ * mode selects how the filed work item runs, independent of the workflow it
+ * names: "autonomous" (the default) lets the autonomy scheduler drive the run
+ * hands-off — appropriate when the trigger event *is* the approval (e.g. a
+ * merged proposal); "interactive" files the item and parks it for a human to
+ * drive in the webchat. Gating BEYOND this (e.g. a gate.human step) is a
+ * property of the workflow the rule names, not of the trigger.
  */
 
 #include "aimee.h"
@@ -261,6 +269,18 @@ int config_parse_trigger(config_t *cfg, const cJSON *root)
       if (schedule && cJSON_IsString(schedule) && schedule->valuestring[0])
          snprintf(r->schedule, sizeof(r->schedule), "%s", schedule->valuestring);
 
+      const cJSON *mode = cJSON_GetObjectItemCaseSensitive(rule, "mode");
+      if (mode && cJSON_IsString(mode) && mode->valuestring[0])
+      {
+         if (strcmp(mode->valuestring, "autonomous") != 0 &&
+             strcmp(mode->valuestring, "interactive") != 0)
+            issues += config_issue(
+                "trigger_rules[].mode expected \"autonomous\" or \"interactive\", got \"%s\"",
+                mode->valuestring);
+         else
+            snprintf(r->mode, sizeof(r->mode), "%s", mode->valuestring);
+      }
+
       const cJSON *pipeline = cJSON_GetObjectItemCaseSensitive(rule, "pipeline");
       if (pipeline && cJSON_IsObject(pipeline))
       {
@@ -305,7 +325,7 @@ void config_save_trigger(const config_t *cfg, cJSON *root)
       }
    }
 
-   /* trigger_rules[] — {source,event,schedule,pipeline:{template,workspace,max_spend_usd}} */
+   /* trigger_rules[] — {source,event,schedule,mode,pipeline:{template,workspace,max_spend_usd}} */
    if (cfg->trigger_rule_count > 0)
    {
       cJSON *rules = cJSON_AddArrayToObject(root, "trigger_rules");
@@ -321,6 +341,8 @@ void config_save_trigger(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(o, "event", r->event);
          if (r->schedule[0])
             cJSON_AddStringToObject(o, "schedule", r->schedule);
+         if (r->mode[0])
+            cJSON_AddStringToObject(o, "mode", r->mode);
          if (r->pipeline_template[0] || r->workspace[0] || r->max_spend_usd != 0.0)
          {
             cJSON *p = cJSON_AddObjectToObject(o, "pipeline");

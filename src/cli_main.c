@@ -5,6 +5,7 @@
 #include "cli_client.h"
 #include "cli_agent_keys.h"
 #include "cli_session_start.h"
+#include "cmd_self_update.h"
 #include "cli_attention_guard.h"
 #include "cli_agent_setup.h"
 #include "cli_code_audit.h"
@@ -21,7 +22,7 @@
 #include "delegate_plan.h"
 #include "cli_tui.h"
 #include "platform.h"
-#include "platform_path.h"
+#include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
 #include "cJSON.h"
 #include "memory_redirect.h"
@@ -1542,7 +1543,22 @@ static char *acp_dispatch_prompt(const char *content, const char *session_id)
    const char *sock = cli_ensure_server_for_method("chat.send_stream");
    if (!sock)
       return NULL;
-   return cli_chat_stream(sock, session_id, content, acp_stream_delta, acp_stream_tool,
+   /* Single-session ACP clients never call session/new and omit sessionId, so
+    * session_id arrives empty and the turn would carry no aimee_session_id -- the
+    * server could not log it in server_sessions. Derive a stable per-editor id for
+    * LOGGING (keyed on the parent pid, mirroring the MCP serve proxy's
+    * session-ppid-*) so every turn from one editor process is recorded under one
+    * recoverable id. The outbound session/update notifications keep echoing the
+    * client's original sessionId (empty when none was sent), so the ACP wire
+    * contract is unchanged -- only the server-side logging id is synthesized. */
+   char fallback[32];
+   const char *log_sid = session_id;
+   if (!log_sid || !log_sid[0])
+   {
+      snprintf(fallback, sizeof(fallback), "acp-ppid-%d", platform_getppid());
+      log_sid = fallback;
+   }
+   return cli_chat_stream(sock, log_sid, content, acp_stream_delta, acp_stream_tool,
                           (void *)session_id);
 }
 
@@ -1750,6 +1766,8 @@ int main(int argc, char **argv)
          printf("%s %s\n", prog, AIMEE_VERSION);
       return 0;
    }
+   if (strcmp(cmd, "self-update") == 0)
+      return cmd_self_update(sub_argc, sub_argv);
    if (strcmp(cmd, "--help") == 0)
    {
       usage();
@@ -1862,9 +1880,16 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "mcp-serve") == 0)
       return cli_mcp_serve();
 
-   /* ACP stdio server: lets ACP editors (Zed, Aider) use aimee as a backend. */
+   /* ACP stdio server: lets ACP editors (Zed, Aider) use aimee as a backend.
+    * Tag every chat turn this loop dispatches as "acp" so the session is logged
+    * under its real surface (builtin_chat_send_ex forwards AIMEE_CLIENT_TYPE into
+    * the chat request; the server records it on the server_sessions row). */
    if (strcmp(cmd, "acp-serve") == 0)
+   {
+      /* platform_setenv: portable (POSIX setenv / Windows SetEnvironmentVariable). */
+      platform_setenv("AIMEE_CLIENT_TYPE", "acp");
       return acp_server_run(acp_dispatch_prompt);
+   }
 
    /* Explicit server lifecycle. The CLI no longer auto-spawns on demand
     * (#1660); systemd / launchd / SCM owns the lifecycle on each platform,

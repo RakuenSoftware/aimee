@@ -35,6 +35,7 @@
 #include "delegate_role.h"
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"
+#include "delegate_ephemeral_ws.h"
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"
@@ -1287,6 +1288,41 @@ void delegate_worker(void *arg)
    platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
    /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
    int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
+   /* A background/durable delegate has no live client connection to serve a
+    * DETACHED (client-served) workspace: by the time the worker runs, the
+    * dispatching client has disconnected, so the reverse channel is dead and every
+    * shell/file tool marshalled to it fails (previously a silent exit_code:-1).
+    * Create a server-side ephemeral workspace FIRST; only on success unbind the
+    * detached provider and run tools there. On failure keep the detached binding
+    * so the dead-channel path surfaces a clear error (fail CLOSED — never run in
+    * an undefined cwd). The ephemeral workspace does NOT contain the client's repo
+    * (it drops an AIMEE_WORKSPACE_NOTE.txt saying so); a background *code* delegate
+    * that must edit the client tree needs it provisioned server-side (follow-up). */
+   char ephemeral_ws[MAX_PATH_LEN] = "";
+   if (detached_bound && cctx->background_job_id > 0)
+   {
+      if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0 &&
+          ephemeral_ws[0])
+      {
+         workspace_turn_unbind_active();
+         detached_bound = 0;
+         run_cmd_set_cwd(ephemeral_ws);
+         aimee_log(LOG_WARN, "delegate",
+                   "delegate %s: background job cannot serve its detached (client) workspace; "
+                   "running tools in server-side ephemeral workspace %s",
+                   deleg_id, ephemeral_ws);
+      }
+      else
+      {
+         /* Fail closed: detached binding stays, so shell tools return the clear
+          * reverse-channel-unavailable error rather than running in a stray cwd. */
+         aimee_log(LOG_ERROR, "delegate",
+                   "delegate %s: background job on a detached workspace but could not create a "
+                   "server-side ephemeral workspace; shell tools will report the reverse channel "
+                   "is unavailable",
+                   deleg_id);
+      }
+   }
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                            max_tokens, force_tools, delegate_allows_writes,
@@ -1297,6 +1333,14 @@ void delegate_worker(void *arg)
    delegate_run_ctx_restore(&run_ctx);
    if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
       workspace_turn_unbind_active();
+   if (ephemeral_ws[0])
+   {
+      /* Clear the thread-local cwd BEFORE removing the workspace so any post-run
+       * teardown exec (transcript capture, etc.) does not try to `cd` into a
+       * directory we just deleted (a harmless-but-noisy "cd: can't cd" error). */
+      run_cmd_set_cwd(NULL);
+      delegate_ephemeral_ws_remove(ephemeral_ws);
+   }
    (void)db1_delegation_spawn_complete(deleg_id);
 
    /* Post-run named-file drift check: verify named existing paths appear in response. */

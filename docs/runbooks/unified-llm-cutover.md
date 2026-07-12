@@ -9,19 +9,20 @@ the images build, serve `/embed`+`/rerank`(ettin encoder + gateway
 head)+`/v1/chat/completions`, and offload to the AMD 7900 XTX via Vulkan (`-ngl 99`).
 
 > **Naming update (post-cutover):** the images built here were renamed
-> `aimee-llm-cpu`/`aimee-llm-gpu` → `aimee-kb-cpu`/`aimee-kb-gpu-small`, and two more GPU
-> tiers were added — `aimee-kb-gpu-mid` (Gemma 4 26B-A4B, 24 GB card) and `aimee-kb-gpu-large`
-> (same synth, 32 GB card, `SYNTH_SLOTS=4`); `aimee-llm` is now only the plugin name. The
-> steps below keep the original names as a record, for the current tiers, image sizes, and
-> build-args see [../AIMEE_KB_SYNTH_TIERS.md](../AIMEE_KB_SYNTH_TIERS.md).
+> `aimee-llm-cpu`/`aimee-llm-gpu` → `aimee-kb-cpu`/`aimee-kb-gpu-small` (+ `gpu-mid`/`gpu-large`),
+> and have since been **collapsed back into one model-less `aimee-llm` image**: the tier is
+> chosen at runtime via `AIMEE_LLM_TIER` (`cpu`/`small`/`mid`/`large`) and the models download
+> on first boot — there are no baked per-tier images anymore. The steps below keep the original
+> names as a record; for the current image, tiers, and env knobs see
+> [../AIMEE_KB_SYNTH_TIERS.md](../AIMEE_KB_SYNTH_TIERS.md).
 
 ## 0. What changes
 
 - **From:** torch `aimee-embedder` (pplx-embed + ettin via sentence-transformers) + the
   stock `llm` llama.cpp container (gemma synth).
-- **To:** one `aimee-llm` image (CPU or GPU tier): Vulkan llama.cpp serving embed
-  (Qwen3-Embedding) + rerank (ettin encoder + the gateway Dense head) + synth (gemma),
-  models baked in.
+- **To:** one model-less `aimee-llm` image: Vulkan llama.cpp serving embed
+  (Qwen3-Embedding) + rerank (ettin encoder + the gateway Dense head) + synth (gemma). The
+  tier (`AIMEE_LLM_TIER`) selects the models, which download on first boot into `/models`.
 - **Corpus re-embed required:** `pplx-embed` → `Qwen3-Embedding` is a **`model_id` change**
   (and 0.6B→1024 / 4B→2560 a possible **dim** change), so the `kb_meta` drift guard (P1,
   now activated, `db2_set_embedder_model_id`) will **refuse** to serve the new embedder
@@ -38,30 +39,29 @@ release (no in-image rollback flag); a post-cutover revert is a deploy-tag rollb
 
 ## 2. Build + publish the images
 
-CI builds + publishes both tiers as part of the normal release cycle:
-- **main:** `.github/workflows/publish-images.yml` (via `auto-release.yml`) builds
-  `aimee-kb-cpu` + `aimee-kb-gpu-small` + `aimee-kb-gpu-mid` + `aimee-kb-gpu-large` on every
-  release and tags them `:<version>` + `:latest`. They are in both the `build` and the `merge`
-  matrices; the merge step applies the tags, so a build that pushes only by digest leaves
-  `tags:null`. (`gpu-mid` and `gpu-large` are amd64-only.)
-- **testing:** `.github/workflows/publish-llm-testing.yml` builds `cpu` + `gpu-small` on
-  `testing` pushes that touch `Dockerfile.aimee-llm` or the gateway/supervisor scripts,
-  tagged `:testing` (+ `:testing-<sha>`, amd64). `gpu-mid` and `gpu-large` are dispatch-only
-  (`build_kb_gpu_mid=true` / `build_kb_gpu_large=true`): tested-but-unreleased images for `.254`.
+CI builds + publishes the **one** model-less `aimee-llm` image as part of the normal cycle
+(no per-tier images — the tier is a runtime env, not a build):
+- **main:** `.github/workflows/publish-images.yml` (via `auto-release.yml`) builds `aimee-llm`
+  on every release and tags it `:<version>` + `:latest`. It is in both the `build` and `merge`
+  matrices; the merge step applies the tags. amd64-only (the llama.cpp Vulkan binary is x64).
+- **testing:** `.github/workflows/publish-llm-testing.yml` builds `aimee-llm` on `testing`
+  pushes that touch `Dockerfile.aimee-llm` or the gateway/supervisor scripts, tagged `:testing`
+  (+ `:testing-<sha>`, amd64).
+- **rerank artifacts (automatic):** `.github/workflows/publish-rerank-artifacts.yml` converts
+  the ettin rerankers and uploads them to the `rerank-artifacts-v1` GitHub release, which the
+  supervisor fetches on first boot. Both publish workflows above CALL it as a prerequisite
+  (`needs`), so a container image is never published without the release existing — no manual
+  step. It is idempotent: the expensive conversion runs only when an asset is missing (first
+  run, or after you delete the release / dispatch it with `force=true` to bump the reranker);
+  every other run just confirms the assets are present and skips.
 
-To build out-of-band (e.g. on a PVE CT with docker):
+To build out-of-band (e.g. on a PVE CT with docker) — one model-less image, no model build-args:
 
 ```
-docker build -f Dockerfile.aimee-llm -t aimee-kb-cpu .
-docker build -f Dockerfile.aimee-llm -t aimee-kb-gpu-small \
-  --build-arg EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF \
-  --build-arg EMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf \
-  --build-arg RERANK_REPO=cross-encoder/ettin-reranker-400m-v1 \
-  --build-arg SYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF \
-  --build-arg SYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf \
-  --build-arg SYNTH_FA=on .
+docker build -f Dockerfile.aimee-llm -t aimee-llm .
+# then at run time pick the tier:  docker run -e AIMEE_LLM_TIER=small ... aimee-llm
 ```
-(gpu-mid swaps the synth args to Gemma 4 26B-A4B; see the tiers doc for the exact pins.)
+(The tier selects the models the supervisor downloads on first boot; see the tiers doc.)
 
 ## 3. Deploy to `.254` (tierd / LXC, GPU)
 

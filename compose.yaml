@@ -83,8 +83,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # required:false so the kb starts even when the aimee-llm service is not in
+      # the active profile set (all-external / remote-kb): it fail-opens on
+      # embedding until an LLM is reachable. When the `llm` profile IS on, it
+      # still waits for aimee-llm to be healthy first.
       aimee-llm:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
       interval: 10s
@@ -156,35 +161,46 @@ services:
       # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
       start_period: 1200s
 
-  # Unified llama.cpp+Vulkan container: one image serving embed + rerank + synth
-  # from baked-in GGUFs behind the gateway (the /embed,/embed_batch,/rerank,
-  # /v1/chat/completions contract). The kb's single LLM backend (DEFAULT now —
-  # the unified-llm cutover; the legacy embedder/llm services moved behind
-  # profiles). CPU tier by default; GPU = AIMEE_LLM_IMAGE=...-gpu + AIMEE_LLM_NGL=99
-  # + a /dev/dri device (see deploy/compose/aimee.gpu.yaml). Internal only — the
-  # kb reaches it at aimee-llm:8080. Auth-off (the kb sends no bearer).
+  # Unified llama.cpp+Vulkan container: one model-less image serving embed + rerank
+  # + synth behind the gateway (the /embed,/embed_batch,/rerank,/v1/chat/completions
+  # contract). The kb's single LLM backend (DEFAULT now — the unified-llm cutover;
+  # the legacy embedder/llm services moved behind profiles). The tier is chosen at
+  # runtime via AIMEE_LLM_TIER (unset ≡ cpu) and the models download to the /models
+  # volume on first boot; GPU = AIMEE_LLM_TIER=small|mid|large + AIMEE_LLM_NGL=99 +
+  # a /dev/dri device (see deploy/compose/aimee.gpu.yaml). Internal only — the kb
+  # reaches it at aimee-llm:8080. Auth-off (the kb sends no bearer).
   # CI/dev: AIMEE_LLM_DOCKERFILE=Dockerfile.aimee-llm-stub + AIMEE_LLM_STUB=1
   # builds a tiny python-only stub (no llama.cpp / GGUFs) — see e2e-matrix.sh.
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-cpu:latest}
+    # Profile-gated: brought up only when the page-2 config puts a role local (the
+    # translation `aimee config deploy-env` emits COMPOSE_PROFILES=...,llm). An
+    # all-external / remote-kb stack never starts it. CI opts it in via
+    # COMPOSE_PROFILES=llm (see e2e-matrix.sh) to exercise the kb->gateway contract.
+    profiles: ["llm"]
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     build:
       context: .
       dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}
     environment:
       AIMEE_LLM_PORT: "8080"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
       # CI/dev stub (off in prod): deterministic embed/rerank/synth, no models.
       AIMEE_LLM_STUB: ${AIMEE_LLM_STUB:-}
       AIMEE_LLM_STUB_DIM: ${AIMEE_LLM_STUB_DIM:-}
+    volumes:
+      # Persist the downloaded per-tier GGUFs so restarts don't re-fetch.
+      - aimee-llm-models:/models
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-      # Baked GGUFs load into RAM/VRAM (no download); generous for the GPU tier.
-      start_period: 300s
+      # Cold first boot downloads the tier's models; the /models volume makes later
+      # boots fast. STUB mode skips the download and flips healthy quickly.
+      start_period: 1200s
 
 volumes:
   aimee-kb-home:

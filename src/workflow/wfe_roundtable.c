@@ -118,6 +118,10 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    char *proposal = read_text_capped(wfe_ctx_proposal_path(ctx), WFE_PROPOSAL_MAX);
    const cJSON *focus_j =
        node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+   /* Optional: this gate may convene a NAMED roundtable preset (its seat
+    * persona->model bindings) instead of the configured default. */
+   const cJSON *rt_j =
+       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "roundtable") : NULL;
    /* The directory the panel reviews the change in: the per-work-item worktree, or —
     * when worktree isolation is unavailable and a run fell back to the shared checkout
     * (wfe_worktree_ensure failed) — that shared repo dir. Mirrors the producing blocks'
@@ -148,12 +152,18 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
            (focus_j && cJSON_IsString(focus_j) && focus_j->valuestring) ? focus_j->valuestring : "",
        .workdir = workdir,
        .diff = diff ? diff : "",
+       .roundtable = (rt_j && cJSON_IsString(rt_j) && rt_j->valuestring) ? rt_j->valuestring : "",
    };
 
    wfe_verdict_t verdicts[WFE_PANEL_MAX];
    int nv = g_provider(&pkt, req, nreq, elig, nelig, verdicts, WFE_PANEL_MAX);
    free(proposal);
    free(diff);
+   if (nv == WFE_PANEL_PINNED_FAIL)
+      /* A user-pinned seat model could not be fulfilled. A pinned model is a hard
+       * requirement — never silently swapped — so the run FAILS terminally rather
+       * than degrading to a different panel. */
+      return wfe_step_failed_class(WFE_FAIL_PERMANENT, 0);
    if (nv < 0)
       return wfe_step_pending(WFE_PAUSE_PANEL_UNREACHABLE);
 
@@ -164,12 +174,34 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    {
    case WFE_GATE_APPROVE:
    {
+      /* Passed: drop any stale review feedback so it can't bleed into a later
+       * author step for this work item. */
+      wfe_feedback_clear(wi);
       char handle[80];
       snprintf(handle, sizeof handle, "%s.out", node->id);
       return wfe_step_advanced(handle, artifact_hash, 0.0);
    }
    case WFE_GATE_CHANGES:
+   {
+      /* Persist the panel's blockers so the re-authoring delegate (via on_fail)
+       * refines against the actual objections instead of re-authoring blind. */
+      const cJSON *fj =
+          node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "focus") : NULL;
+      const char *focus = (fj && cJSON_IsString(fj)) ? fj->valuestring : "";
+      char agg[4096];
+      int off = snprintf(agg, sizeof agg,
+                         "The review roundtable requested changes%s%s. Revise to resolve the "
+                         "reviewers' blockers below, then commit:\n",
+                         focus[0] ? " — focus: " : "", focus);
+      for (int i = 0; i < nv && off > 0 && (size_t)off < sizeof agg; i++)
+         if ((verdicts[i].kind == WFE_V_REQUEST_CHANGES || verdicts[i].kind == WFE_V_MALFORMED) &&
+             verdicts[i].feedback[0])
+            off += snprintf(agg + off, sizeof agg - (size_t)off, "\n## %s\n%s\n",
+                            verdicts[i].persona[0] ? verdicts[i].persona : "reviewer",
+                            verdicts[i].feedback);
+      wfe_feedback_write(wi, agg);
       return wfe_step_looped();
+   }
    case WFE_GATE_DEGRADED:
    default:
       return wfe_step_pending(WFE_PAUSE_PANEL_DEGRADED);

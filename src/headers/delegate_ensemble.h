@@ -169,10 +169,17 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
  * authorized (claude_cli_delegate_enabled) AND server-hosted (is_server_hosted). */
 int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag);
 
+/* Replace each "$random" seat in ensemble.reference_models with a concretely
+ * picked review-capable agent (excluding already-seated models for diversity);
+ * drop a $random seat that cannot be filled. Pinned seats pass through. Called
+ * first by ensemble_filter_panel_authorization so downstream filters see real
+ * agents. Exposed for tests. */
+void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg);
+
 /* Drop unauthorized/ineligible configured agents (e.g. an unauthorized claude)
  * from an EXPLICIT ensemble.reference_models list and fix up the aggregator. Run
  * after ensemble_default_panel_from_agents so both auto and explicit panels are
- * authorization-gated. */
+ * authorization-gated. Resolves "$random" seats first (see above). */
 void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg);
 
 /* Drop currently-UNAVAILABLE panelists (unkeyed HTTP agent, missing CLI/tmux,

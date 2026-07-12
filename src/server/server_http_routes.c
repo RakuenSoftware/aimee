@@ -54,6 +54,7 @@
 #include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
 #include "vault_service.h"    /* vault_service_set/delete for the per-webuser ssh-key route */
 #include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "git_org_repos.h"    /* git_org_repos_list for /v1/workspace/org-repos */
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
 #include "webchat_live.h"     /* db1_webchat_live_get — the browser's live-turn poll */
@@ -601,6 +602,32 @@ static int rh_role_template_put(const route_req_t *rq, char *resp, int cap)
 static int rh_role_template_delete(const route_req_t *rq, char *resp, int cap)
 {
    return route_role_template_remove(rq->id, resp, cap);
+}
+
+static int rh_roundtables_list(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_roundtables_list(resp, cap);
+}
+static int rh_roundtables_create(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_upsert(NULL, rq->body, resp, cap);
+}
+static int rh_roundtable_set_active(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_set_active(rq->body, resp, cap);
+}
+static int rh_roundtable_show(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_show(rq->id, resp, cap);
+}
+static int rh_roundtable_put(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_upsert(rq->id, rq->body, resp, cap);
+}
+static int rh_roundtable_delete(const route_req_t *rq, char *resp, int cap)
+{
+   return route_roundtable_remove(rq->id, resp, cap);
 }
 
 static int rh_sessions_list(const route_req_t *rq, char *resp, int cap)
@@ -1172,6 +1199,112 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    cJSON *out = cJSON_CreateObject();
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddStringToObject(out, "name", pname);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* GET /v1/workspace/org-repos?host=&owner= — list the repositories under an owner
+ * on a git host (provider-agnostic: GitHub/GitLab/Gitea/Bitbucket), so the wizard
+ * can bulk-clone a workspace. Auth is the attested webuser principal; enumeration
+ * uses the per-host token from the sealed vault (or unauthenticated for a public
+ * org). Nothing is cloned here. */
+static int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   char host[256], owner[192];
+   rh_query_str("host", host, sizeof(host));
+   rh_query_str("owner", owner, sizeof(owner));
+
+   cJSON *repos = NULL;
+   char provider[32], err[256];
+   int st = git_org_repos_list(host, owner, &repos, provider, sizeof(provider), err, sizeof(err));
+   if (st != 0)
+      return err_json(resp, cap, st, err);
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "provider", provider);
+   cJSON_AddItemToObject(out, "repos", repos); /* transfers ownership */
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/workspace/clone-org {host, owner, repos:[{name, clone_url}]} — bulk
+ * clone a selection of a workspace's repos into the calling webuser's scoped tree.
+ * Each repo is cloned via git_project_clone (identity + credential handling as
+ * /v1/workspace/clone); individual failures do not abort the batch. Returns a
+ * per-repo result list. */
+static int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
+{
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jrepos = cJSON_GetObjectItemCaseSensitive(body, "repos");
+   if (!cJSON_IsArray(jrepos) || cJSON_GetArraySize(jrepos) == 0)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "repos[] required");
+   }
+   if (cJSON_GetArraySize(jrepos) > 100)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "too many repos (max 100 per request)");
+   }
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON *results = cJSON_AddArrayToObject(out, "results");
+   const cJSON *jrepo = NULL;
+   cJSON_ArrayForEach(jrepo, jrepos)
+   {
+      const cJSON *jname = cJSON_GetObjectItemCaseSensitive(jrepo, "name");
+      const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(jrepo, "clone_url");
+      const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
+      const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
+
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "name", name ? name : "");
+      char dest[MAX_PATH_LEN], pname[128], err[256];
+      /* token=NULL → the host's stored credential (or server identity) is used. */
+      int rc = url ? git_project_clone(principal, url, name, NULL, dest, sizeof(dest), pname,
+                                       sizeof(pname), err, sizeof(err))
+                   : -1;
+      if (rc == 0)
+      {
+         index_scan_project(pname, dest, 0); /* best-effort: make it searchable */
+         cJSON_AddBoolToObject(r, "ok", 1);
+         cJSON_AddStringToObject(r, "project", pname);
+         cJSON_AddNullToObject(r, "error");
+      }
+      else
+      {
+         cJSON_AddBoolToObject(r, "ok", 0);
+         cJSON_AddNullToObject(r, "project");
+         cJSON_AddStringToObject(r, "error", url ? err : "missing clone_url");
+      }
+      cJSON_AddItemToArray(results, r);
+   }
+   cJSON_Delete(body);
+
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);
@@ -1801,6 +1934,7 @@ static const http_route_t g_v1_routes[] = {
      * CAP_SESSION_READ). Mutating skill and work methods are not exposed here. */
     {"GET", "/v1/skills", NULL, RM_EXACT, "skill.list", 0, rh_dispatch_op},
     {"POST", "/v1/skills/show", NULL, RM_EXACT, "skill.show", 0, rh_dispatch_op},
+    {"GET", "/v1/hosts", NULL, RM_EXACT, "hosts.list", 0, rh_dispatch_op},
     {"GET", "/v1/work", NULL, RM_EXACT, "work.list", 0, rh_dispatch_op},
     {"GET", "/v1/work/stats", NULL, RM_EXACT, "work.stats", 0, rh_dispatch_op},
 
@@ -2121,6 +2255,17 @@ static const http_route_t g_v1_routes[] = {
     {"DELETE", "/v1/role_templates/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
      rh_role_template_delete},
 
+    /* Named roundtable presets: read like personas, mutate as admin. The exact
+     * POST /v1/roundtables/active (set active preset) precedes the prefix routes
+     * so it is not captured as a preset name. */
+    {"GET", "/v1/roundtables", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_roundtables_list},
+    {"POST", "/v1/roundtables", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN, rh_roundtables_create},
+    {"POST", "/v1/roundtables/active", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN,
+     rh_roundtable_set_active},
+    {"GET", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_roundtable_show},
+    {"PUT", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_put},
+    {"DELETE", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_delete},
+
     /* Unified presence: list / attach / detach / persona / events are
      * session-scoped on the owner's own presence. */
     /* Workflow visual composer (W7): read+author the wfe_ definition model and
@@ -2194,6 +2339,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
+    {"GET", "/v1/workspace/org-repos", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
+     rh_workspace_org_repos},
+    {"POST", "/v1/workspace/clone-org", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_workspace_clone_org},
     {"POST", "/v1/workspace/editor", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_editor},
     {"GET", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
     {"POST", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
@@ -2208,6 +2357,14 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_github_config},
     {"POST", "/v1/git/oauth/github/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_github_config},
+    {"POST", "/v1/git/oauth/device/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_device_start},
+    {"POST", "/v1/git/oauth/device/poll", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_device_poll},
+    {"GET", "/v1/git/oauth/device/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_device_config},
+    {"POST", "/v1/git/oauth/device/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_device_config},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

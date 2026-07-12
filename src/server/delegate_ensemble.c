@@ -16,6 +16,7 @@
 #include "log.h"
 #include "persona.h"
 #include "dstr.h"
+#include "roundtable_seat_resolve.h"
 #include "roundtable_verify.h"
 #include "token_tracker.h"
 
@@ -549,9 +550,21 @@ static int build_synthesis_prompt(char *buf, size_t cap, const char *original_pr
 }
 
 static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char *synthesis_prompt,
-                          agent_result_t *out)
+                          long deadline_abs_ms, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+
+   /* deadline_abs_ms (absolute CLOCK_MONOTONIC ms; 0 = UNBOUNDED) caps the FALLBACK
+    * FAN-OUT below. Without it a flaky/empty primary aggregator followed by N
+    * panelist fallbacks — each up to the provider HTTP timeout x retries (~9 min) —
+    * can run ~an hour and wedge the roundtable past its deadline (the panel is
+    * deadline-bounded; this path was not).
+    *
+    * This is a FAN-OUT limit, not a hard per-call bound: a call already in flight
+    * can still overrun by up to one provider timeout (delegate_run_inline exposes
+    * no per-call timeout hook). Only the roundtable round-loop passes a deadline;
+    * other callers pass 0 and keep their original unbounded behavior, so this never
+    * silently couples non-roundtable synthesis to the roundtable config. */
 
    agent_config_t agg_cfg = *acfg;
 
@@ -601,6 +614,14 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
     * degrade when other capable panelists are available. */
    for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
+      if (deadline_abs_ms > 0 && monotonic_ms() >= deadline_abs_ms)
+      {
+         aimee_log(LOG_WARN, "delegate_roundtable",
+                   "aggregator: deadline reached at fallback candidate %d/%d; abandoning the "
+                   "remaining %d (a flaky synthesis model must not wedge the roundtable)",
+                   i, cfg->ensemble_reference_count, cfg->ensemble_reference_count - i);
+         break;
+      }
       const char *cand = cfg->ensemble_reference_models[i];
       if (!cand[0] || (primary_name && strcmp(cand, primary_name) == 0))
          continue;
@@ -864,7 +885,7 @@ static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const ch
       return -1;
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = run_aggregator(acfg, cfg, full, &res);
+   int rc = run_aggregator(acfg, cfg, full, 0, &res);
    free(full);
    if (rc != 0 || !res.response || !res.response[0])
    {
@@ -1234,8 +1255,77 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
                cfg->ensemble_reference_models[0]);
 }
 
+void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
+{
+   /* Replace each "$random" seat with a concretely-picked review-capable agent,
+    * excluding models already seated (pinned seats + prior random picks) for
+    * diversity. A $random seat that cannot be filled (roster exhausted) is DROPPED
+    * — an interactive roundtable degrades rather than fails; the fail-on-
+    * unfulfillable rule is the autonomous gate's, where a pinned model is a hard
+    * requirement. Pinned seats pass through untouched (the availability filter
+    * below drops an unavailable pinned model). Runs before the authorization /
+    * availability filters so a resolved seat is a real, filterable agent. */
+   char models[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_models[0]];
+   char personas[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_personas[0]];
+   const char *used[ENSEMBLE_MAX_REFS];
+   int n = 0, nused = 0;
+
+   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
+      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
+         used[nused++] = cfg->ensemble_reference_models[i];
+
+   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
+   {
+      const char *persona =
+          (i < cfg->ensemble_reference_persona_count) ? cfg->ensemble_reference_personas[i] : "";
+      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
+      {
+         snprintf(models[n], sizeof models[n], "%s", cfg->ensemble_reference_models[i]);
+         snprintf(personas[n], sizeof personas[n], "%s", persona);
+         n++;
+         continue;
+      }
+      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
+      if (idx < 0)
+      {
+         aimee_log(LOG_WARN, "delegate.panel",
+                   "no review-capable agent left for a $random seat -> dropping it");
+         continue;
+      }
+      snprintf(models[n], sizeof models[n], "%s", acfg->agents[idx].name);
+      snprintf(personas[n], sizeof personas[n], "%s", persona);
+      if (nused < ENSEMBLE_MAX_REFS)
+         used[nused++] = acfg->agents[idx].name; /* stable pointer into acfg for this call */
+      n++;
+   }
+
+   for (int i = 0; i < n; i++)
+   {
+      snprintf(cfg->ensemble_reference_models[i], sizeof cfg->ensemble_reference_models[i], "%s",
+               models[i]);
+      snprintf(cfg->ensemble_reference_personas[i], sizeof cfg->ensemble_reference_personas[i],
+               "%s", personas[i]);
+   }
+   cfg->ensemble_reference_count = n;
+   cfg->ensemble_reference_persona_count = n;
+
+   /* An aggregator explicitly set to "$random" resolves the same way. */
+   if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
+   {
+      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
+      if (idx >= 0)
+         snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
+                  acfg->agents[idx].name);
+      else
+         cfg->ensemble_aggregator[0] = '\0';
+   }
+}
+
 void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg)
 {
+   /* Resolve "$random" seats to concrete agents FIRST, so the eligibility check
+    * below (and the availability filter after it) see real, filterable agents. */
+   ensemble_resolve_random_seats(cfg, acfg);
    /* Applies the same eligibility rule to an EXPLICITLY configured
     * ensemble.reference_models list: drop any entry that names a configured agent
     * which is not panel-eligible (an unauthorized / disabled / client-only
@@ -1417,7 +1507,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
       free(results[i].response);
 
    agent_result_t agg_result;
-   int agg_rc = run_aggregator(acfg, cfg, synthesis_buf, &agg_result);
+   int agg_rc = run_aggregator(acfg, cfg, synthesis_buf, 0, &agg_result);
    free(synthesis_buf);
 
    if (agg_rc == 0 && agg_result.response && agg_result.response[0])
@@ -1763,7 +1853,10 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          break;
       }
       agent_result_t agg_result;
-      int agg_rc = run_aggregator(acfg, cfg, synthesis_prompt, &agg_result);
+      /* Bound synthesis by the roundtable's own deadline so the fallback loop
+       * cannot run long past it (the panel already respects this deadline). */
+      long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
+      int agg_rc = run_aggregator(acfg, cfg, synthesis_prompt, agg_deadline_abs, &agg_result);
       free(synthesis_prompt);
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])
       {

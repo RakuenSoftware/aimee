@@ -8,7 +8,17 @@
 // set of keys carrying reload_class RELOAD_RESTART in src/config_fields.c (the
 // Postgres pool + the kb API listener bind at startup); every other exposed key
 // applies on the next turn. Keep in sync if a field's reload_class changes.
-export const RESTART_KEYS = new Set<string>(["db2_url", "kb_api_http_port", "kb_api_bearer_token"]);
+export const RESTART_KEYS = new Set<string>([
+  "db2_url", "kb_api_http_port", "kb_api_bearer_token",
+  // Deploy-topology (page-2) record: the deploy layer reads these and the
+  // topology (which containers run) only changes on a restart — RELOAD_RESTART
+  // in src/config_fields.c. (embedding_endpoint/model/dim apply on the next turn.)
+  "kb_mode", "kb_client_url", "kb_client_bearer_token",
+  "llm_embed_backend", "llm_embed_host", "llm_embed_gpu", "llm_embed_tier",
+  "llm_rerank_backend", "llm_rerank_host", "llm_rerank_gpu", "llm_rerank_tier", "llm_rerank_endpoint",
+  "llm_synth_backend", "llm_synth_host", "llm_synth_gpu", "llm_synth_tier", "llm_synth_endpoint",
+  "llm_synth_model",
+]);
 
 // One line per section (see category() in Settings.tsx).
 export const SECTION_HELP: Record<string, string> = {
@@ -76,6 +86,29 @@ export const FIELD_HELP: Record<string, string> = {
   embedding_endpoint: "HTTP endpoint for the embedder when it's a service rather than a command.",
   embedding_dim:
     "Vector width the embedder produces (e.g. 1024, 2560). Has to match what the database columns expect.",
+
+  // Deploy topology (setup wizard page 2). The deploy layer reads these; the
+  // topology only changes on a restart. Set them from the wizard's Deploy page.
+  kb_mode:
+    "Where the knowledge base runs: 'local' deploys an aimee-kb here; 'remote' connects to an existing one (see kb_client_url).",
+  kb_client_url: "URL of an existing aimee-kb to connect to when kb_mode is 'remote'. Nothing is deployed locally.",
+  kb_client_bearer_token: "Bearer token for the remote aimee-kb (kb_mode='remote'). Needs a restart.",
+  llm_embed_backend: "How the embedder is served: 'local' (on the shared aimee-llm container), 'external' (an endpoint), or 'off'.",
+  llm_embed_host: "Host that runs the local aimee-llm container serving the embedder.",
+  llm_embed_gpu: "GPU index on the host for a local embedder; blank runs it on CPU.",
+  llm_embed_tier: "Local embedder tier: cpu / small / mid / large (sizes the model to the card).",
+  llm_rerank_backend: "How the reranker is served: 'local', 'external', or 'off'.",
+  llm_rerank_host: "Host that runs the local reranker.",
+  llm_rerank_gpu: "GPU index on the host for a local reranker; blank runs it on CPU.",
+  llm_rerank_tier: "Local reranker tier: cpu / small / mid / large.",
+  llm_rerank_endpoint: "Endpoint URL for an external reranker.",
+  llm_synth_backend: "How the synthesizer is served: 'local', 'external', or 'off'.",
+  llm_synth_host: "Host that runs the local synthesizer.",
+  llm_synth_gpu: "GPU index on the host for a local synthesizer; blank runs it on CPU.",
+  llm_synth_tier: "Local synthesizer tier: cpu / small / mid / large. CPU serves the Tier-A model only.",
+  llm_synth_endpoint: "Endpoint URL for an external synthesizer.",
+  llm_synth_model: "Model name the synthesizer serves.",
+
   ecomode: "Always route to the cheapest capable agent instead of the default one. Off by default.",
   claude_cli_delegate_enabled:
     "Allow the subscription-logged-in Claude CLI to be used as a delegate, not just the primary. Off by default — driving a personal Claude subscription as an automated delegate may breach Anthropic's terms.",

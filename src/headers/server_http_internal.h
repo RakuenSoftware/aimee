@@ -23,6 +23,11 @@ int route_role_template_remove(const char *name, char *resp, int cap);
 int route_role_template_show(const char *name, char *resp, int cap);
 int route_role_template_upsert(const char *name, const char *body, char *resp, int cap);
 int route_role_templates_list(char *resp, int cap);
+int route_roundtables_list(char *resp, int cap);
+int route_roundtable_show(const char *name, char *resp, int cap);
+int route_roundtable_upsert(const char *url_name, const char *body, char *resp, int cap);
+int route_roundtable_remove(const char *name, char *resp, int cap);
+int route_roundtable_set_active(const char *body, char *resp, int cap);
 void send_rate_limited(int fd, int retry_after, const char *request_id);
 void send_response(int fd, int status, const char *body, const char *request_id);
 void handle_session_events(int fd, const char *id_in, const char *request_id);
@@ -111,11 +116,19 @@ int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
  * (relocated out of server_http_routes.c to stay under the line-check ceiling).
  * Referenced by the route table in server_http_routes.c. */
 long rh_query_long(const char *key, long dflt);
+/* Percent-decoded string query param into out[cap] ("" if absent). */
+void rh_query_str(const char *key, char *out, size_t cap);
 int rh_wf_item_pause(const route_req_t *rq, char *resp, int cap);
 int rh_wf_item_resume(const route_req_t *rq, char *resp, int cap);
 int rh_wf_item_stop(const route_req_t *rq, char *resp, int cap);
 int rh_wf_item_delete(const route_req_t *rq, char *resp, int cap);
 int rh_wf_repo_tree(const route_req_t *rq, char *resp, int cap);
 int rh_wf_repo_file(const route_req_t *rq, char *resp, int cap);
+/* GitLab/Gitea OAuth device-flow route handlers — defined in
+ * server_http_config_routes.c (relocated to keep server_http_routes.c under the
+ * line-check ceiling). Referenced by the route table in server_http_routes.c. */
+int rh_git_oauth_device_start(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_device_poll(const route_req_t *rq, char *resp, int cap);
+int rh_git_oauth_device_config(const route_req_t *rq, char *resp, int cap);
 
 #endif /* SERVER_HTTP_INTERNAL_H */

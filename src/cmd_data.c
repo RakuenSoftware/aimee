@@ -18,6 +18,7 @@
 #include "headers/mcp_git.h"
 #include "headers/git_verify.h"
 #include "config_fields.h"
+#include "config_database.h" /* config_emit_deploy_env — page-2 compose env */
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -451,6 +452,23 @@ void cmd_config(app_ctx_t *ctx, int argc, char **argv)
          cmd_config_dispositions_print_json(&cfg);
       else
          cmd_config_dispositions_print_text(&cfg);
+      (void)ctx;
+      return;
+   }
+
+   if (strcmp(sub, "deploy-env") == 0)
+   {
+      /* Emit the compose env for the page-2 backend record. Sourced by the deploy
+       * wrapper: `eval "$(aimee config deploy-env)" && docker compose up -d`. */
+      config_t cfg;
+      if (config_load(&cfg) < 0)
+      {
+         fprintf(stderr, "Failed to load config\n");
+         return;
+      }
+      char env[2048];
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      fputs(env, stdout);
       (void)ctx;
       return;
    }

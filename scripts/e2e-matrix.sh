@@ -37,6 +37,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 SCRIPTS="$(pwd)/scripts"
+ROOT="$(pwd)"
 
 ONLY="T1,T2,T3,T4,T5,T6,PC"
 KB_URL=""
@@ -71,12 +72,13 @@ export AIMEE_LLM_STUB="${AIMEE_LLM_STUB:-1}"
 export AIMEE_LLM_STUB_DIM="${AIMEE_LLM_STUB_DIM:-2560}"
 export AIMEE_LLM_DOCKERFILE="${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm-stub}"
 
-# Disable the bundled curator LLM in CI: the committed .env enables the
-# `curator-llm` profile by default, but the smoke tests don't exercise the
-# curator and the multi-GB Gemma GGUF would blow the runner's disk/time. An
-# explicit (empty) COMPOSE_PROFILES overrides the .env so the `llm` service is
-# never started here.
-export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
+# COMPOSE_PROFILES: the `aimee-llm` service is now profile-gated (`llm`) — it only
+# starts when a page-2 role is local — so CI opts it in to exercise the kb->gateway
+# contract (with the stub image above). The separate `curator-llm` profile stays
+# OFF: the smoke tests don't exercise the curator and its multi-GB Gemma GGUF would
+# blow the runner's disk/time. Selecting only `llm` overrides the committed .env's
+# curator-llm default. T3 (standalone) has no aimee-llm service, so this is a no-op there.
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-llm}"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
@@ -147,6 +149,21 @@ run_docker_topology() {
 run_docker_topology T1 "Docker kb-only"            aimee-kb-docker-smoke.sh                compose.yaml                     "aimee-kb=${KB_PORT}:8741"
 run_docker_topology T2 "Docker server+kb split"    aimee-server-docker-smoke.sh            compose.server.yaml              "aimee-server=${SERVER_PORT}:8743" "aimee-kb=${KB_PORT}:8741"
 run_docker_topology T3 "Docker server standalone"  aimee-server-standalone-docker-smoke.sh compose.server-standalone.yaml   "aimee-server=${SERVER_PORT}:8743"
+
+# T4 combined is now server+kb ONLY (the LLM is no longer bundled); it reaches the
+# separate, profile-gated `aimee-llm` service in compose.combined.yaml. In prod that
+# is the published aimee-llm image; in CI there is no freshly-published tag, so build
+# the model-less image locally (llama binary + gateway, no GGUFs — fast) and point the
+# service at it. It runs in STUB mode (AIMEE_LLM_STUB=1, exported above) — deterministic
+# responses, no model download — and COMPOSE_PROFILES=llm (above) brings it up.
+if selected T4 && have_docker; then
+  bold "==> Building local aimee-llm image for the T4 aimee-llm service"
+  if docker build -f "$ROOT/Dockerfile.aimee-llm" -t aimee-llm-local:e2e "$ROOT"; then
+    export AIMEE_LLM_IMAGE="aimee-llm-local:e2e"
+  else
+    bold "==> WARNING: local aimee-llm build failed; T4 will fall back to the default AIMEE_LLM_IMAGE"
+  fi
+fi
 run_docker_topology T4 "Docker combined server+kb" aimee-combined-docker-smoke.sh          compose.combined.yaml            "aimee-server-kb=${SERVER_PORT}:8743,${KB_PORT}:8741"
 
 # --- Local topologies (Linux only) ----------------------------------------

@@ -610,11 +610,22 @@ static const char *path_basename(const char *p)
    return slash ? slash + 1 : (p ? p : "");
 }
 
-/* Ownership: true iff the item's submitter equals the calling principal (string
- * compare; both must be non-empty). A NULL/empty submitter (CLI/legacy/system
- * rows) is owned by nobody, so owner-only reads refuse it — fail-closed. */
+/* Ownership / operator-visibility for the Workflow Actions surface. True iff:
+ *   - the run is AUTONOMOUS (system/triggered: the proposals trigger, cron, or a
+ *     dev-submit pipeline). These are not private human proposals, so they are
+ *     visible to — and operable (pause/resume/stop) by — any authenticated
+ *     dashboard operator, so the tab shows the autonomous pipeline regardless of
+ *     which webuser convened it; OR
+ *   - the item's submitter equals the calling principal — an INTERACTIVE human
+ *     proposal stays owner-scoped (closes the list IDOR; one user never sees
+ *     another's drafts).
+ * A NULL/empty submitter on a non-autonomous row is owned by nobody -> fail
+ * closed. The human-gate decision (approve/reject) is separately CAP_WORKFLOW_
+ * ADMIN-gated, so widening visibility here does not widen gate authority. */
 static int wf_owns(const db1_work_item_t *wi)
 {
+   if (strcmp(wi->mode, "autonomous") == 0)
+      return 1;
    const char *principal = server_http_identity_principal();
    return wi->submitter[0] && principal && principal[0] && strcmp(principal, wi->submitter) == 0;
 }

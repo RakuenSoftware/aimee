@@ -66,11 +66,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The combined (aimee-server-kb) image now bundles the aimee-llm CPU runtime
-      # + baked GGUFs (~5.5 GB), COPYd from the prebuilt aimee-llm-cpu:testing
-      # image — so reclaim the preinstalled toolchains we don't use to make room
-      # for the pull + the larger output image. Scoped to the combined leg (the
-      # split server/kb images stay lean and build fine without this).
+      # The combined (aimee-server-kb) image bundles the aimee-llm runtime, COPYd from
+      # the prebuilt model-less aimee-llm:testing image (no baked GGUFs — the bundled
+      # supervisor downloads the cpu tier at runtime) — reclaim the preinstalled
+      # toolchains we don't use to keep the webchat/code-server build within the
+      # runner. Scoped to the combined leg (the split server/kb images stay lean).
       - name: Free disk space (aimee-server-kb leg)
         if: matrix.image.name == 'aimee-server-kb'
         run: |
@@ -98,16 +98,13 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
           # WITH_WEBCHAT bundles the browser UI (default for server/combined; the
-          # aimee-kb image ignores it). WITH_LLM=1 + AIMEE_LLM_CPU_IMAGE make the
-          # combined image bundle the aimee-llm CPU runtime by COPYing from the
-          # prebuilt aimee-llm-cpu:testing (published by publish-llm-testing.yml,
-          # which must have run first). The split server/kb Dockerfiles don't
-          # declare these args (a harmless "not consumed" warning).
+          # aimee-kb image ignores it). WITH_LLM=0: the combined image is server+kb
+          # ONLY — the LLM is no longer bundled; the deploy stack runs a separate,
+          # profile-gated aimee-llm container instead (see compose.combined.yaml).
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_WEBCHAT=1
-            WITH_LLM=1
-            AIMEE_LLM_CPU_IMAGE=ghcr.io/${{ env.OWNER }}/aimee-llm-cpu:testing
+            WITH_LLM=0
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing-${{ env.SHA7 }}

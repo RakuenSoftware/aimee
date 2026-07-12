@@ -9,9 +9,16 @@
 # re-embed (the kb_meta drift guard refuses a stale mismatch).
 services:
   aimee-llm:
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-gpu-small:latest}
+    # Kept in sync with the base file's profile so `-f aimee.yaml -f aimee.gpu.yaml`
+    # keeps aimee-llm gated on the `llm` profile.
+    profiles: ["llm"]
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
     environment:
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
+      # GPU tier: pick the synth by AIMEE_LLM_TIER (small=12B / mid=26B-A4B SLOTS=2 /
+      # large=26B-A4B SLOTS=4). small is the 16GB-safe default; the models download
+      # to /models on first boot. small/mid/large share the 2560-dim embedder.
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-small}
       # gemma-4-12b trains to 256K; the supervisor's default cap is a 16GB-safe 32K.
       # 128K is safe on the .254 card (RADV GFX1100 / 7900 XTX, 24560 MiB confirmed):
       # ~6.6GB Q4_K_M model + ~1.5GB embed/rerank + KV cache. gemma-4 uses
@@ -19,10 +26,10 @@ services:
       # 128K KV is dominated by the few global layers (~2-3GB), not all-layers-x-128K —
       # well under 24GB. 256K would still fit with KV-cache quantization if ever needed.
       #
-      # Tier picks (override AIMEE_LLM_IMAGE + AIMEE_LLM_SYNTH_CTX per card):
-      #   gpu-small (16GB): ...-gpu-small,  CTX 131072  (1 × 128K)
-      #   gpu-mid   (24GB): ...-gpu-mid,    CTX 262144   (2 × 128K, SLOTS=2)
-      #   gpu-large (32GB): ...-gpu-large,  CTX 1048576  (4 × 256K, SLOTS=4) — each of
+      # Tier picks (set AIMEE_LLM_TIER + AIMEE_LLM_SYNTH_CTX per card):
+      #   small (16GB): TIER=small, CTX 131072   (1 × 128K)
+      #   mid   (24GB): TIER=mid,   CTX 262144   (2 × 128K, SLOTS=2)
+      #   large (32GB): TIER=large, CTX 1048576  (4 × 256K, SLOTS=4) — each of
       #     4 agents gets the full native 256K window; ~28.5GiB used, ~3.5GB headroom.
       AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
     devices:

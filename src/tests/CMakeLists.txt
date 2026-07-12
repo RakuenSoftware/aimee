@@ -60,6 +60,35 @@ aimee_add_test(test_harness_memory_scope test_harness_memory_scope.c)
 aimee_add_test(test_harness_memory_spill test_harness_memory_spill.c)
 aimee_add_test(test_harness_memory_audit test_harness_memory_audit.c)
 aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)
+
+# test_git_org_repos: provider detection + repo-list JSON parsing + paginated
+# enumeration (HTTP + host-cred stubbed in the test). Self-contained — compiles
+# the module + cJSON directly rather than linking aimee-core, so the test's
+# agent_http_get/git_host_cred_get stubs don't clash with the real symbols.
+add_executable(test_git_org_repos test_git_org_repos.c
+  ../server/git_org_repos.c ../vendor/cJSON.c)
+target_include_directories(test_git_org_repos PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+aimee_enable_test_asserts(test_git_org_repos)
+add_test(NAME test_git_org_repos COMMAND test_git_org_repos)
+set_tests_properties(test_git_org_repos PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# test_git_oauth_device: provider-name parsing + endpoint construction for the
+# GitLab/Gitea device flow. HTTP + vault externals stubbed in the test (never
+# invoked by the pure functions under test).
+add_executable(test_git_oauth_device test_git_oauth_device.c
+  ../server/git_oauth_device.c ../vendor/cJSON.c)
+target_include_directories(test_git_oauth_device PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+aimee_enable_test_asserts(test_git_oauth_device)
+add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
+set_tests_properties(test_git_oauth_device PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_executable(test_context_engine test_context_engine.c)
 target_include_directories(test_context_engine PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
@@ -78,6 +107,7 @@ add_test(NAME test_context_engine COMMAND test_context_engine)
 set_tests_properties(test_context_engine PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_util test_util.c)
+aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_audit_action_log test_audit_action_log.c)
 aimee_add_test(test_audit_ledger test_audit_ledger.c)

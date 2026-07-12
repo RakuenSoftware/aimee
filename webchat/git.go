@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // gitRelay writes a sanitized browser response from an aimee-server reply,
@@ -72,6 +74,56 @@ func (s *server) gitOAuthRelay(w http.ResponseWriter, st int, data []byte, err e
 	w.Write(out)
 }
 
+// gitReposRelay passes through the org-repos enumeration ({provider, repos:[…]}).
+// Typed passthrough (like gitOAuthRelay), never the raw upstream body.
+func (s *server) gitReposRelay(w http.ResponseWriter, st int, data []byte, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "git: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	var up struct {
+		Provider string `json:"provider"`
+		Repos    []struct {
+			Name     string `json:"name"`
+			CloneURL string `json:"clone_url"`
+			SSHURL   string `json:"ssh_url"`
+			Private  bool   `json:"private"`
+		} `json:"repos"`
+	}
+	_ = json.Unmarshal(data, &up)
+	out, _ := json.Marshal(map[string]any{"provider": up.Provider, "repos": up.Repos})
+	w.Write(out)
+}
+
+// gitCloneOrgRelay passes through the bulk-clone per-repo results ({results:[…]}).
+func (s *server) gitCloneOrgRelay(w http.ResponseWriter, st int, data []byte, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "git: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	var up struct {
+		Results []struct {
+			Name    string  `json:"name"`
+			OK      bool    `json:"ok"`
+			Project *string `json:"project"`
+			Error   *string `json:"error"`
+		} `json:"results"`
+	}
+	_ = json.Unmarshal(data, &up)
+	out, _ := json.Marshal(map[string]any{"results": up.Results})
+	w.Write(out)
+}
+
 // /api/git/oauth/github/config — read (GET) or set (POST {client_id}) the GitHub
 // OAuth App client ID so "Sign in with GitHub" can be configured from the UI.
 func (s *server) handleGitOauthGithubConfig(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +173,74 @@ func (s *server) handleGitOauthGithubPoll(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost,
 		"/v1/git/oauth/github/poll", []byte(`{}`))
+	s.gitOAuthRelay(w, st, data, err)
+}
+
+// /api/git/oauth/device/config — read (GET ?provider=&host=) or set (POST
+// {provider, host?, client_id}) a GitLab/Gitea OAuth App client ID.
+func (s *server) handleGitOauthDeviceConfig(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	user := currentUser(r)
+	switch r.Method {
+	case http.MethodGet:
+		provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+		host := strings.TrimSpace(r.URL.Query().Get("host"))
+		if provider == "" {
+			writeJSONError(w, http.StatusBadRequest, "provider required")
+			return
+		}
+		path := "/v1/git/oauth/device/config?provider=" + url.QueryEscape(provider) +
+			"&host=" + url.QueryEscape(host)
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodGet, path, nil)
+		s.gitOAuthRelay(w, st, data, err)
+	case http.MethodPost:
+		var req struct {
+			Provider string `json:"provider"`
+			Host     string `json:"host"`
+			ClientID string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Provider == "" || req.ClientID == "" {
+			writeJSONError(w, http.StatusBadRequest, "provider and client_id required")
+			return
+		}
+		body, _ := json.Marshal(req)
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/git/oauth/device/config", body)
+		s.gitOAuthRelay(w, st, data, err)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// POST /api/git/oauth/device/start {provider, host?} — begin a GitLab/Gitea device flow.
+func (s *server) handleGitOauthDeviceStart(w http.ResponseWriter, r *http.Request) {
+	s.forwardDeviceOAuth(w, r, "/v1/git/oauth/device/start")
+}
+
+// POST /api/git/oauth/device/poll {provider, host?} — poll device-flow completion.
+func (s *server) handleGitOauthDevicePoll(w http.ResponseWriter, r *http.Request) {
+	s.forwardDeviceOAuth(w, r, "/v1/git/oauth/device/poll")
+}
+
+// forwardDeviceOAuth relays a {provider, host?} POST to an aimee-server device
+// oauth route with the webuser identity.
+func (s *server) forwardDeviceOAuth(w http.ResponseWriter, r *http.Request, path string) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Provider string `json:"provider"`
+		Host     string `json:"host"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Provider == "" {
+		writeJSONError(w, http.StatusBadRequest, "provider required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	body, _ := json.Marshal(req)
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, path, body)
 	s.gitOAuthRelay(w, st, data, err)
 }
 
@@ -287,4 +407,55 @@ func (s *server) handleGitSessionDir(w http.ResponseWriter, r *http.Request) {
 	body, _ := json.Marshal(map[string]any{"project": req.Project, "session_id": req.SessionID})
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/session-dir", body)
 	s.gitRelay(w, st, data, err)
+}
+
+// GET /api/git/org-repos?host=&owner= — list the repos under an owner/org on a git
+// host (provider-agnostic), so the wizard can pick a workspace to bulk-clone.
+func (s *server) handleGitOrgRepos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	host := strings.TrimSpace(r.URL.Query().Get("host"))
+	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
+	if host == "" || owner == "" {
+		writeJSONError(w, http.StatusBadRequest, "host and owner required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	path := "/v1/workspace/org-repos?host=" + url.QueryEscape(host) + "&owner=" + url.QueryEscape(owner)
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodGet, path, nil)
+	s.gitReposRelay(w, st, data, err)
+}
+
+// POST /api/git/clone-org {host, owner, repos:[{name, clone_url}]} — bulk-clone a
+// selection of a workspace's repos. Cloning many repos can take a while, so it
+// gets a longer deadline than a normal socket call.
+func (s *server) handleGitCloneOrg(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Host  string `json:"host"`
+		Owner string `json:"owner"`
+		Repos []struct {
+			Name     string `json:"name"`
+			CloneURL string `json:"clone_url"`
+		} `json:"repos"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Host == "" || req.Owner == "" || len(req.Repos) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "host, owner and repos[] required")
+		return
+	}
+	if len(req.Repos) > 100 {
+		writeJSONError(w, http.StatusBadRequest, "too many repos (max 100 per request)")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), cloneOrgTimeout)
+	defer cancel()
+	body, _ := json.Marshal(req)
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone-org", body)
+	s.gitCloneOrgRelay(w, st, data, err)
 }

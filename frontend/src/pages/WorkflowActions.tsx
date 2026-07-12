@@ -411,7 +411,7 @@ export default function WorkflowActions() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <strong style={{ fontSize: 16 }}>Workflow Actions</strong>
+          <strong style={{ fontSize: 16 }}>Workflows</strong>
           <Badge label={`${items.length}`} variant="neutral" />
           <button onClick={refreshList} style={btn}>
             Refresh

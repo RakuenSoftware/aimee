@@ -214,7 +214,14 @@ static int kb_handle_memory_repair(int fd, cJSON *req)
 
    if (!db2_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
-   if (pgvec_kb_service_ensure_memory_collection(384) != 0)
+   /* Size the memory retrieval index at the deployment's embedding dimension —
+    * the same runtime dim the halfvec memory_embeddings column was created at
+    * (db2_set_embedding_dim at startup: 2560 GPU / 1024 CPU / external cap 4000).
+    * A hardcoded 384 never matched the halfvec column, so the index was wrong. */
+   int mem_embed_dim = db2_embedding_dim();
+   if (mem_embed_dim <= 0 || mem_embed_dim > EMBED_MAX_DIM)
+      mem_embed_dim = 1024;
+   if (pgvec_kb_service_ensure_memory_collection(mem_embed_dim) != 0)
    {
       return kb_send_error(fd, "failed to initialize the memory retrieval index");
    }

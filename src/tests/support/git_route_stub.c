@@ -5,8 +5,10 @@
  * Binaries that need the real behavior (unit-test-git-project) link the real
  * objects and must NOT also link this TU. */
 #include "git_host_cred.h"
+#include "git_oauth_device.h"
 #include "git_oauth_github.h"
 #include "git_ops.h"
+#include "git_org_repos.h"
 #include "git_project.h"
 #include "git_ssh_agent.h"
 #include "index.h"
@@ -46,6 +48,20 @@ int git_project_list(const char *principal, char out[][GIT_PROJECT_NAME_MAX], in
    (void)out;
    (void)max;
    return 0;
+}
+
+int git_org_repos_list(const char *host, const char *owner, struct cJSON **out, char *provider,
+                       size_t provider_cap, char *err, size_t errlen)
+{
+   (void)host;
+   (void)owner;
+   if (out)
+      *out = NULL;
+   if (provider && provider_cap)
+      provider[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return 502;
 }
 
 int git_ops_run(const char *principal, const char *project, const char *op, const char *text_arg,
@@ -160,6 +176,74 @@ int git_oauth_github_get_client_id(char *out, size_t out_len)
    if (out && out_len)
       out[0] = '\0';
    return 0;
+}
+
+/* GitLab/Gitea device-flow stubs (git_oauth_device.h) — the HTTP-routing tests link
+ * server_http_routes.o (whose device-flow oauth handlers reference these) but
+ * exercise only routing, not the real OAuth device grant. */
+int oauth_dev_provider_from_name(const char *name, oauth_dev_provider_t *out)
+{
+   (void)name;
+   (void)out;
+   return -1;
+}
+
+const char *oauth_dev_provider_name(oauth_dev_provider_t p)
+{
+   (void)p;
+   return "gitea";
+}
+
+int oauth_dev_available(oauth_dev_provider_t p, const char *host)
+{
+   (void)p;
+   (void)host;
+   return 0;
+}
+
+int oauth_dev_set_client_id(oauth_dev_provider_t p, const char *host, const char *client_id)
+{
+   (void)p;
+   (void)host;
+   (void)client_id;
+   return -1;
+}
+
+int oauth_dev_get_client_id(oauth_dev_provider_t p, const char *host, char *out, size_t cap)
+{
+   (void)p;
+   (void)host;
+   if (out && cap)
+      out[0] = '\0';
+   return 0;
+}
+
+int oauth_dev_start(oauth_dev_provider_t p, const char *host, const char *principal,
+                    char *user_code, size_t uc_len, char *verify_uri, size_t vu_len, int *interval,
+                    char *err, size_t errlen)
+{
+   (void)p;
+   (void)host;
+   (void)principal;
+   if (user_code && uc_len)
+      user_code[0] = '\0';
+   if (verify_uri && vu_len)
+      verify_uri[0] = '\0';
+   (void)interval;
+   if (err && errlen)
+      err[0] = '\0';
+   return -1;
+}
+
+int oauth_dev_poll(oauth_dev_provider_t p, const char *host, const char *principal, char *err,
+                   size_t errlen)
+{
+   (void)p;
+   (void)host;
+   (void)principal;
+   if (err && errlen)
+      err[0] = '\0';
+   return -1;
 }
 
 int ws_scope_user_root(const char *principal, int create, char *out, size_t cap)

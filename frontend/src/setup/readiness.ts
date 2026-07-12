@@ -1,26 +1,37 @@
 /* Setup readiness — a PURE function over the values GET /api/config returns
- * (config.show). It classifies the minimum steps needed for a working turn so the
- * header chip and the wizard share one definition of "ready". No network, no DOM:
- * unit-tested under vitest's node env.
+ * (config.show), plus a couple of session/runtime signals passed in. It classifies
+ * the minimum steps needed for a working turn so the header chip and the wizard
+ * share one definition of "ready". No network, no DOM: unit-tested under vitest's
+ * node env.
  *
- * MVP scope: readiness is inferred client-side from config values (and whether the
- * active session has a project bound). A server-side GET /api/setup/state that can
- * additionally ping DB2/the provider is a documented follow-up. */
+ * The wizard forks on kb_mode: connecting to a REMOTE aimee-kb (kb_mode='remote')
+ * deploys nothing locally, so the embedder + shared store (DB2) requirements fall
+ * away — only the remote KB URL matters. A LOCAL knowledge base still needs a real
+ * embedder and a DB2 store. The `connection` (git host) step is optional: public
+ * repos clone without it.
+ *
+ * MVP scope: readiness is inferred client-side from config values, whether the
+ * active session has a project bound, and how many git hosts are connected. A
+ * server-side GET /api/setup/state that can additionally ping DB2/the provider is
+ * a documented follow-up. */
 
 import { FIELD_HELP } from '../pages/settingsHelp';
 
-export type StepId = 'provider' | 'embedding' | 'db2' | 'kb_api' | 'project';
+export type StepId = 'provider' | 'knowledge_base' | 'embedding' | 'db2' | 'connection' | 'project';
 
 /* The config keys readiness inspects. Exported so a test can assert each one is a
  * real, documented config field (a key rename in settingsHelp.ts that we miss
- * would otherwise silently break a rule). `project` has no config key — it comes
- * from the session bundle — so it is deliberately absent here. */
+ * would otherwise silently break a rule). `connection` reads from the git-host
+ * count and `project` from the session bundle — neither has a config key, so both
+ * are deliberately absent here. */
 export const READINESS_KEYS = [
   'provider',
   'embedding_command',
   'embedding_endpoint',
+  'llm_embed_backend',
   'db2_url',
-  'kb_api_http_port',
+  'kb_mode',
+  'kb_client_url',
 ] as const;
 
 export interface StepStatus {
@@ -42,40 +53,58 @@ function asStr(cfg: Record<string, unknown>, key: string): string {
   return String(v).trim();
 }
 
-function asNum(cfg: Record<string, unknown>, key: string): number {
-  const v = cfg[key];
-  if (typeof v === 'number') return v;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
 /** Classify the setup steps. `hasProject` comes from the active session (the
- * config has no project field). */
-export function computeReadiness(cfg: Record<string, unknown>, hasProject: boolean): Readiness {
+ * config has no project field); `hostsConnected` is how many git hosts have a
+ * stored credential (GET /api/git/credentials). When kb_mode is 'remote', the
+ * local embedder + DB2 steps are satisfied by connecting the remote KB. */
+export function computeReadiness(
+  cfg: Record<string, unknown>,
+  hasProject: boolean,
+  hostsConnected = 0,
+): Readiness {
   const provider = asStr(cfg, 'provider');
+  const remote = asStr(cfg, 'kb_mode') === 'remote';
+  const kbUrl = asStr(cfg, 'kb_client_url');
+
   const embCmd = asStr(cfg, 'embedding_command');
   const embEndpoint = asStr(cfg, 'embedding_endpoint');
+  // The deploy-topology page places the embedder as a role (local container or
+  // external), which also configures a real embedder.
+  const embBackend = asStr(cfg, 'llm_embed_backend');
+  const embConfigured = embCmd !== '' || embEndpoint !== '' || embBackend === 'local' || embBackend === 'external';
   const db2 = asStr(cfg, 'db2_url');
-  const kbPort = asNum(cfg, 'kb_api_http_port');
 
   const steps: Record<StepId, StepStatus> = {
     provider: {
       ok: provider !== '',
       detail: provider !== '' ? `primary: ${provider}` : 'no primary provider set',
     },
-    embedding: {
-      // A real embedder is a command or an endpoint; blank means the built-in
-      // 384-dim hash fallback, which only works in a test setup.
-      ok: embCmd !== '' || embEndpoint !== '',
-      detail: embCmd !== '' || embEndpoint !== '' ? 'embedder configured' : 'built-in hash fallback (test-only)',
-    },
-    db2: {
-      ok: db2 !== '',
-      detail: db2 !== '' ? 'shared store configured' : 'no DB2 URL set',
-    },
-    kb_api: {
-      ok: kbPort > 0,
-      detail: kbPort > 0 ? `listening on port ${kbPort}` : 'disabled (port 0)',
+    knowledge_base: remote
+      ? {
+          ok: kbUrl !== '',
+          detail: kbUrl !== '' ? 'remote KB connected' : 'no remote KB URL set',
+        }
+      : { ok: true, detail: 'local knowledge base' },
+    embedding: remote
+      ? { ok: true, detail: 'n/a (remote KB)' }
+      : {
+          // A real embedder is a command, an endpoint, or a placed embed role; blank
+          // means the built-in 384-dim hash fallback, which only works in a test setup.
+          ok: embConfigured,
+          detail: embConfigured ? 'embedder configured' : 'built-in hash fallback (test-only)',
+        },
+    db2: remote
+      ? { ok: true, detail: 'n/a (remote KB)' }
+      : {
+          ok: db2 !== '',
+          detail: db2 !== '' ? 'shared store configured' : 'no DB2 URL set',
+        },
+    connection: {
+      ok: hostsConnected > 0,
+      detail:
+        hostsConnected > 0
+          ? `${hostsConnected} host${hostsConnected > 1 ? 's' : ''} connected`
+          : 'no git host connected',
       optional: true,
     },
     project: {

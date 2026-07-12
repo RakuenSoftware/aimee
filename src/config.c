@@ -279,6 +279,22 @@ static const config_schema_entry_t config_schema[] = {
     {"db2_pool_size", SCHEMA_INT, 0},
     {"kb_client_url", SCHEMA_STRING, 0},
     {"kb_client_bearer_token", SCHEMA_STRING, 0},
+    {"kb_mode", SCHEMA_STRING, 0},
+    {"llm_embed_backend", SCHEMA_STRING, 0},
+    {"llm_embed_host", SCHEMA_STRING, 0},
+    {"llm_embed_gpu", SCHEMA_STRING, 0},
+    {"llm_embed_tier", SCHEMA_STRING, 0},
+    {"llm_rerank_backend", SCHEMA_STRING, 0},
+    {"llm_rerank_host", SCHEMA_STRING, 0},
+    {"llm_rerank_gpu", SCHEMA_STRING, 0},
+    {"llm_rerank_tier", SCHEMA_STRING, 0},
+    {"llm_rerank_endpoint", SCHEMA_STRING, 0},
+    {"llm_synth_backend", SCHEMA_STRING, 0},
+    {"llm_synth_host", SCHEMA_STRING, 0},
+    {"llm_synth_gpu", SCHEMA_STRING, 0},
+    {"llm_synth_tier", SCHEMA_STRING, 0},
+    {"llm_synth_endpoint", SCHEMA_STRING, 0},
+    {"llm_synth_model", SCHEMA_STRING, 0},
     {"guardrail_mode", SCHEMA_STRING, 0},
     {"ingress_preinject_enabled", SCHEMA_BOOL, 0},
     {"ingress_preinject_anthropic_enabled", SCHEMA_BOOL, 0},
@@ -836,7 +852,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->mcp_osv_allow_count = 0;
    config_computer_use_defaults(cfg);
    cfg->trigger_max_concurrent = 2;
-   cfg->identity_working_profile_injection_enabled = 0;
+   /* Master switch for DB1-local per-user interaction learning: observe the
+    * user's own turns into the working profile (memory_recall_handler) AND inject
+    * the learned profile into the session context (build_session_context) so the
+    * primary adapts to how they work. Default on; empty until something is
+    * learned, so it is a no-op for a fresh user. An empty field allow-list means
+    * all learned fields inject. */
+   cfg->identity_working_profile_injection_enabled = 1;
    cfg->identity_working_profile_injection_fields_count = 0;
    cfg->memory_recall_lanes_floor_summary = 4;
    cfg->memory_recall_lanes_floor_fact = 4;
@@ -1225,6 +1247,55 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_dim");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->embedding_dim = (int)item->valuedouble;
+
+   /* Setup-wizard page-2 backend record (kb_mode + per-role llm_* fields). All are
+    * string fields; parse them from a compact table that mirrors config_fields.c.
+    * (kb_client_url/bearer are parsed with the DB/KB block in config_database.c.) */
+   {
+      static const struct
+      {
+         const char *key;
+         size_t off, sz;
+      } page2[] = {
+          {"kb_mode", offsetof(config_t, kb_mode), sizeof(((config_t *)0)->kb_mode)},
+          {"llm_embed_backend", offsetof(config_t, llm_embed_backend),
+           sizeof(((config_t *)0)->llm_embed_backend)},
+          {"llm_embed_host", offsetof(config_t, llm_embed_host),
+           sizeof(((config_t *)0)->llm_embed_host)},
+          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu),
+           sizeof(((config_t *)0)->llm_embed_gpu)},
+          {"llm_embed_tier", offsetof(config_t, llm_embed_tier),
+           sizeof(((config_t *)0)->llm_embed_tier)},
+          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend),
+           sizeof(((config_t *)0)->llm_rerank_backend)},
+          {"llm_rerank_host", offsetof(config_t, llm_rerank_host),
+           sizeof(((config_t *)0)->llm_rerank_host)},
+          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu),
+           sizeof(((config_t *)0)->llm_rerank_gpu)},
+          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier),
+           sizeof(((config_t *)0)->llm_rerank_tier)},
+          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint),
+           sizeof(((config_t *)0)->llm_rerank_endpoint)},
+          {"llm_synth_backend", offsetof(config_t, llm_synth_backend),
+           sizeof(((config_t *)0)->llm_synth_backend)},
+          {"llm_synth_host", offsetof(config_t, llm_synth_host),
+           sizeof(((config_t *)0)->llm_synth_host)},
+          {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu),
+           sizeof(((config_t *)0)->llm_synth_gpu)},
+          {"llm_synth_tier", offsetof(config_t, llm_synth_tier),
+           sizeof(((config_t *)0)->llm_synth_tier)},
+          {"llm_synth_endpoint", offsetof(config_t, llm_synth_endpoint),
+           sizeof(((config_t *)0)->llm_synth_endpoint)},
+          {"llm_synth_model", offsetof(config_t, llm_synth_model),
+           sizeof(((config_t *)0)->llm_synth_model)},
+      };
+      for (size_t i = 0; i < sizeof(page2) / sizeof(page2[0]); i++)
+      {
+         cJSON *pit = cJSON_GetObjectItemCaseSensitive(root, page2[i].key);
+         if (cJSON_IsString(pit) && pit->valuestring[0])
+            snprintf((char *)cfg + page2[i].off, page2[i].sz, "%s", pit->valuestring);
+      }
+   }
 
    item = cJSON_GetObjectItemCaseSensitive(root, "memory_weight_profile");
    if (cJSON_IsString(item) && item->valuestring[0])

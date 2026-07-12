@@ -129,6 +129,67 @@ static void record_outcome(const char *agent_name, const char *role, const agent
                                         outcome->reason, outcome->turns_used, outcome->tools_called,
                                         outcome->tokens_used, outcome->tool_error_pattern);
 }
+
+/* THE single per-agent turn executor — see agent_exec.h. Every model turn (panel
+ * lens, ensemble reference, delegate, fallback peer, chat/responses passthrough,
+ * aux) routes through here so the per-agent max_parallel cap and provider-health
+ * recording are enforced in ONE place instead of being re-implemented (and
+ * forgotten) per dispatch path.
+ *
+ * Health-domain note: this deliberately WIDENS provider-health accounting to the
+ * OpenAI-compatible ingress and the aux router, which previously bypassed it — a
+ * failing model on those paths now degrades its catalog health like any other
+ * turn (intended: one health signal per provider, whatever drove the call).
+ *
+ * Slot safety: there is no non-local exit between acquire and release — the
+ * executors (agent_execute / agent_execute_with_tools_for_role) return normally
+ * (C has no exceptions), so the release always runs and a slot is never leaked. */
+int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
+                       const char *system_prompt, const char *user_prompt, int max_tokens,
+                       double temperature, int use_tools, agent_result_t *out)
+{
+   if (!ag || !out)
+      return -1;
+   /* Own `out` from the first instruction, exactly like the executors: memset it so
+    * EVERY early-return path (at-limit, bad-precondition) leaves a clean result —
+    * out->response == NULL — and a caller that frees out->response after a non-zero
+    * return can never hit stale/garbage. (No caller passes a live out->response
+    * here; the executors also memset, so this is the established contract.) */
+   memset(out, 0, sizeof(*out));
+   /* The tools executor dereferences `net`; a plain completion ignores it. Enforce
+    * the precondition (net != NULL when use_tools) so a future caller that flips
+    * use_tools without supplying a network fails cleanly instead of crashing. */
+   if (use_tools && !net)
+   {
+      snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
+      return -1;
+   }
+   /* Concurrency choke point: acquire the agent's max_parallel slot. At the limit,
+    * report a DISTINCT at-limit signal (so a fan-out/retry caller picks a different
+    * agent) and return BEFORE any health recording — saturation is a load signal,
+    * not a provider fault. acquire() returns "unlimited" for max_parallel<=0 /
+    * unknown agents, so single-dispatch callers are unaffected. */
+   if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
+   {
+      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", ag->name);
+      snprintf(out->error, sizeof(out->error), "agent '%s' at concurrency limit (max_parallel=%d)",
+               ag->name, ag->max_parallel);
+      return AGENT_RC_AT_LIMIT;
+   }
+   int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
+                                                          max_tokens, temperature, out)
+                      : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
+   provider_catalog_concurrent_release(ag->name);
+   if (rc == 0)
+      provider_catalog_record_success(ag->name);
+   else
+   {
+      const char *ec = agent_error_is_retryable(out->error) ? "retryable" : "error";
+      provider_catalog_record_failure(ag->name, ec);
+   }
+   return rc;
+}
+
 int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
                  const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
 {
@@ -147,58 +208,29 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       }
    }
 
-   for (int pass = 0; pass < 2; pass++)
+   /* Route to the best agent for the role (cost-tier), then retry other viable
+    * agents at random until one succeeds. This replaces the configured
+    * fallback_chain: eligibility + retry-until-viable is the whole mechanism. A
+    * DOWN agent is never tried (agent_is_available_for_routing filters it). */
+   const char *tried[MAX_AGENTS];
+   int ntried = 0;
+   for (int attempt = 0; attempt <= MAX_AGENTS; attempt++)
    {
-      for (int i = 0; i < cfg->fallback_count; i++)
+      agent_t *ag;
+      if (attempt == 0)
+         ag = agent_route(cfg, role); /* preferred (cost-tier) pick first */
+      else
       {
-         agent_t *ag = agent_find(cfg, cfg->fallback_chain[i]);
-         if (!ag || !ag->enabled || !agent_has_role(ag, role))
-            continue;
-         if (pass == 0 && provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-         {
-            aimee_log(LOG_DEBUG, "agent", "skipping DOWN agent '%s' in fallback (pass 0)",
-                      ag->name);
-            continue;
-         }
-
-         int use_tools =
-             agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
-         agent_apply_runtime_config(ag);
-         ag->ablation = cfg->ablation;
-         ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
-         int rc;
-         if (use_tools)
-            rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                   user_prompt, max_tokens, temperature, out);
-         else
-            rc = agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
-
-         if (rc == 0)
-         {
-            provider_catalog_record_success(ag->name);
-            agent_log_call(out, role);
-            agent_store_feedback(out, role, user_prompt);
-
-            agent_outcome_t oc;
-            classify_outcome(out, ag->max_turns, &oc);
-            record_outcome(out->agent_name, role, &oc);
-
-            if (cache_enabled && out->response)
-               db1_agent_cache_put(role, user_prompt, out->response);
-            return 0;
-         }
-         {
-            const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
-            provider_catalog_record_failure(ag->name, err_class);
-         }
-         free(out->response);
-         out->response = NULL;
+         int idx = delegate_pick_for_role(cfg, role, tried, ntried);
+         ag = idx >= 0 ? &cfg->agents[idx] : NULL;
       }
-   }
+      if (!ag)
+      {
+         if (attempt == 0)
+            continue; /* no primary route -> fall through to the random picker */
+         break;       /* no viable agent remains */
+      }
 
-   agent_t *ag = agent_route(cfg, role);
-   if (ag)
-   {
       int use_tools =
           agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
       agent_apply_runtime_config(ag);
@@ -222,18 +254,15 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       }
       free(hint);
 
-      int rc;
-      if (use_tools)
-         rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                effective_prompt, max_tokens, temperature, out);
-      else
-         rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, temperature, out);
-
+      /* The turn goes through the single guarded executor: it enforces max_parallel
+       * and records provider health. Returns 0 (ok), AGENT_RC_AT_LIMIT (agent
+       * saturated — no health recorded), or -1 (run failure — health recorded). */
+      int rc = agent_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt,
+                                  max_tokens, temperature, use_tools, out);
       free(enhanced);
 
       if (rc == 0)
       {
-         provider_catalog_record_success(ag->name);
          agent_log_call(out, role);
          agent_store_feedback(out, role, user_prompt);
 
@@ -245,10 +274,12 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
       }
-      {
-         const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
-         provider_catalog_record_failure(ag->name, err_class);
-      }
+      /* At-limit or a real failure: either way skip this agent and try the next
+       * (health already recorded by agent_dispatch_one for a real failure). */
+      if (ntried < MAX_AGENTS)
+         tried[ntried++] = ag->name;
+      free(out->response);
+      out->response = NULL;
    }
 
    agent_store_feedback(out, role, user_prompt);
@@ -318,17 +349,18 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
                            * owns no shared pointers. */
    agent_apply_runtime_config(&local);
    local.write_capable = 0; /* belt-and-suspenders; not the primary safeguard */
-   /* THE tool-safety guarantee: this calls agent_execute() directly — the plain
-    * single request->response completion path that has NO tool loop at all. Tool
-    * execution lives only in the separate agent_execute_with_tools_for_role(),
-    * which we never call. So regardless of the agent's tools_enabled flag, a draft
-    * can only return text: it cannot run a tool, read/write files, or touch a repo.
-    * The non-CLI filter above is secondary (provider-CLI agents are agentic and
-    * don't serve plain HTTP completions anyway). */
-   int rc = agent_execute(&local, system_prompt, user_prompt, max_tokens, temperature, out);
+   /* THE tool-safety guarantee: dispatch with use_tools=0, so the single executor
+    * runs the plain agent_execute() completion path — NO tool loop at all (tool
+    * execution lives only in agent_execute_with_tools_for_role, reached ONLY when
+    * use_tools=1). So regardless of the agent's tools_enabled flag, a draft can
+    * only return text: it cannot run a tool, read/write files, or touch a repo.
+    * The non-CLI filter above is secondary. (agent_dispatch_one also enforces the
+    * drafter's max_parallel + records its health, like every other turn.) */
+   int rc = agent_dispatch_one(&local, &cfg->network, NULL /* role */, system_prompt, user_prompt,
+                               max_tokens, temperature, 0 /* use_tools: plain completion */, out);
+   /* Stamp the drafter name for the caller even on the early-guard paths that
+    * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
-   if (rc == 0)
-      provider_catalog_record_success(local.name);
    return rc;
 }
 
@@ -364,14 +396,13 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    local.ablation = cfg->ablation;
    local.write_capable = 0; /* ensemble references answer a prompt; no write tools */
 
-   int rc = agent_execute(&local, system_prompt, user_prompt, max_tokens, temperature, out);
-   if (rc == 0)
-      provider_catalog_record_success(local.name);
-   else
-   {
-      const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
-      provider_catalog_record_failure(local.name, err_class);
-   }
+   /* Plain completion (no tools) through the single guarded executor: it enforces
+    * local.max_parallel and records provider health. An AGENT_RC_AT_LIMIT return
+    * (agent saturated) propagates as a non-zero rc; the parallel panel/ensemble
+    * caller treats a non-response as "this lens unfilled" and retries a different
+    * agent, so a saturated model is spread rather than piled on. */
+   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                               temperature, 0 /* use_tools */, out);
    {
       agent_outcome_t oc;
       classify_outcome(out, local.max_turns, &oc);
@@ -424,20 +455,16 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    }
    free(hint);
 
-   int rc = agent_execute_guarded(ag, &cfg->network, role, system_prompt, effective_prompt,
-                                  max_tokens, out);
+   /* The delegate turn through the single guarded executor (tools enabled): it
+    * enforces ag->max_parallel and records provider health. */
+   int rc = agent_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt, max_tokens,
+                               0.3, 1 /* use_tools */, out);
    free(enhanced);
 
-   if (rc != 0)
-   {
-      const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
-      provider_catalog_record_failure(ag->name, err_class);
-   }
-
-   if (rc != 0 && agent_error_is_retryable(out->error) && cfg->fallback_count > 0)
+   if (agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
-                "delegate agent '%s' returned retryable error, trying fallback chain (%d entries)",
+                "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
                 ag->name, cfg->fallback_count);
 
       for (int fi = 0; fi < cfg->fallback_count && rc != 0; fi++)
@@ -459,23 +486,18 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
          out->error[0] = '\0';
 
          aimee_log(LOG_INFO, "agent", "fallback: trying agent '%s'", fb->name);
-         rc = agent_execute_with_tools_for_role(fb, &cfg->network, role, system_prompt, user_prompt,
-                                                max_tokens, 0.3, out);
+         rc = agent_dispatch_one(fb, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                                 0.3, 1 /* use_tools */, out);
          if (rc == 0)
-            ag = fb; /* update ag for post-run logging */
-         else
-         {
-            const char *fec = agent_error_is_retryable(out->error) ? "retryable" : "error";
-            provider_catalog_record_failure(fb->name, fec);
-         }
+            ag = fb; /* update ag for post-run logging (health recorded by dispatch_one) */
       }
    }
 
    rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
                                      enforce_writes, out, rc);
 
-   if (rc == 0)
-      provider_catalog_record_success(ag->name);
+   /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
+    * same-tier), so no final record_success here. */
    agent_log_call(out, role);
    agent_store_feedback(out, role, user_prompt);
 

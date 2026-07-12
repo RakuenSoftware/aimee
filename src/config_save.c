@@ -100,7 +100,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
        cfg->roundtable_pipeline_max_total_cost_usd != 0.0 ||
        cfg->roundtable_pipeline_gate_ttl_h != 0 ||
        cfg->roundtable_pipeline_parked_releases_slot != 1 ||
-       cfg->roundtable_pipeline_unknown_context_tokens != 8000)
+       cfg->roundtable_pipeline_unknown_context_tokens != 8000 || cfg->roundtable_default[0])
    {
       cJSON *rt = cJSON_AddObjectToObject(root, "roundtable");
       if (rt)
@@ -109,6 +109,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
          cJSON_AddNumberToObject(rt, "converge_threshold", cfg->roundtable_converge_threshold);
          cJSON_AddNumberToObject(rt, "deadline_ms", cfg->roundtable_deadline_ms);
          cJSON_AddStringToObject(rt, "turns", cfg->roundtable_turns);
+         if (cfg->roundtable_default[0])
+            cJSON_AddStringToObject(rt, "default", cfg->roundtable_default);
          cJSON_AddStringToObject(rt, "pipeline_done_bar", cfg->roundtable_pipeline_done_bar);
          cJSON_AddNumberToObject(rt, "pipeline_max_passes", cfg->roundtable_pipeline_max_passes);
          cJSON_AddNumberToObject(rt, "pipeline_max_attempts_per_pass",
@@ -314,6 +316,39 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "kb_client_url", cfg->kb_client_url);
    if (cfg->kb_client_bearer_token[0])
       cJSON_AddStringToObject(root, "kb_client_bearer_token", cfg->kb_client_bearer_token);
+
+   /* Setup-wizard page-2 backend record: save each non-empty string field from a
+    * compact table (mirrors the parse table in config.c). */
+   {
+      static const struct
+      {
+         const char *key;
+         size_t off;
+      } page2[] = {
+          {"kb_mode", offsetof(config_t, kb_mode)},
+          {"llm_embed_backend", offsetof(config_t, llm_embed_backend)},
+          {"llm_embed_host", offsetof(config_t, llm_embed_host)},
+          {"llm_embed_gpu", offsetof(config_t, llm_embed_gpu)},
+          {"llm_embed_tier", offsetof(config_t, llm_embed_tier)},
+          {"llm_rerank_backend", offsetof(config_t, llm_rerank_backend)},
+          {"llm_rerank_host", offsetof(config_t, llm_rerank_host)},
+          {"llm_rerank_gpu", offsetof(config_t, llm_rerank_gpu)},
+          {"llm_rerank_tier", offsetof(config_t, llm_rerank_tier)},
+          {"llm_rerank_endpoint", offsetof(config_t, llm_rerank_endpoint)},
+          {"llm_synth_backend", offsetof(config_t, llm_synth_backend)},
+          {"llm_synth_host", offsetof(config_t, llm_synth_host)},
+          {"llm_synth_gpu", offsetof(config_t, llm_synth_gpu)},
+          {"llm_synth_tier", offsetof(config_t, llm_synth_tier)},
+          {"llm_synth_endpoint", offsetof(config_t, llm_synth_endpoint)},
+          {"llm_synth_model", offsetof(config_t, llm_synth_model)},
+      };
+      for (size_t i = 0; i < sizeof(page2) / sizeof(page2[0]); i++)
+      {
+         const char *v = (const char *)cfg + page2[i].off;
+         if (v[0])
+            cJSON_AddStringToObject(root, page2[i].key, v);
+      }
+   }
    if (cfg->db2_pool_size > 0 && cfg->db2_pool_size != 8)
       cJSON_AddNumberToObject(root, "db2_pool_size", cfg->db2_pool_size);
    cJSON_AddStringToObject(root, "guardrail_mode", cfg->guardrail_mode);

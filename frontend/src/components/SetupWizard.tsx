@@ -1,23 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useToast } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
-import { WIZARD_STEPS, isRestartKey, helpFor } from '../setup/wizardSteps';
+import { visibleSteps, isRestartKey, helpFor, type WizardKbMode } from '../setup/wizardSteps';
 import { computeReadiness } from '../setup/readiness';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
+import PrimaryChooser from '../setup/PrimaryChooser';
+import KnowledgeBase from '../setup/KnowledgeBase';
+import DeployTopology from '../setup/DeployTopology';
+import ConnectHosts from '../setup/ConnectHosts';
+import ConnectWorkspace from '../setup/ConnectWorkspace';
+import type { KbMode } from '../setup/deployTopology';
 
-/* First-run setup wizard. A modal over the app that walks the operator through
- * the minimum path to a working turn — provider → embedding → shared store →
- * optional KB API → connect a project — writing every value through the existing
- * POST /api/config/set allowlist (no new backend). It is non-blocking: closable
- * at any time via ×, Esc, the backdrop, or "Later".
+/* First-run setup wizard. A modal over the app that walks the operator through the
+ * minimum path to a working turn. It forks at the Knowledge-base step: a remote KB
+ * hides the deploy-topology + shared-store steps (visibleSteps() reflects the live
+ * kb_mode). Every value is written through the existing POST /api/config/set
+ * allowlist and the /api/git/* routes (no new config backend). Non-blocking:
+ * closable at any time via ×, Esc, the backdrop, or "Later".
  *
  * Design notes:
  * - All config I/O + step data live in the tested setup/ modules; this file is
  *   presentation + local step state.
- * - Every save is guarded: a 4xx/5xx/network failure surfaces a Toast and keeps
- *   the operator on the step with their input intact.
+ * - Every generic-key save is guarded: a 4xx/5xx/network failure surfaces a Toast
+ *   and keeps the operator on the step with their input intact.
  * - Keys carrying RESTART_KEYS are tracked into `pendingRestart` and listed on the
  *   summary, since they only take effect after a server restart. */
 
@@ -37,8 +43,29 @@ function coerce(key: string, raw: string, original: unknown): unknown {
   return raw;
 }
 
+function csrf(): string {
+  try {
+    if (typeof window !== 'undefined') return (window as { _csrf?: string })._csrf || '';
+  } catch {
+    /* ignore */
+  }
+  return '';
+}
+
+// How many git hosts have a stored credential (drives the optional connection
+// step's readiness). Network failure ⇒ 0; the step is optional so this never
+// blocks "ready".
+async function fetchHostCount(): Promise<number> {
+  try {
+    const r = await fetch('/api/git/credentials', { headers: { 'X-CSRF-Token': csrf() } });
+    const d = await r.json();
+    return r.ok && Array.isArray(d.hosts) ? d.hosts.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function SetupWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const navigate = useNavigate();
   const toast = useToast();
   const { active } = useSessions();
   const hasProject = !!active?.projectName;
@@ -49,6 +76,14 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [saving, setSaving] = useState(false);
   const [pendingRestart, setPendingRestart] = useState<string[]>([]);
   const [showSummary, setShowSummary] = useState(false);
+  const [hostsConnected, setHostsConnected] = useState(0);
+
+  const kbMode: WizardKbMode = String(cfg.kb_mode) === 'remote' ? 'remote' : 'local';
+  const steps = useMemo(() => visibleSteps(kbMode), [kbMode]);
+  const total = steps.length;
+  // Clamp the cursor: switching to a remote KB shrinks the visible list.
+  const safeIdx = Math.min(idx, total - 1);
+  const step = steps[safeIdx];
 
   // (Re)load config each time the wizard opens; reset step + transient state.
   useEffect(() => {
@@ -59,14 +94,15 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     loadConfig().then((c) => {
       setCfg(c);
       const d: Record<string, string> = {};
-      for (const step of WIZARD_STEPS) {
-        for (const k of step.keys) {
+      for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'local')) {
+        for (const k of s.keys) {
           const v = c[k];
           d[k] = v == null ? '' : String(v);
         }
       }
       setDraft(d);
     });
+    fetchHostCount().then(setHostsConnected);
   }, [open]);
 
   const close = useCallback(() => { onClose(); }, [onClose]);
@@ -79,19 +115,51 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     return () => window.removeEventListener('keydown', onKey);
   }, [open, close]);
 
-  const step = WIZARD_STEPS[idx];
-
-  const readiness = useMemo(() => computeReadiness(cfg, hasProject), [cfg, hasProject]);
+  const readiness = useMemo(
+    () => computeReadiness(cfg, hasProject, hostsConnected),
+    [cfg, hasProject, hostsConnected],
+  );
 
   if (!open) return null;
 
   function advance() {
-    if (idx < WIZARD_STEPS.length - 1) setIdx(idx + 1);
+    if (safeIdx < total - 1) setIdx(safeIdx + 1);
     else setShowSummary(true);
   }
 
-  // Save every edited key in the current step. Any failure aborts advance and
-  // Toasts; successes update the live cfg + restart tracking.
+  // The primary chooser configures the primary through the agent endpoints; once
+  // it succeeds we stamp the legacy `provider` breadcrumb (which readiness + the
+  // header chip read) and move on. A breadcrumb-save failure is non-fatal.
+  async function handlePrimaryConfigured(provider: string) {
+    const res = await saveConfigValue('provider', provider);
+    setCfg((c) => ({ ...c, provider: res.ok ? res.value ?? provider : provider }));
+    notifySetupUpdated();
+    advance();
+  }
+
+  // The knowledge-base step records the local/remote choice (+ remote url/token).
+  // Reload config so visibleSteps reflects the new kb_mode (remote hides the
+  // deploy + DB2 steps), track restart-pending, advance.
+  async function handleKbSaved(restartKeys: string[], _mode: KbMode) {
+    const c = await loadConfig();
+    setCfg(c);
+    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
+    notifySetupUpdated();
+    advance();
+  }
+
+  // The deploy-topology page writes its own config keys (per-role llm_*). It
+  // reports the restart-class keys it changed; refresh cfg, track restart, advance.
+  async function handleDeploySaved(restartKeys: string[]) {
+    const c = await loadConfig();
+    setCfg(c);
+    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
+    notifySetupUpdated();
+    advance();
+  }
+
+  // Save every edited key in the current (generic keyed) step. Any failure aborts
+  // advance and Toasts; successes update the live cfg + restart tracking.
   async function saveStep() {
     setSaving(true);
     const savedCfg: ConfigMap = { ...cfg };
@@ -148,8 +216,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
   };
 
-  const stepNum = idx + 1;
-  const total = WIZARD_STEPS.length;
+  const stepNum = safeIdx + 1;
 
   return (
     <div style={backdrop} onClick={close}>
@@ -169,7 +236,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {(Object.entries(readiness.steps)).map(([id, s]) => (
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <span aria-hidden>{s.ok ? '✅' : s.optional ? '⚪' : '⛔'}</span>
-                  <span style={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 92 }}>{id.replace('_', ' ')}</span>
+                  <span style={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 92 }}>{id.replace(/_/g, ' ')}</span>
                   <span style={{ color: '#667' }}>{s.detail}{s.optional && !s.ok ? ' (optional)' : ''}</span>
                 </div>
               ))}
@@ -191,7 +258,17 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {step.title}{step.optional ? <span style={{ color: '#9aa', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
             </div>
 
-            {step.keys.length > 0 ? (
+            {step.kind === 'chooser' ? (
+              <PrimaryChooser onConfigured={handlePrimaryConfigured} />
+            ) : step.kind === 'kb' ? (
+              <KnowledgeBase onSaved={handleKbSaved} />
+            ) : step.kind === 'deploy' ? (
+              <DeployTopology onSaved={handleDeploySaved} />
+            ) : step.kind === 'connection' ? (
+              <ConnectHosts onDone={advance} onHostsChanged={setHostsConnected} />
+            ) : step.kind === 'workspace' ? (
+              <ConnectWorkspace onDone={advance} />
+            ) : step.keys.length > 0 ? (
               <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
                 {step.keys.map((key) => (
                   <label key={key} style={{ display: 'block' }}>
@@ -209,31 +286,22 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                   </label>
                 ))}
               </div>
-            ) : (
-              // Hand-off step (project): no config keys, link out to the page.
-              <div style={{ marginBottom: 16 }}>
-                <p style={{ fontSize: 13, color: '#556', lineHeight: 1.5 }}>
-                  Connect a git repository on the Projects tab so the tools have something to act on.
-                  {step.skipNote ? ` ${step.skipNote}` : ''}
-                </p>
-                <button style={{ ...primaryBtn, marginTop: 4 }} onClick={() => { navigate(step.route ?? '/projects'); close(); }}>
-                  Go to Projects →
-                </button>
-                {hasProject && <div style={{ fontSize: 12.5, color: '#2c8f56', marginTop: 8 }}>✅ A project is already connected to this session.</div>}
-              </div>
-            )}
+            ) : null}
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={ghostBtn} disabled={idx === 0} onClick={() => setIdx(Math.max(0, idx - 1))}>Back</button>
+                <button style={ghostBtn} disabled={safeIdx === 0} onClick={() => setIdx(Math.max(0, safeIdx - 1))}>Back</button>
                 <button style={ghostBtn} onClick={close}>Later</button>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {step.optional && <button style={ghostBtn} onClick={advance}>Skip</button>}
                 {step.keys.length > 0 ? (
                   <button style={primaryBtn} disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</button>
+                ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'connection' || step.kind === 'workspace' ? (
+                  // Bespoke steps own their own primary action (they call advance()).
+                  null
                 ) : (
-                  <button style={primaryBtn} onClick={advance}>{idx === total - 1 ? 'Review' : 'Next'}</button>
+                  <button style={primaryBtn} onClick={advance}>{safeIdx === total - 1 ? 'Review' : 'Next'}</button>
                 )}
               </div>
             </div>

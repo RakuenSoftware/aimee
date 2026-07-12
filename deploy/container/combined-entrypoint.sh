@@ -81,10 +81,8 @@ fi
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 [ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
-
 kb_pid=""
 server_pid=""
-llm_pid=""
 
 . /usr/local/bin/webchat-lib.sh
 
@@ -94,76 +92,22 @@ shutdown() {
     # Best-effort teardown of all children; ignore errors during shutdown.
     [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
     [ -n "$kb_pid" ] && kill "$kb_pid" 2>/dev/null || true
-    [ -n "$llm_pid" ] && kill "$llm_pid" 2>/dev/null || true
     webchat_stop
 }
 trap 'shutdown' TERM INT
 
-# --- bundled aimee-llm (CPU): auto-start + point the kb/server at it ---------
-# When this image was built WITH_LLM=1 it carries the unified llama.cpp/Vulkan
-# gateway (embed + rerank + Tier-A synth) and its baked GGUFs. We start it here
-# and repoint the kb's embed path + the curator synth at the in-container gateway
-# so the combined container is self-contained (no external embedder/llm).
-#
-# Operator endpoints WIN — an existing deploy that set AIMEE_LLM_URL,
-# AIMEE_EMBEDDER_URL or LLM_ENDPOINT (e.g. an external embedder, or opting up to a
-# GPU endpoint) is never silently overridden:
-#   AIMEE_BUNDLED_LLM=auto (default) — start the bundled gateway ONLY if the
-#       operator configured no endpoint; otherwise respect theirs.
-#   AIMEE_BUNDLED_LLM=on            — always start + use the bundled gateway,
-#       overriding any operator endpoint.
-#   AIMEE_BUNDLED_LLM=off           — never start it; use operator/legacy endpoints.
-GW_PORT="${AIMEE_LLM_PORT:-8742}"
-operator_llm=0
-if [ -n "${AIMEE_LLM_URL:-}" ] || [ -n "${AIMEE_EMBEDDER_URL:-}" ] || [ -n "${LLM_ENDPOINT:-}" ]; then
-    operator_llm=1
+# --- resolve the embed/rerank/synth endpoints -------------------------------
+# The LLM is a SEPARATE service (aimee-llm), never bundled in this image. Derive
+# the embedder + curator-synth endpoints from the one-knob AIMEE_LLM_URL when the
+# operator left them unset; compose points AIMEE_LLM_URL at the profile-gated
+# aimee-llm service (or an external endpoint). The kb fail-opens on embedding
+# until that endpoint is reachable.
+if [ -n "${AIMEE_LLM_URL:-}" ]; then
+    export AIMEE_EMBEDDER_URL="${AIMEE_EMBEDDER_URL:-$AIMEE_LLM_URL}"
+    export LLM_ENDPOINT="${LLM_ENDPOINT:-${AIMEE_LLM_URL}/v1}"
 fi
-start_bundled_llm=0
-if [ -x /opt/aimee/supervisor.sh ]; then
-    case "${AIMEE_BUNDLED_LLM:-auto}" in
-        on)   start_bundled_llm=1 ;;
-        off)  start_bundled_llm=0 ;;
-        auto) if [ "$operator_llm" = 0 ]; then start_bundled_llm=1; fi ;;
-        *)    log "AIMEE_BUNDLED_LLM='${AIMEE_BUNDLED_LLM:-}' unrecognized; treating as auto"
-              if [ "$operator_llm" = 0 ]; then start_bundled_llm=1; fi ;;
-    esac
-fi
-if [ "$operator_llm" = 1 ] && [ "$start_bundled_llm" = 0 ]; then
-    log "using operator-configured LLM endpoints (bundled aimee-llm not started)"
-fi
-if [ "$start_bundled_llm" = 1 ]; then
-    log "starting bundled aimee-llm (CPU) gateway on :$GW_PORT as user aimee"
-    # Set the runtime's lib + module paths INSIDE the child (after runuser's uid
-    # switch) via sh -c, not as inline vars on runuser: LD_LIBRARY_PATH is
-    # security-sensitive and can be dropped across a privilege change, and we must
-    # NOT put /opt/llama/lib on the aimee-server/kb load path anyway. The gateway's
-    # other settings (AIMEE_LLM_EMBED_URL/RERANK_URL/SYNTH_URL/RERANK_HEAD/...) are
-    # image ENV that runuser preserves like the kb/server's existing env.
-    runuser -u aimee -- sh -c \
-        'LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PYTHONPATH=/opt/aimee AIMEE_LLM_PORT="$1" exec /opt/aimee/supervisor.sh' \
-        aimee-llm "$GW_PORT" &
-    llm_pid=$!
-    # One-knob: drive the kb embed path (in-process http; the seeded config has no
-    # embedding_command) + reranking via the gateway, and the curator synth
-    # sidecar via its /v1. Default the CPU tier dim (operator-set dim wins). These
-    # exports reach the kb/server children below (runuser preserves the env).
-    export AIMEE_LLM_URL="http://127.0.0.1:${GW_PORT}"
-    export AIMEE_EMBEDDER_URL="http://127.0.0.1:${GW_PORT}"
-    export LLM_ENDPOINT="http://127.0.0.1:${GW_PORT}/v1"
-    : "${AIMEE_EMBEDDING_DIM:=1024}"
-    export AIMEE_EMBEDDING_DIM
-else
-    # Not starting the bundled gateway. Honor operator endpoints, deriving the
-    # ones they left unset from the AIMEE_LLM_URL one-knob; fall back to the legacy
-    # external defaults (embedder:8080 / llm:8080) so a lean WITH_LLM=0 image with
-    # the external-llm compose profile keeps working unchanged.
-    if [ -n "${AIMEE_LLM_URL:-}" ]; then
-        export AIMEE_EMBEDDER_URL="${AIMEE_EMBEDDER_URL:-$AIMEE_LLM_URL}"
-        export LLM_ENDPOINT="${LLM_ENDPOINT:-${AIMEE_LLM_URL}/v1}"
-    fi
-    export AIMEE_EMBEDDER_URL="${AIMEE_EMBEDDER_URL:-http://embedder:8080}"
-    export LLM_ENDPOINT="${LLM_ENDPOINT:-http://llm:8080/v1}"
-fi
+export AIMEE_EMBEDDER_URL="${AIMEE_EMBEDDER_URL:-http://aimee-llm:8080}"
+export LLM_ENDPOINT="${LLM_ENDPOINT:-http://aimee-llm:8080/v1}"
 
 log "starting aimee-kb (http-port=$KB_HTTP_PORT) as user aimee"
 runuser -u aimee -- aimee-kb --http-port="$KB_HTTP_PORT" &
@@ -190,34 +134,6 @@ while :; do
     fi
     sleep 1
 done
-
-# If we started the bundled gateway, wait for it to load its models so the first
-# kb embed/search succeeds. Cold CPU load of multi-GB GGUFs is slow, so allow a
-# long window. FAIL-OPEN: if it doesn't come up we still bring up the server (the
-# container's contract) — embeddings/synth degrade until the gateway is healthy,
-# rather than the whole container failing. If the supervisor died, log and move on.
-if [ "$start_bundled_llm" = 1 ]; then
-    LLM_WAIT_SECONDS="${AIMEE_LLM_WAIT_SECONDS:-600}"
-    log "waiting up to ${LLM_WAIT_SECONDS}s for bundled aimee-llm /health on :$GW_PORT"
-    i=0
-    while :; do
-        if curl -fsS --max-time 3 "http://127.0.0.1:${GW_PORT}/health" >/dev/null 2>&1; then
-            log "bundled aimee-llm is healthy"
-            break
-        fi
-        if ! kill -0 "$llm_pid" 2>/dev/null; then
-            log "WARNING: bundled aimee-llm exited during startup; embeddings/synth will be unavailable until it is restarted (continuing fail-open)"
-            llm_pid=""
-            break
-        fi
-        i=$((i + 1))
-        if [ "$i" -ge "$LLM_WAIT_SECONDS" ]; then
-            log "WARNING: bundled aimee-llm not healthy within ${LLM_WAIT_SECONDS}s; continuing fail-open (embeddings/synth degraded)"
-            break
-        fi
-        sleep 1
-    done
-fi
 
 # Delegate-vault auto-provisioning. aimee-server seals operator-supplied delegate
 # API keys into its server-principal vault at startup, so a fresh deploy's

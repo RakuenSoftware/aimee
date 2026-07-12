@@ -533,6 +533,68 @@ int wfe_implement_verify_ok(const char *workdir)
    return passed ? 1 : 0;
 }
 
+/* The TDD RED gate (see wfe_blocks.h). Provider-present: a red is real iff the
+ * change does NOT pass; "passed" / can't-run / unparseable -> not a red (loop).
+ * No provider -> proceed (drivable). */
+int wfe_tdd_red_ok(const char *workdir)
+{
+   if (!g_verify || !g_verify->verify)
+      return 1; /* cannot enforce mechanically -> proceed */
+   char verdict[4096] = "";
+   if (g_verify->verify(workdir, verdict, sizeof verdict) != 0)
+      return 0; /* gate could not run -> red unconfirmed -> loop */
+   cJSON *doc = cJSON_Parse(verdict);
+   if (!doc)
+      return 0; /* unparseable -> red unconfirmed -> loop */
+   const cJSON *vd = cJSON_GetObjectItemCaseSensitive(doc, "verdict");
+   int passed = cJSON_IsString(vd) && vd->valuestring && strcmp(vd->valuestring, "passed") == 0;
+   cJSON_Delete(doc);
+   return passed ? 0 : 1; /* passed = nothing fails -> not a red -> loop */
+}
+
+/* TDD anti-deletion guard (see wfe_blocks.h). Lists the files the RED commit added/
+ * modified (NUL-delimited plumbing, so paths with spaces/specials are safe) and
+ * checks each still resolves at HEAD after GREEN. */
+int wfe_tdd_tests_survive(const char *workdir, const char *red_sha)
+{
+   if (!workdir || !workdir[0] || !red_sha || !red_sha[0])
+      return 1; /* nothing to check */
+   /* Added/Modified paths in the red commit (vs its parent; --root handles a root
+    * commit). -z => NUL-separated, unquoted — no core.quotePath ambiguity. */
+   const char *argv[] = {
+       "git",    "-C",          workdir, "diff-tree",        "-r",    "--no-commit-id",
+       "--root", "--name-only", "-z",    "--diff-filter=AM", red_sha, NULL};
+   char *o = NULL;
+   if (git_capture(argv, &o) != 0 || !o)
+   {
+      free(o);
+      return 1; /* cannot determine the red file set -> don't block (freeze backstop) */
+   }
+   int survive = 1;
+   for (char *p = o; *p;)
+   {
+      char *path = p;
+      size_t len = strlen(path); /* one NUL-terminated path */
+      p += len + 1;
+      if (!len)
+         continue;
+      char rev[1200];
+      if (snprintf(rev, sizeof rev, "HEAD:%s", path) >= (int)sizeof rev)
+         continue; /* pathological path length -> skip (don't false-positive) */
+      const char *ex[] = {"git", "-C", workdir, "cat-file", "-e", rev, NULL};
+      char *eo = NULL;
+      int rc = safe_exec_capture(ex, &eo, 1 << 12);
+      free(eo);
+      if (rc != 0)
+      {
+         survive = 0; /* a red-authored file is gone at HEAD -> GREEN deleted it */
+         break;
+      }
+   }
+   free(o);
+   return survive;
+}
+
 /* The step's assigned delegate from node params ("delegate"), or "" for none.
  * May be the sentinel "$random" — the provider resolves it to a random agent. */
 static const char *node_delegate(const wfe_node_t *node)
@@ -541,6 +603,25 @@ static const char *node_delegate(const wfe_node_t *node)
       return "";
    const cJSON *d = cJSON_GetObjectItemCaseSensitive(node->params, "delegate");
    return (d && cJSON_IsString(d) && d->valuestring) ? d->valuestring : "";
+}
+
+/* A string-typed node param by key, or "" if absent/non-string. */
+static const char *node_str(const wfe_node_t *node, const char *key)
+{
+   if (!node || !node->params)
+      return "";
+   const cJSON *v = cJSON_GetObjectItemCaseSensitive(node->params, key);
+   return (v && cJSON_IsString(v) && v->valuestring) ? v->valuestring : "";
+}
+
+/* A boolean-typed node param by key (accepts JSON true or the string "true"). */
+static int node_bool(const wfe_node_t *node, const char *key)
+{
+   if (!node || !node->params)
+      return 0;
+   const cJSON *v = cJSON_GetObjectItemCaseSensitive(node->params, key);
+   return v && (cJSON_IsTrue(v) ||
+                (cJSON_IsString(v) && v->valuestring && strcmp(v->valuestring, "true") == 0));
 }
 
 /* Dispatch one block's delegate work, if a provider is installed. `delegate` is
@@ -587,30 +668,46 @@ static wfe_step_result_t with_cost(wfe_step_result_t r, double cost)
 /* ---- executors ---- */
 
 /* author.proposal / author.plan: drive a delegate to produce/edit the artifact,
- * then hash the artifact file. */
+ * then hash the artifact file. A failed dispatch loops to retry — except
+ * author.proposal accepts an already-present, non-empty proposal (see below), so
+ * a pre-supplied complete proposal (the proposals-trigger case) is not looped. */
 static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *path = wfe_ctx_proposal_path(ctx);
-   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed;
-    * a failed run loops). Then hash the artifact file as the produced content; if
-    * it is absent (no provider ran) the gate that follows simply re-loops. */
+   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed).
+    * If a prior review roundtable left blockers for this work item (persisted via
+    * on_fail), fold them into the prompt so this pass REFINES against the panel's
+    * objections rather than re-authoring blind — the plan<->roundtable loop can
+    * then converge instead of churning to max_iters. */
    char wd[1024];
    resolve_workdir(ctx, wd, sizeof wd);
+   char feedback[4096];
+   wfe_feedback_read(wfe_ctx_work_item(ctx), feedback, sizeof feedback);
+   const char *base_prompt = "Author or revise the workflow artifact at the given path per the "
+                             "work item, then commit it.";
+   char prompt[4096 + 512];
+   if (feedback[0])
+      snprintf(prompt, sizeof prompt,
+               "%s\n\nA prior review roundtable REQUESTED CHANGES on your last revision. You MUST "
+               "address every blocker below and commit the improved artifact:\n\n%s",
+               base_prompt, feedback);
+   else
+      snprintf(prompt, sizeof prompt, "%s", base_prompt);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(wd, "architect", node_delegate(node),
-                             "Author or revise the workflow artifact at the given path "
-                             "per the work item, then commit it.",
-                             path, commit, &cost) < 0)
-      return with_cost(wfe_step_looped(), cost);
+   int drc =
+       wfe_delegate_dispatch(wd, "architect", node_delegate(node), prompt, path, commit, &cost);
+   /* Hash the artifact file as the produced content, and note whether it holds
+    * any content at all. */
    char hash[65] = "";
+   long sz = 0;
    if (path && path[0])
    {
       FILE *f = fopen(path, "rb");
       if (f)
       {
          fseek(f, 0, SEEK_END);
-         long sz = ftell(f);
+         sz = ftell(f);
          if (sz < 0)
             sz = 0;
          fseek(f, 0, SEEK_SET);
@@ -627,6 +724,21 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    }
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
+   if (drc < 0)
+   {
+      /* The delegate did not advance the artifact (no provider, an error, or a
+       * no-op that changed no files). For author.proposal that is acceptable when
+       * the proposal artifact is ALREADY present and non-empty: the proposals
+       * trigger supplies a complete, already-approved proposal (the merge IS the
+       * approval), so a "revise" delegate correctly changes nothing — accept the
+       * existing proposal instead of looping to max_iters. With no artifact yet
+       * (empty/missing file) it is a genuine non-advance, so loop and retry.
+       * author.plan and every other author node have no pre-supplied artifact, so
+       * they always loop on a failed dispatch. */
+      if (node->block == WFE_BLK_AUTHOR_PROPOSAL && sz > 0 && hash[0])
+         return wfe_step_advanced(handle, hash, cost);
+      return with_cost(wfe_step_looped(), cost);
+   }
    return wfe_step_advanced(handle, hash, cost);
 }
 
@@ -794,6 +906,80 @@ static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost
    return failed ? -1 : 0;
 }
 
+/* Test-Driven Development mode (implement node param `tdd: true`): drive TWO
+ * delegates in a red->green sequence on the work-item branch. The TEST agent
+ * writes the failing tests that specify the plan; the CODE agent then makes them
+ * pass without weakening them. Each agent's PERSONA and delegate are operator-
+ * specified in the composer: the test author's persona is `test_persona` (default
+ * "qa") on delegate `test_delegate`; the implementer reuses the node's own
+ * `persona` (default "engineer") on delegate `delegate`. The persona is passed in
+ * the dispatch `role` slot — the live provider treats that slot as the delegate's
+ * IDENTITY (see wfe_live_delegate.c), so this is what makes the two personas
+ * specifiable end to end. Returns 0 to proceed to the mandatory freeze + aggregate
+ * verify, -1 to loop/retry. A dispatch that reports no installed provider (0) is a
+ * no-op that still proceeds, preserving the drivable-without-a-live-delegate
+ * behavior of the single path. *cost accumulates BOTH dispatches. */
+static int run_tdd(const char *wd, const wfe_node_t *node, double *cost)
+{
+   /* 1. RED: the test author writes failing tests only — no production code. */
+   const char *test_persona = node_str(node, "test_persona");
+   if (!test_persona[0])
+      test_persona = "qa";
+   char tc[64] = "";
+   double c1 = 0.0;
+   int r1 = wfe_delegate_dispatch(
+       wd, test_persona, node_str(node, "test_delegate"),
+       "Test-Driven Development, RED step. Write FAILING tests on the work-item branch that "
+       "specify the behavior the approved plan requires. Do NOT implement the production code — "
+       "only the tests. Commit the failing tests.",
+       NULL, tc, &c1);
+   *cost += c1;
+   if (r1 < 0)
+      return -1; /* provider ran and failed -> loop/retry */
+
+   /* Enforce the RED invariant mechanically: the tests must actually FAIL now. A
+    * test author that added nothing (or passing tests) has not established a red —
+    * loop rather than let the prompt be the only guard. */
+   if (!wfe_tdd_red_ok(wd))
+      return -1;
+
+   /* Snapshot the red commit so we can prove GREEN did not delete its tests
+    * (best-effort: a non-git/degraded workdir leaves red_sha empty -> guard skipped,
+    * the freeze + aggregate verify remain the backstop). */
+   char red_sha[64] = "";
+   {
+      const char *argv[] = {"git", "-C", wd, "rev-parse", "HEAD", NULL};
+      char *o = NULL;
+      if (git_capture(argv, &o) == 0 && o)
+      {
+         chomp(o);
+         snprintf(red_sha, sizeof red_sha, "%s", o);
+      }
+      free(o);
+   }
+
+   /* 2. GREEN: the implementer makes the failing tests pass, tests unchanged. */
+   const char *code_persona = node_str(node, "persona");
+   if (!code_persona[0])
+      code_persona = "engineer";
+   char cc[64] = "";
+   double c2 = 0.0;
+   int r2 = wfe_delegate_dispatch(
+       wd, code_persona, node_delegate(node),
+       "Test-Driven Development, GREEN step. Implement the production code on the work-item branch "
+       "to make the failing tests pass WITHOUT weakening or deleting them. Run `aimee git verify`, "
+       "fix any failures, then commit the accepted work.",
+       NULL, cc, &c2);
+   *cost += c2;
+   if (r2 < 0)
+      return -1;
+
+   /* GREEN must not have deleted the red-authored tests. */
+   if (!wfe_tdd_tests_survive(wd, red_sha))
+      return -1;
+   return 0;
+}
+
 static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char wd[1024];
@@ -803,7 +989,16 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 
    long fanout_on = 0;
    (void)config_autonomy_lookup("AIMEE_AUTONOMY_FANOUT", &fanout_on); /* live: env > snapshot */
-   if (fanout_on)
+   if (node_bool(node, "tdd"))
+   {
+      /* Two-agent TDD (per-node opt-in): tests first, then implementation. Takes
+       * precedence over engine fan-out — the split is tests-vs-code, not per-unit.
+       * A failed dispatch loops (the engine bounds retries); the mandatory
+       * aggregate mechanical verify below still gates the merged change. */
+      if (run_tdd(wd, node, &cost) < 0)
+         return with_cost(wfe_step_looped(), cost);
+   }
+   else if (fanout_on)
    {
       /* Manager loop (PC3b): decompose -> fan out engineer per unit -> per-unit verify
        * + retry-different. A unit that never passes parks pending_human via DEGRADED

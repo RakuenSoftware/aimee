@@ -9,6 +9,7 @@
 #include "db1.h"
 #include "agent_tasks.h"
 #include "agent_tools.h"
+#include "workspace_provider.h"
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -360,4 +361,43 @@ void test_parent_write_guard_allows_readonly_printf(void)
    free(result);
    platform_test_rmrf(root);
    printf("  PASS: test_parent_write_guard_allows_readonly_printf\n");
+}
+
+/* A DETACHED workspace whose serving client has disconnected (e.g. any
+ * background/durable delegate) has a dead reverse channel: exec_shell returns
+ * NULL. Fix A requires this surface as a clear error, NOT a silent
+ * {"stdout":"","stderr":"","exit_code":-1} that reads like the command ran and
+ * failed. (A real command with empty output returns "" — non-NULL.) */
+static char *dead_channel_exec_shell(const workspace_provider_t *p, const char *cmd, int *exit_code)
+{
+   (void)p;
+   (void)cmd;
+   if (exit_code)
+      *exit_code = -1;
+   return NULL; /* no usable reverse-channel response — client gone */
+}
+
+void test_detached_dead_channel_reports_clear_error(void)
+{
+   workspace_provider_t mock;
+   memset(&mock, 0, sizeof(mock));
+   mock.kind = WS_PROVIDER_DETACHED;
+   mock.exec_shell = dead_channel_exec_shell;
+   workspace_provider_set_active(&mock);
+
+   char *result = tool_bash("echo hi", 5000);
+   workspace_provider_clear_active();
+
+   assert(result != NULL);
+   assert(strstr(result, "reverse-channel unavailable") != NULL);
+   assert(strstr(result, "serving client is not connected") != NULL);
+
+   /* Must not masquerade as a normal empty-output command result: stderr is set. */
+   cJSON *json = cJSON_Parse(result);
+   assert(json != NULL);
+   cJSON *stderr_item = cJSON_GetObjectItem(json, "stderr");
+   assert(stderr_item && cJSON_IsString(stderr_item) && stderr_item->valuestring[0] != '\0');
+   cJSON_Delete(json);
+   free(result);
+   printf("  PASS: test_detached_dead_channel_reports_clear_error\n");
 }

@@ -20,9 +20,12 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "config.h"
 #include "delegate_role.h"
 #include "persona.h"
 #include "provider_catalog.h"
+#include "roundtable_preset.h"
+#include "roundtable_seat_resolve.h"
 #include "log.h"
 #include "util.h"
 
@@ -46,84 +49,13 @@ static void panel_git(const char *workdir, const char *const extra[], int extra_
    free(o);
 }
 
-/* Dispatch persona `persona` as a READ-ONLY reviewer in `workdir` with `prompt`.
- * Returns the agent's response (malloc'd, caller frees), or NULL if no eligible agent
- * could run. Any edit the reviewer makes is discarded (hard reset) — read-only is
- * enforced, not merely requested. */
-static char *dispatch_review(const char *workdir, const char *persona, const char *prompt)
-{
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof acfg);
-   if (agent_load_config(&acfg) != 0)
-      return NULL;
-   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-   persona_t pinfo;
-   memset(&pinfo, 0, sizeof pinfo);
-   persona_load(NULL, persona, &pinfo);
-
-   char pre_head[64] = "";
-   {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         size_t n = strlen(o);
-         while (n > 0 && (o[n - 1] == '\n' || o[n - 1] == '\r'))
-            o[--n] = '\0';
-         snprintf(pre_head, sizeof pre_head, "%s", o);
-      }
-      free(o);
-   }
-
-   run_cmd_set_cwd(workdir);
-   agent_result_t res;
-   memset(&res, 0, sizeof res);
-   agent_t *chosen = NULL;
-   const char *chosen_role = NULL;
-   int best_tier = 0;
-   for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
-   {
-      const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
-      for (int ai = 0; ai < acfg.agent_count; ai++)
-      {
-         agent_t *ag = &acfg.agents[ai];
-         if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
-             !agent_is_available_for_routing(ag))
-            continue;
-         if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-            continue;
-         if (!chosen || ag->cost_tier < best_tier)
-         {
-            chosen = ag;
-            chosen_role = r;
-            best_tier = ag->cost_tier;
-         }
-      }
-   }
-   int rc = -1;
-   if (chosen)
-      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
-                                             sys_prompt ? sys_prompt : "", prompt,
-                                             AGENT_DEFAULT_MAX_TOKENS, 0.2, &res);
-   run_cmd_set_cwd(NULL);
-   free(sys_prompt);
-   persona_free(&pinfo);
-
-   /* Enforce read-only: hard-reset to the pre-review HEAD + clean untracked. */
-   if (pre_head[0])
-   {
-      const char *reset[] = {"reset", "--hard", pre_head};
-      panel_git(workdir, reset, 3);
-      const char *clean[] = {"clean", "-fd"};
-      panel_git(workdir, clean, 2);
-   }
-
-   char *out = NULL;
-   if (rc == 0 && res.response && res.response[0])
-      out = strdup(res.response);
-   free(res.response);
-   return out;
-}
+/* Max panel seats (matches the verdict-array bound the gate.roundtable executor
+ * passes as `max`). */
+#define WFE_PANEL_MAX 16
+/* Per-round wall-clock ceiling for the parallel panel: a panelist still running
+ * at the deadline is abandoned (its lens left unfilled) so one hung model can
+ * never wedge the round. */
+#define WFE_PANEL_DEADLINE_MS 300000
 
 /* Build the per-persona review prompt. The change under review is embedded directly
  * as a diff so the panelist reads the delta and navigates surrounding code via the
@@ -157,35 +89,260 @@ static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
    return buf;
 }
 
+/* The seat model bound to `persona` in the active roundtable preset, or NULL when
+ * no seat matches (the caller then treats the lens as "$random"). The model may
+ * itself be the "$random" sentinel — a seat the user explicitly set to random. */
+static const char *seat_model_for_persona(const roundtable_preset_t *preset, const char *persona)
+{
+   if (!preset || !persona || !persona[0])
+      return NULL;
+   for (int i = 0; i < preset->seat_count; i++)
+      if (strcmp(preset->seats[i].persona, persona) == 0)
+         return preset->seats[i].model;
+   return NULL;
+}
+
+/* Load the roundtable preset this gate convenes into *preset for its
+ * persona->model bindings. `requested` is the node's params.roundtable (the gate
+ * may name a specific preset); when empty it falls back to the configured default
+ * (roundtable.default, else "default"). Returns 1 on success, 0 when no preset
+ * loads — in which case every lens resolves as "$random", preserving the
+ * pre-preset "any review-capable agent per persona" behaviour. A NAMED preset
+ * that does not load is logged, since it is likely a workflow authoring error. */
+static int load_panel_preset(roundtable_preset_t *preset, const char *requested)
+{
+   memset(preset, 0, sizeof *preset);
+   config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   const char *name = "default";
+   if (config_load(&cfg) == 0 && cfg.roundtable_default[0])
+      name = cfg.roundtable_default;
+   if (requested && requested[0])
+      name = requested; /* the node's explicit choice wins over the default */
+   if (roundtable_preset_load(name, preset) == 0)
+      return 1;
+   if (requested && requested[0])
+      aimee_log(LOG_WARN, "wfe-panel",
+                "roundtable preset '%s' not found -> every lens falls back to $random", requested);
+   return 0;
+}
+
+/* Compose the review roundtable IN PARALLEL, honoring each required lens's seat
+ * model from the active roundtable preset:
+ *   - a PINNED model dispatches to that EXACT agent; if it is not enabled/routable
+ *     for the review role (or its dispatch fails), the run FAILS — a pinned model
+ *     is never silently swapped (returns WFE_PANEL_PINNED_FAIL);
+ *   - a "$random" seat (or a lens with no matching seat) picks any review-capable
+ *     agent and retries a different one on the second round if the first fails.
+ * Panelists fan out concurrently via agent_run_parallel (bounded by the compute-
+ * thread ceiling; a panelist past the deadline is abandoned). Reviews are
+ * read-only (the `review` role grants no write tools); one hard-reset after the
+ * panel defends the worktree regardless. Returns the number of lenses filled, or a
+ * WFE_PANEL_* sentinel (<0). */
 static int live_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
    (void)eligible;
    (void)nelig;
    if (!pkt || !pkt->workdir || !pkt->workdir[0])
-      return -1; /* no worktree to review in -> panel can't compose -> park */
+      return WFE_PANEL_UNREACHABLE; /* no worktree to review in -> park */
 
-   int filled = 0;
-   for (int i = 0; i < nreq && filled < max; i++)
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof acfg);
+   if (agent_load_config(&acfg) != 0)
+      return WFE_PANEL_UNREACHABLE;
+
+   int nlens = nreq < max ? nreq : max;
+   if (nlens > WFE_PANEL_MAX)
+      nlens = WFE_PANEL_MAX;
+
+   /* Persona->model bindings for this panel come from the roundtable preset this
+    * gate convenes: the node's named preset (pkt->roundtable) or the default. */
+   roundtable_preset_t preset;
+   int have_preset = load_panel_preset(&preset, pkt->roundtable);
+
+   char *sysp[WFE_PANEL_MAX];            /* per-lens review-persona system prompt */
+   char *usrp[WFE_PANEL_MAX];            /* per-lens user prompt (change under review) */
+   int done[WFE_PANEL_MAX];              /* lens has a verdict */
+   int pinned[WFE_PANEL_MAX];            /* lens pinned to a specific model */
+   const char *pin_agent[WFE_PANEL_MAX]; /* resolved pinned agent name (into acfg) */
+   memset(sysp, 0, sizeof sysp);
+   memset(usrp, 0, sizeof usrp);
+   memset(done, 0, sizeof done);
+   memset(pinned, 0, sizeof pinned);
+   memset(pin_agent, 0, sizeof pin_agent);
+
+   const char *used[MAX_AGENTS];
+   int nused = 0;
+
+   /* Resolve seats up front. A pinned model that cannot be fulfilled fails the run
+    * (no substitution): abort before dispatching anything. Pinned agents are added
+    * to `used` so a later $random pick never collides with them (diversity). */
+   int pinned_fail = 0;
+   for (int i = 0; i < nlens; i++)
    {
-      char *prompt = build_prompt(required[i], pkt);
-      if (!prompt)
-         continue; /* OOM building the prompt -> leave this lens unfilled (gate degrades) */
-      char *resp = dispatch_review(pkt->workdir, required[i], prompt);
-      free(prompt);
-      if (!resp)
+      sysp[i] = persona_compose_delegate_prompt(required[i], pkt->workdir, "");
+      usrp[i] = build_prompt(required[i], pkt);
+      const char *model = have_preset ? seat_model_for_persona(&preset, required[i]) : NULL;
+      if (rt_seat_is_random(model))
+         continue; /* $random / unmatched -> resolved per-round below */
+      int idx = -1;
+      if (rt_resolve_seat_model(&acfg, model, "review", used, nused, &idx) != RT_SEAT_OK)
       {
-         /* This required persona couldn't be dispatched: leave it WITHOUT a verdict so
-          * the gate DEGRADES (a missing required lens must never be papered over). */
-         aimee_log(LOG_WARN, "wfe-panel", "no agent for required persona '%s' -> degrade",
-                   required[i]);
+         aimee_log(LOG_WARN, "wfe-panel", "pinned model '%s' for lens '%s' unavailable -> fail run",
+                   model, required[i]);
+         pinned_fail = 1;
          continue;
       }
-      wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, resp, &out[filled]);
-      free(resp);
-      filled++;
+      pinned[i] = 1;
+      pin_agent[i] = acfg.agents[idx].name;
+      if (nused < MAX_AGENTS)
+         used[nused++] = pin_agent[i];
    }
-   /* filled==0 (nothing composed) -> the gate sees no required verdicts -> DEGRADED. */
+   if (pinned_fail)
+   {
+      for (int i = 0; i < nlens; i++)
+      {
+         free(sysp[i]);
+         free(usrp[i]);
+      }
+      return WFE_PANEL_PINNED_FAIL;
+   }
+
+   /* Snapshot HEAD once for the post-panel read-only reset. */
+   char pre_head[64] = "";
+   {
+      const char *argv[] = {"git", "-C", pkt->workdir, "rev-parse", "HEAD", NULL};
+      char *o = NULL;
+      if (safe_exec_capture(argv, &o, 256) == 0 && o)
+      {
+         size_t n = strlen(o);
+         while (n > 0 && (o[n - 1] == '\n' || o[n - 1] == '\r'))
+            o[--n] = '\0';
+         snprintf(pre_head, sizeof pre_head, "%s", o);
+      }
+      free(o);
+   }
+
+   run_cmd_set_cwd(pkt->workdir);
+
+   int filled = 0;
+   int pinned_dispatch_fail = 0;
+   /* Up to two parallel rounds. A pinned lens dispatches once to its fixed agent (a
+    * pinned dispatch failure fails the run — no retry); a $random lens retries a
+    * different agent on the second round so one flaky pick doesn't degrade the gate. */
+   for (int round = 0; round < 2 && filled < nlens && !pinned_dispatch_fail; round++)
+   {
+      agent_task_t tasks[WFE_PANEL_MAX];
+      const char *taskagent[WFE_PANEL_MAX];
+      int lensmap[WFE_PANEL_MAX];
+      memset(tasks, 0, sizeof tasks);
+      int nt = 0;
+      for (int i = 0; i < nlens; i++)
+      {
+         if (done[i])
+            continue;
+         const char *agent = NULL;
+         if (pinned[i])
+         {
+            if (round > 0)
+               continue; /* pinned does not retry */
+            agent = pin_agent[i];
+         }
+         else
+         {
+            int idx = -1;
+            /* Prefer a UNIQUE agent per lens (the `used` exclusion gives panel
+             * diversity). But when there are fewer eligible review agents than
+             * lenses, insisting on distinctness would leave the surplus lenses
+             * unfilled and needlessly DEGRADE the whole gate. So on exhaustion,
+             * DOWNGRADE: reuse an already-seated agent (drop the exclusion) — the
+             * same model reviews this lens under its own persona prompt. The gate
+             * then degrades only when NO review agent is eligible at all. */
+            int reused = 0;
+            rt_seat_resolve_t rc =
+                rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
+            if (rc == RT_SEAT_RANDOM_EXHAUSTED)
+            {
+               rc = rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
+               reused = 1;
+            }
+            /* rt_resolve_seat_model only sets a valid idx on RT_SEAT_OK; bound-check
+             * defensively anyway before indexing acfg.agents. */
+            if (rc != RT_SEAT_OK || idx < 0 || idx >= acfg.agent_count)
+               continue; /* no eligible review agent at all -> unfilled (gate degrades) */
+            agent = acfg.agents[idx].name;
+            if (reused)
+               /* surface the degraded-diversity composition so operators can see the
+                * panel ran with fewer distinct agents than lenses. */
+               aimee_log(LOG_INFO, "wfe-panel",
+                         "reusing agent '%s' for lens '%s' (fewer eligible review agents "
+                         "than lenses)",
+                         agent, required[i]);
+            else if (nused < MAX_AGENTS)
+               used[nused++] = agent; /* only DISTINCT picks join the diversity set */
+         }
+         tasks[nt].role = "review";
+         tasks[nt].agent = agent;
+         tasks[nt].system_prompt = sysp[i] ? sysp[i] : "";
+         tasks[nt].user_prompt = usrp[i] ? usrp[i] : "";
+         tasks[nt].temperature = 0.2;
+         tasks[nt].max_tokens = AGENT_DEFAULT_MAX_TOKENS;
+         taskagent[nt] = agent;
+         lensmap[nt] = i;
+         nt++;
+      }
+      if (nt == 0)
+         break;
+
+      agent_result_t results[WFE_PANEL_MAX];
+      memset(results, 0, sizeof results);
+      agent_run_parallel(&acfg, tasks, nt, results, WFE_PANEL_DEADLINE_MS);
+      for (int t = 0; t < nt; t++)
+      {
+         int i = lensmap[t];
+         if (results[t].response && results[t].response[0])
+         {
+            wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
+                                          &out[filled]);
+            snprintf(out[filled].model, sizeof out[filled].model, "%s", taskagent[t]);
+            filled++;
+            done[i] = 1;
+         }
+         else if (pinned[i])
+         {
+            /* Reachable at resolve time but its dispatch failed -> still "cannot be
+             * fulfilled" for a pinned model, so fail the run (no substitution). */
+            aimee_log(LOG_WARN, "wfe-panel",
+                      "pinned model '%s' for lens '%s' failed to respond -> fail run", taskagent[t],
+                      required[i]);
+            pinned_dispatch_fail = 1;
+         }
+         free(results[t].response);
+      }
+   }
+
+   run_cmd_set_cwd(NULL);
+
+   /* Read-only enforcement: hard-reset to the pre-panel HEAD + clean untracked. */
+   if (pre_head[0])
+   {
+      const char *reset[] = {"reset", "--hard", pre_head};
+      panel_git(pkt->workdir, reset, 3);
+      const char *clean[] = {"clean", "-fd"};
+      panel_git(pkt->workdir, clean, 2);
+   }
+
+   for (int i = 0; i < nlens; i++)
+   {
+      if (!done[i] && !pinned[i] && !pinned_dispatch_fail)
+         aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for lens '%s' -> degrade",
+                   required[i]);
+      free(sysp[i]);
+      free(usrp[i]);
+   }
+   if (pinned_dispatch_fail)
+      return WFE_PANEL_PINNED_FAIL;
    return filled;
 }
 

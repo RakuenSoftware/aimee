@@ -22,13 +22,13 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (158)
+## CLI-settable keys (176)
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `audit_action_enabled` | bool | — |
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
-| `autonomous` | bool | Run autonomously (auto-advance preauthorized gates) vs interactive. |
+| `autonomous` | bool | Run autonomously (auto-advance machine gates; human gates always park) vs interactive. |
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
 | `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
@@ -92,6 +92,8 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `integrity_enabled` | bool | Enable the integrity gate. |
 | `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
+| `kb_client_bearer_token` | string | — |
+| `kb_client_url` | string | — |
 | `kb_curator_cross_repo_graph_enabled` | bool | — |
 | `kb_curator_custom_stages` | string | — |
 | `kb_curator_detect_contradictions_enabled` | bool | — |
@@ -113,6 +115,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `kb_fusion_static_alpha` | float | Lexical/dense blend weight (0-1) for the static_alpha fusion mode. |
 | `kb_mining_enabled` | bool | Enable background KB mining. |
 | `kb_mining_min_poll_s` | int | Minimum interval (s) between KB mining polls. |
+| `kb_mode` | string | — |
 | `kb_pdf_assets_enabled` | bool | Render structured-PDF figure/table crops to the content-addressed blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm). |
 | `kb_pdf_blob_dir` | string | Override the structured-PDF blob store root (default <kb-config-dir>/kb-blobs). |
 | `kb_pdf_blob_orphan_alarm_mb` | int | Warn when reclaimable orphan blob bytes exceed this many MB (default 1024; <=0 disables the alarm). |
@@ -131,6 +134,21 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `learning_max_commits_per_week` | int | Cap on learning-derived commits per week. |
 | `learning_proposal_ttl_days` | int | TTL (days) for learning proposals. |
 | `learning_router_enabled` | bool | Enable the learning router. |
+| `llm_embed_backend` | string | — |
+| `llm_embed_gpu` | string | — |
+| `llm_embed_host` | string | — |
+| `llm_embed_tier` | string | — |
+| `llm_rerank_backend` | string | — |
+| `llm_rerank_endpoint` | string | — |
+| `llm_rerank_gpu` | string | — |
+| `llm_rerank_host` | string | — |
+| `llm_rerank_tier` | string | — |
+| `llm_synth_backend` | string | — |
+| `llm_synth_endpoint` | string | — |
+| `llm_synth_gpu` | string | — |
+| `llm_synth_host` | string | — |
+| `llm_synth_model` | string | — |
+| `llm_synth_tier` | string | — |
 | `max_iterations` | int | Per-turn iteration cap for interactive chat (default 15). |
 | `max_iterations_delegate` | int | Per-turn iteration cap for delegate sessions (default 25). |
 | `memory_abstain_enabled` | bool | Allow memory recall to abstain on low confidence. |
@@ -185,7 +203,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | — |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `wfe_live_forge_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_docs_enabled`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `llm_embed_backend`, `llm_embed_gpu`, `llm_embed_host`, `llm_embed_tier`, `llm_rerank_backend`, `llm_rerank_endpoint`, `llm_rerank_gpu`, `llm_rerank_host`, `llm_rerank_tier`, `llm_synth_backend`, `llm_synth_endpoint`, `llm_synth_gpu`, `llm_synth_host`, `llm_synth_model`, `llm_synth_tier`, `wfe_live_forge_enabled`
 
 ## Config-file sections (53)
 
@@ -233,7 +251,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`reduce`** — `command_filter`, `compress`, `delegate_seam`, `freeze_guard`, `freeze_guard_horizon`, `gateway_mutate`, `gateway_seam`, `gateway_session_disable_ttl_ms`, `history_fold`, `measure`
 - **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
-- **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
+- **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
 - **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
 - **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
@@ -241,19 +259,19 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `manage`, `review`
 - **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
-- **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `pipeline`, `schedule`, `source`
+- **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
 - **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`
 - **`worktree_gc`** — `enabled`, `max_age_days`
 
-## Other top-level config-file keys (5)
+## Other top-level config-file keys (3)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `kb_client_bearer_token`, `kb_client_url`, `proxy_token`, `toolsets`
+`db2_pool_size`, `proxy_token`, `toolsets`
 
 ## Environment variables
 
-The binaries read 147 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 149 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -408,6 +426,7 @@ The binaries read 147 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
+| `AIMEE_AUTONOMY_PANEL_RETRIES` | Per-(work item, stage) budget for auto-retrying a TRANSIENT roundtable park (`panel_degraded`/`panel_unreachable`) in an autonomous run, one retry per scheduler backstop sweep, before it escalates to a human. Default 6. An explicit `0` disables auto-retry (a degraded panel escalates immediately — the pre-feature behavior, useful during a known provider incident); a malformed/negative value floors to the default so a typo can't silently disable the rail. |
 | `AIMEE_DEFAULT_BRANCH` | Override the target repo's real default branch (its trunk) that a `base:trunk` `branch.open`/`pr.open` resolves to; else read from `git origin/HEAD`. Distinct from `AIMEE_AUTONOMY_BASE` (the aimee integration branch). A final feature PR opens against this branch (open-only, never auto-merged). |
 | `AIMEE_WORKFLOW_BASE` | Base branch for the engine's freeze/diff. |
 | `AIMEE_WORKFLOW_REPO` | Local repository directory the workflow engine operates on. |
@@ -451,7 +470,7 @@ The binaries read 147 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_OCR_URL`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_OCR_URL`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 
@@ -558,7 +577,7 @@ nodes:
 ### Block parameters (`params:`)
 
 - **`gate.roundtable`** — `panel.required` (list of required reviewer personas), `panel.eligible` (list of additional eligible personas), `quorum` (int; effective quorum is `max(2, quorum)` and at least the required-panel size).
-- **`gate.human`** — `policy: preauthorized` (auto-approve in autonomous mode) and/or `optional: true` (skippable). Without these, an autonomous run parks at the gate for a human.
+- **`gate.human`** — parks the run for a human decision. **Inviolable**: never auto-satisfied in autonomous mode, and declaring it auto-satisfiable (`policy: preauthorized` / `optional: true`) is rejected at validation. Cleared only by a human's signed approval via the gate endpoint.
 - Other blocks take no params today; unknown params are ignored by the validator.
 
 ### Custom blocks — `$AIMEE_HOME/workflows/blocks.yaml`

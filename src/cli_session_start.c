@@ -7,6 +7,7 @@
 #include "cli_session_start.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h" /* attn_require_session_worktree, attn_session_isolation_blocked */
+#include "cmd_self_update.h"     /* aimee_self_update_notice */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -373,6 +374,22 @@ static int handle_session_start_remote(const char *sid)
 
    free(endpoint);
    free(bearer);
+
+   /* Thin-client version drift: this client talks 1:1 to the remote server, so
+    * if the server has moved ahead, surface a one-line notice steering the agent
+    * (or user) to `aimee self-update`. Best-effort; never blocks the session. */
+   {
+      char notice[256];
+      if (aimee_self_update_notice(notice, sizeof notice))
+      {
+         ss_add(&ctx, "\n# aimee update available\n");
+         ss_add(&ctx, notice);
+         ss_add(&ctx, "\n");
+      }
+      /* With `update_mode: apply`, catch up automatically (verified, rate-limited,
+       * detached — never blocks this session). No-op in the default notify mode. */
+      aimee_self_update_apply_async();
+   }
 
    /* Local worktree isolation: even though compute is remote, the guard runs on
     * THIS host. Prepare + direct the agent into an isolated worktree so mutating
@@ -746,7 +763,22 @@ int handle_session_start(int json_output)
    free(augmented_hook);
    free(stdin_data);
 
+   /* Prepare + surface the per-session worktree onboarding directive when this
+    * session is running against the SHARED MAIN CLONE (not a managed worktree)
+    * and isolation is enforced. This is the SAME onboarding the remote/thin path
+    * already does (handle_session_start_remote): a co-located session started
+    * outside the launcher (e.g. a raw `claude` in the repo) never went through
+    * launch.run and so was never placed on a worktree — without this its first
+    * edit is blocked by the guard. ss_append_worktree_isolation no-ops when the
+    * session is already isolated (launcher/server-forked) or isolation is off, so
+    * an already-placed session is unaffected. It is computed independently of the
+    * RPC response so the directive is emitted even when the server returns no
+    * brief/recall or the RPC failed. */
+   struct ss_sbuf wt = {0};
+   ss_append_worktree_isolation(&wt, sid);
+
    int exit_code = nonblocking ? 0 : 1;
+   const char *server_out = NULL;
    if (resp)
    {
       cJSON *ec = cJSON_GetObjectItemCaseSensitive(resp, "exit_code");
@@ -755,26 +787,41 @@ int handle_session_start(int json_output)
 
       cJSON *jout = cJSON_GetObjectItemCaseSensitive(resp, "output");
       if (cJSON_IsString(jout) && jout->valuestring[0])
-      {
-         cJSON *out = cJSON_CreateObject();
-         cJSON *hook_out = out ? cJSON_AddObjectToObject(out, "hookSpecificOutput") : NULL;
-         if (hook_out)
-         {
-            cJSON_AddStringToObject(hook_out, "hookEventName", "SessionStart");
-            cJSON_AddStringToObject(hook_out, "additionalContext", jout->valuestring);
-            char *s = cJSON_PrintUnformatted(out);
-            if (s)
-            {
-               fputs(s, stdout);
-               fputc('\n', stdout);
-               free(s);
-            }
-         }
-         else
-            fputs(jout->valuestring, stdout);
-         cJSON_Delete(out);
-      }
+         server_out = jout->valuestring;
+   }
 
+   /* additionalContext = [worktree directive] + [server brief/recall]. Emit the
+    * hookSpecificOutput block whenever either part is present. */
+   if ((wt.p && wt.p[0]) || server_out)
+   {
+      struct ss_sbuf ctx = {0};
+      if (wt.p && wt.p[0])
+         ss_add(&ctx, wt.p);
+      if (server_out)
+         ss_add(&ctx, server_out);
+
+      cJSON *out = cJSON_CreateObject();
+      cJSON *hook_out = out ? cJSON_AddObjectToObject(out, "hookSpecificOutput") : NULL;
+      if (hook_out)
+      {
+         cJSON_AddStringToObject(hook_out, "hookEventName", "SessionStart");
+         cJSON_AddStringToObject(hook_out, "additionalContext", ctx.p ? ctx.p : "");
+         char *s = cJSON_PrintUnformatted(out);
+         if (s)
+         {
+            fputs(s, stdout);
+            fputc('\n', stdout);
+            free(s);
+         }
+      }
+      else if (server_out)
+         fputs(server_out, stdout);
+      cJSON_Delete(out);
+      free(ctx.p);
+   }
+
+   if (resp)
+   {
       cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
       if (cJSON_IsString(msg) && msg->valuestring[0])
          fprintf(stderr, "aimee: %s\n", msg->valuestring);
@@ -783,8 +830,8 @@ int handle_session_start(int json_output)
       {
          cJSON *out = cJSON_CreateObject();
          cJSON_AddNumberToObject(out, "exit_code", exit_code);
-         if (cJSON_IsString(jout) && jout->valuestring[0])
-            cJSON_AddStringToObject(out, "output", jout->valuestring);
+         if (server_out)
+            cJSON_AddStringToObject(out, "output", server_out);
          char *s = cJSON_PrintUnformatted(out);
          if (s)
          {
@@ -800,5 +847,6 @@ int handle_session_start(int json_output)
    {
       fprintf(stderr, "aimee: session-start RPC failed\n");
    }
+   free(wt.p);
    return exit_code;
 }

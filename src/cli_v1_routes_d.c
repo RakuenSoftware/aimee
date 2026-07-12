@@ -652,6 +652,7 @@ static const struct
     {"hooks.post", "POST", "/v1/hooks/post"},
     {"hooks.pre", "POST", "/v1/hooks/pre"},
     {"hooks.session_start", "POST", "/v1/hooks/session_start"},
+    {"hosts.list", "GET", "/v1/hosts"},
     {"hud.status", "GET", "/v1/hud"},
     {"identity.diff", "POST", "/v1/identity/diff"},
     {"identity.show", "GET", "/v1/identity/show"},

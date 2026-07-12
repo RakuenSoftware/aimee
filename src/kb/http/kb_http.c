@@ -1460,7 +1460,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   "{\"error\":\"failed to open knowledge service store\"}");
          return 503;
       }
-      if (pgvec_kb_service_ensure_kb_collection(384) != 0)
+      int kb_embed_dim = db2_embedding_dim();
+      if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)
+         kb_embed_dim = 1024;
+      if (pgvec_kb_service_ensure_kb_collection(kb_embed_dim) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"vector store unavailable\"}");
          return 503;
@@ -1799,7 +1802,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          config_load(&embed_cfg);
          snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
       }
-      if (pgvec_kb_service_ensure_kb_collection(384) != 0)
+      int kb_embed_dim = db2_embedding_dim();
+      if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)
+         kb_embed_dim = 1024;
+      if (pgvec_kb_service_ensure_kb_collection(kb_embed_dim) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"vector store unavailable\"}");
          return 503;

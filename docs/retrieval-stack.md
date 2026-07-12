@@ -23,10 +23,10 @@ scalar score, so its size is a quality choice, not a dimension constraint.)
 
 Two embedding widths ship:
 
-| Tier | Embedder (`embedding_dim`) | Reranker |
+| `AIMEE_LLM_TIER` | Embedder (`embedding_dim`) | Reranker |
 |------|----------------------------|----------|
-| `aimee-kb-cpu` | Qwen3-Embedding-0.6B (`1024`) | ettin-68m |
-| `aimee-kb-gpu-small` / `-gpu-mid` / `-gpu-large` | Qwen3-Embedding-4B (`2560`) | ettin-400m |
+| `cpu` | Qwen3-Embedding-0.6B (`1024`) | ettin-68m |
+| `small` / `mid` / `large` | Qwen3-Embedding-4B (`2560`) | ettin-400m |
 
 The 4B/2560 tier has better recall on large or meaning-heavy corpora; the 0.6B/1024 tier is
 the low-footprint default. The retrieval pipeline (hybrid search, reranking, fusion) is
@@ -34,14 +34,15 @@ identical either way. Only the model sizes differ.
 
 ### Switching tiers
 
-Switch by deploying a different `aimee-kb-*` tier (the `aimee-llm` plugin image) and setting
-the width to match:
+Switch by setting `AIMEE_LLM_TIER` on the `aimee-llm` container (one model-less image; the
+new tier downloads on first boot) and setting the width to match:
 
 ```bash
+AIMEE_LLM_TIER=small       # cpu | small | mid | large
 AIMEE_EMBEDDING_DIM=2560   # or embedding_dim: 2560 in aimee.yaml
 ```
 
-All GPU tiers are 2560-dim, so moving between `gpu-small`, `gpu-mid`, and `gpu-large` needs no re-embed.
+All GPU tiers are 2560-dim, so moving between `small`, `mid`, and `large` needs no re-embed.
 Moving between 1024 and 2560 is a model-identity **and** width change: on an **empty** DB
 just set the dim; on a **populated** one it's a drop-and-rebuild re-embed (the `halfvec`
 columns are sized to `embedding_dim`), which the `kb_meta` drift guard enforces. See
@@ -200,9 +201,10 @@ unchanged, since the dimension has not moved.
 ## Reranking
 
 An optional cross-encoder reranker refines the top-k of a recall before it is
-returned. It is baked into the same tier image and sized to match the embedder: the GPU tiers
-(`aimee-kb-gpu-small` / `-gpu-mid` / `-gpu-large`) bake `cross-encoder/ettin-reranker-400m-v1`; the CPU
-tier bakes ettin-68m. Build-time override: `--build-arg RERANK_REPO=<hf id>`.
+returned. It is served by the same `aimee-llm` container and sized to match the embedder: the
+GPU tiers (`small` / `mid` / `large`) use `cross-encoder/ettin-reranker-400m-v1`; the `cpu`
+tier uses ettin-68m. Each is a pre-converted encoder GGUF + Dense head the container downloads
+on first boot per `AIMEE_LLM_TIER` (published by `publish-rerank-artifacts.yml`).
 
 It is configured independently of the embedder dimension:
 

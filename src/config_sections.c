@@ -1456,6 +1456,9 @@ void config_parse_roundtable_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "turns");
    if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
       snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", item->valuestring);
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "default");
+   if (cJSON_IsString(item) && item->valuestring)
+      snprintf(cfg->roundtable_default, sizeof(cfg->roundtable_default), "%s", item->valuestring);
 
    /* Authoring pipeline (roundtable.pipeline_*). */
    item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_done_bar");

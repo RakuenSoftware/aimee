@@ -1,0 +1,119 @@
+# Convert the ettin rerankers and publish them as GitHub release assets, so the
+# model-less aimee-llm image can `wget` the pre-converted encoder GGUF + Dense head
+# at runtime (the ST score head doesn't survive GGUF conversion, so the gateway
+# applies it — see scripts/aimee_llm_rerank_head.py). This is the ONLY piece of the
+# aimee-llm model set that isn't a plain HF GGUF pull; embed + synth come straight
+# from Hugging Face at container start.
+#
+# AUTOMATED, not a manual prerequisite: the image-publish workflows
+# (publish-llm-testing.yml, publish-images.yml) CALL this as a prerequisite job, so
+# a container image is never published without the rerank release existing. It is
+# IDEMPOTENT — the expensive conversion runs only when the `rerank-artifacts-v1`
+# release is missing an asset (or a dispatch sets force=true); otherwise it detects
+# the complete release and skips in seconds. Bumping the reranker/converter is thus
+# picked up automatically (delete the release, or dispatch with force=true, to
+# re-convert), and every normal CI run just confirms the assets are present.
+#
+# Assets on the `rerank-artifacts-v1` release (names the supervisor depends on —
+# scripts/aimee-llm-supervisor.sh, RERANK_ASSET_BASE):
+#   rerank-ettin-68m.gguf   rerank-ettin-68m.head.npz
+#   rerank-ettin-400m.gguf  rerank-ettin-400m.head.npz
+#   SHA256SUMS
+name: Publish rerank artifacts
+
+on:
+  # Called by the image-publish workflows as a prerequisite (see their `needs`).
+  workflow_call: {}
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-convert and re-upload even if the release already has the assets"
+        type: boolean
+        default: false
+
+concurrency:
+  # Static group (not per-ref) + no cancel: concurrent callers serialize on the
+  # single shared release instead of racing two uploads or cancelling each other.
+  group: publish-rerank-artifacts
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: rerank-artifacts-v1
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Skip the expensive conversion when the release already has every asset
+      # (idempotent). force=true (dispatch only) always re-converts.
+      - name: Check whether the release already has all assets
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          need="rerank-ettin-68m.gguf rerank-ettin-68m.head.npz rerank-ettin-400m.gguf rerank-ettin-400m.head.npz SHA256SUMS"
+          skip=false
+          if [ "${{ github.event.inputs.force }}" != "true" ] \
+             && gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > have.txt 2>/dev/null; then
+            skip=true
+            for a in $need; do grep -qxF "$a" have.txt || skip=false; done
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [ "$skip" = true ]; then
+            echo "release $RELEASE_TAG already has all assets — skipping conversion"
+          else
+            echo "release incomplete or force set — conversion needed"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+
+      # Torch (CPU wheel) + the conversion deps. This mirrors the old Dockerfile
+      # `modelprep` stage exactly — it is the same conversion, just hoisted to CI so
+      # the runtime image needs neither torch nor the converter.
+      - name: Install conversion deps
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --quiet transformers safetensors numpy gguf sentencepiece protobuf huggingface_hub
+
+      # convert_hf_to_gguf.py + gguf-py from a recent llama.cpp (ModernBert supported).
+      - name: Clone llama.cpp (converter)
+        if: steps.check.outputs.skip != 'true'
+        run: git clone --depth 1 https://github.com/ggml-org/llama.cpp /tmp/llama
+
+      # Convert BOTH ettin tiers: encoder -> GGUF (f16) + Dense head -> head.npz.
+      # 68m backs the cpu tier; 400m backs small/mid/large.
+      - name: Convert ettin rerankers
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python scripts/convert_ettin_rerank.py 68m  cross-encoder/ettin-reranker-68m-v1  out /tmp/llama
+          python scripts/convert_ettin_rerank.py 400m cross-encoder/ettin-reranker-400m-v1 out /tmp/llama
+          ( cd out && sha256sum rerank-ettin-*.gguf rerank-ettin-*.head.npz > SHA256SUMS )
+          echo "== artifacts =="; ls -l out; cat out/SHA256SUMS
+
+      # Create the release if it doesn't exist, then upload (clobber to allow re-runs).
+      - name: Publish to the release
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 \
+            || gh release create "$RELEASE_TAG" \
+                 --title "aimee-llm rerank artifacts" \
+                 --notes "Pre-converted ettin reranker encoder GGUFs + Dense heads fetched by aimee-llm at runtime."
+          gh release upload "$RELEASE_TAG" \
+            out/rerank-ettin-68m.gguf out/rerank-ettin-68m.head.npz \
+            out/rerank-ettin-400m.gguf out/rerank-ettin-400m.head.npz \
+            out/SHA256SUMS --clobber
