@@ -116,7 +116,9 @@ int delegate_ephemeral_ws_create(const char *deleg_id, char *out, size_t out_cap
     * only in a git checkout / worktree (cwd_is_git_checkout), so a plain dir would
     * block every edit. `git init` in the leaf via fchdir on the already-opened
     * no-follow fd (no path re-resolution -> no TOCTOU). Best-effort: if git is
-    * missing the workspace still exists, only writes stay guarded. */
+    * missing the workspace still exists, only writes stay guarded.
+    * fd hygiene: anchor/leaf/note (and the child's devnull) are all O_CLOEXEC, so
+    * only the intended dirfd survives into the exec'd git. */
    pid_t pid = fork();
    if (pid < 0)
    {
