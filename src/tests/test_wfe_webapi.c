@@ -277,14 +277,16 @@ int main(void)
    assert(wf_api_events("no-such-item", 0, 200, buf, CAP) == 404);
    assert(wf_api_proposal("no-such-item", buf, CAP) == 404);
 
-   /* --- ownership: a work item submitted by another principal is not readable ---
-    * The test runs with an un-attested (empty) principal, so an item whose submitter
-    * is set is owned by nobody-in-this-context: the per-item reads must 403 (the
-    * IDOR closure). The owner-allowed path + pagination + proposal read-back are
-    * exercised live (a request carrying the matching webuser principal). */
+   /* --- ownership: an INTERACTIVE work item submitted by another principal is not
+    * readable --- The test runs with an un-attested (empty) principal, so an
+    * interactive item whose submitter is set is owned by nobody-in-this-context:
+    * the per-item reads must 403 (the IDOR closure). (Autonomous runs are the
+    * deliberate exception — see the operator-visibility block below.) The
+    * owner-allowed path + pagination + proposal read-back are exercised live (a
+    * request carrying the matching webuser principal). */
    {
       assert(db1_work_item_create("wi_owned", "", "wi_owned.md", "build", "v1", "draft",
-                                  "autonomous") == 0);
+                                  "interactive") == 0);
       assert(db1_work_item_set_submitter("wi_owned", "webuser:someone-else") == 0);
       (void)db1_lifecycle_event_add("wi_owned", "draft", "create", "user", "", "", 0.0);
 
@@ -310,6 +312,36 @@ int main(void)
       assert(strcmp(cJSON_GetObjectItemCaseSensitive(it, "proposal_name")->valuestring,
                     "wi_owned.md") == 0);
       assert(cJSON_HasObjectItem(it, "cum_cost_usd") && cJSON_HasObjectItem(it, "pr_ref"));
+      cJSON_Delete(o);
+   }
+
+   /* --- autonomous / triggered runs are OPERATOR-VISIBLE regardless of submitter ---
+    * A system-initiated run (mode "autonomous": the proposals trigger, cron, or a
+    * dev-submit pipeline) is not a private human proposal, so a dashboard operator
+    * — here the un-attested (non-submitting) principal — can read it AND it appears
+    * in the DEFAULT owner-scoped list. This is what surfaces the autonomous pipeline
+    * in the Workflows tab. Interactive proposals stay owner-scoped (block above). */
+   {
+      assert(db1_work_item_create("wi_auto", "", "wi_auto.md", "build", "v1", "draft",
+                                  "autonomous") == 0);
+      assert(db1_work_item_set_submitter("wi_auto", "webuser:someone-else") == 0);
+      (void)db1_lifecycle_event_add("wi_auto", "draft", "create", "engine", "", "", 0.0);
+
+      /* principal is empty (non-owner), yet the autonomous run is readable... */
+      assert(wf_api_item("wi_auto", buf, CAP) == 200);
+      assert(wf_api_events("wi_auto", 0, 200, buf, CAP) == 200);
+      /* ...and it shows in the default owner-scoped list (the Workflows tab). */
+      assert(wf_api_items(buf, CAP) == 200);
+      cJSON *o = parse_resp(buf);
+      cJSON *items = cJSON_GetObjectItemCaseSensitive(o, "items");
+      int found = 0;
+      for (int i = 0; i < cJSON_GetArraySize(items); i++)
+      {
+         cJSON *it = cJSON_GetArrayItem(items, i);
+         if (strcmp(cJSON_GetObjectItemCaseSensitive(it, "id")->valuestring, "wi_auto") == 0)
+            found = 1;
+      }
+      assert(found);
       cJSON_Delete(o);
    }
 
