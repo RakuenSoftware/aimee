@@ -32,7 +32,9 @@ const PROVIDERS: Record<OAuthProvider, ProviderMeta> = {
       <>
         Create a GitHub OAuth App (
         <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">github.com/settings/developers</a>
-        {' '}→ New OAuth App → enable <b>Device flow</b>), then paste its <b>Client ID</b>.
+        {' '}→ New OAuth App). Set the <b>Authorization callback URL</b> to this server’s{' '}
+        <code>/api/git/oauth/github/callback</code>, then paste the <b>Client ID</b> and a{' '}
+        <b>Client secret</b> for one-click sign-in. (Secret omitted → device-code sign-in instead.)
       </>
     ),
   },
@@ -110,7 +112,11 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
   const [provider, setProvider] = useState<OAuthProvider>('github');
   const [oauthHost, setOauthHost] = useState('');
   const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [configured, setConfigured] = useState(false);
+  // GitHub only: a client secret is set, so the seamless web (redirect) flow is
+  // available — "Sign in with GitHub" goes straight to GitHub, no device code.
+  const [webAvailable, setWebAvailable] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
 
   const meta = PROVIDERS[provider];
@@ -136,6 +142,7 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
   const loadConfig = useCallback(async () => {
     setConfigured(false);
     setClientId('');
+    setWebAvailable(false);
     try {
       const path =
         provider === 'github'
@@ -146,6 +153,7 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
       if (r.ok) {
         setConfigured(!!d.configured);
         setClientId(d.client_id || '');
+        setWebAvailable(provider === 'github' && !!d.web);
       }
     } catch {
       /* leave unconfigured */
@@ -158,6 +166,24 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+
+  // Consume the web-flow callback result (?git=github / ?git_error=…) once, then
+  // strip it from the URL so a reload doesn't re-show it.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has('git') && !q.has('git_error')) return;
+    if (q.get('git') === 'github') {
+      setMsg('GitHub connected.');
+      loadHosts();
+    }
+    const e = q.get('git_error');
+    if (e) setErr(`GitHub sign-in failed: ${e}`);
+    q.delete('git');
+    q.delete('git_error');
+    const qs = q.toString();
+    window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+  }, [loadHosts]);
 
   // Device-flow poll: once a user code is shown, poll the right endpoint until the
   // user authorizes (or it errors).
@@ -202,7 +228,11 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
         provider === 'github'
           ? await api('/api/git/oauth/github/config', {
               method: 'POST',
-              body: JSON.stringify({ client_id: clientId.trim() }),
+              body: JSON.stringify(
+                clientSecret.trim()
+                  ? { client_id: clientId.trim(), client_secret: clientSecret.trim() }
+                  : { client_id: clientId.trim() },
+              ),
             })
           : await api('/api/git/oauth/device/config', {
               method: 'POST',
@@ -210,9 +240,31 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
             });
       const d = await r.json();
       if (!r.ok) setErr(d.error || 'could not save client ID');
-      else await loadConfig();
+      else {
+        setClientSecret(''); // never keep the secret in component state after save
+        await loadConfig();
+      }
     } finally {
       setBusy(false);
+    }
+  }
+
+  // GitHub web (redirect) flow: hand the browser off to GitHub's authorize page.
+  // GitHub sends it back to /api/git/oauth/github/callback, which stores the token
+  // and redirects here with ?git=github.
+  async function startWebSignIn() {
+    setErr('');
+    setMsg('');
+    try {
+      const r = await api('/api/git/oauth/github/web/start', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok || !d.authorize_url) {
+        setErr(d.error || 'GitHub sign-in unavailable');
+        return;
+      }
+      window.location.href = d.authorize_url;
+    } catch {
+      setErr('aimee-server unavailable');
     }
   }
 
@@ -336,11 +388,17 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
           <button
             style={{ ...primaryBtn, background: configured ? '#2c8f56' : '#888', borderColor: configured ? '#2c6' : '#888' }}
             disabled={busy || !!pending || !configured}
-            onClick={startSignIn}
+            onClick={provider === 'github' && webAvailable ? startWebSignIn : startSignIn}
           >
-            Sign in
+            {provider === 'github' && webAvailable ? 'Sign in with GitHub' : 'Sign in'}
           </button>
         </div>
+        {!configured && !pending && (
+          <div style={{ fontSize: 11.5, color: '#a67c00' }}>
+            No {meta.label} sign-in is configured on this server yet — set an OAuth App Client ID
+            below to enable it.
+          </div>
+        )}
         {pending && (
           <div style={{ fontSize: 12.5, color: '#444' }}>
             Go to <a href={pending.uri} target="_blank" rel="noreferrer">{pending.uri}</a> and enter{' '}
@@ -357,6 +415,11 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <input style={{ ...input, flex: 1, minWidth: 200 }} placeholder={`${meta.label} OAuth App Client ID`}
                 value={clientId} onChange={(e) => setClientId(e.target.value)} />
+              {provider === 'github' && (
+                <input style={{ ...input, flex: 1, minWidth: 200 }} type="password" autoComplete="off"
+                  placeholder="Client secret (optional — enables one-click)"
+                  value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+              )}
               <button style={ghostBtn} disabled={busy || !clientId.trim() || (meta.needsHost && !effHost)}
                 onClick={saveConfig}>Save</button>
             </div>

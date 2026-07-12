@@ -1,0 +1,94 @@
+# Managed sibling services for the server-orchestrated deploy.
+#
+# aimee-server launches THIS file with `docker compose -f … up -d` (via the
+# mounted host Docker socket) when the setup wizard finishes — see
+# src/server/deploy_apply.c and compose.server-managed.yaml. It is NOT run by an
+# operator directly; the server picks the services with COMPOSE_PROFILES, which
+# `aimee config deploy-env` derives from the wizard's page-2 config:
+#
+#   local kb, LLM external/off  -> COMPOSE_PROFILES=kb       -> postgres + aimee-kb
+#   local kb, a role local      -> COMPOSE_PROFILES=kb,llm   -> + aimee-llm
+#   remote kb                   -> COMPOSE_PROFILES=          -> nothing (server connects out)
+#
+# Every service joins the EXTERNAL `aimee` network that aimee-server is also on, so
+# the server reaches them by name (aimee-kb:8741, aimee-llm:8080, postgres:5432).
+# That network is created by compose.server-managed.yaml.
+
+networks:
+  aimee:
+    external: true
+    name: aimee
+
+services:
+  postgres:
+    profiles: ["kb"]
+    restart: unless-stopped
+    image: pgvector/pgvector:pg16
+    networks: [aimee]
+    environment:
+      POSTGRES_DB: aimee_shared
+      POSTGRES_USER: aimee
+      POSTGRES_PASSWORD: aimee
+    volumes:
+      - aimee-managed-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  aimee-kb:
+    profiles: ["kb"]
+    restart: unless-stopped
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    networks: [aimee]
+    # The kb's worker threads need a 64 MB stack (the 8 MB default SIGSEGVs on real
+    # kb queries). Matches systemd's LimitSTACK=67108864.
+    ulimits:
+      stack: 67108864
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # embed + rerank + synth via the unified aimee-llm container (the kb runs no
+      # model). When no role is local (llm profile off) the operator points this at
+      # an external endpoint; the kb fail-opens on embedding if it is unreachable.
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+    command: ["--http-port=8741"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - aimee-managed-kb-home:/var/lib/aimee
+
+  aimee-llm:
+    profiles: ["llm"]
+    restart: unless-stopped
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+    networks: [aimee]
+    environment:
+      AIMEE_LLM_PORT: "8080"
+      # CPU by default; GPU = AIMEE_LLM_TIER=small|mid|large + AIMEE_LLM_NGL=99 +
+      # /dev/dri (deploy/compose/aimee.gpu.yaml). Models download on first boot.
+      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
+      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+    volumes:
+      - aimee-managed-llm-models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Cold first boot downloads the tier's GGUFs before /health is OK.
+      start_period: 1200s
+
+volumes:
+  aimee-managed-postgres:
+  aimee-managed-kb-home:
+  aimee-managed-llm-models:

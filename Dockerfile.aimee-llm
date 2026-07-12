@@ -44,9 +44,9 @@ ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PA
 COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
 COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
 # Create /models as a REAL directory (not just a VOLUME mountpoint): a bare
-# `VOLUME /models` on an otherwise-empty path leaves no directory layer, so a
-# downstream `COPY --from=aimee-llm /models/` (the combined image bundles this
-# runtime) fails with "/models: not found". The explicit mkdir gives it a layer.
+# `VOLUME /models` on an otherwise-empty path leaves no directory layer, so any
+# downstream `COPY --from=aimee-llm /models/` fails with "/models: not found".
+# The explicit mkdir gives it a layer.
 RUN chmod +x /opt/aimee/supervisor.sh && mkdir -p /models
 
 # Persistent model cache: the supervisor downloads the tier's GGUFs here on first

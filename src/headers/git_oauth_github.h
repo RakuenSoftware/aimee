@@ -5,10 +5,12 @@
 
 /* git_oauth_github — "Sign in with GitHub" via the OAuth device flow, to populate
  * the github.com entry of the per-host credential store (git_host_cred) without
- * the user creating a PAT by hand. Requires AIMEE_GITHUB_OAUTH_CLIENT_ID (a
- * registered GitHub OAuth App with device flow enabled — the client_id is public,
- * no secret needed for device flow). Other providers (Gitea/GitLab/...) use the
- * token field instead. */
+ * the user creating a PAT by hand. Uses a GitHub OAuth App with device flow
+ * enabled (the client_id is public, no secret needed): resolved from the UI-set
+ * value, else AIMEE_GITHUB_OAUTH_CLIENT_ID, else the built-in default baked into
+ * the build (oauth_defaults.h) so a distribution can ship one and every deployment
+ * signs in with no setup. Other providers (Gitea/GitLab/...) use the token field
+ * or the generic device flow (git_oauth_device). */
 
 /* 1 iff a client ID is configured (stored from the UI, or the env) — flow usable. */
 int git_oauth_github_available(void);
@@ -31,5 +33,32 @@ int git_oauth_github_start(const char *principal, char *user_code, size_t uc_len
 /* Poll for completion. Returns 1 (done — token stored as host:github.com), 0
  * (still pending), or -1 (error/expired, err filled). */
 int git_oauth_github_poll(const char *principal, char *err, size_t errlen);
+
+/* ── Web (authorization-code) flow ──────────────────────────────────────────
+ * The seamless "click → GitHub authorize → back, logged in" flow. Unlike the
+ * device flow it needs a client SECRET (so it cannot ship in a public image; set
+ * it per deployment via the vault or AIMEE_GITHUB_OAUTH_CLIENT_SECRET). When a
+ * secret is present the UI uses this flow; otherwise it falls back to the device
+ * flow above. */
+
+/* 1 iff the web flow is usable (both a client ID and a client secret configured). */
+int git_oauth_github_web_available(void);
+
+/* Store the GitHub OAuth App client SECRET (write-only; sealed in the server
+ * vault). Returns 0 on success, -1 on error. */
+int git_oauth_github_set_client_secret(const char *client_secret);
+
+/* Begin the web flow: stash a CSRF `state` bound to `principal` + `redirect_uri`
+ * and write the GitHub authorize URL to out_url (the browser is sent there).
+ * `redirect_uri` must match the OAuth App's registered callback URL. Returns 0, or
+ * -1 with err. */
+int git_oauth_github_web_start(const char *principal, const char *redirect_uri, char *out_url,
+                               size_t url_len, char *err, size_t errlen);
+
+/* Complete the web flow: validate `state` for `principal`, exchange `code` (+ the
+ * client secret + the stashed redirect_uri) for an access token, and store it as
+ * the github.com credential. Returns 0 (done, token stored) or -1 (err filled). */
+int git_oauth_github_web_callback(const char *principal, const char *code, const char *state,
+                                  char *err, size_t errlen);
 
 #endif /* GIT_OAUTH_GITHUB_H */

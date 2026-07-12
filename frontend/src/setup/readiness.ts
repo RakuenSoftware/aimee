@@ -93,11 +93,15 @@ export function computeReadiness(
           ok: embConfigured,
           detail: embConfigured ? 'embedder configured' : 'built-in hash fallback (test-only)',
         },
+    // A local KB always has a Postgres store: the deploy stack spawns a bundled
+    // one automatically (blank db2_url), or the operator points at an existing
+    // database (db2_url set). Either way the step is satisfied — spawning your own
+    // KB never requires a URL.
     db2: remote
       ? { ok: true, detail: 'n/a (remote KB)' }
       : {
-          ok: db2 !== '',
-          detail: db2 !== '' ? 'shared store configured' : 'no DB2 URL set',
+          ok: true,
+          detail: db2 !== '' ? 'existing database' : 'bundled Postgres',
         },
     connection: {
       ok: hostsConnected > 0,

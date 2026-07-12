@@ -1,6 +1,6 @@
 # Build the unified aimee-llm container on `testing` and publish it under the
 # DELIBERATELY non-semver `:testing` tag (+ `:testing-<sha>`), mirroring how
-# publish-testing.yml ships aimee-server-kb. This lets .254 (the GPU deploy
+# publish-testing.yml ships aimee-server + aimee-kb. This lets .254 (the GPU deploy
 # target) pull a tested-but-unreleased aimee-llm image WITHOUT promoting to main;
 # versioned + `:latest` publishing stays owned by main (auto-release.yml ->
 # publish-images.yml).

@@ -3,7 +3,7 @@
 # e2e-matrix.sh — run the aimee deploy-matrix E2E
 # (docs/proposals/pending/aimee-e2e-deploy-matrix.md) and print one pass/fail
 # table. Runs ON the host it is invoked on: on a Docker host it can run the
-# container topologies (T1-T4); on a Linux box with the build deps it can run the
+# container topologies (T1-T3); on a Linux box with the build deps it can run the
 # local topologies (T5-T6). For the pve runs, invoke this INSIDE CT 101
 # (ssh root@192.168.1.253 -> pct exec 101).
 #
@@ -11,14 +11,13 @@
 #   T1  Docker kb-only                 (compose.yaml)
 #   T2  Docker server + kb split       (compose.server.yaml)
 #   T3  Docker server standalone       (compose.server-standalone.yaml)
-#   T4  Docker combined server+kb      (compose.combined.yaml)        [new image]
 #   T5  Local full stack               (scratch server + local kb)    [Linux only]
 #   T6  Local server + Docker kb hybrid (scratch server -> :8741)     [Linux only]
 #   PC  Thin-client smoke              (against the T2 server URL)
 #
 # Usage:
 #   scripts/e2e-matrix.sh                      # everything runnable on this host
-#   scripts/e2e-matrix.sh --only T1,T4         # a subset
+#   scripts/e2e-matrix.sh --only T1,T3         # a subset
 #   scripts/e2e-matrix.sh --only T6 --kb-url http://localhost:8741
 #
 # Flags:
@@ -39,7 +38,7 @@ cd "$(dirname "$0")/.."
 SCRIPTS="$(pwd)/scripts"
 ROOT="$(pwd)"
 
-ONLY="T1,T2,T3,T4,T5,T6,PC"
+ONLY="T1,T2,T3,T5,T6,PC"
 KB_URL=""
 DOWN="--down"
 PORT_OFFSET=0
@@ -66,8 +65,8 @@ export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-2560}"
 # Unified-llm topologies (T1 kb-only, T2 server+kb) now embed/rerank/synth against
 # the `aimee-llm` container instead of the torch `embedder`. CI builds the tiny
 # STUB image (no llama.cpp / GGUFs) and runs it in stub mode at the same dim, so
-# the kb -> gateway contract is exercised cheaply. (T4 combined still uses the
-# embedder stub above; T3 standalone has no embedder.) compose reads these via ${...}.
+# the kb -> gateway contract is exercised cheaply. (T3 standalone has no embedder.)
+# compose reads these via ${...}.
 export AIMEE_LLM_STUB="${AIMEE_LLM_STUB:-1}"
 export AIMEE_LLM_STUB_DIM="${AIMEE_LLM_STUB_DIM:-2560}"
 export AIMEE_LLM_DOCKERFILE="${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm-stub}"
@@ -149,22 +148,6 @@ run_docker_topology() {
 run_docker_topology T1 "Docker kb-only"            aimee-kb-docker-smoke.sh                compose.yaml                     "aimee-kb=${KB_PORT}:8741"
 run_docker_topology T2 "Docker server+kb split"    aimee-server-docker-smoke.sh            compose.server.yaml              "aimee-server=${SERVER_PORT}:8743" "aimee-kb=${KB_PORT}:8741"
 run_docker_topology T3 "Docker server standalone"  aimee-server-standalone-docker-smoke.sh compose.server-standalone.yaml   "aimee-server=${SERVER_PORT}:8743"
-
-# T4 combined is now server+kb ONLY (the LLM is no longer bundled); it reaches the
-# separate, profile-gated `aimee-llm` service in compose.combined.yaml. In prod that
-# is the published aimee-llm image; in CI there is no freshly-published tag, so build
-# the model-less image locally (llama binary + gateway, no GGUFs — fast) and point the
-# service at it. It runs in STUB mode (AIMEE_LLM_STUB=1, exported above) — deterministic
-# responses, no model download — and COMPOSE_PROFILES=llm (above) brings it up.
-if selected T4 && have_docker; then
-  bold "==> Building local aimee-llm image for the T4 aimee-llm service"
-  if docker build -f "$ROOT/Dockerfile.aimee-llm" -t aimee-llm-local:e2e "$ROOT"; then
-    export AIMEE_LLM_IMAGE="aimee-llm-local:e2e"
-  else
-    bold "==> WARNING: local aimee-llm build failed; T4 will fall back to the default AIMEE_LLM_IMAGE"
-  fi
-fi
-run_docker_topology T4 "Docker combined server+kb" aimee-combined-docker-smoke.sh          compose.combined.yaml            "aimee-server-kb=${SERVER_PORT}:8743,${KB_PORT}:8741"
 
 # --- Local topologies (Linux only) ----------------------------------------
 if selected T5; then

@@ -47,30 +47,29 @@
 #include <stdatomic.h>
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
-#include "git_forge_vault.h"  /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
-#include "git_host_cred.h"    /* per-host git credential store for /v1/git/credentials */
-#include "git_oauth_github.h" /* GitHub device-flow sign-in (/v1/git/oauth/github) */
-#include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
-#include "vault_service.h"    /* vault_service_set/delete for the per-webuser ssh-key route */
-#include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
-#include "git_org_repos.h"    /* git_org_repos_list for /v1/workspace/org-repos */
-#include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
-#include "webchat_live.h"     /* db1_webchat_live_get — the browser's live-turn poll */
-#include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
-#include "aimee_home.h"       /* aimee_home — proposal artifact dir for /v1/dev/submit */
-#include <math.h>             /* isfinite — validate the /v1/dev/submit budget cap */
-#include <errno.h>            /* strtol overflow detection for /v1/dev/submit caps */
-#include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
-#include "json_fluent.h"      /* jo_cstr — parse the CI-event webhook body */
-#include <openssl/hmac.h>     /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
-#include "router_advise.h"    /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"     /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"        /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>         /* mkdir for the proposal artifact dir */
-#include <time.h>             /* unique proposal artifact filename */
+#include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
+#include "git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
+#include "git_ops.h"         /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
+#include "git_project.h"     /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
+#include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "webchat_live.h"    /* db1_webchat_live_get — the browser's live-turn poll */
+#include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
+#include "aimee_home.h"      /* aimee_home — proposal artifact dir for /v1/dev/submit */
+#include <math.h>            /* isfinite — validate the /v1/dev/submit budget cap */
+#include <errno.h>           /* strtol overflow detection for /v1/dev/submit caps */
+#include "wfe_engine.h"      /* wfe_work_item_create — POST /v1/dev/submit intake */
+#include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
+#include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
+#include "router_advise.h"   /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h"   /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"    /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"       /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>        /* mkdir for the proposal artifact dir */
+#include <time.h>            /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -1696,99 +1695,6 @@ static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
               : err_json(resp, cap, 500, "too large");
 }
 
-/* POST /v1/git/oauth/github/start — begin GitHub device-flow sign-in. Returns
- * {ok, user_code, verification_uri, interval}; 503 if not configured. */
-static int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
-   if (!git_oauth_github_available())
-      return err_json(resp, cap, 503, "GitHub sign-in is not configured");
-
-   char user_code[64], verify_uri[256], err[256];
-   int interval = 5;
-   if (git_oauth_github_start(principal, user_code, sizeof(user_code), verify_uri,
-                              sizeof(verify_uri), &interval, err, sizeof(err)) != 0)
-      return err_json(resp, cap, 502, err[0] ? err : "GitHub sign-in failed to start");
-
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddBoolToObject(out, "ok", 1);
-   cJSON_AddStringToObject(out, "user_code", user_code);
-   cJSON_AddStringToObject(out, "verification_uri", verify_uri);
-   cJSON_AddNumberToObject(out, "interval", interval);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* POST /v1/git/oauth/github/poll — poll device-flow completion. Returns
- * {status: "pending"|"done"|"error", error?}. On done the token is stored. */
-static int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
-
-   char err[256] = "";
-   int rc = git_oauth_github_poll(principal, err, sizeof(err));
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddStringToObject(out, "status", rc == 1 ? "done" : rc == 0 ? "pending" : "error");
-   if (rc < 0 && err[0])
-      cJSON_AddStringToObject(out, "error", err);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* GET/POST /v1/git/oauth/github/config — read or set the GitHub OAuth App client
- * ID from the UI (public; persisted server-side), so the "Sign in with GitHub"
- * button can be configured without touching env vars. */
-static int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
-
-   if (strcmp(rq->method, "POST") == 0)
-   {
-      cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-      const cJSON *jid = body ? cJSON_GetObjectItemCaseSensitive(body, "client_id") : NULL;
-      const char *id = (cJSON_IsString(jid) && jid->valuestring) ? jid->valuestring : NULL;
-      int rc = (id && id[0]) ? git_oauth_github_set_client_id(id) : -1;
-      cJSON_Delete(body);
-      if (rc != 0)
-         return err_json(resp, cap, 400, "client_id required");
-      return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
-                 ? 200
-                 : err_json(resp, cap, 500, "too large");
-   }
-
-   /* GET → report whether configured (the client ID is public, so return it). */
-   char id[256];
-   int have = git_oauth_github_get_client_id(id, sizeof(id));
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddBoolToObject(out, "configured", have);
-   cJSON_AddStringToObject(out, "client_id", have ? id : "");
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -2357,6 +2263,10 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_github_config},
     {"POST", "/v1/git/oauth/github/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_github_config},
+    {"POST", "/v1/git/oauth/github/web/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_web_start},
+    {"POST", "/v1/git/oauth/github/web/callback", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_web_callback},
     {"POST", "/v1/git/oauth/device/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_device_start},
     {"POST", "/v1/git/oauth/device/poll", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
@@ -2365,6 +2275,8 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_device_config},
     {"POST", "/v1/git/oauth/device/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_device_config},
+    {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
+    {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

@@ -220,9 +220,20 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/git/oauth/github/start", s.requireAuth(s.handleGitOauthGithubStart))
 	mux.HandleFunc("/api/git/oauth/github/poll", s.requireAuth(s.handleGitOauthGithubPoll))
 	mux.HandleFunc("/api/git/oauth/github/config", s.requireAuth(s.handleGitOauthGithubConfig))
+	mux.HandleFunc("/api/git/oauth/github/web/start", s.requireAuth(s.handleGitOauthGithubWebStart))
+	// PUBLIC: GitHub's cross-site redirect lands here (SameSite=Strict cookie not
+	// sent), so it serves a bounce page that same-origin-POSTs to the authenticated
+	// exchange below (where the cookie IS sent).
+	mux.HandleFunc("/api/git/oauth/github/callback", s.handleGitOauthGithubCallback)
+	mux.HandleFunc("/api/git/oauth/github/web/callback", s.requireAuth(s.handleGitOauthGithubWebCallback))
 	mux.HandleFunc("/api/git/oauth/device/start", s.requireAuth(s.handleGitOauthDeviceStart))
 	mux.HandleFunc("/api/git/oauth/device/poll", s.requireAuth(s.handleGitOauthDevicePoll))
 	mux.HandleFunc("/api/git/oauth/device/config", s.requireAuth(s.handleGitOauthDeviceConfig))
+
+	// Server-orchestrated container deploy (setup wizard → docker compose up).
+	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
+	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
+	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))
 
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
