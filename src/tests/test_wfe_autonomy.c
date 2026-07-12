@@ -89,6 +89,8 @@ static int g_stub_return_unreachable;
 static int stub_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
+   /* The verdict set is sized from `required` (the lenses), not the eligible-agent
+    * pool, so the mock ignores eligible/nelig — matches how the gate scores. */
    (void)eligible;
    (void)nelig;
    if (!pkt)
@@ -343,7 +345,11 @@ int main(void)
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(g_stub_panel_calls == 3);
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strncmp(wi.pause_reason, "panel_", 6) != 0); /* no longer a transient park */
+      /* Recovered: not parked for ANY reason, and advanced OFF the roundtable gate
+       * (a stronger check than "not a panel_ reason" — that also passed for an
+       * unrelated runaway park like turn_cap_exceeded). */
+      assert(wi.pause_reason[0] == '\0');
+      assert(strcmp(wi.current_stage, "gate") != 0);
 
       unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
       wfe_set_panel_provider(NULL);
@@ -455,9 +461,11 @@ int main(void)
       wfe_set_panel_provider(NULL);
    }
 
-   /* A14: a malformed AIMEE_AUTONOMY_PANEL_RETRIES falls back to the default cap
-    * (retry stays ENABLED — a typo must not silently disable the rail like 0
-    * does, nor crash the parser). */
+   /* A14: a malformed AIMEE_AUTONOMY_PANEL_RETRIES falls back to the DEFAULT cap —
+    * retry stays enabled (a typo must not silently disable the rail like 0 does,
+    * nor crash the parser) AND is still bounded at the default. Driving enough
+    * sweeps pins the default EXACTLY: initial convene + default retries, no more —
+    * distinguishing it from a silent collapse to 1 or an uncapped loop. */
    {
       g_stub_panel_calls = 0;
       g_stub_degrade_calls = ALWAYS_DEGRADE;
@@ -467,9 +475,12 @@ int main(void)
 
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("rta", "a14", "a14", "autonomous", id, err, sizeof err) == 0);
-      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* initial park */
-      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* retry #1: default cap, NOT disabled */
-      assert(g_stub_panel_calls == 2); /* malformed -> default -> a retry still happens */
+      for (int k = 0; k < WFE_AUTONOMY_PANEL_RETRY_CAP_DEFAULT + 3; k++)
+         assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(g_stub_panel_calls == WFE_AUTONOMY_PANEL_RETRY_CAP_DEFAULT + 1);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
 
       unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
       wfe_set_panel_provider(NULL);
