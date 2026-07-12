@@ -220,6 +220,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/git/oauth/github/start", s.requireAuth(s.handleGitOauthGithubStart))
 	mux.HandleFunc("/api/git/oauth/github/poll", s.requireAuth(s.handleGitOauthGithubPoll))
 	mux.HandleFunc("/api/git/oauth/github/config", s.requireAuth(s.handleGitOauthGithubConfig))
+	mux.HandleFunc("/api/git/oauth/device/start", s.requireAuth(s.handleGitOauthDeviceStart))
+	mux.HandleFunc("/api/git/oauth/device/poll", s.requireAuth(s.handleGitOauthDevicePoll))
+	mux.HandleFunc("/api/git/oauth/device/config", s.requireAuth(s.handleGitOauthDeviceConfig))
 
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))

@@ -176,6 +176,74 @@ func (s *server) handleGitOauthGithubPoll(w http.ResponseWriter, r *http.Request
 	s.gitOAuthRelay(w, st, data, err)
 }
 
+// /api/git/oauth/device/config — read (GET ?provider=&host=) or set (POST
+// {provider, host?, client_id}) a GitLab/Gitea OAuth App client ID.
+func (s *server) handleGitOauthDeviceConfig(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	user := currentUser(r)
+	switch r.Method {
+	case http.MethodGet:
+		provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+		host := strings.TrimSpace(r.URL.Query().Get("host"))
+		if provider == "" {
+			writeJSONError(w, http.StatusBadRequest, "provider required")
+			return
+		}
+		path := "/v1/git/oauth/device/config?provider=" + url.QueryEscape(provider) +
+			"&host=" + url.QueryEscape(host)
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodGet, path, nil)
+		s.gitOAuthRelay(w, st, data, err)
+	case http.MethodPost:
+		var req struct {
+			Provider string `json:"provider"`
+			Host     string `json:"host"`
+			ClientID string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Provider == "" || req.ClientID == "" {
+			writeJSONError(w, http.StatusBadRequest, "provider and client_id required")
+			return
+		}
+		body, _ := json.Marshal(req)
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/git/oauth/device/config", body)
+		s.gitOAuthRelay(w, st, data, err)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// POST /api/git/oauth/device/start {provider, host?} — begin a GitLab/Gitea device flow.
+func (s *server) handleGitOauthDeviceStart(w http.ResponseWriter, r *http.Request) {
+	s.forwardDeviceOAuth(w, r, "/v1/git/oauth/device/start")
+}
+
+// POST /api/git/oauth/device/poll {provider, host?} — poll device-flow completion.
+func (s *server) handleGitOauthDevicePoll(w http.ResponseWriter, r *http.Request) {
+	s.forwardDeviceOAuth(w, r, "/v1/git/oauth/device/poll")
+}
+
+// forwardDeviceOAuth relays a {provider, host?} POST to an aimee-server device
+// oauth route with the webuser identity.
+func (s *server) forwardDeviceOAuth(w http.ResponseWriter, r *http.Request, path string) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Provider string `json:"provider"`
+		Host     string `json:"host"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Provider == "" {
+		writeJSONError(w, http.StatusBadRequest, "provider required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	body, _ := json.Marshal(req)
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, path, body)
+	s.gitOAuthRelay(w, st, data, err)
+}
+
 // /api/git/credentials — manage aimee-server's per-host git access tokens
 // (GET list hosts, POST {host, token} set, DELETE {host} remove). Tokens are
 // write-only: listing returns host names only, never secrets.
