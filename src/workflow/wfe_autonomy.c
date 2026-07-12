@@ -45,6 +45,33 @@ static long wfe_env_long(const char *name, long def)
    return n;
 }
 
+/* A roundtable panel that could not be composed (panel_degraded) or reached
+ * (panel_unreachable) is TRANSIENT provider flakiness, not a human decision:
+ * these two pause reasons are auto-retried by the autonomy driver. */
+static int autonomy_pause_is_transient(const char *reason)
+{
+   return strcmp(reason, "panel_degraded") == 0 || strcmp(reason, "panel_unreachable") == 0;
+}
+
+/* Count how many times this run has already auto-retried a transient roundtable
+ * park at `stage` — one "panel_retry" audit event is written per retry. Bounds
+ * the retry budget so a persistently-degraded panel eventually escalates to a
+ * human instead of retrying forever. Returns the count; on a read failure it
+ * returns 0 (fail toward retrying — a transient DB fault must not permanently
+ * strand an otherwise-healthy run), with the cumulative turn cap as the ultimate
+ * runaway backstop. */
+static int autonomy_panel_retries_used(const char *work_item_id, const char *stage)
+{
+   db1_lifecycle_event_t *evs = NULL;
+   int n = db1_lifecycle_event_list(work_item_id, &evs);
+   int used = 0;
+   for (int i = 0; i < n; i++)
+      if (strcmp(evs[i].kind, "panel_retry") == 0 && strcmp(evs[i].stage, stage) == 0)
+         used++;
+   free(evs);
+   return used;
+}
+
 /* Park an active, not-yet-parked autonomous work item at a runaway-backstop cap
  * and audit the reason. `reason` is the accurate pause token for the breach that
  * fired (turn_cap_exceeded / wall_cap_exceeded — NOT the dollar cost cap, which
@@ -111,13 +138,37 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
     * is unresolvable / has no executor); an item parked 'operator_paused' was
     * deliberately halted by an operator. Skip both so the backstop sweep doesn't
     * re-attempt an advance every cycle; a human resume clears the pause and lets
-    * the next sweep retry. */
+    * the next sweep retry.
+    *
+    * A transient roundtable park (panel_degraded / panel_unreachable), by
+    * contrast, reflects momentary provider flakiness — reviewers that were DOWN
+    * or unreachable when the panel convened — NOT a human decision. Auto-retry it
+    * a bounded number of times (one attempt per backstop sweep = natural
+    * backoff): clear the pause here so the advance loop below re-runs the
+    * roundtable node, and let a recovered panel self-heal. Only once the retry
+    * budget is spent does it stay parked to escalate to a human. Without this an
+    * autonomous run dead-ends forever on a momentary degradation, which is
+    * exactly the opposite of what a panel "fail-closed" should mean for autonomy. */
    {
       db1_work_item_t wi0;
-      if (db1_work_item_get(work_item_id, &wi0) == 1 &&
-          (strcmp(wi0.pause_reason, "stuck") == 0 ||
-           strcmp(wi0.pause_reason, "operator_paused") == 0))
-         return 0;
+      if (db1_work_item_get(work_item_id, &wi0) == 1 && wi0.pause_reason[0])
+      {
+         if (strcmp(wi0.pause_reason, "stuck") == 0 ||
+             strcmp(wi0.pause_reason, "operator_paused") == 0)
+            return 0;
+         if (autonomy_pause_is_transient(wi0.pause_reason))
+         {
+            long cap = wfe_env_long("AIMEE_AUTONOMY_PANEL_RETRIES", 6);
+            if (autonomy_panel_retries_used(work_item_id, wi0.current_stage) >= cap)
+               return 0; /* budget spent: stay parked for a human resume */
+            db1_lifecycle_event_add(work_item_id, wi0.current_stage, "panel_retry", "engine",
+                                    wi0.pause_reason, "", 0);
+            if (db1_work_item_clear_pause(work_item_id) != 0)
+               return 0; /* could not clear the pause -> leave it, retry next sweep */
+            /* pause cleared -> fall through to the advance loop, which re-runs the
+             * parked roundtable node for a fresh panel. */
+         }
+      }
    }
 
    for (int i = 0; i < 10000; i++)
