@@ -75,6 +75,44 @@ int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
    return 0;
 }
 
+/* A mock panel provider for the auto-retry tests. It DEGRADES its first
+ * g_stub_degrade_calls convenings (returning 0 verdicts so a required persona is
+ * unfilled -> the gate scores DEGRADED -> panel_degraded; or WFE_PANEL_UNREACHABLE
+ * when g_stub_return_unreachable is set), then APPROVES: one APPROVE verdict per
+ * required persona, echoing the packet's artifact_hash so the gate's hash-identity
+ * check passes. g_stub_panel_calls counts convenings — the retry tests assert on
+ * it to prove that clearing the pause actually RE-RUNS the roundtable node. */
+#define ALWAYS_DEGRADE 1000 /* g_stub_degrade_calls sentinel: degrade every convening */
+static int g_stub_panel_calls;
+static int g_stub_degrade_calls; /* degrade the first N convenings (ALWAYS_DEGRADE = every one) */
+static int g_stub_return_unreachable;
+static int stub_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
+                      const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
+{
+   /* The verdict set is sized from `required` (the lenses), not the eligible-agent
+    * pool, so the mock ignores eligible/nelig — matches how the gate scores. */
+   (void)eligible;
+   (void)nelig;
+   if (!pkt)
+      return 0; /* defensive: the real seam never passes NULL, fail closed to DEGRADED */
+   g_stub_panel_calls++;
+   if (g_stub_panel_calls <= g_stub_degrade_calls)
+      return g_stub_return_unreachable ? WFE_PANEL_UNREACHABLE : 0;
+   int n = 0;
+   for (int i = 0; i < nreq && n < max; i++)
+   {
+      wfe_verdict_t *v = &out[n++];
+      memset(v, 0, sizeof *v);
+      snprintf(v->persona, sizeof v->persona, "%s", required[i]);
+      v->schema_version = WFE_VERDICT_SCHEMA;
+      snprintf(v->reviewed_content_hash, sizeof v->reviewed_content_hash, "%s",
+               pkt->artifact_hash ? pkt->artifact_hash : "");
+      v->kind = WFE_V_APPROVE;
+      v->high_sev_blockers = 0;
+   }
+   return n;
+}
+
 static void write_wf(const char *dir, const char *name, const char *body)
 {
    char p[256];
@@ -277,6 +315,218 @@ int main(void)
       /* empty / NULL pr_ref is a bad arg */
       assert(db1_work_item_id_by_pr_ref("", got, sizeof got) == -1);
       assert(db1_work_item_id_by_pr_ref(NULL, got, sizeof got) == -1);
+   }
+
+   /* A10: a TRANSIENT roundtable park (panel_degraded) is AUTO-RETRIED by the
+    * autonomy driver — clearing the pause re-runs the roundtable node — and a
+    * recovered panel self-heals PAST the gate instead of dead-ending forever. */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = 2; /* degrade convenings 1-2, approve #3 */
+      g_stub_return_unreachable = 0;
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "5", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a10", "a10", "autonomous", id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      /* run 1: initial convene -> degraded -> parks panel_degraded (no retry yet). */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+      assert(g_stub_panel_calls == 1);
+      /* run 2: retry #1 -> convene #2 -> still degraded -> re-parks. */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+      assert(g_stub_panel_calls == 2);
+      /* run 3: retry #2 -> convene #3 -> APPROVE -> advances past the gate. The
+       * convene count reaching 3 proves the pause-clear actually RE-RAN the node. */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(g_stub_panel_calls == 3);
+      assert(db1_work_item_get(id, &wi) == 1);
+      /* Recovered: not parked for ANY reason, and advanced OFF the roundtable gate
+       * (a stronger check than "not a panel_ reason" — that also passed for an
+       * unrelated runaway park like turn_cap_exceeded). */
+      assert(wi.pause_reason[0] == '\0');
+      assert(strcmp(wi.current_stage, "gate") != 0);
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A11: a persistently-degraded panel is retried only up to the cap, then stays
+    * parked to escalate to a human — exactly `cap` panel_retry events are recorded
+    * (per (work item, stage)), and no further convenings happen once spent. */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = ALWAYS_DEGRADE; /* always degrade */
+      g_stub_return_unreachable = 0;
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "2", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a11", "a11", "autonomous", id, err, sizeof err) == 0);
+      for (int k = 0; k < 5; k++) /* 1 initial + 2 retries convene; the rest early-out */
+         assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+      /* the retry key is stable: every degraded re-park lands on the same node id,
+       * so the per-stage budget does not drift across retries. */
+      assert(strcmp(wi.current_stage, "gate") == 0);
+      assert(g_stub_panel_calls == 3); /* 1 initial + 2 retries, then capped */
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int retries = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "panel_retry") == 0 && strcmp(evs[i].stage, "gate") == 0)
+            retries++;
+      free(evs);
+      assert(retries == 2); /* exactly the cap; a failed clear would NOT count here */
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A12: panel_unreachable (the panel could not be reached at all) is the same
+    * transient class and is auto-retried too, not escalated immediately. */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = ALWAYS_DEGRADE;
+      g_stub_return_unreachable = 1; /* provider returns WFE_PANEL_UNREACHABLE */
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "3", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a12", "a12", "autonomous", id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* initial -> panel_unreachable */
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_unreachable") == 0);
+      assert(g_stub_panel_calls == 1);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* retry #1 -> re-convene */
+      assert(g_stub_panel_calls == 2); /* proves re-run for the unreachable class too */
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int retries = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "panel_retry") == 0)
+            retries++;
+      free(evs);
+      assert(retries == 1);
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A13: AIMEE_AUTONOMY_PANEL_RETRIES=0 is the operator escape hatch — auto-retry
+    * is disabled and a transient park escalates to a human immediately (the
+    * pre-feature behavior), with the panel never re-convened. */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = ALWAYS_DEGRADE;
+      g_stub_return_unreachable = 0;
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "0", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a13", "a13", "autonomous", id, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* initial -> parks panel_degraded */
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+      assert(g_stub_panel_calls == 1);
+      /* subsequent sweeps do NOT retry: no re-convene, stays parked for a human. */
+      for (int k = 0; k < 3; k++)
+         assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(g_stub_panel_calls == 1);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int retries = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "panel_retry") == 0)
+            retries++;
+      free(evs);
+      assert(retries == 0); /* disabled -> no retry events at all */
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A14: a malformed AIMEE_AUTONOMY_PANEL_RETRIES falls back to the DEFAULT cap —
+    * retry stays enabled (a typo must not silently disable the rail like 0 does,
+    * nor crash the parser) AND is still bounded at the default. Driving enough
+    * sweeps pins the default EXACTLY: initial convene + default retries, no more —
+    * distinguishing it from a silent collapse to 1 or an uncapped loop. */
+   {
+      g_stub_panel_calls = 0;
+      g_stub_degrade_calls = ALWAYS_DEGRADE;
+      g_stub_return_unreachable = 0;
+      wfe_set_panel_provider(stub_panel);
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "not-a-number", 1);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rta", "a14", "a14", "autonomous", id, err, sizeof err) == 0);
+      for (int k = 0; k < WFE_AUTONOMY_PANEL_RETRY_CAP_DEFAULT + 3; k++)
+         assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(g_stub_panel_calls == WFE_AUTONOMY_PANEL_RETRY_CAP_DEFAULT + 1);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "panel_degraded") == 0);
+
+      /* negative value is also treated as malformed -> default (retry stays
+       * enabled, NOT disabled like an explicit 0): a fresh item still retries. */
+      g_stub_panel_calls = 0;
+      setenv("AIMEE_AUTONOMY_PANEL_RETRIES", "-3", 1);
+      char idn[80] = "";
+      assert(wfe_work_item_create("rta", "a14n", "a14n", "autonomous", idn, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(idn, err, sizeof err) == 0); /* initial park */
+      assert(wfe_autonomy_run(idn, err, sizeof err) == 0); /* retry #1 -> not disabled */
+      assert(g_stub_panel_calls == 2);
+
+      unsetenv("AIMEE_AUTONOMY_PANEL_RETRIES");
+      wfe_set_panel_provider(NULL);
+   }
+
+   /* A15: a NON-transient park (pending_human) is left UNTOUCHED by the retry path.
+    * It is neither short-circuited early nor retried — it falls through to the
+    * advance loop, which re-parks it without re-running work. This pins the
+    * invariant H1 depends on: adding the transient-retry branch did not change
+    * behavior for any other park class. */
+   {
+      g_stub_panel_calls = 0;
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("auto", "a15", "a15", "autonomous", id, err, sizeof err) == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* parks pending_human */
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      char stage0[64];
+      snprintf(stage0, sizeof stage0, "%s", wi.current_stage);
+
+      /* a second sweep must NOT touch it: same reason, same stage, no panel activity. */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      assert(strcmp(wi.current_stage, stage0) == 0);
+      assert(g_stub_panel_calls == 0);
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int retries = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "panel_retry") == 0)
+            retries++;
+      free(evs);
+      assert(retries == 0); /* the transient-retry branch never fired for pending_human */
    }
 
    printf("ok\n");
