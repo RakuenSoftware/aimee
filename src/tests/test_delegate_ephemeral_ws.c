@@ -64,7 +64,7 @@ int main(void)
    char keep[700];
    snprintf(keep, sizeof(keep), "%s/keepme", home);
    assert(platform_mkdir_p(keep, 0700) == 0);
-   delegate_ephemeral_ws_remove(keep); /* under home but not delegate-ws -> no-op */
+   delegate_ephemeral_ws_remove(keep);   /* under home but not delegate-ws -> no-op */
    delegate_ephemeral_ws_remove("/tmp"); /* outside home -> no-op */
    assert(path_exists(keep));
    printf("  remove_refuses_outside_prefix: ok\n");
@@ -88,8 +88,8 @@ int main(void)
    assert(symlink(victim_dir, evil_link) == 0); /* delegate-ws/evil -> ../victim */
 
    delegate_ephemeral_ws_remove(evil_link); /* lexical prefix OK, but it's a symlink */
-   assert(path_exists(victim_dir));  /* target dir untouched */
-   assert(path_exists(victim_file)); /* target contents untouched */
+   assert(path_exists(victim_dir));         /* target dir untouched */
+   assert(path_exists(victim_file));        /* target contents untouched */
    printf("  remove_refuses_symlink_escape: ok\n");
 
    /* 6. ANCESTOR symlink: when <home>/delegate-ws is itself a symlink, both
