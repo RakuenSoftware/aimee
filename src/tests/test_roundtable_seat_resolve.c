@@ -79,6 +79,17 @@ int main(void)
    assert(rt_resolve_seat_model(&cfg, "$random", "review", used3, 3, &idx) ==
           RT_SEAT_RANDOM_EXHAUSTED);
 
+   /* Downgrade contract (wfe_live_panel): when the DISTINCT pool is exhausted (more
+    * lenses than eligible agents), a retry WITHOUT the exclusion still resolves —
+    * i.e. an already-seated agent is REUSED rather than leaving the lens unfilled.
+    * This is what lets a panel compose by reusing agents instead of degrading the
+    * gate; it degrades only when NO eligible agent exists at all. */
+   assert(rt_resolve_seat_model(&cfg, "$random", "review", used3, 3, &idx) ==
+          RT_SEAT_RANDOM_EXHAUSTED); /* distinct: none */
+   assert(rt_resolve_seat_model(&cfg, "$random", "review", NULL, 0, &idx) ==
+          RT_SEAT_OK);           /* reuse */
+   assert(idx >= 0 && idx <= 2); /* reuse still respects role eligibility (A/B/C, not D/E) */
+
    /* Empty/unset model behaves as "$random", not a pinned failure. */
    assert(rt_resolve_seat_model(&cfg, "", "review", NULL, 0, &idx) == RT_SEAT_OK);
 
