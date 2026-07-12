@@ -215,31 +215,34 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
             if (cap == 0 || autonomy_panel_retries_used(work_item_id, wi0.current_stage) >= cap)
                return 0; /* budget spent (or disabled): stay parked to escalate to a human */
             /* Claim the retry with a compare-and-clear: clear the pause only while
-             * it still equals the (reason, stage) we just read, so the budget
-             * counts only retries that ACTUALLY happened AND at most one retry runs
-             * per park even if the single-threaded-scheduler invariant is ever
-             * relaxed (a concurrent driver's clear would find the row already
-             * moved). rc: 1 = we won, 0 = another driver moved it first, -1 = error.
-             * On anything but a win, leave it and retry next sweep — no budget
-             * spent, no uncounted retry. */
+             * it still equals the (reason, stage) we just read, so at most one
+             * retry runs per park even if the single-threaded-scheduler invariant
+             * is ever relaxed (a concurrent driver's clear would find the row
+             * already moved). rc: 1 = we won, 0 = another driver moved it first,
+             * -1 = error. On anything but a win, leave it and retry next sweep — no
+             * budget spent, no uncounted retry. NOTE the panel_retry cap bounds
+             * ATTEMPTS (parks claimed + cleared), not successful re-convenes: if the
+             * advance below dies before the panel re-runs, the attempt still counted
+             * — which is the intended, honest semantics (the turn cap is the hard
+             * backstop for a genuinely runaway loop). */
             int claimed =
                 db1_work_item_clear_pause_if(work_item_id, wi0.pause_reason, wi0.current_stage);
             if (claimed != 1)
                return 0;
             /* Symmetric on the write side: if the panel_retry audit write fails the
-             * retry would run UNCOUNTED and could bypass the cap, so treat it like a
-             * failed clear — re-park with the original reason and do not advance. If
-             * the re-park ALSO fails the item is left unpaused with no retry event,
-             * which must not be reported as a benign no-op: surface it (return -1)
-             * so the scheduler logs it rather than silently looping.
-             * (Belt-and-braces: even if the process died in the tiny window between
-             * the clear and this write, the re-convened panel writes its own "pause"
-             * lifecycle event, which the cumulative turn cap counts, so the runaway
-             * backstop still holds.) */
+             * attempt would run UNCOUNTED and could bypass the cap, so treat it like
+             * a failed clear — re-park with the ORIGINAL (reason, paused_state) and
+             * do not advance. If the re-park ALSO fails the item is left unpaused
+             * with no retry event, which must not be reported as a benign no-op:
+             * surface it (return -1) so the scheduler logs it rather than silently
+             * looping. (Belt-and-braces: even if the process died in the tiny window
+             * between the clear and this write, the re-convened panel writes its own
+             * "pause" lifecycle event, which the cumulative turn cap counts, so the
+             * runaway backstop still holds.) */
             if (db1_lifecycle_event_add(work_item_id, wi0.current_stage, "panel_retry", "engine",
                                         wi0.pause_reason, "", 0) != 0)
             {
-               if (db1_work_item_set_pause(work_item_id, wi0.pause_reason, wi0.current_stage) != 0)
+               if (db1_work_item_set_pause(work_item_id, wi0.pause_reason, wi0.paused_state) != 0)
                {
                   snprintf(err, errlen, "panel-retry: audit write and re-park both failed for '%s'",
                            work_item_id);
