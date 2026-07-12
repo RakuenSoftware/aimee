@@ -79,8 +79,14 @@ jobs:
   images:
     needs: version
     uses: ./.github/workflows/publish-images.yml
+    # contents: write (not read) because publish-images.yml nests the
+    # publish-rerank-artifacts.yml job, which creates/uploads the
+    # rerank-artifacts release. A nested reusable workflow can't request more
+    # than the caller grants, so a read-only ceiling here fails the whole run
+    # at startup ("nested job 'rerank-artifacts' is requesting 'contents:
+    # write', but is only allowed 'contents: read'").
     permissions:
-      contents: read
+      contents: write
       packages: write
     with:
       version: ${{ needs.version.outputs.version }}
