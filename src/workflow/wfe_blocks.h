@@ -14,6 +14,11 @@ void wfe_register_default_executors(void);
  * merge-base of HEAD against `base_branch` (e.g. "origin/testing" or "main").
  * Fills the short SHAs and the sha256 hex of the cumulative diff. Returns 0 on
  * success. Standalone (no engine ctx) so it is directly unit-testable. */
+/* source.archive git half (unit-testable): move the file under from/ whose HEAD
+ * blob is `sha` into to/ and commit. 1 = moved+committed, 0 = nothing to do,
+ * -1 = git failure. */
+int wfe_source_archive_move(const char *wd, const char *sha, const char *from, const char *to);
+
 int wfe_git_freeze(const char *repo_dir, const char *base_branch, char out_base_sha[64],
                    char out_head_sha[64], char out_diff_hash[65], char *err, size_t errlen);
 

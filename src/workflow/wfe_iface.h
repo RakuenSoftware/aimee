@@ -60,6 +60,12 @@ typedef enum
     * workflow run and parks the parent until every child is terminal. */
    WFE_BLK_BRANCH_OPEN,      /* open/return a durable feature branch -> branch */
    WFE_BLK_FOREACH_WORKFLOW, /* per-packet child workflow fan-out -> branch */
+   /* Retire the run's triggering source file (trigger-first lifecycle): move the
+    * watched file that filed this run (content-addressed by the materialized
+    * artifact's blob-sha name) from its watch dir to a done dir, committed on the
+    * run branch so the final PR retires the trigger input atomically with the
+    * work. No-op advance for runs without a content-addressed trigger artifact. */
+   WFE_BLK_SOURCE_ARCHIVE, /* branch -> branch */
    WFE_BLK__COUNT
 } wfe_block_type_t;
 
