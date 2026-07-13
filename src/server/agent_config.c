@@ -1284,6 +1284,14 @@ void agent_set_route_health_filter(int (*fn)(const char *agent_name))
    g_route_health_filter = fn;
 }
 
+/* Optional route-time delegate-policy filter; see agent_set_route_policy_filter. */
+static int (*g_route_policy_filter)(const agent_t *agent) = NULL;
+
+void agent_set_route_policy_filter(int (*fn)(const agent_t *agent))
+{
+   g_route_policy_filter = fn;
+}
+
 int agent_is_available_for_routing(const agent_t *agent)
 {
    if (!agent)
@@ -1294,6 +1302,16 @@ int agent_is_available_for_routing(const agent_t *agent)
     * healthy peer; routing returns NULL (clean "no agent" error) only when
     * every candidate is filtered out. */
    if (g_route_health_filter && agent->name[0] && g_route_health_filter(agent->name))
+      return 0;
+   /* A claude-CLI agent can only ever execute as a delegate SERVER-SIDE (a
+    * client-only claude has no server session to drive — dispatch would just
+    * fail). Structural, so it is enforced even with no policy filter
+    * registered; the config-dependent rules (the claude_cli_delegate_enabled
+    * ToS opt-in, primary self-delegation) live in the registered policy
+    * filter, which sees the live config. */
+   if (agent_is_claude_cli(agent) && !agent->is_server_hosted)
+      return 0;
+   if (g_route_policy_filter && g_route_policy_filter(agent))
       return 0;
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
    {

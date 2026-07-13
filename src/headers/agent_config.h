@@ -38,6 +38,21 @@ int agent_any_delegate_available(void);
  * gains no link dependency on provider_catalog. */
 void agent_set_route_health_filter(int (*fn)(const char *agent_name));
 
+/* Optional route-time delegate-POLICY filter, same mechanism as the health
+ * filter (returns nonzero to EXCLUDE the agent; NULL disables). The server
+ * registers a live-config predicate enforcing two invariants everywhere
+ * routing happens, not just on one dispatch path:
+ *   1) the PRIMARY passthrough — the agent named after config.provider — is
+ *      never a delegation target (the primary must not delegate back to
+ *      itself; roundtables already enforce this for panel seats);
+ *   2) a claude-CLI agent is a delegate only behind the explicit ToS-sensitive
+ *      operator opt-in (claude_cli_delegate_enabled).
+ * The structural half of (2) — a claude-CLI agent that is not server-hosted
+ * can never execute as a delegate — is enforced unconditionally in
+ * agent_is_available_for_routing, so even filter-less builds (CLI/tests) never
+ * route to a client-only claude. */
+void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
+
 int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
