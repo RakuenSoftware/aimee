@@ -999,6 +999,11 @@ static void cron_fire(const trigger_rule_t *rule, int max_concurrent)
 }
 
 static const trigger_source_t g_trigger_sources[] = {
+    /* watch-dir is the canonical generic source: watch a repo-relative
+     * directory at a git ref and file one run per new file. `proposals` is the
+     * original alias for the same scanner — its default dir
+     * (docs/proposals/pending) is just one configuration of watch-dir. */
+    {"watch-dir", proposals_due, proposals_fire},
     {"proposals", proposals_due, proposals_fire},
     {"cron", cron_due, cron_fire},
 };
