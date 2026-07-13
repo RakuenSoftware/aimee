@@ -455,10 +455,10 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "url required")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name, "token": req.Token})
-	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone", body)
+	st, data, err := s.v1RequestWebuserT(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone", body, cloneTimeout)
 	s.gitRelay(w, st, data, err)
 }
 
@@ -563,6 +563,6 @@ func (s *server) handleGitCloneOrg(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), cloneOrgTimeout)
 	defer cancel()
 	body, _ := json.Marshal(req)
-	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone-org", body)
+	st, data, err := s.v1RequestWebuserT(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone-org", body, cloneOrgTimeout)
 	s.gitCloneOrgRelay(w, st, data, err)
 }

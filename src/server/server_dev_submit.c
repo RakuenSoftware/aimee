@@ -7,11 +7,11 @@
 #include "cJSON.h"
 #include "aimee_home.h"    /* aimee_home */
 #include "router_advise.h" /* router_autonomous_pick / router_autonomous_audit */
+#include "wfe_autonomy.h"  /* wfe_autonomy_default_max_cost_usd — shared intake cap policy */
 #include "wfe_engine.h"    /* wfe_work_item_resolve */
 #include "wfe_scheduler.h" /* wfe_scheduler_notify */
 #include "wfe_store.h"     /* db1_work_item_submit_capped / _set_terminal / _set_cost_cap */
 #include <errno.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -168,18 +168,11 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
       router_autonomous_audit(id, workflow, autoroute_src, autoroute_raw, autoroute_clamped,
                               autoroute_tag);
    /* WP-5: a per-run USD budget ceiling so a runaway autonomous run parks
-    * (budget_exceeded) instead of burning unbounded delegate cost. Default $5.00;
-    * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). */
+    * (budget_exceeded) instead of burning unbounded delegate cost. The default
+    * policy ($5.00, AIMEE_AUTONOMY_MAX_USD override, 0 disables) is shared with
+    * every other autonomous intake (wfe_autonomy_default_max_cost_usd). */
    {
-      double cap_usd = 5.0;
-      const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
-      if (v && v[0])
-      {
-         char *e = NULL;
-         double d = strtod(v, &e);
-         if (e && *e == '\0' && isfinite(d) && d >= 0) /* reject inf/NaN: would void the cap */
-            cap_usd = d;
-      }
+      double cap_usd = wfe_autonomy_default_max_cost_usd();
       if (cap_usd > 0)
          db1_work_item_set_cost_cap(id, cap_usd);
    }

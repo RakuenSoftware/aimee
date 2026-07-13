@@ -26,6 +26,7 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    (void)fmt;
 }
 
+#include "db1/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
 #include "db1_trigger.h"
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task,
                        const char *workspace, const char *metadata)
@@ -113,14 +114,18 @@ static struct
    char repo[512];
    char path[600];
    char mode[32];
+   char state[24];  /* stub work-item state, "active" on create; tests may complete it */
+   double cost_cap; /* recorded by the db1_work_item_set_cost_cap stub; 0 = none */
 } g_created[32];
 static int g_ncreated;
+static int g_notify_count; /* wfe_scheduler_notify() invocations */
 
 static void trig_stub_reset(void)
 {
    g_symref_out[0] = g_lstree_out[0] = g_lstree_ref[0] = g_lstree_pathspec[0] = '\0';
    g_nblobs = 0;
    g_ncreated = 0;
+   g_notify_count = 0;
 }
 
 const char *aimee_home(void)
@@ -221,6 +226,8 @@ int wfe_work_item_create(const char *workflow_name, const char *repo, const char
       snprintf(g_created[g_ncreated].path, sizeof g_created[0].path, "%s",
                proposal_path ? proposal_path : "");
       snprintf(g_created[g_ncreated].mode, sizeof g_created[0].mode, "%s", mode ? mode : "");
+      snprintf(g_created[g_ncreated].state, sizeof g_created[0].state, "active");
+      g_created[g_ncreated].cost_cap = 0.0;
       g_ncreated++;
    }
    if (out_id)
@@ -228,6 +235,51 @@ int wfe_work_item_create(const char *workflow_name, const char *repo, const char
    if (err && errlen > 0)
       err[0] = '\0';
    return 0;
+}
+
+/* Cost-cap stub: record the cap against the just-created item ("wi_<n>"). */
+int db1_work_item_set_cost_cap(const char *work_item_id, double cap)
+{
+   int idx = work_item_id ? atoi(work_item_id + 3) - 1 : -1;
+   if (idx >= 0 && idx < g_ncreated)
+      g_created[idx].cost_cap = cap;
+   return 0;
+}
+
+/* Work-item list stub: every created item, with its (test-controlled) state. */
+int db1_work_item_list(db1_work_item_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (g_ncreated == 0)
+      return 0;
+   db1_work_item_t *items = calloc((size_t)g_ncreated, sizeof(*items));
+   if (!items)
+      return -1;
+   for (int i = 0; i < g_ncreated; i++)
+   {
+      snprintf(items[i].work_item_id, sizeof items[i].work_item_id, "wi_%d", i + 1);
+      snprintf(items[i].proposal_path, sizeof items[i].proposal_path, "%s", g_created[i].path);
+      snprintf(items[i].state, sizeof items[i].state, "%s", g_created[i].state);
+   }
+   *out = items;
+   return g_ncreated;
+}
+
+void wfe_scheduler_notify(void)
+{
+   g_notify_count++;
+}
+
+/* Stub of the shared intake cap policy (the real env-driven policy lives in
+ * wfe_autonomy.c and is exercised by unit-test-trigger-e2e, which links it);
+ * test-settable so the plumbing — rule cap wins, else this default, 0 = no
+ * cap — is asserted deterministically. */
+static double g_default_cap = 5.0;
+double wfe_autonomy_default_max_cost_usd(void)
+{
+   return g_default_cap;
 }
 
 /* Pull in static cron_matches / field_matches via direct .c include. */
@@ -734,7 +786,7 @@ static void test_scan_proposals_end_to_end(void)
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
    snprintf(rule.event, sizeof rule.event, "docs/proposals/pending");
 
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
 
    /* Two .md proposals -> two work items; .gitkeep filtered out. */
    assert(g_ncreated == 2);
@@ -759,7 +811,7 @@ static void test_scan_proposals_end_to_end(void)
    assert(file_equals(exp1, "# Proposal B\n"));
 
    /* Re-scan with the same tree -> dedup pre-check skips both -> no new work items. */
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 2);
 
    /* A genuinely new proposal (new blob) -> exactly one new work item. */
@@ -770,7 +822,7 @@ static void test_scan_proposals_end_to_end(void)
             "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n"
             "100644 blob fedcba9876543210fedcba9876543210fedcba98\tdocs/proposals/pending/b.md\n"
             "100644 blob 2222222222222222222222222222222222222222\tdocs/proposals/pending/c.md\n");
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 3);
    assert(strcmp(g_created[2].wf, "build") == 0);
 
@@ -800,7 +852,7 @@ static void test_scan_proposals_honors_explicit_mode(void)
    snprintf(rule.event, sizeof rule.event, "docs/proposals/pending");
    snprintf(rule.mode, sizeof rule.mode, "interactive");
 
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
 
    assert(g_ncreated == 1);
    assert(strcmp(g_created[0].mode, "interactive") == 0);
@@ -826,14 +878,14 @@ static void test_scan_proposals_requires_workspace_and_workflow(void)
 
    /* Missing workspace -> no-op. */
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 0);
 
    /* Missing workflow (pipeline_template) -> no-op. */
    memset(&rule, 0, sizeof rule);
    snprintf(rule.source, sizeof rule.source, "proposals");
    snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 0);
 
    printf("  PASS: test_scan_proposals_requires_workspace_and_workflow\n");
@@ -859,7 +911,7 @@ static void test_scan_proposals_custom_event_and_schedule(void)
    snprintf(rule.event, sizeof rule.event, "rfcs");       /* custom scan dir */
    snprintf(rule.schedule, sizeof rule.schedule, "main"); /* custom branch */
 
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 1);
    assert(strcmp(g_lstree_ref, "main") == 0);          /* schedule used as ref */
    assert(strncmp(g_lstree_pathspec, "rfcs", 4) == 0); /* custom event dir */
@@ -885,7 +937,7 @@ static void test_scan_proposals_rejects_unsafe_ref_and_path(void)
    snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
    snprintf(rule.schedule, sizeof rule.schedule, "--all");
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 0);
    assert(g_lstree_ref[0] == '\0'); /* ls-tree never invoked */
 
@@ -896,16 +948,170 @@ static void test_scan_proposals_rejects_unsafe_ref_and_path(void)
    snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
    snprintf(rule.event, sizeof rule.event, "../../etc");
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 0);
    assert(g_lstree_ref[0] == '\0');
 
    /* An absolute scan dir is rejected. */
    snprintf(rule.event, sizeof rule.event, "/etc");
-   scan_proposals(&rule);
+   scan_proposals(&rule, 0);
    assert(g_ncreated == 0);
 
    printf("  PASS: test_scan_proposals_rejects_unsafe_ref_and_path\n");
+}
+
+/* Filing wakes the autonomy driver once (parity with /v1/dev/submit); a pass
+ * that files nothing must not wake it. */
+static void test_scan_proposals_notifies_scheduler(void)
+{
+   trig_stub_reset();
+   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-notify-%d", (int)getpid());
+   mkdir(g_home, 0700);
+   snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
+   snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
+   snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# Proposal A\n");
+   g_nblobs = 1;
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n");
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+
+   scan_proposals(&rule, 0);
+   assert(g_ncreated == 1);
+   assert(g_notify_count == 1);
+
+   /* Re-scan: dedup files nothing -> no spurious wake. */
+   scan_proposals(&rule, 0);
+   assert(g_ncreated == 1);
+   assert(g_notify_count == 1);
+   printf("  PASS: test_scan_proposals_notifies_scheduler\n");
+}
+
+/* pipeline.max_spend_usd is applied to the filed run; a rule without one gets
+ * the intake default ($5, AIMEE_AUTONOMY_MAX_USD override, 0 disables). */
+static void test_scan_proposals_applies_cost_cap(void)
+{
+   trig_stub_reset();
+   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-cap-%d", (int)getpid());
+   mkdir(g_home, 0700);
+   snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
+   snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
+   snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# A\n");
+   snprintf(g_blobs[1].sha, sizeof g_blobs[1].sha, "fedcba9876543210fedcba9876543210fedcba98");
+   snprintf(g_blobs[1].content, sizeof g_blobs[1].content, "# B\n");
+   snprintf(g_blobs[2].sha, sizeof g_blobs[2].sha, "2222222222222222222222222222222222222222");
+   snprintf(g_blobs[2].content, sizeof g_blobs[2].content, "# C\n");
+   g_nblobs = 3;
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+
+   /* Explicit rule cap wins. */
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n");
+   rule.max_spend_usd = 1.25;
+   unsetenv("AIMEE_AUTONOMY_MAX_USD");
+   scan_proposals(&rule, 0);
+   assert(g_ncreated == 1);
+   assert(g_created[0].cost_cap == 1.25);
+
+   /* No rule cap -> the shared intake default (stubbed here; the real
+    * env-driven policy is asserted by unit-test-trigger-e2e). */
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob fedcba9876543210fedcba9876543210fedcba98\tdocs/proposals/pending/b.md\n");
+   rule.max_spend_usd = 0.0;
+   scan_proposals(&rule, 0);
+   assert(g_ncreated == 2);
+   assert(g_created[1].cost_cap == 5.0);
+
+   /* A default of 0 means "no cap": nothing is stamped. */
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 2222222222222222222222222222222222222222\tdocs/proposals/pending/c.md\n");
+   g_default_cap = 0.0;
+   scan_proposals(&rule, 0);
+   g_default_cap = 5.0;
+   assert(g_ncreated == 3);
+   assert(g_created[2].cost_cap == 0.0);
+
+   printf("  PASS: test_scan_proposals_applies_cost_cap\n");
+}
+
+/* trigger.max_concurrent caps concurrently-ACTIVE triggered runs; deferred
+ * proposals file on a later pass once a slot frees (dedup keys on the artifact
+ * path, so nothing is lost). */
+static void test_scan_proposals_enforces_max_concurrent(void)
+{
+   trig_stub_reset();
+   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-conc-%d", (int)getpid());
+   mkdir(g_home, 0700);
+   snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
+   snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
+   snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# A\n");
+   snprintf(g_blobs[1].sha, sizeof g_blobs[1].sha, "fedcba9876543210fedcba9876543210fedcba98");
+   snprintf(g_blobs[1].content, sizeof g_blobs[1].content, "# B\n");
+   snprintf(g_blobs[2].sha, sizeof g_blobs[2].sha, "2222222222222222222222222222222222222222");
+   snprintf(g_blobs[2].content, sizeof g_blobs[2].content, "# C\n");
+   g_nblobs = 3;
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\tdocs/proposals/pending/a.md\n"
+            "100644 blob fedcba9876543210fedcba9876543210fedcba98\tdocs/proposals/pending/b.md\n"
+            "100644 blob 2222222222222222222222222222222222222222\tdocs/proposals/pending/c.md\n");
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+
+   /* Three pending, cap 2 -> exactly two filed this pass. */
+   scan_proposals(&rule, 2);
+   assert(g_ncreated == 2);
+
+   /* Both still active -> the next pass files nothing. */
+   scan_proposals(&rule, 2);
+   assert(g_ncreated == 2);
+
+   /* One run completes -> a slot frees -> the deferred proposal files. */
+   snprintf(g_created[0].state, sizeof g_created[0].state, "accepted");
+   scan_proposals(&rule, 2);
+   assert(g_ncreated == 3);
+
+   printf("  PASS: test_scan_proposals_enforces_max_concurrent\n");
+}
+
+/* The trigger-source registry: rules dispatch by source name; a scanner source
+ * is due on every pass, cron only on a schedule match, and an unknown source
+ * is skipped (no registry row -> no fire). */
+static void test_trigger_source_registry(void)
+{
+   assert(trigger_source_find("proposals") != NULL);
+   assert(trigger_source_find("cron") != NULL);
+   assert(trigger_source_find("github-webhook") == NULL);
+   assert(trigger_source_find("") == NULL);
+   /* watch-dir is the canonical name for the same scanner proposals aliases. */
+   assert(trigger_source_find("watch-dir") != NULL);
+   assert(trigger_source_find("watch-dir")->fire == trigger_source_find("proposals")->fire);
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   struct tm at3 = make_tm(0, 3, 1, 4, 2);
+   struct tm at4 = make_tm(0, 4, 1, 4, 2);
+
+   assert(proposals_due(&rule, &at3) == 1); /* scanners poll every pass */
+
+   assert(cron_due(&rule, &at3) == 0); /* no schedule -> never due */
+   snprintf(rule.schedule, sizeof rule.schedule, "0 3 * * *");
+   assert(cron_due(&rule, &at3) == 1);
+   assert(cron_due(&rule, &at4) == 0);
+
+   printf("  PASS: test_trigger_source_registry\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -955,6 +1161,10 @@ int main(void)
    test_scan_proposals_requires_workspace_and_workflow();
    test_scan_proposals_custom_event_and_schedule();
    test_scan_proposals_rejects_unsafe_ref_and_path();
+   test_scan_proposals_notifies_scheduler();
+   test_scan_proposals_applies_cost_cap();
+   test_scan_proposals_enforces_max_concurrent();
+   test_trigger_source_registry();
    printf("All tests passed.\n");
    return 0;
 }

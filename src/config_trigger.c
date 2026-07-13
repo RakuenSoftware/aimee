@@ -7,7 +7,8 @@
  *   max_concurrent: 2
  *
  * trigger_rules:
- *   - source: "github-webhook"   # valid sources include github-webhook, cron, proposals
+ *   - source: "github-webhook"   # valid sources include github-webhook, cron,
+ *                                # watch-dir (alias: proposals)
  *     event: "push"
  *     mode: "autonomous"         # "autonomous" (default) | "interactive"
  *     pipeline:

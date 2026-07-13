@@ -252,9 +252,11 @@ The page is read/UI only; the behavior it drives is governed by existing config:
   agent config (see [`DELEGATES.md`](DELEGATES.md)); with only CLI delegates, the draft
   endpoint returns an error and the button surfaces it.
 - **Autonomous execution** is governed by the wfe engine
-  ([`AUTONOMOUS_DEVELOPMENT.md`](AUTONOMOUS_DEVELOPMENT.md)). Notably the **live forge
-  is default-off** (`wfe_live_forge_enabled`): with it off, a run advances and parks at
-  gates without pushing a real PR, which is the safe default for exercising the page.
+  ([`AUTONOMOUS_DEVELOPMENT.md`](AUTONOMOUS_DEVELOPMENT.md)). The **live forge is
+  default-on** (`wfe_live_forge_enabled`); set it to `false` to exercise the page
+  without real pushes — a run then advances and parks at gates instead of opening a
+  PR. Even on, the merge-target rail bounds every op (PRs open-only against the
+  trunk; merges only to the unprotected autonomous base).
 - **Submit** is bounded by the intake's existing caps (a 1 MB proposal body cap and the
   intake-auth per-principal rate/concurrency limits); the user-supplied `repo` is
   handled by the same `/v1/dev/submit` intake that the CLI uses; its validation and

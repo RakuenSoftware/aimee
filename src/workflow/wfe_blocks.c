@@ -41,11 +41,12 @@ static const char *repo_dir(void)
  * into `buf`; never empty. */
 static void resolve_workdir(wfe_ctx *ctx, char *buf, size_t n)
 {
-   if (wfe_worktree_ensure(wfe_ctx_work_item(ctx), wfe_ctx_worktree(ctx), repo_dir(),
+   const char *repo = wfe_repo_local(wfe_ctx_repo(ctx));
+   if (wfe_worktree_ensure(wfe_ctx_work_item(ctx), wfe_ctx_worktree(ctx), repo,
                            wfe_autonomous_base(), buf, n) != 0)
-      snprintf(buf, n, "%s", repo_dir()); /* fall back to the shared checkout */
-   if (!buf[0])                           /* guarantee a non-empty workdir for every caller */
-      snprintf(buf, n, "%s", repo_dir());
+      snprintf(buf, n, "%s", repo); /* fall back to the shared checkout */
+   if (!buf[0])                     /* guarantee a non-empty workdir for every caller */
+      snprintf(buf, n, "%s", repo);
 }
 
 static int git_capture(const char *const argv[], char **out)

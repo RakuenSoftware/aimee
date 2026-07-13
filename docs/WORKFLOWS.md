@@ -257,9 +257,11 @@ The engine advances it one step at a time
   recorded against the step's content hash, so an approval is bound to the exact
   artifact it approved.
 
-A step resolves the working repository from `$AIMEE_WORKFLOW_REPO` (or the
-process cwd), see [Limitations](#current-limitations) for the
-run-in-a-specific-project gap.
+A step resolves the working repository from the work item's own `repo` when it
+names a local directory (a trigger rule's `pipeline.workspace` binds the run to
+that repository), falling back to `$AIMEE_WORKFLOW_REPO`, then the process cwd.
+See [Limitations](#current-limitations) for the forge-side residue of the old
+process-global behavior.
 
 ## Inspecting runs
 
@@ -283,6 +285,17 @@ appears in a repo, a schedule elapses, a webhook arrives) or a person (clicking
 set of generic trigger sources that you wire to whatever workflow you want —
 the trigger starts the run; what happens next is entirely the workflow's design.
 
+Sources are a registry in
+[src/server/trigger_scheduler.c](../src/server/trigger_scheduler.c): each entry
+is `{name, due, fire}` — `due` decides whether this tick should fire (a repo
+scanner polls every pass; cron matches its schedule), `fire` matches events and
+materializes artifacts, and files each run through the shared
+`trigger_file_run` back half (work item on the rule's pipeline + workspace +
+mode, per-run USD ceiling from `max_spend_usd` or the intake-wide default,
+audit log line). The tick loop owns the rest — per-rule rate limiting and the
+global `trigger.max_concurrent` — so adding a source is one table row plus its
+`fire`.
+
 Triggers are configured as a `trigger_rules` list in `aimee.yaml`. Each rule
 names a **source** (what fires it), how the filed run should execute (**mode**),
 and the **pipeline** (which workflow, in which repo):
@@ -292,7 +305,7 @@ trigger:
   max_concurrent: 1          # cap on concurrently-executing triggered runs
 
 trigger_rules:
-  - source: proposals              # scan a git repo for new proposals
+  - source: watch-dir              # scan a repo dir for new files (alias: proposals)
     event: docs/proposals/pending  # repo-relative dir to watch (this is the default)
     schedule: main                 # git ref/branch to read (default: auto-detected origin HEAD)
     mode: autonomous               # autonomous (default) | interactive
@@ -305,12 +318,12 @@ trigger_rules:
 
 | Field | Meaning |
 | --- | --- |
-| `source` | What fires the rule: `proposals`, `cron`, or a webhook source. |
-| `event` | Source-specific match. For `proposals`, the repo-relative directory to scan (default `docs/proposals/pending`). |
-| `schedule` | For `cron`, the cron expression. For `proposals`, the git ref/branch to read (default: auto-detected `origin` HEAD, then `HEAD`). |
+| `source` | What fires the rule: `watch-dir` (alias `proposals`), `cron`, or a webhook source. |
+| `event` | Source-specific match. For `watch-dir`/`proposals`, the repo-relative directory to scan (default `docs/proposals/pending`). |
+| `schedule` | For `cron`, the cron expression. For `watch-dir`/`proposals`, the git ref/branch to read (default: auto-detected `origin` HEAD, then `HEAD`). |
 | `mode` | Execution mode stamped on the filed work item — see below. `autonomous` (default) or `interactive`. |
 | `pipeline.template` | The workflow to start (any saved workflow name, e.g. `build`). |
-| `pipeline.workspace` | Absolute path of the git repo the run operates in (and, for `proposals`, the repo to scan). |
+| `pipeline.workspace` | Absolute path of the git repo the run operates in (and, for `watch-dir`/`proposals`, the repo to scan). |
 | `pipeline.max_spend_usd` | Optional per-run spend cap. |
 
 ### `mode`: autonomous vs. interactive
@@ -334,22 +347,34 @@ workflow that still pauses at a human gate partway through, or an `interactive`
 trigger into a fully hands-off workflow. Pick the trigger `mode` for the
 *start* decision; put in-flight gates in the *workflow*.
 
-### The `proposals` source
+### The `watch-dir` source (alias: `proposals`)
 
-The `proposals` source turns "a proposal was committed" into a workflow run. On
+The `watch-dir` source turns "a file was committed into a watched directory"
+into a workflow run — `proposals` is the original alias for the same scanner,
+whose default directory (`docs/proposals/pending`) is just one configuration. On
 each scan (roughly once a minute) it lists the proposal directory at the
 configured git ref, and for every proposal it has not seen before it:
 
 1. materializes the proposal's content under `$AIMEE_HOME/triggers/proposals/`,
 2. files exactly one work item on `pipeline.template`, in `pipeline.workspace`,
    with the configured `mode` (default `autonomous`),
-3. de-duplicates by proposal, so re-scanning the same tree never files twice.
+3. de-duplicates by proposal, so re-scanning the same tree never files twice,
+4. stamps the run's USD ceiling — the rule's `max_spend_usd` if set, else the
+   same default every autonomous intake gets ($5.00; `AIMEE_AUTONOMY_MAX_USD`
+   overrides, `0` disables) — and wakes the autonomy scheduler so the run
+   starts immediately rather than on its next backstop sweep.
+
+`trigger.max_concurrent` is enforced at filing time: when that many
+trigger-filed runs are still active, further proposals are deferred (not
+dropped — the dedup key is the materialized proposal, so they file on a later
+scan once a slot frees). The work item's `repo` is the rule's
+`pipeline.workspace`, and every per-step block resolves its working directory
+from it, so the run executes in the watched repository.
 
 Merging a new proposal onto the watched branch is therefore all it takes to
 kick off a build — and with `mode: autonomous`, that build runs to its PR
-without further intervention (subject to `trigger.max_concurrent` and any
-`max_spend_usd` cap). Point the rule at a different `template` to run any other
-workflow you have authored.
+without further intervention. Point the rule at a different `template` to run
+any other workflow you have authored.
 
 > The filed run still enters through the same capped, audited intake as every
 > other run (see [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)); the trigger
@@ -368,10 +393,13 @@ These are real today and worth knowing before you lean on workflows:
    agents — but all of them require a `proposal_md`: there is still no way to
    start a workflow whose entry node isn't `author.proposal` without supplying
    proposal text. (There is still no Run button on the **Edit Workflows** page.)
-2. **Run-in-a-specific-project isn't wired.** A work-item has a `repo` field, but
-   the per-step blocks resolve their working directory from
-   `$AIMEE_WORKFLOW_REPO`/cwd rather than the work-item's `repo`, so binding a run
-   to a UI-selected project is incomplete.
+2. **Forge operations are process-global.** Per-step blocks now resolve their
+   working directory from the work-item's `repo` (when it names a local
+   directory; `$AIMEE_WORKFLOW_REPO`/cwd otherwise), so a triggered run executes
+   in its configured workspace. But the forge half (`git push`, `gh pr …` via
+   the vaulted runner) still runs in the server's own checkout, so PR-opening
+   workflows against a workspace that is not the server's primary repo are not
+   yet fully wired.
 3. **Composer ergonomics.** New steps are added disconnected; you wire order in
    the inspector. The **Edit Workflows** page has no live run/progress view — you
    start and watch runs on the separate **Workflow Actions** tab.

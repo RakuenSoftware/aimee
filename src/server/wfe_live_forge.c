@@ -5,17 +5,17 @@
  * (mcp_git_run, which injects the forge token via git_cred_inject) and the autonomous
  * merge-target rail (wfe_autonomous_base / _target_ok).
  *
- * SECURITY: registered ONLY when the operator has set wfe_live_forge_enabled=true
- * (default OFF — see config.h). Even once registered, EVERY op re-checks the flag
- * AND the merge-target rail via forge_allowed() and fails closed if either is off —
- * including immediately before each mutating git/gh call, so a config flip or a
- * base misconfig mid-op can't slip a push/PR/merge through (TOCTOU-safe). An
+ * SECURITY: registered unless the operator has set wfe_live_forge_enabled=false
+ * (default ON — operator ruling 2026-07-13, restoring the plan's default; see
+ * config.h). Registered or not, EVERY op re-checks the flag AND the merge-target
+ * rail via forge_allowed() and fails closed if either is off — including
+ * immediately before each mutating git/gh call, so a config flip or a base
+ * misconfig mid-op can't slip a push/PR/merge through (TOCTOU-safe). An
  * autonomous run can never MERGE into a protected branch; it may OPEN a
  * human-reviewed PR against the repo's own default branch (trunk) -- open-only, never
  * auto-merged (the default "build" workflow's terminal). Any OTHER protected base
- * stays refused. Turning the flag on is a deliberate operator deployment action gated
- * on branch protection + scoped creds (the security-roundtable deviation from §7's
- * default-on). */
+ * stays refused. Real pushes additionally require forge creds (the vaulted git
+ * runner); without them ops fail cleanly and the run parks. */
 #include "aimee.h"
 
 #include "wfe_live_forge.h"
