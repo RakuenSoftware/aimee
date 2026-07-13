@@ -173,6 +173,59 @@ static void test_agent_find(void)
    assert(agent_find(&cfg, "missing") == NULL);
 }
 
+/* Route-time delegate-policy filter (the server registers a live-config
+ * predicate; here a test double): an excluded agent is never routed, even when
+ * it is the preferred default agent — the primary must not delegate to itself. */
+static int test_policy_exclude_primary(const agent_t *ag)
+{
+   return strcmp(ag->name, "primary") == 0;
+}
+
+static void test_agent_route_policy_filter(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   strcpy(cfg.default_agent, "primary");
+   strcpy(cfg.agents[0].name, "primary");
+   strcpy(cfg.agents[0].roles[0], "summarize");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].cost_tier = 0;
+   cfg.agents[0].enabled = 1;
+   strcpy(cfg.agents[1].name, "peer");
+   strcpy(cfg.agents[1].roles[0], "summarize");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].cost_tier = 1;
+   cfg.agents[1].enabled = 1;
+
+   /* Baseline: the default agent is preferred. */
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+
+   /* With the policy filter registered, the excluded agent is unroutable
+    * EVERYWHERE — including as the preferred default — and routing falls back
+    * to the peer. */
+   agent_set_route_policy_filter(test_policy_exclude_primary);
+   assert(agent_is_available_for_routing(&cfg.agents[0]) == 0);
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
+   agent_set_route_policy_filter(NULL);
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+}
+
+/* Structural rule (no filter needed): a claude-CLI agent that is not
+ * server-hosted has no server session to drive — it can never be a delegate,
+ * so routing refuses it before any PATH/credential probing. */
+static void test_agent_route_client_only_claude_excluded(void)
+{
+   agent_t a;
+   memset(&a, 0, sizeof(a));
+   strcpy(a.name, "claude");
+   strcpy(a.cli_kind, "claude");
+   strcpy(a.backend, AGENT_BACKEND_TMUX_CLI);
+   a.enabled = 1;
+   a.is_server_hosted = 0;
+   assert(agent_is_available_for_routing(&a) == 0);
+}
+
 static void test_agent_route(void)
 {
    agent_config_t cfg;
@@ -592,7 +645,11 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[5].cli_kind, "claude-code") == 0);
    assert(strcmp(loaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(loaded.agents[5].session_reuse == 1);
-   assert(agent_is_available_for_routing(&loaded.agents[5]) == 1);
+   /* A claude-CLI agent that is NOT server-hosted (no `is_server_hosted` in its
+    * record) is structurally excluded from delegate routing: a client-only
+    * claude has no server session to drive, so dispatch could only fail. This
+    * short-circuits before any tmux/PATH probing, so it holds everywhere. */
+   assert(agent_is_available_for_routing(&loaded.agents[5]) == 0);
 
    assert(agent_save_config(&loaded) == 0);
 
@@ -631,7 +688,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(reloaded.agents[5].cli_kind, "claude-code") == 0);
    assert(strcmp(reloaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(reloaded.agents[5].session_reuse == 1);
-   assert(agent_is_available_for_routing(&reloaded.agents[5]) == 1);
+   /* Still excluded after the save/reload roundtrip (see the load-side assert). */
+   assert(agent_is_available_for_routing(&reloaded.agents[5]) == 0);
 
    if (old_path)
    {
@@ -2326,6 +2384,8 @@ int main(void)
    test_agent_supports_persona();
    test_agent_find();
    test_agent_route();
+   test_agent_route_policy_filter();
+   test_agent_route_client_only_claude_excluded();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_current_code_only_role_tool_policy();

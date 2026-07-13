@@ -1835,6 +1835,33 @@ static int server_agent_route_is_down(const char *agent_name)
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
 }
 
+/* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
+ * 1) the primary passthrough — the agent named after config.provider — is
+ *    never a delegation target: the primary must not delegate back to itself
+ *    (observed in the wild as a streak of failed 'code' delegations to the
+ *    operator's own OAuth claude entry). Matched by NAME only, deliberately:
+ *    other agents that merely share the provider tag (e.g. gateway-routed
+ *    anthropic models) are legitimate delegates.
+ * 2) a claude-CLI agent (tmux/provider-cli claude — the interactive-login
+ *    ToS-sensitive class) is a delegate ONLY behind the explicit operator
+ *    opt-in claude_cli_delegate_enabled — previously enforced on one dispatch
+ *    path and on panel seats, now at every routing decision.
+ * A config_load failure fails closed for the gated class (a claude-CLI agent
+ * is excluded, everything else routes) rather than voiding the opt-in. */
+static int server_agent_route_policy_excluded(const agent_t *ag)
+{
+   if (!ag)
+      return 1;
+   config_t cfg;
+   if (config_load(&cfg) != 0)
+      return agent_is_claude_cli(ag);
+   if (cfg.provider[0] && ag->name[0] && strcasecmp(ag->name, cfg.provider) == 0)
+      return 1;
+   if (agent_is_claude_cli(ag) && !cfg.claude_cli_delegate_enabled)
+      return 1;
+   return 0;
+}
+
 /* Production agent-name resolver for the vault bootstrap: validate against
  * agents.json and return the canonical agent name. agent_load_config is cached,
  * so the per-secret calls are cheap. */
@@ -2016,6 +2043,10 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates. Routing falls back to a healthy peer; only when every candidate
     * for a role is DOWN does routing return a clean "no agent available". */
    agent_set_route_health_filter(server_agent_route_is_down);
+   /* Delegate-policy invariants at every routing decision: the primary never
+    * delegates to itself, and a claude-CLI agent is only a delegate behind the
+    * explicit claude_cli_delegate_enabled opt-in. */
+   agent_set_route_policy_filter(server_agent_route_policy_excluded);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "
             "surface owns the listeners",
