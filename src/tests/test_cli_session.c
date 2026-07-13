@@ -31,6 +31,11 @@ static long long test_mono_ms(void)
    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+/* Path the fake tmux appends every `new-session` argv element to (one per
+ * line, bracketed), so the create test can assert the pane command reached
+ * tmux as a single intact argument rather than word-split fragments. */
+static char g_createlog[300];
+
 /* Path the fake tmux appends every `send-keys` invocation to, so a test can
  * assert which interrupt key (if any) the cancel path sent. */
 static char g_sendlog[320];
@@ -42,6 +47,7 @@ static void install_fake_tmux(void)
    char counter[300];
    snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
    snprintf(g_sendlog, sizeof(g_sendlog), "%s/sendlog", g_fake_dir);
+   snprintf(g_createlog, sizeof(g_createlog), "%s/createlog", g_fake_dir);
    char script[320];
    snprintf(script, sizeof(script), "%s/tmux", g_fake_dir);
    FILE *f = fopen(script, "w");
@@ -76,10 +82,11 @@ static void install_fake_tmux(void)
            "'\"$c\"' end';\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
            "  send-keys) shift; echo \"$*\" >> '%s'; exit 0 ;;\n"
+           "  new-session) shift; for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
            counter, counter, counter, counter, counter, counter, counter, counter, counter,
-           g_sendlog);
+           g_sendlog, g_createlog);
    fclose(f);
    assert(chmod(script, 0700) == 0);
 
@@ -107,6 +114,40 @@ static int sendlog_has(const char *needle)
    buf[n] = '\0';
    fclose(f);
    return strstr(buf, needle) != NULL;
+}
+
+/* True if the fake tmux new-session argv log contains `needle`. */
+static int createlog_has(const char *needle)
+{
+   FILE *f = fopen(g_createlog, "r");
+   if (!f)
+      return 0;
+   char buf[4096];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   return strstr(buf, needle) != NULL;
+}
+
+/* cli_session_create must hand tmux the pane command (and workdir) as ONE
+ * argument each. cli_cmd is multi-word in production (the AIMEE_SESSION_ID
+ * stamp, --model, --dangerously-skip-permissions): unquoted interpolation gets
+ * word-split by the outer shell, tmux re-joins the fragments, and the pane's
+ * `sh -c` executes only the leading env assignment — exiting 0 instantly and
+ * surfacing as "failed to send prompt to tmux session". */
+static void test_create_multiword_cli_cmd_single_arg(void)
+{
+   unlink(g_createlog);
+   cli_session_t s;
+   int rc = cli_session_create(&s, "aimee-quoting-test",
+                               "AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions",
+                               "/tmp/aimee quoting wd", 0);
+   assert(rc == 0);
+   assert(createlog_has("ARG:[AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions]"));
+   assert(createlog_has("ARG:[/tmp/aimee quoting wd]"));
+   /* No fragment may arrive as its own argument (the word-split regression). */
+   assert(!createlog_has("ARG:[AIMEE_SESSION_ID=web-1]"));
+   s.active = 0; /* fake tmux: no real session to tear down */
 }
 static void sendlog_reset(void)
 {
@@ -933,6 +974,10 @@ int main(void)
    printf("OK\n");
 
    install_fake_tmux();
+
+   printf("test_create_multiword_cli_cmd_single_arg... ");
+   test_create_multiword_cli_cmd_single_arg();
+   printf("OK\n");
 
    printf("test_recv_timeout_on_changing_pane... ");
    test_recv_timeout_on_changing_pane();
