@@ -564,6 +564,7 @@ nodes:
 | `author.plan` | `plan` | `proposal` |
 | `implement` | `branch` | `plan` |
 | `document` | `branch` | `branch` |
+| `source.archive` | `branch` | `branch` |
 | `freeze` | `frozen_diff` | `branch` |
 | `gate.roundtable` | `verdict` | `proposal`, `plan`, `frozen_diff` |
 | `gate.human` | `approval` | `proposal`, `plan`, `branch`, `frozen_diff`, `pr` |
