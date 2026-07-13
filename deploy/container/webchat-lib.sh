@@ -27,6 +27,71 @@ webchat_log() { printf '[webchat] %s\n' "$*"; }
 # require the group.
 WEBCHAT_GROUP="${AIMEE_WEBCHAT_GROUP:-aimee}"
 
+# Durable mirror of the provisioned PAM logins, kept on the persistent AIMEE_HOME
+# volume. The container's /etc/passwd + /etc/shadow live ONLY in the ephemeral
+# container filesystem, so anything that starts the container from a fresh rootfs
+# — an image update, a `docker rm`/recreate, or a runtime (e.g. the SmoothNAS
+# appliance) that re-creates the container on every host reboot — wipes every PAM
+# account, and browser login breaks until someone manually re-runs `useradd`.
+# We therefore record each provisioned account here (username + its crypt(3) shadow
+# hash, NEVER a plaintext password) and restore any missing account from it on every
+# start. $AIMEE_HOME IS a persistent volume, so the login survives reboots even when
+# the env that originally created it is no longer injected. Root-owned, 0600.
+WEBCHAT_LOGIN_STORE="${WEBCHAT_HOME}/webchat/logins"
+
+# Record (or replace) the "user:hash" line for $1 in the durable store, reading the
+# crypt hash straight from /etc/shadow so we persist the encrypted form, not the
+# plaintext. Skips locked/empty hashes ('!'/'*'/'') so an unusable account is not
+# mirrored. Best-effort: a persistence failure must never break provisioning.
+webchat_persist_login() {
+    _pl_user="$1"
+    [ -n "$_pl_user" ] || return 0
+    _pl_hash="$(getent shadow "$_pl_user" 2>/dev/null | cut -d: -f2)"
+    case "$_pl_hash" in
+        '' | '!'* | '*'*) return 0 ;;
+    esac
+    mkdir -p "$(dirname "$WEBCHAT_LOGIN_STORE")" 2>/dev/null || return 0
+    _pl_umask_old="$(umask)"
+    umask 077
+    _pl_tmp="${WEBCHAT_LOGIN_STORE}.tmp.$$"
+    if [ -f "$WEBCHAT_LOGIN_STORE" ]; then
+        grep -v "^${_pl_user}:" "$WEBCHAT_LOGIN_STORE" > "$_pl_tmp" 2>/dev/null || : > "$_pl_tmp"
+    else
+        : > "$_pl_tmp"
+    fi
+    printf '%s:%s\n' "$_pl_user" "$_pl_hash" >> "$_pl_tmp"
+    mv -f "$_pl_tmp" "$WEBCHAT_LOGIN_STORE" 2>/dev/null || rm -f "$_pl_tmp"
+    umask "$_pl_umask_old"
+    chmod 600 "$WEBCHAT_LOGIN_STORE" 2>/dev/null || true
+}
+
+# Recreate any persisted login that is missing from the container's PAM database,
+# restoring its exact crypt hash (chpasswd -e). Runs on every start BEFORE the
+# env-based bootstrap, so a fresh container rootfs regains every previously
+# provisioned account; the env bootstrap then still runs afterwards and can update
+# a password the operator changed. An account that already exists is left untouched
+# (only its group membership is re-asserted) — the live /etc/shadow wins.
+webchat_restore_logins() {
+    [ -f "$WEBCHAT_LOGIN_STORE" ] || return 0
+    getent group "$WEBCHAT_GROUP" >/dev/null 2>&1 || groupadd --system "$WEBCHAT_GROUP" || true
+    while IFS=: read -r _rl_user _rl_hash; do
+        [ -n "$_rl_user" ] && [ -n "$_rl_hash" ] || continue
+        if id "$_rl_user" >/dev/null 2>&1; then
+            usermod --append --groups "$WEBCHAT_GROUP" "$_rl_user" 2>/dev/null || true
+            continue
+        fi
+        webchat_log "restoring persisted login '$_rl_user' (group $WEBCHAT_GROUP)"
+        if ! useradd --create-home --shell /usr/sbin/nologin --groups "$WEBCHAT_GROUP" "$_rl_user"; then
+            webchat_log "ERROR: useradd failed restoring '$_rl_user' — browser login for it will fail"
+            continue
+        fi
+        # crypt hashes use '$', never ':', so the hash survives the IFS=: split intact.
+        if ! printf '%s:%s\n' "$_rl_user" "$_rl_hash" | chpasswd -e 2>/dev/null; then
+            webchat_log "ERROR: could not restore password for '$_rl_user' (chpasswd -e failed) — browser login for it will fail"
+        fi
+    done < "$WEBCHAT_LOGIN_STORE"
+}
+
 # Create (or update) the bootstrap login user from env. PAM authenticates browser
 # logins against a real OS user, so without this no one can sign in. Unset
 # credentials are tolerated: webchat still serves (login page up), it just has no
@@ -66,6 +131,9 @@ webchat_provision_user() {
     # account with no usable password.
     if printf '%s:%s\n' "$_pu_user" "$_pu_pass" | chpasswd; then
         webchat_log "login user '$_pu_user' ready (group $WEBCHAT_GROUP)"
+        # Mirror the account onto the persistent volume so it survives a fresh
+        # container rootfs even if this env is not re-injected next boot.
+        webchat_persist_login "$_pu_user"
     else
         webchat_log "ERROR: could not set password for '$_pu_user' (chpasswd failed) — browser login for it will fail"
     fi
@@ -101,6 +169,10 @@ webchat_bootstrap_extra_users() {
 # tolerated (login page still serves) — and AIMEE_WEBCHAT_USERS adds any number
 # of extra persistent accounts.
 webchat_bootstrap_user() {
+    # First bring back any account provisioned on an earlier boot — this is what
+    # makes login survive a reboot/recreate when the runtime does not re-inject
+    # AIMEE_WEBCHAT_USER/PASSWORD. The env bootstrap below still runs and wins.
+    webchat_restore_logins
     _wc_user="${AIMEE_WEBCHAT_USER:-}"
     _wc_pass="${AIMEE_WEBCHAT_PASSWORD:-}"
     if [ -z "$_wc_user" ] || [ -z "$_wc_pass" ]; then
