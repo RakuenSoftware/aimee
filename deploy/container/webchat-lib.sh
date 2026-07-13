@@ -38,16 +38,37 @@ webchat_provision_user() {
     _pu_user="$1"
     _pu_pass="$2"
     [ -n "$_pu_user" ] && [ -n "$_pu_pass" ] || return 0
-    getent group "$WEBCHAT_GROUP" >/dev/null 2>&1 || groupadd --system "$WEBCHAT_GROUP"
+    # PAM authenticates against a real OS user, and useradd's default NAME_REGEX
+    # (and the webchat user manager) only accept lowercase letters, digits, '-'
+    # and '_'. Reject anything else LOUDLY here rather than let useradd fail
+    # silently and leave login broken with a confusing "invalid credentials".
+    case "$_pu_user" in
+        *[!a-z0-9_-]* | [!a-z_]*)
+            webchat_log "ERROR: login user '$_pu_user' is not a valid username (use lowercase letters, digits, '-', '_'; must not start with a digit/hyphen). Skipping — browser login for it will fail."
+            return 0
+            ;;
+    esac
+    getent group "$WEBCHAT_GROUP" >/dev/null 2>&1 || groupadd --system "$WEBCHAT_GROUP" || true
     if id "$_pu_user" >/dev/null 2>&1; then
-        # Existing user (e.g. the service account): just ensure group membership.
+        # Existing user (e.g. the aimee service account): just ensure group membership.
         usermod --append --groups "$WEBCHAT_GROUP" "$_pu_user" 2>/dev/null || true
     else
         webchat_log "creating login user '$_pu_user'"
-        useradd --create-home --shell /usr/sbin/nologin --groups "$WEBCHAT_GROUP" "$_pu_user"
+        # Guard useradd so a failure is reported, not swallowed by the entrypoint's
+        # `set -e` (which would crash the container before webchat even starts).
+        if ! useradd --create-home --shell /usr/sbin/nologin --groups "$WEBCHAT_GROUP" "$_pu_user"; then
+            webchat_log "ERROR: useradd failed for '$_pu_user' — browser login for it will fail"
+            return 0
+        fi
     fi
-    printf '%s:%s\n' "$_pu_user" "$_pu_pass" | chpasswd
-    webchat_log "login user '$_pu_user' ready (group $WEBCHAT_GROUP)"
+    # Set the password from AIMEE_WEBCHAT_PASSWORD. chpasswd splits on the FIRST
+    # ':', so a password may contain ':'. Report a failure instead of leaving the
+    # account with no usable password.
+    if printf '%s:%s\n' "$_pu_user" "$_pu_pass" | chpasswd; then
+        webchat_log "login user '$_pu_user' ready (group $WEBCHAT_GROUP)"
+    else
+        webchat_log "ERROR: could not set password for '$_pu_user' (chpasswd failed) — browser login for it will fail"
+    fi
 }
 
 # Additional persistent logins from AIMEE_WEBCHAT_USERS: a list of "user:password"

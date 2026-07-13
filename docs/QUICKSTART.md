@@ -39,7 +39,11 @@ Starts `aimee-server` only (webchat built in). `/v1` is on `:8743` (native TLS, 
 
 ### 1.2 Run the setup wizard
 
-Open **https://localhost:8443** (accept the self-signed cert) and log in as `aimee` / `aimee-local-dev`. The wizard covers:
+Open **https://localhost:8443** (accept the self-signed cert) and log in as `aimee` / `aimee-local-dev`.
+
+The browser login is a real PAM account the container creates on startup from **`AIMEE_WEBCHAT_USER`** / **`AIMEE_WEBCHAT_PASSWORD`** (defaults `aimee` / `aimee-local-dev`) — set them in the compose file for anything past local dev. The username must be a valid Linux name: **lowercase letters, digits, `-`, `_`, and not starting with a digit** (so `admin` or `web-user`, not `Admin` or `bob.smith`). For more than one login, set `AIMEE_WEBCHAT_USERS` to a comma-separated `user:password` list. If a login is rejected, check the container logs for `[webchat]` lines — they report exactly which account was created or why it couldn't be.
+
+The wizard covers:
 
 - **Primary provider** — which agent aimee drives.
 - **Knowledge base** — a local one (default), or an existing remote `aimee-kb`.
@@ -48,8 +52,6 @@ Open **https://localhost:8443** (accept the self-signed cert) and log in as `aim
 - **Connection & workspaces** — sign in to your git hosts and clone repos.
 
 The final **Deploy** launches `aimee-kb` + `aimee-llm` + Postgres and shows their status. The first run pulls images and the CPU model weights (a few minutes); later boots are fast — state lives in named volumes.
-
-> Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` for anything past local dev.
 
 ### 1.3 Verify it's healthy
 
