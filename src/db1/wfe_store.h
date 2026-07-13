@@ -155,7 +155,8 @@ int db1_lifecycle_event_add(const char *work_item_id, const char *stage, const c
 int db1_lifecycle_event_list(const char *work_item_id, db1_lifecycle_event_t **out);
 
 /* Per-stage attempt counter (for loop-back max_attempts). */
-int db1_stage_attempt_inc(const char *work_item_id, const char *stage); /* new count */
+int db1_stage_attempt_inc(const char *work_item_id, const char *stage);   /* new count */
+int db1_stage_attempt_reset(const char *work_item_id, const char *stage); /* re-arm the loop */
 int db1_stage_attempt_get(const char *work_item_id, const char *stage);
 
 /* Coarse transaction control for an atomic advance critical section (the engine
