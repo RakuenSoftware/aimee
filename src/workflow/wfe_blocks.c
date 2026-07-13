@@ -28,7 +28,7 @@
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_manager_artifacts.h" /* typed intent/packet/verdict schema validators */
-#include "wfe_store.h" /* db1_work_item_set_worktree — persist the per-item worktree */
+#include "wfe_store.h"             /* db1_work_item_set_worktree — persist the per-item worktree */
 
 /* Resolve the local working repo for a work item: $AIMEE_WORKFLOW_REPO or cwd. */
 static const char *repo_dir(void)
