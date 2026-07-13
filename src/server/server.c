@@ -1852,6 +1852,13 @@ static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)
       return 1;
+   /* A PRIMARY chat turn routes the provider-named agent through the same
+    * machinery as delegation; both rules below are delegation policy, so they
+    * must not exclude the primary from its own turn (they otherwise break
+    * every server-side chat whose provider is a configured agent — the
+    * webchat's default). The marker is thread-local to the chat worker. */
+   if (agent_routing_primary_turn())
+      return 0;
    config_t cfg;
    if (config_load(&cfg) != 0)
       return agent_is_claude_cli(ag);

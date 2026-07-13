@@ -256,6 +256,25 @@ def health_state(child_oks):
     return "ok" if all(configured.values()) else "down"
 
 
+# The kb's readiness probe (embed-remote.py --dim) reads payload["dim"] from
+# /health and treats a missing/absent dim as "embedder not ready" forever — so
+# the real (non-stub) path must report it too, not just the stub. The embedder
+# child doesn't expose its dim as metadata, so learn it once from an actual
+# embedding and cache it; until the child can embed, /health simply omits dim
+# (status won't be "ok" yet either).
+_embed_dim = None
+
+
+def embed_dim():
+    global _embed_dim
+    if _embed_dim is None:
+        try:
+            _embed_dim = len(do_embed("dim probe"))
+        except Exception:  # noqa: BLE001 - child not ready; retry on a later probe
+            return None
+    return _embed_dim
+
+
 # ---- handlers (call llama.cpp; the rerank head is the validated P2 path) ----
 
 _head = None
@@ -477,7 +496,17 @@ def build_server():
                     self._send(200, {"status": "ok", "model": "aimee-llm-stub", "dim": STUB_DIM})
                     return
                 st = health_state(child_health())
-                self._send(200 if st == "ok" else 503, {"status": st, "model": EMBED_MODEL})
+                payload = {"status": st, "model": EMBED_MODEL}
+                if st == "ok":
+                    dim = embed_dim()
+                    if dim:
+                        payload["dim"] = dim
+                    else:
+                        # embedder reachable but not serving embeddings yet: the kb
+                        # gates on dim, so don't report ok without one.
+                        st = "loading"
+                        payload["status"] = st
+                self._send(200 if st == "ok" else 503, payload)
             elif path in ("/health/embed", "/health/rerank", "/health/synth"):
                 role = path.rsplit("/", 1)[1]
                 st = role_states()[role]
