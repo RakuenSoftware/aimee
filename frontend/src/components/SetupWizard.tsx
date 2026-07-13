@@ -3,7 +3,7 @@ import { useToast } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
 import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
-import { computeReadiness, type StepId } from '../setup/readiness';
+import { completedSteps, computeReadiness, type StepId } from '../setup/readiness';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import PrimaryChooser from '../setup/PrimaryChooser';
 import KnowledgeBase from '../setup/KnowledgeBase';
@@ -94,22 +94,37 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
   // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
   const [appliance, setAppliance] = useState(false);
+  // Steps already completed when the wizard opened — hidden this run. Frozen at
+  // open so finishing a step mid-run doesn't reshuffle the remaining ones.
+  const [doneAtOpen, setDoneAtOpen] = useState<ReadonlySet<StepId>>(new Set());
+  // Until the open-time loads resolve we don't know which steps to hide; gate
+  // the body so the list doesn't flash-then-shrink.
+  const [booted, setBooted] = useState(false);
 
   const kbMode: WizardKbMode = String(cfg.kb_mode) === 'remote' ? 'remote' : 'local';
-  const steps = useMemo(() => visibleSteps(kbMode, appliance), [kbMode, appliance]);
+  const steps = useMemo(
+    () => visibleSteps(kbMode, appliance).filter((s) => !doneAtOpen.has(s.id)),
+    [kbMode, appliance, doneAtOpen],
+  );
   const total = steps.length;
   // Clamp the cursor: switching to a remote KB shrinks the visible list.
   const safeIdx = Math.min(idx, total - 1);
-  const step = steps[safeIdx];
+  // Undefined when every step was already complete at open — the summary shows.
+  const step = steps[safeIdx] as (typeof steps)[number] | undefined;
 
-  // (Re)load config each time the wizard opens; reset step + transient state.
+  // (Re)load config each time the wizard opens; reset step + transient state,
+  // then hide the sections that are already set up.
   useEffect(() => {
     if (!open) return;
     setIdx(0);
     setShowSummary(false);
     setPendingRestart([]);
-    loadConfig().then((c) => {
+    setBooted(false);
+    setDoneAtOpen(new Set());
+    Promise.all([loadConfig(), fetchHostCount(), fetchAppliance()]).then(([c, hosts, appl]) => {
       setCfg(c);
+      setHostsConnected(hosts);
+      setAppliance(appl);
       const d: Record<string, string> = {};
       for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'local')) {
         for (const k of s.keys) {
@@ -118,9 +133,12 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         }
       }
       setDraft(d);
+      const done = completedSteps(c, hasProject, hosts);
+      setDoneAtOpen(done);
+      setBooted(true);
     });
-    fetchHostCount().then(setHostsConnected);
-    fetchAppliance().then(setAppliance);
+    // hasProject is read once at open: the done-set is a deliberate snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const close = useCallback(() => { onClose(); }, [onClose]);
@@ -189,6 +207,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   // Save every edited key in the current (generic keyed) step. Any failure aborts
   // advance and Toasts; successes update the live cfg + restart tracking.
   async function saveStep() {
+    if (!step) return; // unreachable: the save button only renders with a step
     setSaving(true);
     const savedCfg: ConfigMap = { ...cfg };
     const restart = new Set(pendingRestart);
@@ -255,7 +274,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
             style={{ background: 'none', border: 'none', color: '#9aa', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
 
-        {showSummary ? (
+        {!booted ? (
+          <div style={{ fontSize: 13, color: '#667', padding: '10px 0' }}>Loading…</div>
+        ) : showSummary || !step ? (
           <div>
             <p style={{ fontSize: 13, color: '#556', margin: '4px 0 12px' }}>
               {readiness.ready ? 'Everything required is configured. 🎉' : 'Here’s what’s left:'}
@@ -280,8 +301,10 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 straight from here when the server can orchestrate Docker. The
                 appliance already runs everything in-container, so skip it there. */}
             {!appliance && <DeployPanel kbMode={kbMode} />}
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <button style={ghostBtn} onClick={() => { setShowSummary(false); setIdx(0); }}>Back</button>
+            <div style={{ display: 'flex', justifyContent: total > 0 ? 'space-between' : 'flex-end' }}>
+              {total > 0 && (
+                <button style={ghostBtn} onClick={() => { setShowSummary(false); setIdx(0); }}>Back</button>
+              )}
               <button style={primaryBtn} onClick={() => { setDismissed(true); notifySetupUpdated(); close(); }}>Finish</button>
             </div>
           </div>

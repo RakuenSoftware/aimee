@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { parseOwner } from './ownerUrl';
 
 /* Wizard — Workspaces & projects. A workspace is your collection of projects: the
  * repos under an owner/org (e.g. github.com/RakuenSoftware). Point at that owner,
@@ -44,21 +45,6 @@ interface CloneResult {
   ok: boolean;
   project?: string | null;
   error?: string | null;
-}
-
-/** Parse "github.com/RakuenSoftware", "https://github.com/RakuenSoftware/", or
- * "host owner" into {host, owner}. Returns null when either part is missing. */
-export function parseOwner(input: string): { host: string; owner: string } | null {
-  let s = input.trim();
-  if (!s) return null;
-  s = s.replace(/^[a-z]+:\/\//i, ''); // strip scheme
-  s = s.replace(/^git@/i, '').replace(':', '/'); // git@host:owner → host/owner
-  const parts = s.split('/').filter(Boolean);
-  if (parts.length < 2) return null;
-  const host = parts[0].toLowerCase();
-  const owner = parts[1];
-  if (!host.includes('.') || !owner) return null;
-  return { host, owner };
 }
 
 export interface ConnectWorkspaceProps {
@@ -181,7 +167,8 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input style={{ ...input, flex: 2, minWidth: 240 }}
             placeholder="owner URL (e.g. github.com/RakuenSoftware)"
-            value={ownerInput} onChange={(e) => setOwnerInput(e.target.value)} />
+            value={ownerInput} onChange={(e) => setOwnerInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && ownerInput.trim() && !listing) listRepos(); }} />
           <button style={primaryBtn} disabled={listing || !ownerInput.trim()} onClick={listRepos}>
             {listing ? 'Listing…' : 'List repositories'}
           </button>
