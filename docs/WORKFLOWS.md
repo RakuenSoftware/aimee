@@ -285,6 +285,17 @@ appears in a repo, a schedule elapses, a webhook arrives) or a person (clicking
 set of generic trigger sources that you wire to whatever workflow you want —
 the trigger starts the run; what happens next is entirely the workflow's design.
 
+Sources are a registry in
+[src/server/trigger_scheduler.c](../src/server/trigger_scheduler.c): each entry
+is `{name, due, fire}` — `due` decides whether this tick should fire (a repo
+scanner polls every pass; cron matches its schedule), `fire` matches events and
+materializes artifacts, and files each run through the shared
+`trigger_file_run` back half (work item on the rule's pipeline + workspace +
+mode, per-run USD ceiling from `max_spend_usd` or the intake-wide default,
+audit log line). The tick loop owns the rest — per-rule rate limiting and the
+global `trigger.max_concurrent` — so adding a source is one table row plus its
+`fire`.
+
 Triggers are configured as a `trigger_rules` list in `aimee.yaml`. Each rule
 names a **source** (what fires it), how the filed run should execute (**mode**),
 and the **pipeline** (which workflow, in which repo):

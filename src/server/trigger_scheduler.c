@@ -20,6 +20,7 @@
 #include "skill_curator.h"
 #include "trigger_scheduler.h"
 #include "util.h"
+#include "wfe_autonomy.h" /* wfe_autonomy_default_max_cost_usd — the shared intake cap policy */
 #include "wfe_engine.h"
 #include "wfe_scheduler.h" /* wfe_scheduler_notify — drive a filed run now, not on the 30s sweep */
 
@@ -443,24 +444,47 @@ static int trigger_write_atomic(const char *path, const char *bytes)
 }
 
 /* The per-run USD ceiling for a trigger-filed run: the rule's explicit
- * pipeline.max_spend_usd when set (> 0), else the same default every autonomous
- * intake applies ($5.00, AIMEE_AUTONOMY_MAX_USD override, 0 disables) — a
- * trigger-filed run must never be the one intake path with NO runaway cost cap.
- * Mirrors dev_submit_run (server_dev_submit.c). Returns 0 for "no cap". */
+ * pipeline.max_spend_usd when set (> 0), else the intake-wide default policy
+ * (wfe_autonomy_default_max_cost_usd, shared with /v1/dev/submit) — a
+ * trigger-filed run must never be the one intake path with NO runaway cost
+ * cap. Returns 0 for "no cap". */
 static double trigger_cost_cap(const trigger_rule_t *rule)
 {
    if (rule->max_spend_usd > 0 && isfinite(rule->max_spend_usd))
       return rule->max_spend_usd;
-   double cap_usd = 5.0;
-   const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
-   if (v && v[0])
+   return wfe_autonomy_default_max_cost_usd();
+}
+
+/* File one run for a materialized trigger artifact — the shared back half of
+ * every artifact-producing trigger source: create the work item on the rule's
+ * pipeline (in the rule's workspace, with the rule's mode), stamp the per-run
+ * USD ceiling, and log the outcome. `what` labels the artifact in logs (e.g.
+ * "sha=<blob>"). De-duplication is the SOURCE's job — each source knows its
+ * own identity key; this helper is pure filing. Returns 0 filed (out_id set),
+ * -1 refused/failed. */
+static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_path, const char *what,
+                            char out_id[80])
+{
+   char err[256] = "";
+   out_id[0] = '\0';
+   /* mode drives whether the autonomy scheduler advances the run hands-off
+    * ("autonomous", the default when the rule omits it) or the item parks for
+    * a human to drive in the webchat ("interactive"). */
+   const char *mode = rule->mode[0] ? rule->mode : "autonomous";
+   if (wfe_work_item_create(rule->pipeline_template, rule->workspace, artifact_path, mode, out_id,
+                            err, sizeof(err)) != 0 ||
+       !out_id[0])
    {
-      char *e = NULL;
-      double d = strtod(v, &e);
-      if (e && *e == '\0' && isfinite(d) && d >= 0) /* reject inf/NaN: would void the cap */
-         cap_usd = d;
+      aimee_log(LOG_WARN, "trigger.sched", "%s: create skipped/failed repo=%s %s: %s", rule->source,
+                rule->workspace, what, err[0] ? err : "already exists");
+      return -1;
    }
-   return cap_usd;
+   double cap = trigger_cost_cap(rule);
+   if (cap > 0)
+      db1_work_item_set_cost_cap(out_id, cap);
+   aimee_log(LOG_INFO, "trigger.sched", "filed run workflow=%s repo=%s %s id=%s",
+             rule->pipeline_template, rule->workspace, what, out_id);
+   return 0;
 }
 
 /* Count ACTIVE work items that were filed by the proposals trigger (their
@@ -624,30 +648,14 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       }
       free(blob);
 
-      char id[80] = "", err[256] = "";
-      /* mode drives whether the autonomy scheduler advances the run hands-off
-       * ("autonomous", the default when the rule omits it) or the item parks for
-       * a human to drive in the webchat ("interactive"). */
-      const char *mode = rule->mode[0] ? rule->mode : "autonomous";
-      rc = wfe_work_item_create(rule->pipeline_template, rule->workspace, proposal_path, mode, id,
-                                err, sizeof(err));
-      if (rc == 0 && id[0])
+      char what[64], id[80];
+      snprintf(what, sizeof(what), "sha=%s", entries[i].sha);
+      if (trigger_file_run(rule, proposal_path, what, id) == 0)
       {
-         /* Per-run USD ceiling (rule's max_spend_usd, else the intake default) so
-          * a triggered run parks budget_exceeded instead of burning unbounded
-          * delegate cost. Best-effort, mirroring dev_submit_run. */
-         double cap = trigger_cost_cap(rule);
-         if (cap > 0)
-            db1_work_item_set_cost_cap(id, cap);
          filed++;
          if (budget > 0)
             budget--;
-         aimee_log(LOG_INFO, "trigger.sched", "filed proposal workflow=%s repo=%s sha=%s id=%s",
-                   rule->pipeline_template, rule->workspace, entries[i].sha, id);
       }
-      else
-         aimee_log(LOG_WARN, "trigger.sched", "proposal create skipped/failed repo=%s sha=%s: %s",
-                   rule->workspace, entries[i].sha, err[0] ? err : "already exists");
    }
 
    /* Wake the autonomy driver so a just-filed run advances now rather than on
@@ -950,6 +958,60 @@ static int config_has_cron_job(const config_t *cfg, const char *id)
 }
 
 /* ------------------------------------------------------------------ */
+/* Trigger-source registry                                             */
+/* ------------------------------------------------------------------ */
+
+/* A trigger source turns "something happened" into filed runs. The tick loop
+ * owns the shared plumbing — one probe per rule per ~minute window, the global
+ * trigger.max_concurrent handed to fire() — and each source owns its own event
+ * matching, artifact materialization, and de-duplication. Adding a source is
+ * one table row: `due` says whether this tick should fire (a scanner that
+ * polls on every pass returns 1 unconditionally; cron matches its schedule),
+ * `fire` does the work and files runs through trigger_file_run. */
+typedef struct
+{
+   const char *name;
+   int (*due)(const trigger_rule_t *rule, const struct tm *tm);
+   void (*fire)(const trigger_rule_t *rule, int max_concurrent);
+} trigger_source_t;
+
+static int proposals_due(const trigger_rule_t *rule, const struct tm *tm)
+{
+   (void)rule;
+   (void)tm;
+   return 1; /* poll the repo every pass; per-proposal dedup makes re-scans idempotent */
+}
+
+static void proposals_fire(const trigger_rule_t *rule, int max_concurrent)
+{
+   scan_proposals(rule, max_concurrent);
+}
+
+static int cron_due(const trigger_rule_t *rule, const struct tm *tm)
+{
+   return rule->schedule[0] && schedule_matches(rule->schedule, tm) == 1;
+}
+
+static void cron_fire(const trigger_rule_t *rule, int max_concurrent)
+{
+   (void)max_concurrent; /* cron files a legacy pipeline, not a wfe work item */
+   trigger_scheduler_fire_rule(rule);
+}
+
+static const trigger_source_t g_trigger_sources[] = {
+    {"proposals", proposals_due, proposals_fire},
+    {"cron", cron_due, cron_fire},
+};
+
+static const trigger_source_t *trigger_source_find(const char *name)
+{
+   for (size_t i = 0; i < sizeof(g_trigger_sources) / sizeof(g_trigger_sources[0]); i++)
+      if (strcmp(g_trigger_sources[i].name, name) == 0)
+         return &g_trigger_sources[i];
+   return NULL;
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduler tick                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -965,31 +1027,17 @@ static void sched_tick(void)
    for (int i = 0; i < cfg.trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
    {
       const trigger_rule_t *rule = &cfg.trigger_rules[i];
-
-      if (strcmp(rule->source, "proposals") == 0)
-      {
-         if (now - g_last_fired[i] < 55)
-            continue;
-         g_last_fired[i] = now;
-         scan_proposals(rule, cfg.trigger_max_concurrent);
+      const trigger_source_t *src = trigger_source_find(rule->source);
+      if (!src)
+         continue; /* unknown source (e.g. a webhook handled on its own ingress) */
+      if (!src->due(rule, &tm))
          continue;
-      }
-
-      if (strcmp(rule->source, "cron") != 0)
-         continue;
-      if (!rule->schedule[0])
-         continue;
-
-      int match = schedule_matches(rule->schedule, &tm);
-      if (match != 1)
-         continue;
-
-      /* Deduplicate: skip if we fired within the last 55 seconds */
+      /* Shared per-rule rate limit: one fire per ~minute window, so the 30s
+       * tick never double-fires a minute-granular source. */
       if (now - g_last_fired[i] < 55)
          continue;
-
       g_last_fired[i] = now;
-      trigger_scheduler_fire_rule(rule);
+      src->fire(rule, cfg.trigger_max_concurrent);
    }
 
    for (int i = 0; i < cfg.cron_job_count && i < CRON_JOBS_MAX; i++)

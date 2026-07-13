@@ -25,6 +25,14 @@
  * clean stop (terminal or parked), -1 on error. */
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen);
 
+/* The default per-run USD ceiling every autonomous intake applies when the
+ * caller supplies no explicit cap: $5.00, AIMEE_AUTONOMY_MAX_USD overrides
+ * (0 disables the cap; a malformed/inf/NaN override falls back to the
+ * default). One policy for every filing path — /v1/dev/submit, the MCP tool,
+ * and each trigger source — so no intake is ever the one without a runaway
+ * cost cap. Returns the cap in USD; 0 means "no cap". */
+double wfe_autonomy_default_max_cost_usd(void);
+
 /* Human-only escape from a stuck gate: records a signed override (counts as a
  * human approval), increments override_count, and clears the pause so the next
  * run advances. On the (WFE_MAX_OVERRIDES+1)th override the work item is forced
