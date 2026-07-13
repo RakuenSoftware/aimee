@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "log.h"  /* degraded-gate WARN carries wfe_gate_decide's reason */
 #include "util.h" /* safe_exec_capture — compute the change-under-review diff */
 #include "wfe_store.h"
 #include "wfe_def.h"
@@ -203,6 +204,12 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
    }
    case WFE_GATE_DEGRADED:
    default:
+      /* The reason (which required persona was missing/untrustworthy) is
+       * otherwise discarded, leaving nothing in the log to distinguish a
+       * seat-resolution failure from a malformed verdict when triaging a
+       * parked run. */
+      aimee_log(LOG_WARN, "wfe-gate", "%s: panel degraded at gate: %s", node->id,
+                reason[0] ? reason : "(no reason)");
       return wfe_step_pending(WFE_PAUSE_PANEL_DEGRADED);
    }
 }
