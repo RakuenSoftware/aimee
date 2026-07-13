@@ -323,6 +323,19 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
                   aimee_log(LOG_WARN, "wfe-panel",
                             "lens '%s' verdict malformed from agent '%s'; reply tail: %.160s",
                             required[i], taskagent[t], tail);
+                  /* A malformed reply from a $random seat is provider flakiness
+                   * (typically a review truncated before its final JSON line, as
+                   * the tail above shows) — treat it like a failed dispatch and
+                   * let the next round retry the lens with a DIFFERENT agent
+                   * rather than committing a verdict that fails required-lens
+                   * coverage and degrades the whole gate. Only the FINAL round
+                   * commits the malformed verdict (fail-closed as before). */
+                  if (!pinned[i] && round == 0)
+                  {
+                     free(results[t].response);
+                     results[t].response = NULL;
+                     continue; /* leave done[i]=0 -> round 2 re-seats this lens */
+                  }
                }
                else
                   aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s'",

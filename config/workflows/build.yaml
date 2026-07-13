@@ -88,6 +88,10 @@ nodes:
     in:
       plan: plan.out
     next: slices
+    # A transient split failure (the packet-authoring delegate flubbing its
+    # output) must retry, not dead-end the run: a looped node with no on_fail
+    # edge parks 'stuck' permanently.
+    on_fail: split
   # Fan every packet out to the child "slice" workflow; park until all have merged
   # into the feature branch. A failed/blocked slice parks the run for a human.
   - id: slices

@@ -1702,13 +1702,34 @@ static wfe_step_result_t exec_understand(wfe_ctx *ctx, const wfe_node_t *node)
 
 static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   return manager_produce(
-       ctx, node, "architect",
-       "Decompose the approved intent into a structured PACKET PLAN and write it as JSON to the "
-       "given path (nothing else): {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\","
-       "\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],"
-       "\"acceptance_criteria\":[\"...\"]}]}. Then commit it.",
-       wfe_packets_validate);
+   /* Thread the APPROVED PLAN into the prompt: the plan artifact lives at the
+    * run's proposal path (under $AIMEE_HOME, edited in place by author.plan),
+    * which the delegate — running in the worktree — cannot see. Without the
+    * content the delegate has nothing to decompose and (observed live) writes a
+    * complaint into the artifact file instead of packets, looping split to its
+    * cap. Truncated head-first: packetization needs the plan's structure, which
+    * leads. */
+   char plan[12 * 1024];
+   plan[0] = '\0';
+   const char *ppath = wfe_ctx_proposal_path(ctx);
+   if (ppath && ppath[0])
+   {
+      FILE *f = fopen(ppath, "rb");
+      if (f)
+      {
+         size_t n = fread(plan, 1, sizeof plan - 1, f);
+         plan[n] = '\0';
+         fclose(f);
+      }
+   }
+   char prompt[14 * 1024];
+   snprintf(prompt, sizeof prompt,
+            "Decompose the APPROVED PLAN below into a structured PACKET PLAN and write it as JSON "
+            "to the given path (nothing else): {\"schema_version\":1,\"packets\":[{\"packet_id\":"
+            "\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],"
+            "\"acceptance_criteria\":[\"...\"]}]}. Then commit it.\n\nAPPROVED PLAN:\n%s",
+            plan[0] ? plan : "(no plan artifact found — decompose the work item's ask)");
+   return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }
 
 /* review: a READ-ONLY reviewer delegate (persona from node params `reviewer`,
