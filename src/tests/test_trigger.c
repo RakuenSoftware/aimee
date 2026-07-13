@@ -1095,6 +1095,9 @@ static void test_trigger_source_registry(void)
    assert(trigger_source_find("cron") != NULL);
    assert(trigger_source_find("github-webhook") == NULL);
    assert(trigger_source_find("") == NULL);
+   /* watch-dir is the canonical name for the same scanner proposals aliases. */
+   assert(trigger_source_find("watch-dir") != NULL);
+   assert(trigger_source_find("watch-dir")->fire == trigger_source_find("proposals")->fire);
 
    trigger_rule_t rule;
    memset(&rule, 0, sizeof rule);

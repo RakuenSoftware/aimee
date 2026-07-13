@@ -305,7 +305,7 @@ trigger:
   max_concurrent: 1          # cap on concurrently-executing triggered runs
 
 trigger_rules:
-  - source: proposals              # scan a git repo for new proposals
+  - source: watch-dir              # scan a repo dir for new files (alias: proposals)
     event: docs/proposals/pending  # repo-relative dir to watch (this is the default)
     schedule: main                 # git ref/branch to read (default: auto-detected origin HEAD)
     mode: autonomous               # autonomous (default) | interactive
@@ -318,12 +318,12 @@ trigger_rules:
 
 | Field | Meaning |
 | --- | --- |
-| `source` | What fires the rule: `proposals`, `cron`, or a webhook source. |
-| `event` | Source-specific match. For `proposals`, the repo-relative directory to scan (default `docs/proposals/pending`). |
-| `schedule` | For `cron`, the cron expression. For `proposals`, the git ref/branch to read (default: auto-detected `origin` HEAD, then `HEAD`). |
+| `source` | What fires the rule: `watch-dir` (alias `proposals`), `cron`, or a webhook source. |
+| `event` | Source-specific match. For `watch-dir`/`proposals`, the repo-relative directory to scan (default `docs/proposals/pending`). |
+| `schedule` | For `cron`, the cron expression. For `watch-dir`/`proposals`, the git ref/branch to read (default: auto-detected `origin` HEAD, then `HEAD`). |
 | `mode` | Execution mode stamped on the filed work item — see below. `autonomous` (default) or `interactive`. |
 | `pipeline.template` | The workflow to start (any saved workflow name, e.g. `build`). |
-| `pipeline.workspace` | Absolute path of the git repo the run operates in (and, for `proposals`, the repo to scan). |
+| `pipeline.workspace` | Absolute path of the git repo the run operates in (and, for `watch-dir`/`proposals`, the repo to scan). |
 | `pipeline.max_spend_usd` | Optional per-run spend cap. |
 
 ### `mode`: autonomous vs. interactive
@@ -347,9 +347,11 @@ workflow that still pauses at a human gate partway through, or an `interactive`
 trigger into a fully hands-off workflow. Pick the trigger `mode` for the
 *start* decision; put in-flight gates in the *workflow*.
 
-### The `proposals` source
+### The `watch-dir` source (alias: `proposals`)
 
-The `proposals` source turns "a proposal was committed" into a workflow run. On
+The `watch-dir` source turns "a file was committed into a watched directory"
+into a workflow run — `proposals` is the original alias for the same scanner,
+whose default directory (`docs/proposals/pending`) is just one configuration. On
 each scan (roughly once a minute) it lists the proposal directory at the
 configured git ref, and for every proposal it has not seen before it:
 
