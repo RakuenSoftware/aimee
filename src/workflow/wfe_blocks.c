@@ -1059,6 +1059,19 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, head, cost);
 }
 
+/* trigger.watch-dir: at RUN time the trigger already fired — the scheduler
+ * materialized the watched file as this run's proposal artifact and filed the
+ * run (arming lives in trigger_scheduler.c, not here). The block advances
+ * immediately, producing the proposal handle so an explicit data edge
+ * (trigger -> author.proposal) can consume it. */
+static wfe_step_result_t exec_trigger_source(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   (void)ctx;
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+   return wfe_step_advanced(handle, "", 0.0);
+}
+
 /* mkdir -p for a repo-relative dir under `wd` (single-purpose: the archive
  * destination). Best-effort; the git mv below surfaces any real failure. */
 static void archive_mkdir_parents(const char *wd, const char *rel)
@@ -1951,6 +1964,7 @@ void wfe_register_default_executors(void)
    wfe_register_block_executor(WFE_BLK_IMPLEMENT, exec_implement);
    wfe_register_block_executor(WFE_BLK_DOCUMENT, exec_document);
    wfe_register_block_executor(WFE_BLK_SOURCE_ARCHIVE, exec_source_archive);
+   wfe_register_block_executor(WFE_BLK_TRIGGER_WATCH_DIR, exec_trigger_source);
    wfe_register_block_executor(WFE_BLK_FREEZE, exec_freeze);
    wfe_register_block_executor(WFE_BLK_PR_OPEN, exec_pr_open);
    wfe_register_block_executor(WFE_BLK_MERGE, exec_merge);

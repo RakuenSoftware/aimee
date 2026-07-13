@@ -560,7 +560,8 @@ nodes:
 
 | Block | Produces | Accepts inputs |
 |-------|----------|----------------|
-| `author.proposal` | `proposal` | _(source: none)_ |
+| `author.proposal` | `proposal` | `proposal` |
+| `trigger.watch-dir` | `proposal` | _(source: none)_ |
 | `author.plan` | `plan` | `proposal` |
 | `implement` | `branch` | `plan` |
 | `document` | `branch` | `branch` |
