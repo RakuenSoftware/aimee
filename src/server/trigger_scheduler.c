@@ -21,11 +21,13 @@
 #include "trigger_scheduler.h"
 #include "util.h"
 #include "wfe_engine.h"
+#include "wfe_scheduler.h" /* wfe_scheduler_notify — drive a filed run now, not on the 30s sweep */
 
 #include <pthread.h>
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -440,7 +442,55 @@ static int trigger_write_atomic(const char *path, const char *bytes)
    return 0;
 }
 
-static void scan_proposals(const trigger_rule_t *rule)
+/* The per-run USD ceiling for a trigger-filed run: the rule's explicit
+ * pipeline.max_spend_usd when set (> 0), else the same default every autonomous
+ * intake applies ($5.00, AIMEE_AUTONOMY_MAX_USD override, 0 disables) — a
+ * trigger-filed run must never be the one intake path with NO runaway cost cap.
+ * Mirrors dev_submit_run (server_dev_submit.c). Returns 0 for "no cap". */
+static double trigger_cost_cap(const trigger_rule_t *rule)
+{
+   if (rule->max_spend_usd > 0 && isfinite(rule->max_spend_usd))
+      return rule->max_spend_usd;
+   double cap_usd = 5.0;
+   const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
+   if (v && v[0])
+   {
+      char *e = NULL;
+      double d = strtod(v, &e);
+      if (e && *e == '\0' && isfinite(d) && d >= 0) /* reject inf/NaN: would void the cap */
+         cap_usd = d;
+   }
+   return cap_usd;
+}
+
+/* Count ACTIVE work items that were filed by the proposals trigger (their
+ * proposal artifact lives under <home>/triggers/proposals/), across all rules —
+ * trigger.max_concurrent is a GLOBAL cap on concurrently-executing triggered
+ * runs. Returns the count, or -1 on a DB read failure (caller fails closed:
+ * files nothing this pass rather than overshooting the cap). */
+static int trigger_active_filed_runs(const char *home)
+{
+   char prefix[1100];
+   if (snprintf(prefix, sizeof(prefix), "%s/triggers/proposals/", home) >= (int)sizeof(prefix))
+      return -1;
+   db1_work_item_t *items = NULL;
+   int n = db1_work_item_list(&items);
+   if (n < 0 || !items)
+   {
+      free(items);
+      return n < 0 ? -1 : 0;
+   }
+   int active = 0;
+   size_t plen = strlen(prefix);
+   for (int i = 0; i < n; i++)
+      if (strcmp(items[i].state, "active") == 0 &&
+          strncmp(items[i].proposal_path, prefix, plen) == 0)
+         active++;
+   free(items);
+   return active;
+}
+
+static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
 {
    if (!rule || !rule->workspace[0] || !rule->pipeline_template[0])
       return;
@@ -510,8 +560,41 @@ static void scan_proposals(const trigger_rule_t *rule)
       return;
    }
 
+   /* trigger.max_concurrent: admission cap on concurrently-executing triggered
+    * runs. Filing is deferred, not lost — the per-proposal dedup key is the
+    * materialized artifact path, so an un-filed proposal is re-seen and filed on
+    * a later pass once a slot frees up. A cap <= 0 means uncapped. */
+   int budget = -1; /* uncapped */
+   if (max_concurrent > 0)
+   {
+      int active = trigger_active_filed_runs(home);
+      if (active < 0)
+      {
+         aimee_log(LOG_WARN, "trigger.sched",
+                   "proposals: could not count active triggered runs; deferring this pass");
+         return; /* fail closed: never overshoot the cap on a DB read fault */
+      }
+      budget = max_concurrent - active;
+      if (budget <= 0)
+      {
+         aimee_log(LOG_INFO, "trigger.sched",
+                   "proposals: %d active triggered run(s) >= max_concurrent=%d; deferring", active,
+                   max_concurrent);
+         return;
+      }
+   }
+
+   int filed = 0;
    for (int i = 0; i < n; i++)
    {
+      if (budget == 0)
+      {
+         aimee_log(LOG_INFO, "trigger.sched",
+                   "proposals: max_concurrent=%d reached; remaining proposals deferred to a "
+                   "later pass",
+                   max_concurrent);
+         break;
+      }
       char proposal_path[1200];
       if (snprintf(proposal_path, sizeof(proposal_path), "%s/triggers/proposals/%s.md", home,
                    entries[i].sha) >= (int)sizeof(proposal_path))
@@ -549,12 +632,28 @@ static void scan_proposals(const trigger_rule_t *rule)
       rc = wfe_work_item_create(rule->pipeline_template, rule->workspace, proposal_path, mode, id,
                                 err, sizeof(err));
       if (rc == 0 && id[0])
+      {
+         /* Per-run USD ceiling (rule's max_spend_usd, else the intake default) so
+          * a triggered run parks budget_exceeded instead of burning unbounded
+          * delegate cost. Best-effort, mirroring dev_submit_run. */
+         double cap = trigger_cost_cap(rule);
+         if (cap > 0)
+            db1_work_item_set_cost_cap(id, cap);
+         filed++;
+         if (budget > 0)
+            budget--;
          aimee_log(LOG_INFO, "trigger.sched", "filed proposal workflow=%s repo=%s sha=%s id=%s",
                    rule->pipeline_template, rule->workspace, entries[i].sha, id);
+      }
       else
          aimee_log(LOG_WARN, "trigger.sched", "proposal create skipped/failed repo=%s sha=%s: %s",
                    rule->workspace, entries[i].sha, err[0] ? err : "already exists");
    }
+
+   /* Wake the autonomy driver so a just-filed run advances now rather than on
+    * its 30s backstop sweep (parity with the /v1/dev/submit intake). */
+   if (filed > 0)
+      wfe_scheduler_notify();
 }
 
 /* ------------------------------------------------------------------ */
@@ -872,7 +971,7 @@ static void sched_tick(void)
          if (now - g_last_fired[i] < 55)
             continue;
          g_last_fired[i] = now;
-         scan_proposals(rule);
+         scan_proposals(rule, cfg.trigger_max_concurrent);
          continue;
       }
 

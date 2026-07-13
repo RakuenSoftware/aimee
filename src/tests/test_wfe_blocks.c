@@ -48,6 +48,20 @@ int main(void)
    assert(wfe_lookup_block_executor(WFE_BLK_PR_OPEN));
    assert(wfe_lookup_block_executor(WFE_BLK_MERGE));
 
+   /* --- wfe_repo_local: the work item's repo wins when it names a local dir --- */
+   {
+      unsetenv("AIMEE_WORKFLOW_REPO");
+      assert(strcmp(wfe_repo_local("/tmp"), "/tmp") == 0);        /* local dir -> itself */
+      assert(strcmp(wfe_repo_local("/no/such/dir-x"), ".") == 0); /* absent -> env/cwd */
+      assert(strcmp(wfe_repo_local("org/repo"), ".") == 0);       /* identifier -> env/cwd */
+      assert(strcmp(wfe_repo_local(""), ".") == 0);
+      assert(strcmp(wfe_repo_local(NULL), ".") == 0);
+      setenv("AIMEE_WORKFLOW_REPO", "/srv/shared", 1);
+      assert(strcmp(wfe_repo_local("/tmp"), "/tmp") == 0); /* per-item repo still wins */
+      assert(strcmp(wfe_repo_local("org/repo"), "/srv/shared") == 0);
+      unsetenv("AIMEE_WORKFLOW_REPO");
+   }
+
    /* --- wfe_git_freeze against a real temp git repo --- */
    char dir[] = "/tmp/wfe_repo_XXXXXX";
    if (!wfe_test_mkdtemp(dir))

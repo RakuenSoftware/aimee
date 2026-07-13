@@ -24,8 +24,7 @@ static void wfe_autonomy_cleanup_worktree(const char *work_item_id)
    db1_work_item_t wi;
    if (db1_work_item_get(work_item_id, &wi) != 1 || !wi.worktree[0])
       return;
-   const char *rl = getenv("AIMEE_WORKFLOW_REPO");
-   if (wfe_worktree_cleanup(wi.worktree, (rl && rl[0]) ? rl : ".") == 0)
+   if (wfe_worktree_cleanup(wi.worktree, wfe_repo_local(wi.repo)) == 0)
       db1_work_item_set_worktree(work_item_id, "");
 }
 

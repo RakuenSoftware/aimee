@@ -5,7 +5,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> /* strcasecmp / strncasecmp */
+#include <strings.h>  /* strcasecmp / strncasecmp */
+#include <sys/stat.h> /* stat — wfe_repo_local dir check */
+
+/* ---- per-work-item repo resolution (see wfe_iface.h) ---- */
+
+const char *wfe_repo_local(const char *wi_repo)
+{
+   /* The work item's own repo binds the run to its repository (a trigger rule's
+    * pipeline.workspace, or an explicit dev-submit repo) — honor it whenever it
+    * names a local directory. Anything else (an identifier/URL, or "") falls back
+    * to the process-wide $AIMEE_WORKFLOW_REPO, then cwd, preserving
+    * single-repo deployments unchanged. */
+   if (wi_repo && wi_repo[0] == '/')
+   {
+      struct stat st;
+      if (stat(wi_repo, &st) == 0 && S_ISDIR(st.st_mode))
+         return wi_repo;
+   }
+   const char *d = getenv("AIMEE_WORKFLOW_REPO");
+   return (d && d[0]) ? d : ".";
+}
 
 /* ---- autonomous merge-target rail (WP-5 safety; see wfe_iface.h) ---- */
 

@@ -10,6 +10,7 @@
 #include "log.h"
 #include "wfe_autonomy.h"
 #include "wfe_blocks.h" /* wfe_worktree_cleanup (terminal) + wfe_worktree_orphan_gc (age-based) */
+#include "wfe_iface.h"  /* wfe_repo_local — resolve each item's own repo for cleanup */
 #include "wfe_store.h"
 
 #include <pthread.h>
@@ -53,8 +54,7 @@ void wfe_scheduler_run_once(void)
       {
          if (items[i].worktree[0])
          {
-            const char *rl = getenv("AIMEE_WORKFLOW_REPO");
-            if (wfe_worktree_cleanup(items[i].worktree, (rl && rl[0]) ? rl : ".") == 0)
+            if (wfe_worktree_cleanup(items[i].worktree, wfe_repo_local(items[i].repo)) == 0)
                db1_work_item_set_worktree(items[i].work_item_id, "");
          }
          continue;
