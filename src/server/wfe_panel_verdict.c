@@ -23,15 +23,30 @@ void wfe_panel_verdict_from_review(const char *persona, const char *artifact_has
       return;
 
    /* Extract ONLY the last non-empty line (the delegate emits one JSON line at the
-    * end). A whole-response scan could false-approve on quoted JSON in the reasoning. */
+    * end). A whole-response scan could false-approve on quoted JSON in the reasoning.
+    * Providers routinely wrap that final JSON in a markdown code fence, leaving
+    * "```" as the literal last line — skip trailing fence-only lines (``` or
+    * ```json) so a fenced verdict isn't misread as MALFORMED, but never skip past
+    * anything else. */
    const char *r = review_text;
    size_t len = strlen(r);
-   while (len > 0 &&
-          (r[len - 1] == '\n' || r[len - 1] == '\r' || r[len - 1] == ' ' || r[len - 1] == '\t'))
-      len--;
-   size_t start = len;
-   while (start > 0 && r[start - 1] != '\n')
-      start--;
+   size_t start;
+   for (;;)
+   {
+      while (len > 0 &&
+             (r[len - 1] == '\n' || r[len - 1] == '\r' || r[len - 1] == ' ' || r[len - 1] == '\t'))
+         len--;
+      start = len;
+      while (start > 0 && r[start - 1] != '\n')
+         start--;
+      size_t l = len - start;
+      if (l >= 3 && l <= 16 && strncmp(r + start, "```", 3) == 0)
+      {
+         len = start; /* fence-only line: consider the line above instead */
+         continue;
+      }
+      break;
+   }
 
    /* Capture the reviewer's critique — everything before the final JSON verdict
     * line — so a request_changes can be threaded back to the re-authoring
