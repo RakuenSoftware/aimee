@@ -87,6 +87,16 @@ static const char *REVIEWER_CONSTRUCTIVE_BRIEF =
     "- You produce the review yourself; use READ-ONLY delegates only — `aimee delegate review "
     "\"...\"` (or diagnose, validate, research) to investigate in parallel.\n";
 
+static const char *TECH_WRITER_BRIEF =
+    "- Use `aimee index find <name>` / `aimee memory search <terms>` to locate the change under "
+    "review and the documentation around it.\n"
+    "- Trace each documented claim to the code and each new behaviour back to the docs; walk the "
+    "instructions as the least-context reader and note where they break.\n"
+    "- Write like a person and prefer brevity; treat AI-isms and padded, machine-sounding prose "
+    "in the docs as findings.\n"
+    "- You produce the review yourself; use READ-ONLY delegates only — `aimee delegate review "
+    "\"...\"` (or diagnose, validate, research) to investigate in parallel.\n";
+
 /* Built-ins. Roles are the delegate roles the persona may use, consistent with
  * its delegate policy (engineer: full set; novel: read-only checks only;
  * songwriter: none). */
@@ -107,6 +117,8 @@ static const builtin_persona_t g_builtins[] = {
     {"reviewer-constructive", AIMEE_MODE_REVIEWER_CONSTRUCTIVE,
      "Senior constructive code reviewer (assess as written)", "review,diagnose,validate,research",
      "", "", "readonly"},
+    {"technical-writer", AIMEE_MODE_TECH_WRITER, "Senior technical writer / documentation reviewer",
+     "review,diagnose,validate,research", "", "", "readonly"},
     {NULL, 0, NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -175,6 +187,8 @@ static const char *builtin_brief(const builtin_persona_t *b)
       return ARCHITECT_BRIEF;
    if (b->mode == AIMEE_MODE_REVIEWER_CONSTRUCTIVE)
       return REVIEWER_CONSTRUCTIVE_BRIEF;
+   if (b->mode == AIMEE_MODE_TECH_WRITER)
+      return TECH_WRITER_BRIEF;
    return "";
 }
 

@@ -43,6 +43,7 @@ typedef enum
    AIMEE_MODE_REVIEWER = 5,              /* senior, thorough, contrarian code reviewer */
    AIMEE_MODE_ARCHITECT = 6,             /* software-architecture reviewer */
    AIMEE_MODE_REVIEWER_CONSTRUCTIVE = 7, /* constructive reviewer: assess as written */
+   AIMEE_MODE_TECH_WRITER = 8,           /* technical writer / documentation reviewer */
 } aimee_mode_t;
 
 /* Parse a mode name ("engineer", "novel", "songwriter", "qa", "security",

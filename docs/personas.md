@@ -3,7 +3,7 @@
 A **persona** is the primary agent's identity, its system-prompt voice, craft
 principles, session-brief hints, the delegate roles it advertises, and its
 **delegate policy**. Personas are server-owned and user-extensible: aimee ships
-eight built-ins and seeds them as editable files, and you can add your own.
+nine built-ins and seeds them as editable files, and you can add your own.
 
 ## Built-in personas
 
@@ -17,14 +17,20 @@ eight built-ins and seeds them as editable files, and you can add your own.
 | `reviewer` | Senior **contrarian** code reviewer (thorough, comprehensive) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
 | `reviewer-constructive` | Senior **constructive** code reviewer (assess as written) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
 | `architect` | Software-architecture reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
+| `technical-writer` | Senior technical writer / documentation reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
 
-The five reviewer personas (`qa`, `security`, `reviewer`,
-`reviewer-constructive`, `architect`) reframe the agent as a read-only senior
+The six reviewer personas (`qa`, `security`, `reviewer`,
+`reviewer-constructive`, `architect`, `technical-writer`) reframe the agent as a read-only senior
 reviewer: it investigates and surfaces findings with evidence, never editing the
 code. They share a common **Review Principles** block and each carry their own
 review methodology. `reviewer` and `reviewer-constructive` are a deliberate pair
 ,  the former is adversarial (tries to refute), the latter assesses the work as
-written, so a roundtable panel can blend both stances.
+written, so a roundtable panel can blend both stances. `technical-writer`
+judges the documentation of a change — accuracy against the code, completeness,
+clarity, runnable examples — and is an eligible seat on the default `build`
+workflow's documentation gate. It writes and reviews to a human standard:
+brevity first, and machine-sounding prose (AI clichés, filler, padded
+sentences) is itself a finding.
 
 ## Where personas live
 
@@ -33,7 +39,7 @@ Single markdown files, resolved project → user → built-in:
 - Project: `<project>/.aimee/personas/<name>.md`
 - User: `~/.config/aimee/personas/<name>.md`
 - Built-in fallback
-  (engineer/novel/songwriter/qa/security/reviewer/reviewer-constructive/architect)
+  (engineer/novel/songwriter/qa/security/reviewer/reviewer-constructive/architect/technical-writer)
 
 `aimee init` seeds the built-ins as editable files under
 `~/.config/aimee/personas/` (idempotent, it never overwrites an existing file),
