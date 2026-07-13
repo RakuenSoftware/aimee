@@ -1,0 +1,86 @@
+# Self-deploying aimee-server (server-orchestrated deploy).
+#
+# You deploy ONE container — aimee-server — and drive the rest from the browser.
+# It runs with the host Docker socket mounted, so when the setup wizard finishes it
+# brings up the managed sibling services (postgres + aimee-kb + aimee-llm) itself,
+# via `docker compose up -d` on deploy/container/aimee-managed.compose.yaml (baked
+# into the image). No second compose command, no combined image.
+#
+#   docker compose -f compose.server-managed.yaml up -d
+#   # then open https://localhost:8443 and run the setup wizard → "Deploy"
+#
+# The /v1 API requires a bearer token (baked default: "aimee-local-dev"):
+#   curl -k -H "Authorization: Bearer aimee-local-dev" https://localhost:8743/v1/health
+#
+# SECURITY: mounting /var/run/docker.sock grants aimee-server control of the host
+# Docker daemon (root-equivalent). Only use this on a host you trust the server on.
+# The published image has AIMEE_DEPLOY_ENABLED unset — orchestration is off until
+# this file turns it on together with the socket mount.
+
+# Shared network the server + every managed service join, so they resolve each
+# other by name (aimee-kb:8741, aimee-llm:8080, postgres:5432). The managed compose
+# references this as `external` — it must exist, so define it here with a fixed name.
+networks:
+  aimee:
+    name: aimee
+
+services:
+  aimee-server:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    networks: [aimee]
+    ulimits:
+      stack: 67108864
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
+      AIMEE_SERVER_HTTP_BIND: "1"
+      # Browser webchat (the wizard lives here). Provision the login via PAM.
+      AIMEE_WEBCHAT_ENABLED: "1"
+      AIMEE_WEBCHAT_USER: aimee
+      AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
+      # Reach the managed kb by name on the shared network once it is up.
+      AIMEE_KB_API_URL: http://aimee-kb:8741
+      # Turn on server-orchestrated deploy: the wizard's "Deploy" runs the managed
+      # compose against the socket below. COMPOSE_PROJECT_NAME pins the project so
+      # `up` and `ps` (status polling) agree on it.
+      AIMEE_DEPLOY_ENABLED: "1"
+      AIMEE_DEPLOY_COMPOSE_FILE: /opt/aimee/deploy/aimee-managed.compose.yaml
+      COMPOSE_PROJECT_NAME: aimee
+      # Passed through to the managed services when a role is placed local (GPU
+      # tier, images, default LLM tier). Left at defaults for a CPU deploy.
+      AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:latest}
+      AIMEE_KB_IMAGE: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+      AIMEE_LLM_TIER: ${AIMEE_LLM_TIER:-cpu}
+      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
+      # "Sign in with OAuth" client IDs (public; see oauth_defaults.h). Set the
+      # GitHub client ID + secret for the seamless "click → GitHub → back, logged
+      # in" web flow (register the OAuth App's callback URL as
+      # <this-origin>/api/git/oauth/github/callback). Omit the secret to fall back
+      # to the device-code flow. AIMEE_OAUTH_REDIRECT_BASE overrides the callback
+      # origin behind a reverse proxy (e.g. https://aimee.example.com).
+      AIMEE_GITHUB_OAUTH_CLIENT_ID: ${AIMEE_GITHUB_OAUTH_CLIENT_ID:-}
+      AIMEE_GITHUB_OAUTH_CLIENT_SECRET: ${AIMEE_GITHUB_OAUTH_CLIENT_SECRET:-}
+      AIMEE_GITLAB_OAUTH_CLIENT_ID: ${AIMEE_GITLAB_OAUTH_CLIENT_ID:-}
+      AIMEE_OAUTH_REDIRECT_BASE: ${AIMEE_OAUTH_REDIRECT_BASE:-}
+    ports:
+      - "8743:8743"
+      - "8443:8443"
+    volumes:
+      - aimee-server-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces
+      # The host Docker socket — lets aimee-server launch the managed services.
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL",
+             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$$'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  aimee-server-home:
+  aimee-server-workspaces:

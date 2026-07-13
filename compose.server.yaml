@@ -140,11 +140,20 @@ services:
       AIMEE_WEBCHAT_ENABLED: "1"
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
+      # "Sign in with OAuth" (webchat → git host). Set the GitHub client ID +
+      # secret for the seamless web (redirect) sign-in — register the OAuth App's
+      # callback URL as <this-origin>/api/git/oauth/github/callback. Omit the secret
+      # to fall back to the device-code flow (client ID is public). GitLab uses the
+      # device flow (client ID only). AIMEE_OAUTH_REDIRECT_BASE overrides the
+      # callback origin behind a reverse proxy.
+      AIMEE_GITHUB_OAUTH_CLIENT_ID: ${AIMEE_GITHUB_OAUTH_CLIENT_ID:-}
+      AIMEE_GITHUB_OAUTH_CLIENT_SECRET: ${AIMEE_GITHUB_OAUTH_CLIENT_SECRET:-}
+      AIMEE_GITLAB_OAUTH_CLIENT_ID: ${AIMEE_GITLAB_OAUTH_CLIENT_ID:-}
+      AIMEE_OAUTH_REDIRECT_BASE: ${AIMEE_OAUTH_REDIRECT_BASE:-}
       # Delegate-vault auto-provisioning (optional): seal delegate API keys into
       # the server-principal vault at startup so delegates work with no manual
       # `aimee vault set`. Env form (agent lowercased) or a mounted JSON file;
-      # non-destructive unless AIMEE_DELEGATE_SECRETS_OVERWRITE=1. See
-      # compose.combined.yaml for the full notes.
+      # non-destructive unless AIMEE_DELEGATE_SECRETS_OVERWRITE=1.
       # AIMEE_DELEGATE_KEY_MISTRAL: ${AIMEE_DELEGATE_KEY_MISTRAL:-}
       # AIMEE_DELEGATE_SECRETS_FILE: /run/secrets/aimee-delegates.json
     ports:

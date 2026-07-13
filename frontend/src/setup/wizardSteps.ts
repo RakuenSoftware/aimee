@@ -26,9 +26,10 @@ export interface WizardStep {
   skipNote?: string;
   /** A step whose body is a bespoke component rather than the generic key inputs:
    * 'chooser' = primary chooser, 'kb' = knowledge-base fork, 'deploy' = deploy
-   * topology (LLM placement), 'connection' = git-host auth, 'workspace' = org
-   * enumerate + bulk clone. Rendered specially by SetupWizard. */
-  kind?: 'chooser' | 'kb' | 'deploy' | 'connection' | 'workspace';
+   * topology (LLM placement), 'db2' = shared-store (bundled vs existing Postgres),
+   * 'connection' = git-host auth, 'workspace' = org enumerate + bulk clone.
+   * Rendered specially by SetupWizard. */
+  kind?: 'chooser' | 'kb' | 'deploy' | 'db2' | 'connection' | 'workspace';
   /** When present, the step is only shown for the kb modes it returns true for.
    * Absent ⇒ always shown. */
   showWhen?: (kbMode: WizardKbMode) => boolean;
@@ -42,8 +43,10 @@ export const WIZARD_STEPS: WizardStep[] = [
   { id: 'knowledge_base', title: 'Knowledge base', keys: [], kind: 'kb' },
   // Local-only: LLM role placement for the deployed knowledge base.
   { id: 'embedding', title: 'Deploy topology', keys: [], kind: 'deploy', showWhen: (m) => m === 'local' },
-  // Local-only: the shared Postgres (DB2) store the local KB writes to.
-  { id: 'db2', title: 'Shared store (DB2)', keys: ['db2_url'], showWhen: (m) => m === 'local' },
+  // Local-only: the shared Postgres (DB2) store the local KB writes to. A bespoke
+  // step: spawning your own KB deploys a bundled Postgres automatically (no URL),
+  // so db2_url is asked for only when pointing at an existing database.
+  { id: 'db2', title: 'Shared store (DB2)', keys: [], kind: 'db2', showWhen: (m) => m === 'local' },
   // Always: authenticate to git hosts (OAuth / token / SSH). Optional — public
   // repos clone without it.
   { id: 'connection', title: 'Connection', keys: [], kind: 'connection', optional: true, skipNote: 'Skipping leaves no git host connected — you can still clone public repos and connect private hosts later.' },
@@ -51,10 +54,23 @@ export const WIZARD_STEPS: WizardStep[] = [
   { id: 'project', title: 'Workspaces & projects', keys: [], kind: 'workspace', skipNote: 'Without a connected repo, tools have no repository to act on.' },
 ];
 
+/** Infra steps the all-in-one appliance bakes (KB + LLM + shared store), so its
+ * wizard hides them and only asks for the provider, git connection, and
+ * workspaces. */
+export const APPLIANCE_HIDDEN_STEPS: ReadonlySet<StepId> = new Set<StepId>([
+  'knowledge_base',
+  'embedding',
+  'db2',
+]);
+
 /** The steps visible for the given kb mode, in order (drives the wizard's Step
- * N of M and next/back navigation). */
-export function visibleSteps(kbMode: WizardKbMode): WizardStep[] {
-  return WIZARD_STEPS.filter((s) => !s.showWhen || s.showWhen(kbMode));
+ * N of M and next/back navigation). In `appliance` mode the baked-infra steps are
+ * hidden regardless of kb mode. */
+export function visibleSteps(kbMode: WizardKbMode, appliance = false): WizardStep[] {
+  return WIZARD_STEPS.filter((s) => {
+    if (appliance && APPLIANCE_HIDDEN_STEPS.has(s.id)) return false;
+    return !s.showWhen || s.showWhen(kbMode);
+  });
 }
 
 /** True when a config key only takes effect after a server restart. */

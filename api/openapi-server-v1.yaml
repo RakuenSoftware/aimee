@@ -4811,6 +4811,70 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/web/start:
+    post:
+      summary: Begin the GitHub web (authorization-code) sign-in
+      description: >
+        Seamless redirect sign-in: stash a CSRF state and return the GitHub
+        authorize URL for the browser to navigate to. Needs a client ID + secret
+        (the secret enables this flow; without it, use the device flow). The caller
+        supplies redirect_uri (its public callback origin). Capability: tool:execute.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { redirect_uri: { type: string } }
+      responses:
+        "200":
+          description: Authorize URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  authorize_url: { type: string }
+        "400":
+          description: Not configured / missing redirect_uri
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/web/callback:
+    post:
+      summary: Complete the GitHub web sign-in
+      description: >
+        Validate the state, exchange the authorization code (+ the client secret and
+        the stashed redirect_uri) for an access token, and store it as the github.com
+        credential. Capability: tool:execute.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string }
+                state: { type: string }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [done, error] }
+                  error: { type: string }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /git/oauth/device/start:
     post:
       summary: Begin a GitLab/Gitea device-flow sign-in
@@ -4955,6 +5019,63 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         "403":
           description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /deploy/apply:
+    post:
+      summary: Bring up the managed sibling services
+      description: >
+        Server-orchestrated deploy: run `docker compose up -d` for the managed
+        services (postgres + aimee-kb + aimee-llm) the current wizard config selects,
+        on a background thread. Requires AIMEE_DEPLOY_ENABLED + a mounted Docker
+        socket. Capability: tool:execute.
+      responses:
+        "200":
+          description: Deploy started (or already running)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { type: string, enum: [started, running] }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Server-orchestrated deploy is disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /deploy/status:
+    get:
+      summary: Deploy progress + docker compose ps
+      description: >
+        The background deploy's state (running / last exit / output tail) plus
+        `docker compose ps` for the managed services. Capability: tool:execute.
+      responses:
+        "200":
+          description: Deploy status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  running: { type: boolean }
+                  last_exit: { type: integer, nullable: true }
+                  output: { type: string }
+                  ps: { type: string }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Server-orchestrated deploy is disabled
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

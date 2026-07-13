@@ -12,19 +12,27 @@ describe('readiness grounding', () => {
 });
 
 describe('computeReadiness (local KB path)', () => {
-  it('an empty config with no project → provider/embedding/db2/project red, not ready', () => {
+  it('an empty config with no project → provider/embedding/project red, not ready', () => {
     const r = computeReadiness({}, false);
     expect(r.ready).toBe(false);
     expect(r.steps.provider.ok).toBe(false);
     expect(r.steps.knowledge_base.ok).toBe(true); // local is the default; the fork is satisfied
     expect(r.steps.embedding.ok).toBe(false);
-    expect(r.steps.db2.ok).toBe(false);
+    // A local KB never blocks on DB2: a blank db2_url means the bundled Postgres.
+    expect(r.steps.db2.ok).toBe(true);
+    expect(r.steps.db2.detail).toMatch(/bundled/i);
     expect(r.steps.project.ok).toBe(false);
     expect(r.steps.connection.ok).toBe(false);
     expect(r.steps.connection.optional).toBe(true);
-    // provider, embedding, db2, project are the 4 required-incomplete steps
-    // (knowledge_base is ok, connection is optional).
-    expect(stepsRemaining(r)).toBe(4);
+    // provider, embedding, project are the 3 required-incomplete steps (knowledge_base
+    // + db2 are ok, connection is optional).
+    expect(stepsRemaining(r)).toBe(3);
+  });
+
+  it('a db2_url reads as an existing database, still ok', () => {
+    const r = computeReadiness({ db2_url: 'postgres://x' }, false);
+    expect(r.steps.db2.ok).toBe(true);
+    expect(r.steps.db2.detail).toMatch(/existing database/i);
   });
 
   it('the built-in hash embedder (both keys blank) reads as not-ok, test-only', () => {

@@ -1,5 +1,5 @@
 {
-  "_comment": "Default delegate roster baked into the aimee-server / aimee-combined image and seeded into $AIMEE_HOME/agents.json on first start (only if absent). DEFINITIONS ONLY — no API keys live here. A thin client pushes its client-held keys per session (POST /v1/session/credentials), which the server caches in RAM keyed by agent name; codex uses client-sourced OAuth. Override by mounting your own agents.json over $AIMEE_HOME/agents.json.",
+  "_comment": "Default delegate roster baked into the aimee-server image and seeded into $AIMEE_HOME/agents.json on first start (only if absent). DEFINITIONS ONLY — no API keys live here. A thin client pushes its client-held keys per session (POST /v1/session/credentials), which the server caches in RAM keyed by agent name; codex uses client-sourced OAuth. Override by mounting your own agents.json over $AIMEE_HOME/agents.json.",
   "agents": [
     {
       "name": "minimax",

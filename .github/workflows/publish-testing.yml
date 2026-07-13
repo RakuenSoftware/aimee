@@ -3,10 +3,9 @@
 # testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
 # main.
 #
-# Builds BOTH the split images (aimee-server, aimee-kb) AND the combined
-# (aimee-server-kb), so a split compose stack (the .254 layout: postgres +
-# aimee-llm + aimee-kb + aimee-server) can pull `:testing` just like the combined
-# single-unit deploy can. Versioned + `:latest` publishing of the full image set
+# Builds the split images (aimee-server, aimee-kb) so a split compose stack (the
+# .254 layout: postgres + aimee-llm + aimee-kb + aimee-server) can pull `:testing`.
+# Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
 # unreleased build with a real release. amd64 only (the .254 deploy target); the
@@ -49,7 +48,7 @@ jobs:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
-          - { name: aimee-server-kb, dockerfile: Dockerfile.combined }
+          - { name: aimee-combined,  dockerfile: Dockerfile.combined }
     steps:
       - uses: actions/checkout@v4
 
@@ -66,13 +65,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The combined (aimee-server-kb) image bundles the aimee-llm runtime, COPYd from
-      # the prebuilt model-less aimee-llm:testing image (no baked GGUFs — the bundled
-      # supervisor downloads the cpu tier at runtime) — reclaim the preinstalled
-      # toolchains we don't use to keep the webchat/code-server build within the
-      # runner. Scoped to the combined leg (the split server/kb images stay lean).
-      - name: Free disk space (aimee-server-kb leg)
-        if: matrix.image.name == 'aimee-server-kb'
+      # The combined appliance bundles server + kb + webchat + code-server + the
+      # llama.cpp runtime — reclaim preinstalled toolchains to fit a stock runner.
+      - name: Free disk space (combined leg)
+        if: matrix.image.name == 'aimee-combined'
         run: |
           echo "before:"; df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -97,10 +93,10 @@ jobs:
           # builds are fast and never start the LTO C build from scratch.
           cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
-          # WITH_WEBCHAT bundles the browser UI (default for server/combined; the
-          # aimee-kb image ignores it). WITH_LLM=0: the combined image is server+kb
-          # ONLY — the LLM is no longer bundled; the deploy stack runs a separate,
-          # profile-gated aimee-llm container instead (see compose.combined.yaml).
+          # WITH_WEBCHAT bundles the browser UI (default for aimee-server; the
+          # aimee-kb image ignores it). WITH_LLM=0: no LLM is bundled — the deploy
+          # stack runs a separate, profile-gated aimee-llm container instead (see
+          # compose.server.yaml).
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_WEBCHAT=1

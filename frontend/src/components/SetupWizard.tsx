@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useToast } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
-import { visibleSteps, isRestartKey, helpFor, type WizardKbMode } from '../setup/wizardSteps';
-import { computeReadiness } from '../setup/readiness';
+import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
+import { computeReadiness, type StepId } from '../setup/readiness';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import PrimaryChooser from '../setup/PrimaryChooser';
 import KnowledgeBase from '../setup/KnowledgeBase';
 import DeployTopology from '../setup/DeployTopology';
+import SharedStore from '../setup/SharedStore';
+import DeployPanel from '../setup/DeployPanel';
 import ConnectHosts from '../setup/ConnectHosts';
 import ConnectWorkspace from '../setup/ConnectWorkspace';
 import type { KbMode } from '../setup/deployTopology';
@@ -65,6 +67,18 @@ async function fetchHostCount(): Promise<number> {
   }
 }
 
+// Whether this instance is the all-in-one appliance (KB + LLM + store baked in),
+// so the wizard hides the infra steps. Network failure ⇒ full wizard.
+async function fetchAppliance(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/setup/appliance', { headers: { 'X-CSRF-Token': csrf() } });
+    const d = await r.json();
+    return r.ok && !!d.appliance;
+  } catch {
+    return false;
+  }
+}
+
 export default function SetupWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
   const { active } = useSessions();
@@ -77,9 +91,12 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [pendingRestart, setPendingRestart] = useState<string[]>([]);
   const [showSummary, setShowSummary] = useState(false);
   const [hostsConnected, setHostsConnected] = useState(0);
+  // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
+  // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
+  const [appliance, setAppliance] = useState(false);
 
   const kbMode: WizardKbMode = String(cfg.kb_mode) === 'remote' ? 'remote' : 'local';
-  const steps = useMemo(() => visibleSteps(kbMode), [kbMode]);
+  const steps = useMemo(() => visibleSteps(kbMode, appliance), [kbMode, appliance]);
   const total = steps.length;
   // Clamp the cursor: switching to a remote KB shrinks the visible list.
   const safeIdx = Math.min(idx, total - 1);
@@ -103,6 +120,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
       setDraft(d);
     });
     fetchHostCount().then(setHostsConnected);
+    fetchAppliance().then(setAppliance);
   }, [open]);
 
   const close = useCallback(() => { onClose(); }, [onClose]);
@@ -151,6 +169,16 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   // The deploy-topology page writes its own config keys (per-role llm_*). It
   // reports the restart-class keys it changed; refresh cfg, track restart, advance.
   async function handleDeploySaved(restartKeys: string[]) {
+    const c = await loadConfig();
+    setCfg(c);
+    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
+    notifySetupUpdated();
+    advance();
+  }
+
+  // The shared-store (DB2) step writes db2_url ('' for the bundled Postgres, or an
+  // existing-database URL). Refresh cfg, track restart-pending, advance.
+  async function handleDb2Saved(restartKeys: string[]) {
     const c = await loadConfig();
     setCfg(c);
     setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
@@ -233,7 +261,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               {readiness.ready ? 'Everything required is configured. 🎉' : 'Here’s what’s left:'}
             </p>
             <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
-              {(Object.entries(readiness.steps)).map(([id, s]) => (
+              {(Object.entries(readiness.steps))
+                .filter(([id]) => !(appliance && APPLIANCE_HIDDEN_STEPS.has(id as StepId)))
+                .map(([id, s]) => (
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <span aria-hidden>{s.ok ? '✅' : s.optional ? '⚪' : '⛔'}</span>
                   <span style={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 92 }}>{id.replace(/_/g, ' ')}</span>
@@ -246,6 +276,10 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 ⏳ Restart required for: {pendingRestart.map(humanize).join(', ')} — these take effect after the server restarts.
               </div>
             )}
+            {/* Local KB: offer to bring up the managed services (kb + llm + postgres)
+                straight from here when the server can orchestrate Docker. The
+                appliance already runs everything in-container, so skip it there. */}
+            {!appliance && <DeployPanel kbMode={kbMode} />}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <button style={ghostBtn} onClick={() => { setShowSummary(false); setIdx(0); }}>Back</button>
               <button style={primaryBtn} onClick={() => { setDismissed(true); notifySetupUpdated(); close(); }}>Finish</button>
@@ -264,6 +298,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               <KnowledgeBase onSaved={handleKbSaved} />
             ) : step.kind === 'deploy' ? (
               <DeployTopology onSaved={handleDeploySaved} />
+            ) : step.kind === 'db2' ? (
+              <SharedStore onSaved={handleDb2Saved} />
             ) : step.kind === 'connection' ? (
               <ConnectHosts onDone={advance} onHostsChanged={setHostsConnected} />
             ) : step.kind === 'workspace' ? (
@@ -297,7 +333,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 {step.optional && <button style={ghostBtn} onClick={advance}>Skip</button>}
                 {step.keys.length > 0 ? (
                   <button style={primaryBtn} disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</button>
-                ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'connection' || step.kind === 'workspace' ? (
+                ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
                   // Bespoke steps own their own primary action (they call advance()).
                   null
                 ) : (

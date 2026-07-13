@@ -10,8 +10,8 @@ package main
 // same-origin and code-server's git credentials stay server-side, vault-only).
 //
 // Deployment note: this assumes webchat and aimee-server share a network
-// namespace (the combined image / aimee-server image), so 127.0.0.1:<port> is
-// reachable. The editor feature is scoped to those images by design.
+// namespace (the aimee-server image), so 127.0.0.1:<port> is reachable. The
+// editor feature is scoped to that image by design.
 
 import (
 	"context"

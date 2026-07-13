@@ -6,8 +6,9 @@
 #include "git_oauth_device.h"
 
 #include "cJSON.h"
-#include "git_host_cred.h" /* git_host_cred_set */
-#include "vault_service.h" /* per-(provider,host) client_id storage */
+#include "git_host_cred.h"  /* git_host_cred_set */
+#include "oauth_defaults.h" /* AIMEE_DEFAULT_GITLAB_OAUTH_CLIENT_ID */
+#include "vault_service.h"  /* per-(provider,host) client_id storage */
 
 #include <ctype.h>
 #include <pthread.h>
@@ -110,6 +111,32 @@ static void client_id_key(oauth_dev_provider_t p, const char *host, char *out, s
    snprintf(out, cap, "oauth_cid_%s_%s", oauth_dev_provider_name(p), safe);
 }
 
+/* Env + built-in default client_id for a canonical public host. A single shared
+ * OAuth App only makes sense for GitLab's SaaS host (gitlab.com); self-hosted
+ * GitLab and every Gitea/Forgejo instance runs its own app and must be configured
+ * per-host from the UI. Returns 1 + fills buf, or 0. */
+static int builtin_client_id(oauth_dev_provider_t p, const char *host, char *buf, size_t cap)
+{
+   if (p != OAUTH_DEV_GITLAB)
+      return 0;
+   /* Only the default GitLab host (blank ⇒ gitlab.com) shares the built-in app. */
+   if (host && host[0] && strcmp(host, "gitlab.com") != 0)
+      return 0;
+   const char *env = getenv("AIMEE_GITLAB_OAUTH_CLIENT_ID");
+   if (env && env[0])
+   {
+      snprintf(buf, cap, "%s", env);
+      return 1;
+   }
+   const char *builtin = AIMEE_DEFAULT_GITLAB_OAUTH_CLIENT_ID;
+   if (builtin[0])
+   {
+      snprintf(buf, cap, "%s", builtin);
+      return 1;
+   }
+   return 0;
+}
+
 int oauth_dev_get_client_id(oauth_dev_provider_t p, const char *host, char *out, size_t cap)
 {
    if (out && cap)
@@ -119,6 +146,8 @@ int oauth_dev_get_client_id(oauth_dev_provider_t p, const char *host, char *out,
    char key[256];
    client_id_key(p, host, key, sizeof(key));
    if (vault_service_get_server_principal(DEV_CID_AGENT, key, out, cap) == VAULT_OK && out[0])
+      return 1;
+   if (builtin_client_id(p, host, out, cap) && out[0])
       return 1;
    out[0] = '\0';
    return 0;

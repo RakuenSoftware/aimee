@@ -5,7 +5,7 @@
 # `v*` tag, creates and pushes that tag, then cuts a full release by calling the
 # reusable build workflows:
 #   - release-thin-client.yml  -> aimee CLI binaries (Linux/macOS/Windows) on the GitHub Release
-#   - publish-images.yml       -> aimee-server / aimee-kb / aimee-server-kb multi-arch images, tagged :<version> + :latest
+#   - publish-images.yml       -> aimee-server / aimee-kb multi-arch images, tagged :<version> + :latest
 #
 # Reusable workflows are invoked directly (workflow_call), so this works with the
 # default GITHUB_TOKEN -- no PAT needed (a tag pushed by GITHUB_TOKEN would not,

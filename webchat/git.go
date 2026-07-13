@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -64,12 +65,13 @@ func (s *server) gitOAuthRelay(w http.ResponseWriter, st int, data []byte, err e
 		Error           string `json:"error"`
 		Configured      bool   `json:"configured"`
 		ClientID        string `json:"client_id"`
+		Web             bool   `json:"web"`
 	}
 	_ = json.Unmarshal(data, &up)
 	out, _ := json.Marshal(map[string]any{
 		"ok": true, "user_code": up.UserCode, "verification_uri": up.VerificationURI,
 		"interval": up.Interval, "status": up.Status, "error": up.Error,
-		"configured": up.Configured, "client_id": up.ClientID,
+		"configured": up.Configured, "client_id": up.ClientID, "web": up.Web,
 	})
 	w.Write(out)
 }
@@ -136,18 +138,123 @@ func (s *server) handleGitOauthGithubConfig(w http.ResponseWriter, r *http.Reque
 		s.gitOAuthRelay(w, st, data, err)
 	case http.MethodPost:
 		var req struct {
-			ClientID string `json:"client_id"`
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ClientID == "" {
 			writeJSONError(w, http.StatusBadRequest, "client_id required")
 			return
 		}
-		body, _ := json.Marshal(map[string]string{"client_id": req.ClientID})
+		fwd := map[string]string{"client_id": req.ClientID}
+		if req.ClientSecret != "" {
+			// Setting a secret enables the seamless web (redirect) flow; it is
+			// write-only server-side (sealed in the vault, never read back).
+			fwd["client_secret"] = req.ClientSecret
+		}
+		body, _ := json.Marshal(fwd)
 		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/git/oauth/github/config", body)
 		s.gitOAuthRelay(w, st, data, err)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// oauthRedirectURI derives the GitHub OAuth callback URL for this deployment: the
+// browser-facing origin + the callback path. This is what the OAuth App must have
+// registered as its "Authorization callback URL". AIMEE_OAUTH_REDIRECT_BASE overrides
+// the origin for reverse-proxied setups where the request host isn't the public one.
+func oauthRedirectURI(r *http.Request) string {
+	const path = "/api/git/oauth/github/callback"
+	if base := os.Getenv("AIMEE_OAUTH_REDIRECT_BASE"); base != "" {
+		return strings.TrimRight(base, "/") + path
+	}
+	scheme := "https"
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		scheme = p
+	} else if r.TLS == nil {
+		scheme = "http"
+	}
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+	return scheme + "://" + host + path
+}
+
+// POST /api/git/oauth/github/web/start — begin the seamless web (redirect) sign-in.
+// Returns {ok, authorize_url}; the browser then navigates there.
+func (s *server) handleGitOauthGithubWebStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	body, _ := json.Marshal(map[string]string{"redirect_uri": oauthRedirectURI(r)})
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost,
+		"/v1/git/oauth/github/web/start", body)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "git: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	w.Write(data)
+}
+
+// GET /api/git/oauth/github/callback?code&state — GitHub redirects the browser
+// here after the user authorizes. This is a CROSS-SITE top-level navigation, so
+// the SameSite=Strict session cookie is NOT sent — this route is therefore PUBLIC
+// and serves a tiny bounce page. The page then does a SAME-ORIGIN POST to the
+// authenticated exchange endpoint below (Strict cookie IS sent same-origin), so
+// the token exchange stays tied to the logged-in user.
+func (s *server) handleGitOauthGithubCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(githubCallbackHTML))
+}
+
+const githubCallbackHTML = `<!doctype html><meta charset="utf-8"><title>Signing in…</title>
+<body style="font-family:system-ui;padding:2rem;color:#233">Finishing GitHub sign-in…</body>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  function go(p) { location.replace('/' + p); }
+  var err = q.get('error');
+  if (err) { go('?git_error=' + encodeURIComponent(err)); return; }
+  fetch('/api/git/oauth/github/web/callback', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: q.get('code'), state: q.get('state') })
+  }).then(function (r) { return r.json().catch(function () { return {}; }); })
+    .then(function (d) {
+      if (d && d.status === 'done') go('?git=github');
+      else go('?git_error=' + encodeURIComponent((d && d.error) || 'sign-in failed'));
+    }).catch(function () { go('?git_error=' + encodeURIComponent('sign-in failed')); });
+})();
+</script>`
+
+// POST /api/git/oauth/github/web/callback {code, state} — the authenticated,
+// same-origin exchange the bounce page calls. Forwards to aimee-server (where the
+// client secret lives) and returns {status}.
+func (s *server) handleGitOauthGithubWebCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	var req struct {
+		Code  string `json:"code"`
+		State string `json:"state"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	body, _ := json.Marshal(map[string]string{"code": req.Code, "state": req.State})
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost,
+		"/v1/git/oauth/github/web/callback", body)
+	s.deployRelay(w, st, data, err)
 }
 
 // POST /api/git/oauth/github/start — begin GitHub device-flow sign-in.

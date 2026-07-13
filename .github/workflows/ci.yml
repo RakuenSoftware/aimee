@@ -508,9 +508,9 @@ jobs:
           /tmp/bench-pr --check /tmp/baseline.json || \
             echo "::warning::Benchmark regression detected; benchmarks are informational and do not gate PRs."
 
-  # End-to-end deploy matrix: build the three images and prove every Docker
-  # topology (kb-only, server+kb split, server standalone, combined server+kb)
-  # boots and serves a usable /v1 surface. See
+  # End-to-end deploy matrix: build the images and prove every Docker topology
+  # (kb-only, server+kb split, server standalone) boots and serves a usable /v1
+  # surface. See
   # docs/proposals/pending/aimee-e2e-deploy-matrix.md. GitHub's ubuntu runners
   # ship Docker + compose, so no port offset is needed (8740/8741 are free).
   e2e-docker:
@@ -524,14 +524,14 @@ jobs:
           docker version --format '{{.Server.Version}}'
           docker compose version
           df -h / | tail -1
-      - name: Run Docker deploy matrix (T1-T4)
-        # The server/combined images build webchat's SPA from its vendored
+      - name: Run Docker deploy matrix (T1-T3)
+        # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
-        run: scripts/e2e-matrix.sh --only T1,T2,T3,T4
+        run: scripts/e2e-matrix.sh --only T1,T2,T3
       - name: Stack logs on failure
         if: failure()
         run: |
-          for f in compose.yaml compose.server.yaml compose.server-standalone.yaml compose.combined.yaml; do
+          for f in compose.yaml compose.server.yaml compose.server-standalone.yaml; do
             echo "::group::$f"; docker compose -f "$f" logs --tail=80 2>/dev/null || true; echo "::endgroup::"
           done
 

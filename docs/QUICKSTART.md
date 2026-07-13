@@ -2,7 +2,7 @@
 
 This guide takes you from nothing to a working aimee install in four parts:
 
-1. **[Run the server](#part-1--run-the-server-aimee-combined-in-docker)**, stand up the full stack (server + knowledge base + Postgres, with a bundled CPU inference gateway) with the combined Docker image.
+1. **[Run the server](#part-1-run-the-server-in-docker)**, deploy the single `aimee-server` container and let the setup wizard bring up the knowledge base, LLM, and Postgres for you.
 2. **[Install the Linux client](#part-2--linux-client)**, install the thin `aimee` binary, point it at your server, and set up workspaces and agents.
 3. **[Install the Windows client](#part-3--windows-client)**, same, for Windows.
 4. **[Install the macOS client](#part-4--macos-client)**, same, for macOS.
@@ -11,58 +11,62 @@ The model is the same on every developer machine: **the services run in Docker (
 
 ---
 
-## Part 1, Run the server (aimee-combined in Docker)
+## Part 1, Run the server (in Docker)
 
-The **combined** image co-locates both aimee binaries in one container: the knowledge base (`aimee-kb`) on loopback `:8741` inside the container, and the server (`aimee-server`) fronting `/v1` over native TLS on `:8743` (self-signed cert; plaintext `:8740` is loopback-only and not published). Postgres (DB2 + pgvector) comes up alongside it as a separate service; the CPU inference gateway (embeddings, reranking, synthesis) is bundled in the image.
+Two one-container ways in:
+
+- **All-in-one CPU appliance** — `docker compose -f compose.combined.yaml up -d`. One image runs `aimee-server` + `aimee-kb` + the LLM, all on CPU, paired with Postgres. The setup wizard is short: add an agent, connect GitHub, pick workspaces — no KB/LLM/store questions. No Docker socket. Best for getting started fast.
+- **Self-deploying server** — the rest of this section. Deploy just `aimee-server` with the host Docker socket mounted; the wizard's **Deploy** step then brings up `aimee-kb`, `aimee-llm`, and Postgres (CPU or GPU). Best when you want the real split topology or a GPU.
+
+The self-deploying server: deploy one container — `aimee-server` — with the host Docker socket mounted. The setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres (DB2 + pgvector) from there.
 
 ### Prerequisites
 
 - Docker Engine + the Docker Compose plugin (`docker compose`, v2).
-- ~8 GB free RAM and ~10 GB of disk. The combined image bakes in ~5.5 GB of CPU inference model weights (embed, rerank, synth) on top of Postgres data and build layers. (Build `--build-arg WITH_LLM=0` for a lean server+kb image that points at an external `AIMEE_LLM_URL` instead.)
-- No credentials or API keys are required for the default build.
+- Host Docker socket access — `compose.server-managed.yaml` mounts it so the server can launch the other containers. It's root-equivalent, so run this only on a host you trust the server on.
+- ~8 GB RAM and ~10 GB disk. `aimee-llm` pulls ~5.5 GB of CPU model weights (embed, rerank, synth) into a volume the first time the wizard deploys it.
+- No credentials or API keys needed for the default build.
 
-### 1.1 Clone and start the stack
+### 1.1 Start the server
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
-docker compose -f compose.combined.yaml up --build -d
+docker compose -f compose.server-managed.yaml up -d
 ```
 
-By default this brings up **two** services. The browser webchat runs *inside* the combined container, not as a separate service, and the combined image bundles a CPU inference gateway (embeddings, reranking, and synthesis), so nothing external is needed to start.
+Starts `aimee-server` only (webchat built in). `/v1` is on `:8743` (native TLS, self-signed; plaintext `:8740` is loopback-only, not published); webchat is on `:8443`. Nothing else is up yet.
 
-| Service | What it is | Port |
-|---------|-----------|------|
-| `aimee-server-kb` | Both aimee binaries (server and kb), the browser webchat UI, and a bundled CPU inference gateway (embed, rerank, synth) in one container | `8743` (server `/v1`, native TLS self signed; plaintext `8740` loopback only), `8741` (kb `/v1`), `8443` (webchat HTTPS, self signed) |
-| `postgres` | `pgvector/pgvector:pg16`, DB2 (`aimee_shared`) for knowledge and vectors | internal |
-| `llm` *(optional)* | Standalone curator LLM sidecar (Gemma 3n E4B via `llama.cpp`). Off by default, since the bundled gateway already serves embed, rerank, and synth. Enable it with `--profile external-llm` for a lean `WITH_LLM=0` image, or to bring your own curator GGUF (point `LLM_ENDPOINT` at it). | internal |
+### 1.2 Run the setup wizard
 
-The kb auto-applies its DB2 schema (tables plus the `pg_trgm` and `vector` extensions) on first boot. The first `--build` takes a few minutes to compile the binaries; the CPU inference model weights are pulled in prebuilt (baked into the image), not downloaded at boot, so later starts are fast. To also run the standalone curator LLM sidecar (for a lean `WITH_LLM=0` image or a custom curator GGUF), add the profile: `docker compose -f compose.combined.yaml --profile external-llm up --build -d`.
+Open **https://localhost:8443** (accept the self-signed cert) and log in as `aimee` / `aimee-local-dev`. The wizard covers:
 
-### 1.2 Verify it's healthy
+- **Primary provider** — which agent aimee drives.
+- **Knowledge base** — a local one (default), or an existing remote `aimee-kb`.
+- **Deploy topology** — where the embedder / reranker / synthesizer run (CPU by default, or a GPU).
+- **Shared store** — the bundled Postgres (default; nothing to enter), or an existing database.
+- **Connection & workspaces** — sign in to your git hosts and clone repos.
+
+The final **Deploy** launches `aimee-kb` + `aimee-llm` + Postgres and shows their status. The first run pulls images and the CPU model weights (a few minutes); later boots are fast — state lives in named volumes.
+
+> Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` for anything past local dev.
+
+### 1.3 Verify it's healthy
 
 ```bash
-docker compose -f compose.combined.yaml ps          # all services should be "healthy"
-
 # Server /v1 over TLS (default bearer is "aimee-local-dev"; -k accepts the self-signed cert):
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/kb/status
 
-# In-container kb directly (DB + pgvector status):
-curl 'http://localhost:8741/v1/health?status=1'
+# The managed containers (after the wizard's Deploy step):
+docker ps    # aimee-server, aimee-kb, aimee-llm, and postgres should be running
 ```
 
 If the server endpoints return `200` and `kb/status` reports the DB and vector store ready, the stack is up.
 
-### 1.3 Browser webchat
-
-The browser UI is **on by default**. Open **https://localhost:8443** (accept the self-signed cert) and log in with the default account `aimee` / `aimee-local-dev`. Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` for anything beyond local dev, or set `AIMEE_WEBCHAT_ENABLED=0` in the compose file to turn it off.
-
-> Webchat is built into the image by default, from both published images and a from-source `docker compose build`, its frontend dependency (`@rakuensoftware/smoothgui`) is vendored in-repo, so the build needs no credentials. Build with `--build-arg WITH_WEBCHAT=0` to ship the server+kb services only.
-
 ### 1.4 Before you expose it on a network
 
-- **Override the default bearer.** `aimee-local-dev` is a loopback convenience only. Mount your own `aimee.yaml` at `/var/lib/aimee/aimee.yaml` with a real bearer (see `compose.remote-writes.combined.yaml` for the pattern) and terminate TLS at a reverse proxy.
+- **Override the default bearer.** `aimee-local-dev` is a loopback convenience only. Mount your own `aimee.yaml` at `/var/lib/aimee/aimee.yaml` with a real bearer and terminate TLS at a reverse proxy.
 - **Remote writes are off by default.** Over the network a remote bearer is **read/query only** until you opt in. To let remote clients write memory, run the index, etc., set `aimee.api.remote_writes` in your mounted `aimee.yaml`:
   - `data`, allow data-plane writes (`memory store`, `work …`, `rules …`, `skill …`).
   - `full`, also allow exec/control (`delegate`, `agent`, `provider`, `cron`). **Trusted networks only**, a leaked `full` bearer permits remote code execution.
@@ -72,15 +76,15 @@ The browser UI is **on by default**. Open **https://localhost:8443** (accept the
 ### 1.5 Managing the stack
 
 ```bash
-docker compose -f compose.combined.yaml logs -f                 # follow logs
-docker compose -f compose.combined.yaml restart aimee-server-kb # restart just the aimee container
-docker compose -f compose.combined.yaml down                    # stop + remove containers (named volumes persist)
-docker compose -f compose.combined.yaml down -v                 # also DROP data volumes (DESTROYS DB2 + state)
-docker compose -f compose.combined.yaml pull && \
-  docker compose -f compose.combined.yaml up -d --build         # update: rebuild and recreate
+docker compose -f compose.server-managed.yaml logs -f              # server logs
+docker compose -f compose.server-managed.yaml restart aimee-server # restart the server
+docker compose -f compose.server-managed.yaml down                 # stop the server (managed containers keep running)
+docker compose -f compose.server-managed.yaml up -d --pull always  # update the server image
 ```
 
-Durable state lives in named volumes (`*-postgres`, `*-home`, `*-workspaces`), so `down` and recreate are safe; only `down -v` erases data. (The CPU inference model weights are baked into the image, not a volume.)
+The wizard-deployed services (`aimee-kb`, `aimee-llm`, `postgres`) run as their own Docker project — use `docker ps` / `docker logs`, or re-run the wizard's **Deploy** to reconcile them after a config change. State lives in the `aimee-managed-*` volumes; removing them erases the knowledge base + DB2.
+
+Advanced: you can run each service as its own container instead of letting the server orchestrate them (`compose.server.yaml`, `compose.yaml`) — see [MANUAL.md](../MANUAL.md).
 
 ---
 

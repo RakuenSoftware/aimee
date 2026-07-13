@@ -26,6 +26,11 @@ describe('WIZARD_STEPS structure', () => {
     expect(embedding.kind).toBe('deploy');
     expect(embedding.showWhen!('local')).toBe(true);
     expect(embedding.showWhen!('remote')).toBe(false);
+    // DB2 is a bespoke step (bundled vs existing Postgres); db2_url is no longer a
+    // required generic key.
+    expect(db2.kind).toBe('db2');
+    expect(db2.keys).toEqual([]);
+    expect(db2.showWhen!('local')).toBe(true);
     expect(db2.showWhen!('remote')).toBe(false);
 
     const connection = WIZARD_STEPS.find((s) => s.id === 'connection')!;
@@ -43,6 +48,13 @@ describe('WIZARD_STEPS structure', () => {
     const remote = visibleSteps('remote').map((s) => s.id);
     expect(local).toEqual(['provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
     expect(remote).toEqual(['provider', 'knowledge_base', 'connection', 'project']);
+  });
+
+  it('appliance mode hides the baked-infra steps (kb/deploy/db2)', () => {
+    const applianceLocal = visibleSteps('local', true).map((s) => s.id);
+    expect(applianceLocal).toEqual(['provider', 'connection', 'project']);
+    // Same regardless of kb mode — the appliance bakes it.
+    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['provider', 'connection', 'project']);
   });
 
   it('every keyed step references documented config keys', () => {
