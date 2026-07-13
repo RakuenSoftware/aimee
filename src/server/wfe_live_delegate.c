@@ -20,6 +20,7 @@
 
 #include "wfe_live_delegate.h"
 
+#include "aimee_home.h"
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_types.h"
@@ -457,5 +458,15 @@ void wfe_autonomy_register(void)
     * foreach node after its plan is authored + roundtabled); without it the foreach
     * node fails closed (parks). */
    wfe_live_foreach_register();
+   /* The human-gate approval trust root (HMAC key) must exist before the first
+    * operator decision: without it every approve fails "could not record
+    * approval" and a parked run can never be driven past a human gate (the
+    * ensure was previously only called from tests). Best-effort: a failure
+    * logs and the first approve still fails closed. */
+   if (wfe_approval_ensure_key() != 0)
+      aimee_log(LOG_WARN, "wfe",
+                "could not provision the approval key; human-gate approvals "
+                "will fail until %s/.approval-key exists",
+                aimee_home());
    aimee_log(LOG_INFO, "wfe", "autonomous development registered (default-on)");
 }

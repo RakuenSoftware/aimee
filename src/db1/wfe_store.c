@@ -714,6 +714,24 @@ int db1_stage_attempt_inc(const char *wi, const char *stage)
    return db1_stage_attempt_get(wi, stage);
 }
 
+/* Reset a stage's loop-attempt budget (operator resume of an escalated
+ * roundtable park re-arms the refinement loop). 0 on success. */
+int db1_stage_attempt_reset(const char *wi, const char *stage)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !wi || !stage)
+      return -1;
+   static const char *sql = "DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, wi, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, stage, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
 int db1_stage_attempt_get(const char *wi, const char *stage)
 {
    sqlite3 *db = db1_conn();

@@ -299,7 +299,13 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    cJSON *jdec = body ? cJSON_GetObjectItemCaseSensitive(body, "decision") : NULL;
    cJSON *jgate = body ? cJSON_GetObjectItemCaseSensitive(body, "gate") : NULL;
-   const char *decision = (jdec && cJSON_IsString(jdec)) ? jdec->valuestring : "";
+   /* Copy the decision OUT of `body` now: the cJSON doc is deleted before the
+    * final response is formatted, so a pointer into it must not outlive it
+    * (this was a use-after-free that echoed garbage in the success response). */
+   char decision_buf[16] = "";
+   if (jdec && cJSON_IsString(jdec) && jdec->valuestring)
+      snprintf(decision_buf, sizeof decision_buf, "%s", jdec->valuestring);
+   const char *decision = decision_buf;
    const char *actor = server_http_identity_principal();
    if (!actor || !actor[0])
       actor = "operator";
@@ -323,6 +329,31 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       snprintf(resp, cap, "{\"error\":\"decision must be 'approve' or 'reject'\"}");
       return 400;
+   }
+   /* Approving a ROUNDTABLE gate is refused, mirroring wfe_gate_override's rail
+    * (a human must not force-pass a panel): previously this endpoint recorded a
+    * phantom approval + cleared the pause, and the engine simply re-ran the
+    * gate — misleading the operator into thinking approve crossed it. The
+    * levers for an escalated roundtable are: let the panel re-converge (the
+    * pause clears on resume of the loop budget), raise the node's max_iters,
+    * or reject. */
+   if (strcmp(decision, "approve") == 0)
+   {
+      char ferr[256];
+      wfe_def_t *gdef = wfe_load_workflow(wi.workflow_name, ferr, sizeof ferr);
+      const wfe_node_t *gnode = gdef ? wfe_def_node(gdef, wi.current_stage) : NULL;
+      int is_rt = gnode && gnode->block == WFE_BLK_GATE_ROUNDTABLE;
+      if (gdef)
+         wfe_def_free(gdef);
+      if (is_rt)
+      {
+         cJSON_Delete(body);
+         snprintf(resp, cap,
+                  "{\"error\":\"'%s' is a roundtable gate — a human cannot force-pass a panel. "
+                  "Resume re-runs the panel; reject terminates.\"}",
+                  wi.current_stage);
+         return 409;
+      }
    }
 
    const char *result_kind = decision; /* audit kind; a reject may become reject_retry */

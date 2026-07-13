@@ -63,6 +63,11 @@ nodes:
           - contrarian
       quorum: 4
       max_rounds: 6
+      # The gate's own loop budget (panel convenes -> request_changes -> the plan
+      # is re-authored -> gate again). The engine's default cap parked runs after
+      # a handful of rounds; honest refinement loops need more headroom before
+      # escalating to a human.
+      max_iters: 24
       focus: does this implementation plan fully satisfy the proposal/request?
     on_pass: split
     on_fail: plan
