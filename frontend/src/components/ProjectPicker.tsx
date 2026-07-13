@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Picker } from '@rakuensoftware/smoothgui';
 
 /* ProjectPicker — a compact "select or clone a project" control embedded in each
@@ -38,9 +38,16 @@ export default function ProjectPicker({ storageKey, onChange }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // onChange goes through a ref so its identity never feeds the load/effect
+  // chain: parents pass inline closures that patch their own state, and a
+  // load() → onChange → parent re-render → new closure → new load() cycle
+  // re-fires the mount effect forever (an unthrottled /api/git/projects loop).
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
   const emit = useCallback((project: string, rootPath: string) => {
-    onChange(project && rootPath ? { project, root: rootPath } : null);
-  }, [onChange]);
+    onChangeRef.current(project && rootPath ? { project, root: rootPath } : null);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -48,16 +55,16 @@ export default function ProjectPicker({ storageKey, onChange }: {
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'failed to list projects'); return; }
       const ps: string[] = d.projects || [];
+      const rootPath = d.root || '';
       setProjects(ps);
-      setRoot(d.root || '');
+      setRoot(rootPath);
       // keep the persisted selection if still present, else clear
-      setSelected(prev => {
-        const next = prev && ps.includes(prev) ? prev : '';
-        emit(next, d.root || '');
-        return next;
-      });
+      const prev = localStorage.getItem(storageKey) || '';
+      const next = prev && ps.includes(prev) ? prev : '';
+      setSelected(next);
+      emit(next, rootPath);
     } catch { setErr('aimee-server unavailable'); }
-  }, [emit]);
+  }, [emit, storageKey]);
 
   useEffect(() => { load(); }, [load]);
 
