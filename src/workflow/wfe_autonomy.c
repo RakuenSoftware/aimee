@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <math.h> /* isfinite — validate the AIMEE_AUTONOMY_MAX_USD override */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,6 +153,22 @@ static int wfe_autonomy_park_stuck(const char *work_item_id, const char *why)
    db1_lifecycle_event_add(work_item_id, wi.current_stage, "pause", "engine",
                            (why && why[0]) ? why : "unrecoverable advance failure", "", 0);
    return 0;
+}
+
+double wfe_autonomy_default_max_cost_usd(void)
+{
+   /* WP-5: the shared per-run USD budget ceiling (see wfe_autonomy.h). Reject
+    * inf/NaN — either would void the cap rather than tune it. */
+   double cap_usd = 5.0;
+   const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
+   if (v && v[0])
+   {
+      char *e = NULL;
+      double d = strtod(v, &e);
+      if (e && *e == '\0' && isfinite(d) && d >= 0)
+         cap_usd = d;
+   }
+   return cap_usd;
 }
 
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)

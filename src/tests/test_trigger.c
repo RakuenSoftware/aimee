@@ -272,6 +272,16 @@ void wfe_scheduler_notify(void)
    g_notify_count++;
 }
 
+/* Stub of the shared intake cap policy (the real env-driven policy lives in
+ * wfe_autonomy.c and is exercised by unit-test-trigger-e2e, which links it);
+ * test-settable so the plumbing — rule cap wins, else this default, 0 = no
+ * cap — is asserted deterministically. */
+static double g_default_cap = 5.0;
+double wfe_autonomy_default_max_cost_usd(void)
+{
+   return g_default_cap;
+}
+
 /* Pull in static cron_matches / field_matches via direct .c include. */
 #include "../server/trigger_scheduler.c"
 
@@ -1012,7 +1022,8 @@ static void test_scan_proposals_applies_cost_cap(void)
    assert(g_ncreated == 1);
    assert(g_created[0].cost_cap == 1.25);
 
-   /* No rule cap -> the $5 intake default. */
+   /* No rule cap -> the shared intake default (stubbed here; the real
+    * env-driven policy is asserted by unit-test-trigger-e2e). */
    snprintf(g_lstree_out, sizeof g_lstree_out,
             "100644 blob fedcba9876543210fedcba9876543210fedcba98\tdocs/proposals/pending/b.md\n");
    rule.max_spend_usd = 0.0;
@@ -1020,12 +1031,12 @@ static void test_scan_proposals_applies_cost_cap(void)
    assert(g_ncreated == 2);
    assert(g_created[1].cost_cap == 5.0);
 
-   /* AIMEE_AUTONOMY_MAX_USD=0 disables the default cap. */
+   /* A default of 0 means "no cap": nothing is stamped. */
    snprintf(g_lstree_out, sizeof g_lstree_out,
             "100644 blob 2222222222222222222222222222222222222222\tdocs/proposals/pending/c.md\n");
-   setenv("AIMEE_AUTONOMY_MAX_USD", "0", 1);
+   g_default_cap = 0.0;
    scan_proposals(&rule, 0);
-   unsetenv("AIMEE_AUTONOMY_MAX_USD");
+   g_default_cap = 5.0;
    assert(g_ncreated == 3);
    assert(g_created[2].cost_cap == 0.0);
 
@@ -1073,6 +1084,31 @@ static void test_scan_proposals_enforces_max_concurrent(void)
    assert(g_ncreated == 3);
 
    printf("  PASS: test_scan_proposals_enforces_max_concurrent\n");
+}
+
+/* The trigger-source registry: rules dispatch by source name; a scanner source
+ * is due on every pass, cron only on a schedule match, and an unknown source
+ * is skipped (no registry row -> no fire). */
+static void test_trigger_source_registry(void)
+{
+   assert(trigger_source_find("proposals") != NULL);
+   assert(trigger_source_find("cron") != NULL);
+   assert(trigger_source_find("github-webhook") == NULL);
+   assert(trigger_source_find("") == NULL);
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   struct tm at3 = make_tm(0, 3, 1, 4, 2);
+   struct tm at4 = make_tm(0, 4, 1, 4, 2);
+
+   assert(proposals_due(&rule, &at3) == 1); /* scanners poll every pass */
+
+   assert(cron_due(&rule, &at3) == 0); /* no schedule -> never due */
+   snprintf(rule.schedule, sizeof rule.schedule, "0 3 * * *");
+   assert(cron_due(&rule, &at3) == 1);
+   assert(cron_due(&rule, &at4) == 0);
+
+   printf("  PASS: test_trigger_source_registry\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1125,6 +1161,7 @@ int main(void)
    test_scan_proposals_notifies_scheduler();
    test_scan_proposals_applies_cost_cap();
    test_scan_proposals_enforces_max_concurrent();
+   test_trigger_source_registry();
    printf("All tests passed.\n");
    return 0;
 }
