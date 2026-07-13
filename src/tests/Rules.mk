@@ -423,6 +423,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-roadmap-auto \
                $(TESTPREFIX)/unit-test-kb-mdl \
                $(TESTPREFIX)/unit-test-trigger \
+               $(TESTPREFIX)/unit-test-trigger-e2e \
                $(TESTPREFIX)/unit-test-kb-mining \
                $(TESTPREFIX)/unit-test-corpus-structural \
                $(TESTPREFIX)/unit-test-corpus-jobs \
@@ -2222,6 +2223,27 @@ $(TESTPREFIX)/unit-test-delegate-plan: $(OBJDIR)/tests/test_delegate_plan.o \
 $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
                              $(OBJDIR)/server/delegate_role.o $(OBJDIR)/role_templates.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Trigger end-to-end: the REAL scan_proposals (textually included, real git
+# subprocesses + real DB1) files a work item from a committed pending proposal
+# and the real autonomy scheduler drives it to terminal (stub executors only).
+$(TESTPREFIX)/unit-test-trigger-e2e: $(OBJDIR)/tests/test_trigger_e2e.o \
+                                    $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
+                                    $(OBJDIR)/tests/support/log_stub.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_approval.o \
+                                    $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
+                                    $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+$(OBJDIR)/tests/test_trigger_e2e.o: tests/test_trigger_e2e.c server/trigger_scheduler.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(TEST_C_FLAGS) -I. -o $@ $<
 
 $(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
