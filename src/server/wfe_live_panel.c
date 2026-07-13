@@ -314,8 +314,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
                static const char *const kind_names[] = {"approve", "request_changes", "comment",
                                                         "malformed"};
                wfe_verdict_kind_t k = out[filled].kind;
-               const char *kn =
-                   (k >= 0 && k <= WFE_V_MALFORMED) ? kind_names[k] : "?";
+               const char *kn = (k >= 0 && k <= WFE_V_MALFORMED) ? kind_names[k] : "?";
                if (k == WFE_V_MALFORMED)
                {
                   const char *r = results[t].response;
