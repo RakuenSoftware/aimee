@@ -89,6 +89,23 @@ aimee_enable_test_asserts(test_git_oauth_device)
 add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
 set_tests_properties(test_git_oauth_device PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# test_git_oauth_gh: PTY-output scrubbing + one-time-code extraction for the
+# gh-CLI GitHub sign-in fallback. Exec/vault externals stubbed in the test
+# (never invoked by the pure functions under test). POSIX-only (<pty.h>).
+if(NOT WIN32)
+  add_executable(test_git_oauth_gh test_git_oauth_gh.c
+    ../server/git_oauth_gh.c)
+  target_include_directories(test_git_oauth_gh PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+  target_link_libraries(test_git_oauth_gh PRIVATE Threads::Threads)
+  aimee_enable_test_asserts(test_git_oauth_gh)
+  add_test(NAME test_git_oauth_gh COMMAND test_git_oauth_gh)
+  set_tests_properties(test_git_oauth_gh PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
 add_executable(test_context_engine test_context_engine.c)
 target_include_directories(test_context_engine PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..

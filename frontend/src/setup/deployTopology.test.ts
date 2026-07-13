@@ -178,11 +178,10 @@ describe('buildDesiredConfig (the full save map)', () => {
     },
     embedModel: '',
     embedDim: '',
-    synthModel: 'aimee-synth',
     ...over,
   });
 
-  it('local KB writes kb_mode + every role placement + synth model', () => {
+  it('local KB writes kb_mode + every role placement', () => {
     const m = buildDesiredConfig(localSel());
     expect(m.kb_mode).toBe('local');
     expect(m.llm_embed_backend).toBe('local');
@@ -190,7 +189,8 @@ describe('buildDesiredConfig (the full save map)', () => {
     expect(m.llm_rerank_tier).toBe('cpu');
     expect(m.llm_synth_backend).toBe('external');
     expect(m.llm_synth_endpoint).toBe('https://synth');
-    expect(m.llm_synth_model).toBe('aimee-synth');
+    // the synth model is fixed by tier, never written from the wizard
+    expect('llm_synth_model' in m).toBe(false);
     // no external embedder → no embedding_model/dim written
     expect('embedding_model' in m).toBe(false);
   });

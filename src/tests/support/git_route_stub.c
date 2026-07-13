@@ -7,6 +7,7 @@
 #include "deploy_apply.h"
 #include "git_host_cred.h"
 #include "git_oauth_device.h"
+#include "git_oauth_gh.h"
 #include "git_oauth_github.h"
 #include "git_ops.h"
 #include "git_org_repos.h"
@@ -208,6 +209,38 @@ int git_oauth_github_web_callback(const char *principal, const char *code, const
    (void)principal;
    (void)code;
    (void)state;
+   if (err && errlen)
+      err[0] = '\0';
+   return -1;
+}
+
+int git_oauth_gh_available(void)
+{
+   return 0;
+}
+
+int git_oauth_gh_pending(void)
+{
+   return 0;
+}
+
+int git_oauth_gh_start(const char *principal, char *user_code, size_t uc_len, char *verify_uri,
+                       size_t vu_len, int *interval, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)user_code;
+   (void)uc_len;
+   (void)verify_uri;
+   (void)vu_len;
+   (void)interval;
+   if (err && errlen)
+      err[0] = '\0';
+   return -1;
+}
+
+int git_oauth_gh_poll(const char *principal, char *err, size_t errlen)
+{
+   (void)principal;
    if (err && errlen)
       err[0] = '\0';
    return -1;

@@ -13,6 +13,7 @@
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include "git_oauth_device.h"          /* GitLab/Gitea device-flow (relocated route handlers) */
 #include "git_oauth_github.h" /* GitHub device + web (redirect) flow (relocated handlers) */
+#include "git_oauth_gh.h"     /* zero-config GitHub sign-in via the bundled gh CLI */
 #include "deploy_apply.h"     /* server-orchestrated container deploy (relocated handlers) */
 #include <limits.h>
 #include <time.h>
@@ -700,13 +701,20 @@ int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git sign-in requires a webchat user");
-   if (!git_oauth_github_available())
-      return err_json(resp, cap, 503, "GitHub sign-in is not configured");
-
    char user_code[64], verify_uri[256], err[256];
    int interval = 5;
-   if (git_oauth_github_start(principal, user_code, sizeof(user_code), verify_uri,
-                              sizeof(verify_uri), &interval, err, sizeof(err)) != 0)
+   int rc;
+   if (git_oauth_github_available())
+      rc = git_oauth_github_start(principal, user_code, sizeof(user_code), verify_uri,
+                                  sizeof(verify_uri), &interval, err, sizeof(err));
+   else if (git_oauth_gh_available())
+      /* No OAuth App client ID anywhere — fall back to the device flow run
+       * through the bundled gh CLI (gh's own public app identity). */
+      rc = git_oauth_gh_start(principal, user_code, sizeof(user_code), verify_uri,
+                              sizeof(verify_uri), &interval, err, sizeof(err));
+   else
+      return err_json(resp, cap, 503, "GitHub sign-in is not configured");
+   if (rc != 0)
       return err_json(resp, cap, 502, err[0] ? err : "GitHub sign-in failed to start");
 
    cJSON *out = cJSON_CreateObject();
@@ -733,7 +741,10 @@ int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 403, "git sign-in requires a webchat user");
 
    char err[256] = "";
-   int rc = git_oauth_github_poll(principal, err, sizeof(err));
+   /* A gh-CLI session and a native device-flow session never coexist (start
+    * picks exactly one), so pending() cleanly steers the poll. */
+   int rc = git_oauth_gh_pending() ? git_oauth_gh_poll(principal, err, sizeof(err))
+                                   : git_oauth_github_poll(principal, err, sizeof(err));
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "status", rc == 1 ? "done" : rc == 0 ? "pending" : "error");
    if (rc < 0 && err[0])
@@ -781,7 +792,9 @@ int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap)
    char id[256];
    int have = git_oauth_github_get_client_id(id, sizeof(id));
    cJSON *out = cJSON_CreateObject();
-   cJSON_AddBoolToObject(out, "configured", have);
+   /* The bundled gh CLI makes sign-in work with no OAuth App configured, so it
+    * counts as configured (the wizard's button lights up out of the box). */
+   cJSON_AddBoolToObject(out, "configured", have || git_oauth_gh_available());
    cJSON_AddStringToObject(out, "client_id", have ? id : "");
    cJSON_AddBoolToObject(out, "web", git_oauth_github_web_available());
    char *s = cJSON_PrintUnformatted(out);

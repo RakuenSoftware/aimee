@@ -74,7 +74,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     rerank: { optionId: 'cpu', endpoint: '' },
     synth: { optionId: 'cpu', endpoint: '' },
   });
-  const [synthModel, setSynthModel] = useState('');
   const [embedModel, setEmbedModel] = useState('');
   const [embedDim, setEmbedDim] = useState('');
 
@@ -86,7 +85,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       if (!alive) return;
       setCfg(c);
       setHosts(h);
-      setSynthModel(String(c.llm_synth_model ?? ''));
       setEmbedModel(String(c.embedding_model ?? ''));
       setEmbedDim(c.embedding_dim == null ? '' : String(c.embedding_dim));
 
@@ -166,7 +164,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       placements: { embed: resolvePlacement('embed'), rerank: resolvePlacement('rerank'), synth: resolvePlacement('synth') },
       embedModel,
       embedDim,
-      synthModel,
     });
 
     // Persist only what changed (mirrors SetupWizard.saveStep); abort + Toast on
@@ -245,10 +242,6 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
               )}
               {role === 'embed' && ui.optionId !== 'external' && ui.optionId !== 'off' && (
                 <div style={{ fontSize: 11, color: '#889', marginTop: 4 }}>Dimension auto-detected from the tier at runtime.</div>
-              )}
-              {role === 'synth' && p.backend !== 'off' && ui.optionId !== 'external' && (
-                <input style={{ ...input, marginTop: 6 }} value={synthModel}
-                  onChange={(e) => setSynthModel(e.target.value)} placeholder="synth model" />
               )}
               {tierA && (
                 <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 4 }}>CPU runs the Tier-A synth model only.</div>
