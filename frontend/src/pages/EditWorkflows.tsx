@@ -87,6 +87,15 @@ interface Participant {
 
 const ROUNDTABLE_BLOCK = "gate.roundtable";
 const IMPLEMENT_BLOCK = "implement";
+// foreach.workflow fans each packet out to a CHILD workflow (params.workflow) —
+// on the canvas it renders as a callout to that workflow, not a normal block.
+const FOREACH_BLOCK = "foreach.workflow";
+
+// The child workflow a foreach.workflow node calls out to ("" when unset).
+function childWorkflowName(node: GNode): string {
+  const w = (node.params as Record<string, unknown> | undefined)?.workflow;
+  return typeof w === "string" ? w : "";
+}
 
 // Read an implement node's TDD test-author participant (test_persona/test_delegate).
 function readTddTest(node: GNode): Participant {
@@ -904,6 +913,8 @@ export default function EditWorkflows() {
             {graph?.nodes.map((n) => {
               const p = pos[n.id] || { x: 0, y: 0 };
               const isSel = n.id === selected;
+              const child = n.block === FOREACH_BLOCK ? childWorkflowName(n) : "";
+              const isCallout = n.block === FOREACH_BLOCK;
               return (
                 <g
                   key={n.id}
@@ -912,24 +923,54 @@ export default function EditWorkflows() {
                   onMouseDown={(e) => onNodeDown(n.id, e)}
                   onClick={(e) => e.stopPropagation()}
                 >
+                  {/* a callout renders as a stacked card: the child workflow behind it */}
+                  {isCallout && (
+                    <rect
+                      x={4}
+                      y={-4}
+                      width={NODE_W}
+                      height={NODE_H}
+                      rx={6}
+                      fill="#e0e7ff"
+                      stroke="#a5b4fc"
+                      strokeWidth={1}
+                    />
+                  )}
                   <rect
                     width={NODE_W}
                     height={NODE_H}
                     rx={6}
-                    fill="#fff"
-                    stroke={isSel ? "#2563eb" : "#ccc"}
+                    fill={isCallout ? "#eef2ff" : "#fff"}
+                    stroke={isSel ? "#2563eb" : isCallout ? "#6366f1" : "#ccc"}
                     strokeWidth={isSel ? 2 : 1}
+                    strokeDasharray={isCallout ? "6,3" : undefined}
                   />
                   <text x={8} y={20} fontSize={13} fontWeight={600} fill="#222">
                     {nodeTitle(n)}
                   </text>
-                  <text x={8} y={38} fontSize={11} fill="#777">
-                    {n.block}
+                  <text x={8} y={38} fontSize={11} fill={isCallout ? "#4f46e5" : "#777"}>
+                    {isCallout ? `↳ workflow: ${child || "(unset)"}` : n.block}
                     {n.custom ? " ⚙" : ""}
                   </text>
-                  <text x={8} y={50} fontSize={10} fill="#aaa">
-                    {participantSummary(n) || `→ ${n.produces}`}
-                  </text>
+                  {isCallout && child ? (
+                    <text
+                      x={8}
+                      y={50}
+                      fontSize={10}
+                      fill="#4f46e5"
+                      style={{ cursor: "pointer", textDecoration: "underline" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDef(child);
+                      }}
+                    >
+                      open {child} ↗
+                    </text>
+                  ) : (
+                    <text x={8} y={50} fontSize={10} fill="#aaa">
+                      {participantSummary(n) || `→ ${n.produces}`}
+                    </text>
+                  )}
                   {n.id === graph?.start && (
                     <circle cx={NODE_W - 10} cy={10} r={4} fill="#22a06b" />
                   )}
@@ -956,6 +997,8 @@ export default function EditWorkflows() {
               onDelete={() => deleteNode(sel.id)}
               personas={personas}
               agents={agents}
+              workflows={defs.map((d) => d.name)}
+              onOpenWorkflow={openDef}
             />
           )}
         </Panel>
@@ -989,6 +1032,8 @@ function NodeInspector({
   onDelete,
   personas,
   agents,
+  workflows,
+  onOpenWorkflow,
 }: {
   node: GNode;
   graph: GraphDef;
@@ -996,6 +1041,8 @@ function NodeInspector({
   onDelete: () => void;
   personas: PersonaInfo[];
   agents: AgentInfo[];
+  workflows: string[];
+  onOpenWorkflow: (name: string) => void;
 }) {
   // A roundtable runs a panel of lenses (several persona+delegate participants);
   // every other action runs a single persona on a single delegate.
@@ -1351,6 +1398,46 @@ function NodeInspector({
           <option key={a.name} value={a.name} />
         ))}
       </datalist>
+
+      {node.block === FOREACH_BLOCK && (
+        <div style={{ margin: "8px 0" }}>
+          <label style={lbl}>child workflow (each packet runs it)</label>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select
+              value={childWorkflowName(node)}
+              onChange={(e) => {
+                const v = e.target.value;
+                mutate((g) => ({
+                  ...g,
+                  nodes: g.nodes.map((n) =>
+                    n.id === node.id
+                      ? { ...n, params: { ...(n.params || {}), workflow: v } }
+                      : n,
+                  ),
+                }));
+              }}
+              style={{ ...inp, flex: 1 }}
+            >
+              <option value="">— pick a workflow —</option>
+              {workflows
+                .filter((w) => w !== graph.name)
+                .map((w) => (
+                  <option key={w} value={w}>
+                    {w}
+                  </option>
+                ))}
+            </select>
+            <button
+              onClick={() => onOpenWorkflow(childWorkflowName(node))}
+              disabled={!childWorkflowName(node)}
+              style={btnSmall}
+              title="open the child workflow in this editor"
+            >
+              open ↗
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ borderTop: "1px solid #eee", margin: "10px 0 6px" }} />
       <Field k="block" v={node.block + (node.custom ? " (custom)" : "")} />
