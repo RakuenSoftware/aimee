@@ -1292,6 +1292,21 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent))
    g_route_policy_filter = fn;
 }
 
+/* See agent_config.h: marks the current thread's turn as PRIMARY (not
+ * delegation) so the policy filter doesn't exclude the provider-named agent
+ * from its own chat turn. */
+static _Thread_local int g_routing_primary_turn;
+
+void agent_routing_set_primary_turn(int on)
+{
+   g_routing_primary_turn = on ? 1 : 0;
+}
+
+int agent_routing_primary_turn(void)
+{
+   return g_routing_primary_turn;
+}
+
 int agent_is_available_for_routing(const agent_t *agent)
 {
    if (!agent)
