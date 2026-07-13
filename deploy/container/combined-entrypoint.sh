@@ -83,7 +83,10 @@ trap 'shutdown' TERM INT
 # embedding until the endpoint is reachable, so the server comes up promptly.
 LLM_PORT="${AIMEE_LLM_PORT:-8080}"
 log "starting bundled aimee-llm (tier=${AIMEE_LLM_TIER:-cpu} port=$LLM_PORT) as user aimee"
-runuser -u aimee -- sh /opt/aimee/supervisor.sh &
+# Exec the script itself (bash shebang): it uses bash arrays/wait -n, which
+# dash chokes on ("Syntax error: \"(\" unexpected") — under `sh` the bundled
+# llm silently never started and the kb dim probe waited forever.
+runuser -u aimee -- /opt/aimee/supervisor.sh &
 llm_pid=$!
 
 # The kb + curator reach the bundled llm on loopback. AIMEE_LLM_URL is baked to
