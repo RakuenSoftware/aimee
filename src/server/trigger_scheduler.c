@@ -578,8 +578,8 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       if (budget <= 0)
       {
          aimee_log(LOG_INFO, "trigger.sched",
-                   "proposals: %d active triggered run(s) >= max_concurrent=%d; deferring",
-                   active, max_concurrent);
+                   "proposals: %d active triggered run(s) >= max_concurrent=%d; deferring", active,
+                   max_concurrent);
          return;
       }
    }

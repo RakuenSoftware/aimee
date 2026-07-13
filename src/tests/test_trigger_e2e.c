@@ -171,9 +171,9 @@ int main(void)
    assert(n == 1);
    assert(strcmp(items[0].state, "active") == 0);
    assert(strcmp(items[0].mode, "autonomous") == 0);
-   assert(strcmp(items[0].repo, repo) == 0);            /* bound to the watched repo */
-   assert(strcmp(items[0].workflow_name, "e2e") == 0);  /* on the rule's workflow */
-   assert(items[0].work_item_max_cost_usd == 5.0);      /* default USD ceiling stamped */
+   assert(strcmp(items[0].repo, repo) == 0);           /* bound to the watched repo */
+   assert(strcmp(items[0].workflow_name, "e2e") == 0); /* on the rule's workflow */
+   assert(items[0].work_item_max_cost_usd == 5.0);     /* default USD ceiling stamped */
    /* The proposal was materialized under $AIMEE_HOME/triggers/proposals/. */
    char want_prefix[600];
    snprintf(want_prefix, sizeof want_prefix, "%s/triggers/proposals/", home);

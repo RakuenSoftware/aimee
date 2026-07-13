@@ -129,8 +129,7 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
     * "."), so the panel convenes in the run's repository rather than fail closed to
     * panel_unreachable when the worktree is empty. */
    const char *worktree = wfe_ctx_worktree(ctx);
-   const char *workdir =
-       (worktree && worktree[0]) ? worktree : wfe_repo_local(wfe_ctx_repo(ctx));
+   const char *workdir = (worktree && worktree[0]) ? worktree : wfe_repo_local(wfe_ctx_repo(ctx));
 
    /* Push the change under review to the panel: the branch diff vs the autonomous
     * base ("what changed from the default repo"). Computed once here so panelists
