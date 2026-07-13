@@ -306,6 +306,29 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
             wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
                                           &out[filled]);
             snprintf(out[filled].model, sizeof out[filled].model, "%s", taskagent[t]);
+            /* Attribute the verdict so a degraded gate is triageable: without
+             * this there is no record of WHICH agent served a lens or what it
+             * returned. On MALFORMED include the reply's tail — that is the
+             * line the parser rejected. */
+            {
+               static const char *const kind_names[] = {"approve", "request_changes", "comment",
+                                                        "malformed"};
+               wfe_verdict_kind_t k = out[filled].kind;
+               const char *kn =
+                   (k >= 0 && k <= WFE_V_MALFORMED) ? kind_names[k] : "?";
+               if (k == WFE_V_MALFORMED)
+               {
+                  const char *r = results[t].response;
+                  size_t rl = strlen(r);
+                  const char *tail = rl > 160 ? r + rl - 160 : r;
+                  aimee_log(LOG_WARN, "wfe-panel",
+                            "lens '%s' verdict malformed from agent '%s'; reply tail: %.160s",
+                            required[i], taskagent[t], tail);
+               }
+               else
+                  aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s'",
+                            required[i], kn, taskagent[t]);
+            }
             filled++;
             done[i] = 1;
          }
