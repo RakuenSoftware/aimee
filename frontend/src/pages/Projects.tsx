@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Panel } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
+import { parseOwnerOnly, type OwnerRef } from '../setup/ownerUrl';
 
 /* Git projects (webchat-git WP-F2). Lists the user's cloned repos, connects a
  * new one, and runs per-project git ops — all via /api/git/* (the server forwards
  * to /v1/workspace/* with the user's webuser: identity; creds live only in the
- * sealed vault). */
+ * sealed vault). The connect field also accepts an owner/org URL (e.g.
+ * github.com/RakuenSoftware): it then enumerates the owner's repositories and
+ * bulk-clones the selected ones, mirroring the wizard's Workspaces step. */
 
 const READ_OPS = ['status', 'log', 'diff', 'branch'] as const;
 const REMOTE_OPS = ['fetch', 'pull', 'push'] as const;
@@ -50,6 +53,12 @@ export default function Projects() {
   const [ghUri, setGhUri] = useState('');
   const [ghConfigured, setGhConfigured] = useState(false);
   const [ghClientId, setGhClientId] = useState('');
+  // Owner/org bulk-clone (URL parsed as an owner with no repo segment).
+  const [orgRef, setOrgRef] = useState<OwnerRef | null>(null);
+  const [orgRepos, setOrgRepos] = useState<{ name: string; clone_url: string; private?: boolean }[]>([]);
+  const [orgSelected, setOrgSelected] = useState<Record<string, boolean>>({});
+  const [orgProvider, setOrgProvider] = useState('');
+  const [orgResults, setOrgResults] = useState<{ name: string; ok: boolean; error?: string | null }[]>([]);
 
   const loadGhConfig = useCallback(async () => {
     try {
@@ -176,6 +185,9 @@ export default function Projects() {
 
   async function connect() {
     if (!url.trim()) return;
+    // An owner/org URL (no repo segment) enumerates instead of cloning.
+    const owner = parseOwnerOnly(url);
+    if (owner) { await listOrgRepos(owner); return; }
     setBusy(true); setErr(''); setOutput('');
     try {
       const r = await api('/api/git/clone', {
@@ -186,6 +198,53 @@ export default function Projects() {
       if (!r.ok) { setErr(d.error || 'clone failed'); }
       else { setUrl(''); setName(''); setToken(''); await loadProjects(); await loadHosts(); setSelected(d.name || ''); }
     } finally { setBusy(false); }
+  }
+
+  // Enumerate an owner/org's repositories (wizard parity: /api/git/org-repos).
+  async function listOrgRepos(owner: OwnerRef) {
+    setBusy(true); setErr(''); setOutput(''); setOrgResults([]);
+    try {
+      // Save the token first (private/self-hosted org) so enumeration is authed.
+      if (token.trim()) {
+        await api('/api/git/credentials', {
+          method: 'POST',
+          body: JSON.stringify({ host: owner.host, token: token.trim() }),
+        }).catch(() => undefined);
+        setToken('');
+        await loadHosts();
+      }
+      const q = `host=${encodeURIComponent(owner.host)}&owner=${encodeURIComponent(owner.owner)}`;
+      const r = await api(`/api/git/org-repos?${q}`, { method: 'GET' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.error || `could not list repositories (${r.status})`); setOrgRef(null); setOrgRepos([]); return; }
+      const list: { name: string; clone_url: string; private?: boolean }[] = d.repos || [];
+      setOrgRef(owner);
+      setOrgRepos(list);
+      setOrgProvider(d.provider || '');
+      // Default: select every repo not already cloned.
+      const sel: Record<string, boolean> = {};
+      for (const repo of list) sel[repo.name] = !projects.includes(repo.name);
+      setOrgSelected(sel);
+      if (list.length === 0) setErr('No repositories found for that owner.');
+    } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
+  }
+
+  async function cloneOrgSelected() {
+    if (!orgRef) return;
+    const chosen = orgRepos.filter(r => orgSelected[r.name]).map(r => ({ name: r.name, clone_url: r.clone_url }));
+    if (chosen.length === 0) { setErr('Select at least one repository.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/api/git/clone-org', {
+        method: 'POST',
+        body: JSON.stringify({ host: orgRef.host, owner: orgRef.owner, repos: chosen }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.error || `clone failed (${r.status})`); return; }
+      setOrgResults(d.results || []);
+      setUrl('');
+      await loadProjects();
+    } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
   }
 
   async function runOp(op: string, extra?: Record<string, unknown>): Promise<boolean> {
@@ -211,16 +270,69 @@ export default function Projects() {
       <Panel title="Connect a repository">
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <input style={{ ...input, flex: 2, minWidth: '260px' }} placeholder="git remote URL (https or ssh)"
-              value={url} onChange={e => setUrl(e.target.value)} />
+            <input style={{ ...input, flex: 2, minWidth: '260px' }}
+              placeholder="repo URL — or an owner/org (e.g. github.com/RakuenSoftware) to clone its repos"
+              value={url} onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && url.trim() && !busy) connect(); }} />
             <input style={{ ...input, flex: 1, minWidth: '120px' }} placeholder="name (optional)"
               value={name} onChange={e => setName(e.target.value)} />
             <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-              disabled={busy || !url.trim()} onClick={connect}>Clone</button>
+              disabled={busy || !url.trim()} onClick={connect}>
+              {parseOwnerOnly(url) ? 'List repositories' : 'Clone'}
+            </button>
           </div>
           <input style={{ ...input, width: '100%' }} type="password" autoComplete="off"
-            placeholder="access token — only for a private repo (GitHub/Gitea/GitLab…); saved server-side per host"
+            placeholder="access token — only for a private repo/org (GitHub/Gitea/GitLab…); saved server-side per host"
             value={token} onChange={e => setToken(e.target.value)} />
+
+          {/* Owner/org enumeration: pick the repos, bulk-clone as projects. */}
+          {orgRef && orgRepos.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ fontSize: '12.5px', fontWeight: 700 }}>
+                  {orgRef.host}/{orgRef.owner}: {orgRepos.length} repositor{orgRepos.length === 1 ? 'y' : 'ies'}
+                  {orgProvider ? ` · ${orgProvider}` : ''}
+                </div>
+                <button style={{ ...btn, border: 'none', color: '#3a6ea5', padding: 0 }}
+                  onClick={() => setOrgSelected(Object.fromEntries(orgRepos.map(r => [r.name, true])))}>all</button>
+                <button style={{ ...btn, border: 'none', color: '#3a6ea5', padding: 0 }}
+                  onClick={() => setOrgSelected({})}>none</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '220px', overflow: 'auto',
+                            border: '1px solid #ddd', borderRadius: '6px', padding: '8px' }}>
+                {orgRepos.map(repo => {
+                  const already = projects.includes(repo.name);
+                  return (
+                    <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!orgSelected[repo.name]}
+                        onChange={e => setOrgSelected(p => ({ ...p, [repo.name]: e.target.checked }))} />
+                      <span style={{ fontFamily: 'monospace', flex: 1 }}>{repo.name}</span>
+                      {repo.private && <span style={{ fontSize: '10.5px', color: '#8a5a00' }}>private</span>}
+                      {already && <span style={{ fontSize: '11px', color: '#2a7' }}>● cloned</span>}
+                    </label>
+                  );
+                })}
+              </div>
+              <div>
+                <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+                  disabled={busy || orgRepos.filter(r => orgSelected[r.name]).length === 0}
+                  onClick={cloneOrgSelected}>
+                  Clone selected ({orgRepos.filter(r => orgSelected[r.name]).length})
+                </button>
+              </div>
+            </div>
+          )}
+          {orgResults.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              {orgResults.map(res => (
+                <div key={res.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px' }}>
+                  <span aria-hidden>{res.ok ? '✅' : '⛔'}</span>
+                  <span style={{ fontFamily: 'monospace', flex: 1 }}>{res.name}</span>
+                  {!res.ok && <span style={{ color: '#c62828' }}>{res.error || 'failed'}</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Panel>
 

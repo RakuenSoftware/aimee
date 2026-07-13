@@ -127,6 +127,44 @@ export function stepsRemaining(r: Readiness): number {
   return (Object.values(r.steps) as StepStatus[]).filter((s) => !s.ok && !s.optional).length;
 }
 
+/** The steps the operator has AFFIRMATIVELY completed — used by the wizard to
+ * hide already-done sections on reopen. Deliberately stricter than
+ * computeReadiness: a step that is merely satisfied-by-default (the local-KB
+ * fork never visited, the bundled Postgres never chosen) is NOT completed, so a
+ * first run still walks every step. */
+export function completedSteps(
+  cfg: Record<string, unknown>,
+  hasProject: boolean,
+  hostsConnected = 0,
+): Set<StepId> {
+  const done = new Set<StepId>();
+  if (asStr(cfg, 'provider') !== '') done.add('provider');
+
+  // The KB fork is complete once a mode was explicitly recorded ('' = never
+  // visited); remote additionally needs the URL that makes the choice real.
+  const kbMode = asStr(cfg, 'kb_mode');
+  if (kbMode === 'local' || (kbMode === 'remote' && asStr(cfg, 'kb_client_url') !== '')) {
+    done.add('knowledge_base');
+  }
+
+  const embConfigured =
+    asStr(cfg, 'embedding_command') !== '' ||
+    asStr(cfg, 'embedding_endpoint') !== '' ||
+    asStr(cfg, 'llm_embed_backend') === 'local' ||
+    asStr(cfg, 'llm_embed_backend') === 'external';
+  if (embConfigured) done.add('embedding');
+
+  // A blank db2_url is ALSO the completed "bundled Postgres" choice, but blank
+  // is equally the never-visited default. Treat the step as walked once the
+  // local-deploy walk demonstrably happened: an explicit URL, or the embed role
+  // placed in the step right before it.
+  if (asStr(cfg, 'db2_url') !== '' || embConfigured) done.add('db2');
+
+  if (hostsConnected > 0) done.add('connection');
+  if (hasProject) done.add('project');
+  return done;
+}
+
 /** Guard used by the grounding test: every READINESS_KEYS entry must be a real
  * documented field. Kept here so the invariant lives next to the keys. */
 export function readinessKeysAreDocumented(): boolean {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { FIELD_HELP } from '../pages/settingsHelp';
-import { computeReadiness, stepsRemaining, READINESS_KEYS, readinessKeysAreDocumented } from './readiness';
+import { completedSteps, computeReadiness, stepsRemaining, READINESS_KEYS, readinessKeysAreDocumented } from './readiness';
 
 describe('readiness grounding', () => {
   it('every READINESS_KEYS entry is a documented config field', () => {
@@ -89,5 +89,44 @@ describe('computeReadiness (connection step)', () => {
     const two = computeReadiness(cfg, true, 2);
     expect(two.steps.connection.ok).toBe(true);
     expect(two.steps.connection.detail).toMatch(/2 hosts/);
+  });
+});
+
+describe('completedSteps (affirmative completion — hides wizard sections on reopen)', () => {
+  it('a fresh install has completed NOTHING, even steps readiness marks ok-by-default', () => {
+    const done = completedSteps({}, false, 0);
+    expect(done.size).toBe(0);
+    // Contrast: readiness says knowledge_base + db2 are ok on the same input.
+    const r = computeReadiness({}, false, 0);
+    expect(r.steps.knowledge_base.ok).toBe(true);
+    expect(r.steps.db2.ok).toBe(true);
+  });
+
+  it('each step completes on its affirmative signal', () => {
+    expect(completedSteps({ provider: 'claude' }, false).has('provider')).toBe(true);
+    expect(completedSteps({ kb_mode: 'local' }, false).has('knowledge_base')).toBe(true);
+    expect(completedSteps({ llm_embed_backend: 'local' }, false).has('embedding')).toBe(true);
+    expect(completedSteps({}, false, 1).has('connection')).toBe(true);
+    expect(completedSteps({}, true).has('project')).toBe(true);
+  });
+
+  it('remote KB completes only once the URL makes the choice real', () => {
+    expect(completedSteps({ kb_mode: 'remote' }, false).has('knowledge_base')).toBe(false);
+    expect(completedSteps({ kb_mode: 'remote', kb_client_url: 'https://kb' }, false).has('knowledge_base')).toBe(true);
+  });
+
+  it('db2 completes via an explicit URL or the deploy walk (embed role placed)', () => {
+    expect(completedSteps({}, false).has('db2')).toBe(false);
+    expect(completedSteps({ db2_url: 'postgres://x' }, false).has('db2')).toBe(true);
+    expect(completedSteps({ llm_embed_backend: 'external' }, false).has('db2')).toBe(true);
+  });
+
+  it('a fully set-up instance completes every step', () => {
+    const done = completedSteps(
+      { provider: 'claude', kb_mode: 'local', llm_embed_backend: 'local', db2_url: '' },
+      true,
+      1,
+    );
+    expect(done.size).toBe(6);
   });
 });

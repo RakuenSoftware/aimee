@@ -1,17 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-/* Wizard page-1 primary chooser. Four supported primaries, two shapes:
+/* Provider chooser — wizard page 1 AND the Agents tab's "add delegate" first
+ * window. Four supported providers, two shapes:
  *
- *   API key      → agent.add --default (Anthropic API, OpenAI-compatible API)
+ *   API key      → agent.add (Anthropic API, OpenAI-compatible API)
  *   Subscription → server-hosted OAuth CLI login (Claude / Codex "sign in with
- *                  your plan"), then agent.set --default to make it primary.
+ *                  your plan")
+ *
+ * Two modes select what the add means:
+ *   'primary'  (wizard default) — the agent becomes the GLOBAL default (the one
+ *              resolve_primary drives): agent.add --default, and the OAuth flow
+ *              promotes the vendor agent via agent.set --default.
+ *   'delegate' (Agents tab) — a named roster entry, NOT the default: the API
+ *              form collects a delegate name + roles, and the OAuth flow leaves
+ *              the registered vendor agent unpromoted.
  *
  * Every write goes through an existing endpoint — /api/agents/add,
  * /api/agents/set, and the /api/agents/oauth/* proxies — so there is no new
- * config surface. The chosen primary is set as the GLOBAL default agent (the one
- * resolve_primary drives); on success we also stamp the legacy `provider` config
- * breadcrumb so the wizard summary + header chip (which read config, not the
- * agent roster) reflect that a primary now exists.
+ * config surface. In primary mode, on success we also stamp the legacy
+ * `provider` config breadcrumb so the wizard summary + header chip (which read
+ * config, not the agent roster) reflect that a primary now exists.
  *
  * The subscription token is minted, vaulted, and refreshed entirely server-side:
  * only the verification URL, an optional device code, an opaque session handle,
@@ -122,12 +130,17 @@ interface OauthState {
 }
 
 export interface PrimaryChooserProps {
-  /** Called after a primary is fully configured + set as the global default; the
-   * argument is the `provider` breadcrumb to stamp into config. */
+  /** Called after the agent is fully configured (primary mode: and set as the
+   * global default); the argument is the provider string ('primary' mode stamps
+   * it into config as the legacy breadcrumb). */
   onConfigured: (provider: string) => void | Promise<void>;
+  /** 'primary' (default): the wizard's add-and-make-default. 'delegate': the
+   * Agents tab's add — a named, non-default roster entry. */
+  mode?: 'primary' | 'delegate';
 }
 
-export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
+export default function PrimaryChooser({ onConfigured, mode = 'primary' }: PrimaryChooserProps) {
+  const delegate = mode === 'delegate';
   const [selected, setSelected] = useState<Kind | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -136,6 +149,9 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
   const [endpoint, setEndpoint] = useState('');
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  // Delegate mode only: the roster name + delegation roles for the new agent.
+  const [name, setName] = useState('');
+  const [roles, setRoles] = useState('summarize,format,draft');
 
   // Subscription OAuth flow.
   const [oauth, setOauth] = useState<OauthState | null>(null);
@@ -152,6 +168,7 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
     setEndpoint(spec.endpoint);
     setModel(spec.model);
     setApiKey('');
+    setName(delegate ? `${spec.provider}-delegate` : '');
     setError('');
     setOauth(null);
   };
@@ -166,24 +183,31 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
     setBusy(false); setPolling(false);
   };
 
-  // --- API-key primary: agent.add --default -------------------------------
+  // --- API-key agent: agent.add (primary mode adds --default) -------------
   const submitApi = async () => {
     if (!apiSpec) return;
     if (!endpoint.trim() || !model.trim() || !apiKey.trim()) {
       setError('Endpoint, model, and API key are all required.');
       return;
     }
+    if (delegate && !name.trim()) {
+      setError('Give the delegate a name.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
-      await postJSON('/api/agents/add', {
-        args: [
-          apiSpec.provider, endpoint.trim(), model.trim(),
-          '--provider', apiSpec.provider,
-          '--key', apiKey.trim(),
-          '--default',
-        ],
-      });
+      const args = [
+        delegate ? name.trim() : apiSpec.provider, endpoint.trim(), model.trim(),
+        '--provider', apiSpec.provider,
+        '--key', apiKey.trim(),
+      ];
+      if (delegate) {
+        if (roles.trim()) args.push('--roles', roles.trim());
+      } else {
+        args.push('--default');
+      }
+      await postJSON('/api/agents/add', { args });
       await onConfigured(apiSpec.provider);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not add the agent.');
@@ -191,15 +215,18 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
     }
   };
 
-  // --- Subscription primary: OAuth login, then agent.set --default --------
+  // --- Subscription agent: OAuth login (primary mode then agent.set --default)
   const pollOnce = useCallback(async (vendor: string, session: string): Promise<'pending' | 'authenticated' | 'failed'> => {
     try {
       const r = await postJSON<{ state?: string; agent?: string; error?: string }>(
         '/api/agents/oauth/poll', { vendor, session });
       if (r.state === 'authenticated') {
-        // Promote the freshly-registered vendor agent to the global primary.
-        const agent = r.agent || vendor;
-        await postJSON('/api/agents/set', { args: [agent, '--default'] });
+        // Primary mode: promote the freshly-registered vendor agent to the
+        // global primary. A delegate stays an ordinary roster entry.
+        if (!delegate) {
+          const agent = r.agent || vendor;
+          await postJSON('/api/agents/set', { args: [agent, '--default'] });
+        }
         return 'authenticated';
       }
       if (r.state === 'failed') { setError(r.error || 'Login failed or timed out.'); return 'failed'; }
@@ -208,7 +235,7 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
       setError(e instanceof Error ? e.message : 'Poll failed.');
       return 'failed';
     }
-  }, []);
+  }, [delegate]);
 
   const runPoll = useCallback(async (vendor: string, session: string, provider: string) => {
     setPolling(true);
@@ -265,7 +292,9 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
     return (
       <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
         <p style={{ fontSize: 13, color: '#556', margin: '0 0 2px' }}>
-          Pick the primary model aimee drives. You can change it later on the Agents tab.
+          {delegate
+            ? 'Pick the provider for this delegate.'
+            : 'Pick the primary model aimee drives. You can change it later on the Agents tab.'}
         </p>
         {API_SPECS.map((s) => (
           <button key={s.kind} onClick={() => chooseApi(s)} style={cardStyle}>
@@ -286,12 +315,23 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
   return (
     <div style={{ marginBottom: 14 }}>
       <button onClick={reset} style={{ ...ghostBtn, marginBottom: 12 }} disabled={busy || polling}>
-        ← Choose a different primary
+        ← Choose a different {delegate ? 'provider' : 'primary'}
       </button>
 
       {apiSpec && (
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>{apiSpec.label}</div>
+          {delegate && (
+            <>
+              <Field label="Delegate name">
+                <input style={input} value={name} onChange={(e) => setName(e.target.value)}
+                  placeholder={`${apiSpec.provider}-delegate`} />
+              </Field>
+              <Field label="Roles (comma-separated)">
+                <input style={input} value={roles} onChange={(e) => setRoles(e.target.value)} />
+              </Field>
+            </>
+          )}
           <Field label="Endpoint">
             <input style={input} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder={apiSpec.endpoint} />
           </Field>
@@ -307,7 +347,7 @@ export default function PrimaryChooser({ onConfigured }: PrimaryChooserProps) {
           </div>
           <div>
             <button style={primaryBtn} disabled={busy} onClick={submitApi}>
-              {busy ? 'Saving…' : 'Save & set as primary'}
+              {busy ? 'Saving…' : delegate ? 'Add delegate' : 'Save & set as primary'}
             </button>
           </div>
         </div>
