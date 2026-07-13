@@ -43,6 +43,8 @@ Open **https://localhost:8443** (accept the self-signed cert) and log in as `aim
 
 The browser login is a real PAM account the container creates on startup from **`AIMEE_WEBCHAT_USER`** / **`AIMEE_WEBCHAT_PASSWORD`** (defaults `aimee` / `aimee-local-dev`) — set them in the compose file for anything past local dev. The username must be a valid Linux name: **lowercase letters, digits, `-`, `_`, and not starting with a digit** (so `admin` or `web-user`, not `Admin` or `bob.smith`). For more than one login, set `AIMEE_WEBCHAT_USERS` to a comma-separated `user:password` list. If a login is rejected, check the container logs for `[webchat]` lines — they report exactly which account was created or why it couldn't be.
 
+Each provisioned account is mirrored (username + its `/etc/shadow` hash, never the plaintext) to `AIMEE_HOME/webchat/logins` on the data volume and restored on every start, so browser logins survive a container rebuild or a host reboot even if the runtime stops re-injecting `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD`.
+
 The wizard covers:
 
 - **Primary provider** — which agent aimee drives.
