@@ -1729,6 +1729,7 @@ $(TESTPREFIX)/unit-test-wfe-sliced-build: $(OBJDIR)/tests/test_wfe_sliced_build.
 # Workflow engine W6: autonomy driver + gate-override.
 $(TESTPREFIX)/unit-test-wfe-autonomy: $(OBJDIR)/tests/test_wfe_autonomy.o \
                                       $(OBJDIR)/workflow/wfe_autonomy.o $(OBJDIR)/workflow/wfe_approval.o \
+                                      $(OBJDIR)/tests/support/log_stub.o \
                                       $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_verdict.o \
                                       $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/db1/db1_init.o \
                                       $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/wfe_store.o \
