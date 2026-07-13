@@ -477,9 +477,10 @@ int git_oauth_gh_start(const char *principal, char *user_code, size_t uc_len, ch
    {
       /* --insecure-storage: no keyring in the container; the config dir is
        * ephemeral and wiped once the token is moved into the vault. */
-      const char *argv[] = {"gh",    "auth",           "login", "--hostname",
-                            "github.com", "--git-protocol", "https", "--web",
-                            "--insecure-storage", NULL};
+      const char *argv[] = {"gh",         "auth",       "login",
+                            "--hostname", "github.com", "--git-protocol",
+                            "https",      "--web",      "--insecure-storage",
+                            NULL};
       execvpe("gh", (char *const *)argv, envp);
       _exit(127);
    }
@@ -552,8 +553,7 @@ int git_oauth_gh_poll(const char *principal, char *err, size_t errlen)
 {
    pthread_mutex_lock(&g_lock);
    int rc;
-   if (g_state == GH_IDLE ||
-       (principal && g_principal[0] && strcmp(g_principal, principal) != 0))
+   if (g_state == GH_IDLE || (principal && g_principal[0] && strcmp(g_principal, principal) != 0))
    {
       snprintf(err, errlen, "no pending GitHub sign-in");
       rc = -1;
