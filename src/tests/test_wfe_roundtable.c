@@ -124,10 +124,21 @@ int main(void)
                            mk("architect", WFE_V_APPROVE, "H", 1)};
       assert(wfe_gate_decide(c, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
 
-      /* COMMENT counts as present-not-approve -> below quorum -> CHANGES */
+      /* COMMENT is non-blocking: approve + comment meets quorum 2 -> APPROVE */
       wfe_verdict_t d[] = {mk("security", WFE_V_APPROVE, "H", 0),
                            mk("architect", WFE_V_COMMENT, "H", 0)};
-      assert(wfe_gate_decide(d, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+      assert(wfe_gate_decide(d, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_APPROVE);
+
+      /* ...but comments alone never pass: at least one explicit approve. */
+      wfe_verdict_t d2[] = {mk("security", WFE_V_COMMENT, "H", 0),
+                            mk("architect", WFE_V_COMMENT, "H", 0)};
+      assert(wfe_gate_decide(d2, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+
+      /* ...and ANY request_changes loops, even with quorum-many non-blocking. */
+      wfe_verdict_t d3[] = {mk("security", WFE_V_APPROVE, "H", 0),
+                            mk("architect", WFE_V_COMMENT, "H", 0),
+                            mk("qa", WFE_V_REQUEST_CHANGES, "H", 0)};
+      assert(wfe_gate_decide(d3, 3, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
 
       /* tampered hash on a REQUIRED persona: it never validly reviewed THIS
        * artifact -> integrity failure -> DEGRADED (not a definitive CHANGES). */
