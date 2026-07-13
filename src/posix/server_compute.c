@@ -831,8 +831,14 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
+   /* This is the PRIMARY turn: the provider-named agent must be routable for
+    * its own chat even though the delegate-policy filter excludes it as a
+    * delegation target (see agent_routing_set_primary_turn). Thread-local, so
+    * any delegation the turn spawns (other worker threads) stays policed. */
+   agent_routing_set_primary_turn(1);
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
+   agent_routing_set_primary_turn(0);
 
    cli_session_set_error_grace_ms(prev_error_grace);
    cli_session_set_cancel_check(prev_cancel_cb, prev_cancel_ud);

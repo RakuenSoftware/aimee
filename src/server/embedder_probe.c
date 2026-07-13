@@ -3,8 +3,11 @@
  * embedder without db2 learning the embed transport (db2 stays config-free). */
 #include "embedder_probe.h"
 
+#include "aimee.h" /* EMBED_MAX_DIM + memory.h prerequisites */
 #include "lifecycle.h"
 #include "log.h"
+#include "memory.h"               /* memory_embed_text — in-process HTTP probe */
+#include "memory_core_internal.h" /* memory_embed_command_is_http */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +32,18 @@ static int probe_once(void)
 {
    if (!g_embed_cmd[0])
       return -1;
+   /* An http(s):// "command" is the in-process embed transport (the combined /
+    * unified-container deployments export AIMEE_LLM_URL and set no sidecar
+    * command) — there is nothing to exec, and popen would fork
+    * `sh -c "http://... --dim"` forever. Probe by embedding a short text and
+    * taking the vector's length: transport-exact, and independent of whether
+    * the gateway's /health reports a dim. */
+   if (memory_embed_command_is_http(g_embed_cmd))
+   {
+      static float vec[EMBED_MAX_DIM];
+      int d = memory_embed_text("dim probe", g_embed_cmd, vec, EMBED_MAX_DIM);
+      return d > 0 ? d : -1;
+   }
    char cmd[1100];
    snprintf(cmd, sizeof(cmd), "%s --dim", g_embed_cmd);
    FILE *p = popen(cmd, "r");

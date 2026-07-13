@@ -211,6 +211,38 @@ static void test_agent_route_policy_filter(void)
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
 }
 
+/* The server's live predicate consults agent_routing_primary_turn() so the
+ * PRIMARY chat turn can route the provider-named agent even though it is
+ * excluded as a delegation target (mirrored here by a marker-aware double). */
+static int test_policy_exclude_primary_unless_primary_turn(const agent_t *ag)
+{
+   if (agent_routing_primary_turn())
+      return 0;
+   return strcmp(ag->name, "primary") == 0;
+}
+
+static void test_agent_route_primary_turn_marker(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 1;
+   strcpy(cfg.default_agent, "primary");
+   strcpy(cfg.agents[0].name, "primary");
+   strcpy(cfg.agents[0].roles[0], "code");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+
+   agent_set_route_policy_filter(test_policy_exclude_primary_unless_primary_turn);
+   /* Delegation context: the primary is unroutable and routing fails. */
+   assert(agent_route(&cfg, "code") == NULL);
+   /* Primary chat turn: the same agent routes for its own turn. */
+   agent_routing_set_primary_turn(1);
+   assert(agent_route(&cfg, "code") == &cfg.agents[0]);
+   agent_routing_set_primary_turn(0);
+   assert(agent_route(&cfg, "code") == NULL);
+   agent_set_route_policy_filter(NULL);
+}
+
 /* Structural rule (no filter needed): a claude-CLI agent that is not
  * server-hosted has no server session to drive — it can never be a delegate,
  * so routing refuses it before any PATH/credential probing. */
@@ -2385,6 +2417,7 @@ int main(void)
    test_agent_find();
    test_agent_route();
    test_agent_route_policy_filter();
+   test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();

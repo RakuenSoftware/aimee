@@ -589,6 +589,18 @@ static int attn_path_in_managed_worktree(const char *norm)
                    strstr(norm, "/.codex/worktrees/") != NULL);
 }
 
+/* Returns 1 iff `norm` is harness-owned session state rather than repo content:
+ * Claude Code's per-project state dir ("~/.claude/projects/<slug>/..." — auto-
+ * memory, transcripts, tool-result spills). The harness writes there as part of
+ * normal operation from ANY cwd; blocking it doesn't protect the checkout, it
+ * just breaks the harness (observed: memory writes refused mid-session). The
+ * loose "/.claude/" prefix stays blocked — only the projects state dir is
+ * carved out. */
+static int attn_path_is_harness_state(const char *norm)
+{
+   return norm && strstr(norm, "/.claude/projects/") != NULL;
+}
+
 /* Pure decision for the session-isolation guard (testable in isolation).
  * Returns 1 to BLOCK: a mutating op (SOFT/HARD) whose effective target is NOT
  * inside an aimee-managed worktree. Read / raw-scan ops are never blocked here.
@@ -611,7 +623,9 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
 
    char norm[2048];
    attn_lexical_normalize(joined, norm, sizeof(norm));
-   return attn_path_in_managed_worktree(norm) ? 0 : 1;
+   if (attn_path_in_managed_worktree(norm) || attn_path_is_harness_state(norm))
+      return 0;
+   return 1;
 }
 
 int handle_attention_guard(void)

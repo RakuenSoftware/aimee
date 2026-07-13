@@ -202,6 +202,12 @@ static void test_session_isolation_decision(void)
    assert(attn_session_isolation_blocked(ATTN_OP_HARD, NULL, cc_wt_cwd) == 0);
    /* The loose "/.claude" prefix (e.g. ~/.claude/) is NOT a managed worktree. */
    assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/x.c", primary_cwd) == 1);
+   /* ...but the harness's own per-project state dir (auto-memory etc.) is
+    * session state, not repo content — writable from any cwd. */
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, "/home/u/.claude/projects/p/memory/m.md",
+                                         primary_cwd) == 0);
+   assert(attn_session_isolation_blocked(ATTN_OP_HARD, "/home/u/.claude/projects/p/MEMORY.md",
+                                         wt_cwd) == 0);
 
    /* Codex's native worktrees (/.codex/worktrees/) are honoured the same way. */
    const char *cx_wt = "/home/u/repo/.codex/worktrees/feat/src/x.c";

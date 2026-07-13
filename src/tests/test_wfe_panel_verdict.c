@@ -60,6 +60,16 @@ int main(void)
    /* trailing whitespace/newlines after the JSON line are tolerated */
    assert(map("{\"verdict\":\"approve\"}\n\n  \n").kind == WFE_V_APPROVE);
 
+   /* a markdown-fenced verdict (the common provider habit) is still parsed:
+    * trailing fence-only lines are skipped, not treated as the verdict line */
+   assert(map("blockers noted.\n```json\n{\"verdict\":\"request_changes\"}\n```\n").kind ==
+          WFE_V_REQUEST_CHANGES);
+   assert(map("```\n{\"verdict\":\"approve\"}\n```").kind == WFE_V_APPROVE);
+   /* a fence-only response stays MALFORMED (nothing above the fences) */
+   assert(map("```\n```").kind == WFE_V_MALFORMED);
+   /* prose after the fenced verdict still wins as the last line (no rescan) */
+   assert(map("```\n{\"verdict\":\"approve\"}\n```\nnot json").kind == WFE_V_MALFORMED);
+
    /* a null artifact hash still yields a (fail-closed) verdict with an empty hash */
    {
       wfe_verdict_t v;

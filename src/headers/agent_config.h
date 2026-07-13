@@ -53,6 +53,17 @@ void agent_set_route_health_filter(int (*fn)(const char *agent_name));
  * route to a client-only claude. */
 void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
 
+/* Primary-turn marker for the delegate-policy filter. The PRIMARY chat turn
+ * routes the provider-named agent through the same machinery as delegation
+ * (agent_run_with_tools -> agent_route), where policy rule (1) above would
+ * exclude it and rule (2) would demand the delegate opt-in — but a primary
+ * turn is not delegation: driving claude via its CLI as the PRIMARY is the
+ * documented default. The chat worker brackets the turn with set(1)/set(0) on
+ * its own thread (thread-local, so concurrent delegate routing on other
+ * threads stays policed); the server's policy predicate consults it. */
+void agent_routing_set_primary_turn(int on);
+int agent_routing_primary_turn(void);
+
 int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
