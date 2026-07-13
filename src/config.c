@@ -808,9 +808,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->css_style_graph_enabled = 1; /* default-on: the indexer builds the CSS style
                                         graph so the read-only css signals/report work
                                         out of the box (set false to opt out) */
-   cfg->wfe_live_forge_enabled = 0;  /* default-OFF (security): the autonomous live
-                                        forge stays unregistered until an operator
-                                        explicitly enables it (F4) */
+   cfg->wfe_live_forge_enabled = 1;  /* default-ON (operator ruling 2026-07-13,
+                                        restoring the plan's default): the live forge
+                                        registers at standup; set false to opt out.
+                                        The merge-target rail still bounds every op --
+                                        PRs open-only against the resolved trunk,
+                                        merges only to the unprotected autonomous
+                                        base -- and each op re-checks flag + rail. */
    cfg->audit_action_enabled = 1;    /* default-ON: the trajectory_export reader (S3)
                                         shipped, so the passive per-action audit row
                                         is on by default; set false to opt out */
