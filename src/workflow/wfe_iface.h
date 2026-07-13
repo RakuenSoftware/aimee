@@ -155,6 +155,15 @@ typedef enum
 } wfe_failure_disposition_t;
 wfe_failure_disposition_t wfe_failure_disposition(wfe_failure_class_t cls, int has_new_input);
 
+/* Resolve the local working repo for a work item from its stored `repo` column:
+ * the repo itself when it names a local directory (a trigger rule's
+ * pipeline.workspace binds the run to that repository), else the process-wide
+ * $AIMEE_WORKFLOW_REPO, else cwd. Every per-work-item repo consumer (block
+ * executors, roundtable workdir, worktree cleanup) resolves through this so a
+ * run filed against a specific workspace executes there, not wherever the
+ * server process happens to sit. */
+const char *wfe_repo_local(const char *wi_repo);
+
 /* ---- Autonomous merge-target rail (WP-5 safety) ----
  * The single source of truth for the branch an autonomous run may target for a
  * PR/merge. Autonomous merges only ever go to this branch (default "testing");
