@@ -133,6 +133,41 @@ int main(void)
    assert(wfe_tdd_tests_survive("", red) == 1);
    assert(wfe_tdd_tests_survive(dir, "0000000000000000000000000000000000000000") == 1);
 
+   /* --- source.archive: content-addressed retire of the triggering file --- */
+   {
+      assert(wfe_lookup_block_executor(WFE_BLK_SOURCE_ARCHIVE));
+      snprintf(cmd, sizeof cmd,
+               "cd %s && mkdir -p docs/proposals/pending && printf 'proposal body\\n' > "
+               "docs/proposals/pending/idea.md && git add -A && git commit -q -m proposal",
+               dir);
+      assert(sh(cmd) == 0);
+      /* the trigger keys the run on the file's BLOB sha */
+      char sha[64] = "";
+      {
+         char c2[1200];
+         snprintf(c2, sizeof c2, "git -C %s rev-parse HEAD:docs/proposals/pending/idea.md", dir);
+         FILE *p = popen(c2, "r");
+         assert(p && fgets(sha, sizeof sha, p));
+         pclose(p);
+         sha[40] = '\0';
+      }
+      /* moved + committed */
+      assert(wfe_source_archive_move(dir, sha, "docs/proposals/pending", "docs/proposals/done") ==
+             1);
+      snprintf(
+          cmd, sizeof cmd,
+          "test ! -e %s/docs/proposals/pending/idea.md && test -f "
+          "%s/docs/proposals/done/idea.md && git -C %s status --porcelain | wc -l | grep -qx 0",
+          dir, dir, dir);
+      assert(sh(cmd) == 0);
+      /* idempotent: the blob is gone from pending/ -> nothing to do */
+      assert(wfe_source_archive_move(dir, sha, "docs/proposals/pending", "docs/proposals/done") ==
+             0);
+      /* unknown sha -> nothing to do (never an error) */
+      assert(wfe_source_archive_move(dir, "0000000000000000000000000000000000000000",
+                                     "docs/proposals/pending", "docs/proposals/done") == 0);
+   }
+
    snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
    sh(cmd);
    printf("ok\n");

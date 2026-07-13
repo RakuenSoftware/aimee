@@ -37,6 +37,9 @@ static const struct
      * branch, produces the documented branch) -> composes between implement and
      * freeze, or anywhere a branch is in hand. */
     {WFE_BLK_DOCUMENT, "document", WFE_ART_BRANCH, 1, {WFE_ART_BRANCH, WFE_ART_NONE}},
+    /* retire the run's triggering source file onto the run branch (trigger-first
+     * lifecycle; see wfe_iface.h); branch -> branch so it composes anywhere. */
+    {WFE_BLK_SOURCE_ARCHIVE, "source.archive", WFE_ART_BRANCH, 1, {WFE_ART_BRANCH, WFE_ART_NONE}},
     {WFE_BLK_FREEZE, "freeze", WFE_ART_FROZEN_DIFF, 1, {WFE_ART_BRANCH, WFE_ART_NONE}},
     {WFE_BLK_GATE_ROUNDTABLE,
      "gate.roundtable",

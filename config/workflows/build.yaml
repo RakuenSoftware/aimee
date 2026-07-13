@@ -149,8 +149,17 @@ nodes:
       quorum: 3
       max_rounds: 6
       focus: is the documentation complete, accurate, and clear for this feature?
-    on_pass: final_pr
+    on_pass: archive
     on_fail: document
+  # Retire the triggering proposal on the run branch: move it from the watch dir
+  # (docs/proposals/pending) to docs/proposals/done, committed on the feature
+  # branch so the final PR retires the trigger input atomically with the work.
+  # A run without a trigger artifact (interactive intake) advances as a no-op.
+  - id: archive
+    block: source.archive
+    in:
+      branch: document.out
+    next: final_pr
   # Open the final PR: feature branch -> the repo's DEFAULT branch. Terminal: the
   # workflow ends here. pr.open only OPENS the PR (base:trunk, never merged); a human
   # reviews and merges it on the forge.
