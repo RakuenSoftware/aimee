@@ -24,7 +24,18 @@ static const struct
    int requires_input;
    wfe_artifact_type_t accepts[8]; /* WFE_ART_NONE-terminated */
 } CATALOG[] = {
-    {WFE_BLK_AUTHOR_PROPOSAL, "author.proposal", WFE_ART_PROPOSAL, 0, {WFE_ART_NONE}},
+    /* author.proposal optionally ACCEPTS a proposal (a trigger block's produced
+     * artifact feeds it via an explicit data edge); with no input it authors
+     * from the run's pre-supplied proposal / the user ask, as before. */
+    {WFE_BLK_AUTHOR_PROPOSAL,
+     "author.proposal",
+     WFE_ART_PROPOSAL,
+     0,
+     {WFE_ART_PROPOSAL, WFE_ART_NONE}},
+    /* trigger.watch-dir: the arming entry node (triggers-as-blocks). params:
+     * {dir, ref, suffix, workspace, mode, max_spend_usd} — the same vocabulary
+     * as a `watch-dir` trigger_rules stanza, composed in the graph instead. */
+    {WFE_BLK_TRIGGER_WATCH_DIR, "trigger.watch-dir", WFE_ART_PROPOSAL, 0, {WFE_ART_NONE}},
     {WFE_BLK_AUTHOR_PLAN, "author.plan", WFE_ART_PLAN, 1, {WFE_ART_PROPOSAL, WFE_ART_NONE}},
     /* implement also accepts an INTENT directly (S0): a single-packet `hotfix`
      * feeds understand -> implement without a split step. */

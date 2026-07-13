@@ -66,6 +66,12 @@ typedef enum
     * run branch so the final PR retires the trigger input atomically with the
     * work. No-op advance for runs without a content-addressed trigger artifact. */
    WFE_BLK_SOURCE_ARCHIVE, /* branch -> branch */
+   /* Trigger blocks (triggers-as-blocks): the entry node that ARMS a saved
+    * workflow — the trigger scheduler enumerates saved workflows whose start
+    * node is a trigger block and files one run per event through the same
+    * intake as trigger_rules. At run time the block no-op advances (the run's
+    * proposal artifact was materialized by the trigger at filing). */
+   WFE_BLK_TRIGGER_WATCH_DIR, /* source -> proposal */
    WFE_BLK__COUNT
 } wfe_block_type_t;
 

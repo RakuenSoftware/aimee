@@ -61,10 +61,12 @@ From the catalog in [src/workflow/wfe_def.c](../src/workflow/wfe_def.c)
 
 | Block | Produces | Accepts (input) | Kind | What it does |
 |---|---|---|---|---|
-| `author.proposal` | proposal |, (no input) | action | A delegate drafts a proposal. The usual entry point. |
+| `trigger.watch-dir` | proposal |, (no input) | **trigger** | The arming entry node: watch a repo dir; each new file files one run (see [Triggers as blocks](#triggers-as-blocks-armed-workflows)). |
+| `author.proposal` | proposal |, (no input; optionally a trigger's proposal) | action | A delegate drafts a proposal. The usual entry point. |
 | `author.plan` | plan | proposal | action | A delegate turns the proposal into an implementation plan. |
 | `implement` | branch | plan | action | Delegates implement the plan onto a branch (`params.fanout: max` parallelizes). |
 | `document` | branch | branch | action | A delegate writes docs onto the branch. Composes between implement and freeze. |
+| `source.archive` | branch | branch | action | Retires the run's triggering file: moves it from the watch dir (`params.from`, default `docs/proposals/pending`) to a done dir (`params.to`, default `docs/proposals/done`), committed on the run branch. No-op for runs without a trigger artifact. |
 | `freeze` | frozen_diff | branch | action | Freezes the branch to an immutable diff for review. |
 | `gate.roundtable` | verdict | proposal · plan · frozen_diff | **gate** | Runs a multi-persona review **panel**; pass/fail on quorum. |
 | `gate.human` | approval | proposal · plan · branch · frozen_diff · pr | **gate** | Parks for a human decision — **inviolable**; never auto-satisfied in autonomous mode. |
@@ -379,6 +381,50 @@ any other workflow you have authored.
 > The filed run still enters through the same capped, audited intake as every
 > other run (see [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)); the trigger
 > supplies the proposal text, so the *propose → … → PR* framing below still holds.
+
+### Triggers as blocks (armed workflows)
+
+`trigger_rules` arms *someone else's* workflow from config. The graph-native
+form puts the trigger **in the workflow itself**: make `trigger.watch-dir` the
+start node and the saved workflow is **armed** — the trigger scheduler
+enumerates saved workflows whose start is a trigger block every tick and files
+runs through the exact same intake (dedup, per-run USD ceiling,
+`trigger.max_concurrent`, audit) as an equivalent rule. One YAML file then
+states *watch this dir, in this repo, and run this graph*:
+
+```yaml
+name: build-triggered
+start: watch
+nodes:
+  - id: watch
+    block: trigger.watch-dir
+    params:
+      dir: docs/proposals/pending        # repo-relative dir to watch (default)
+      workspace: /srv/repos/myproject    # REQUIRED to arm: the repo to watch/run in
+      # ref: main                        # git ref to read (default: origin HEAD)
+      # mode: autonomous                 # or interactive
+      # max_spend_usd: 2
+    next: draft
+  - id: draft
+    block: author.proposal
+    in:
+      proposal: watch.out                # the trigger's artifact, as a data edge
+    ...
+```
+
+The validator enforces trigger placement: a trigger block must be the start
+node, at most one per workflow, with no inbound edges and no `in` bindings.
+At run time the trigger node advances instantly (the scheduler already
+materialized the watched file as the run's proposal); without
+`params.workspace` the workflow saves fine but stays disarmed (one warning is
+logged). Deleting the workflow disarms it. The shipped
+[`build-triggered`](../config/workflows/build-triggered.yaml) template is this
+composition: watch → author → plan → gate → slices → accept → document →
+**archive (pending → done)** → final PR.
+
+A GUI interaction is a trigger too: creating a proposal in the webchat writes
+it into the watched directory, so the same armed workflow picks it up — every
+run starts with a trigger, whether a person or an event fired it.
 
 ## Current limitations
 

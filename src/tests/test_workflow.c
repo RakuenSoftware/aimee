@@ -90,6 +90,79 @@ int main(void)
       assert(ok);
    }
 
+   /* --- trigger blocks: start-only, at most one, no inbound edges/inputs --- */
+   {
+      char err[256] = "";
+      assert(wfe_block_from_name("trigger.watch-dir") == WFE_BLK_TRIGGER_WATCH_DIR);
+      assert(wfe_block_output(WFE_BLK_TRIGGER_WATCH_DIR) == WFE_ART_PROPOSAL);
+      assert(wfe_block_requires_input(WFE_BLK_TRIGGER_WATCH_DIR) == 0);
+      /* author.proposal now optionally accepts the trigger's proposal edge */
+      assert(wfe_block_accepts_input(WFE_BLK_AUTHOR_PROPOSAL, WFE_ART_PROPOSAL) == 1);
+
+      /* good: trigger as start, data edge into author.proposal */
+      static const char *ARMED = "name: armed\n"
+                                 "start: watch\n"
+                                 "nodes:\n"
+                                 "  - id: watch\n"
+                                 "    block: trigger.watch-dir\n"
+                                 "    next: draft\n"
+                                 "  - id: draft\n"
+                                 "    block: author.proposal\n"
+                                 "    in:\n"
+                                 "      proposal: watch.out\n";
+      int ok = validates(ARMED, err, sizeof err);
+      if (!ok)
+         printf("\n  ARMED rejected: %s\n", err);
+      assert(ok);
+
+      /* bad: trigger not at start */
+      static const char *MID = "name: mid\n"
+                               "start: draft\n"
+                               "nodes:\n"
+                               "  - id: draft\n"
+                               "    block: author.proposal\n"
+                               "    next: watch\n"
+                               "  - id: watch\n"
+                               "    block: trigger.watch-dir\n";
+      assert(!validates(MID, NULL, 0));
+
+      /* bad: two triggers */
+      static const char *TWO = "name: two\n"
+                               "start: watch\n"
+                               "nodes:\n"
+                               "  - id: watch\n"
+                               "    block: trigger.watch-dir\n"
+                               "    next: watch2\n"
+                               "  - id: watch2\n"
+                               "    block: trigger.watch-dir\n";
+      assert(!validates(TWO, NULL, 0));
+
+      /* bad: inbound edge onto the trigger */
+      static const char *LOOPED = "name: looped\n"
+                                  "start: watch\n"
+                                  "nodes:\n"
+                                  "  - id: watch\n"
+                                  "    block: trigger.watch-dir\n"
+                                  "    next: draft\n"
+                                  "  - id: draft\n"
+                                  "    block: author.proposal\n"
+                                  "    on_fail: watch\n";
+      assert(!validates(LOOPED, NULL, 0));
+
+      /* bad: an `in` binding on the trigger */
+      static const char *BOUND = "name: bound\n"
+                                 "start: watch\n"
+                                 "nodes:\n"
+                                 "  - id: watch\n"
+                                 "    block: trigger.watch-dir\n"
+                                 "    in:\n"
+                                 "      src: draft.out\n"
+                                 "    next: draft\n"
+                                 "  - id: draft\n"
+                                 "    block: author.proposal\n";
+      assert(!validates(BOUND, NULL, 0));
+   }
+
    /* --- version determinism + canonical stability under key reordering --- */
    {
       char err[256];
