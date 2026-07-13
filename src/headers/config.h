@@ -316,12 +316,13 @@ typedef struct config
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
-   /* wfe_live_forge_enabled: gate (default 0, OFF) for the autonomous live forge
+   /* wfe_live_forge_enabled: gate (default 1, ON — operator ruling 2026-07-13,
+    * restoring the plan's default) for the autonomous live forge
     * (full-autonomous-development F4). When OFF the wfe forge provider is not
     * registered and every forge op fails closed, so an autonomous run can never
-    * open or merge a real PR. Turning it ON is a deliberate operator deployment
-    * action (branch protection + scoped creds + break-glass) — never a code default,
-    * per the security-roundtable deviation. */
+    * open or merge a real PR. Even ON, every op re-checks this flag AND the
+    * merge-target rail: PRs open-only against the resolved trunk, merges only
+    * to the unprotected autonomous base. Set false to opt out. */
    int wfe_live_forge_enabled;
    /* audit_action_enabled: emit a per-tool-call governed-action row (kind=
     * tool_action) to audit.log from pre_tool_check. Default-ON (the

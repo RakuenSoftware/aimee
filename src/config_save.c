@@ -887,8 +887,8 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "ocr_command", cfg->ocr_command);
    if (!cfg->css_style_graph_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 0);
-   if (cfg->wfe_live_forge_enabled) /* default-off: persist only the opt-in (enable) */
-      cJSON_AddBoolToObject(root, "wfe_live_forge_enabled", 1);
+   if (!cfg->wfe_live_forge_enabled) /* default-on: persist only the opt-out (disable) */
+      cJSON_AddBoolToObject(root, "wfe_live_forge_enabled", 0);
    if (!cfg->audit_action_enabled) /* default-on: persist only the opt-out (disable) */
       cJSON_AddBoolToObject(root, "audit_action_enabled", 0);
    if (cfg->audit_worm_enabled) /* default-off: persist only the opt-in (enable) */
