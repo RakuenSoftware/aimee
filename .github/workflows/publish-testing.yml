@@ -21,6 +21,11 @@ on:
       - "config/**"
       - "deploy/container/**"
       - "scripts/**"
+      # The images bundle the webchat UI (frontend/ SPA + webchat/ Go server) —
+      # see the frontend-build/webchat-build stages in Dockerfile.server and
+      # Dockerfile.combined.
+      - "frontend/**"
+      - "webchat/**"
       - "Dockerfile"
       - "Dockerfile.server"
       - "Dockerfile.combined"
