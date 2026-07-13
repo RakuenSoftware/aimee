@@ -144,6 +144,8 @@ nodes:
           - architect
           - qa
           - reviewer
+        eligible:
+          - technical-writer # the documentation domain expert joins when seatable
       quorum: 3
       max_rounds: 6
       focus: is the documentation complete, accurate, and clear for this feature?
