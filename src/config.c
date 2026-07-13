@@ -401,6 +401,7 @@ static const config_schema_entry_t config_schema[] = {
     {"ensemble", SCHEMA_OBJECT, 0},
     {"roundtable", SCHEMA_OBJECT, 0},
     {"cron_jobs", SCHEMA_ARRAY, 0},
+    {"aimee", SCHEMA_OBJECT, 0},
     {"trigger", SCHEMA_OBJECT, 0},
     {"trigger_rules", SCHEMA_ARRAY, 0},
     {"claude_cli_delegate_enabled", SCHEMA_BOOL, 0},
