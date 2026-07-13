@@ -299,7 +299,13 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    cJSON *jdec = body ? cJSON_GetObjectItemCaseSensitive(body, "decision") : NULL;
    cJSON *jgate = body ? cJSON_GetObjectItemCaseSensitive(body, "gate") : NULL;
-   const char *decision = (jdec && cJSON_IsString(jdec)) ? jdec->valuestring : "";
+   /* Copy the decision OUT of `body` now: the cJSON doc is deleted before the
+    * final response is formatted, so a pointer into it must not outlive it
+    * (this was a use-after-free that echoed garbage in the success response). */
+   char decision_buf[16] = "";
+   if (jdec && cJSON_IsString(jdec) && jdec->valuestring)
+      snprintf(decision_buf, sizeof decision_buf, "%s", jdec->valuestring);
+   const char *decision = decision_buf;
    const char *actor = server_http_identity_principal();
    if (!actor || !actor[0])
       actor = "operator";
