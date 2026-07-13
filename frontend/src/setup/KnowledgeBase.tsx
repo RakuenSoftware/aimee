@@ -73,7 +73,6 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
             },
             embedModel: '',
             embedDim: '',
-            synthModel: '',
           })
         : { kb_mode: 'local' };
 

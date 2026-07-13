@@ -100,14 +100,14 @@ export interface DeploySelection {
   placements: Record<Role, Placement>;
   embedModel: string;
   embedDim: string;
-  synthModel: string;
 }
 
 /** Build the complete {key: value} config map a selection would persist. A
  * remote KB deploys nothing locally, so ONLY the kb_* keys are written (the LLM
  * placement is skipped, mirroring `deploy-env`'s early return). Otherwise every
- * role's placement is emitted, plus the external-embedder model/dim and the
- * synth model. Pure — the component saves only the keys that changed vs config. */
+ * role's placement is emitted, plus the external-embedder model/dim. The synth
+ * model is not configurable — it is fixed by the placement tier (cpu/small/mid/
+ * large). Pure — the component saves only the keys that changed vs config. */
 export function buildDesiredConfig(sel: DeploySelection): Record<string, string> {
   const out: Record<string, string> = { kb_mode: sel.kbMode };
   if (sel.kbMode === 'remote') {
@@ -124,9 +124,6 @@ export function buildDesiredConfig(sel: DeploySelection): Record<string, string>
       // string (which would reach the int allowlist as '').
       const dim = sel.embedDim.trim();
       if (dim !== '') out.embedding_dim = dim;
-    }
-    if (role === 'synth' && p.backend !== 'off') {
-      out.llm_synth_model = sel.synthModel.trim();
     }
   }
   return out;

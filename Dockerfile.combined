@@ -94,6 +94,21 @@ RUN apt-get update \
         openssh-client python3 python3-numpy tmux zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
+# GitHub CLI — backs the wizard's zero-config "Sign in with GitHub": when no
+# OAuth App client ID is configured, aimee-server runs GitHub's device flow
+# through `gh auth login` (gh's own public app identity), so sign-in works out
+# of the box with no app registration (git_oauth_gh.c).
+ARG TARGETARCH
+ARG GH_CLI_VERSION=2.96.0
+RUN set -eux; \
+    gharch="${TARGETARCH:-amd64}"; \
+    case "$gharch" in amd64|arm64) ;; *) echo "unsupported TARGETARCH=${gharch}" >&2; exit 1 ;; esac; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" \
+      | tar -xz -C /tmp "gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh"; \
+    install -m0755 "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh" /usr/local/bin/gh; \
+    rm -rf "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}"; \
+    gh --version
+
 ENV AIMEE_HOME=/var/lib/aimee
 ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
 ENV PATH=/opt/llama:/opt/llama/bin:/var/lib/aimee/.npm-global/bin:$PATH
