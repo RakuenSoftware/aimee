@@ -158,8 +158,16 @@ start() { # name port extra-args...   (caller passes -ngl per role: cpu=0, gpu=$
 # leaves .ready absent so the next start retries a partial pull).
 fetch() {
   local url="$1" dest="$2"
-  wget -q -c --tries=5 --timeout=30 --waitretry=10 -O "$dest" "$url" \
-    || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
+  # wget when available (the standalone aimee-llm image), else curl (the combined
+  # image ships curl only — its runtime stage has no wget, and a silent hard
+  # dependency here meant every model fetch failed there).
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -c --tries=5 --timeout=30 --waitretry=10 -O "$dest" "$url" \
+      || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
+  else
+    curl -fsSL --connect-timeout 30 --retry 5 --retry-delay 10 -C - -o "$dest" "$url" \
+      || { echo "aimee-llm: download FAILED: $url" >&2; return 1; }
+  fi
 }
 
 # download_models — fetch ONLY the roles served locally, each into its own tier's
