@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
 
@@ -604,112 +605,19 @@ function AgentEditModal({
   );
 }
 
-/* ---- add-delegate form: builds the `aimee agent add` argv ---- */
+/* ---- add delegate: the SAME chooser + flows as the wizard's add agent ----
+ * One code path (PrimaryChooser) drives both surfaces; 'delegate' mode only
+ * collects a roster name + roles and skips the --default promotion. Fine-tuning
+ * (cost tier, disable, endpoint tweaks) lives in the edit modal afterwards. */
 
 function AddDelegate({ onDone }: { onDone: (msg: string, ok: boolean) => void }) {
-  const [name, setName] = useState("");
-  const [endpoint, setEndpoint] = useState("");
-  const [model, setModel] = useState("");
-  const [provider, setProvider] = useState("openai");
-  const [roles, setRoles] = useState("summarize,format,draft");
-  const [apiKey, setApiKey] = useState("");
-  const [costTier, setCostTier] = useState("0");
-  const [disabled, setDisabled] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  // CLI-backed providers (claude/claude-code) run a local CLI, not an HTTP
-  // endpoint, so the endpoint field is optional for them (server ignores it).
-  const cliProvider = provider === "claude" || provider === "claude-code";
-
-  const submit = async () => {
-    if (!name.trim() || !model.trim() || (!cliProvider && !endpoint.trim())) {
-      onDone("name, endpoint and model are required", false);
-      return;
-    }
-    // Mirror `aimee agent add <name> <endpoint> <model> [--flags]`. Endpoint is a
-    // required positional; pass "-" as a placeholder for CLI providers.
-    const args = [name.trim(), cliProvider ? "-" : endpoint.trim(), model.trim()];
-    if (provider) args.push("--provider", provider);
-    if (roles.trim()) args.push("--roles", roles.trim());
-    if (apiKey.trim()) args.push("--key", apiKey.trim());
-    if (costTier && costTier !== "0") args.push("--cost-tier", costTier);
-    if (disabled) args.push("--disabled");
-
-    setBusy(true);
-    try {
-      const res = await postArgs<{ error?: string; name?: string }>(
-        "/api/agents/add",
-        args,
-      );
-      if (res.error) onDone(res.error, false);
-      else onDone(`added ${res.name || name}`, true);
-    } catch {
-      onDone("add failed", false);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <Panel title="Add delegate">
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <L label="name">
-          <input value={name} onChange={(e) => setName(e.target.value)} style={inp} placeholder="my-delegate" />
-        </L>
-        <L label="provider">
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp}>
-            {PROVIDERS.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </L>
-        <L label={cliProvider ? "endpoint (optional for CLI)" : "endpoint"}>
-          <input
-            value={endpoint}
-            onChange={(e) => setEndpoint(e.target.value)}
-            style={inp}
-            placeholder="https://host:port/v1"
-            disabled={cliProvider}
-          />
-        </L>
-        <L label="model">
-          <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} placeholder="gpt-5" />
-        </L>
-        <L label="roles (comma-separated)">
-          <input value={roles} onChange={(e) => setRoles(e.target.value)} style={inp} />
-        </L>
-        <L label="cost tier">
-          <input
-            type="number"
-            value={costTier}
-            onChange={(e) => setCostTier(e.target.value)}
-            style={inp}
-            min={0}
-          />
-        </L>
-        <L label="API key (optional — stored in vault)">
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            style={inp}
-            placeholder="sk-…  or  $ENV_VAR"
-          />
-        </L>
-        <L label="start disabled">
-          <input type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} />
-        </L>
-      </div>
-      <div style={{ marginTop: 10 }}>
-        <button
-          onClick={submit}
-          disabled={busy}
-          style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
-        >
-          {busy ? "Adding…" : "Add delegate"}
-        </button>
+      <div style={{ padding: "12px" }}>
+        <PrimaryChooser
+          mode="delegate"
+          onConfigured={(provider) => onDone(`added ${provider} delegate`, true)}
+        />
       </div>
     </Panel>
   );
