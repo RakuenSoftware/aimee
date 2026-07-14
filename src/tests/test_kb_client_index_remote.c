@@ -24,6 +24,8 @@ static int g_remote_mode = 0; /* controls kb_client_v1_base_url return */
 static char *g_last_path = NULL;
 static char *g_last_body = NULL;
 static int g_post_calls = 0;
+static int g_files_pushed_total = 0; /* rel_path entries summed across calls */
+static size_t g_max_body_bytes = 0;  /* largest single request body seen */
 static const char *g_next_response =
     "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 
@@ -40,6 +42,11 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
    g_last_path = strdup(path ? path : "");
    g_last_body = body ? cJSON_PrintUnformatted(body) : strdup("{}");
    g_post_calls++;
+   if (g_last_body && strlen(g_last_body) > g_max_body_bytes)
+      g_max_body_bytes = strlen(g_last_body);
+   cJSON *files = body ? cJSON_GetObjectItemCaseSensitive(body, "files") : NULL;
+   if (cJSON_IsArray(files))
+      g_files_pushed_total += cJSON_GetArraySize(files);
    if (status_out)
       *status_out = 200;
    return strdup(g_next_response);
@@ -66,6 +73,8 @@ static void reset_stub(void)
    g_last_path = NULL;
    g_last_body = NULL;
    g_post_calls = 0;
+   g_files_pushed_total = 0;
+   g_max_body_bytes = 0;
    g_remote_mode = 0;
 }
 
@@ -266,6 +275,50 @@ static void test_remote_mode_empty_dir(void)
    reset_stub();
 }
 
+/* Remote mode: a tree whose content exceeds the per-request batch budget must
+ * be pushed as MULTIPLE /v1/code/scan requests, each under aimee-kb's 1 MB
+ * request-body cap, with every file present across the batches. A single
+ * whole-tree push would be truncated at the kb and 400 as invalid JSON. */
+static void test_remote_mode_batches_large_tree(void)
+{
+   reset_stub();
+   g_remote_mode = 1;
+
+   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   /* 5 x 200 KB source files = ~1 MB of content against the 600 KB batch
+    * budget (each file stays under CODE_COLLECT_MAX_FILE_BYTES). */
+   enum
+   {
+      NFILES = 5,
+      FBYTES = 200 * 1024
+   };
+   char *content = malloc(FBYTES + 1);
+   assert(content != NULL);
+   memset(content, 'x', FBYTES);
+   content[FBYTES] = '\0';
+   for (int i = 0; i < NFILES; i++)
+   {
+      char p[4096];
+      snprintf(p, sizeof(p), "%s/big%d.c", tmpdir, i);
+      write_file(p, content, FBYTES);
+   }
+   free(content);
+
+   kb_client_index_scan_result_t res;
+   int rc = kb_client_index_scan("proj", tmpdir, 0, &res);
+
+   assert(rc == 0);
+   assert(res.skipped == 0);
+   assert(g_post_calls >= 2);              /* batched, not one giant push */
+   assert(g_files_pushed_total == NFILES); /* nothing dropped */
+   assert(g_max_body_bytes < 1048576);     /* every body under the kb cap */
+
+   rmdir_r(tmpdir);
+   reset_stub();
+}
+
 /* Remote mode: missing/invalid project or root → error path, no crash. */
 static void test_remote_mode_missing_args(void)
 {
@@ -290,6 +343,7 @@ int main(void)
    test_local_mode_no_files_array();
    test_remote_mode_pushes_files();
    test_remote_mode_empty_dir();
+   test_remote_mode_batches_large_tree();
    test_remote_mode_missing_args();
    printf("kb_client_index_remote: all tests passed\n");
    return 0;

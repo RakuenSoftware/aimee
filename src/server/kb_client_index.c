@@ -189,22 +189,129 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
    return rc;
 }
 
+#ifdef AIMEE_POSIX
+/* Per-batch content budget for pushed-file scans. Batching keeps client
+ * memory to ~one batch regardless of tree size, gives per-batch progress
+ * against the scan timeout, and stays under the 1 MB request-body cap of
+ * pre-KB_HTTP_BODY_MAX aimee-kb images (which silently truncated bigger
+ * bodies into 400 "invalid json"). The kb scan upserts per project+path, so
+ * batches accumulate — the same contract the thin client's /v1/index/ingest
+ * streamer relies on. */
+#define KB_CLIENT_SCAN_BATCH_BYTES (600 * 1024)
+
+/* Streaming scan-push state: code_collect_files_cb hands over one file at a
+ * time; we accumulate byte-bounded batches and POST each the moment it fills,
+ * keeping memory to ~one batch regardless of tree size. */
+typedef struct
+{
+   const char *name;
+   const char *root;
+   int force;
+   cJSON *batch; /* current open batch, or NULL */
+   size_t batch_bytes;
+   int batches;   /* batches pushed */
+   int failed_rc; /* rc of the first failed batch push; 0 while all succeed */
+   kb_client_index_scan_result_t fail_res; /* result of that failed push */
+   kb_client_index_scan_result_t agg;      /* aggregate of successful pushes */
+} kb_scan_push_ctx_t;
+
+/* Push the current batch (kb_client_code_scan_push adopts/frees it) and fold
+ * the per-batch result into the aggregate. */
+static void kb_scan_push_flush(kb_scan_push_ctx_t *s)
+{
+   if (!s->batch)
+      return;
+   if (cJSON_GetArraySize(s->batch) == 0 || s->failed_rc != 0)
+   {
+      cJSON_Delete(s->batch);
+      s->batch = NULL;
+      s->batch_bytes = 0;
+      return;
+   }
+   kb_client_index_scan_result_t res;
+   memset(&res, 0, sizeof(res));
+   int rc = kb_client_code_scan_push(s->name, s->root, s->force, s->batch, &res);
+   s->batch = NULL;
+   s->batch_bytes = 0;
+   s->batches++;
+   if (rc == 0 && !res.skipped)
+   {
+      s->agg.projects = 1;
+      s->agg.files += res.files;
+      s->agg.inspected += res.inspected;
+   }
+   else
+   {
+      s->failed_rc = rc != 0 ? rc : -1;
+      s->fail_res = res;
+   }
+}
+
+static int kb_scan_push_collect_cb(const char *rel_path, const char *content, void *ctx)
+{
+   kb_scan_push_ctx_t *s = (kb_scan_push_ctx_t *)ctx;
+   size_t flen = strlen(content) + strlen(rel_path) + 64;
+
+   if (s->batch && cJSON_GetArraySize(s->batch) > 0 &&
+       s->batch_bytes + flen > KB_CLIENT_SCAN_BATCH_BYTES)
+      kb_scan_push_flush(s);
+   if (s->failed_rc != 0)
+      return 1; /* a batch failed — stop the walk, report the failure */
+
+   if (!s->batch)
+   {
+      s->batch = cJSON_CreateArray();
+      if (!s->batch)
+         return 1; /* OOM — stop; the batches so far are already indexed */
+   }
+   cJSON *entry = cJSON_CreateObject();
+   if (!entry)
+      return 0; /* skip this file, keep walking */
+   cJSON_AddStringToObject(entry, "rel_path", rel_path);
+   cJSON_AddStringToObject(entry, "content", content);
+   cJSON_AddItemToArray(s->batch, entry);
+   s->batch_bytes += flen;
+   return 0;
+}
+#endif
+
 static int kb_client_index_scan_v1(const char *name, const char *root, int force,
                                    kb_client_index_scan_result_t *out)
 {
-   cJSON *files_arr = NULL;
 #ifdef AIMEE_POSIX
    /* When aimee-kb is remote (AIMEE_KB_API_URL set), the container cannot reach
     * the host filesystem via root_path.  Enumerate and push file contents so
-    * the handler can index without filesystem access. */
+    * the handler can index without filesystem access — in byte-bounded batches,
+    * since the kb caps request bodies at 1 MB. */
    if (name && name[0] && root && root[0] && kb_client_v1_base_url())
    {
-      files_arr = cJSON_CreateArray();
-      if (files_arr)
-         code_collect_files(root, files_arr);
+      kb_scan_push_ctx_t s;
+      memset(&s, 0, sizeof(s));
+      s.name = name;
+      s.root = root;
+      s.force = force;
+      code_collect_files_cb(root, kb_scan_push_collect_cb, &s);
+      kb_scan_push_flush(&s); /* flush the trailing partial batch */
+      if (s.failed_rc != 0)
+      {
+         if (out)
+            *out = s.fail_res;
+         return s.failed_rc;
+      }
+      if (s.batches > 0)
+      {
+         if (out)
+            *out = s.agg;
+         return 0;
+      }
+      /* No indexable files collected: push an empty files array so the kb
+       * still registers the project + queues curation (prior behavior),
+       * rather than falling back to a root_path scan of a filesystem the kb
+       * cannot see. */
+      return kb_client_code_scan_push(name, root, force, cJSON_CreateArray(), out);
    }
 #endif
-   return kb_client_code_scan_push(name, root, force, files_arr, out);
+   return kb_client_code_scan_push(name, root, force, NULL, out);
 }
 
 int kb_client_index_scan(const char *name, const char *root, int force,

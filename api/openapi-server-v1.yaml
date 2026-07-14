@@ -4300,6 +4300,14 @@ paths:
                 properties:
                   ok: { type: boolean }
                   name: { type: string }
+                  kb_indexed:
+                    type: boolean
+                    description: >
+                      Whether the clone was also pushed to the knowledge service
+                      (/v1/code/scan) for code-unit synthesis + embeddings.
+                  kb_reason:
+                    type: string
+                    description: Why the kb scan was skipped (present when kb_indexed is false).
         "400":
           description: Invalid URL/name, or the project already exists
           content:
@@ -4427,6 +4435,14 @@ paths:
                         ok: { type: boolean }
                         project: { type: string, nullable: true }
                         error: { type: string, nullable: true }
+                        kb_indexed:
+                          type: boolean
+                          description: >
+                            Whether the clone was also pushed to the knowledge
+                            service (/v1/code/scan) for synthesis + embeddings.
+                        kb_reason:
+                          type: string
+                          description: Why the kb scan was skipped (present when kb_indexed is false).
         "400":
           description: Missing host/owner/repos, or too many repos (max 100)
           content:
