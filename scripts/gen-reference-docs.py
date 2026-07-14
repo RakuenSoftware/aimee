@@ -160,6 +160,9 @@ CFG_KEY_DESC = {
     "history bounded.",
     "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
     "(session-isolation guard; default off).",
+    "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "
+    "(~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory "
+    "system via `aimee memory store` (default on).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
