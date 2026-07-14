@@ -147,6 +147,15 @@ int db1_work_item_delete(const char *work_item_id);
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
 int db1_work_item_list(db1_work_item_t **out);
 
+/* List work items LEAST-RECENTLY-UPDATED first — the scheduler's fairness
+ * order. A newest-first sweep starves older siblings: the sequential autonomy
+ * pass gives each item up to its wall-clock cap, so whichever items sort first
+ * eat every sweep (observed live: 2 of 13 fan-out slices monopolized 3.5h
+ * while the rest never advanced). Staleness-first makes starvation
+ * self-correcting: whoever was skipped longest goes first next sweep.
+ * Caller frees *out. Returns count or -1. */
+int db1_work_item_list_lru(db1_work_item_t **out);
+
 /* Append an audit event. */
 int db1_lifecycle_event_add(const char *work_item_id, const char *stage, const char *kind,
                             const char *actor, const char *detail, const char *content_hash,

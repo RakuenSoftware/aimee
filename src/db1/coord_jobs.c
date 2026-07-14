@@ -125,7 +125,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return -1;
 
    sqlite3_stmt *stmt = NULL;
@@ -133,7 +133,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
                                     " WHERE job_id = ? AND status IN ('claimed', 'running')";
    if (sqlite3_prepare_v2(db, running_sql, -1, &stmt, NULL) != SQLITE_OK)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_int(stmt, 1, job_id);
@@ -149,7 +149,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
                                     " ORDER BY id ASC";
    if (sqlite3_prepare_v2(db, pending_sql, -1, &stmt, NULL) != SQLITE_OK)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_int(stmt, 1, job_id);
@@ -183,7 +183,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
 
    if (found_id < 0)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
 
@@ -192,7 +192,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
                                   " WHERE id = ? AND status = 'pending'";
    if (sqlite3_prepare_v2(db, claim_sql, -1, &stmt, NULL) != SQLITE_OK)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_text(stmt, 1, delegate_name, -1, SQLITE_TRANSIENT);
@@ -200,7 +200,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
    if (sqlite3_step(stmt) != SQLITE_DONE || sqlite3_changes(db) == 0)
    {
       sqlite3_finalize(stmt);
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_finalize(stmt);
@@ -215,9 +215,9 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
       sqlite3_finalize(stmt);
    }
 
-   if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_end(db, "COMMIT") != 0)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      /* gate already released; a failed COMMIT auto-rolls-back in sqlite */
       return -1;
    }
 

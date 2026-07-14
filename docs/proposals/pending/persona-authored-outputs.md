@@ -19,12 +19,22 @@ self-contradictory prompt. A role's capability is a hardcoded name list
 delegates are addressed by (role template, persona name) pairs, so callers
 hardwire *who* instead of *what capabilities the job requires*.
 
+And even with all of that fixed, persona-styled commit messages would stay
+best-effort as long as an agent can run raw `git commit` from a shell: the
+message only reliably passes through a persona if every commit and PR
+passes through one gate. aimee already has that gate — the guarded git
+tools (`git_commit`, `git_push`, `git_pr`) that strip AI attribution,
+block protected branches, and skip sensitive files — but nothing requires
+agents to use it.
+
 One model change fixes all of this. Roles become permissions. Delegates
 advertise permissions. A persona declares the permissions it requires, and
 any delegate that covers them is a valid target. Stance is generated from
-the granted permissions instead of baked into prose. On that footing,
-routing "the technical writer writes the commit messages, the PR messages,
-and the docs" is config and workflow YAML, not prompt surgery.
+the granted permissions instead of baked into prose. And aimee's git
+tooling becomes mandatory for agents, so the commit and PR gate is a
+choke point a persona can own. On that footing, routing "the technical
+writer writes the commit messages, the PR messages, and the docs" is
+config and workflow YAML, not prompt surgery.
 
 ## What
 
@@ -86,29 +96,46 @@ and the docs" is config and workflow YAML, not prompt surgery.
 7. `document` honors a per-node persona, read the same way the `implement`
    block's TDD path already reads one, and the `build` composition sets
    `persona: technical-writer` on its document node.
-8. Commit messages are delegate-authored, styled, and actually used. The
-   live dispatch path today commits with a hardcoded message; committing
-   dispatches will instead carry the structured delegate handoff, and the
-   harness commit consumes the `commit_message` it supplies. A new config
-   key, `commit_style_persona` (default `technical-writer`, empty
-   disables), appends that persona's voice guidance as a
-   "## Commit message style" block to every dispatch that commits:
-   `implement` (plain, fanout units, TDD), and `document`. The `author.*`
-   blocks produce prose artifacts, not commits, and are excluded. When a
-   delegate self-commits mid-run with its own git tools, the style block
-   guides it but the resulting message is best-effort.
-9. Voice becomes addressable. The built-in technical-writer's voice prose
-   is factored into a built-in voice field; `## Voice` joins the sections
-   parsed from persona files and the seeded output. A persona without a
-   voice makes `commit_style_persona` a logged no-op.
-10. Persona names and grants are validated. `aimee workflow validate`
+8. aimee's git tooling is enforced for agents, at both layers agents run
+   in. A new config key, `require_aimee_git` (default on, operator
+   opt-out only — the `require_aimee_memory` pattern), refuses raw git
+   write commands and raw `gh pr` invocations from agent shells and
+   directs them to the guarded tools: the attention-guard covers
+   hook-driven interactive sessions, and the server-side agent policy
+   covers in-process delegates, both reusing the tokenizing git-write
+   detectors the guardrails layer already has rather than a new verb
+   list. Every agent-authored commit and PR then flows through one gate.
+   aimee-server's own internal commits and forge calls are not agent
+   shells and stay as they are; and the refusal is a redirect, not a
+   sandbox — a determined bypass is out of scope, the ban on unattended
+   AI attribution remains the hard outer guard.
+9. Commit messages are persona-authored at that gate. The commit gate
+   becomes one shared implementation behind the MCP `git_commit` handler
+   and the workflow harness commit (which today hardcodes its message).
+   When `commit_style_persona` (new config key, default
+   `technical-writer`, empty disables) is set and the commit is
+   agent-originated, the gate dispatches that persona read-only over the
+   staged diff, with the caller's message as the draft, and commits with
+   the authored message. The pass is skipped when a persona-styled draft
+   already arrived (committing workflow dispatches carry one through a
+   commit-message draft channel in the delegate handoff, and their
+   prompts carry the persona's voice guidance as a
+   "## Commit message style" block) — one authoring pass per commit,
+   never two. On dispatch failure, no backend, or a message that strips
+   to empty, the draft commits as supplied; a human operator's own
+   commit message is never rewritten.
+10. Voice becomes addressable. The built-in technical-writer's voice
+    prose is factored into a built-in voice field; `## Voice` joins the
+    sections parsed from persona files and the seeded output. A persona
+    without a voice makes `commit_style_persona` a logged no-op.
+11. Persona names and grants are validated. `aimee workflow validate`
     rejects an unknown `persona:` on producing and `pr.open` nodes —
     today a typo silently falls back to `engineer` — and template loading
     rejects unknown permission tokens.
-11. Docs and help follow the interface: `docs/personas.md`,
+12. Docs and help follow the interface: `docs/personas.md`,
     `docs/DELEGATES.md`, `docs/WORKFLOW_ACTIONS.md`, the CLI help text,
     and the generated command reference all drop `--persona` and document
-    the permission model.
+    the permission model and the git-tooling requirement.
 
 Out of scope: a general action→persona binding table, and any permission
 beyond `read`/`write`/`execute`. Mechanics — caller enumerations, file
@@ -140,11 +167,24 @@ lists, signatures, migration, and the test seam — are in
   With the dispatch failing, returning garbage, or the forge rejecting the
   text, the PR still opens with the work-item title and empty body —
   observed via the block-test forge recorder, not parked.
-- The commit created by a live-path dispatch carries the delegate-supplied
-  message, not the hardcoded one; with `commit_style_persona` set (and by
-  default) the message follows the styled prompt, and the resulting
-  message — not just the prompt — is asserted in tests. Config round-trips
-  through save/load like `default_persona`.
+- With `require_aimee_git` on (the default), a raw `git commit` or `gh pr`
+  from an agent shell is refused with a message directing to the guarded
+  tools — on both the interactive-session (hook) layer and the in-process
+  delegate (agent policy) layer; with it off, the command passes. Read
+  verbs pass untouched. The guard is operator config only, with no
+  env-var bypass.
+- Every agent commit routes through the shared gate: the MCP `git_commit`
+  handler and the workflow harness commit produce the same gated behavior
+  in the caller's worktree, and the harness commit no longer carries the
+  hardcoded message.
+- With `commit_style_persona` set (and by default), an agent commit
+  without a styled draft gets the gate-authored message — asserted on the
+  resulting commit, not the prompt; a handoff-drafted commit is used as
+  supplied (no second authoring pass); on gate-dispatch failure or a
+  message that strips to empty the draft is used; a human operator's
+  message commits unchanged. With the key empty, every caller's message
+  commits unchanged. Config round-trips through save/load like
+  `default_persona`.
 - Setting `commit_style_persona` to a persona with no voice logs and
   no-ops. `## Voice` in a persona file parses into the persona.
 - `aimee workflow validate` rejects an unknown `persona:` on `pr.open`,

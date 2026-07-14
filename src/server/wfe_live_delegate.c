@@ -170,6 +170,11 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
          }
       }
    }
+   /* Keep the reply's head for the no-op diagnostic below (res.response is
+    * freed here). */
+   char reply_head[224] = "(empty)";
+   if (res.response && res.response[0])
+      snprintf(reply_head, sizeof reply_head, "%.200s", res.response);
    free(res.response);
 
    /* Stage + commit whatever the delegate changed in the worktree. A commit with
@@ -179,6 +184,17 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
     * makes a downstream squash-merge inject a `Co-authored-by:` trailer, which the
     * standing directive forbids. No `-c user.name/user.email` override, and no
     * co-authorship trailer. */
+   char pre_head[64] = "";
+   {
+      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
+      char *o = NULL;
+      if (safe_exec_capture(argv, &o, 256) == 0 && o)
+      {
+         chomp(o);
+         snprintf(pre_head, sizeof pre_head, "%s", o);
+      }
+      free(o);
+   }
    {
       const char *add[] = {"add", "-A"};
       (void)git_run(workdir, add, 2);
@@ -193,6 +209,15 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
          chomp(o);
          if (out_commit_sha)
             snprintf(out_commit_sha, 64, "%s", o);
+         /* Diagnostic: a producing delegate that edited NOTHING is the top
+          * silent failure mode of the autonomous loop (rounds spin on an
+          * unchanged tree). Surface WHICH agent replied without editing and
+          * the head of what it said instead, so the cause (tool bridge down,
+          * refusal, advice-only reply) is triageable from the server log. */
+         if (pre_head[0] && strcmp(pre_head, o) == 0)
+            aimee_log(LOG_WARN, "wfe-delegate",
+                      "no-op run: agent '%s' made no edits in %s; reply head: %s",
+                      agent_name[0] ? agent_name : "(role-routed)", workdir, reply_head);
       }
       free(o);
    }

@@ -57,6 +57,27 @@ static void panel_git(const char *workdir, const char *const extra[], int extra_
  * never wedge the round. */
 #define WFE_PANEL_DEADLINE_MS 300000
 
+/* How long an unseatable $random lens QUEUES for a review agent before the
+ * gate degrades. The review roster is small and shared with implement
+ * delegates: under a parallel fleet, "no eligible review agent right now" is
+ * usually transient (provider health streak, seats busy) — waiting out the
+ * contention converts an instant panel_degraded park into a completed panel.
+ * 0 disables queueing (legacy instant-degrade). */
+static long wfe_panel_seat_wait_secs(void)
+{
+   const char *v = getenv("AIMEE_PANEL_SEAT_WAIT_SECS");
+   if (v && v[0])
+   {
+      char *end = NULL;
+      long s = strtol(v, &end, 10);
+      if (end && *end == '\0' && s >= 0 && s <= 3600)
+         return s;
+   }
+   return 300;
+}
+
+#define WFE_PANEL_SEAT_POLL_SECS 15
+
 /* Build the per-persona review prompt. The change under review is embedded directly
  * as a diff so the panelist reads the delta and navigates surrounding code via the
  * aimee index (find_symbol/search_memory) instead of re-running git and sweeping the
@@ -228,11 +249,23 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
    int filled = 0;
    int pinned_dispatch_fail = 0;
-   /* Up to two parallel rounds. A pinned lens dispatches once to its fixed agent (a
-    * pinned dispatch failure fails the run — no retry); a $random lens retries a
-    * different agent on the second round so one flaky pick doesn't degrade the gate. */
-   for (int round = 0; round < 2 && filled < nlens && !pinned_dispatch_fail; round++)
+   /* Deadline-bounded rounds. A pinned lens dispatches once to its fixed agent (a
+    * pinned dispatch failure fails the run — no retry). A $random lens re-seats a
+    * different agent on later rounds so one flaky pick doesn't degrade the gate —
+    * and when NO review agent is eligible right now, the lens QUEUES: the round
+    * loop sleeps and re-resolves until an agent becomes viable or the seat-wait
+    * deadline expires. Only after the deadline does an unfilled/malformed lens
+    * commit and the gate degrade. */
+   struct timespec q0;
+   clock_gettime(CLOCK_MONOTONIC, &q0);
+   long seat_wait = wfe_panel_seat_wait_secs();
+   int queued_logged = 0;
+   for (int round = 0; filled < nlens && !pinned_dispatch_fail; round++)
    {
+      struct timespec qn;
+      clock_gettime(CLOCK_MONOTONIC, &qn);
+      int final = (qn.tv_sec - q0.tv_sec) >= seat_wait; /* last attempt: commit as-is */
+      int filled_before = filled;
       agent_task_t tasks[WFE_PANEL_MAX];
       const char *taskagent[WFE_PANEL_MAX];
       int lensmap[WFE_PANEL_MAX];
@@ -293,7 +326,23 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          nt++;
       }
       if (nt == 0)
-         break;
+      {
+         /* Nothing dispatchable this round: every unfilled lens is unseatable
+          * (no eligible review agent right now). Queue for a seat until the
+          * deadline instead of degrading instantly. */
+         if (final || seat_wait == 0)
+            break;
+         if (!queued_logged)
+         {
+            aimee_log(LOG_INFO, "wfe-panel",
+                      "no eligible review agent for %d unfilled lens(es); queueing up to %lds",
+                      nlens - filled, seat_wait);
+            queued_logged = 1;
+         }
+         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
+         nanosleep(&nap, NULL);
+         continue;
+      }
 
       agent_result_t results[WFE_PANEL_MAX];
       memset(results, 0, sizeof results);
@@ -328,13 +377,14 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
                    * the tail above shows) — treat it like a failed dispatch and
                    * let the next round retry the lens with a DIFFERENT agent
                    * rather than committing a verdict that fails required-lens
-                   * coverage and degrades the whole gate. Only the FINAL round
-                   * commits the malformed verdict (fail-closed as before). */
-                  if (!pinned[i] && round == 0)
+                   * coverage and degrades the whole gate. Only once the seat-wait
+                   * deadline expires does the malformed verdict commit
+                   * (fail-closed as before). */
+                  if (!pinned[i] && !final)
                   {
                      free(results[t].response);
                      results[t].response = NULL;
-                     continue; /* leave done[i]=0 -> round 2 re-seats this lens */
+                     continue; /* leave done[i]=0 -> a later round re-seats this lens */
                   }
                }
                else
@@ -354,6 +404,15 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
             pinned_dispatch_fail = 1;
          }
          free(results[t].response);
+      }
+      /* No lens progressed this round (fast dispatch failures / all replies
+       * malformed): back off before re-seating so a flapping provider doesn't
+       * burn the whole seat-wait window in a tight retry loop. */
+      if (filled == filled_before && filled < nlens && !pinned_dispatch_fail && !final &&
+          seat_wait > 0)
+      {
+         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
+         nanosleep(&nap, NULL);
       }
    }
 

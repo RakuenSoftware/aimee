@@ -582,14 +582,13 @@ int db1_work_item_inc_override(const char *wi)
    return -1;
 }
 
-int db1_work_item_list(db1_work_item_t **out)
+static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
 {
    if (out)
       *out = NULL;
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   static const char *sql = "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC";
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
@@ -618,6 +617,21 @@ int db1_work_item_list(db1_work_item_t **out)
    else
       free(arr);
    return n;
+}
+
+int db1_work_item_list(db1_work_item_t **out)
+{
+   return work_item_list_ordered(out,
+                                 "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC");
+}
+
+int db1_work_item_list_lru(db1_work_item_t **out)
+{
+   /* Staleness-first (see wfe_store.h). id ASC tie-break keeps the order total
+    * and deterministic for same-second updates (a fresh fan-out stamps every
+    * child in one batch). */
+   return work_item_list_ordered(out, "SELECT " WI_COLS
+                                      " FROM lifecycle_work_item ORDER BY updated_at ASC, id ASC");
 }
 
 int db1_lifecycle_event_add(const char *wi, const char *stage, const char *kind, const char *actor,
@@ -749,22 +763,18 @@ int db1_stage_attempt_get(const char *wi, const char *stage)
    return v;
 }
 
-static int txn_exec(const char *cmd)
-{
-   sqlite3 *db = db1_conn();
-   if (!db)
-      return -1;
-   return sqlite3_exec(db, cmd, NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
-}
+/* All three route through the db1 transaction gate (db1_internal.h): begin
+ * holds the cross-thread mutex until the matching commit/rollback, so parallel
+ * engine advances can't interleave transactions on the shared connection. */
 int db1_lifecycle_txn_begin(void)
 {
-   return txn_exec("BEGIN IMMEDIATE");
+   return db1_txn_begin(db1_conn(), "BEGIN IMMEDIATE");
 }
 int db1_lifecycle_txn_commit(void)
 {
-   return txn_exec("COMMIT");
+   return db1_txn_end(db1_conn(), "COMMIT");
 }
 int db1_lifecycle_txn_rollback(void)
 {
-   return txn_exec("ROLLBACK");
+   return db1_txn_end(db1_conn(), "ROLLBACK");
 }

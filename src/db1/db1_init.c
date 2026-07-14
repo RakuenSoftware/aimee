@@ -115,3 +115,27 @@ sqlite3 *db1_conn(void)
     * error at the domain-function layer. */
    return g_conn;
 }
+
+/* See db1_internal.h. One process-wide gate: explicit transactions on the
+ * shared connection are mutually exclusive across threads. */
+static pthread_mutex_t g_txn_gate = PTHREAD_MUTEX_INITIALIZER;
+
+int db1_txn_begin(sqlite3 *db, const char *begin_sql)
+{
+   if (!db)
+      return -1;
+   pthread_mutex_lock(&g_txn_gate);
+   if (sqlite3_exec(db, begin_sql, NULL, NULL, NULL) != SQLITE_OK)
+   {
+      pthread_mutex_unlock(&g_txn_gate);
+      return -1;
+   }
+   return 0;
+}
+
+int db1_txn_end(sqlite3 *db, const char *end_sql)
+{
+   int ok = db && sqlite3_exec(db, end_sql, NULL, NULL, NULL) == SQLITE_OK;
+   pthread_mutex_unlock(&g_txn_gate);
+   return ok ? 0 : -1;
+}
