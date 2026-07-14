@@ -43,7 +43,8 @@ CI builds + publishes the **one** model-less `aimee-llm` image as part of the no
 (no per-tier images — the tier is a runtime env, not a build):
 - **main:** `.github/workflows/publish-images.yml` (via `auto-release.yml`) builds `aimee-llm`
   on every release and tags it `:<version>` + `:latest`. It is in both the `build` and `merge`
-  matrices; the merge step applies the tags. amd64-only (the llama.cpp Vulkan binary is x64).
+  matrices; the merge step applies the tags. Multi-arch amd64+arm64 (the llama.cpp Vulkan
+  tarball is TARGETARCH-mapped in the Dockerfile).
 - **testing:** `.github/workflows/publish-llm-testing.yml` builds `aimee-llm` on `testing`
   pushes that touch `Dockerfile.aimee-llm` or the gateway/supervisor scripts, tagged `:testing`
   (+ `:testing-<sha>`, amd64).

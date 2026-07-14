@@ -13,8 +13,9 @@
 # The /v1 API requires a bearer token (baked default: "aimee-local-dev"):
 #   curl -k -H "Authorization: Bearer aimee-local-dev" https://localhost:8743/v1/health
 #
-# CPU-only by design. The bundled aimee-llm downloads its cpu-tier models into the
-# models volume on first boot, so the first start takes a few minutes.
+# CPU-only by design. The image is multi-arch (amd64 + arm64) and ships its
+# cpu-tier models PRE-BAKED; first boot only seeds them into the models volume
+# (a local copy), not a multi-GB download.
 
 services:
   postgres:
@@ -68,7 +69,8 @@ services:
     volumes:
       - aimee-combined-home:/var/lib/aimee
       - aimee-combined-workspaces:/var/lib/aimee-workspaces
-      # Persist the bundled LLM's downloaded cpu-tier models across recreations.
+      # Seeded from the image's pre-baked cpu-tier models on first use; persists
+      # any other tier's downloads across recreations.
       - aimee-combined-models:/models
     healthcheck:
       test: ["CMD-SHELL",
@@ -76,8 +78,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      # Long: the bundled aimee-llm downloads its cpu models on first boot.
-      start_period: 1200s
+      # Covers seeding the baked models into a fresh volume + loading them (the
+      # first-boot model DOWNLOAD is gone — they ship in the image).
+      start_period: 600s
 
 volumes:
   aimee-combined-home:

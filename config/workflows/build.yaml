@@ -74,6 +74,11 @@ nodes:
           - contrarian
       quorum: 4
       max_rounds: 6
+      # The gate's own loop budget (panel convenes -> request_changes -> the plan
+      # is re-authored -> gate again). The engine's default cap parked runs after
+      # a handful of rounds; honest refinement loops need more headroom before
+      # escalating to a human.
+      max_iters: 24
       focus: does this implementation plan fully satisfy the proposal/request?
     on_pass: split
     on_fail: plan
@@ -83,6 +88,10 @@ nodes:
     in:
       plan: plan.out
     next: slices
+    # A transient split failure (the packet-authoring delegate flubbing its
+    # output) must retry, not dead-end the run: a looped node with no on_fail
+    # edge parks 'stuck' permanently.
+    on_fail: split
   # Fan every packet out to the child "slice" workflow; park until all have merged
   # into the feature branch. A failed/blocked slice parks the run for a human.
   - id: slices
@@ -149,8 +158,17 @@ nodes:
       quorum: 3
       max_rounds: 6
       focus: is the documentation complete, accurate, and clear for this feature?
-    on_pass: final_pr
+    on_pass: archive
     on_fail: document
+  # Retire the triggering proposal on the run branch: move it from the watch dir
+  # (docs/proposals/pending) to docs/proposals/done, committed on the feature
+  # branch so the final PR retires the trigger input atomically with the work.
+  # A run without a trigger artifact (interactive intake) advances as a no-op.
+  - id: archive
+    block: source.archive
+    in:
+      branch: document.out
+    next: final_pr
   # Open the final PR: feature branch -> the repo's DEFAULT branch. Terminal: the
   # workflow ends here. pr.open only OPENS the PR (base:trunk, never merged); a human
   # reviews and merges it on the forge.

@@ -193,11 +193,18 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
       return -1;
    }
 
+   /* Standing directive: no AI co-authorship / "Generated with" attribution in
+    * PR bodies — strip a copy before it reaches GitHub. */
+   char *bclean = strdup(body ? body : "");
+   if (bclean)
+      strip_ai_attribution(bclean);
+
    cJSON *j = cJSON_CreateObject();
    cJSON_AddStringToObject(j, "title", title);
    cJSON_AddStringToObject(j, "head", head);
    cJSON_AddStringToObject(j, "base", base);
-   cJSON_AddStringToObject(j, "body", body ? body : "");
+   cJSON_AddStringToObject(j, "body", bclean ? bclean : "");
+   free(bclean);
    char *jbody = cJSON_PrintUnformatted(j);
    cJSON_Delete(j);
    if (!jbody)

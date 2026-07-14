@@ -306,6 +306,41 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
             wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
                                           &out[filled]);
             snprintf(out[filled].model, sizeof out[filled].model, "%s", taskagent[t]);
+            /* Attribute the verdict so a degraded gate is triageable: without
+             * this there is no record of WHICH agent served a lens or what it
+             * returned. On MALFORMED include the reply's tail — that is the
+             * line the parser rejected. */
+            {
+               static const char *const kind_names[] = {"approve", "request_changes", "comment",
+                                                        "malformed"};
+               wfe_verdict_kind_t k = out[filled].kind;
+               const char *kn = (k >= 0 && k <= WFE_V_MALFORMED) ? kind_names[k] : "?";
+               if (k == WFE_V_MALFORMED)
+               {
+                  const char *r = results[t].response;
+                  size_t rl = strlen(r);
+                  const char *tail = rl > 160 ? r + rl - 160 : r;
+                  aimee_log(LOG_WARN, "wfe-panel",
+                            "lens '%s' verdict malformed from agent '%s'; reply tail: %.160s",
+                            required[i], taskagent[t], tail);
+                  /* A malformed reply from a $random seat is provider flakiness
+                   * (typically a review truncated before its final JSON line, as
+                   * the tail above shows) — treat it like a failed dispatch and
+                   * let the next round retry the lens with a DIFFERENT agent
+                   * rather than committing a verdict that fails required-lens
+                   * coverage and degrades the whole gate. Only the FINAL round
+                   * commits the malformed verdict (fail-closed as before). */
+                  if (!pinned[i] && round == 0)
+                  {
+                     free(results[t].response);
+                     results[t].response = NULL;
+                     continue; /* leave done[i]=0 -> round 2 re-seats this lens */
+                  }
+               }
+               else
+                  aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s'",
+                            required[i], kn, taskagent[t]);
+            }
             filled++;
             done[i] = 1;
          }

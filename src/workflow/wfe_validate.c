@@ -253,6 +253,50 @@ int wfe_def_validate(const wfe_def_t *def, char *err, size_t errlen)
       return -1;
    }
 
+   /* Trigger blocks (triggers-as-blocks): a trigger may appear ONLY as the
+    * start node, at most once, with no inbound control edges and no `in`
+    * bindings — it is what ARMS the workflow, not a step of it. */
+   {
+      int triggers = 0;
+      for (int i = 0; i < def->n_nodes; i++)
+      {
+         const wfe_node_t *n = &def->nodes[i];
+         if (n->block != WFE_BLK_TRIGGER_WATCH_DIR)
+            continue;
+         triggers++;
+         if (triggers > 1)
+         {
+            snprintf(err, errlen, "node '%s': at most one trigger block per workflow", n->id);
+            return -1;
+         }
+         if (strcmp(def->start, n->id) != 0)
+         {
+            snprintf(err, errlen, "node '%s': a trigger block must be the start node", n->id);
+            return -1;
+         }
+         if (n->n_ins > 0)
+         {
+            snprintf(err, errlen, "node '%s': a trigger block takes no `in` bindings", n->id);
+            return -1;
+         }
+         for (int j = 0; j < def->n_nodes; j++)
+         {
+            const wfe_node_t *m = &def->nodes[j];
+            if (m == n)
+               continue;
+            if (strcmp(m->next, n->id) == 0 || strcmp(m->on_pass, n->id) == 0 ||
+                strcmp(m->on_fail, n->id) == 0)
+            {
+               snprintf(err, errlen,
+                        "node '%s': a trigger block cannot have inbound edges (from "
+                        "'%s')",
+                        n->id, m->id);
+               return -1;
+            }
+         }
+      }
+   }
+
    /* per-node: block known, inputs typed, gate rules, edges resolve */
    for (int i = 0; i < def->n_nodes; i++)
    {

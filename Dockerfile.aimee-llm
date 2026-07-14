@@ -18,6 +18,8 @@
 #
 # The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
 # Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (defaults 0 = CPU).
+# MULTI-ARCH: upstream ships both ubuntu-vulkan-x64 and ubuntu-vulkan-arm64
+# tarballs, mapped from TARGETARCH below.
 
 ARG LLAMA_TAG=b9775
 
@@ -30,15 +32,23 @@ ARG LLAMA_TAG=b9775
 # NOTE: trixie's 64-bit time_t transition renames libcurl4 -> libcurl4t64.
 FROM debian:trixie-slim AS runtime
 ARG LLAMA_TAG
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget libgomp1 libcurl4t64 libvulkan1 mesa-vulkan-drivers \
         python3 python3-numpy \
     && rm -rf /var/lib/apt/lists/*
-# llama.cpp vendor-agnostic Vulkan release (one binary for AMD/Nvidia/Intel)
-RUN wget -q -O /tmp/llama.tgz \
-        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-vulkan-x64.tar.gz" \
-    && mkdir -p /opt/llama && tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1 \
-    && rm /tmp/llama.tgz
+# llama.cpp vendor-agnostic Vulkan release (one binary for AMD/Nvidia/Intel).
+# Upstream names its asset arches x64/arm64; map from Docker's amd64/arm64.
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) llarch=x64 ;; \
+      arm64) llarch=arm64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    wget -q -O /tmp/llama.tgz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-vulkan-${llarch}.tar.gz"; \
+    mkdir -p /opt/llama; tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1; \
+    rm /tmp/llama.tgz
 ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PATH
 
 COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/

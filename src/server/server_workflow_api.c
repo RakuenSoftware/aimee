@@ -22,7 +22,8 @@
 #include "cJSON.h"
 #include "server_http_identity.h" /* server_http_identity_principal — ownership scoping */
 #include "wfe_def.h"
-#include "yaml.h" /* yaml_emit — write blocks.yaml */
+#include "wfe_engine.h" /* wfe_load_workflow — roundtable-park resume check */
+#include "yaml.h"       /* yaml_emit — write blocks.yaml */
 #include "wfe_iface.h"
 #include "wfe_store.h"
 
@@ -863,9 +864,34 @@ int wf_api_item_resume(const char *id, int is_operator, char *resp, int cap)
    if (!wi.pause_reason[0])
       return err(resp, cap, 409, "run is not paused");
    /* A run parked at a human gate must be decided via Approve/Reject so the
-    * signed approval is recorded — never silently un-paused here. */
+    * signed approval is recorded — never silently un-paused here. The one
+    * exception: a ROUNDTABLE gate escalated at its loop cap. A human cannot
+    * force-pass a panel (approve refuses it), so resume is the operator lever
+    * that re-arms the refinement loop: clear the pause and the sweep re-runs
+    * the panel with the (possibly re-authored/raised) budget. */
    if (strcmp(wi.pause_reason, "pending_human") == 0)
-      return err(resp, cap, 409, "run is at a human gate — use Approve or Reject");
+   {
+      /* pending_human means one of two very different things:
+       *   - a gate.human node: a DECISION is required — resume must not
+       *     silently bypass it (approve/reject records the signed decision);
+       *   - a loop-cap escalation on ANY OTHER node (roundtable, split, ...):
+       *     the node exhausted its attempt budget and asked for a human. The
+       *     human's lever there IS resume: re-arm the budget and let the loop
+       *     continue (a human cannot force-pass a roundtable, and there is
+       *     nothing to "approve" about a flaky split).
+       * Only a true gate.human refuses resume. */
+      char ferr[256];
+      wfe_def_t *rdef = wfe_load_workflow(wi.workflow_name, ferr, sizeof ferr);
+      const wfe_node_t *rnode = rdef ? wfe_def_node(rdef, wi.current_stage) : NULL;
+      int is_human_gate = rnode && rnode->block == WFE_BLK_GATE_HUMAN;
+      if (rdef)
+         wfe_def_free(rdef);
+      if (is_human_gate)
+         return err(resp, cap, 409, "run is at a human gate — use Approve or Reject");
+      /* loop-cap escalation: re-arm the stage budget so the node doesn't
+       * instantly re-park at the same cap, then fall through to un-pause. */
+      db1_stage_attempt_reset(id, wi.current_stage);
+   }
    if (db1_work_item_clear_pause(id) != 0)
       return err(resp, cap, 500, "could not resume run");
    db1_lifecycle_event_add(id, wi.current_stage, "resume", wf_actor(), "resumed by operator", "",

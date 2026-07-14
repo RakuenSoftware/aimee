@@ -7,6 +7,7 @@
  * suite (the engine test overrides them with mocks via the vtable). */
 #include "wfe_blocks.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1058,6 +1059,159 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, head, cost);
 }
 
+/* trigger.watch-dir: at RUN time the trigger already fired — the scheduler
+ * materialized the watched file as this run's proposal artifact and filed the
+ * run (arming lives in trigger_scheduler.c, not here). The block advances
+ * immediately, producing the proposal handle so an explicit data edge
+ * (trigger -> author.proposal) can consume it. */
+static wfe_step_result_t exec_trigger_source(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   (void)ctx;
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+   return wfe_step_advanced(handle, "", 0.0);
+}
+
+/* mkdir -p for a repo-relative dir under `wd` (single-purpose: the archive
+ * destination). Best-effort; the git mv below surfaces any real failure. */
+static void archive_mkdir_parents(const char *wd, const char *rel)
+{
+   char buf[1200];
+   int n = snprintf(buf, sizeof buf, "%s/%s", wd, rel);
+   if (n <= 0 || n >= (int)sizeof buf)
+      return;
+   for (char *p = buf + strlen(wd) + 1; *p; p++)
+      if (*p == '/')
+      {
+         *p = '\0';
+         mkdir(buf, 0755);
+         *p = '/';
+      }
+   mkdir(buf, 0755);
+}
+
+/* The git half of source.archive (unit-testable against a real repo): find the
+ * file under `from`/ whose HEAD blob is `sha`, `git mv` it into `to`/ and
+ * commit. Returns 1 moved+committed, 0 nothing to do (no matching blob), -1 on
+ * a git failure. */
+int wfe_source_archive_move(const char *wd, const char *sha, const char *from, const char *to)
+{
+   char spec[600];
+   if (snprintf(spec, sizeof spec, "%s/", from) >= (int)sizeof spec)
+      return -1;
+   const char *ls[] = {"git", "-C", (char *)wd, "ls-tree", "HEAD", "--", spec, NULL};
+   char *out = NULL;
+   if (safe_exec_capture(ls, &out, 1 << 20) != 0 || !out)
+   {
+      free(out);
+      return -1;
+   }
+   /* lines: <mode> SP blob SP <sha> TAB <path> */
+   char path[512] = "";
+   for (char *line = out; line && *line;)
+   {
+      char *nl = strchr(line, '\n');
+      if (nl)
+         *nl = '\0';
+      char *tab = strchr(line, '\t');
+      const char *shapos = strstr(line, sha);
+      if (tab && shapos && shapos < tab)
+      {
+         snprintf(path, sizeof path, "%s", tab + 1);
+         break;
+      }
+      line = nl ? nl + 1 : NULL;
+   }
+   free(out);
+   if (!path[0])
+      return 0;
+
+   const char *pbn = strrchr(path, '/');
+   pbn = pbn ? pbn + 1 : path;
+   char dest[1024];
+   if (snprintf(dest, sizeof dest, "%s/%s", to, pbn) >= (int)sizeof dest)
+      return -1;
+   archive_mkdir_parents(wd, to);
+   const char *mv[] = {"git", "-C", (char *)wd, "mv", "-f", path, dest, NULL};
+   char *o = NULL;
+   if (safe_exec_capture(mv, &o, 1 << 16) != 0)
+   {
+      free(o);
+      return -1;
+   }
+   free(o);
+   o = NULL;
+   char msg[700];
+   snprintf(msg, sizeof msg, "chore: archive completed proposal %s -> %s", pbn, to);
+   const char *ci[] = {"git", "-C", (char *)wd, "commit", "-m", msg, NULL};
+   if (safe_exec_capture(ci, &o, 1 << 16) != 0)
+   {
+      free(o);
+      return -1;
+   }
+   free(o);
+   return 1;
+}
+
+/* source.archive: retire the run's triggering source file (trigger-first
+ * lifecycle). The trigger materialized the watched file as
+ * <home>/triggers/<source>/<blob-sha>.md and filed the run keyed on that path;
+ * this block finds the file in params.from (default docs/proposals/pending)
+ * whose HEAD blob matches that sha, `git mv`s it into params.to (default
+ * docs/proposals/done), and commits on the run branch — so the final PR retires
+ * the trigger input atomically with the work. Runs without a content-addressed
+ * trigger artifact (interactive/dev-submit intake), or whose source file was
+ * already moved/edited, advance as a no-op: the block never blocks a run that
+ * has nothing to retire. */
+static wfe_step_result_t exec_source_archive(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+
+   char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
+   if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+      return wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0); /* worktree/git unavailable */
+
+   const char *wi = wfe_ctx_work_item(ctx);
+   db1_work_item_t row;
+   if (!wi || !wi[0] || db1_work_item_get(wi, &row) != 1 || !row.proposal_path[0])
+      return wfe_step_advanced(handle, head, 0.0);
+   const char *bn = strrchr(row.proposal_path, '/');
+   bn = bn ? bn + 1 : row.proposal_path;
+   char sha[41];
+   if (strlen(bn) != 43 || strcmp(bn + 40, ".md") != 0)
+      return wfe_step_advanced(handle, head, 0.0);
+   for (int i = 0; i < 40; i++)
+      if (!isxdigit((unsigned char)bn[i]))
+         return wfe_step_advanced(handle, head, 0.0);
+   memcpy(sha, bn, 40);
+   sha[40] = '\0';
+
+   /* params.from/.to are repo-relative; an absolute or traversing dir could point
+    * git outside the worktree -> fail closed (a misconfigured node, not a retry). */
+   const cJSON *jf = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "from") : NULL;
+   const cJSON *jt = node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "to") : NULL;
+   const char *from = (jf && cJSON_IsString(jf) && jf->valuestring && jf->valuestring[0])
+                          ? jf->valuestring
+                          : "docs/proposals/pending";
+   const char *to = (jt && cJSON_IsString(jt) && jt->valuestring && jt->valuestring[0])
+                        ? jt->valuestring
+                        : "docs/proposals/done";
+   if (from[0] == '/' || to[0] == '/' || strstr(from, "..") || strstr(to, ".."))
+      return wfe_step_failed();
+
+   int rc = wfe_source_archive_move(wd, sha, from, to);
+   if (rc < 0)
+      return wfe_step_looped();
+   if (rc == 0)
+      return wfe_step_advanced(handle, head, 0.0); /* nothing (left) to retire */
+   if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+      return wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0);
+   return wfe_step_advanced(handle, head, 0.0);
+}
+
 /* freeze: capture the cumulative diff at a stable freeze commit. */
 static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
 {
@@ -1500,6 +1654,28 @@ static cJSON *manager_read_hash_json(const char *path, char *hash)
    fclose(f);
    wfe_sha256_hex(buf, rd, hash);
    cJSON *j = cJSON_Parse(buf);
+   if (!j)
+   {
+      /* Fence tolerance: when the artifact came from the response-persist
+       * fallback (a delegate whose file tools were unavailable), models
+       * routinely wrap the JSON in a markdown fence. Parse the fenced body
+       * rather than failing the whole attempt. */
+      char *start = strstr(buf, "```");
+      if (start)
+      {
+         start += 3;
+         while (*start && *start != '\n')
+            start++; /* skip the info string (```json) */
+         if (*start == '\n')
+            start++;
+         char *end = strstr(start, "```");
+         if (end)
+         {
+            *end = '\0';
+            j = cJSON_Parse(start);
+         }
+      }
+   }
    free(buf);
    return j;
 }
@@ -1515,6 +1691,13 @@ static wfe_step_result_t manager_produce(wfe_ctx *ctx, const wfe_node_t *node, c
    resolve_workdir(ctx, wd, sizeof wd);
    char path[1200];
    manager_artifact_path(ctx, node, path, sizeof path);
+   /* Author each attempt FRESH: the provider persists the model's reply to the
+    * artifact only when the file is absent/empty (so tool-written artifacts
+    * aren't clobbered by the chat response) — which means one bad attempt's
+    * leftovers would otherwise poison every retry: the fresh reply is dropped
+    * and validation re-reads the stale file forever (observed live: a split
+    * that could never recover from its first refusal). */
+   remove(path);
    char commit[64] = "";
    double cost = 0.0;
    if (wfe_delegate_dispatch(wd, role, node_delegate(node), prompt, path, commit, &cost) < 0)
@@ -1538,23 +1721,68 @@ static wfe_step_result_t manager_produce(wfe_ctx *ctx, const wfe_node_t *node, c
 
 static wfe_step_result_t exec_understand(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   return manager_produce(
-       ctx, node, "architect",
-       "Scope this work item into a structured INTENT RECORD and write it as JSON to the given "
-       "path (nothing else): {\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"<one "
-       "line>\",\"rationale\":\"<why>\",\"acceptance_criteria\":[\"<testable>\"]}. Then commit it.",
-       wfe_intent_validate);
+   /* Same read-only-persona contract as exec_split: the architect persona's
+    * delegates may have no file tools, in which case the response-persist
+    * fallback is the artifact path — the reply itself must be the JSON. Thread
+    * the packet/proposal content in so a slice child scopes ITS packet rather
+    * than guessing. */
+   char src[12 * 1024];
+   src[0] = '\0';
+   const char *ppath = wfe_ctx_proposal_path(ctx);
+   if (ppath && ppath[0])
+   {
+      FILE *f = fopen(ppath, "rb");
+      if (f)
+      {
+         size_t n = fread(src, 1, sizeof src - 1, f);
+         src[n] = '\0';
+         fclose(f);
+      }
+   }
+   char prompt[14 * 1024];
+   snprintf(prompt, sizeof prompt,
+            "Scope the WORK ITEM below into a structured INTENT RECORD: "
+            "{\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"<one line>\","
+            "\"rationale\":\"<why>\",\"acceptance_criteria\":[\"<testable>\"]}. Write the JSON to "
+            "the given path and commit it if you can; if file tools are unavailable to you, your "
+            "ENTIRE reply must be exactly that JSON document — no prose, no code fences, nothing "
+            "else.\n\nWORK ITEM:\n%s",
+            src[0] ? src : "(no packet artifact found — scope the work item's ask)");
+   return manager_produce(ctx, node, "architect", prompt, wfe_intent_validate);
 }
 
 static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   return manager_produce(
-       ctx, node, "architect",
-       "Decompose the approved intent into a structured PACKET PLAN and write it as JSON to the "
-       "given path (nothing else): {\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\","
-       "\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],"
-       "\"acceptance_criteria\":[\"...\"]}]}. Then commit it.",
-       wfe_packets_validate);
+   /* Thread the APPROVED PLAN into the prompt: the plan artifact lives at the
+    * run's proposal path (under $AIMEE_HOME, edited in place by author.plan),
+    * which the delegate — running in the worktree — cannot see. Without the
+    * content the delegate has nothing to decompose and (observed live) writes a
+    * complaint into the artifact file instead of packets, looping split to its
+    * cap. Truncated head-first: packetization needs the plan's structure, which
+    * leads. */
+   char plan[12 * 1024];
+   plan[0] = '\0';
+   const char *ppath = wfe_ctx_proposal_path(ctx);
+   if (ppath && ppath[0])
+   {
+      FILE *f = fopen(ppath, "rb");
+      if (f)
+      {
+         size_t n = fread(plan, 1, sizeof plan - 1, f);
+         plan[n] = '\0';
+         fclose(f);
+      }
+   }
+   char prompt[14 * 1024];
+   snprintf(prompt, sizeof prompt,
+            "Decompose the APPROVED PLAN below into a structured PACKET PLAN: "
+            "{\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\","
+            "\"target_blocks\":[\"implement\"],\"dependencies\":[],"
+            "\"acceptance_criteria\":[\"...\"]}]}. Write the JSON to the given path and commit it "
+            "if you can; if file tools are unavailable to you, your ENTIRE reply must be exactly "
+            "that JSON document — no prose, no code fences, nothing else.\n\nAPPROVED PLAN:\n%s",
+            plan[0] ? plan : "(no plan artifact found — decompose the work item's ask)");
+   return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }
 
 /* review: a READ-ONLY reviewer delegate (persona from node params `reviewer`,
@@ -1809,6 +2037,8 @@ void wfe_register_default_executors(void)
    wfe_register_block_executor(WFE_BLK_AUTHOR_PLAN, exec_author);
    wfe_register_block_executor(WFE_BLK_IMPLEMENT, exec_implement);
    wfe_register_block_executor(WFE_BLK_DOCUMENT, exec_document);
+   wfe_register_block_executor(WFE_BLK_SOURCE_ARCHIVE, exec_source_archive);
+   wfe_register_block_executor(WFE_BLK_TRIGGER_WATCH_DIR, exec_trigger_source);
    wfe_register_block_executor(WFE_BLK_FREEZE, exec_freeze);
    wfe_register_block_executor(WFE_BLK_PR_OPEN, exec_pr_open);
    wfe_register_block_executor(WFE_BLK_MERGE, exec_merge);

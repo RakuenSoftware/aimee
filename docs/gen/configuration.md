@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (176)
+## CLI-settable keys (177)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -193,6 +193,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `openai_model` | string | OpenAI model name. |
 | `provider` | string | Default model provider. |
 | `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
+| `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
 | `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the (default-off) context-economizer compresses older results to keep history bounded. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
@@ -560,10 +561,12 @@ nodes:
 
 | Block | Produces | Accepts inputs |
 |-------|----------|----------------|
-| `author.proposal` | `proposal` | _(source: none)_ |
+| `author.proposal` | `proposal` | `proposal` |
+| `trigger.watch-dir` | `proposal` | _(source: none)_ |
 | `author.plan` | `plan` | `proposal` |
 | `implement` | `branch` | `plan` |
 | `document` | `branch` | `branch` |
+| `source.archive` | `branch` | `branch` |
 | `freeze` | `frozen_diff` | `branch` |
 | `gate.roundtable` | `verdict` | `proposal`, `plan`, `frozen_diff` |
 | `gate.human` | `approval` | `proposal`, `plan`, `branch`, `frozen_diff`, `pr` |

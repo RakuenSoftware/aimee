@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 14 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 17 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,32 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — fourteen proposals (all but one not yet implemented).
+The genuinely open work — seventeen proposals (all but one not yet implemented).
+
+- **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
+  question they jointly answer is not "do we enforce policy" but "where does the
+  enforcer sit, and can it prove enforcement held without trusting the agent it
+  governs."
+  1. [Attestable enforcement — complete the WORM trust anchor](proposals/pending/governance-attestable-enforcement.md)
+     — flip the hash-chained WORM store default-on and make it authoritative;
+     route every enforcer (attention guard, gateway policy, memory interception,
+     integrity gate, native gate, vault, trigger/forge) into the chain;
+     policy-versioned verdict rows; the sealer sidecar + signed off-host anchor
+     (cross-service anchoring); `aimee audit attest`.
+     **Enforce / Constrain-Verify / Gate-Promote.**
+  2. [One governance policy surface — posture profiles + gate completion](proposals/pending/governance-policy-surface-and-posture.md)
+     — `governance.profile: observe|standard|hardened` over today's scattered,
+     autonomy-on/defenses-off defaults; wire the integrity gate into the ingest
+     fronts that matter (watch-dir trigger content first); `require_approval` as
+     a first-class pre-tool verdict routed to the HMAC human gate; an autonomy
+     kill switch + cumulative spend ledger.
+     **Enforce / Gate-Promote / Classify-Score.**
+  3. [Per-agent identity, delegation chains, fleet registry, signed artifacts](proposals/pending/governance-agent-identity-and-artifact-trust.md)
+     — distinct principals for delegates/autonomous runs instead of the shared
+     server principal; server-assembled `on_behalf_of` chains in audit actors; a
+     fleet registry so unmediated/rogue actors are visible; hash-pin (TOFU) then
+     sign plugins/skills/templates/workflows; authenticate the hook channel.
+     **Enforce / Classify-Score / Gate-Promote.**
 
 - [The code graph should carry the architecture, not just the symbols](proposals/pending/code-graph-architecture-surface.md)
   — five slices that turn the symbol/call graph into an architecture surface: route

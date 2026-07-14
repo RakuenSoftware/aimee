@@ -9,6 +9,7 @@
 #endif
 
 #include "config.h"
+#include <dirent.h>
 #include "cJSON.h"
 #include "db1/db1_cron_jobs.h"
 #include "db1/db1_trigger.h"
@@ -21,6 +22,7 @@
 #include "trigger_scheduler.h"
 #include "util.h"
 #include "wfe_autonomy.h" /* wfe_autonomy_default_max_cost_usd — the shared intake cap policy */
+#include "wfe_def.h"      /* armed workflows: parse saved defs for trigger starts */
 #include "wfe_engine.h"
 #include "wfe_scheduler.h" /* wfe_scheduler_notify — drive a filed run now, not on the 30s sweep */
 
@@ -1017,6 +1019,124 @@ static const trigger_source_t *trigger_source_find(const char *name)
 }
 
 /* ------------------------------------------------------------------ */
+/* Armed workflows (triggers-as-blocks)                                */
+/* ------------------------------------------------------------------ */
+
+/* A saved workflow whose START node is a trigger block ARMS itself: the tick
+ * synthesizes the equivalent watch-dir rule from the trigger node's params and
+ * runs it through the exact same due/fire plumbing (and thus the same intake,
+ * dedup, cost-cap and max_concurrent policy) as a trigger_rules stanza. */
+#define ARMED_MAX 64
+
+static time_t g_armed_last_fired[ARMED_MAX];
+static char g_armed_name[ARMED_MAX][WFE_NAME_LEN];
+
+static time_t *armed_last_fired_slot(const char *name, int *is_new)
+{
+   if (is_new)
+      *is_new = 0;
+   int free_i = -1;
+   for (int i = 0; i < ARMED_MAX; i++)
+   {
+      if (g_armed_name[i][0] && strcmp(g_armed_name[i], name) == 0)
+         return &g_armed_last_fired[i];
+      if (free_i < 0 && !g_armed_name[i][0])
+         free_i = i;
+   }
+   if (free_i < 0)
+      return NULL;
+   snprintf(g_armed_name[free_i], sizeof(g_armed_name[free_i]), "%s", name);
+   g_armed_last_fired[free_i] = 0;
+   if (is_new)
+      *is_new = 1;
+   return &g_armed_last_fired[free_i];
+}
+
+/* Build the synthetic rule for an armed workflow. Returns 0 when the workflow is
+ * armed and routable, -1 otherwise (not a trigger start / missing workspace). */
+static int armed_rule_from_def(const wfe_def_t *def, trigger_rule_t *rule, int warn)
+{
+   const wfe_node_t *start = wfe_def_node(def, def->start);
+   if (!start || start->block != WFE_BLK_TRIGGER_WATCH_DIR)
+      return -1;
+   memset(rule, 0, sizeof *rule);
+   snprintf(rule->source, sizeof rule->source, "watch-dir");
+   snprintf(rule->pipeline_template, sizeof rule->pipeline_template, "%s", def->name);
+   const cJSON *p = start->params;
+   const cJSON *j;
+   j = p ? cJSON_GetObjectItemCaseSensitive(p, "dir") : NULL;
+   if (j && cJSON_IsString(j) && j->valuestring[0])
+      snprintf(rule->event, sizeof rule->event, "%s", j->valuestring);
+   j = p ? cJSON_GetObjectItemCaseSensitive(p, "ref") : NULL;
+   if (j && cJSON_IsString(j) && j->valuestring[0])
+      snprintf(rule->schedule, sizeof rule->schedule, "%s", j->valuestring);
+   j = p ? cJSON_GetObjectItemCaseSensitive(p, "mode") : NULL;
+   if (j && cJSON_IsString(j) && j->valuestring[0])
+      snprintf(rule->mode, sizeof rule->mode, "%s", j->valuestring);
+   j = p ? cJSON_GetObjectItemCaseSensitive(p, "max_spend_usd") : NULL;
+   if (j && cJSON_IsNumber(j) && j->valuedouble > 0)
+      rule->max_spend_usd = j->valuedouble;
+   j = p ? cJSON_GetObjectItemCaseSensitive(p, "workspace") : NULL;
+   if (!(j && cJSON_IsString(j) && j->valuestring[0]))
+   {
+      if (warn) /* once per sighting, not once per 30s tick */
+         aimee_log(LOG_WARN, "trigger.sched",
+                   "armed workflow '%s': trigger.watch-dir needs params.workspace (the repo to "
+                   "watch); not armed",
+                   def->name);
+      return -1;
+   }
+   snprintf(rule->workspace, sizeof rule->workspace, "%s", j->valuestring);
+   return 0;
+}
+
+static void sched_tick_armed(time_t now, int max_concurrent)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return;
+   char dirp[1024];
+   if (snprintf(dirp, sizeof dirp, "%s/workflows", home) >= (int)sizeof dirp)
+      return;
+   DIR *d = opendir(dirp);
+   if (!d)
+      return;
+   struct dirent *de;
+   while ((de = readdir(d)) != NULL)
+   {
+      size_t n = strlen(de->d_name);
+      if (n < 6 || strcmp(de->d_name + n - 5, ".yaml") != 0)
+         continue;
+      if (strcmp(de->d_name, "blocks.yaml") == 0)
+         continue;
+      char path[1400];
+      if (snprintf(path, sizeof path, "%s/%s", dirp, de->d_name) >= (int)sizeof path)
+         continue;
+      char err[256] = "";
+      wfe_def_t *def = wfe_def_load_file(path, err, sizeof err);
+      if (!def)
+         continue;
+      int is_new = 0;
+      time_t *last = armed_last_fired_slot(def->name, &is_new);
+      trigger_rule_t rule;
+      if (armed_rule_from_def(def, &rule, is_new) == 0)
+      {
+         if (last && now - *last >= 55)
+         {
+            *last = now;
+            const trigger_source_t *src = trigger_source_find(rule.source);
+            struct tm tm_now;
+            localtime_r(&now, &tm_now);
+            if (src && src->due(&rule, &tm_now))
+               src->fire(&rule, max_concurrent);
+         }
+      }
+      wfe_def_free(def);
+   }
+   closedir(d);
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduler tick                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -1078,6 +1198,10 @@ static void sched_tick(void)
          aimee_log(LOG_WARN, "trigger.sched", "cron db job failed id=%s schedule=%s", job->id,
                    job->schedule);
    }
+
+   /* Armed workflows (triggers-as-blocks): saved workflows whose start node is
+    * a trigger block file runs through the same plumbing as trigger_rules. */
+   sched_tick_armed(now, cfg.trigger_max_concurrent);
 
    /* Skill curator: idle-guarded; safe to call on every tick. */
    if (cfg.skills_curator_enabled)

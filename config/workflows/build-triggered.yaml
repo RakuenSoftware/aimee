@@ -1,0 +1,152 @@
+# Triggered "build": identical to the build workflow, but the trigger IS the
+# graph's entry node (triggers-as-blocks) — saving this workflow with a
+# params.workspace ARMS it: the trigger scheduler watches params.dir at
+# params.ref in that repo and files one autonomous run per new file, through the
+# exact same intake, dedup, cost-cap and max_concurrent policy as an equivalent
+# `trigger_rules` stanza. Without params.workspace the workflow saves fine but
+# stays disarmed (the server logs one warning).
+#
+# The trigger node advances instantly at run time (the scheduler already
+# materialized the watched file as the run's proposal artifact); its data edge
+# feeds author.proposal explicitly.
+name: build-triggered
+intent_tags:
+  - proposal
+  - full-lifecycle
+  - triggered
+start: watch
+nodes:
+  # The trigger: watch a repo-relative dir for new files. Set workspace to the
+  # server-side repo clone to arm (e.g. /var/lib/aimee-workspaces/webusers/<u>/<repo>).
+  - id: watch
+    block: trigger.watch-dir
+    params:
+      dir: docs/proposals/pending
+      # workspace: /abs/path/to/the/repo/to/watch   # REQUIRED to arm
+      # ref: origin/main                             # default: auto-detected origin HEAD
+      # mode: autonomous                             # or interactive
+      # max_spend_usd: 2
+    next: draft
+  - id: draft
+    block: author.proposal
+    in:
+      proposal: watch.out
+    params:
+      with_user: true
+    next: feature
+    on_fail: draft
+  - id: feature
+    block: branch.open
+    params:
+      base: trunk
+    next: plan
+  - id: plan
+    block: author.plan
+    in:
+      proposal: draft.out
+    params:
+      max_iters: 60
+    next: plan_gate
+    on_fail: plan
+  - id: plan_gate
+    block: gate.roundtable
+    in:
+      src: plan.out
+    params:
+      panel:
+        required:
+          - security
+          - architect
+          - qa
+          - reviewer
+        eligible:
+          - contrarian
+      quorum: 4
+      max_rounds: 6
+      # The gate's own loop budget (panel convenes -> request_changes -> the plan
+      # is re-authored -> gate again). The engine's default cap parked runs after
+      # a handful of rounds; honest refinement loops need more headroom before
+      # escalating to a human.
+      max_iters: 24
+      focus: does this implementation plan fully satisfy the proposal/request?
+    on_pass: split
+    on_fail: plan
+  - id: split
+    block: split
+    in:
+      plan: plan.out
+    next: slices
+    # A transient split failure (the packet-authoring delegate flubbing its
+    # output) must retry, not dead-end the run: a looped node with no on_fail
+    # edge parks 'stuck' permanently.
+    on_fail: split
+  - id: slices
+    block: foreach.workflow
+    in:
+      packets: split.out
+      feature: feature.out
+    params:
+      workflow: slice
+    next: accept_freeze
+  - id: accept_freeze
+    block: freeze
+    in:
+      branch: slices.out
+    next: accept_gate
+  - id: accept_gate
+    block: gate.roundtable
+    in:
+      src: accept_freeze.out
+    params:
+      panel:
+        required:
+          - security
+          - architect
+          - qa
+          - reviewer
+      quorum: 4
+      max_rounds: 6
+      focus: was the proposal completed? assess code quality and any missing tests.
+    on_pass: document
+    on_fail: split
+  - id: document
+    block: document
+    in:
+      branch: slices.out
+    next: doc_freeze
+    on_fail: document
+  - id: doc_freeze
+    block: freeze
+    in:
+      branch: document.out
+    next: doc_gate
+  - id: doc_gate
+    block: gate.roundtable
+    in:
+      src: doc_freeze.out
+    params:
+      panel:
+        required:
+          - architect
+          - qa
+          - reviewer
+        eligible:
+          - technical-writer
+      quorum: 3
+      max_rounds: 6
+      focus: is the documentation complete, accurate, and clear for this feature?
+    on_pass: archive
+    on_fail: document
+  # Retire the triggering file: pending -> done on the feature branch, so the
+  # final PR removes it from the watched dir (the trigger never re-fires).
+  - id: archive
+    block: source.archive
+    in:
+      branch: document.out
+    next: final_pr
+  - id: final_pr
+    block: pr.open
+    in:
+      src: doc_freeze.out
+    params:
+      base: trunk

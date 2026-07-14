@@ -4,9 +4,9 @@
 #
 #   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
 #   aimee-kb         (Dockerfile)             ghcr.io/<owner>/aimee-kb
-#   aimee-combined   (Dockerfile.combined)    ghcr.io/<owner>/aimee-combined (all-in-one appliance; amd64)
+#   aimee-combined   (Dockerfile.combined)    ghcr.io/<owner>/aimee-combined (all-in-one appliance)
 #   aimee-embedder   (Dockerfile.embedder)    ghcr.io/<owner>/aimee-embedder (+ -4b)
-#   aimee-llm        (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-llm (model-less; amd64)
+#   aimee-llm        (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-llm (model-less)
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
@@ -81,8 +81,8 @@ jobs:
         image:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
-          # All-in-one appliance: server + kb + the bundled llama.cpp llm runtime.
-          # amd64 only (the llama.cpp binary is x64), skipped on arm64 below.
+          # All-in-one appliance: server + kb + the bundled llama.cpp llm runtime
+          # (TARGETARCH-mapped upstream tarball) + the PRE-BAKED cpu-tier models.
           - { name: aimee-combined,  dockerfile: Dockerfile.combined }
           - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
           # Higher-fidelity alternate tier: same Dockerfile, 4b embedder + 1b reranker
@@ -93,8 +93,8 @@ jobs:
           # embed+rerank+synth). MODEL-LESS: one image for every tier — the tier
           # (cpu/small/mid/large) is chosen at RUNTIME via AIMEE_LLM_TIER and the models
           # are downloaded on first boot, so there are no baked GGUFs and no build-args.
-          # amd64 only: the llama.cpp Vulkan release binary is x64-only (skipped on arm64
-          # below). NGL is set at deploy.
+          # Multi-arch: upstream llama.cpp ships x64 + arm64 Vulkan tarballs, mapped
+          # from TARGETARCH in the Dockerfile. NGL is set at deploy.
           - { name: aimee-llm, dockerfile: Dockerfile.aimee-llm }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
@@ -138,10 +138,6 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        # aimee-llm + aimee-combined are amd64-only: the llama.cpp Vulkan release
-        # binary is x64-only, so an arm64 image would ship a non-runnable binary.
-        # Skip them on arm64 -> the merge job emits a single-arch amd64 manifest.
-        if: ${{ !((matrix.image.name == 'aimee-llm' || matrix.image.name == 'aimee-combined') && matrix.platform.arch == 'arm64') }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context || '.' }}
@@ -151,14 +147,15 @@ jobs:
           # Reuse layers across releases. Without this every release rebuilt all
           # images on both arches from scratch — re-running the full LTO C build
           # each time. Scoped per image+arch so the matrix legs never clobber each
-          # other. EXCLUDES aimee-embedder: its torch + baked multi-GB model layers
-          # would blow the 10 GB GHA cache budget and evict the (small, high-reuse)
-          # C-image caches, defeating the purpose. The embedder's real win is the
-          # runtime model fetch (embedder-runtime-fetch-autodim proposal), not the
-          # layer cache. aimee-llm is now model-less (no baked GGUFs) so it is small
-          # and cached like the C images.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          # other. EXCLUDES aimee-embedder AND aimee-combined: their baked multi-GB
+          # model layers would blow the 10 GB GHA cache budget and evict the (small,
+          # high-reuse) C-image caches, defeating the purpose. The embedder's real
+          # win is the runtime model fetch (embedder-runtime-fetch-autodim proposal),
+          # not the layer cache; the combined image pre-bakes its cpu-tier GGUFs.
+          # aimee-llm is model-less (no baked GGUFs) so it is small and cached like
+          # the C images.
+          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-combined' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-combined' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
@@ -173,13 +170,11 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
-        if: ${{ !((matrix.image.name == 'aimee-llm' || matrix.image.name == 'aimee-combined') && matrix.platform.arch == 'arm64') }}
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
-        if: ${{ !((matrix.image.name == 'aimee-llm' || matrix.image.name == 'aimee-combined') && matrix.platform.arch == 'arm64') }}
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
