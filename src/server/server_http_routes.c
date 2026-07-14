@@ -1240,14 +1240,27 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    }
    const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(body, "url");
    const cJSON *jname = cJSON_GetObjectItemCaseSensitive(body, "name");
+   const cJSON *jorg = cJSON_GetObjectItemCaseSensitive(body, "org");
    const cJSON *jtoken = cJSON_GetObjectItemCaseSensitive(body, "token");
    const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
    const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
+   const char *org = (cJSON_IsString(jorg) && jorg->valuestring) ? jorg->valuestring : NULL;
    const char *token = (cJSON_IsString(jtoken) && jtoken->valuestring) ? jtoken->valuestring : NULL;
 
-   char dest[MAX_PATH_LEN], pname[128], err[256];
-   int rc = git_project_clone(principal, url, name, token, dest, sizeof(dest), pname, sizeof(pname),
-                              err, sizeof(err));
+   char dest[MAX_PATH_LEN], pname[GIT_PROJECT_NAME_MAX], err[256];
+   int rc = git_project_clone(principal, url, name, org, token, dest, sizeof(dest), pname,
+                              sizeof(pname), err, sizeof(err));
+   /* A multi-segment owner (GitLab subgroups) bails to a flat clone by design;
+    * tell the caller how to place it under an org explicitly. (Checked before
+    * body teardown — url points into it.) */
+   int flat_multi = 0;
+   if (rc == 0 && !org)
+   {
+      int multi = 0;
+      char cand[65];
+      if (git_project_derive_org(url, cand, sizeof(cand), &multi) != 0 && multi)
+         flat_multi = 1;
+   }
    cJSON_Delete(body);
    if (rc != 0)
       return err_json(resp, cap, 400, err);
@@ -1257,7 +1270,11 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
 
    cJSON *out = cJSON_CreateObject();
    cJSON_AddBoolToObject(out, "ok", 1);
-   cJSON_AddStringToObject(out, "name", pname);
+   cJSON_AddStringToObject(out, "name", pname); /* the project REF (org/repo or flat) */
+   if (flat_multi)
+      cJSON_AddStringToObject(out, "org_note",
+                              "multi-segment owner path: cloned flat; pass an explicit 'org' to "
+                              "place it under an org");
    rh_clone_kb_scan(pname, dest, out);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
@@ -1331,6 +1348,13 @@ static int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "too many repos (max 100 per request)");
    }
 
+   /* The org: the request's `owner` field — the wizard already knows which
+    * org it is bulk-cloning (this was previously parsed and dropped). Every
+    * repo in the batch lands under it. */
+   const cJSON *jowner = cJSON_GetObjectItemCaseSensitive(body, "owner");
+   const char *owner =
+       (cJSON_IsString(jowner) && jowner->valuestring[0]) ? jowner->valuestring : NULL;
+
    cJSON *out = cJSON_CreateObject();
    cJSON *results = cJSON_AddArrayToObject(out, "results");
    const cJSON *jrepo = NULL;
@@ -1343,9 +1367,9 @@ static int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
 
       cJSON *r = cJSON_CreateObject();
       cJSON_AddStringToObject(r, "name", name ? name : "");
-      char dest[MAX_PATH_LEN], pname[128], err[256];
+      char dest[MAX_PATH_LEN], pname[GIT_PROJECT_NAME_MAX], err[256];
       /* token=NULL → the host's stored credential (or server identity) is used. */
-      int rc = url ? git_project_clone(principal, url, name, NULL, dest, sizeof(dest), pname,
+      int rc = url ? git_project_clone(principal, url, name, owner, NULL, dest, sizeof(dest), pname,
                                        sizeof(pname), err, sizeof(err))
                    : -1;
       if (rc == 0)
@@ -1448,9 +1472,33 @@ static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    if (count < 0)
       count = 0;
    cJSON *out = cJSON_CreateObject();
+   /* `projects` stays an array of ref STRINGS (legacy consumers parse it and
+    * ignore the sibling `details`); `details` adds org/name/remote per ref. */
    cJSON *arr = cJSON_AddArrayToObject(out, "projects");
+   cJSON *details = cJSON_AddArrayToObject(out, "details");
    for (int i = 0; i < count; i++)
+   {
       cJSON_AddItemToArray(arr, cJSON_CreateString(names[i]));
+      cJSON *d = cJSON_CreateObject();
+      cJSON_AddStringToObject(d, "ref", names[i]);
+      const char *slash = strchr(names[i], '/');
+      if (slash)
+      {
+         char org[GIT_PROJECT_NAME_MAX];
+         snprintf(org, sizeof(org), "%.*s", (int)(slash - names[i]), names[i]);
+         cJSON_AddStringToObject(d, "org", org);
+         cJSON_AddStringToObject(d, "name", slash + 1);
+      }
+      else
+      {
+         cJSON_AddStringToObject(d, "org", "");
+         cJSON_AddStringToObject(d, "name", names[i]);
+      }
+      char remote[1024];
+      if (git_project_remote(principal, names[i], remote, sizeof(remote)) == 0)
+         cJSON_AddStringToObject(d, "remote", remote);
+      cJSON_AddItemToArray(details, d);
+   }
    /* The user's scoped workspace root — used by the editor to open a project
     * folder (root/<project>) and by chat to set its working directory. It is the
     * caller's own workspace path, returned only to them. */

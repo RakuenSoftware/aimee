@@ -45,6 +45,8 @@
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
+#include "workspace_scope.h" /* ws_scope_openat2_available — webuser surface gate */
+#include "ws_registry.h"     /* ws_reg_rebuild at startup */
 #include "hud.h"
 #include "platform_event.h"
 #include "platform_ipc.h"
@@ -2083,6 +2085,17 @@ int server_run(server_ctx_t *ctx)
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
    server_install_gateway_delegate_policy();
+
+   /* Rebuild the webuser project-key registry from the published clones on
+    * disk (crash-window drift self-heals; counts derive from published clones
+    * only). Also probes openat2 once so the webuser project surface's
+    * fail-closed gate is decided before the first request. */
+   if (ws_scope_openat2_available())
+      (void)ws_reg_rebuild();
+   else
+      aimee_log(LOG_WARN, "server",
+                "openat2 unavailable on this kernel: the webuser project clone surface is "
+                "disabled (fail closed)");
 
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to

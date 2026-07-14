@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { parseOwner } from './ownerUrl';
+import { parseOwner, repoAlreadyCloned, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
 
 /* Wizard — Workspaces & projects. A workspace is your collection of projects: the
  * repos under an owner/org (e.g. github.com/RakuenSoftware). Point at that owner,
@@ -60,6 +60,7 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
   const [provider, setProvider] = useState('');
   const [results, setResults] = useState<CloneResult[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
+  const [details, setDetails] = useState<ProjectDetail[]>([]);
   const [listing, setListing] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [err, setErr] = useState('');
@@ -67,8 +68,11 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
   const loadProjects = useCallback(async () => {
     try {
       const r = await api('/api/git/projects', { method: 'GET' });
-      const d = await r.json();
-      if (r.ok) setProjects(d.projects || []);
+      const d: GitProjectsResponse = await r.json();
+      if (r.ok) {
+        setProjects(d.projects || []);
+        setDetails(d.details || []);
+      }
     } catch {
       /* server unavailable — leave empty */
     }
@@ -109,7 +113,7 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
       setProvider(d.provider || '');
       // Default: select every repo not already cloned.
       const sel: Record<string, boolean> = {};
-      for (const repo of list) sel[repo.name] = !projects.includes(repo.name);
+      for (const repo of list) sel[repo.name] = !repoAlreadyCloned(repo, parsed.owner, projects, details);
       setSelected(sel);
       if (list.length === 0) setErr('No repositories found for that owner.');
     } catch {
@@ -150,6 +154,7 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
   }
 
   const selectedCount = repos.filter((r) => selected[r.name]).length;
+  const ownerName = parseOwner(ownerInput)?.owner || '';
   const toggleAll = (on: boolean) => {
     const sel: Record<string, boolean> = {};
     for (const r of repos) sel[r.name] = on;
@@ -189,7 +194,7 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
           </div>
           <div style={{ display: 'grid', gap: 2, maxHeight: 220, overflow: 'auto', border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
             {repos.map((repo) => {
-              const already = projects.includes(repo.name);
+              const already = repoAlreadyCloned(repo, ownerName, projects, details);
               return (
                 <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!selected[repo.name]}

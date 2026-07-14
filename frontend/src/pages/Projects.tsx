@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Panel } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
-import { parseOwnerOnly, type OwnerRef } from '../setup/ownerUrl';
+import { parseOwnerOnly, repoAlreadyCloned, type GitProjectsResponse, type OwnerRef, type ProjectDetail } from '../setup/ownerUrl';
 
 /* Git projects (webchat-git WP-F2). Lists the user's cloned repos, connects a
  * new one, and runs per-project git ops — all via /api/git/* (the server forwards
@@ -35,6 +35,7 @@ const input: React.CSSProperties = {
 export default function Projects() {
   const { active } = useSessions();
   const [projects, setProjects] = useState<string[]>([]);
+  const [details, setDetails] = useState<ProjectDetail[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [output, setOutput] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -93,10 +94,11 @@ export default function Projects() {
     setErr('');
     try {
       const r = await api('/api/git/projects', { method: 'GET' });
-      const d = await r.json();
+      const d: GitProjectsResponse = await r.json();
       if (!r.ok) { setErr(d.error || 'failed to list projects'); return; }
       const ps: string[] = d.projects || [];
       setProjects(ps);
+      setDetails(d.details || []);
       setSelected(s => (s && ps.includes(s) ? s : ps[0] || ''));
     } catch {
       setErr('aimee-server unavailable');
@@ -223,7 +225,7 @@ export default function Projects() {
       setOrgProvider(d.provider || '');
       // Default: select every repo not already cloned.
       const sel: Record<string, boolean> = {};
-      for (const repo of list) sel[repo.name] = !projects.includes(repo.name);
+      for (const repo of list) sel[repo.name] = !repoAlreadyCloned(repo, owner.owner, projects, details);
       setOrgSelected(sel);
       if (list.length === 0) setErr('No repositories found for that owner.');
     } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
@@ -301,7 +303,7 @@ export default function Projects() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '220px', overflow: 'auto',
                             border: '1px solid #ddd', borderRadius: '6px', padding: '8px' }}>
                 {orgRepos.map(repo => {
-                  const already = projects.includes(repo.name);
+                  const already = repoAlreadyCloned(repo, orgRef.owner, projects, details);
                   return (
                     <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!orgSelected[repo.name]}
