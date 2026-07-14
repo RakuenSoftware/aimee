@@ -311,9 +311,9 @@ static void test_remote_mode_batches_large_tree(void)
 
    assert(rc == 0);
    assert(res.skipped == 0);
-   assert(g_post_calls >= 2);                 /* batched, not one giant push */
-   assert(g_files_pushed_total == NFILES);    /* nothing dropped */
-   assert(g_max_body_bytes < 1048576);        /* every body under the kb cap */
+   assert(g_post_calls >= 2);              /* batched, not one giant push */
+   assert(g_files_pushed_total == NFILES); /* nothing dropped */
+   assert(g_max_body_bytes < 1048576);     /* every body under the kb cap */
 
    rmdir_r(tmpdir);
    reset_stub();

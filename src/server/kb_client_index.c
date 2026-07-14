@@ -209,7 +209,7 @@ typedef struct
    int force;
    cJSON *batch; /* current open batch, or NULL */
    size_t batch_bytes;
-   int batches; /* batches pushed */
+   int batches;   /* batches pushed */
    int failed_rc; /* rc of the first failed batch push; 0 while all succeed */
    kb_client_index_scan_result_t fail_res; /* result of that failed push */
    kb_client_index_scan_result_t agg;      /* aggregate of successful pushes */
