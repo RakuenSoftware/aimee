@@ -1,0 +1,13 @@
+Intent record written to `intent_record_p3.json` and committed (`c4b22c83`).
+
+**Summary of the scoping:**
+
+The work item p3 is scoped to a new C module (`src/supervision_budget.c` + `src/headers/supervision_budget.h`) that closes three governance gaps in the existing supervisor/delegate model:
+
+1. **Turn digest cap** — `supervision_budget_digest_cap()` clamps per-turn digests to the existing `AGENT_CONTEXT_BUDGET` (16,000 tokens), preventing unbounded primary context consumption during supervised delegate runs.
+
+2. **Escalate gating** — `supervision_budget_escalate_spend()` decrements a per-session token counter and emits an `audit_action_log` row (p2 dependency) with caller attribution + args_hash. Without a spent token, escalation is denied.
+
+3. **Tool allowlist enforcement** — `supervision_budget_tool_allowed()` is consulted by `pre_tool_check` in `guardrails_orchestrator.c`; primary-side tools (read_file, bash, grep) return BLOCKED when the escalate-token balance is zero.
+
+4. **Drift reporting** — `supervision_budget_turn_record()` + `supervision_budget_drift_report()` track `(turn_index, prompt_tokens)` and serialize a `primary_tokens_by_turn` JSON curve for the `infra tokens` command, wired through `delegate_economics.c`.
