@@ -2399,10 +2399,10 @@ static void test_session_isolation_guard(void)
    /* The workflow engine's per-work-item worktrees ARE managed isolation (the
     * server-side mirror of #1314's guardrail fix): a wfe delegate's writes into
     * its own wfe worktree must not be refused by this backstop. */
-   assert(agent_tools_session_isolation_blocks(
-              "/var/lib/aimee/wfe-worktrees/wi_ab12.s3/src/x.c", NULL) == 0);
-   assert(agent_tools_session_isolation_blocks(
-              "src/x.c", "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
+   assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_ab12.s3/src/x.c",
+                                               NULL) == 0);
+   assert(agent_tools_session_isolation_blocks("src/x.c",
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
    /* Traversal OUT of a wfe worktree still blocks. */
    assert(agent_tools_session_isolation_blocks(
               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3/../../escape.c", NULL) == 1);
