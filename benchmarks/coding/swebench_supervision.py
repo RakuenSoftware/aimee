@@ -448,6 +448,11 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
                                         turns=res.api_calls))
         digests.append(build_digest(_worker_turn(res, w)))
     frame, _frame_rejected = serialize_supervisor_frame(digests)
+    # S3 budget: enforce the whole-frame primary-context cap (16k) on what the supervisor
+    # actually sees. build_digest already caps each worker turn to DIGEST_TOKEN_CAP (2048);
+    # cap_digest is the frame-level ceiling that truncates + appends a labeled overflow note
+    # so an over-cap frame cannot silently exhaust the primary context.
+    frame, _frame_orig_tokens, _frame_tokens = _budget.cap_digest(frame)
 
     # Deterministic submitted patch (reproducible authority).
     best = select_best_of_n(candidates)
@@ -463,6 +468,10 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
 
     tok = R.primary_tokens_by_jobs(token_db, primary_model, [sup.job_id],
                                    delegation_ids=[sup.delegation_id])
+    # S3 budget telemetry: record the single tools-OFF supervisor turn's primary headline
+    # spend (uncached input + output) so primary_tokens_by_turn is the reproducible per-turn
+    # context curve an auditor can use to detect drift.
+    _budget.record_turn(0, tok.total_headline)
     worker_dids = [res.delegation_id for _, res in worker_results if res.delegation_id]
     if worker_dids:
         wi, wc, wo, _ = T.read_realized_by_delegations(token_db, worker_dids)
@@ -475,17 +484,29 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     if not candidates and base_repo:
         trig = esc.should_escalate(all_failed=True, made_progress=False)
         if trig != EscalationTrigger.NONE and esc.escalations < 3:
-            branch = H.worktree_branch(instance_id, "C-esc", 0)
-            e = dispatch("code", H.agentic_prompt(instance, arm="C"), via=primary_agent, tools=True,
-                         worktree=branch, token_db=token_db, aimee_bin=aimee_bin,
-                         max_turns=budget.max_turns, timeout_ms=int(budget.max_wall_s * 1000))
-            e_in, _ = T.read_worker_tokens_by_jobs(token_db, [e.job_id])
-            esc.record_escalation(e_in)
-            epatch = H.scan_and_redact_secrets(H.extract_diff_from_text(e.result))[0]
-            if epatch.strip():
-                best = Candidate(worker_id=f"{primary_agent}@escalate", diff=epatch,
-                                 verify=VerifyEnum.NOT_RUN, turns=e.api_calls)
-                sources[f"{primary_agent}@escalate"] = "response_text"
+            # S3 budget: escalation is the ONLY path that unlocks code-reading tools. Open
+            # the gate (charged + caller-attributed in the ledger) before the tools-ON
+            # dispatch, and assert the allowlist now permits read_file/bash/grep. Closed in
+            # `finally` so the gate can never leak past this bounded escalation.
+            _budget.gate.open_escalation(caller=f"{primary_agent}@arm_c",
+                                         reason=f"no candidate for {instance_id}")
+            try:
+                _budget.check_tool_dispatch("read_file")
+                _budget.check_tool_dispatch("bash")
+                _budget.check_tool_dispatch("grep")
+                branch = H.worktree_branch(instance_id, "C-esc", 0)
+                e = dispatch("code", H.agentic_prompt(instance, arm="C"), via=primary_agent, tools=True,
+                             worktree=branch, token_db=token_db, aimee_bin=aimee_bin,
+                             max_turns=budget.max_turns, timeout_ms=int(budget.max_wall_s * 1000))
+                e_in, _ = T.read_worker_tokens_by_jobs(token_db, [e.job_id])
+                esc.record_escalation(e_in)
+                epatch = H.scan_and_redact_secrets(H.extract_diff_from_text(e.result))[0]
+                if epatch.strip():
+                    best = Candidate(worker_id=f"{primary_agent}@escalate", diff=epatch,
+                                     verify=VerifyEnum.NOT_RUN, turns=e.api_calls)
+                    sources[f"{primary_agent}@escalate"] = "response_text"
+            finally:
+                _budget.gate.close_escalation(caller=f"{primary_agent}@arm_c")
 
     wall = R.WallClock(t0=t0, first_work=first_work, t1=t1)
     escalation_dominated = is_escalation_dominated(esc.escalation_tokens, tok.input_uncached)
