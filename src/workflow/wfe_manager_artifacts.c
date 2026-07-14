@@ -150,8 +150,9 @@ int wfe_intent_validate(const cJSON *rec, char *err, size_t errlen)
    {
       if (icontains(it->valuestring, "intent record"))
       {
-         snprintf(err, errlen, "intent: self-referential acceptance criterion — criteria must be "
-                               "testable properties of the change, not of the record");
+         snprintf(err, errlen,
+                  "intent: self-referential acceptance criterion — criteria must be "
+                  "testable properties of the change, not of the record");
          return -1;
       }
    }
