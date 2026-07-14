@@ -720,6 +720,148 @@ static int parse_mistral_bracket_tool_calls(const char *text, parsed_response_t 
    return found;
 }
 
+static char *json_arguments_from_item(cJSON *item);
+
+/* Singular [TOOL_CALL] ... [/TOOL_CALL] block whose body is a JSON object:
+ * {"name": "...", "arguments": {...}} (or "parameters"/"input" for the args
+ * key). The liveness degenerate-response classifier has recognized this shape
+ * live since it was added — i.e. real models emit it — but nothing EXECUTED
+ * it: the run was bounced with a don't-emit-markup retry, which weak models
+ * read as "tools are forbidden" and downgraded to prose-only answers
+ * (observed live: implement delegates replying 'I can't implement without
+ * calling tools', producing no-op rounds). Parse it like every other rescue
+ * flavor instead. */
+static int parse_bracket_tool_call_blocks(const char *text, parsed_response_t *out)
+{
+   static const char open_tag[] = "[TOOL_CALL]";
+   static const char close_tag[] = "[/TOOL_CALL]";
+   int found = 0;
+   const char *p = text;
+
+   while (out->call_count < AGENT_MAX_TOOL_CALLS)
+   {
+      const char *start = strstr(p, open_tag);
+      if (!start)
+         break;
+      const char *body = start + sizeof(open_tag) - 1;
+      const char *end = strstr(body, close_tag);
+      if (!end)
+         break;
+
+      const char *obj = body;
+      while (obj < end && *obj != '{')
+         obj++;
+      const char *obj_end = (obj < end) ? find_json_object_end(obj) : NULL;
+      if (obj_end && obj_end < end)
+      {
+         char *json = copy_trimmed(obj, (size_t)(obj_end - obj + 1));
+         cJSON *call = json ? cJSON_Parse(json) : NULL;
+         free(json);
+         if (call)
+         {
+            const cJSON *name = cJSON_GetObjectItemCaseSensitive(call, "name");
+            cJSON *args = cJSON_GetObjectItemCaseSensitive(call, "arguments");
+            if (!args)
+               args = cJSON_GetObjectItemCaseSensitive(call, "parameters");
+            if (!args)
+               args = cJSON_GetObjectItemCaseSensitive(call, "input");
+            if (cJSON_IsString(name) && name->valuestring && name->valuestring[0])
+            {
+               char name_buf[sizeof(out->calls[0].name)];
+               snprintf(name_buf, sizeof(name_buf), "%s", name->valuestring);
+               trim_inplace(name_buf);
+               normalize_tool_name(name_buf);
+               if (tool_name_known_for_rescue(name_buf))
+               {
+                  char *args_json = json_arguments_from_item(args);
+                  fill_tool_call(&out->calls[out->call_count], out->call_count + 1, name_buf,
+                                 strlen(name_buf), args_json ? args_json : "{}",
+                                 args_json ? strlen(args_json) : 2);
+                  free(args_json);
+                  out->call_count++;
+                  found++;
+               }
+            }
+            cJSON_Delete(call);
+         }
+      }
+      p = end + sizeof(close_tag) - 1;
+   }
+
+   if (found > 0)
+   {
+      out->is_tool_call = 1;
+      const char *first = strstr(text, open_tag);
+      if (first && first > text)
+      {
+         char *pre = copy_trimmed(text, (size_t)(first - text));
+         if (pre && pre[0])
+            out->content = pre;
+         else
+            free(pre);
+      }
+   }
+   return found;
+}
+
+/* Dollar-prefixed call: `$tool_name{...json...}` — the other shape the
+ * degenerate classifier recognizes without anything executing it. The name is
+ * the token after '$'; the argument object is the balanced {...} that follows
+ * immediately (whitespace tolerated). */
+static int parse_dollar_tool_calls(const char *text, parsed_response_t *out)
+{
+   int found = 0;
+   const char *p = text;
+
+   while (out->call_count < AGENT_MAX_TOOL_CALLS)
+   {
+      const char *dollar = strchr(p, '$');
+      if (!dollar)
+         break;
+      const char *name_start = dollar + 1;
+      const char *name_end = name_start;
+      while (*name_end &&
+             (isalnum((unsigned char)*name_end) || *name_end == '_' || *name_end == '-'))
+         name_end++;
+      const char *brace = name_end;
+      while (*brace && isspace((unsigned char)*brace))
+         brace++;
+      if (name_end == name_start || *brace != '{')
+      {
+         p = dollar + 1;
+         continue;
+      }
+      const char *args_close = find_json_object_end(brace);
+      if (!args_close)
+      {
+         p = dollar + 1;
+         continue;
+      }
+      char name_buf[sizeof(out->calls[0].name)];
+      size_t name_len = (size_t)(name_end - name_start);
+      if (name_len >= sizeof(name_buf))
+         name_len = sizeof(name_buf) - 1;
+      memcpy(name_buf, name_start, name_len);
+      name_buf[name_len] = '\0';
+      trim_inplace(name_buf);
+      normalize_tool_name(name_buf);
+      if (!tool_name_known_for_rescue(name_buf))
+      {
+         p = dollar + 1;
+         continue;
+      }
+      fill_tool_call(&out->calls[out->call_count], out->call_count + 1, name_buf, strlen(name_buf),
+                     brace, (size_t)(args_close - brace + 1));
+      out->call_count++;
+      found++;
+      p = args_close + 1;
+   }
+
+   if (found > 0)
+      out->is_tool_call = 1;
+   return found;
+}
+
 static char *json_arguments_from_item(cJSON *item)
 {
    if (!item)
