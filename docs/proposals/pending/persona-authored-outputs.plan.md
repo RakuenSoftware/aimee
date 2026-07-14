@@ -1,8 +1,10 @@
 # persona-authored-outputs — implementation plan
 
 Mechanics for [persona-authored-outputs.md](persona-authored-outputs.md).
-Numbers refer to that document's What items. Paths are under `src/` unless
-noted; workflow-engine files live in `src/workflow/`.
+Section numbers follow that document's What items (B8 here covers its
+items 8–9, the enforced tooling and the commit gate; B9 → item 10,
+B10 → item 11). Paths are under `src/` unless noted; workflow-engine files
+live in `src/workflow/`.
 
 ## A1 — permission table and grant resolution
 
@@ -145,41 +147,109 @@ noted; workflow-engine files live in `src/workflow/`.
   `wfe_blocks.c:965`). `config/workflows/build.yaml` document node gains
   `persona: technical-writer`.
 
-## B8 — commit message capture and style
+## B8 — enforced git tooling and the shared commit gate
 
-- The live path frees the delegate reply and commits with a fixed message
-  (`res.response` freed at `server/wfe_live_delegate.c:173`; commit
-  `-m "aimee: autonomous delegate change"` at `:185`). There is no
-  structured handoff on this path today — the `delegate_result_v1`
-  contract exists only on the plan-packet path (`delegate_launch.c:301`,
-  `delegate_prompt.c:151`).
-- The contract itself gains the field: `delegate_result_v1` today carries
-  `schema_version, status, changed_files, tests, summary` and has **no
-  commit-message carrier**. `delegate_handoff_append_contract`
-  (`delegate_prompt.c:151`) adds `commit_message` (required for committing
-  dispatches) to the contract text, and the parser
-  (`delegate_handoff_validate_text` →  `delegate_handoff_validation_t`,
-  `headers/cmd_agent_delegate_impl.h`) retains the string — today it keeps
-  only counts and status.
-- Mechanism, discriminated by dispatch kind so artifact blocks keep raw
-  text: committing dispatches (`implement` plain, fanout units, TDD,
-  `document`) get the contract appended to their prompt; the provider
-  parses `res.response` as the contract (before the free at `:173`) and
-  extracts `commit_message`; the harness commit uses it, else the current
-  fixed message. Artifact dispatches (`author.*`, B6's PR text) keep
+- Enforcement config: new key `require_aimee_git` (default 1), the
+  `require_aimee_memory` pattern exactly (`config.c:325` schema, `:734`
+  default, `:1196` load). Operator opt-out in `aimee.yaml` only; no
+  env-var bypass (same stance as `require_session_worktree`). The verb
+  set is not a new list: both layers reuse the guardrails orchestrator's
+  tokenizing detectors — `bash_has_git_write`
+  (`guardrails_orchestrator.c:243,342`; quote- and `git -C`-aware),
+  `bash_has_gh_pr_create` (`:406`), and the push gate (`:329`) — extended
+  with `tag` and `stash` so every verb with a guarded MCP equivalent
+  (`server_mcp.c:1392` table) is redirected to it. Read verbs
+  (`status`, `log`, `diff`, …) pass untouched. The refusal is a redirect
+  nudge, not a sandbox (`sh -c '…'` smuggling is out of scope; the
+  AI-attribution ban stays the hard outer guard).
+- Enforcement layer 1, interactive sessions: `cli_attention_guard.c`
+  (a Claude Code PreToolUse hook; Bash text scanning precedent at `:112`,
+  `:719`) refuses matching commands with a message naming `git_commit`,
+  `git_push`, `git_pr`.
+- Enforcement layer 2, in-process delegates: the attention-guard hook
+  never sees `agent_execute_with_tools` delegates
+  (`delegate_backend_local.c:234` runs raw `/bin/bash -c`), so the same
+  refusal lands in the server-side agent policy intercept
+  (`agent_policy.c`, alongside the existing `forbidden_commands` /
+  discovery-shell intercepts), using the same orchestrator detectors.
+  Without this layer the enforcement would cover only interactive
+  sessions and the self-commit caveat would return for exactly the
+  autonomous dispatches this proposal exists to fix.
+- Out of the gate by design: aimee-server's own subprocess git (the
+  forge's push and `gh pr create`, `server/wfe_live_forge.c:289-303`;
+  `source.archive`'s chore commit on the run branch) — internal calls,
+  not agent shells. The .md scopes the one-gate claim to agent-authored
+  commits accordingly.
+- The shared commit gate: `handle_git_commit` (`mcp_git_write.c:53`) is
+  refactored so its stage→guard→commit core (AI-attribution strip,
+  main-branch block, branch ownership, sensitive-file skip) is callable
+  in-process **with an explicit workdir**: today every git call inside it
+  goes through `mcp_git_run`/`get_current_branch`, which key off the
+  process-global `run_cmd_get_cwd()` (`mcp_git_query.c:84,289`). The
+  harness caller pins `run_cmd_set_cwd(workdir)` around the core — the
+  exact pattern `wfe_live_verify_run` already uses for the same reason
+  (`server/wfe_live_delegate.c:218-227`) — so the gate commits in the
+  per-work-item worktree, not the daemon checkout (whose branch could
+  even be `main`, tripping the gate's own guard). The workflow harness
+  commit (`server/wfe_live_delegate.c:183-185`, hardcoded
+  `-m "aimee: autonomous delegate change"` today) then calls the core
+  instead of raw `git_run`.
+- Persona authorship at the gate — skip-on-draft, agent-only: the
+  authoring pass runs only when (a) `commit_style_persona` is set and the
+  persona has a voice, (b) the commit is agent-originated (MCP callers
+  and the harness; a human operator's CLI commit passes through
+  unchanged), and (c) no persona-styled draft accompanied the commit (a
+  handoff-supplied `commit_message` from a styled producing dispatch is
+  committed as supplied — never a second authoring pass; the honest
+  rationale for the style block is fallback quality, not gate cost). The
+  pass dispatches the persona read-only over `git diff --cached` plus the
+  caller's draft. Failure, no backend, empty reply, or a reply that
+  `strip_ai_attribution` reduces to empty → the draft commits as
+  supplied. Nothing staged → the gate errors before any dispatch, as
+  `git commit` does today.
+- Re-entrancy of the nested pass: the MCP-side gate dispatches through
+  the same in-process entry the workflow uses
+  (`agent_execute_with_tools`, read-only agent config), and the gate
+  saves/restores the thread-local state the inner dispatch clobbers —
+  `run_cmd` cwd and the `g_write_capable` TLS (`agent_tools.c:58`) —
+  re-pinning the workdir before the final `git commit`. Recursion is
+  bounded structurally: the authoring delegate is read-granted, so it has
+  no `git_commit` tool and cannot re-enter the gate.
+- Draft channel for harness commits, discriminated by dispatch kind so
+  artifact blocks keep raw text: committing dispatches (`implement`
+  plain, fanout units, TDD, `document`) get the `delegate_result_v1`
+  contract appended to their prompt; the contract gains a
+  `commit_message` field — `delegate_handoff_append_contract`
+  (`delegate_prompt.c:151`) adds it to the contract text (today:
+  `schema_version, status, changed_files, tests, summary`, no message
+  carrier), and the parser (`delegate_handoff_validate_text` →
+  `delegate_handoff_validation_t`, `headers/cmd_agent_delegate_impl.h`)
+  retains the string (today it keeps only counts and status; the field
+  stays optional in the validator so plan-packet handoffs keep
+  validating). The provider parses `res.response` before the free at
+  `server/wfe_live_delegate.c:183` and passes `commit_message` to the
+  gate as the draft. Artifact dispatches (`author.*`, B6's PR text) keep
   `res.response` verbatim.
-- Scope note: when a delegate self-commits mid-run via its own git tools,
-  the styled message reaches it only as prompt guidance — best-effort, not
-  asserted.
-- Style block: producing dispatch prompts (`implement` plain
-  `wfe_blocks.c:1011`, fanout units `:888` — note the fixed
-  `char prompt[1024]` there needs growth to take the block, TDD RED/GREEN
-  `:932,:969`, `document` `:1048`) append "## Commit message style" =
-  `commit_style_persona`'s voice text when non-empty.
+- Delegate self-commits route through the gate too: with
+  `require_aimee_git` on, a delegate's own commit is an MCP `git_commit`
+  call, so its message gets the same persona pass — the round-4
+  best-effort caveat disappears.
+- Style block (draft quality, keeps the gate's pass cheap): producing
+  dispatch prompts (`implement` plain `wfe_blocks.c:1011`, fanout units
+  `:888` — note the fixed `char prompt[1024]` there needs growth, TDD
+  RED/GREEN `:932,:969`, `document` `:1048`) append
+  "## Commit message style" = `commit_style_persona`'s voice text when
+  non-empty.
 - Config key `commit_style_persona[64]`: `headers/config.h` (next to
   `default_persona:279`), default + load in `config.c` (pattern of
   `default_persona` at :842, :1076), descriptor `config_fields.c:22`
   pattern, save `config_save.c:356` pattern.
+- PR side of the gate: `handle_git_pr` (`mcp_git_pr.c:160`) gets the same
+  treatment as B6's `pr.open` — an absent/empty title or body is
+  persona-authored over the branch evidence before the create, with the
+  same fail-open fallback. Note the create path today hard-rejects an
+  empty title (`'title' parameter is required`, `mcp_git_pr.c:515`); that
+  check relaxes to "author, then require".
 
 ## B9 — voice field
 
@@ -206,7 +276,9 @@ noted; workflow-engine files live in `src/workflow/`.
 | `--persona` deprecation warning; no `--persona` in composed prompts | `test_cmd_delegate.c` warning case + prompt-scan assertion in `test_persona.c` |
 | stance across grants; stale-seed re-seed vs edited-file preserved | `test_persona.c` (compose with `[read]` vs `[read,write]`; fabricated v0 file with no `seed_version` key, hash-match and hash-mismatch cases) |
 | PR text happy path; garbage/empty fallback; open() −1 retry-with-empty; no extra commit | `test_wfe_blocks.c` with new capturing delegate stub + forge recorder |
-| harness commit carries delegate message; styled prompt; config round-trip | `test_wfe_blocks.c` (handoff parse → commit message) + `test_config.c` round-trip |
+| `require_aimee_git` refuses raw git write / `gh pr` on both layers; off passes; read verbs pass | `test_attention_guard.c` (hook layer) + agent-policy intercept cases beside the orchestrator detectors' existing tests |
+| MCP `git_commit` and harness commit share the gate, in the caller's worktree; hardcoded message gone | `test_wfe_blocks.c` (harness path, workdir pinning) + MCP handler test via the shared core |
+| gate-authored vs skip-on-draft vs human pass-through; dispatch-failure / strips-to-empty → draft; empty key → pass-through; config round-trip | gate unit test with stubbed persona dispatch + `test_config.c` round-trip |
 | voiceless persona no-op; `## Voice` parsed | `test_persona.c` |
 | validate rejects unknown persona on the three node kinds | `test_wfe_validate.c` (new file; existing def-validate coverage lives in `test_workflow.c`) |
 | no AI-attribution trailers on either path | existing `strip_ai_attribution` coverage + commit-path equivalent in `test_wfe_blocks.c` |
@@ -220,6 +292,9 @@ noted; workflow-engine files live in `src/workflow/`.
 3. A5 prose re-authoring + composer grant param, with A4's
    dispatch-persona/grant threading through the provider contract.
 4. A3 matching + `requires:`.
-5. B8 commit capture, B9 voice, B7 document, B6 pr.open, B10 validation.
+5. B8 in two steps: the shared commit gate + draft channel first, then
+   `require_aimee_git` enforcement (the gate must exist before raw git is
+   refused, or agents have no commit path). B9 voice, B7 document,
+   B6 pr.open, B10 validation.
 6. Docs (personas.md, DELEGATES.md, WORKFLOW_ACTIONS.md, CLI help,
-   generated command reference).
+   generated command reference, the git-tooling requirement).
