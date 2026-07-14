@@ -124,6 +124,15 @@ class EscalationDenied(RuntimeError):
     """Raised when a code tool is called without an active escalation, or after the gate closes."""
 
 
+class PrimaryBudgetExhausted(RuntimeError):
+    """Strict-mode refusal of ``record_turn``: per-turn spend would push past primary_budget.
+
+    The live supervisor intentionally does NOT catch this - it uses ``try_record_turn``
+    which records the rejection in the ledger. Tests that want the hard error
+    should call ``record_turn`` directly.
+    """
+
+
 class EscalationGate:
     """Lifetime-bounded escalation. Open with open_escalation; closes itself.
 
@@ -282,6 +291,15 @@ class BudgetLedger:
         self.turn_boundaries = []
         self.escalations = []
         self.per_turn_primary = []  # one entry per record_turn call
+        # Frame-level digest cap audit trail (F1: cap result must not be discarded).
+        # One record per cap_digest() call so an auditor can see WHEN a digest was
+        # truncated, what its original/capped sizes were, and which caller invoked it.
+        self.cap_events = []
+        # Primary turn rejections (F5): when record_turn refuses a spend that would
+        # exceed primary_budget, the rejection is recorded here so a run that
+        # exhausts its primary budget emits an explicit audit row instead of
+        # aborting with an uncaught RuntimeError. Append-only; read by audit.
+        self.primary_rejections = []      
 
     @property
     def balance(self):
@@ -321,6 +339,12 @@ class BudgetLedger:
         suffix disambiguates and ``per_turn_primary`` retains the per-call value
         in insertion order. The per-turn primary spend is also capped against
         ``primary_budget`` and refused if it would exceed it.
+
+        Strict-mode: raises ``PrimaryBudgetExhausted`` when the per-turn charge
+        would push primary spend past ``primary_budget``. Callers that need to
+        keep the run alive (the integration path under swebench_supervision)
+        should use ``try_record_turn`` which records a rejection and returns
+        False instead.
         """
         if primary_tokens_this_turn < 0:
             raise ValueError("primary_tokens_this_turn must be >= 0")
@@ -328,7 +352,7 @@ class BudgetLedger:
         # a single point by inserting with a unique nonce-suffixed source.
         nonce = len(self.per_turn_primary)
         if self._primary_spent + primary_tokens_this_turn > self._primary_budget:
-            raise RuntimeError(
+            raise PrimaryBudgetExhausted(
                 f"primary_budget cap exceeded: spent={self._primary_spent} "
                 f"charge={primary_tokens_this_turn} "
                 f"primary_budget={self._primary_budget}"
@@ -345,6 +369,52 @@ class BudgetLedger:
         })
         self._primary_spent += primary_tokens_this_turn
         return new_total
+
+    def try_record_turn(self, turn_index, primary_tokens_this_turn, *, caller=""):
+        """Like ``record_turn`` but NEVER raises on primary_budget overflow.
+
+        Returns ``(accepted, running_total)`` where ``accepted`` is True if the
+        charge was applied and False if it was refused. A refusal is recorded
+        in ``primary_rejections`` (audit-visible) instead of being swallowed,
+        so the integration path can keep running while the auditor still sees
+        an explicit "budget exhausted" row per refused turn.
+
+        This is the path the live supervisor should call - the original
+        ``record_turn`` stays strict for callers that want a hard error.
+        """
+        if primary_tokens_this_turn < 0:
+            raise ValueError("primary_tokens_this_turn must be >= 0")
+        if self._primary_spent + primary_tokens_this_turn > self._primary_budget:
+            self.primary_rejections.append({
+                "turn_index": turn_index,
+                "attempted": primary_tokens_this_turn,
+                "primary_spent_at_reject": self._primary_spent,
+                "primary_budget": self._primary_budget,
+                "caller": caller,
+            })
+            prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
+            return False, prev
+        new_total = self.record_turn(turn_index, primary_tokens_this_turn)
+        return True, new_total
+
+    def record_cap(self, *, caller, original_tokens, capped_tokens, cap, kind="digest"):
+        """Record a digest cap event for audit (F1: cap result must not be discarded).
+
+        Append-only. Returns the cap event dict so callers can chain it through
+        if they want. Equality ``capped_tokens == original_tokens`` means the
+        digest was at-or-below the cap and no truncation happened; the audit row
+        is still recorded so the auditor can see that a cap was *checked*.
+        """
+        ev = {
+            "caller": caller,
+            "kind": kind,
+            "cap": cap,
+            "original_tokens": original_tokens,
+            "capped_tokens": capped_tokens,
+            "truncated": capped_tokens < original_tokens,
+        }
+        self.cap_events.append(ev)
+        return ev
 
     @property
     def primary_tokens_by_turn(self):
@@ -442,8 +512,21 @@ class Supervisor:
         self.dispatcher = ToolDispatcher(self.gate)
         self.cap = cap
 
-    def cap_digest(self, text):
-        return cap_digest(text, cap=self.cap)
+    def cap_digest(self, text, *, caller="supervisor", kind="digest"):
+        """Cap a digest and AUDIT the cap result (F1).
+
+        F1 fix: previously the call site discarded (text, orig, capped) and a
+        truncated digest silently looked identical to a non-truncated one to
+        downstream readers. Now the cap is recorded on the ledger's ``cap_events``
+        so the auditor can see exactly when a digest was truncated, by whom, and
+        how many tokens were shaved off.
+        """
+        text2, orig, capped = cap_digest(text, cap=self.cap)
+        self.ledger.record_cap(
+            caller=caller, original_tokens=orig, capped_tokens=capped,
+            cap=self.cap, kind=kind,
+        )
+        return text2, orig, capped
 
     def check_tool_dispatch(self, tool):
         self.dispatcher.check(tool)
@@ -451,6 +534,25 @@ class Supervisor:
     def record_turn(self, turn_index, primary_tokens):
         return self.ledger.record_turn(turn_index, primary_tokens)
 
+    def try_record_turn(self, turn_index, primary_tokens, *, caller=""):
+        """Non-throwing primary spend (F5): records a rejection in the ledger when the
+        per-turn charge would exceed primary_budget, instead of aborting the run."""
+        return self.ledger.try_record_turn(turn_index, primary_tokens, caller=caller)
+
+    def record_cap(self, *, caller, original_tokens, capped_tokens, cap, kind="digest"):
+        return self.ledger.record_cap(
+            caller=caller, original_tokens=original_tokens, capped_tokens=capped_tokens,
+            cap=cap, kind=kind,
+        )
+
     @property
     def primary_tokens_by_turn(self):
         return self.ledger.primary_tokens_by_turn
+
+    @property
+    def cap_events(self):
+        return self.ledger.cap_events
+
+    @property
+    def primary_rejections(self):
+        return self.ledger.primary_rejections

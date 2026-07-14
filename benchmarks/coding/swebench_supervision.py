@@ -452,7 +452,7 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     # actually sees. build_digest already caps each worker turn to DIGEST_TOKEN_CAP (2048);
     # cap_digest is the frame-level ceiling that truncates + appends a labeled overflow note
     # so an over-cap frame cannot silently exhaust the primary context.
-    frame, _frame_orig_tokens, _frame_tokens = _budget.cap_digest(frame)
+    frame, _frame_orig_tokens, _frame_tokens = _budget.cap_digest(frame, caller="run_arm_c_supervised", kind="frame")
 
     # Deterministic submitted patch (reproducible authority).
     best = select_best_of_n(candidates)
@@ -468,10 +468,35 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
 
     tok = R.primary_tokens_by_jobs(token_db, primary_model, [sup.job_id],
                                    delegation_ids=[sup.delegation_id])
-    # S3 budget telemetry: record the single tools-OFF supervisor turn's primary headline
-    # spend (uncached input + output) so primary_tokens_by_turn is the reproducible per-turn
-    # context curve an auditor can use to detect drift.
-    _budget.record_turn(0, tok.total_headline)
+    # S3 budget telemetry (F4): emit ONE point per primary API/model turn, not one
+    # aggregate for the entire job. The ledger's ``primary_tokens_by_turn`` is the
+    # running total at end-of-turn so a multi-turn supervisor with N turns yields N
+    # points. Earlier this call recorded a single aggregate ``tok.total_headline``
+    # which collapsed a 5-turn supervisor into one point and made context drift
+    # undetectable.
+    #
+    # The escalation turn (which is itself a tools-enabled primary call) is also
+    # recorded as its own point so the auditor can see how much primary context
+    # the escalation cost.
+    try:
+        from benchmarks.coding.swebench_transport_verify import _primary_rows as _V_primary_rows
+        prim_rows = _V_primary_rows(rows, primary_model) if rows else []
+        for i, r in enumerate(prim_rows):
+            headline = (int(r.get("prompt_tokens", 0)) + int(r.get("completion_tokens", 0))
+                        - int(r.get("cache_read_tokens", 0)))
+            # F5: try_record_turn records a rejection on the ledger instead of
+            # raising, so a run that exhausts primary_budget keeps going and the
+            # auditor sees explicit primary_rejections rows.
+            _budget.try_record_turn(i, headline, caller="run_arm_c_supervised")
+    except Exception:
+        # Fallback to the aggregate curve if per-row extraction fails for any
+        # reason - never break the run on telemetry shaping.
+        _budget.try_record_turn(0, tok.total_headline, caller="run_arm_c_supervised")
+    # Always emit at least one point so the curve is never empty even when the
+    # ledger had no primary rows (e.g., FAKE scenarios that synthesize only
+    # summary totals).
+    if not _budget.primary_tokens_by_turn and tok.total_headline:
+        _budget.try_record_turn(0, tok.total_headline, caller="run_arm_c_supervised")
     worker_dids = [res.delegation_id for _, res in worker_results if res.delegation_id]
     if worker_dids:
         wi, wc, wo, _ = T.read_realized_by_delegations(token_db, worker_dids)
@@ -563,6 +588,18 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
         # means the run was well-behaved; non-empty means the auditor should
         # inspect the ledger entries above.
         "budget_drift_findings": _budget.ledger.detect_drift(),
+        # F1: frame-level digest cap audit trail. One row per cap_digest()
+        # call so a truncated digest is never silently indistinguishable from
+        # a clean one. ``truncated=True`` rows are the ones the auditor should
+        # inspect for context loss.
+        "budget_cap_events": [
+            {k: v for k, v in ev.items()}
+            for ev in _budget.ledger.cap_events
+        ],
+        # F5: refused primary spend. A run that runs out of primary_budget
+        # records each refused turn here so the auditor can see "we tried to
+        # spend N tokens but the budget was at primary_spent=N-1 and rejected".
+        "primary_rejections": list(_budget.ledger.primary_rejections),
     })
     return rec
 
