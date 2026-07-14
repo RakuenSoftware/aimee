@@ -319,6 +319,43 @@ int main(void)
    assert(strcmp(names[0], "acme/syncy") == 0);
    assert(git_project_list("webuser:bob", names, 64) == 0);
 
+   /* --- rename-first tombstone: an interrupted walk is resumable --- */
+   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
+   /* simulate a crash right after the tombstone rename: the project sits at
+    * its ".deleting-<repo>" sibling and the crashed attempt's registry
+    * decrement persisted (resync re-derives from disk, where only the marker
+    * — invisible to it — remains). Re-running the delete must converge. */
+   char mpath[PATH_MAX];
+   snprintf(mpath, sizeof(mpath), "%s/webusers/alice/acme/.deleting-syncy", wsdir);
+   assert(run("mv %s/webusers/alice/acme/syncy %s", wsdir, mpath) == 0);
+   assert(git_project_delete("webuser:alice", "acme/syncy", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "purged") == 0);
+   free(dres.kb_detail);
+   assert(stat(mpath, &st) != 0); /* marker tree fully gone */
+   snprintf(check, sizeof(check), "%s/webusers/alice/acme", wsdir);
+   assert(stat(check, &st) != 0); /* org pruned */
+   assert(ws_reg_lookup("acme/syncy", remo, sizeof(remo), &holders) == 0);
+
+   /* a flat marker with content (the ref itself no longer exists anywhere)
+    * also converges, and once converged the ref is a plain 404 again */
+   assert(run("mkdir -p %s/webusers/alice/.deleting-ghost/sub && "
+              "echo x > %s/webusers/alice/.deleting-ghost/sub/f",
+              wsdir, wsdir) == 0);
+   assert(git_project_delete("webuser:alice", "ghost", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "purged") == 0);
+   free(dres.kb_detail);
+   snprintf(check, sizeof(check), "%s/webusers/alice/.deleting-ghost", wsdir);
+   assert(stat(check, &st) != 0);
+   assert(git_project_delete("webuser:alice", "ghost", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_NOT_FOUND);
+   /* never-existing refs (flat and org) still 404 — no marker, no project */
+   assert(git_project_delete("webuser:alice", "neverwas", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_NOT_FOUND);
+   assert(git_project_delete("webuser:alice", "no/pe", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_NOT_FOUND);
+   unsetenv("AIMEE_TEST_KB_PURGE_MODE");
+   assert(git_project_list("webuser:alice", names, 64) == 0);
+
    assert(run("rm -rf %s", home) == 0);
    printf("git_project: all tests passed\n");
    return 0;

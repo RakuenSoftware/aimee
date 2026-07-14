@@ -82,14 +82,17 @@ extern "C"
    int db2_kb_purge_fence_active(const char *project);
 
    /* Refresh the heartbeat iff BOTH generation and purge_id match the stored
-    * fence — one conditional UPDATE, so match+refresh is atomic. 1 refreshed,
-    * 0 mismatch/absent (no-op), -1 error. */
+    * fence. Serialized like acquire: one transaction taking the project
+    * advisory lock, then FOR UPDATE on the identity row, compare in C, then
+    * refresh — a displaced owner can never touch the new owner's rows. A
+    * matching owner with a missing ts row recreates it (heartbeat repair).
+    * 1 refreshed, 0 mismatch/absent (no-op), -1 error. */
    int db2_kb_purge_fence_heartbeat(const char *project, const char *generation,
                                     const char *purge_id);
 
-   /* Clear both fence rows iff BOTH generation and purge_id match — one
-    * conditional DELETE, so match+clear is atomic. 1 cleared, 0 mismatch/
-    * absent (no-op), -1 error. */
+   /* Clear both fence rows iff BOTH generation and purge_id match. Same
+    * guard + FOR UPDATE + compare-in-C serialization as heartbeat/acquire.
+    * 1 cleared, 0 mismatch/absent (no-op), -1 error. */
    int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id);
 
 #ifdef __cplusplus

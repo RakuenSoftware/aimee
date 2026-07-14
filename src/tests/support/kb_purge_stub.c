@@ -96,10 +96,12 @@ char *kb_client_purge_cancel_json(const char *project, const char *generation, c
 }
 
 /* Weak so a future db2_test_shim.c definition (kb agent) wins without a
- * duplicate-symbol link failure. */
+ * duplicate-symbol link failure. Success returns the DELETED ROW COUNT — a
+ * positive 1 here, pinning that the delete flow treats any >= 0 as success
+ * (the normal existing-project case deletes one projects row). */
 __attribute__((weak)) int db2_code_index_project_delete(const char *name)
 {
    (void)name;
    const char *fail = getenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL");
-   return (fail && strcmp(fail, "1") == 0) ? -1 : 0;
+   return (fail && strcmp(fail, "1") == 0) ? -1 : 1;
 }

@@ -520,7 +520,10 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    }
    int destfd_parent = org[0] ? orgfd : rootfd;
    snprintf(tmpname, sizeof(tmpname), ".tmp-%s-%d", repo, (int)getpid());
-   (void)rm_rf_at(destfd_parent, tmpname); /* stale leftover from a crash */
+   /* Stale leftover from a crashed clone only: the cleanup targets this exact
+    * ".tmp-<repo>-<pid>" name and never touches ".deleting-*" markers — those
+    * belong to the delete path's resumable tombstones. */
+   (void)rm_rf_at(destfd_parent, tmpname);
    if (mkdirat(destfd_parent, tmpname, 0700) != 0)
    {
       snprintf(err, errlen, "could not create the clone staging directory");
@@ -907,42 +910,97 @@ int git_project_delete(const char *principal, const char *ref, int force,
 
    int rc_final = -1, rootfd = -1, orgfd = -1;
    int purge_ran = 0; /* a fence was written — heartbeat + finalize apply */
+   int resumed = 0;   /* a ".deleting-<repo>" tombstone from an interrupted walk */
 
-   /* Step 3: resolve strictly under the caller's tree; any failure is a plain
-    * not-found (no existence disclosure about other principals' trees). */
+   char org[WS_REF_COMP_MAX + 1], repo[WS_REF_COMP_MAX + 1];
+   char marker[WS_REF_COMP_MAX + 32]; /* ".deleting-<repo>" rename-first tombstone */
+   if (ws_scope_ref_split(ref, org, sizeof(org), repo, sizeof(repo)) < 0)
+   {
+      snprintf(err, errlen, "invalid project ref");
+      goto out;
+   }
+   snprintf(marker, sizeof(marker), ".deleting-%s", repo);
+
+   /* Step 3: resolve strictly under the caller's tree. When the ref does not
+    * resolve, a matching ".deleting-<repo>" tombstone at the expected level
+    * marks a RESUMABLE partial delete (an earlier walk renamed the project to
+    * the tombstone, then was interrupted); only when neither exists is it a
+    * plain not-found (no existence disclosure about other principals'
+    * trees — the tombstone check runs under the caller's own root only). */
    {
       int pfd = ws_scope_open_project(principal, ref, 0);
-      if (pfd < 0)
+      if (pfd >= 0)
+         close(pfd);
+      else
       {
-         delete_audit(res->purge_id, principal, ref, "aborted", "reason=not-found");
-         snprintf(err, errlen, "not found");
-         rc_final = GP_ERR_NOT_FOUND;
-         goto out;
+         int rfd = ws_scope_open_user_root(principal);
+         if (rfd >= 0)
+         {
+            int parent = org[0] ? ws_scope_openat2_dir(rfd, org) : rfd;
+            if (parent >= 0)
+            {
+               struct stat mst;
+               if (fstatat(parent, marker, &mst, AT_SYMLINK_NOFOLLOW) == 0 && S_ISDIR(mst.st_mode))
+                  resumed = 1;
+               if (parent != rfd)
+                  close(parent);
+            }
+            close(rfd);
+         }
+         if (!resumed)
+         {
+            delete_audit(res->purge_id, principal, ref, "aborted", "reason=not-found");
+            snprintf(err, errlen, "not found");
+            rc_final = GP_ERR_NOT_FOUND;
+            goto out;
+         }
       }
-      close(pfd);
    }
 
    /* Step 4: holder decision (registry-based, git config authoritative).
     * Capture the recorded remote BEFORE the decrement so an abort can roll it
-    * back with ws_reg_register. */
+    * back with ws_reg_register. A RESUMED delete already decremented in the
+    * earlier attempt: re-derive the outcome from the current registry (the
+    * resync counts published clones only — the tombstone is invisible to it),
+    * with no second decrement and no rollback on abort. */
    char reg_remote[1024];
    reg_remote[0] = '\0';
+   int remaining;
+   if (resumed)
    {
       int holders = 0;
+      int found;
       if (ws_reg_resync(ref) != 0 ||
-          ws_reg_lookup(ref, reg_remote, sizeof(reg_remote), &holders) != 1)
+          (found = ws_reg_lookup(ref, reg_remote, sizeof(reg_remote), &holders)) < 0)
       {
          delete_audit(res->purge_id, principal, ref, "aborted", "reason=registry-unavailable");
          snprintf(err, errlen, "project registry unavailable");
          goto out;
       }
+      /* Holders remaining -> the interrupted delete was a retained one; none
+       * -> last holder: purge again under THIS run's fresh generation/purge_id
+       * (idempotent zero deletes; fence_replaced displaces any stale fence). */
+      remaining = (found == 1) ? holders : 0;
    }
-   int remaining = ws_reg_unregister(ref);
-   if (remaining < 0)
+   else
    {
-      delete_audit(res->purge_id, principal, ref, "aborted", "reason=registry-unavailable");
-      snprintf(err, errlen, "project registry unavailable");
-      goto out;
+      {
+         int holders = 0;
+         if (ws_reg_resync(ref) != 0 ||
+             ws_reg_lookup(ref, reg_remote, sizeof(reg_remote), &holders) != 1)
+         {
+            delete_audit(res->purge_id, principal, ref, "aborted", "reason=registry-unavailable");
+            snprintf(err, errlen, "project registry unavailable");
+            goto out;
+         }
+      }
+      remaining = ws_reg_unregister(ref);
+      if (remaining < 0)
+      {
+         delete_audit(res->purge_id, principal, ref, "aborted", "reason=registry-unavailable");
+         snprintf(err, errlen, "project registry unavailable");
+         goto out;
+      }
    }
 
    if (remaining > 0)
@@ -981,9 +1039,10 @@ int git_project_delete(const char *principal, const char *ref, int force,
       else if (prc == -1)
       {
          /* Transport failure: the kb was never reached, so NO fence was
-          * written — roll the registry decrement back and abort. Nothing
+          * written — roll the registry decrement back (only when THIS run
+          * decremented; a resumed run never did) and abort. Nothing
           * filesystem has been destroyed. */
-         if (ws_reg_register(ref, reg_remote) != 0)
+         if (!resumed && ws_reg_register(ref, reg_remote) != 0)
             aimee_log(LOG_ERROR, "webuser.project.delete",
                       "ref '%s': could not roll back the registry decrement after a kb transport "
                       "failure (purge_id=%s); the startup rebuild self-heals",
@@ -1006,7 +1065,7 @@ int git_project_delete(const char *principal, const char *ref, int force,
          free(cj);
          if (cancelled)
          {
-            if (ws_reg_register(ref, reg_remote) != 0)
+            if (!resumed && ws_reg_register(ref, reg_remote) != 0)
                aimee_log(LOG_ERROR, "webuser.project.delete",
                          "ref '%s': could not roll back the registry decrement after purge-cancel "
                          "(purge_id=%s); the startup rebuild self-heals",
@@ -1031,13 +1090,15 @@ int git_project_delete(const char *principal, const char *ref, int force,
 
    /* Step 5: server-local lexical index rows are keyed by project (shared
     * across webusers) and follow the kb decision exactly: deleted on
-    * purged/forced, kept on retained. A failure here ABORTS BEFORE any
-    * filesystem removal — proceeding would strand shared index rows with no
-    * retry path once the clone is gone. The clone still exists, so the
-    * holder is re-registered and the fence cancelled; re-running the delete
-    * converges (the kb deletes are idempotent, and a re-scan restores any
-    * stores this attempt already emptied). */
-   if (strcmp(res->kb_status, "retained") != 0 && db2_code_index_project_delete(ref) != 0)
+    * purged/forced, kept on retained. db2_code_index_project_delete returns
+    * the DELETED ROW COUNT (>= 0, e.g. 1 for the normal existing-project
+    * case, 0 when already gone — both success); only < 0 is a failure. A
+    * failure ABORTS BEFORE any filesystem removal — proceeding would strand
+    * shared index rows with no retry path once the clone is gone. The clone
+    * still exists, so the holder is re-registered and the fence cancelled;
+    * re-running the delete converges (the kb deletes are idempotent, and a
+    * re-scan restores any stores this attempt already emptied). */
+   if (strcmp(res->kb_status, "retained") != 0 && db2_code_index_project_delete(ref) < 0)
    {
       int cancelled;
       if (purge_ran)
@@ -1050,7 +1111,7 @@ int git_project_delete(const char *principal, const char *ref, int force,
          cancelled = 1; /* forced transport failure: no fence was ever written */
       if (cancelled)
       {
-         if (ws_reg_register(ref, reg_remote) != 0)
+         if (!resumed && ws_reg_register(ref, reg_remote) != 0)
             aimee_log(LOG_ERROR, "webuser.project.delete",
                       "ref '%s': could not roll back the registry decrement after a local-index "
                       "failure (purge_id=%s); the startup rebuild self-heals",
@@ -1096,19 +1157,18 @@ int git_project_delete(const char *principal, const char *ref, int force,
       goto out;
    }
 
-   /* Step 6: filesystem removal — an unlinkat-based walk from the pinned
-    * parent fd (rm_rf_at never follows symlinks), heartbeating via the tick
-    * hook. Step 7: prune the org dir when it emptied (best-effort, still
-    * under the first-component lock). */
+   /* Step 6: filesystem removal — rename-first tombstone, then an
+    * unlinkat-based walk from the pinned parent fd (rm_rf_at never follows
+    * symlinks), heartbeating via the tick hook. The project is atomically
+    * renamed to the dot-prefixed ".deleting-<repo>" sibling BEFORE the walk:
+    * dot names are invisible to the lister/structural rules and cannot
+    * collide with valid refs, so an interrupted walk leaves a RESUMABLE
+    * marker instead of a half-removed tree that no longer resolves. Step 7:
+    * prune the org dir when it emptied (best-effort, still under the
+    * first-component lock). */
    {
       int (*tick)(void *) = purge_ran ? gp_hb_tick : NULL;
       void *tick_ctx = purge_ran ? &hb : NULL;
-      char org[WS_REF_COMP_MAX + 1], repo[WS_REF_COMP_MAX + 1];
-      if (ws_scope_ref_split(ref, org, sizeof(org), repo, sizeof(repo)) < 0)
-      {
-         snprintf(err, errlen, "invalid project ref");
-         goto out;
-      }
       rootfd = ws_scope_open_user_root(principal);
       if (rootfd < 0)
       {
@@ -1116,7 +1176,7 @@ int git_project_delete(const char *principal, const char *ref, int force,
          snprintf(err, errlen, "could not open the workspace root");
          goto out;
       }
-      int rm_rc;
+      int parentfd = rootfd;
       if (org[0])
       {
          orgfd = ws_scope_openat2_dir(rootfd, org);
@@ -1126,14 +1186,26 @@ int git_project_delete(const char *principal, const char *ref, int force,
             snprintf(err, errlen, "could not open the org directory");
             goto out;
          }
-         rm_rc = rm_rf_at_tick(orgfd, repo, tick, tick_ctx);
+         parentfd = orgfd;
+      }
+      int rm_rc = 0;
+      if (!resumed)
+      {
+         /* Fold in any stale marker from an even older crash (renameat onto a
+          * non-empty dir would fail), then tombstone the project. */
+         (void)rm_rf_at_tick(parentfd, marker, tick, tick_ctx);
+         if (renameat(parentfd, repo, parentfd, marker) != 0)
+            rm_rc = -1;
+      }
+      if (rm_rc == 0)
+         rm_rc = rm_rf_at_tick(parentfd, marker, tick, tick_ctx);
+      if (orgfd >= 0)
+      {
          close(orgfd);
          orgfd = -1;
-         if (rm_rc == 0)
-            (void)unlinkat(rootfd, org, AT_REMOVEDIR); /* prune if now empty */
       }
-      else
-         rm_rc = rm_rf_at_tick(rootfd, repo, tick, tick_ctx);
+      if (rm_rc == 0 && org[0])
+         (void)unlinkat(rootfd, org, AT_REMOVEDIR); /* prune if now empty */
       if (rm_rc != 0)
       {
          /* The kb purge (when one ran) is committed and its fence stays until
@@ -1168,12 +1240,16 @@ int git_project_delete(const char *principal, const char *ref, int force,
                    ref, res->purge_id);
       free(fj);
    }
+   /* The 'done' record only emits here — after the marker tree is fully gone
+    * and the fence finalized. */
    if (strcmp(res->kb_status, "retained") == 0)
-      delete_audit(res->purge_id, principal, ref, "done", "kb_status=retained fs=removed");
+      delete_audit(res->purge_id, principal, ref, "done", "%skb_status=retained fs=removed",
+                   resumed ? "resumed=1 " : "");
    else
       delete_audit(res->purge_id, principal, ref, "done",
-                   "kb_status=%s fs=removed fence_generation=%s kb=%s", res->kb_status,
-                   res->generation, res->kb_detail ? res->kb_detail : "");
+                   "%skb_status=%s fs=removed fence_generation=%s kb=%s",
+                   resumed ? "resumed=1 " : "", res->kb_status, res->generation,
+                   res->kb_detail ? res->kb_detail : "");
    rc_final = 0;
 
 out:

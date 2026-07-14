@@ -399,7 +399,43 @@ int db2_kb_purge_fence_active(const char *project)
    return kbrs_fence_ts_within(ts_key, kbrs_fence_ttl_s());
 }
 
-int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+/* Lock the identity row FOR UPDATE inside the caller's open transaction and
+ * compare it against the expected "generation purge_id" value in C.
+ * Returns 1 exact match (row stays locked until commit/rollback), 0
+ * mismatch/absent, -1 error. */
+static int kbrs_fence_match_locked(void *conn, const char *key, const char *expected)
+{
+   char err[KBRS_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT state_value FROM kb_runtime_state WHERE state_key = ?1 FOR UPDATE", err,
+       sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", key);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   int match = 0;
+   if (rc == AIMEE_PG_ROW)
+   {
+      const char *v = aimee_pg_column_text(st, 0);
+      match = (v && strcmp(v, expected) == 0) ? 1 : 0;
+   }
+   aimee_pg_finalize(st);
+   if (rc == AIMEE_PG_ERR)
+      return -1;
+   return match;
+}
+
+/* Shared serialized match-then-mutate for heartbeat (clear=0) and finalize/
+ * cancel (clear=1). A bare conditional UPDATE/DELETE with an EXISTS predicate
+ * is NOT safe here: under READ COMMITTED row re-evaluation (EvalPlanQual) the
+ * statement can block on a concurrent takeover's transaction and then mutate
+ * the rows the takeover just rewrote, while its EXISTS subplan still saw the
+ * old snapshot. So mirror db2_kb_purge_fence_acquire: one transaction that
+ * takes the project advisory lock FIRST, locks the identity row FOR UPDATE,
+ * compares in C, and only then mutates. Returns 1 mutated, 0 mismatch/absent,
+ * -1 error. */
+static int kbrs_fence_mutate_matched(const char *project, const char *generation,
+                                     const char *purge_id, int clear)
 {
    if (!project || !project[0] || !generation || !purge_id)
       return -1;
@@ -411,61 +447,46 @@ int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, co
    kbrs_fence_keys(project, key, sizeof(key), ts_key, sizeof(ts_key));
    snprintf(expected, sizeof(expected), "%s %s", generation, purge_id);
 
-   /* Single conditional statement: the match test and the refresh are one
-    * atomic step, so a displaced owner cannot interleave between them. */
    char err[KBRS_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE kb_runtime_state SET state_value = pg_now_text()"
-                        " WHERE state_key = ?1"
-                        "   AND EXISTS (SELECT 1 FROM kb_runtime_state"
-                        "                WHERE state_key = ?2 AND state_value = ?3)",
-                        err, sizeof(err));
-   if (!st)
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
       return -1;
-   aimee_pg_bind_text(st, "?1", ts_key);
-   aimee_pg_bind_text(st, "?2", key);
-   aimee_pg_bind_text(st, "?3", expected);
-   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   if (rc != AIMEE_PG_DONE)
+   if (db2_kb_purge_txn_guard(project) != 0)
+   {
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
-   return changes > 0 ? 1 : 0;
+   }
+   int match = kbrs_fence_match_locked(conn, key, expected);
+   if (match != 1)
+   {
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return match; /* 0 mismatch/absent, -1 error */
+   }
+
+   int rc;
+   if (clear)
+   {
+      rc = db2_kb_runtime_state_delete(key);
+      if (rc == 0)
+         rc = db2_kb_runtime_state_delete(ts_key);
+   }
+   else
+   {
+      rc = db2_kb_runtime_state_set_now(ts_key);
+   }
+   if (rc != 0 || aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return 1;
+}
+
+int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+{
+   return kbrs_fence_mutate_matched(project, generation, purge_id, 0);
 }
 
 int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
 {
-   if (!project || !project[0] || !generation || !purge_id)
-      return -1;
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char key[320], ts_key[320], expected[256];
-   kbrs_fence_keys(project, key, sizeof(key), ts_key, sizeof(ts_key));
-   snprintf(expected, sizeof(expected), "%s %s", generation, purge_id);
-
-   /* One DELETE covering both rows, guarded by the same EXISTS match: the
-    * match test and the removal cannot be interleaved by a new owner. */
-   char err[KBRS_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "DELETE FROM kb_runtime_state"
-                        " WHERE state_key IN (?1, ?2)"
-                        "   AND EXISTS (SELECT 1 FROM kb_runtime_state"
-                        "                WHERE state_key = ?3 AND state_value = ?4)",
-                        err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_text(st, "?1", key);
-   aimee_pg_bind_text(st, "?2", ts_key);
-   aimee_pg_bind_text(st, "?3", key);
-   aimee_pg_bind_text(st, "?4", expected);
-   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = aimee_pg_stmt_changes(st);
-   aimee_pg_finalize(st);
-   if (rc != AIMEE_PG_DONE)
-      return -1;
-   return changes > 0 ? 1 : 0;
+   return kbrs_fence_mutate_matched(project, generation, purge_id, 1);
 }

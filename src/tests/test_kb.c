@@ -870,10 +870,11 @@ static void test_purge_fence_blocks_ingest(void)
     * arise from a torn write — the publish transaction writes ts first). */
    assert(db2_kb_runtime_state_delete("project_purging_ts:fence_proj") == 0);
    assert(db2_kb_purge_fence_active("fence_proj") == 1);
-   /* Heartbeat with matching ids but no ts row is a single-statement no-op
-    * (nothing to refresh); restore the ts row via a full re-publish. */
-   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 0);
-   assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+   /* A displaced owner still no-ops against the identity-only fence... */
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-0") == 0);
+   /* ...while the matching owner's heartbeat repairs the missing ts row. */
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
+   assert(db2_kb_purge_fence_active("fence_proj") == 1);
 
    /* A stale heartbeat makes the fence absent for writers (TTL expiry), while
     * the fence row itself remains readable (live=0). */
