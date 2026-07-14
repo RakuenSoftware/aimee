@@ -33,6 +33,12 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
                       const char *token, char *out_path, size_t path_cap, char *out_ref,
                       size_t ref_cap, char *err, size_t errlen);
 
+/* The server-local lexical index delete seam used by git_project_delete:
+ * DELETED ROW COUNT (>= 0) on success, -1 on failure. Weak — a 0-success
+ * no-op in the split AIMEE_DB2_DISABLED server (no local index there); the
+ * combined build deletes the local db2 rows; tests override it. */
+int gp_local_index_delete(const char *ref);
+
 /* Normalize `url` to the credential-free canonical remote (scheme://host/path,
  * userinfo/query/fragment/".git" stripped) into out[cap]. 0 or -1. */
 int git_project_canonical_remote(const char *url, char *out, size_t cap);

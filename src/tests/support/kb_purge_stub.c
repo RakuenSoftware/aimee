@@ -105,3 +105,14 @@ __attribute__((weak)) int db2_code_index_project_delete(const char *name)
    const char *fail = getenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL");
    return (fail && strcmp(fail, "1") == 0) ? -1 : 1;
 }
+
+/* STRONG override of git_project.c's weak local-index seam: the shipped
+ * aimee-server flavor (AIMEE_DB2_DISABLED, which the test binary links) makes
+ * it a 0-success no-op, so the failure path would be untestable without this
+ * injection point. */
+int gp_local_index_delete(const char *ref)
+{
+   (void)ref;
+   const char *fail = getenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL");
+   return (fail && strcmp(fail, "1") == 0) ? -1 : 1;
+}

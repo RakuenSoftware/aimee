@@ -29,8 +29,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "db2/code_index.h" /* db2_code_index_project_delete (slice-2 purge fan-out) */
-
 extern char **environ;
 
 #define GP_PATH_MAX 4096
@@ -109,6 +107,20 @@ static int sanitize_org(const char *in, char *out, size_t cap)
       o--;
    out[o] = '\0';
    return (o > 0 && ws_scope_name_valid(out)) ? 0 : -1;
+}
+
+/* The server-local lexical index delete seam. The shipped aimee-server keeps
+ * NO local lexical index: index_scan_project is compiled to a stub in this
+ * binary (build/obj/server/index.o, -DAIMEE_DB2_DISABLED) and the canonical
+ * code index lives in aimee-kb, where the purge-project fan-out's
+ * "canonical_index" store already deleted it — so there is nothing to delete
+ * here and no db2 linkage in this TU. Kept as a weak seam so the delete
+ * flow's abort-before-filesystem ordering stays unit-testable (the tests
+ * override it to inject failures). */
+__attribute__((weak)) int gp_local_index_delete(const char *ref)
+{
+   (void)ref;
+   return 0;
 }
 
 int git_project_canonical_remote(const char *url, char *out, size_t cap)
@@ -388,7 +400,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       snprintf(err, errlen, "could not acquire the project lifecycle lock");
       return -1;
    }
-   int registered = 0, rootfd = -1, orgfd = -1, tmpfd = -1;
+   int registered = 0, rootfd = -1, orgfd = -1, tmpfd = -1, destfd_parent = -1;
    char tmpname[WS_REF_COMP_MAX + 32];
    tmpname[0] = '\0';
    int rc_final = -1;
@@ -518,7 +530,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
          goto out;
       }
    }
-   int destfd_parent = org[0] ? orgfd : rootfd;
+   destfd_parent = org[0] ? orgfd : rootfd;
    snprintf(tmpname, sizeof(tmpname), ".tmp-%s-%d", repo, (int)getpid());
    /* Stale leftover from a crashed clone only: the cleanup targets this exact
     * ".tmp-<repo>-<pid>" name and never touches ".deleting-*" markers — those
@@ -1088,17 +1100,16 @@ int git_project_delete(const char *principal, const char *ref, int force,
       }
    }
 
-   /* Step 5: server-local lexical index rows are keyed by project (shared
-    * across webusers) and follow the kb decision exactly: deleted on
-    * purged/forced, kept on retained. db2_code_index_project_delete returns
-    * the DELETED ROW COUNT (>= 0, e.g. 1 for the normal existing-project
-    * case, 0 when already gone — both success); only < 0 is a failure. A
-    * failure ABORTS BEFORE any filesystem removal — proceeding would strand
-    * shared index rows with no retry path once the clone is gone. The clone
-    * still exists, so the holder is re-registered and the fence cancelled;
-    * re-running the delete converges (the kb deletes are idempotent, and a
-    * re-scan restores any stores this attempt already emptied). */
-   if (strcmp(res->kb_status, "retained") != 0 && db2_code_index_project_delete(ref) < 0)
+   /* Step 5: local lexical index. gp_local_index_delete returns a DELETED
+    * ROW COUNT (>= 0 success, only < 0 fails) and follows the kb decision
+    * exactly: runs on purged/forced, skipped on retained. In the shipped
+    * server it is a 0-success no-op (the canonical index lives in aimee-kb
+    * and was already deleted by the purge fan-out's canonical_index store);
+    * the seam stays because a FAILURE must ABORT BEFORE any filesystem
+    * removal — proceeding would strand shared index rows with no retry path
+    * once the clone is gone. On failure the holder is re-registered and the
+    * fence cancelled; re-running the delete converges. */
+   if (strcmp(res->kb_status, "retained") != 0 && gp_local_index_delete(ref) < 0)
    {
       int cancelled;
       if (purge_ran)
