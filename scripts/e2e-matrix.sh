@@ -14,6 +14,7 @@
 #   T5  Local full stack               (scratch server + local kb)    [Linux only]
 #   T6  Local server + Docker kb hybrid (scratch server -> :8741)     [Linux only]
 #   PC  Thin-client smoke              (against the T2 server URL)
+#   AD  Thin-client adoption           (TOFU bootstrap-bearer enrollment) [Linux only]
 #
 # Usage:
 #   scripts/e2e-matrix.sh                      # everything runnable on this host
@@ -38,7 +39,7 @@ cd "$(dirname "$0")/.."
 SCRIPTS="$(pwd)/scripts"
 ROOT="$(pwd)"
 
-ONLY="T1,T2,T3,T5,T6,PC"
+ONLY="T1,T2,T3,T5,T6,PC,AD"
 KB_URL=""
 DOWN="--down"
 PORT_OFFSET=0
@@ -165,6 +166,15 @@ if selected T6; then
     if MODE=hybrid KB_URL="$KB_URL" "$SCRIPTS/aimee-local-stack-e2e.sh"; then record T6 PASS "hybrid"; else record T6 FAIL "hybrid"; fi
   else
     bold "== T6: SKIP — local install is Linux-only"; record T6 SKIP "non-Linux host"
+  fi
+fi
+
+if selected AD; then
+  if is_linux; then
+    bold "== AD (Thin-client adoption / TOFU enrollment) =="
+    if "$SCRIPTS/aimee-thinclient-adoption-e2e.sh"; then record AD PASS "thin-client adoption"; else record AD FAIL "thin-client adoption"; fi
+  else
+    bold "== AD: SKIP — local build is Linux-only"; record AD SKIP "non-Linux host"
   fi
 fi
 

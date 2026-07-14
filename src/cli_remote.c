@@ -194,9 +194,13 @@ static int remote_enroll(const char *url, char *out, size_t out_sz, int json_out
    {
       if (st == 401 && !json_output)
          fprintf(stderr,
-                 "  enroll: the server rejected the bootstrap token (already enrolled by another "
-                 "client?).\n         Copy the strong bearer from the enrolled client into "
-                 "remote.conf, or re-seed the server.\n");
+                 "  enroll: the server rejected the bootstrap token — it was already consumed by "
+                 "the first\n         enrolled client (one-shot TOFU). The strong bearer is "
+                 "persisted on the server in\n         <AIMEE_HOME>/aimee.yaml under "
+                 "aimee.api.bearer_token — copy it into this client with\n         `aimee remote "
+                 "set <url> <token>`; or rotate a fresh one from an already-enrolled\n         "
+                 "client (`aimee remote enroll`); or re-seed the server's bearer_token to the\n"
+                 "         bootstrap value to re-open one-shot enrollment.\n");
       free(body);
       return -1;
    }
