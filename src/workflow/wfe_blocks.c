@@ -1033,9 +1033,33 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
                   base_prompt, feedback);
       else
          snprintf(prompt, sizeof prompt, "%s", base_prompt);
+      /* Snapshot HEAD so a NO-OP dispatch is detectable below. */
+      char pre_head[64] = "";
+      {
+         const char *argv[] = {"git", "-C", wd, "rev-parse", "HEAD", NULL};
+         char *o = NULL;
+         if (git_capture(argv, &o) == 0 && o)
+         {
+            chomp(o);
+            snprintf(pre_head, sizeof pre_head, "%s", o);
+         }
+         free(o);
+      }
       if (wfe_delegate_dispatch(wd, "engineer", node_delegate(node), prompt, NULL, commit, &cost) <
           0)
          return with_cost(wfe_step_looped(), cost);
+      /* A dispatch that changed NOTHING (reply-only, no tool edits, so the
+       * provider's add+commit no-opped and HEAD is unchanged) is a FAILED
+       * attempt, not an advance: freezing the identical tree re-runs verify and
+       * a full 4-seat panel on a diff the panel already rejected. Observed
+       * live: whole review rounds burned on byte-identical artifacts. Loop so
+       * the retry re-dispatches (a $random re-roll picks a different agent). */
+      if (pre_head[0] && commit[0] && strcmp(pre_head, commit) == 0)
+      {
+         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
+                                 "impl no-op: delegate made no edits", "", cost);
+         return with_cost(wfe_step_looped(), cost);
+      }
    }
 
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
