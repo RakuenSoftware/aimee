@@ -1,15 +1,13 @@
 {
   "schema_version": 1,
   "status": "unconfirmed",
-  "summary": "New supervision_budget module: hard-capped turn digests, escalate-token gating, primary-side tool allowlist enforcement, and per-turn token drift tracking",
-  "rationale": "The supervisor/delegate model already budgets delegate tokens (delegate_token_budget) and context-fold allocations (fold_budget), but the primary agent's own context consumption during a supervised delegate run is ungoverned: turn digests can exceed the context window, tool-use escalation has no explicit cost, and there is no mechanism to block primary-side tools (read_file, bash, grep) when the supervisor has not paid for them. A dedicated supervision_budget module closes these gaps so the primary's context stays within bounds, every escalate call is attributed, and tool access is gated on a spent token.",
+  "summary": "Implement a supervision_budget module that caps primary turn digests, gates escalation by explicit token spend, enforces primary-side tool access, and reports context drift.",
+  "rationale": "Supervised runs need a single budget boundary for the primary agent so oversized digests cannot exhaust its context, privileged tool use cannot bypass escalation, escalation cost remains attributable, and context growth is observable over time.",
   "acceptance_criteria": [
-    "New files src/supervision_budget.c and src/headers/supervision_budget.h exist and compile; the module links into the aimee client/server binaries via the Makefile and CMakeLists.txt",
-    "Turn digest rendering calls supervision_budget_digest_cap() which clamps output to ≤16000 tokens per primary context window (re-using AGENT_CONTEXT_BUDGET from agent_types.h as the ceiling); verified by unit test with a synthetic 20k-token digest",
-    "supervision_budget_escalate_spend() decrements a per-session escalate-token counter, returns the remaining balance, and writes an audit_action_log row with caller attribution and args_hash (p2 dependency); unit test asserts log row and balance after N escalate calls",
-    "pre_tool_check (guardrails_orchestrator.c) consults supervision_budget_tool_allowed(): primary-side tools read_file, bash, and grep are blocked (pre_tool_check returns non-zero) when the escalate-token balance is zero; unit test asserts BLOCKED for each tool without an active token and PERMITTED after escalate_spend",
-    "supervision_budget_turn_record() appends (turn_index, prompt_tokens) to an in-memory primary_tokens_by_turn array; supervision_budget_drift_report() serialises the array as JSON for the infra tokens command; unit test asserts monotonic turn indices and correct JSON shape",
-    "Delegate economics (delegate_economics.c) calls supervision_budget_turn_record after each completed turn so the token curve stays populated during multi-turn delegate runs",
-    "All new unit tests pass under both make test and cmake --build + ctest"
+    "The supervision_budget module limits turn digests to no more than 16,000 tokens within each primary context window, with boundary tests covering inputs at and above the cap.",
+    "An escalate call succeeds only when an explicit escalation token spend is active, and each attempted or successful escalation is logged with its token spend and caller attribution.",
+    "Primary-side read_file, bash, and grep tool requests are rejected when no escalation token is active and are permitted while a valid escalation token is active.",
+    "Supervision telemetry exposes a primary_tokens_by_turn curve that records primary-context token usage for every turn so context drift can be detected.",
+    "Automated tests exercise digest capping, escalation gating and attribution logging, tool allowlist enforcement, and per-turn token telemetry through the project's standard test runner."
   ]
 }
