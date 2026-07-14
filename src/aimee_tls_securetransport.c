@@ -344,49 +344,40 @@ static SecCertificateRef securetransport_load_pinned_cert(const char *path)
    return cert;
 }
 
-/* During a BreakOnServerAuth handshake, manually evaluate the peer's trust so
- * that BOTH the system anchors AND the pinned cert are accepted, with the
- * SSL/hostname policy bound to |host|. Returns 1 if trusted, 0 otherwise.
- *
- * IP-literal hosts: SecPolicyCreateSSL is given the host string verbatim; when
- * that string is an IP literal, the SSL trust policy matches it against the
- * cert's iPAddress SANs (aimee is commonly reached by IP with an IP-SAN cert),
- * and against dNSName SANs/CN for real DNS names. (Could not be exercised here
- * without running on macOS — see the report's caveats.) */
+/* During a BreakOnServerAuth handshake, decide the pinned-mode trust: the
+ * identity is an EXACT leaf match against the TOFU-pinned certificate (SSH
+ * known_hosts semantics), matching the OpenSSL and Windows backends. The
+ * hostname/SAN policy is deliberately NOT consulted: a containerized/NAT'd
+ * server cannot know its reachable address at cert-mint time, so its
+ * self-signed cert routinely lacks the SAN the client dials — while the
+ * byte-exact pin is a stronger identity than any name match (a MITM cannot
+ * present the pinned cert without its private key; any other cert, even a
+ * validly-issued one, fails the DER compare). Returns 1 if trusted, 0 not.
+ * (|host| is retained in the signature for symmetry/logging call sites.) */
 static int securetransport_eval_pinned_trust(SSLContextRef ctx, const char *host,
                                              SecCertificateRef pinned)
 {
+   (void)host;
    SecTrustRef trust = NULL;
    if (SSLCopyPeerTrust(ctx, &trust) != noErr || !trust)
       return 0;
 
    int ok = 0;
-   CFStringRef cf_host = CFStringCreateWithCString(NULL, host, kCFStringEncodingUTF8);
-   SecPolicyRef policy = cf_host ? SecPolicyCreateSSL(true, cf_host) : NULL;
-   if (policy && SecTrustSetPolicies(trust, policy) == errSecSuccess)
+   SecCertificateRef leaf =
+       (SecTrustGetCertificateCount(trust) > 0) ? SecTrustGetCertificateAtIndex(trust, 0) : NULL;
+   if (leaf && pinned)
    {
-      const void *anchors[] = {pinned};
-      CFArrayRef anchor_arr = CFArrayCreate(NULL, anchors, 1, &kCFTypeArrayCallBacks);
-      /* Strict pin: SecTrustSetAnchorCertificatesOnly(true) trusts ONLY the pinned
-       * cert (not the system anchors) for this evaluation — matching the OpenSSL
-       * (load-pin-only) and Windows (leaf-DER) backends. A recorded pin means a
-       * self-signed/private server, so a mis-issued public-CA cert for the same
-       * host is still rejected. The hostname/SAN policy above remains enforced. */
-      if (anchor_arr && SecTrustSetAnchorCertificates(trust, anchor_arr) == errSecSuccess &&
-          SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess)
-      {
-         CFErrorRef err = NULL;
-         ok = SecTrustEvaluateWithError(trust, &err) ? 1 : 0;
-         if (err)
-            CFRelease(err);
-      }
-      if (anchor_arr)
-         CFRelease(anchor_arr);
+      CFDataRef leaf_der = SecCertificateCopyData(leaf);
+      CFDataRef pin_der = SecCertificateCopyData(pinned);
+      if (leaf_der && pin_der && CFDataGetLength(leaf_der) == CFDataGetLength(pin_der) &&
+          memcmp(CFDataGetBytePtr(leaf_der), CFDataGetBytePtr(pin_der),
+                 (size_t)CFDataGetLength(leaf_der)) == 0)
+         ok = 1;
+      if (leaf_der)
+         CFRelease(leaf_der);
+      if (pin_der)
+         CFRelease(pin_der);
    }
-   if (policy)
-      CFRelease(policy);
-   if (cf_host)
-      CFRelease(cf_host);
    CFRelease(trust);
    return ok;
 }

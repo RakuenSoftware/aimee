@@ -83,7 +83,7 @@ static void aimee_tls_present_client_cert(SSL_CTX *ctx)
 /* Resolve <aimee_home>/remote-ca.pem — the pinned server certificate written by
  * `aimee remote set/trust`. Returns 1 (and fills |out|) when the file exists,
  * else 0. Trusting this file lets a self-signed/private server verify fully
- * (chain + hostname/SAN) without disabling verification (AIMEE_TLS_INSECURE). */
+ * without disabling verification (AIMEE_TLS_INSECURE). */
 static int pinned_ca_path(char *out, size_t n)
 {
    const char *home = aimee_home();
@@ -94,6 +94,37 @@ static int pinned_ca_path(char *out, size_t n)
    return (stat(out, &st) == 0 && S_ISREG(st.st_mode)) ? 1 : 0;
 }
 
+/* Load the pinned certificate itself (first PEM cert in remote-ca.pem), or NULL. */
+static X509 *pinned_cert_load(const char *path)
+{
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return NULL;
+   X509 *cert = PEM_read_X509(f, NULL, NULL, NULL);
+   fclose(f);
+   return cert;
+}
+
+/* Pinned-mode verify: the identity is an EXACT leaf match against the TOFU-
+ * pinned certificate (SSH known_hosts semantics). Hostname/SAN is deliberately
+ * NOT consulted: a containerized/NAT'd server cannot know its reachable
+ * host address at cert-mint time, so its self-signed cert routinely lacks the
+ * SAN the client dials — while the byte-exact pin is already a STRONGER
+ * identity than any name match (a MITM cannot present the pinned cert without
+ * its private key; any other cert, even one validly chaining to a public CA,
+ * fails the compare). Chain/time preverify results are likewise subordinate to
+ * the pin at the leaf, exactly like an SSH host key. */
+static int pin_leaf_verify_cb(int preverify_ok, X509_STORE_CTX *xctx)
+{
+   (void)preverify_ok;
+   if (X509_STORE_CTX_get_error_depth(xctx) > 0)
+      return 1; /* only the leaf decides in pinned mode */
+   SSL *ssl = X509_STORE_CTX_get_ex_data(xctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+   X509 *pin = ssl ? (X509 *)SSL_get_app_data(ssl) : NULL;
+   X509 *leaf = X509_STORE_CTX_get_current_cert(xctx);
+   return (pin && leaf && X509_cmp(pin, leaf) == 0) ? 1 : 0;
+}
+
 aimee_tls_t *aimee_tls_connect(int fd, const char *host)
 {
    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
@@ -102,27 +133,34 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
    int insecure = tls_insecure();
+   X509 *pinned = NULL;
    if (!insecure)
    {
       char pin[600];
       if (pinned_ca_path(pin, sizeof(pin)))
       {
          /* Strict pin: a recorded cert means a self-signed/private server, so
-          * trust ONLY that cert and NOT the system store — a mis-issued or
+          * trust ONLY that exact cert and NOT the system store — a mis-issued or
           * compromised public-CA cert for the same host is then still rejected.
           * A pin that won't load fails the connection CLOSED rather than silently
-          * widening trust back to the system store. */
-         if (SSL_CTX_load_verify_locations(ctx, pin, NULL) != 1)
+          * widening trust back to the system store. Identity is decided by
+          * pin_leaf_verify_cb (exact leaf match); hostname/SAN is not consulted
+          * in pinned mode — see the callback's rationale. */
+         pinned = pinned_cert_load(pin);
+         if (!pinned || SSL_CTX_load_verify_locations(ctx, pin, NULL) != 1)
          {
+            if (pinned)
+               X509_free(pinned);
             SSL_CTX_free(ctx);
             return NULL;
          }
+         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, pin_leaf_verify_cb);
       }
       else
       {
          SSL_CTX_set_default_verify_paths(ctx); /* publicly-trusted servers */
+         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
       }
-      SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
    }
 
    aimee_tls_present_client_cert(ctx);
@@ -130,24 +168,29 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
    SSL *ssl = SSL_new(ctx);
    if (!ssl)
    {
+      if (pinned)
+         X509_free(pinned);
       SSL_CTX_free(ctx);
       return NULL;
    }
    SSL_set_fd(ssl, fd);
+   if (pinned)
+      SSL_set_app_data(ssl, pinned); /* consumed by pin_leaf_verify_cb */
    if (host && *host)
    {
       SSL_set_tlsext_host_name(ssl, host); /* SNI */
-      if (!insecure)
+      if (!insecure && !pinned)
       {
          X509_VERIFY_PARAM *param = SSL_get0_param(ssl);
          X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
          /* An IP-literal host (e.g. a private server reached by address) must be
           * matched against the cert's IP-address SANs: set1_host only matches DNS
           * names/CN, so an IP would otherwise fail the name check even with a
-          * valid/pinned cert. set1_ip_asc returns 1 only for a real IP literal;
+          * valid cert. set1_ip_asc returns 1 only for a real IP literal;
           * fall back to DNS-name matching for actual hostnames. If neither arms
           * the name check, fail CLOSED — verifying the chain but not the identity
-          * would accept any otherwise-valid cert. */
+          * would accept any otherwise-valid cert. (Pinned mode skips this: the
+          * exact-leaf pin IS the identity.) */
          if (X509_VERIFY_PARAM_set1_ip_asc(param, host) != 1 &&
              X509_VERIFY_PARAM_set1_host(param, host, 0) != 1)
          {
@@ -158,7 +201,13 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       }
    }
 
-   if (SSL_connect(ssl) != 1)
+   int connected = (SSL_connect(ssl) == 1);
+   if (pinned)
+   {
+      SSL_set_app_data(ssl, NULL); /* the handshake (and its verify) is done */
+      X509_free(pinned);
+   }
+   if (!connected)
    {
       SSL_free(ssl);
       SSL_CTX_free(ctx);
