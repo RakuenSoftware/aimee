@@ -9,6 +9,8 @@
 #include <sys/stat.h>
 
 #include "db1.h"
+#include "db1_internal.h" /* db1_conn — stamp updated_at directly for the LRU test */
+#include "sqlite3.h"
 #include "wfe_engine.h"
 #include "wfe_scheduler.h"
 #include "wfe_store.h"
@@ -58,6 +60,32 @@ int main(void)
    assert(strcmp(wa.state, "active") != 0); /* autonomous item advanced past active */
    assert(strcmp(wb.state, "active") == 0); /* interactive item NOT driven by the scheduler */
 
-   printf("ok (autonomous=%s, interactive untouched)\n", wa.state);
+   /* LRU listing: the scheduler's sweep order is least-recently-updated FIRST,
+    * so a busy (recently updated) item can never permanently starve a stale
+    * sibling. Stamp distinct updated_at values and assert the order. */
+   char c[80] = "", d[80] = "";
+   assert(create("c", "autonomous", c) == 0 && c[0]);
+   assert(create("d", "autonomous", d) == 0 && d[0]);
+   {
+      char sql[256];
+      snprintf(sql, sizeof sql,
+               "UPDATE lifecycle_work_item SET updated_at='2000-01-01 00:00:01' WHERE "
+               "work_item_id='%s'",
+               d);
+      assert(sqlite3_exec(db1_conn(), sql, NULL, NULL, NULL) == SQLITE_OK);
+      snprintf(sql, sizeof sql,
+               "UPDATE lifecycle_work_item SET updated_at='2000-01-01 00:00:02' WHERE "
+               "work_item_id='%s'",
+               c);
+      assert(sqlite3_exec(db1_conn(), sql, NULL, NULL, NULL) == SQLITE_OK);
+   }
+   db1_work_item_t *lru = NULL;
+   int n = db1_work_item_list_lru(&lru);
+   assert(n >= 4);
+   assert(strcmp(lru[0].work_item_id, d) == 0); /* stalest first */
+   assert(strcmp(lru[1].work_item_id, c) == 0);
+   free(lru);
+
+   printf("ok (autonomous=%s, interactive untouched, lru order)\n", wa.state);
    return 0;
 }
