@@ -23,6 +23,9 @@ nodes:
     in:
       plan: scope.out
     next: freeze
+    # A transient implement failure (delegate flub, failed verify) retries; a
+    # looped node with no on_fail edge parks 'stuck' permanently.
+    on_fail: impl
   - id: freeze
     block: freeze
     in:
@@ -50,6 +53,8 @@ nodes:
     in:
       src: freeze.out
     next: ci
+    # forge push/open can fail transiently; retry rather than dead-end.
+    on_fail: pr
   # CI must be fully green before the slice may merge; red loops back to implement.
   - id: ci
     block: gate.ci
