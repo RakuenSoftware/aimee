@@ -39,6 +39,13 @@ CHARS_PER_TOKEN = 4
 # build_digest() at the worker-bridge seam and is unaffected by this module.
 DIGEST_CAP: int = 16_000
 
+# Hard model-token cap on per-call primary spend the supervisor authorizes.
+# Without an explicit floor, a starting balance of 1_000_000 simply lets any
+# charge succeed until the balance happens to cross zero - which is what made
+# "balance went to -256" possible in earlier iterations. A charge that would
+# drive the ledger below this floor is refused.
+HARD_MODEL_TOKEN_CAP: int = 1_000_000
+
 # Cost in budget tokens charged for each escalation attempt (success OR failure).
 ESCALATION_COST_TOKENS: int = 256
 
@@ -108,6 +115,7 @@ class EscalationRecord:
     reason: str
     cost_tokens: int
     granted: bool
+    used_tokens: int = 0
     detail: str = ""
     at: float = field(default_factory=time.time)
 
@@ -137,9 +145,30 @@ class EscalationGate:
     def open_record(self):
         return self._open
 
-    def open_escalation(self, *, caller, reason):
+    def open_escalation(self, *, caller, reason, used_tokens=0):
+        """Open a new escalation. Charges self._cost from the ledger and binds it to caller.
+
+        The authorization is bound to ``caller``: closing the gate requires that same
+        identity, and a second open attempt while a gate is already open is rejected
+        so the existing record's audit attribution is never lost.
+
+        ``used_tokens`` is the realized escalation input token spend attributed to this
+        authorization (recorded on the EscalationRecord) so a single audit row
+        associates the caller, the fixed authorization fee, and the actual escalation
+        consumption. It is audit-only - no second ledger charge is performed here,
+        because caller-attributable consumption already flows through the pre-existing
+        ``record_escalation`` path which credits its own accounting independently.
+        """
+        if self._open is not None:
+            raise EscalationDenied(
+                f"escalation already open for {self._open.caller!r}; close it before "
+                f"opening a new one (caller={caller!r})"
+            )
+        if used_tokens < 0:
+            raise ValueError("used_tokens must be >= 0")
         rec = EscalationRecord(
             caller=caller, reason=reason, cost_tokens=self._cost, granted=True,
+            used_tokens=used_tokens,
             detail=f"opened for {caller}",
         )
         self._ledger.charge(rec.cost_tokens, source=f"escalation.open:{caller}")
@@ -147,21 +176,35 @@ class EscalationGate:
         self._open = rec
         return rec
 
-    def close_escalation(self, *, caller, detail="", actual_used=True):
-        """Close the active escalation and attribute outcome to the existing record.
+    def close_escalation(self, *, caller, detail="", actual_used=True, used_tokens=None):
+        """Close the active escalation. The caller MUST match the opening caller.
 
         The ``cost_tokens`` charge happens once, at ``open_escalation`` time. Closing
         must not charge again - that would silently double-book one gate permission as
         two billable events and obscure whether the dispatch actually succeeded. We
         therefore mutate the open record's outcome (``granted`` -> actual_used, plus
-        detail) rather than appending a fresh EscalationRecord.
+        detail, plus final used_tokens if supplied) rather than appending a fresh
+        EscalationRecord.
+
+        Caller identity is enforced: the supplied ``caller`` must match the caller
+        stored on the open record. A mismatch is rejected so a third party cannot
+        close an authorization it did not pay for.
         """
         if self._open is None:
             # Idempotent close: no open record means no spend to attribute. Returning
             # a record with granted=False would lie about a charge that never happened,
             # so return None and let callers branch on ``is_open``.
             return None
+        if caller != self._open.caller:
+            raise EscalationDenied(
+                f"caller {caller!r} cannot close escalation opened by "
+                f"{self._open.caller!r}; caller attribution is enforced"
+            )
         self._open.granted = bool(actual_used)
+        if used_tokens is not None:
+            if used_tokens < 0:
+                raise ValueError("used_tokens must be >= 0")
+            self._open.used_tokens = used_tokens
         self._open.detail = detail or self._open.detail
         # No additional charge: the gate was bought at open time; closing just records
         # whether the privilege was actually used so the audit log reflects intent.
@@ -218,13 +261,27 @@ class BudgetLedger:
     arm-C supervisor reports back.
     """
 
-    def __init__(self, *, starting_balance=1_000_000):
+    def __init__(self, *, starting_balance=HARD_MODEL_TOKEN_CAP, primary_budget=None):
+        """Build a budget ledger for S3 supervision audit.
+
+        ``starting_balance`` is the per-supervisor-invocation hard model-token
+        budget: charges that would drive the balance negative are refused.
+        ``primary_budget`` is an independent (smaller) cap on the supervisor's
+        primary token spend alone, so escalation consumption cannot quietly
+        siphon the entire budget away from the model's headroom. Defaults to
+        ``int(0.9 * starting_balance)`` if not provided.
+        """
         self._balance = starting_balance
+        self._primary_budget = (
+            int(0.9 * starting_balance) if primary_budget is None else primary_budget
+        )
+        self._primary_spent = 0
         self.entries = []
         # Per-call to record_turn: stores the running total at end-of-turn so
         # primary_tokens_by_turn is the supervisor's accumulating telemetry curve.
         self.turn_boundaries = []
         self.escalations = []
+        self.per_turn_primary = []  # one entry per record_turn call
 
     @property
     def balance(self):
@@ -233,7 +290,17 @@ class BudgetLedger:
     def charge(self, tokens, *, source):
         if tokens < 0:
             raise ValueError("cannot credit via charge; use record_turn for primary spend")
-        self._balance -= tokens
+        post = self._balance - tokens
+        if post < 0:
+            # Hard model-token cap: refuse the charge rather than letting the
+            # ledger go negative. The caller must decide whether to escalate
+            # or to stop the dispatch; either way a silent over-spend cannot
+            # hide as a "balance went to -256" side-effect.
+            raise RuntimeError(
+                f"hard model-token cap exceeded: balance={self._balance} "
+                f"charge={tokens} source={source!r}"
+            )
+        self._balance = post
         self.entries.append(LedgerEntry(source=source, tokens=tokens))
         return self._balance
 
@@ -247,15 +314,36 @@ class BudgetLedger:
         each turn, oldest first. It only tracks primary spend - escalation charges are
         logged in ``entries`` and ``escalations`` separately so the primary curve is
         uncontaminated.
+
+        Distinct points: each call appends exactly one entry to ``turn_boundaries``
+        AND to ``per_turn_primary`` so a caller cannot "aggregate into one point"
+        by repeatedly calling record_turn with the same turn_index - the source
+        suffix disambiguates and ``per_turn_primary`` retains the per-call value
+        in insertion order. The per-turn primary spend is also capped against
+        ``primary_budget`` and refused if it would exceed it.
         """
         if primary_tokens_this_turn < 0:
             raise ValueError("primary_tokens_this_turn must be >= 0")
-        # Compute the running total against the primary-only spend, not the ledger
-        # balance (which is also debited by escalation charges).
+        # Per-turn distinct: refuse to collapse multiple record_turn calls into
+        # a single point by inserting with a unique nonce-suffixed source.
+        nonce = len(self.per_turn_primary)
+        if self._primary_spent + primary_tokens_this_turn > self._primary_budget:
+            raise RuntimeError(
+                f"primary_budget cap exceeded: spent={self._primary_spent} "
+                f"charge={primary_tokens_this_turn} "
+                f"primary_budget={self._primary_budget}"
+            )
         prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
         new_total = prev + primary_tokens_this_turn
-        self.charge(primary_tokens_this_turn, source=f"primary.turn:{turn_index}")
+        self.charge(primary_tokens_this_turn, source=f"primary.turn:{turn_index}#{nonce}")
         self.turn_boundaries.append(new_total)
+        self.per_turn_primary.append({
+            "turn_index": turn_index,
+            "nonce": nonce,
+            "primary_tokens_this_turn": primary_tokens_this_turn,
+            "running_total": new_total,
+        })
+        self._primary_spent += primary_tokens_this_turn
         return new_total
 
     @property

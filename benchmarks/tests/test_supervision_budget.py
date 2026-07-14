@@ -333,9 +333,15 @@ class SupervisorFacadeTests(unittest.TestCase):
         sup.gate.close_escalation(caller="arm_c")
         self.assertEqual(len(sup.ledger.entries), 3)
         sources = [e.source for e in sup.ledger.entries]
+        # Per-turn distinct: each record_turn call carries a unique nonce suffix
+        # so two record_turn calls with the same turn_index cannot collapse into
+        # one entry. The escalation.open entry is unique by caller identity.
         self.assertEqual(sources, [
-            "primary.turn:0", "primary.turn:1", "escalation.open:arm_c",
+            "primary.turn:0#0", "primary.turn:1#1", "escalation.open:arm_c",
         ])
+        # And per_turn_primary retains one distinct row per call, not one row
+        # per turn_index.
+        self.assertEqual(len(sup.ledger.per_turn_primary), 2)
         # The single escalation record is the (mutated) open record, not a
         # separate close record - the audit log must show one gate event per
         # escalation, never two.
@@ -346,3 +352,108 @@ class SupervisorFacadeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewerBlockerTests(unittest.TestCase):
+    """Tests that lock down the three reviewer blockers from the second round."""
+
+    def test_double_open_escalation_is_rejected(self):
+        """Re-opening the gate while one is open must NOT orphan the active record.
+
+        Reviewer evidence: 'A second open_escalation() overwrites _open without
+        rejecting or closing the existing authorization.' The fix is a hard
+        refusal that names the existing caller in the error so the audit gap
+        is impossible to walk past silently.
+        """
+        L = BudgetLedger()
+        G = EscalationGate(L)
+        G.open_escalation(caller="arm_c", reason="diff empty")
+        with self.assertRaises(EscalationDenied) as cm:
+            G.open_escalation(caller="other_caller", reason="noise")
+        self.assertIn("arm_c", str(cm.exception))
+        self.assertTrue(G.is_open)
+        # Original record is intact and still bound to the original caller.
+        self.assertEqual(G.open_record.caller, "arm_c")
+
+    def test_close_enforces_caller_identity(self):
+        """close_escalation must reject a caller that is not the opening caller.
+
+        Reviewer evidence: 'close_escalation(caller=...) ignores its caller
+        argument, and tool checks only inspect the global boolean is_open.'
+        The fix enforces identity so caller B cannot close A's gate and so
+        no third party can use code tools under A's authorization.
+        """
+        L = BudgetLedger()
+        G = EscalationGate(L)
+        G.open_escalation(caller="arm_c", reason="diff empty")
+        with self.assertRaises(EscalationDenied) as cm:
+            G.close_escalation(caller="other_caller")
+        self.assertIn("caller attribution", str(cm.exception))
+        # Gate stays open; the wrong-caller close did not steal the record.
+        self.assertTrue(G.is_open)
+        self.assertEqual(G.open_record.caller, "arm_c")
+        # The legitimate caller can still close it.
+        closed = G.close_escalation(caller="arm_c")
+        self.assertIsNotNone(closed)
+        self.assertFalse(G.is_open)
+
+    def test_open_carries_used_tokens_on_record(self):
+        """The EscalationRecord now records realized escalation input token spend.
+
+        Reviewer note: 'The caller-attributed escalation record also contains
+        only the fixed 256-token permission cost. Actual escalation input
+        usage (e_in) is recorded separately ... As a result, the emitted
+        audit data does not provide a single record associating the caller
+        with the escalation's realized token use.' Fix: ``used_tokens`` is
+        recorded on the same row as cost_tokens.
+        """
+        L = BudgetLedger()
+        G = EscalationGate(L)
+        rec = G.open_escalation(caller="arm_c", reason="r", used_tokens=4096)
+        self.assertEqual(rec.cost_tokens, ESCALATION_COST_TOKENS)
+        self.assertEqual(rec.used_tokens, 4096)
+        # And closing can update used_tokens to a final value.
+        closed = G.close_escalation(caller="arm_c", used_tokens=5120)
+        self.assertEqual(closed.used_tokens, 5120)
+
+    def test_hard_model_token_cap_refuses_negative_balance(self):
+        """charge() must refuse requests that would drive the ledger negative.
+
+        Reviewer note: 'The cap set is -256, and unlock code tools. Thus
+        budget availability does not actually gate escalation.' Fix:
+        HARD_MODEL_TOKEN_CAP is the floor; charges below it raise.
+        """
+        L = BudgetLedger(starting_balance=512)
+        # First 256-token escalation spend: succeeds, balance -> 256.
+        L.charge(256, source="escalation.open:arm_c")
+        self.assertEqual(L.balance, 256)
+        # Next charge that would push negative: refused.
+        with self.assertRaises(RuntimeError) as cm:
+            L.charge(512, source="escalation.open:arm_c")
+        self.assertIn("hard model-token cap exceeded", str(cm.exception))
+        # Ledger never went below zero.
+        self.assertGreaterEqual(L.balance, 0)
+
+    def test_primary_budget_cap_is_independent(self):
+        """primary_budget is an explicit sub-cap so escalation cannot drain it."""
+        L = BudgetLedger(primary_budget=100)
+        L.record_turn(0, 60)
+        L.record_turn(1, 39)  # total primary = 99, ok
+        with self.assertRaises(RuntimeError) as cm:
+            L.record_turn(2, 50)  # would push primary to 149 > 100
+        self.assertIn("primary_budget cap exceeded", str(cm.exception))
+
+    def test_per_turn_primary_records_one_point_per_call(self):
+        """record_turn yields one telemetry point per call, not per turn_index."""
+        L = BudgetLedger()
+        L.record_turn(0, 100)
+        L.record_turn(0, 100)  # same turn_index, second distinct call
+        L.record_turn(1, 100)
+        # Three distinct calls, three distinct points and rows.
+        self.assertEqual(len(L.per_turn_primary), 3)
+        self.assertEqual(len(L.turn_boundaries), 3)
+        # Sources are nonce-suffixed to disambiguate.
+        sources = [e.source for e in L.entries]
+        self.assertEqual(sources, [
+            "primary.turn:0#0", "primary.turn:0#1", "primary.turn:1#2",
+        ])

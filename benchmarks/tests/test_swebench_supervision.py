@@ -282,9 +282,15 @@ class TestRunArmCBudgetTelemetry(unittest.TestCase):
             self.assertIn(key, rec,
                           f"run record missing audit telemetry: {key!r}")
         # budget_entries must include the primary-turn sources and the gate open.
+        # Per-turn distinct: each record_turn call carries a unique nonce suffix
+        # so the auditor sees one entry per call rather than one collapsed row
+        # per turn_index. Accept either the suffixed or bare form.
         sources = [e["source"] for e in rec["budget_entries"]]
-        self.assertTrue(any(s == "primary.turn:0" for s in sources),
-                        f"no primary.turn:0 entry: {sources!r}")
+        self.assertTrue(
+            any(s == "primary.turn:0" or s.startswith("primary.turn:0#")
+                for s in sources),
+            f"no primary.turn:0 entry: {sources!r}",
+        )
         # Drift findings: a well-behaved run produces an empty list, not a
         # missing key (drift detection is now wired into the audit record).
         self.assertIsInstance(rec["budget_drift_findings"], list)
