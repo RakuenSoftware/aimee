@@ -95,9 +95,12 @@ jobs:
           push: true
           provenance: false
           # Share the layer cache with the release pipeline (same scope) so testing
-          # builds are fast and never start the LTO C build from scratch.
-          cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
-          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
+          # builds are fast and never start the LTO C build from scratch. EXCEPT
+          # aimee-combined: its pre-baked multi-GB cpu-tier model layer would blow
+          # the 10 GB GHA cache budget and evict the high-reuse C-image caches
+          # (matches the release pipeline's exclusion).
+          cache-from: ${{ matrix.image.name != 'aimee-combined' && format('type=gha,scope={0}-amd64', matrix.image.name) || '' }}
+          cache-to: ${{ matrix.image.name != 'aimee-combined' && format('type=gha,mode=max,scope={0}-amd64', matrix.image.name) || '' }}
           # WITH_WEBCHAT bundles the browser UI (default for aimee-server; the
           # aimee-kb image ignores it). WITH_LLM=0: no LLM is bundled — the deploy
           # stack runs a separate, profile-gated aimee-llm container instead (see
