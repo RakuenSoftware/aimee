@@ -9,8 +9,9 @@
 # at RUNTIME via AIMEE_LLM_TIER and the models are downloaded on first boot, so
 # there are no baked GGUFs and no per-tier build matrix — a single small image
 # serves every tier. The pre-converted ettin rerank artifacts it fetches are
-# published separately by publish-rerank-artifacts.yml. amd64 only (the llama.cpp
-# Vulkan release binary is x64-only; the release pipeline owns any multi-arch).
+# published separately by publish-rerank-artifacts.yml. This testing build is
+# amd64 only for speed (.254 is amd64); the release pipeline (publish-images.yml)
+# publishes the multi-arch amd64+arm64 manifest.
 name: Publish testing aimee-llm
 
 on:

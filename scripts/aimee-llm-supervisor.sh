@@ -255,6 +255,15 @@ resolve_one() { # ROLE MODE localurl
   esac
 }
 
+# DOWNLOAD-ONLY mode (build-time pre-bake): fetch the resolved tiers' models into
+# $MODELS_DIR and exit without launching anything. Dockerfile.combined uses this
+# to bake the cpu tier into the image, keeping the tier table here as the single
+# source of truth instead of duplicating model URLs in the Dockerfile.
+if [ "${AIMEE_LLM_DOWNLOAD_ONLY:-0}" = "1" ]; then
+  download_models || { echo "aimee-llm: pre-bake download failed" >&2; exit 1; }
+  exit 0
+fi
+
 # STUB mode (CI/dev): no GGUFs, no downloads, no llama-servers — the gateway serves
 # deterministic embed/rerank/synth. Lets e2e exercise the kb->gateway contract
 # cheaply (and the image runs without any model fetch).

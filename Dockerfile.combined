@@ -11,7 +11,10 @@
 #   docker compose -f compose.combined.yaml up -d
 #   # server /v1 on :8743 (TLS, bearer "aimee-local-dev"); kb + llm internal
 #
-# amd64 only: the bundled llama.cpp runtime is an x64 build (like aimee-llm).
+# Multi-arch (amd64 + arm64): the bundled llama.cpp runtime maps TARGETARCH to
+# upstream's x64/arm64 Vulkan tarballs (like aimee-llm). The cpu-tier models are
+# PRE-BAKED into the image (see the llm-models stage), so first boot serves
+# immediately with no multi-GB download.
 ARG WITH_WEBCHAT=1
 ARG WITH_VSCODE=1
 ARG LLAMA_TAG=b9775
@@ -70,17 +73,36 @@ FROM debian:bookworm-slim AS code-server-stage-0
 RUN mkdir -p /opt/codeserver/usr
 FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
-# --- bundled aimee-llm runtime: the llama.cpp binary (no models) ---------------
-# Mirrors Dockerfile.aimee-llm: the vendor-agnostic Vulkan build (one x64 binary);
-# at NGL=0 (the appliance default) it runs on CPU. Models are NOT baked — the
-# supervisor downloads the cpu tier into /models on first boot.
+# --- bundled aimee-llm runtime: the llama.cpp binary ---------------------------
+# Mirrors Dockerfile.aimee-llm: the vendor-agnostic Vulkan build, TARGETARCH-mapped
+# to upstream's x64/arm64 tarball; at NGL=0 (the appliance default) it runs on CPU.
 FROM debian:bookworm-slim AS llm-runtime
 ARG LLAMA_TAG
+ARG TARGETARCH
+RUN set -eux; \
+    apt-get update; apt-get install -y --no-install-recommends ca-certificates wget; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) llarch=x64 ;; \
+      arm64) llarch=arm64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    wget -q -O /tmp/llama.tgz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-vulkan-${llarch}.tar.gz"; \
+    mkdir -p /opt/llama; tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1; \
+    rm /tmp/llama.tgz; rm -rf /var/lib/apt/lists/*
+
+# --- pre-baked cpu-tier models --------------------------------------------------
+# Run the supervisor's own download logic (AIMEE_LLM_DOWNLOAD_ONLY=1) at BUILD
+# time so the appliance ships its cpu-tier GGUFs (embed + rerank + synth) and
+# their .ready markers baked in: first boot serves immediately instead of pulling
+# multi-GB models. The supervisor stays the single source of truth for model
+# coordinates; arch-independent content, but built per-arch like every stage.
+FROM debian:bookworm-slim AS llm-models
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
-    && wget -q -O /tmp/llama.tgz \
-        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-vulkan-x64.tar.gz" \
-    && mkdir -p /opt/llama && tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1 \
-    && rm /tmp/llama.tgz && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/aimee-llm-supervisor.sh /tmp/supervisor.sh
+RUN chmod +x /tmp/supervisor.sh \
+    && AIMEE_LLM_DOWNLOAD_ONLY=1 AIMEE_LLM_TIER=cpu AIMEE_LLM_MODELS_DIR=/models /tmp/supervisor.sh
 
 FROM debian:bookworm-slim
 # Union of the runtime closures: libsqlite3 (server DB1), libpq (kb DB2),
@@ -148,6 +170,11 @@ COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 # Bundled llama.cpp runtime + the aimee-llm gateway/supervisor.
 COPY --from=llm-runtime /opt/llama /opt/llama
+# Pre-baked cpu-tier models (+ .ready markers, so the supervisor skips the fetch).
+# A named volume mounted at /models is seeded from this image content on first
+# use (Docker copies image data into an empty named volume), and a tier switch
+# still downloads its models into the volume as before.
+COPY --from=llm-models --chown=aimee:aimee /models/ /models/
 COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
 COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
 RUN chmod +x /opt/aimee/supervisor.sh
@@ -183,8 +210,10 @@ WORKDIR /var/lib/aimee
 EXPOSE 8740 8743 8741 8443
 
 # Health targets the SERVER /v1 (the container contract); a 401 still proves the
-# listener is up. Long start-period: the bundled llm downloads cpu models first boot.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=1200s --retries=5 \
+# listener is up. Start-period covers seeding the baked models into a fresh
+# /models volume + loading them into RAM (cpu tier, slow disks included) — the
+# multi-GB first-boot DOWNLOAD is gone (models are pre-baked).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=5 \
     CMD curl -s -o /dev/null -w '%{http_code}' \
         http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$'
 
