@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 58
+Total endpoints: 62
 
 ## Endpoints
 
@@ -596,6 +596,61 @@ Responses:
 - `400` — Missing project
 - `401` — Unauthorized
 - `500` — Clear failed
+
+### `POST /v1/maintenance/purge-cancel`
+
+Clear the project-purge fence on abort
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Clear outcome (cleared false on fence mismatch)
+- `400` — Missing or invalid parameters
+- `401` — Unauthorized
+- `500` — Clear failed
+
+### `POST /v1/maintenance/purge-finalize`
+
+Clear the project-purge fence after deletion completed
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Clear outcome (cleared false on fence mismatch)
+- `400` — Missing or invalid parameters
+- `401` — Unauthorized
+- `500` — Clear failed
+
+### `POST /v1/maintenance/purge-heartbeat`
+
+Refresh the project-purge fence heartbeat
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Heartbeat outcome (refreshed false on fence mismatch)
+- `400` — Missing or invalid parameters
+- `401` — Unauthorized
+- `500` — Heartbeat failed
+
+### `POST /v1/maintenance/purge-project`
+
+Purge every kb store for a project under a generation fence
+
+Writes the project-purge generation fence, then deletes the project from every kb store the ingest path writes (chunks, file index, vectors, code embeddings, curator code-unit vectors, canonical index, code-unit jobs, pdf vectors, minhash), continuing past per-store failures. The fence is NOT cleared here — call purge-finalize (or purge-cancel) once the caller's own deletion completed. Idempotent.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Purge fan-out completed (see per-store outcomes)
+- `400` — Missing or invalid parameters
+- `401` — Unauthorized
+- `409` — A live fence is held by another owner (takeover absent)
+- `500` — Fence write failed
 
 ### `POST /v1/maintenance/reconcile`
 
