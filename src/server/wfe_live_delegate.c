@@ -20,7 +20,6 @@
 
 #include "wfe_live_delegate.h"
 
-#include "aimee_home.h"
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_types.h"
@@ -431,6 +430,44 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
 
 static const wfe_judge_provider_t WFE_LIVE_JUDGE = {wfe_live_judge_run};
 
+/* --- live mechanical-verify provider (the implement gate) ---------------------
+ * Runs the git_verify gate synchronously in the work-item worktree and hands
+ * its format=json verdict document to wfe_implement_verify_ok. Without a
+ * registered provider the gate fails closed, which meant implement could NEVER
+ * advance on a real deployment (the provider only ever existed in tests —
+ * observed live as instant impl loops to the cap on every slice child). */
+static int live_verify_run(const char *workdir, char *out, size_t n)
+{
+   if (!out || n == 0)
+      return -1;
+   out[0] = '\0';
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
+      return -1;
+   cJSON_AddStringToObject(args, "action", "run");
+   cJSON_AddStringToObject(args, "format", "json");
+   cJSON_AddBoolToObject(args, "async", 0);
+   run_cmd_set_cwd(workdir);
+   cJSON *res = handle_git_verify(server_active_ctx(), args, NULL);
+   run_cmd_set_cwd(NULL);
+   cJSON_Delete(args);
+   if (!res)
+      return -1;
+   /* mcp_text shape: [ {type:"text", text:"<verdict json>"} ] */
+   const cJSON *item = cJSON_GetArrayItem(res, 0);
+   const cJSON *txt = item ? cJSON_GetObjectItemCaseSensitive(item, "text") : NULL;
+   int rc = -1;
+   if (txt && cJSON_IsString(txt) && txt->valuestring)
+   {
+      snprintf(out, n, "%s", txt->valuestring);
+      rc = 0;
+   }
+   cJSON_Delete(res);
+   return rc;
+}
+
+static const wfe_verify_provider_t LIVE_VERIFY = {live_verify_run};
+
 void wfe_autonomy_register(void)
 {
    /* Full engine executor set so a work item can run end-to-end server-side. */
@@ -458,15 +495,6 @@ void wfe_autonomy_register(void)
     * foreach node after its plan is authored + roundtabled); without it the foreach
     * node fails closed (parks). */
    wfe_live_foreach_register();
-   /* The human-gate approval trust root (HMAC key) must exist before the first
-    * operator decision: without it every approve fails "could not record
-    * approval" and a parked run can never be driven past a human gate (the
-    * ensure was previously only called from tests). Best-effort: a failure
-    * logs and the first approve still fails closed. */
-   if (wfe_approval_ensure_key() != 0)
-      aimee_log(LOG_WARN, "wfe",
-                "could not provision the approval key; human-gate approvals "
-                "will fail until %s/.approval-key exists",
-                aimee_home());
+   wfe_set_verify_provider(&LIVE_VERIFY);
    aimee_log(LOG_INFO, "wfe", "autonomous development registered (default-on)");
 }
