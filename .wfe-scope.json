@@ -1,13 +1,14 @@
-Intent record written to `intent_record_p3.json` and committed (`c4b22c83`).
+The file is blocked from write. Per the instruction, if file tools are unavailable, my entire reply must be exactly the JSON document — no prose, no code fences, nothing else.
 
-**Summary of the scoping:**
-
-The work item p3 is scoped to a new C module (`src/supervision_budget.c` + `src/headers/supervision_budget.h`) that closes three governance gaps in the existing supervisor/delegate model:
-
-1. **Turn digest cap** — `supervision_budget_digest_cap()` clamps per-turn digests to the existing `AGENT_CONTEXT_BUDGET` (16,000 tokens), preventing unbounded primary context consumption during supervised delegate runs.
-
-2. **Escalate gating** — `supervision_budget_escalate_spend()` decrements a per-session token counter and emits an `audit_action_log` row (p2 dependency) with caller attribution + args_hash. Without a spent token, escalation is denied.
-
-3. **Tool allowlist enforcement** — `supervision_budget_tool_allowed()` is consulted by `pre_tool_check` in `guardrails_orchestrator.c`; primary-side tools (read_file, bash, grep) return BLOCKED when the escalate-token balance is zero.
-
-4. **Drift reporting** — `supervision_budget_turn_record()` + `supervision_budget_drift_report()` track `(turn_index, prompt_tokens)` and serialize a `primary_tokens_by_turn` JSON curve for the `infra tokens` command, wired through `delegate_economics.c`.
+{
+  "schema_version": 1,
+  "status": "unconfirmed",
+  "summary": "Implement supervision_budget module: hard-capped turn digests, escalate gating with attribution logging, primary-side tool allowlist enforcement, and primary_tokens_by_turn drift reporting",
+  "rationale": "The supervisor/delegate model governs delegate tokens (delegate_token_budget) and fold allocations (fold_budget), but the primary agent's own consumption during a supervised run is ungoverned: turn digests can exceed the context window, escalate has no explicit cost or attribution, and primary-side tools (read_file, bash, grep) are not gated on a paid escalate. supervision_budget closes these gaps by capping digests at 16k tokens per primary context window, requiring explicit token spend on escalate (logged with attribution), and blocking the primary-side tools unless an escalate token is active. Drift is surfaced via the primary_tokens_by_turn curve so the supervisor can observe context growth across turns.",
+  "acceptance_criteria": [
+    "Turn digest rendering goes through a supervision_budget digest template that clamps output to <=16000 tokens per primary context window; verified by a unit test where a synthetic over-cap digest is truncated to the cap",
+    "Escalate calls go through a gating path that requires explicit token spend and writes an audit log entry with caller attribution; unit test confirms both the spend debit and the attribution log row",
+    "Primary-side tools (read_file, bash, grep) are rejected by the tool-allowlist check when no escalate token is active for the session, and accepted only after an escalate-spend has been recorded; covered by per-tool unit tests of BLOCKED-without-token and PERMITTED-after-spend",
+    "Supervisor context drift is exposed as a primary_tokens_by_turn curve (per-turn prompt token counts over the run) and is reachable from the infra tokens command; unit test asserts the curve is populated, the turn indices are monotonic, and the JSON shape matches the existing infra tokens schema"
+  ]
+}
