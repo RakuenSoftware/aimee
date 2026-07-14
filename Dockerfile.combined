@@ -104,15 +104,19 @@ COPY scripts/aimee-llm-supervisor.sh /tmp/supervisor.sh
 RUN chmod +x /tmp/supervisor.sh \
     && AIMEE_LLM_DOWNLOAD_ONLY=1 AIMEE_LLM_TIER=cpu AIMEE_LLM_MODELS_DIR=/models /tmp/supervisor.sh
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
+# trixie (not bookworm): upstream's ubuntu-vulkan-arm64 llama.cpp tarball is built
+# against Ubuntu 24.04 (GLIBC_2.38 / GLIBCXX_3.4.32); bookworm's glibc 2.36 cannot
+# load it (the x64 tarball targets an older toolchain, which masked this on amd64).
+# Same base as Dockerfile.aimee-llm.
 # Union of the runtime closures: libsqlite3 (server DB1), libpq (kb DB2),
 # libssl/libzstd/zlib (both), python3 (kb sidecars + llm gateway), curl (health +
 # entrypoint probes); tmux + nodejs + npm for OAuth CLI agents; libgomp1 + libvulkan1
-# + mesa-vulkan-drivers + libcurl4 + python3-numpy for the bundled llama.cpp runtime.
+# + mesa-vulkan-drivers + libcurl4t64 + python3-numpy for the bundled llama.cpp runtime.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl git libcurl4 libgomp1 libpam-modules libpam0g libpq5 \
-        libsqlite3-0 libssl3 libvulkan1 libzstd1 mesa-vulkan-drivers nodejs npm \
+        ca-certificates curl git libcurl4t64 libgomp1 libpam-modules libpam0g libpq5 \
+        libsqlite3-0 libssl3t64 libvulkan1 libzstd1 mesa-vulkan-drivers nodejs npm \
         openssh-client python3 python3-numpy tmux zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
