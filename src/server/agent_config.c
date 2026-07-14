@@ -11,8 +11,9 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include <ctype.h>
-#include <stdlib.h>
+#include <pthread.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -444,9 +445,17 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
 
 /* --- Load/Save config (with mtime cache) --- */
 
+/* The cache is read/written from many threads at once — every delegate
+ * dispatch calls agent_load_config, and the parallel autonomy scheduler plus
+ * the panel seats dispatch concurrently. An unguarded memcpy of this
+ * multi-KB struct while a reloading thread rewrites it is a torn read (and
+ * TSan-class UB), so all cache access holds g_agent_config_cache_lock. The
+ * lock is NOT held across file I/O parsing — a reloader parses into the
+ * caller's buffer first and only then publishes under the lock. */
 static agent_config_t g_agent_config_cache;
 static struct timespec g_agent_config_mtime;
 static int g_agent_config_cached;
+static pthread_mutex_t g_agent_config_cache_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct timespec agent_config_stat_mtime(const struct stat *st)
 {
@@ -480,14 +489,16 @@ int agent_load_config(agent_config_t *cfg)
    if (!getenv("AIMEE_NO_CACHE"))
    {
       struct stat st;
-      if (stat(path, &st) == 0 && g_agent_config_cached)
+      if (stat(path, &st) == 0)
       {
          struct timespec mt = agent_config_stat_mtime(&st);
-         if (agent_config_mtime_eq(&mt, &g_agent_config_mtime))
-         {
+         pthread_mutex_lock(&g_agent_config_cache_lock);
+         int hit = g_agent_config_cached && agent_config_mtime_eq(&mt, &g_agent_config_mtime);
+         if (hit)
             memcpy(cfg, &g_agent_config_cache, sizeof(*cfg));
+         pthread_mutex_unlock(&g_agent_config_cache_lock);
+         if (hit)
             return 0;
-         }
       }
    }
 
@@ -956,9 +967,11 @@ int agent_load_config(agent_config_t *cfg)
       struct stat st;
       if (stat(path, &st) == 0)
       {
+         pthread_mutex_lock(&g_agent_config_cache_lock);
          memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
          g_agent_config_mtime = agent_config_stat_mtime(&st);
          g_agent_config_cached = 1;
+         pthread_mutex_unlock(&g_agent_config_cache_lock);
       }
    }
 
@@ -1181,9 +1194,11 @@ int agent_save_config(const agent_config_t *cfg)
       struct stat st;
       if (stat(agent_config_path(), &st) == 0)
       {
+         pthread_mutex_lock(&g_agent_config_cache_lock);
          memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
          g_agent_config_mtime = agent_config_stat_mtime(&st);
          g_agent_config_cached = 1;
+         pthread_mutex_unlock(&g_agent_config_cache_lock);
       }
    }
    free(json);
