@@ -166,12 +166,23 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
    if (!cfg.require_session_worktree)
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
-    * escapes. Match ONLY the canonical managed-worktree location (not the
-    * looser "/.aimee-" prefix is_aimee_worktree_path() accepts), consistent
-    * with the client-side attn_session_isolation_blocked check. */
+    * escapes. Match the canonical managed-worktree location plus the workflow
+    * engine's per-work-item worktrees (not the looser "/.aimee-" prefix
+    * is_aimee_worktree_path() accepts), consistent with the client-side
+    * attn_session_isolation_blocked check. /wfe-worktrees/ is the same fix
+    * #1314 applied to the guardrail layer: a wfe delegate's target IS an
+    * isolated worktree — without it, this backstop (default ON) refused every
+    * native write_file/edit_file into a wfe worktree, so implement delegates
+    * that edit via file tools produced no-op rounds while bash-writers slipped
+    * through — the whole fleet's convergence depended on each model's tool
+    * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
-   return strstr(norm, "/.aimee/worktrees/") != NULL ? 0 : 1;
+   if (strstr(norm, "/.aimee/worktrees/") != NULL)
+      return 0;
+   if (strstr(norm, "/wfe-worktrees/") != NULL)
+      return 0;
+   return 1;
 }
 
 static int tools_array_has_name(cJSON *tools, const char *name, int openai_format)
