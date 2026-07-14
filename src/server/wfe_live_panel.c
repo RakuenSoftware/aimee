@@ -1,68 +1,59 @@
 /* wfe_live_panel.c -- the live roundtable panel provider.
  *
- * gate.roundtable calls this to convene a diverse panel: it dispatches ONE read-only
- * review delegate per REQUIRED persona (the same synchronous, worktree-reset-enforced
- * mechanism the implement adversarial judge uses), then maps each reply to a verdict
- * (wfe_panel_verdict_from_review). A persona that cannot be dispatched is left WITHOUT
- * a verdict so wfe_gate_decide DEGRADES (parks) rather than approving on a partial
- * panel — fail closed. Registered from wfe_autonomy_register.
+ * gate.roundtable calls this to convene a diverse panel THROUGH THE ROUNDTABLE
+ * ENGINE (delegate_roundtable_run, REVIEW mode): one structured-review panelist
+ * per REQUIRED persona, whose findings are captured as review items with
+ * replayable evidence, deduped across the panel, replay-VERIFIED against the
+ * gate's worktree (wfe_replay_worktree — interpretation never blocks, a
+ * contradicted claim is rejected), and finally mapped onto per-lens verdicts
+ * (wfe_panel_verdicts_from_roundtable) for the fail-closed wfe_gate_decide.
+ * Registered from wfe_autonomy_register.
  *
- * NOTE: the per-persona dispatch requires reachable review agents, so it is exercised
- * by integration (a live deployment), not the unit suite; the risk-bearing mapping is
- * unit-tested in test_wfe_panel_verdict. The panel is inert until a run reaches a
- * gate.roundtable node, so registration alone changes nothing.
- */
+ * Seat semantics are unchanged from the pre-engine panel: a PINNED seat model
+ * is never substituted (unfulfillable -> the run FAILS); a "$random" or
+ * unmatched lens picks any review-capable agent, preferring panel diversity but
+ * reusing a seated agent when the roster is smaller than the panel; and when NO
+ * review agent is eligible right now the panel QUEUES for a seat up to
+ * AIMEE_PANEL_SEAT_WAIT_SECS before the gate degrades.
+ *
+ * NOTE: panelists are tool-less (the engine embeds the change in the prompt),
+ * so the panel no longer touches the worktree at all; only the verification
+ * pass reads it. Dispatch requires reachable review agents, so this provider is
+ * exercised by integration (a live deployment); the risk-bearing pieces — the
+ * verdict mapping and the worktree replay backend — are unit-tested in
+ * test_wfe_panel_roundtable / test_wfe_replay_worktree. */
 #include "aimee.h"
 
-#include "wfe_panel_verdict.h"
+#include "wfe_panel_roundtable.h"
+#include "wfe_replay_worktree.h"
 #include "wfe_roundtable.h"
 
-#include "agent.h"
 #include "agent_config.h"
-#include "agent_exec.h"
 #include "config.h"
-#include "delegate_role.h"
-#include "persona.h"
-#include "provider_catalog.h"
+#include "delegate_ensemble.h"
+#include "log.h"
 #include "roundtable_preset.h"
 #include "roundtable_seat_resolve.h"
-#include "log.h"
-#include "util.h"
+#include "roundtable_verify.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* Run `git -C workdir <args...>`, discard output. */
-static void panel_git(const char *workdir, const char *const extra[], int extra_n)
-{
-   const char *argv[16];
-   int argc = 0;
-   argv[argc++] = "git";
-   argv[argc++] = "-C";
-   argv[argc++] = workdir;
-   for (int i = 0; i < extra_n && argc < 15; i++)
-      argv[argc++] = extra[i];
-   argv[argc] = NULL;
-   char *o = NULL;
-   (void)safe_exec_capture(argv, &o, 1 << 14);
-   free(o);
-}
+#include <time.h>
 
 /* Max panel seats (matches the verdict-array bound the gate.roundtable executor
  * passes as `max`). */
 #define WFE_PANEL_MAX 16
-/* Per-round wall-clock ceiling for the parallel panel: a panelist still running
- * at the deadline is abandoned (its lens left unfilled) so one hung model can
- * never wedge the round. */
+/* Per-attempt wall-clock ceiling for the parallel panel: a panelist still
+ * running at the deadline is abandoned so one hung model can never wedge the
+ * round. */
 #define WFE_PANEL_DEADLINE_MS 300000
 
-/* How long an unseatable $random lens QUEUES for a review agent before the
- * gate degrades. The review roster is small and shared with implement
- * delegates: under a parallel fleet, "no eligible review agent right now" is
- * usually transient (provider health streak, seats busy) — waiting out the
- * contention converts an instant panel_degraded park into a completed panel.
- * 0 disables queueing (legacy instant-degrade). */
+/* How long an unseatable/failed panel QUEUES for review agents before the gate
+ * degrades. The review roster is small and shared with implement delegates:
+ * under a parallel fleet, "no eligible review agent right now" is usually
+ * transient — waiting out the contention converts an instant panel_degraded
+ * park into a completed panel. 0 disables queueing (instant-degrade). */
 static long wfe_panel_seat_wait_secs(void)
 {
    const char *v = getenv("AIMEE_PANEL_SEAT_WAIT_SECS");
@@ -78,48 +69,29 @@ static long wfe_panel_seat_wait_secs(void)
 
 #define WFE_PANEL_SEAT_POLL_SECS 15
 
-/* Build the per-persona review prompt. The change under review is embedded directly
- * as a diff so the panelist reads the delta and navigates surrounding code via the
- * aimee index (find_symbol/search_memory) instead of re-running git and sweeping the
- * worktree. Returns a malloc'd prompt sized to fit the diff (caller frees), or NULL
- * on allocation failure. */
-static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
+/* The engine review task: what was asked plus the change under review. The
+ * panelists are tool-less — the diff IS the material — and the engine's own
+ * REVIEW round instruction supplies the structured-items output contract
+ * (severity/category/location/summary/recommendation + replayable evidence). */
+static char *build_review_task(const wfe_review_packet_t *pkt)
 {
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
    const char *proposal = (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)";
-   int have_diff = pkt->diff && pkt->diff[0];
-   const char *diff =
-       have_diff ? pkt->diff : "(no code diff — review the plan/proposal artifact against the ask)";
-   /* Code reviews must GROUND every blocker: a request_changes carries citations
-    * (file:line + the exact quoted text) that the gate replays against the
-    * worktree; an unreproducible objection is re-graded to a non-blocking
-    * comment. Plan/proposal reviews have no lines to cite, so the requirement
-    * (and the replay) only applies when a diff is under review. */
-   const char *cite =
-       have_diff
-           ? " A request_changes MUST also carry \"blockers\":[{\"file\":\"<repo-relative "
-             "path>\",\"line\":<n>,\"quote\":\"<exact text on that line>\",\"summary\":\"<why it "
-             "blocks>\"}] (at most 8) citing real evidence for EVERY blocker; each citation is "
-             "verified against the worktree, an unverifiable blocker is discarded, and a "
-             "request_changes with no verifiable citation counts only as a comment."
-           : "";
-   size_t cap = 2560 + strlen(focus) + strlen(proposal) + strlen(diff);
+   const char *diff = (pkt->diff && pkt->diff[0])
+                          ? pkt->diff
+                          : "(no code diff — review the plan/proposal artifact against the ask)";
+   size_t cap = 1024 + strlen(focus) + strlen(proposal) + strlen(diff);
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
    snprintf(buf, cap,
-            "You are the %s lens on a review roundtable. Review the CHANGE UNDER REVIEW below "
-            "AGAINST what was asked. Do NOT edit files, and do NOT sweep or re-read the repo to "
-            "reconstruct context: trust aimee's index/graph (find_symbol, search_memory) as the "
-            "authoritative source for the current codebase, and open a file only to confirm what "
-            "the index cannot resolve.\n\nFOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
+            "Review the CHANGE UNDER REVIEW below AGAINST what was asked.\n\n"
+            "FOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
             "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
-            "End your reply with EXACTLY one JSON line and nothing after it: "
-            "{\"verdict\":\"approve\"} if it satisfies the ask with no high-severity blocker, "
-            "{\"verdict\":\"request_changes\",\"high_sev_blockers\":<N>} if there is a real "
-            "blocker, or {\"verdict\":\"comment\"} if you only have non-blocking remarks.%s",
-            persona, focus, proposal, diff, cite);
+            "For every item, location is \"file:line\" from the change wherever possible, and a "
+            "blocking severity REQUIRES reproducible factual evidence about this code.",
+            focus, proposal, diff);
    return buf;
 }
 
@@ -161,18 +133,68 @@ static int load_panel_preset(roundtable_preset_t *preset, const char *requested)
    return 0;
 }
 
-/* Compose the review roundtable IN PARALLEL, honoring each required lens's seat
- * model from the active roundtable preset:
- *   - a PINNED model dispatches to that EXACT agent; if it is not enabled/routable
- *     for the review role (or its dispatch fails), the run FAILS — a pinned model
- *     is never silently swapped (returns WFE_PANEL_PINNED_FAIL);
- *   - a "$random" seat (or a lens with no matching seat) picks any review-capable
- *     agent and retries a different one on the second round if the first fails.
- * Panelists fan out concurrently via agent_run_parallel (bounded by the compute-
- * thread ceiling; a panelist past the deadline is abandoned). Reviews are
- * read-only (the `review` role grants no write tools); one hard-reset after the
- * panel defends the worktree regardless. Returns the number of lenses filled, or a
- * WFE_PANEL_* sentinel (<0). */
+/* Resolve every lens to a concrete review agent. Pinned seats resolve exactly
+ * once (unfulfillable -> WFE_PANEL_PINNED_FAIL); $random seats prefer a UNIQUE
+ * agent per lens and downgrade to reuse when the roster is smaller than the
+ * panel. Returns 0 with seat[0..nlens-1] set (pointers into acfg), or a
+ * WFE_PANEL_* sentinel; `*any_pinned` reports whether any seat is pinned.
+ * Returns 1 when no review agent is eligible AT ALL right now (caller queues). */
+static int resolve_seats(agent_config_t *acfg, const roundtable_preset_t *preset, int have_preset,
+                         const char *const *required, int nlens, const char *seat[],
+                         int *any_pinned)
+{
+   const char *used[MAX_AGENTS];
+   int nused = 0;
+   *any_pinned = 0;
+   for (int i = 0; i < nlens; i++)
+      seat[i] = NULL;
+
+   for (int i = 0; i < nlens; i++)
+   {
+      const char *model = have_preset ? seat_model_for_persona(preset, required[i]) : NULL;
+      if (rt_seat_is_random(model))
+         continue; /* $random / unmatched -> second pass */
+      int idx = -1;
+      if (rt_resolve_seat_model(acfg, model, "review", used, nused, &idx) != RT_SEAT_OK)
+      {
+         aimee_log(LOG_WARN, "wfe-panel", "pinned model '%s' for lens '%s' unavailable -> fail run",
+                   model, required[i]);
+         return WFE_PANEL_PINNED_FAIL;
+      }
+      seat[i] = acfg->agents[idx].name;
+      *any_pinned = 1;
+      if (nused < MAX_AGENTS)
+         used[nused++] = seat[i];
+   }
+
+   for (int i = 0; i < nlens; i++)
+   {
+      if (seat[i])
+         continue;
+      int idx = -1, reused = 0;
+      rt_seat_resolve_t rc =
+          rt_resolve_seat_model(acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
+      if (rc == RT_SEAT_RANDOM_EXHAUSTED)
+      {
+         rc = rt_resolve_seat_model(acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
+         reused = 1;
+      }
+      if (rc != RT_SEAT_OK || idx < 0 || idx >= acfg->agent_count)
+         return 1; /* no eligible review agent at all right now -> queue */
+      seat[i] = acfg->agents[idx].name;
+      if (reused)
+         aimee_log(LOG_INFO, "wfe-panel",
+                   "reusing agent '%s' for lens '%s' (fewer eligible review agents than lenses)",
+                   seat[i], required[i]);
+      else if (nused < MAX_AGENTS)
+         used[nused++] = seat[i];
+   }
+   return 0;
+}
+
+/* Convene the review roundtable through the engine and map the verified items
+ * to per-lens verdicts. Returns the number of lenses filled (nlens on success,
+ * 0 when the panel degrades so the gate parks) or a WFE_PANEL_* sentinel. */
 static int live_panel(const wfe_review_packet_t *pkt, const char *const *required, int nreq,
                       const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
 {
@@ -190,166 +212,54 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (nlens > WFE_PANEL_MAX)
       nlens = WFE_PANEL_MAX;
 
-   /* Persona->model bindings for this panel come from the roundtable preset this
-    * gate convenes: the node's named preset (pkt->roundtable) or the default. */
    roundtable_preset_t preset;
    int have_preset = load_panel_preset(&preset, pkt->roundtable);
 
-   char *sysp[WFE_PANEL_MAX];            /* per-lens review-persona system prompt */
-   char *usrp[WFE_PANEL_MAX];            /* per-lens user prompt (change under review) */
-   int done[WFE_PANEL_MAX];              /* lens has a verdict */
-   int pinned[WFE_PANEL_MAX];            /* lens pinned to a specific model */
-   const char *pin_agent[WFE_PANEL_MAX]; /* resolved pinned agent name (into acfg) */
-   memset(sysp, 0, sizeof sysp);
-   memset(usrp, 0, sizeof usrp);
-   memset(done, 0, sizeof done);
-   memset(pinned, 0, sizeof pinned);
-   memset(pin_agent, 0, sizeof pin_agent);
+   config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   if (config_load(&cfg) != 0)
+      return WFE_PANEL_UNREACHABLE;
 
-   const char *used[MAX_AGENTS];
-   int nused = 0;
+   char *task = build_review_task(pkt);
+   if (!task)
+      return WFE_PANEL_UNREACHABLE;
 
-   /* Resolve seats up front. A pinned model that cannot be fulfilled fails the run
-    * (no substitution): abort before dispatching anything. Pinned agents are added
-    * to `used` so a later $random pick never collides with them (diversity). */
-   int pinned_fail = 0;
-   for (int i = 0; i < nlens; i++)
-   {
-      sysp[i] = persona_compose_delegate_prompt(required[i], pkt->workdir, "");
-      usrp[i] = build_prompt(required[i], pkt);
-      const char *model = have_preset ? seat_model_for_persona(&preset, required[i]) : NULL;
-      if (rt_seat_is_random(model))
-         continue; /* $random / unmatched -> resolved per-round below */
-      int idx = -1;
-      if (rt_resolve_seat_model(&acfg, model, "review", used, nused, &idx) != RT_SEAT_OK)
-      {
-         aimee_log(LOG_WARN, "wfe-panel", "pinned model '%s' for lens '%s' unavailable -> fail run",
-                   model, required[i]);
-         pinned_fail = 1;
-         continue;
-      }
-      pinned[i] = 1;
-      pin_agent[i] = acfg.agents[idx].name;
-      if (nused < MAX_AGENTS)
-         used[nused++] = pin_agent[i];
-   }
-   if (pinned_fail)
-   {
-      for (int i = 0; i < nlens; i++)
-      {
-         free(sysp[i]);
-         free(usrp[i]);
-      }
-      return WFE_PANEL_PINNED_FAIL;
-   }
-
-   /* Snapshot HEAD once for the post-panel read-only reset. */
-   char pre_head[64] = "";
-   {
-      const char *argv[] = {"git", "-C", pkt->workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         size_t n = strlen(o);
-         while (n > 0 && (o[n - 1] == '\n' || o[n - 1] == '\r'))
-            o[--n] = '\0';
-         snprintf(pre_head, sizeof pre_head, "%s", o);
-      }
-      free(o);
-   }
-
-   run_cmd_set_cwd(pkt->workdir);
-
-   int filled = 0;
-   int pinned_dispatch_fail = 0;
-   /* Deadline-bounded rounds. A pinned lens dispatches once to its fixed agent (a
-    * pinned dispatch failure fails the run — no retry). A $random lens re-seats a
-    * different agent on later rounds so one flaky pick doesn't degrade the gate —
-    * and when NO review agent is eligible right now, the lens QUEUES: the round
-    * loop sleeps and re-resolves until an agent becomes viable or the seat-wait
-    * deadline expires. Only after the deadline does an unfilled/malformed lens
-    * commit and the gate degrade. */
+   /* Deadline-bounded attempts: re-resolve seats and re-run the panel while
+    * seats are unseatable or panelists fail, until the seat-wait deadline. */
    struct timespec q0;
    clock_gettime(CLOCK_MONOTONIC, &q0);
    long seat_wait = wfe_panel_seat_wait_secs();
    int queued_logged = 0;
-   for (int round = 0; filled < nlens && !pinned_dispatch_fail; round++)
+   int rc_final = 0;
+
+   for (;;)
    {
       struct timespec qn;
       clock_gettime(CLOCK_MONOTONIC, &qn);
-      int final = (qn.tv_sec - q0.tv_sec) >= seat_wait; /* last attempt: commit as-is */
-      int filled_before = filled;
-      agent_task_t tasks[WFE_PANEL_MAX];
-      const char *taskagent[WFE_PANEL_MAX];
-      int lensmap[WFE_PANEL_MAX];
-      memset(tasks, 0, sizeof tasks);
-      int nt = 0;
-      for (int i = 0; i < nlens; i++)
+      int final = (qn.tv_sec - q0.tv_sec) >= seat_wait || seat_wait == 0;
+
+      const char *seat[WFE_PANEL_MAX];
+      int any_pinned = 0;
+      int src = resolve_seats(&acfg, &preset, have_preset, required, nlens, seat, &any_pinned);
+      if (src == WFE_PANEL_PINNED_FAIL)
       {
-         if (done[i])
-            continue;
-         const char *agent = NULL;
-         if (pinned[i])
-         {
-            if (round > 0)
-               continue; /* pinned does not retry */
-            agent = pin_agent[i];
-         }
-         else
-         {
-            int idx = -1;
-            /* Prefer a UNIQUE agent per lens (the `used` exclusion gives panel
-             * diversity). But when there are fewer eligible review agents than
-             * lenses, insisting on distinctness would leave the surplus lenses
-             * unfilled and needlessly DEGRADE the whole gate. So on exhaustion,
-             * DOWNGRADE: reuse an already-seated agent (drop the exclusion) — the
-             * same model reviews this lens under its own persona prompt. The gate
-             * then degrades only when NO review agent is eligible at all. */
-            int reused = 0;
-            rt_seat_resolve_t rc =
-                rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
-            if (rc == RT_SEAT_RANDOM_EXHAUSTED)
-            {
-               rc = rt_resolve_seat_model(&acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
-               reused = 1;
-            }
-            /* rt_resolve_seat_model only sets a valid idx on RT_SEAT_OK; bound-check
-             * defensively anyway before indexing acfg.agents. */
-            if (rc != RT_SEAT_OK || idx < 0 || idx >= acfg.agent_count)
-               continue; /* no eligible review agent at all -> unfilled (gate degrades) */
-            agent = acfg.agents[idx].name;
-            if (reused)
-               /* surface the degraded-diversity composition so operators can see the
-                * panel ran with fewer distinct agents than lenses. */
-               aimee_log(LOG_INFO, "wfe-panel",
-                         "reusing agent '%s' for lens '%s' (fewer eligible review agents "
-                         "than lenses)",
-                         agent, required[i]);
-            else if (nused < MAX_AGENTS)
-               used[nused++] = agent; /* only DISTINCT picks join the diversity set */
-         }
-         tasks[nt].role = "review";
-         tasks[nt].agent = agent;
-         tasks[nt].system_prompt = sysp[i] ? sysp[i] : "";
-         tasks[nt].user_prompt = usrp[i] ? usrp[i] : "";
-         tasks[nt].temperature = 0.2;
-         tasks[nt].max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-         taskagent[nt] = agent;
-         lensmap[nt] = i;
-         nt++;
+         rc_final = WFE_PANEL_PINNED_FAIL;
+         break;
       }
-      if (nt == 0)
+      if (src == 1)
       {
-         /* Nothing dispatchable this round: every unfilled lens is unseatable
-          * (no eligible review agent right now). Queue for a seat until the
-          * deadline instead of degrading instantly. */
-         if (final || seat_wait == 0)
+         /* Nothing seatable right now: queue for a seat until the deadline. */
+         if (final)
+         {
+            aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for the panel -> degrade");
+            rc_final = 0;
             break;
+         }
          if (!queued_logged)
          {
             aimee_log(LOG_INFO, "wfe-panel",
-                      "no eligible review agent for %d unfilled lens(es); queueing up to %lds",
-                      nlens - filled, seat_wait);
+                      "no eligible review agent for %d lens(es); queueing up to %lds", nlens,
+                      seat_wait);
             queued_logged = 1;
          }
          struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
@@ -357,118 +267,84 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          continue;
       }
 
-      agent_result_t results[WFE_PANEL_MAX];
-      memset(results, 0, sizeof results);
-      agent_run_parallel(&acfg, tasks, nt, results, WFE_PANEL_DEADLINE_MS);
-      for (int t = 0; t < nt; t++)
+      /* Panel composition = the resolved seats; each lens rides in as the
+       * panelist's persona. The engine's internal index-backed replay stays
+       * OFF: the gate verifies against the WORKTREE below instead (the index
+       * lags the change under review). All lenses are required, so anything
+       * short of a full panel is a failed attempt. */
+      cfg.ensemble_reference_count = nlens;
+      cfg.ensemble_reference_persona_count = nlens;
+      for (int i = 0; i < nlens; i++)
       {
-         int i = lensmap[t];
-         if (results[t].response && results[t].response[0])
-         {
-            wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
-                                          &out[filled]);
-            snprintf(out[filled].model, sizeof out[filled].model, "%s", taskagent[t]);
-            /* Ground the verdict: replay blocker citations against the worktree.
-             * Only meaningful for a code review — a plan/proposal gate (no diff)
-             * has no lines to cite, so its request_changes stands unverified. */
-            if (out[filled].kind == WFE_V_REQUEST_CHANGES && pkt->diff && pkt->diff[0])
-            {
-               int cited = out[filled].blocker_count;
-               int ver = wfe_panel_blockers_verify(&out[filled], pkt->workdir);
-               if (out[filled].kind == WFE_V_COMMENT)
-                  aimee_log(LOG_WARN, "wfe-panel",
-                            "lens '%s' request_changes from agent '%s' re-graded to comment: "
-                            "%d blocker citation(s), none reproduced in the worktree",
-                            required[i], taskagent[t], cited);
-               else if (ver < cited)
-                  aimee_log(LOG_INFO, "wfe-panel",
-                            "lens '%s': %d/%d blocker citation(s) reproduced (unverified ones "
-                            "discarded)",
-                            required[i], ver, cited);
-            }
-            /* Attribute the verdict so a degraded gate is triageable: without
-             * this there is no record of WHICH agent served a lens or what it
-             * returned. On MALFORMED include the reply's tail — that is the
-             * line the parser rejected. */
-            {
-               static const char *const kind_names[] = {"approve", "request_changes", "comment",
-                                                        "malformed"};
-               wfe_verdict_kind_t k = out[filled].kind;
-               const char *kn = (k >= 0 && k <= WFE_V_MALFORMED) ? kind_names[k] : "?";
-               if (k == WFE_V_MALFORMED)
-               {
-                  const char *r = results[t].response;
-                  size_t rl = strlen(r);
-                  const char *tail = rl > 160 ? r + rl - 160 : r;
-                  aimee_log(LOG_WARN, "wfe-panel",
-                            "lens '%s' verdict malformed from agent '%s'; reply tail: %.160s",
-                            required[i], taskagent[t], tail);
-                  /* A malformed reply from a $random seat is provider flakiness
-                   * (typically a review truncated before its final JSON line, as
-                   * the tail above shows) — treat it like a failed dispatch and
-                   * let the next round retry the lens with a DIFFERENT agent
-                   * rather than committing a verdict that fails required-lens
-                   * coverage and degrades the whole gate. Only once the seat-wait
-                   * deadline expires does the malformed verdict commit
-                   * (fail-closed as before). */
-                  if (!pinned[i] && !final)
-                  {
-                     free(results[t].response);
-                     results[t].response = NULL;
-                     continue; /* leave done[i]=0 -> a later round re-seats this lens */
-                  }
-               }
-               else
-                  aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s'",
-                            required[i], kn, taskagent[t]);
-            }
-            filled++;
-            done[i] = 1;
-         }
-         else if (pinned[i])
-         {
-            /* Reachable at resolve time but its dispatch failed -> still "cannot be
-             * fulfilled" for a pinned model, so fail the run (no substitution). */
-            aimee_log(LOG_WARN, "wfe-panel",
-                      "pinned model '%s' for lens '%s' failed to respond -> fail run", taskagent[t],
-                      required[i]);
-            pinned_dispatch_fail = 1;
-         }
-         free(results[t].response);
+         snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i], "%s",
+                  seat[i]);
+         snprintf(cfg.ensemble_reference_personas[i], sizeof cfg.ensemble_reference_personas[i],
+                  "%s", required[i]);
       }
-      /* No lens progressed this round (fast dispatch failures / all replies
-       * malformed): back off before re-seating so a flapping provider doesn't
-       * burn the whole seat-wait window in a tight retry loop. */
-      if (filled == filled_before && filled < nlens && !pinned_dispatch_fail && !final &&
-          seat_wait > 0)
+      cfg.ensemble_min_successful = nlens;
+      cfg.roundtable_replay_verify_enabled = 0;
+
+      roundtable_opts_t opts;
+      memset(&opts, 0, sizeof opts);
+      opts.mode = ROUNDTABLE_REVIEW;
+      opts.turns = ROUNDTABLE_PARALLEL;
+      opts.max_rounds = 1;
+      opts.deadline_ms = WFE_PANEL_DEADLINE_MS;
+
+      roundtable_result_t rt;
+      memset(&rt, 0, sizeof rt);
+      if (delegate_roundtable_run(&acfg, &cfg, task, &opts, &rt) != 0)
       {
+         delegate_roundtable_result_free(&rt);
+         rc_final = WFE_PANEL_UNREACHABLE;
+         break;
+      }
+
+      if (rt.participants_failed > 0 || rt.degraded)
+      {
+         aimee_log(LOG_WARN, "wfe-panel", "panel attempt: %d/%d panelist(s) failed%s%s",
+                   rt.participants_failed, rt.participants_total, rt.degraded ? " (degraded)" : "",
+                   final ? " -> degrade" : " -> re-seat and retry");
+         delegate_roundtable_result_free(&rt);
+         if (final)
+         {
+            rc_final = 0; /* missing lens coverage -> gate parks (fail closed) */
+            break;
+         }
          struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
          nanosleep(&nap, NULL);
+         continue;
       }
+
+      /* Replay-verify the deduped panel items against the worktree the panel
+       * reviewed: interpretation caps below blocking, contradicted claims are
+       * rejected — the same rule as the compute roundtable, re-grounded. */
+      wfe_replay_worktree_set_root(pkt->workdir);
+      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend());
+      wfe_replay_worktree_set_root(NULL);
+      aimee_log(LOG_INFO, "wfe-panel",
+                "panel items: %d kept (verified=%d capped=%d degraded=%d), %d rejected",
+                rt.item_count, rt.verified_count, rt.capped_count, rt.degraded_count,
+                rt.rejected_count);
+      for (int i = 0; i < rt.rejected_count && i < ROUNDTABLE_MAX_REVIEW_ITEMS; i++)
+         aimee_log(LOG_WARN, "wfe-panel", "rejected finding (%s) [%s] %s: %s",
+                   rt.rejected_reason[i], rt.rejected[i].sources, rt.rejected[i].location,
+                   rt.rejected[i].summary);
+
+      int filled = wfe_panel_verdicts_from_roundtable(&rt, required, seat, nlens,
+                                                      pkt->artifact_hash, pkt->workdir, out);
+      for (int i = 0; i < filled; i++)
+         aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s' (%d blocker(s))",
+                   out[i].persona,
+                   out[i].kind == WFE_V_REQUEST_CHANGES ? "request_changes" : "approve",
+                   out[i].model, out[i].high_sev_blockers);
+      delegate_roundtable_result_free(&rt);
+      rc_final = filled > 0 ? filled : 0;
+      break;
    }
 
-   run_cmd_set_cwd(NULL);
-
-   /* Read-only enforcement: hard-reset to the pre-panel HEAD + clean untracked. */
-   if (pre_head[0])
-   {
-      const char *reset[] = {"reset", "--hard", pre_head};
-      panel_git(pkt->workdir, reset, 3);
-      const char *clean[] = {"clean", "-fd"};
-      panel_git(pkt->workdir, clean, 2);
-   }
-
-   for (int i = 0; i < nlens; i++)
-   {
-      if (!done[i] && !pinned[i] && !pinned_dispatch_fail)
-         aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for lens '%s' -> degrade",
-                   required[i]);
-      free(sysp[i]);
-      free(usrp[i]);
-   }
-   if (pinned_dispatch_fail)
-      return WFE_PANEL_PINNED_FAIL;
-   return filled;
+   free(task);
+   return rc_final;
 }
 
 void wfe_live_panel_register(void)
