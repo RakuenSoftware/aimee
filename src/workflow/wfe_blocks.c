@@ -1669,6 +1669,13 @@ static wfe_step_result_t manager_produce(wfe_ctx *ctx, const wfe_node_t *node, c
    resolve_workdir(ctx, wd, sizeof wd);
    char path[1200];
    manager_artifact_path(ctx, node, path, sizeof path);
+   /* Author each attempt FRESH: the provider persists the model's reply to the
+    * artifact only when the file is absent/empty (so tool-written artifacts
+    * aren't clobbered by the chat response) — which means one bad attempt's
+    * leftovers would otherwise poison every retry: the fresh reply is dropped
+    * and validation re-reads the stale file forever (observed live: a split
+    * that could never recover from its first refusal). */
+   remove(path);
    char commit[64] = "";
    double cost = 0.0;
    if (wfe_delegate_dispatch(wd, role, node_delegate(node), prompt, path, commit, &cost) < 0)
