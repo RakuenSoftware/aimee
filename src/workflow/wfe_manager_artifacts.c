@@ -71,6 +71,46 @@ static int all_strings(const cJSON *arr, const char *what, char *err, size_t err
 
 /* ---- intent record (understand) ---- */
 
+/* case-insensitive substring (portable strcasestr) */
+static int icontains(const char *hay, const char *needle)
+{
+   size_t nl = strlen(needle);
+   for (const char *p = hay; *p; p++)
+   {
+      size_t i = 0;
+      while (i < nl && p[i] &&
+             ((p[i] >= 'A' && p[i] <= 'Z') ? p[i] + 32 : p[i]) ==
+                 ((needle[i] >= 'A' && needle[i] <= 'Z') ? needle[i] + 32 : needle[i]))
+         i++;
+      if (i == nl)
+         return 1;
+   }
+   return 0;
+}
+
+/* Reject a SELF-REFERENTIAL intent: a record whose text is about the record /
+ * work-item bookkeeping instead of the engineering task. Observed live (3 of 13
+ * slices): scope delegates pattern-match the instruction into "the task is to
+ * create an intent record" — the schema is valid, so the garbage advanced and
+ * implement dutifully committed only .wfe-scope.json, which the roundtable then
+ * rejects every round to its cap. Markers: mentions of the record itself, of
+ * "work item" (a packet describes code, not run bookkeeping), a work-item id
+ * (wi_<hex>), or any >=16-hex-digit run id blob. */
+static int intent_self_referential(const char *s)
+{
+   if (icontains(s, "intent record") || icontains(s, "work item") || strstr(s, "wi_"))
+      return 1;
+   int hexrun = 0;
+   for (const char *p = s; *p; p++)
+   {
+      int ishex = (*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F');
+      hexrun = ishex ? hexrun + 1 : 0;
+      if (hexrun >= 16)
+         return 1;
+   }
+   return 0;
+}
+
 int wfe_intent_validate(const cJSON *rec, char *err, size_t errlen)
 {
    if (err && errlen)
@@ -95,6 +135,27 @@ int wfe_intent_validate(const cJSON *rec, char *err, size_t errlen)
    const cJSON *ac = req_arr(rec, "acceptance_criteria", 1, err, errlen);
    if (!ac || all_strings(ac, "intent.acceptance_criteria", err, errlen) != 0)
       return -1;
+   /* Content gate, not just shape: a self-referential record loops the scope
+    * attempt (fresh delegate) instead of poisoning every downstream stage. */
+   const cJSON *sm = cJSON_GetObjectItemCaseSensitive(rec, "summary");
+   if (intent_self_referential(sm->valuestring))
+   {
+      snprintf(err, errlen,
+               "intent: self-referential — summary must scope the engineering task itself, not "
+               "the intent record / work item bookkeeping");
+      return -1;
+   }
+   const cJSON *it = NULL;
+   cJSON_ArrayForEach(it, ac)
+   {
+      if (icontains(it->valuestring, "intent record"))
+      {
+         snprintf(err, errlen,
+                  "intent: self-referential acceptance criterion — criteria must be "
+                  "testable properties of the change, not of the record");
+         return -1;
+      }
+   }
    return 0;
 }
 

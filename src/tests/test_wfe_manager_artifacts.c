@@ -51,6 +51,38 @@ int main(void)
    assert(wfe_intent_validate(bad_status, err, sizeof err) != 0);
    cJSON_Delete(bad_status);
 
+   /* SELF-REFERENTIAL records -> reject: schema-valid garbage observed live,
+    * where the scope delegate wrote a record about the record instead of the
+    * task. Each is one of the three real-world shapes. */
+   cJSON *self1 = P("{\"schema_version\":1,\"status\":\"confirmed\","
+                    "\"summary\":\"Create INTENT RECORD for work item wi_2f9246\","
+                    "\"acceptance_criteria\":[\"file exists\"]}");
+   assert(wfe_intent_validate(self1, err, sizeof err) != 0);
+   cJSON_Delete(self1);
+   cJSON *self2 = P("{\"schema_version\":1,\"status\":\"confirmed\","
+                    "\"summary\":\"Scope and structure work item as intent record\","
+                    "\"acceptance_criteria\":[\"record committed\"]}");
+   assert(wfe_intent_validate(self2, err, sizeof err) != 0);
+   cJSON_Delete(self2);
+   cJSON *self3 = P("{\"schema_version\":1,\"status\":\"confirmed\","
+                    "\"summary\":\"Senior architecture review of 2f9246841f04f156 for integrity\","
+                    "\"acceptance_criteria\":[\"review done\"]}");
+   assert(wfe_intent_validate(self3, err, sizeof err) != 0); /* 16-hex id blob */
+   cJSON_Delete(self3);
+   /* a meta criterion alone also rejects */
+   cJSON *self4 = P("{\"schema_version\":1,\"status\":\"confirmed\","
+                    "\"summary\":\"discard first warmup instance per run\","
+                    "\"acceptance_criteria\":[\"INTENT RECORD contains valid schema\"]}");
+   assert(wfe_intent_validate(self4, err, sizeof err) != 0);
+   cJSON_Delete(self4);
+   /* a real task summary with ordinary hex-ish words still passes */
+   cJSON *real = P("{\"schema_version\":1,\"status\":\"confirmed\","
+                   "\"summary\":\"Implement warmup handling: discard first instance per run\","
+                   "\"acceptance_criteria\":[\"first instance excluded from metrics\","
+                   "\"warmup latency reported separately\"]}");
+   assert(wfe_intent_validate(real, err, sizeof err) == 0);
+   cJSON_Delete(real);
+
    /* ---- packet plan ---- */
    cJSON *packets = P("{\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\","
                       "\"summary\":\"impl the button\",\"target_blocks\":[\"implement\"],"
