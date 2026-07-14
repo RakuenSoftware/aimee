@@ -21,6 +21,25 @@ typedef enum
    WFE_V_MALFORMED /* unparseable/empty -> fail-closed to REQUEST_CHANGES */
 } wfe_verdict_kind_t;
 
+/* A request_changes verdict carries its blocking findings as CITATIONS: a
+ * repo-relative file, a 1-based line, and the exact text the reviewer claims at
+ * that line. The panel provider replays each citation against the worktree under
+ * review (wfe_panel_blockers_verify): a citation that does not reproduce is
+ * discarded, and a request_changes with NO reproducible citation is re-graded to
+ * a non-blocking comment — the same rule the compute roundtable enforces via
+ * evidence_replay (interpretation never blocks; contradicted claims are
+ * rejected). */
+#define WFE_VERDICT_MAX_BLOCKERS 8
+
+typedef struct
+{
+   char file[160];    /* repo-relative path the blocker cites */
+   int line;          /* 1-based line the blocker cites */
+   char quote[128];   /* exact text claimed at file:line ("" = uncited) */
+   char summary[128]; /* why this blocks */
+   int verified;      /* citation reproduced in the worktree (set by verify) */
+} wfe_blocker_t;
+
 typedef struct
 {
    char persona[32];
@@ -31,6 +50,8 @@ typedef struct
    int high_sev_blockers;                   /* count of unresolved high-severity blockers */
    char feedback[WFE_VERDICT_FEEDBACK_MAX]; /* the panelist's critique text (reasoning before
                                              * the JSON verdict line); may be empty */
+   wfe_blocker_t blockers[WFE_VERDICT_MAX_BLOCKERS]; /* cited blocking findings */
+   int blocker_count;
 } wfe_verdict_t;
 
 typedef enum
