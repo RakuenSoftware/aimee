@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main, testing]
+    # `edited` re-runs the gate when a PR title/body is edited after open, so
+    # attribution can't be added post-hoc without failing CI.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 concurrency:
@@ -37,6 +40,19 @@ jobs:
             exit 1
           fi
           echo "no co-authorship trailers in $range — ok"
+      - name: Reject AI attribution in the PR title/body
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          hits=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
+                 | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::The PR title/body carries AI attribution; remove it (standing directive)."
+            echo "$hits"
+            exit 1
+          fi
+          echo "no AI attribution in PR title/body — ok"
 
   lint:
     runs-on: ubuntu-latest

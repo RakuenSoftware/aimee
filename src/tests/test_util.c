@@ -237,6 +237,43 @@ static void test_regex_match(void)
 }
 #endif
 
+static void test_strip_ai_attribution(void)
+{
+   char buf[512];
+
+   /* The standard Claude Code footer: trailer + attribution line both go. */
+   snprintf(buf, sizeof(buf),
+            "fix: handle empty input\n\nDetails here.\n\n"
+            "\xF0\x9F\xA4\x96 Generated with [Claude Code](https://claude.com/claude-code)\n\n"
+            "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>\n");
+   assert(strip_ai_attribution(buf) == 2);
+   assert(strcmp(buf, "fix: handle empty input\n\nDetails here.") == 0);
+
+   /* Case-insensitive, leading whitespace, codex variant. */
+   snprintf(buf, sizeof(buf), "subject\n  CO-AUTHORED-BY: bot <b@x>\nGenerated with [Codex CLI]\n");
+   assert(strip_ai_attribution(buf) == 2);
+   assert(strcmp(buf, "subject") == 0);
+
+   /* Prose mentioning the concepts (unanchored trailer, no markdown link) stays. */
+   snprintf(buf, sizeof(buf),
+            "docs: explain co-authored-by handling\n\n"
+            "CI rejects any Co-Authored-By: trailer and text generated with Claude Code.\n");
+   assert(strip_ai_attribution(buf) == 0);
+   assert(strstr(buf, "co-authored-by handling") != NULL);
+   assert(strstr(buf, "generated with Claude") != NULL);
+
+   /* Attribution-only message strips to empty; NULL is a no-op. */
+   snprintf(buf, sizeof(buf), "Co-authored-by: X <x@y>\n");
+   assert(strip_ai_attribution(buf) == 1);
+   assert(buf[0] == '\0');
+   assert(strip_ai_attribution(NULL) == 0);
+
+   /* Interior attribution line is removed without joining its neighbours. */
+   snprintf(buf, sizeof(buf), "line one\nCo-Authored-By: A <a@b>\nline two");
+   assert(strip_ai_attribution(buf) == 1);
+   assert(strcmp(buf, "line one\nline two") == 0);
+}
+
 int main(void)
 {
    test_normalize_key();
@@ -248,6 +285,7 @@ int main(void)
    test_is_contradiction();
    test_shell_escape();
    test_shell_escape_injection_payloads();
+   test_strip_ai_attribution();
 #ifndef AIMEE_WINDOWS
    test_run_cmd();
    test_run_cmd_env();

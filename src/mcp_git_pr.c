@@ -385,6 +385,11 @@ cJSON *handle_git_pr(cJSON *args)
       if (!has_title && !has_body && !has_base)
          return mcp_text("error: edit requires at least one of title/body/base");
 
+      /* Standing directive: no AI attribution in PR bodies (in-place strip is
+       * shrink-only, so the cJSON-owned buffer is safe). */
+      if (has_body)
+         strip_ai_attribution(jbody->valuestring);
+
       char repo_slug[256];
       if (get_origin_repo_slug(repo_slug, sizeof(repo_slug)) != 0)
          return mcp_text("error: could not determine GitHub repository from origin remote");
@@ -508,6 +513,11 @@ cJSON *handle_git_pr(cJSON *args)
 
       if (!cJSON_IsString(jtitle) || !jtitle->valuestring[0])
          return mcp_text("error: 'title' parameter is required for create");
+
+      /* Standing directive: no AI attribution in PR bodies (in-place strip is
+       * shrink-only, so the cJSON-owned buffer is safe). */
+      if (cJSON_IsString(jbody))
+         strip_ai_attribution(jbody->valuestring);
 
       char *esc_title = shell_escape(jtitle->valuestring);
       char *esc_body = shell_escape(cJSON_IsString(jbody) ? jbody->valuestring : "");

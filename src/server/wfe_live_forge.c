@@ -259,16 +259,26 @@ static int live_open(const char *repo, const char *branch, const char *base, con
       }
    }
 
+   /* Standing directive: no AI co-authorship / "Generated with" attribution in
+    * PR bodies. The body comes from the run's LLM, so strip a copy before it
+    * reaches the forge. */
+   char *bclean = strdup(body ? body : "");
+   if (!bclean)
+      return -1;
+   strip_ai_attribution(bclean);
+
    /* Escape every interpolated value; ABORT on any truncation (never run a
     * half-built shell command). */
    char ebranch[256], etitle[512], ebody[1024], ebase[128];
    if (shq(ebranch, sizeof ebranch, branch) != 0 ||
-       shq(etitle, sizeof etitle, title ? title : "") != 0 ||
-       shq(ebody, sizeof ebody, body ? body : "") != 0 || shq(ebase, sizeof ebase, base) != 0)
+       shq(etitle, sizeof etitle, title ? title : "") != 0 || shq(ebody, sizeof ebody, bclean) != 0 ||
+       shq(ebase, sizeof ebase, base) != 0)
    {
       aimee_log(LOG_WARN, "wfe-forge", "live_open: arg too long for %s", branch);
+      free(bclean);
       return -1;
    }
+   free(bclean);
 
    /* Push the work-item branch through the vaulted runner. Worktrees share the
     * branch namespace, so the push resolves the branch the run committed to. */

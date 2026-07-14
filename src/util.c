@@ -72,6 +72,62 @@ char *strip_llm_private_scaffold(const char *text)
    return out;
 }
 
+/* A line carries AI attribution if, after leading whitespace, it starts with a
+ * "co-authored-by:" trailer, or it contains the markdown-link attribution
+ * "generated with [claude"/"generated with [codex" anywhere. Case-insensitive.
+ * Mirrors the anchored regex in .github/workflows/ci.yml (ai-attribution gate)
+ * so Aimee never emits what CI rejects. `end` bounds the line (exclusive). */
+static int line_is_ai_attribution(const char *line, const char *end)
+{
+   const char *p = line;
+   while (p < end && (*p == ' ' || *p == '\t'))
+      p++;
+   if (end - p >= 15 && strncasecmp(p, "co-authored-by:", 15) == 0)
+      return 1;
+   for (const char *q = line; end - q >= 16 + 5; q++)
+   {
+      if (strncasecmp(q, "generated with [", 16) != 0)
+         continue;
+      const char *r = q + 16;
+      if ((end - r >= 6 && strncasecmp(r, "claude", 6) == 0) ||
+          (end - r >= 5 && strncasecmp(r, "codex", 5) == 0))
+         return 1;
+   }
+   return 0;
+}
+
+int strip_ai_attribution(char *text)
+{
+   if (!text)
+      return 0;
+   int removed = 0;
+   char *src = text, *dst = text;
+   while (*src)
+   {
+      char *eol = strchr(src, '\n');
+      char *next = eol ? eol + 1 : src + strlen(src);
+      const char *end = eol ? eol : next;
+      if (line_is_ai_attribution(src, end))
+         removed++;
+      else
+      {
+         size_t n = (size_t)(next - src);
+         memmove(dst, src, n);
+         dst += n;
+      }
+      src = next;
+   }
+   *dst = '\0';
+   if (removed)
+   {
+      size_t len = (size_t)(dst - text);
+      while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r' || text[len - 1] == ' ' ||
+                         text[len - 1] == '\t'))
+         text[--len] = '\0';
+   }
+   return removed;
+}
+
 void fatal(const char *fmt, ...)
 {
    va_list ap;
