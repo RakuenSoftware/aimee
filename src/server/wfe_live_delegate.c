@@ -447,6 +447,9 @@ static int live_verify_run(const char *workdir, char *out, size_t n)
    cJSON_AddStringToObject(args, "action", "run");
    cJSON_AddStringToObject(args, "format", "json");
    cJSON_AddBoolToObject(args, "async", 0);
+   /* The wfe engine is authoritative about the target worktree; bypass the
+    * chat-session cross-project scope gate (see handle_git_verify). */
+   cJSON_AddBoolToObject(args, "force_in_scope", 1);
    run_cmd_set_cwd(workdir);
    cJSON *res = handle_git_verify(server_active_ctx(), args, NULL);
    run_cmd_set_cwd(NULL);

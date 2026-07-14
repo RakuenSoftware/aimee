@@ -1444,8 +1444,19 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    /* Cross-project scope gate. When the target is not the session's current
     * project and cross-project verify is disabled (default), do not run, gate,
     * or auto-generate config for it. status/conflicts/install-hook are explicit
-    * inspection/setup actions and remain available. */
-   int in_scope = verify_project_in_scope(verify_root);
+    * inspection/setup actions and remain available.
+    *
+    * force_in_scope: an IN-PROCESS caller that is authoritative about the target
+    * (the workflow engine's implement gate, verifying a specific work-item
+    * worktree) sets this. The scope gate exists to stop a CHAT delegate from
+    * verifying an unrelated repo via the session's worktree mapping; it is wrong
+    * for the wfe gate, which runs on the scheduler thread where session_id()
+    * resolves to the run's chat session — a different project — and would wrongly
+    * report every implement verify "out-of-scope" (observed live: every slice's
+    * implement looped to its cap on an "unavailable" verdict). Not settable over
+    * the wire tool schema — only the in-process provider passes it. */
+   const cJSON *jforce = cJSON_GetObjectItemCaseSensitive(args, "force_in_scope");
+   int in_scope = (jforce && cJSON_IsTrue(jforce)) ? 1 : verify_project_in_scope(verify_root);
    if (!in_scope && strcmp(action_str, "check") == 0)
    {
       if (json_out)
