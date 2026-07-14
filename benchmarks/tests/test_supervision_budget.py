@@ -73,6 +73,20 @@ class DigestCapperTests(unittest.TestCase):
         self.assertEqual(orig, 2000)
         self.assertIn("[OVERFLOW:", capped)
 
+    def test_tiny_cap_does_not_exceed_contract(self):
+        # Regression: if the overflow note alone already exceeds ``cap``, the
+        # older implementation returned the over-cap note because the truncate
+        # loop's ``while head`` guard prevented any progress. The public
+        # ``est_tokens(capped) <= cap`` contract must hold for every cap.
+        text = "x" * 4000
+        for tiny_cap in (1, 5, 10):
+            capped, orig, final = cap_digest(text, cap=tiny_cap)
+            self.assertLessEqual(
+                final, tiny_cap,
+                f"cap_digest exceeded cap={tiny_cap}: {final} > {tiny_cap}",
+            )
+            self.assertEqual(orig, 1000)
+
     def test_empty_string(self):
         capped, orig, final = cap_digest("")
         self.assertEqual(capped, "")
@@ -100,25 +114,54 @@ class EscalationGateTests(unittest.TestCase):
         self.assertIn(rec, self.ledger.escalations)
         self.assertTrue(self.gate.is_open)
 
-    def test_close_logs_teardown_and_clears_state(self):
+    def test_close_does_not_double_charge(self):
+        # Regression: closing must NOT charge a second ESCALATION_COST_TOKENS.
+        # The gate privilege was bought at open time; closing merely records
+        # whether the dispatch actually succeeded, so the audit log and balance
+        # must reflect exactly one charge per escalation.
         self.gate.open_escalation(caller="arm_c", reason="r")
         before = self.ledger.balance
         rec = self.gate.close_escalation(caller="arm_c", detail="done")
-        self.assertFalse(rec.granted)
+        # Same open record, mutated: still 1 record, no second entry, balance
+        # drops by exactly ESCALATION_COST_TOKENS (the open charge), not 2x.
         self.assertEqual(rec.caller, "arm_c")
-        self.assertEqual(self.ledger.balance, before - ESCALATION_COST_TOKENS)
-        self.assertEqual(len(self.ledger.escalations), 2)
+        self.assertTrue(rec.granted)
+        self.assertEqual(self.ledger.balance, before)
+        self.assertEqual(len(self.ledger.escalations), 1)
+        self.assertEqual(len(self.ledger.entries), 1)
+        self.assertEqual(self.ledger.entries[0].source, "escalation.open:arm_c")
         self.assertFalse(self.gate.is_open)
+
+    def test_close_records_unused_outcome(self):
+        # Regression: when the dispatch was opened but never actually used,
+        # the open record's ``granted`` must flip to False so the audit log
+        # reflects intent rather than intent-masking "gate bought" semantics.
+        self.gate.open_escalation(caller="arm_c", reason="r")
+        rec = self.gate.close_escalation(
+            caller="arm_c", actual_used=False, detail="cancelled",
+        )
+        self.assertFalse(rec.granted)
+        self.assertEqual(rec.detail, "cancelled")
+        # Still no second charge even when the gate was unused.
+        self.assertEqual(len(self.ledger.entries), 1)
+        self.assertEqual(len(self.ledger.escalations), 1)
+
+    def test_close_idempotent_when_no_open(self):
+        # Closing a gate that was never opened must NOT pretend a charge happened.
+        before = self.ledger.balance
+        self.assertIsNone(self.gate.close_escalation(caller="arm_c"))
+        self.assertEqual(self.ledger.balance, before)
+        self.assertEqual(len(self.ledger.entries), 0)
+        self.assertEqual(len(self.ledger.escalations), 0)
 
     def test_open_charge_reflected_in_ledger_entries(self):
         self.gate.open_escalation(caller="arm_c", reason="r")
         self.gate.close_escalation(caller="arm_c")
-        # 2 charges: open + close, each ESCALATION_COST_TOKENS
-        self.assertEqual(len(self.ledger.entries), 2)
+        # 1 charge total: open only. close is a state mutation, not a billable
+        # event - see test_close_does_not_double_charge above.
+        self.assertEqual(len(self.ledger.entries), 1)
         self.assertEqual(self.ledger.entries[0].source, "escalation.open:arm_c")
-        self.assertEqual(self.ledger.entries[1].source, "escalation.close:arm_c")
-        for e in self.ledger.entries:
-            self.assertEqual(e.tokens, ESCALATION_COST_TOKENS)
+        self.assertEqual(self.ledger.entries[0].tokens, ESCALATION_COST_TOKENS)
 
     def test_caller_attribution_distinct(self):
         gate_b = EscalationGate(self.ledger)
@@ -190,6 +233,64 @@ class TelemetryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ledger.charge(-5, source="x")
 
+    def test_drift_detects_monotonicity_violation(self):
+        # The ``turn_boundaries`` series is the auditor-visible primary spend
+        # curve. By construction ``record_turn`` only appends a non-decreasing
+        # boundary, so the only way the curve can back down is if someone
+        # tampered with the ledger from outside. ``detect_drift`` must catch
+        # exactly that bypass: mutation directly on ``turn_boundaries`` so a
+        # primary spend was unwound outside the audit log.
+        ledger = BudgetLedger()
+        ledger.record_turn(0, 100)
+        ledger.record_turn(1, 250)
+        ledger.record_turn(2, 300)
+        # External tamper: rewind the running total - simulate an attacker
+        # unwinding primary spend without going through ``record_turn``.
+        ledger.turn_boundaries[-1] = 100
+        findings = ledger.detect_drift()
+        self.assertEqual(len(findings), 1)
+        self.assertIn("monotonicity violated", findings[0])
+
+    def test_drift_ignores_honest_monotonic_curve(self):
+        # Sanity: as long as every turn's running total is non-decreasing
+        # (which ``record_turn`` enforces), ``detect_drift`` reports zero
+        # monotonicity findings even when per-turn deltas are large.
+        ledger = BudgetLedger()
+        for i, delta in enumerate([100, 250, 200, 300]):
+            ledger.record_turn(i, delta)
+        # Only check the monotonicity part - rapid growth may or may not
+        # fire on this curve, but monotonicity MUST be clean.
+        findings = [f for f in ledger.detect_drift() if "monotonicity" in f]
+        self.assertEqual(findings, [])
+
+    def test_drift_detects_rapid_growth(self):
+        # ``record_turn`` accepts per-turn DELTAS. A 10x jump over the rolling
+        # median of recent deltas is the rapid-growth signal that audit should
+        # surface; it's the kind of curve that often accompanies a primary
+        # agent digging into the codebase instead of delegating.
+        ledger = BudgetLedger()
+        # First five turns: small steady deltas (median ~10).
+        for i, d in enumerate([10, 11, 9, 12, 10]):
+            ledger.record_turn(i, d)
+        # Sixth turn: a 500x spike. This MUST fire the rapid-growth alarm.
+        ledger.record_turn(5, 5000)
+        findings = ledger.detect_drift()
+        self.assertTrue(any("grew rapidly" in f for f in findings),
+                        f"expected rapid-growth finding, got {findings!r}")
+
+    def test_drift_clean_curve_no_findings(self):
+        ledger = BudgetLedger()
+        for i, d in enumerate([50, 60, 70, 80, 90]):
+            ledger.record_turn(i, d)
+        self.assertEqual(ledger.detect_drift(), [])
+
+    def test_drift_handles_short_history(self):
+        # Zero or one turn: not enough data to flag anything.
+        ledger = BudgetLedger()
+        self.assertEqual(ledger.detect_drift(), [])
+        ledger.record_turn(0, 100)
+        self.assertEqual(ledger.detect_drift(), [])
+
 
 class SupervisorFacadeTests(unittest.TestCase):
 
@@ -218,18 +319,29 @@ class SupervisorFacadeTests(unittest.TestCase):
             sup.check_tool_dispatch("read_file")
 
     def test_ledger_audit_trail_complete(self):
+        # Audit trail after one open + close + two primary turns:
+        #   - 2 primary.turn entries (one per record_turn)
+        #   - 1 escalation.open entry (the gate privilege purchase)
+        #   - 0 escalation.close entries (close is a state mutation, not a
+        #     billable event - see test_close_does_not_double_charge)
+        # Total: 3 entries, 1 escalation record (the open record, mutated).
         sup = Supervisor()
         sup.record_turn(0, 100)
         sup.record_turn(1, 200)
         sup.gate.open_escalation(caller="arm_c", reason="r")
+        open_rec = sup.gate.open_record
         sup.gate.close_escalation(caller="arm_c")
-        # 2 primary turns + 2 escalation charges = 4 entries
-        self.assertEqual(len(sup.ledger.entries), 4)
+        self.assertEqual(len(sup.ledger.entries), 3)
         sources = [e.source for e in sup.ledger.entries]
         self.assertEqual(sources, [
-            "primary.turn:0", "primary.turn:1",
-            "escalation.open:arm_c", "escalation.close:arm_c",
+            "primary.turn:0", "primary.turn:1", "escalation.open:arm_c",
         ])
+        # The single escalation record is the (mutated) open record, not a
+        # separate close record - the audit log must show one gate event per
+        # escalation, never two.
+        self.assertEqual(len(sup.ledger.escalations), 1)
+        self.assertIs(sup.ledger.escalations[0], open_rec)
+        self.assertTrue(sup.ledger.escalations[0].granted)
 
 
 if __name__ == "__main__":

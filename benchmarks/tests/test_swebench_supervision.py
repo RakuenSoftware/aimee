@@ -238,5 +238,56 @@ class TestRunArmCLive(unittest.TestCase):
         self.assertIsNone(rec["resolved"])             # graded later by S5
 
 
+
+class TestRunArmCBudgetTelemetry(unittest.TestCase):
+    """Regression: ``run_arm_c_supervised`` must emit the caller-attributable
+    budget telemetry so the auditor can replay the spend timeline. Until this
+    revision ``_budget.ledger.entries`` and ``_budget.ledger.escalations``
+    disappeared at function return because the local ``_budget`` was discarded."""
+
+    def setUp(self):
+        self._orig = S._FAKE
+        S._FAKE = False
+        self.addCleanup(lambda: setattr(S, "_FAKE", self._orig))
+
+    def test_run_record_carries_ledger_telemetry(self):
+        from benchmarks.coding import swebench_agentic_harness as H
+        from benchmarks.coding import swebench_live_transport as LT
+
+        def fake_dispatch(role, prompt, **kw):
+            if role == "review":
+                return LT.DispatchOutcome(
+                    100, "done", '{"action":"select","worker_id":"w1"}',
+                    "codex", "deleg-s-1-100", 2, 1,
+                )
+            wid = kw.get("via")
+            return LT.DispatchOutcome(
+                10, "done",
+                f"```diff\ndiff --git a/{wid} b/{wid}\n+fix\n```",
+                wid, f"deleg-w-1-{wid}", 3, 1,
+            )
+
+        inst = {"instance_id": "sympy__sympy-1", "repo": "sympy/sympy",
+                "base_commit": "0" * 40, "problem": "bug"}
+        rec = S.run_arm_c_supervised(
+            inst, workers=["w1"], n=1,
+            allocator=H.EnvAllocator("/tmp/c"), budget=H.LoopBudget(),
+            primary_agent="codex", primary_model="gpt-5.5",
+            dispatch=fake_dispatch,
+        )
+        # The four telemetry fields the auditor needs to replay the run:
+        for key in ("primary_tokens_by_turn", "primary_tokens_total",
+                    "supervision_budget_remaining", "budget_entries",
+                    "budget_escalations", "budget_drift_findings"):
+            self.assertIn(key, rec,
+                          f"run record missing audit telemetry: {key!r}")
+        # budget_entries must include the primary-turn sources and the gate open.
+        sources = [e["source"] for e in rec["budget_entries"]]
+        self.assertTrue(any(s == "primary.turn:0" for s in sources),
+                        f"no primary.turn:0 entry: {sources!r}")
+        # Drift findings: a well-behaved run produces an empty list, not a
+        # missing key (drift detection is now wired into the audit record).
+        self.assertIsInstance(rec["budget_drift_findings"], list)
+        self.assertEqual(rec["budget_drift_findings"], [])
 if __name__ == "__main__":
     unittest.main()

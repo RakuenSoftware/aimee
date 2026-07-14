@@ -506,7 +506,17 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
                                      verify=VerifyEnum.NOT_RUN, turns=e.api_calls)
                     sources[f"{primary_agent}@escalate"] = "response_text"
             finally:
-                _budget.gate.close_escalation(caller=f"{primary_agent}@arm_c")
+                # The double-charge bug fix in ``close_escalation`` means we now
+                # only mutate the open record's outcome, so passing the actual
+                # dispatch result is what makes the audit honest: ``granted``
+                # reflects whether the escalation actually produced a candidate
+                # patch, not whether the gate was merely closed.
+                _budget.gate.close_escalation(
+                    caller=f"{primary_agent}@arm_c",
+                    actual_used=best is not None,
+                    detail=("produced_candidate" if best is not None
+                            else "no_candidate"),
+                )
 
     wall = R.WallClock(t0=t0, first_work=first_work, t1=t1)
     escalation_dominated = is_escalation_dominated(esc.escalation_tokens, tok.input_uncached)
@@ -530,8 +540,29 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
         # S3 budget telemetry: emit the supervisor's per-turn primary token curve
         # plus the audit ledger so the auditor can reproduce the headline.
         "primary_tokens_by_turn": _budget.primary_tokens_by_turn,
-        "primary_tokens_total": _budget.primary_tokens_total,
+        "primary_tokens_total": _budget.ledger.primary_tokens_total,
         "supervision_budget_remaining": _budget.ledger.balance,
+        # Caller-attributable audit ledger. Until this revision the ledger was
+        # dropped when ``_budget`` went out of scope at function return, so the
+        # caller attribution and per-attempt outcome records vanished. Emit
+        # them now as plain dataclass dicts: any reviewer can replay the
+        # charge/escalation timeline from this without re-running the harness.
+        "budget_entries": [
+            {"source": e.source, "tokens": e.tokens, "at": e.at}
+            for e in _budget.ledger.entries
+        ],
+        "budget_escalations": [
+            {
+                "caller": er.caller, "reason": er.reason,
+                "cost_tokens": er.cost_tokens, "granted": er.granted,
+                "detail": er.detail, "at": er.at,
+            }
+            for er in _budget.ledger.escalations
+        ],
+        # Drift findings (monotonicity violations, rapid growth). Empty list
+        # means the run was well-behaved; non-empty means the auditor should
+        # inspect the ledger entries above.
+        "budget_drift_findings": _budget.ledger.detect_drift(),
     })
     return rec
 

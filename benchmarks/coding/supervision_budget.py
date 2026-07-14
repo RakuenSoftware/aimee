@@ -80,14 +80,25 @@ def cap_digest(text, *, cap=DIGEST_CAP):
 
     note = OVERFLOW_NOTE.format(cap=cap, orig_tokens=orig)
     note_tokens = est_tokens(note)
+    # The truncate loop below requires ``head`` to be non-empty to make progress; if
+    # ``cap`` is small enough that the overflow note alone already exceeds it, the
+    # only sane thing is to truncate the note too. We always emit a non-empty,
+    # strictly-bounded digest: the public contract ``est_tokens(capped) <= cap``
+    # holds for every cap, including pathological caps smaller than the overflow note.
+    if note_tokens > cap:
+        kept_note_chars = max(0, cap * CHARS_PER_TOKEN - 1)
+        note = note[:kept_note_chars]
+        note_tokens = est_tokens(note)
     keep_chars = max(0, (cap - note_tokens) * CHARS_PER_TOKEN)
     head = text[:keep_chars]
     capped = head + note
     capped_tokens = est_tokens(capped)
-    while capped_tokens > cap and head:
+    safety = 0
+    while capped_tokens > cap and head and safety < 10_000:
         head = head[:-CHARS_PER_TOKEN]
         capped = head + note
         capped_tokens = est_tokens(capped)
+        safety += 1
     return capped, orig, capped_tokens
 
 
@@ -136,15 +147,27 @@ class EscalationGate:
         self._open = rec
         return rec
 
-    def close_escalation(self, *, caller, detail=""):
-        rec = EscalationRecord(
-            caller=caller, reason="close", cost_tokens=self._cost, granted=False,
-            detail=detail or f"closed by {caller}",
-        )
-        self._ledger.charge(rec.cost_tokens, source=f"escalation.close:{caller}")
-        self._ledger.log(rec)
+    def close_escalation(self, *, caller, detail="", actual_used=True):
+        """Close the active escalation and attribute outcome to the existing record.
+
+        The ``cost_tokens`` charge happens once, at ``open_escalation`` time. Closing
+        must not charge again - that would silently double-book one gate permission as
+        two billable events and obscure whether the dispatch actually succeeded. We
+        therefore mutate the open record's outcome (``granted`` -> actual_used, plus
+        detail) rather than appending a fresh EscalationRecord.
+        """
+        if self._open is None:
+            # Idempotent close: no open record means no spend to attribute. Returning
+            # a record with granted=False would lie about a charge that never happened,
+            # so return None and let callers branch on ``is_open``.
+            return None
+        self._open.granted = bool(actual_used)
+        self._open.detail = detail or self._open.detail
+        # No additional charge: the gate was bought at open time; closing just records
+        # whether the privilege was actually used so the audit log reflects intent.
+        closed = self._open
         self._open = None
-        return rec
+        return closed
 
     def check_tool(self, tool):
         if tool in CODE_TOOLS and not self.is_open:
@@ -249,6 +272,62 @@ class BudgetLedger:
     def primary_tokens_total(self):
         """Accumulated primary token spend across all recorded turns."""
         return self.turn_boundaries[-1] if self.turn_boundaries else 0
+
+    def detect_drift(self, *, rapid_growth_factor=4, rapid_growth_window=3):
+        """Detect drift in ``primary_tokens_by_turn``.
+
+        Returns a list of human-readable drift findings. Empty list = no drift.
+        Two checks are run:
+
+        1. **Monotonicity violation**: the curve must be non-decreasing because each
+           ``record_turn`` adds a non-negative primary spend. A negative step
+           (turn-over-turn decrease) means somebody backed the value out somewhere
+           outside the ledger - which is exactly the silent-bypass failure mode
+           that motivated putting this spend under audit in the first place.
+
+        2. **Rapid growth**: if any single turn's primary spend exceeds
+           ``rapid_growth_factor`` times the median of the previous
+           ``rapid_growth_window`` turns, flag it. This catches the "primary agent
+           suddenly spends 4x its normal turn budget" pattern that often
+           accompanies escalation abuse (a primary digging into the codebase
+           instead of delegating).
+
+        Both checks are deterministic, side-effect-free, and run against
+        ``turn_boundaries`` so a reviewer can replay them offline.
+        """
+        findings = []
+        if len(self.turn_boundaries) < 2:
+            return findings
+        # 1. Monotonicity
+        for i in range(1, len(self.turn_boundaries)):
+            prev = self.turn_boundaries[i - 1]
+            cur = self.turn_boundaries[i]
+            step = cur - prev
+            if step < 0:
+                findings.append(
+                    f"primary_tokens_by_turn decreased at turn {i} "
+                    f"({prev} -> {cur}); monotonicity violated"
+                )
+        # 2. Rapid growth (per-turn deltas, not cumulative totals)
+        deltas = [
+            self.turn_boundaries[i] - self.turn_boundaries[i - 1]
+            for i in range(1, len(self.turn_boundaries))
+        ]
+        window = max(1, int(rapid_growth_window))
+        for i, d in enumerate(deltas):
+            if d <= 0:
+                continue
+            lookback = deltas[max(0, i - window):i]
+            if not lookback:
+                continue
+            med = sorted(lookback)[len(lookback) // 2]
+            if med > 0 and d > rapid_growth_factor * med:
+                findings.append(
+                    f"primary_tokens_by_turn grew rapidly at turn {i + 1}: "
+                    f"delta={d} vs median(previous {len(lookback)})={med} "
+                    f"(factor > {rapid_growth_factor})"
+                )
+        return findings
 
 
 class Supervisor:
