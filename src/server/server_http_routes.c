@@ -58,6 +58,7 @@
 #include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
 #include "webchat_live.h"    /* db1_webchat_live_get — the browser's live-turn poll */
 #include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
+#include "kb_client.h"       /* kb_client_index_scan — push webuser clones into aimee-kb */
 #include "aimee_home.h"      /* aimee_home — proposal artifact dir for /v1/dev/submit */
 #include <math.h>            /* isfinite — validate the /v1/dev/submit budget cap */
 #include <errno.h>           /* strtol overflow detection for /v1/dev/submit caps */
@@ -1190,6 +1191,34 @@ static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
    return 200;
 }
 
+/* Push a freshly cloned webuser project into aimee-kb (/v1/code/scan) so the
+ * curator queues its code units for synthesis + embedding. index_scan_project
+ * only feeds this server's local lexical index — without this push a
+ * GUI-cloned repo never reaches the kb (no code_embeddings, no corpus).
+ * Best-effort: clone success never depends on the knowledge service; the
+ * outcome is reported on `out` as kb_indexed (+ kb_reason on failure). */
+static void rh_clone_kb_scan(const char *pname, const char *dest, cJSON *out)
+{
+   if (!kb_client_is_live())
+   {
+      cJSON_AddBoolToObject(out, "kb_indexed", 0);
+      cJSON_AddStringToObject(out, "kb_reason", "knowledge service unavailable");
+      return;
+   }
+   kb_client_index_scan_result_t res;
+   memset(&res, 0, sizeof(res));
+   int rc = kb_client_index_scan(pname, dest, 0, &res);
+   int ok = (rc == 0 && !res.skipped);
+   cJSON_AddBoolToObject(out, "kb_indexed", ok);
+   if (!ok)
+   {
+      cJSON_AddStringToObject(out, "kb_reason",
+                              res.reason[0] ? res.reason : "knowledge service unavailable");
+      LOG_WARN("server.workspace", "clone: kb code scan skipped for project '%s': %s", pname,
+               res.message[0] ? res.message : (res.reason[0] ? res.reason : "unavailable"));
+   }
+}
+
 /* POST /v1/workspace/clone {url, name?} — clone a repo as a project under the
  * calling webchat user's scoped workspace (webchat-git WP-D). The caller
  * principal comes from the attested identity (server.token-gated X-Aimee-Webuser),
@@ -1229,6 +1258,7 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    cJSON *out = cJSON_CreateObject();
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddStringToObject(out, "name", pname);
+   rh_clone_kb_scan(pname, dest, out);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);
@@ -1324,6 +1354,7 @@ static int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
          cJSON_AddBoolToObject(r, "ok", 1);
          cJSON_AddStringToObject(r, "project", pname);
          cJSON_AddNullToObject(r, "error");
+         rh_clone_kb_scan(pname, dest, r);
       }
       else
       {
