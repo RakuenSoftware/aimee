@@ -1620,6 +1620,13 @@ typedef struct config
     * events to on doc invalidation. Empty = disabled (poll the feed). */
    char kb_curator_invalidation_notify_socket[512];
    int kb_curator_extract_code_enabled;
+   /* Dedicated extract_code worker threads (kb_curator_extract_code_workers).
+    * Default 1 = the shared drain thread's one-unit-per-pass behavior. N>1
+    * spawns N-1 additional workers that drain ONLY extract_code jobs in
+    * parallel — sized to the synth backend's parallel slots (e.g. 4 workers
+    * for a --parallel 4 llama-server), since each job is one LLM sidecar
+    * call. Clamped to [1,8]. */
+   int kb_curator_extract_code_workers;
    /* resolve_entities pass: 0 = off (default), 1 = commit proposed `entity`
     * mentions into curator_entity_vectors on the curator drain. */
    int kb_curator_resolve_entities_enabled;

@@ -915,6 +915,40 @@ static void *drain_thread_main(void *arg)
    return NULL;
 }
 
+/* Dedicated extract_code worker: claims and processes ONE extract_code job per
+ * iteration, sleeping the poll interval when the queue is empty or the gate is
+ * off. Deliberately minimal — no sweeps, no other stages — so N workers map
+ * 1:1 onto the synth backend's parallel slots. */
+static void *kb_curator_code_worker_main(void *arg)
+{
+   kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
+   while (!ctx->stop)
+   {
+      config_t cfg;
+      config_load(&cfg);
+      if (!cfg.kb_curator_extract_code_enabled)
+      {
+         sleep(DRAIN_POLL_SECS);
+         continue;
+      }
+      kb_curator_extract_opts_t opts;
+      memset(&opts, 0, sizeof(opts));
+      snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
+               cfg.kb_curator_extract_command);
+      opts.max_tokens =
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+
+      int r = kb_curator_extract_code_unit_one(&opts);
+      db2_lease_release_idle();
+      if (r == 1)
+         continue; /* did work — claim the next job immediately */
+      /* empty queue (0) or error (<0): back off the poll interval */
+      sleep(DRAIN_POLL_SECS);
+   }
+   return NULL;
+}
+
 static void *kb_curator_index_lane_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
@@ -1000,6 +1034,29 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
    {
       aimee_log(LOG_WARN, "kb.curator.drain", "failed to start drain thread");
    }
+
+   /* Dedicated extract_code workers: kb_curator_extract_code_workers - 1 extra
+    * threads (the main LLM lane above still runs one extract per pass), so a
+    * synth backend serving N parallel slots actually receives N concurrent
+    * sidecar extractions. Job claims are transactional (UPDATE ... SELECT ...
+    * LIMIT 1), so concurrent workers never double-claim. */
+   ctx->code_active = 0;
+   if (cfg.kb_curator_extract_code_enabled && cfg.kb_curator_extract_code_workers > 1)
+   {
+      int extra = cfg.kb_curator_extract_code_workers - 1;
+      if (extra > KB_CURATOR_MAX_CODE_WORKERS)
+         extra = KB_CURATOR_MAX_CODE_WORKERS;
+      for (int i = 0; i < extra; i++)
+      {
+         if (pthread_create(&ctx->code_threads[ctx->code_active], NULL, kb_curator_code_worker_main,
+                            ctx) == 0)
+            ctx->code_active++;
+         else
+            break;
+      }
+      aimee_log(LOG_INFO, "kb.curator.drain", "%d extract_code worker thread(s) started",
+                ctx->code_active);
+   }
    if (pthread_create(&ctx->index_thread, NULL, kb_curator_index_lane_main, ctx) == 0)
    {
       ctx->index_active = 1;
@@ -1013,7 +1070,7 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
 
 void kb_curator_drain_shutdown(kb_curator_drain_ctx_t *ctx)
 {
-   if (!ctx || (!ctx->active && !ctx->index_active))
+   if (!ctx || (!ctx->active && !ctx->index_active && ctx->code_active <= 0))
       return;
    ctx->stop = 1;
    if (ctx->active)
@@ -1026,5 +1083,8 @@ void kb_curator_drain_shutdown(kb_curator_drain_ctx_t *ctx)
       pthread_join(ctx->index_thread, NULL);
       ctx->index_active = 0;
    }
+   for (int i = 0; i < ctx->code_active; i++)
+      pthread_join(ctx->code_threads[i], NULL);
+   ctx->code_active = 0;
    aimee_log(LOG_DEBUG, "kb.curator.drain", "drain threads stopped");
 }

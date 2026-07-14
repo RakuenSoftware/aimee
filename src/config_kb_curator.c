@@ -36,6 +36,7 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_typed_facts_auto_promote_enabled = 1;
    cfg->kb_typed_facts_promote_threshold = 3;
    cfg->kb_curator_extract_code_enabled = 1;
+   cfg->kb_curator_extract_code_workers = 1;
    cfg->kb_curator_resolve_entities_enabled = 1;
    cfg->kb_curator_index_narrative_enabled = 1;
    cfg->kb_curator_index_claims_enabled = 1;
@@ -177,6 +178,11 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(extract_code, "enabled");
       if (enabled && cJSON_IsBool(enabled))
          cfg->kb_curator_extract_code_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+      /* workers: dedicated extract_code drain threads (see config.h). Clamped
+       * to [1,8]; non-numeric / out-of-range values keep the default. */
+      const cJSON *workers = cJSON_GetObjectItemCaseSensitive(extract_code, "workers");
+      if (workers && cJSON_IsNumber(workers) && workers->valueint >= 1 && workers->valueint <= 8)
+         cfg->kb_curator_extract_code_workers = workers->valueint;
    }
 
    const cJSON *resolve_entities = cJSON_GetObjectItemCaseSensitive(curator, "resolve_entities");

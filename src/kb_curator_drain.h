@@ -3,10 +3,18 @@
 
 #include <pthread.h>
 
+#define KB_CURATOR_MAX_CODE_WORKERS 8
+
 typedef struct
 {
    pthread_t thread;       /* LLM lane (GPU): extract/resolve/synthesize + sweeps */
    pthread_t index_thread; /* INDEX lane (CPU): embed/index + contradiction SQL */
+   /* Dedicated extract_code workers (kb_curator_extract_code_workers - 1 extra
+    * threads; the main LLM lane still contributes one unit per pass). Each
+    * drains ONLY extract_code jobs so a multi-slot synth backend runs that
+    * many sidecar extractions in parallel. */
+   pthread_t code_threads[KB_CURATOR_MAX_CODE_WORKERS];
+   int code_active; /* number of spawned extract_code workers */
    int active;
    int index_active;
    volatile int stop;
