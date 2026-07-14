@@ -299,9 +299,12 @@ export default function Projects() {
         setDelKbDown(true); setDelForceArmed(false);
         setErr(d.error || 'knowledge service unavailable — retry, or force delete');
       } else {
+        // A non-kb error must disarm any pending force confirmation — the
+        // armed state only ever applies to the 503 kb-down flow it came from.
+        setDelKbDown(false); setDelForceArmed(false);
         setErr(d.error || `delete failed (${r.status})`);
       }
-    } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
+    } catch { setDelForceArmed(false); setErr('aimee-server unavailable'); } finally { setBusy(false); }
   }
 
   async function runOp(op: string, extra?: Record<string, unknown>): Promise<boolean> {
