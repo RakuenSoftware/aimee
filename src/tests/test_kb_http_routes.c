@@ -1187,6 +1187,109 @@ int db2_kb_file_index_delete_project(const char *project)
    return 0;
 }
 
+/* ── slice-2 purge-route stubs: fence store + fan-out delete primitives ── */
+
+static int g_fence_present = 0;
+static int g_fence_live = 0;
+static int g_fence_write_rc = 0;
+static char g_fence_gen[128] = "";
+static char g_fence_pid[128] = "";
+static char g_fence_project[256] = "";
+static int g_fence_heartbeats = 0;
+
+int db2_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id)
+{
+   if (g_fence_write_rc)
+      return -1;
+   snprintf(g_fence_project, sizeof(g_fence_project), "%s", project ? project : "");
+   snprintf(g_fence_gen, sizeof(g_fence_gen), "%s", generation ? generation : "");
+   snprintf(g_fence_pid, sizeof(g_fence_pid), "%s", purge_id ? purge_id : "");
+   g_fence_present = 1;
+   g_fence_live = 1;
+   return 0;
+}
+
+int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                            size_t pid_cap, int *live_out)
+{
+   (void)project;
+   if (live_out)
+      *live_out = 0;
+   if (!g_fence_present)
+      return 0;
+   if (gen_out && gen_cap)
+      snprintf(gen_out, gen_cap, "%s", g_fence_gen);
+   if (pid_out && pid_cap)
+      snprintf(pid_out, pid_cap, "%s", g_fence_pid);
+   if (live_out)
+      *live_out = g_fence_live;
+   return 1;
+}
+
+int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+{
+   (void)project;
+   if (!g_fence_present || !generation || !purge_id || strcmp(g_fence_gen, generation) != 0 ||
+       strcmp(g_fence_pid, purge_id) != 0)
+      return 0;
+   g_fence_heartbeats++;
+   return 1;
+}
+
+int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
+{
+   (void)project;
+   if (!g_fence_present || !generation || !purge_id || strcmp(g_fence_gen, generation) != 0 ||
+       strcmp(g_fence_pid, purge_id) != 0)
+      return 0;
+   g_fence_present = 0;
+   g_fence_gen[0] = g_fence_pid[0] = '\0';
+   return 1;
+}
+
+static int g_purge_code_embeddings_rc = 7;
+static int g_purge_curator_vectors_rc = 3;
+static int g_purge_canonical_rc = 1;
+static int g_purge_code_unit_jobs_rc = 4;
+static int g_purge_pdf_rc = 0;
+static int g_purge_minhash_rc = 0;
+
+int pgvec_code_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_code_embeddings_rc;
+}
+
+int pgvec_curator_code_unit_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_curator_vectors_rc;
+}
+
+int db2_code_index_project_delete(const char *name)
+{
+   (void)name;
+   return g_purge_canonical_rc;
+}
+
+int kb_curator_code_unit_jobs_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_code_unit_jobs_rc;
+}
+
+int pgvec_kbpdf_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_pdf_rc;
+}
+
+int db2_sketch_minhash_signature_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_minhash_rc;
+}
+
 void kb_worker_notify(kb_service_ctx_t *ctx)
 {
    (void)ctx;
@@ -3669,6 +3772,208 @@ static void test_maintenance_clear_error(void)
    g_clear_deleted = 12;
 }
 
+/* ── slice-2 purge routes: fence lifecycle + fan-out map shape ─────────── */
+
+static void purge_fence_reset(void)
+{
+   g_fence_present = 0;
+   g_fence_live = 0;
+   g_fence_write_rc = 0;
+   g_fence_gen[0] = g_fence_pid[0] = g_fence_project[0] = '\0';
+   g_fence_heartbeats = 0;
+}
+
+static void test_purge_project_writes_fence(void)
+{
+   purge_fence_reset();
+   g_clear_deleted = 12;
+   char buf[2048];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   /* Fence written for the project and NOT cleared by the purge route. */
+   assert(g_fence_present == 1);
+   assert(strcmp(g_fence_project, "proj-alpha") == 0);
+   assert(strcmp(g_fence_gen, "g1") == 0);
+   assert(strcmp(g_fence_pid, "p1") == 0);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL);
+   assert(strstr(buf, "\"ok\":true") != NULL);
+   assert(strstr(buf, "\"fence_replaced\":false") != NULL);
+   /* Per-store map, in fan-out order, counts from the stubs (0 for the
+    * no-count primitives pdf_vectors/minhash/vectors). */
+   assert(strstr(buf, "\"stores\":{") != NULL);
+   assert(strstr(buf, "\"chunks\":12") != NULL);
+   assert(strstr(buf, "\"file_index\":0") != NULL);
+   assert(strstr(buf, "\"vectors\":0") != NULL);
+   assert(strstr(buf, "\"code_embeddings\":7") != NULL);
+   assert(strstr(buf, "\"curator_code_unit_vectors\":3") != NULL);
+   assert(strstr(buf, "\"canonical_index\":1") != NULL);
+   assert(strstr(buf, "\"code_unit_jobs\":4") != NULL);
+   assert(strstr(buf, "\"pdf_vectors\":0") != NULL);
+   assert(strstr(buf, "\"minhash\":0") != NULL);
+   assert(strcmp(g_clear_project, "proj-alpha") == 0);
+}
+
+static void test_purge_project_live_fence_409(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   g_fence_live = 1;
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "purge fence held") != NULL);
+   assert(strstr(buf, "\"generation\":\"g0\"") != NULL);
+   assert(strstr(buf, "\"purge_id\":\"p0\"") != NULL);
+   /* Refused: the original owner's fence is untouched. */
+   assert(strcmp(g_fence_gen, "g0") == 0);
+   assert(strcmp(g_fence_pid, "p0") == 0);
+}
+
+static void test_purge_project_takeover_displaces(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   g_fence_live = 1;
+   char buf[2048];
+   int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                            "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":"
+                            "\"p1\",\"takeover\":true}",
+                            -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"fence_replaced\":true") != NULL);
+   assert(strstr(buf, "\"displaced\":{\"generation\":\"g0\",\"purge_id\":\"p0\"}") != NULL);
+   /* New owner holds the fence now. */
+   assert(strcmp(g_fence_gen, "g1") == 0);
+   assert(strcmp(g_fence_pid, "p1") == 0);
+}
+
+static void test_purge_project_stale_fence_replaced(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   g_fence_live = 0; /* stale heartbeat: no takeover needed */
+   char buf[2048];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"fence_replaced\":true") != NULL);
+   assert(strcmp(g_fence_gen, "g1") == 0);
+}
+
+static void test_purge_project_store_error_continues(void)
+{
+   purge_fence_reset();
+   g_purge_canonical_rc = -1; /* one store fails: fan-out continues, ok:false */
+   char buf[2048];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"ok\":false") != NULL);
+   assert(strstr(buf, "\"canonical_index\":{\"error\":\"delete failed\"}") != NULL);
+   /* Stores after the failing one still ran and report counts. */
+   assert(strstr(buf, "\"code_unit_jobs\":4") != NULL);
+   assert(strstr(buf, "\"minhash\":0") != NULL);
+   g_purge_canonical_rc = 1;
+}
+
+static void test_purge_project_bad_request(void)
+{
+   purge_fence_reset();
+   char buf[512];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"purge_id\":\"p1\"}", -1, buf, sizeof(buf));
+   assert(s == 400);
+   assert(strstr(buf, "generation") != NULL);
+   /* Space-carrying tokens would corrupt the space-separated fence value. */
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g 1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 400);
+   assert(g_fence_present == 0);
+}
+
+static void test_purge_heartbeat_match_and_mismatch(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"refreshed\":true") != NULL);
+   assert(g_fence_heartbeats == 1);
+   /* Displaced owner: mismatch no-ops and echoes the current fence. */
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p0\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"refreshed\":false") != NULL);
+   assert(strstr(buf, "\"fence\":\"g1 p1\"") != NULL);
+   assert(g_fence_heartbeats == 1);
+}
+
+static void test_purge_finalize_mismatch_noop(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":false") != NULL);
+   assert(strstr(buf, "\"fence\":\"g1 p1\"") != NULL);
+   assert(g_fence_present == 1); /* displaced owner cannot clear the fence */
+}
+
+static void test_purge_finalize_match_clears(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":true") != NULL);
+   assert(g_fence_present == 0);
+}
+
+static void test_purge_cancel_match_clears(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":true") != NULL);
+   assert(g_fence_present == 0);
+   /* Idempotent: a second cancel is a mismatch/absent no-op. */
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":false") != NULL);
+}
+
 static void test_job_not_found(void)
 {
    char buf[256];
@@ -4350,6 +4655,16 @@ int main(void)
    test_maintenance_reconcile_ok();
    test_maintenance_clear_ok();
    test_maintenance_clear_error();
+   test_purge_project_writes_fence();
+   test_purge_project_live_fence_409();
+   test_purge_project_takeover_displaces();
+   test_purge_project_stale_fence_replaced();
+   test_purge_project_store_error_continues();
+   test_purge_project_bad_request();
+   test_purge_heartbeat_match_and_mismatch();
+   test_purge_finalize_mismatch_noop();
+   test_purge_finalize_match_clears();
+   test_purge_cancel_match_clears();
    test_job_not_found();
    test_job_status_ok();
    test_job_status_error();

@@ -1146,6 +1146,7 @@ int main(void)
           {"POST", "/v1/workspace/clone", "{}"},
           {"POST", "/v1/workspace/git", "{}"},
           {"GET", "/v1/workspace/projects", NULL},
+          {"POST", "/v1/workspace/projects/delete", "{}"},
           {"POST", "/v1/workspace/session-dir", "{}"},
           {"GET", "/v1/git/credentials", NULL},
           {"POST", "/v1/git/sshkey", "{}"},

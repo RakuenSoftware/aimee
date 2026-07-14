@@ -41,6 +41,34 @@ extern "C"
    /* Unconditionally drop the vector rebuild-lock row. */
    void db2_kb_runtime_state_vector_rebuild_lock_release(void);
 
+   /* ── Project-purge generation fence (webchat-project-lifecycle slice 2) ──
+    * Fence rows: `project_purging:<key>` = "<generation> <purge_id>" plus a
+    * `project_purging_ts:<key>` heartbeat written via pg_now_text(). A fence
+    * whose heartbeat is older than kb_purge_fence_ttl_s (default 900) is
+    * treated as absent by writers. */
+
+   /* Write (or overwrite) the fence for `project`. 0 on success, -1 on error. */
+   int db2_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id);
+
+   /* Read the current fence. Returns 1 when a fence row exists (fills gen/pid;
+    * *live_out = 1 iff the heartbeat is younger than TTL/3 — 2x the expected
+    * heartbeat interval), 0 when absent, -1 on error. */
+   int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                               size_t pid_cap, int *live_out);
+
+   /* Writer-side commit-point check: 1 iff a fence row exists AND its heartbeat
+    * is within the TTL. Expired or partially written fences count as absent. */
+   int db2_kb_purge_fence_active(const char *project);
+
+   /* Refresh the heartbeat iff BOTH generation and purge_id match the stored
+    * fence. 1 refreshed, 0 mismatch/absent (no-op), -1 error. */
+   int db2_kb_purge_fence_heartbeat(const char *project, const char *generation,
+                                    const char *purge_id);
+
+   /* Clear both fence rows iff BOTH generation and purge_id match. 1 cleared,
+    * 0 mismatch/absent (no-op), -1 error. */
+   int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id);
+
 #ifdef __cplusplus
 }
 #endif

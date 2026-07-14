@@ -3,6 +3,7 @@
  * the test, so it exercises the real git clone + scope resolution + name
  * derivation + refusal paths deterministically. */
 #include "git_project.h"
+#include "ws_registry.h"
 
 #include <assert.h>
 #include <limits.h>
@@ -173,6 +174,89 @@ int main(void)
    assert(git_project_list("uid:1000", names, 64) == -1);
    /* a webuser with no clones lists zero, not an error */
    assert(git_project_list("webuser:carol", names, 64) == 0);
+
+   /* --- delete (slice 2). The kb purge wrappers are the kb_purge_stub: a
+    * transport failure by default (exercising the 503-abort path), success
+    * with AIMEE_TEST_KB_PURGE_MODE=ok. --- */
+   git_project_delete_result_t dres;
+   char derr[512];
+
+   /* refusals: bad ref / non-webuser */
+   assert(git_project_delete("webuser:alice", "../x", 0, &dres, derr, sizeof(derr)) == -1);
+   assert(git_project_delete("webuser:alice", "a/b/c", 0, &dres, derr, sizeof(derr)) == -1);
+   assert(git_project_delete("uid:1000", "srcrepo", 0, &dres, derr, sizeof(derr)) == -1);
+   /* cross-principal / nonexistent: plain not-found (no existence disclosure) */
+   assert(git_project_delete("webuser:carol", "srcrepo", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_NOT_FOUND);
+   assert(git_project_delete("webuser:bob", "srcrepo", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_NOT_FOUND); /* alice's flat project is invisible to bob */
+
+   /* retained: alice deletes acme/orgproj while bob still holds it — the kb
+    * purge is never attempted (the stub would fail), alice's clone goes, bob's
+    * stays, the registry drops to one holder. */
+   char aorg[PATH_MAX], borg[PATH_MAX];
+   snprintf(aorg, sizeof(aorg), "%s/webusers/alice/acme/orgproj", wsdir);
+   snprintf(borg, sizeof(borg), "%s/webusers/bob/acme/orgproj", wsdir);
+   assert(git_project_delete("webuser:alice", "acme/orgproj", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "retained") == 0);
+   assert(dres.purge_id[0] != '\0');
+   free(dres.kb_detail);
+   assert(stat(aorg, &st) != 0);                        /* alice's clone removed */
+   assert(stat(borg, &st) == 0 && S_ISDIR(st.st_mode)); /* bob's untouched */
+   char remo[1024];
+   int holders = 0;
+   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo), &holders) == 1 && holders == 1);
+   /* alice's acme org dir was NOT pruned: acme/syncy still lives there */
+   snprintf(check, sizeof(check), "%s/webusers/alice/acme/syncy", wsdir);
+   assert(stat(check, &st) == 0);
+
+   /* last holder + kb unreachable, no force -> 503 abort: nothing destroyed,
+    * the registry decrement rolled back. */
+   assert(git_project_delete("webuser:bob", "acme/orgproj", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_KB_UNAVAILABLE);
+   assert(dres.kb_detail && strstr(dres.kb_detail, "error") != NULL);
+   free(dres.kb_detail);
+   assert(stat(borg, &st) == 0); /* clone intact */
+   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo), &holders) == 1 &&
+          holders == 1); /* count restored */
+
+   /* force: the filesystem proceeds despite the unreachable kb; the response
+    * carries the kb error detail under kb_status "forced". */
+   assert(git_project_delete("webuser:bob", "acme/orgproj", 1, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "forced") == 0);
+   assert(dres.kb_detail && strstr(dres.kb_detail, "stub") != NULL);
+   free(dres.kb_detail);
+   assert(stat(borg, &st) != 0);                                             /* clone removed */
+   assert(ws_reg_lookup("acme/orgproj", remo, sizeof(remo), &holders) == 0); /* entry gone */
+
+   /* purged: sole holder + reachable kb (stub ok mode) -> full purge path
+    * (fence write, heartbeat, finalize) and the per-store detail. */
+   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
+   snprintf(check, sizeof(check), "%s/webusers/alice/myproj", wsdir);
+   assert(stat(check, &st) == 0);
+   assert(git_project_delete("webuser:alice", "myproj", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "purged") == 0);
+   assert(dres.kb_detail && strstr(dres.kb_detail, "stub") != NULL); /* per-store map */
+   assert(dres.generation[0] != '\0');
+   free(dres.kb_detail);
+   assert(stat(check, &st) != 0);
+   unsetenv("AIMEE_TEST_KB_PURGE_MODE");
+
+   /* org prune: bob's last project under acme (syncy, retained — alice still
+    * holds it) removes the clone AND the now-empty org dir. */
+   assert(git_project_delete("webuser:bob", "acme/syncy", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "retained") == 0);
+   free(dres.kb_detail);
+   snprintf(check, sizeof(check), "%s/webusers/bob/acme", wsdir);
+   assert(stat(check, &st) != 0); /* org dir pruned */
+   snprintf(check, sizeof(check), "%s/webusers/alice/acme/syncy", wsdir);
+   assert(stat(check, &st) == 0); /* alice's holder untouched */
+
+   /* the lister agrees: alice lost acme/orgproj + myproj, bob lost both acme
+    * projects (shared remains). */
+   assert(git_project_list("webuser:alice", names, 64) == 3);
+   assert(git_project_list("webuser:bob", names, 64) == 1);
+   assert(strcmp(names[0], "shared") == 0);
 
    assert(run("rm -rf %s", home) == 0);
    printf("git_project: all tests passed\n");

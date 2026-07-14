@@ -485,10 +485,11 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    }
 
    char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
-       conn,
-       "SELECT heading_path, content, doc_kind, quarantine_state FROM kb_documents WHERE id = ?1",
-       err, sizeof(err));
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT heading_path, content, doc_kind, quarantine_state, project"
+                        " FROM kb_documents WHERE id = ?1",
+                        err, sizeof(err));
    if (!stmt)
    {
       snprintf(errbuf, errbuf_size, "prepare failed");
@@ -506,10 +507,12 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    char content_buf[3072];
    char doc_kind[32];
    char quarantine[32];
+   char project_buf[256];
    db2_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
    db2_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
    db2_copy_text(doc_kind, sizeof(doc_kind), aimee_pg_column_text(stmt, 2));
    db2_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
+   db2_copy_text(project_buf, sizeof(project_buf), aimee_pg_column_text(stmt, 4));
    aimee_pg_finalize(stmt);
 
    /* Defense-in-depth: never write a PDF vector for a non-PDF row or for ANY quarantined
@@ -538,6 +541,16 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    {
       db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, 0, "payload build failed");
       snprintf(errbuf, errbuf_size, "payload build failed");
+      return -1;
+   }
+   /* Generation-fence check immediately before the PDF vector write
+    * (webchat-project-lifecycle slice 2): a job claimed pre-purge must not
+    * land a vector for a project being purged. Failing the job is safe — on
+    * retry after the purge the chunk row is gone (benign skip above). */
+   if (project_buf[0] && db2_kb_purge_fence_active(project_buf))
+   {
+      free(payload_json);
+      snprintf(errbuf, errbuf_size, "purge fence active for project '%s'", project_buf);
       return -1;
    }
    int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);

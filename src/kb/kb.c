@@ -8,6 +8,7 @@
 #include "db2/kb_service_backend.h"
 #include "db2/memory_query.h"
 #include "db2/vector_index_ops.h"
+#include "db2/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
 #include "db2/sketch.h"
 #include "kb_vectors.h"
 #include "kb_curator_notify.h"
@@ -662,16 +663,25 @@ int kb_async_enabled(void)
 /* Build / Update                                                       */
 /* ------------------------------------------------------------------ */
 
-static void kb_flush_batch(int64_t *ids, float *vecs, int dim, char **payloads, int *count)
+static void kb_flush_batch(const char *project, int64_t *ids, float *vecs, int dim, char **payloads,
+                           int *count)
 {
    if (*count <= 0)
       return;
-   int rc =
-       pgvec_kb_vector_upsert_document_batch(ids, vecs, dim, (const char *const *)payloads, *count);
+   /* Generation-fence check immediately before the pgvector batch write: a
+    * batch mid-flight past its enqueue check still must not land vectors for
+    * a project being purged (webchat-project-lifecycle slice 2). */
+   int fenced = project && project[0] && db2_kb_purge_fence_active(project);
+   if (fenced)
+      LOG_WARN("kb_build", "purge fence active for project '%s': dropping %d-vector batch", project,
+               *count);
+   int rc = fenced ? -1
+                   : pgvec_kb_vector_upsert_document_batch(ids, vecs, dim,
+                                                           (const char *const *)payloads, *count);
    for (int i = 0; i < *count; i++)
    {
       int ok = (rc == 0);
-      const char *err = rc ? "batch upsert failed" : NULL;
+      const char *err = rc ? (fenced ? "purge fence active" : "batch upsert failed") : NULL;
       db2_vector_index_op_record(ids[i], pgvec_kb_vector_collection_name(), 0, ok, err);
       free(payloads[i]);
       payloads[i] = NULL;
@@ -906,7 +916,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
              * 384-d collection instead of corrupting the batch. */
             if (dim != c->kb_expected_dim)
             {
-               kb_flush_batch(c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
+               kb_flush_batch(c->project, c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
                               c->kb_batch_payloads, c->kb_batch_count);
                sync_vector_embedding(doc_id, vec, dim);
             }
@@ -925,7 +935,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                c->kb_batch_payloads[*c->kb_batch_count] = payload_json;
                (*c->kb_batch_count)++;
                if (*c->kb_batch_count >= c->kb_batch_size)
-                  kb_flush_batch(c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
+                  kb_flush_batch(c->project, c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
                                  c->kb_batch_payloads, c->kb_batch_count);
             }
          }
@@ -948,6 +958,14 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
 {
    if (!root_path || !db2_is_initialized())
       return -1;
+   /* Generation fence (webchat-project-lifecycle slice 2): refuse to start an
+    * ingest for a project whose purge is in flight. Per-batch commit-point
+    * checks in kb_flush_batch cover a fence raised mid-ingest. */
+   if (project && project[0] && db2_kb_purge_fence_active(project))
+   {
+      LOG_WARN("kb_build", "purge fence active for project '%s': refusing ingest", project);
+      return -1;
+   }
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
 
    kb_stats_t stats;
@@ -1041,7 +1059,8 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
    for (int fi = 0; fi < n_files; fi++)
       kb_process_one_file(&fctx, fi);
 
-   kb_flush_batch(kb_batch_ids, kb_batch_vecs, kb_expected_dim, kb_batch_payloads, &kb_batch_count);
+   kb_flush_batch(project, kb_batch_ids, kb_batch_vecs, kb_expected_dim, kb_batch_payloads,
+                  &kb_batch_count);
    free(kb_batch_ids);
    free(kb_batch_vecs);
    free(kb_batch_payloads);

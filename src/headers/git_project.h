@@ -47,6 +47,40 @@ int git_project_derive_org(const char *url, char *out, size_t cap, int *multi_se
  * joined ("group, sub"), for the org_note guidance. 0 or -1. */
 int git_project_org_candidates(const char *url, char *out, size_t cap);
 
+/* --- delete (webchat project lifecycle proposal, slice 2) ---------------- */
+
+/* Outcome of one git_project_delete operation. `kb_detail` (when non-NULL) is
+ * a malloc'd JSON string — the kb purge's per-store detail on success/force,
+ * or {"error": …} on an abort — suitable for embedding as the response's
+ * "kb" member. The caller frees it. */
+typedef struct
+{
+   char kb_status[16];  /* "purged" | "retained" | "forced" */
+   char purge_id[40];   /* random hex id shared by every audit line + the fence */
+   char generation[40]; /* monotonic fence generation (last-holder purges only) */
+   char *kb_detail;     /* malloc'd JSON or NULL; caller frees */
+} git_project_delete_result_t;
+
+/* The ref did not resolve under the caller's tree (callers 404 — plain "not
+ * found", no cross-principal existence disclosure). */
+#define GP_ERR_NOT_FOUND (-3)
+/* The kb purge failed or was unreachable and force was not set: nothing
+ * filesystem was destroyed; callers 503 with res->kb_detail. */
+#define GP_ERR_KB_UNAVAILABLE (-4)
+
+/* Delete `principal`'s project `ref` (proposal slice 2, steps 1-8). Under the
+ * first-component lifecycle lock: audit intent, resolve strictly under the
+ * caller (else GP_ERR_NOT_FOUND), decide holders via the registry
+ * (resync-then-unregister); the LAST holder runs the fenced kb purge (abort
+ * with GP_ERR_KB_UNAVAILABLE and a rolled-back decrement unless `force`),
+ * then the server-local lexical index delete, the fd-relative filesystem
+ * removal, org-dir prune, and purge-finalize. Every phase logs one
+ * webuser_project_delete_audit_v1 line sharing res->purge_id. Returns 0,
+ * GP_ERR_NOT_FOUND, GP_ERR_KB_UNAVAILABLE, or -1 (validation/internal) with a
+ * short message in err[errlen]. */
+int git_project_delete(const char *principal, const char *ref, int force,
+                       git_project_delete_result_t *res, char *err, size_t errlen);
+
 /* Read the credential-free canonical remote of `principal`'s project `ref`
  * (the .aimee/remote sidecar) into out[cap]. 0 or -1 (legacy clones without a
  * sidecar return -1; callers fall back to git config or show nothing). */

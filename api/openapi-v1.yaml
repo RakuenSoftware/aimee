@@ -684,6 +684,96 @@ components:
         chunks_deleted:
           type: integer
 
+    MaintenancePurgeProjectRequest:
+      type: object
+      required: [project, generation, purge_id]
+      properties:
+        project:
+          type: string
+        generation:
+          type: string
+          description: Fence generation token (no spaces).
+        purge_id:
+          type: string
+          description: Purge operation id (no spaces).
+        takeover:
+          type: boolean
+          description: >
+            Displace a LIVE fence held by another owner. Without it a live
+            foreign fence is refused with 409.
+
+    MaintenancePurgeProjectResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        ok:
+          type: boolean
+          description: True only when every store delete succeeded.
+        project:
+          type: string
+        generation:
+          type: string
+        purge_id:
+          type: string
+        fence_replaced:
+          type: boolean
+        displaced:
+          type: object
+          description: Present when fence_replaced — the displaced owner's ids.
+          properties:
+            generation:
+              type: string
+            purge_id:
+              type: string
+        stores:
+          type: object
+          description: >
+            Per-store outcome, in fan-out order — a deleted-row count on
+            success (0 for primitives that report no count) or
+            {"error": "..."} on failure.
+          additionalProperties: true
+
+    MaintenancePurgeFenceRequest:
+      type: object
+      required: [project, generation, purge_id]
+      properties:
+        project:
+          type: string
+        generation:
+          type: string
+        purge_id:
+          type: string
+
+    MaintenancePurgeHeartbeatResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        refreshed:
+          type: boolean
+        fence:
+          type: string
+          description: >
+            Present when refreshed is false — the current fence as
+            "generation purge_id" (empty when no fence exists).
+
+    MaintenancePurgeClearResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        cleared:
+          type: boolean
+        fence:
+          type: string
+          description: >
+            Present when cleared is false — the current fence as
+            "generation purge_id" (empty when no fence exists).
+
     PipelineStatusResponse:
       type: object
       properties:
@@ -2069,6 +2159,111 @@ paths:
                 $ref: "#/components/schemas/MaintenanceClearResponse"
         "400":
           description: Missing project
+        "401":
+          description: Unauthorized
+        "500":
+          description: Clear failed
+
+  /maintenance/purge-project:
+    post:
+      operationId: postMaintenancePurgeProject
+      summary: Purge every kb store for a project under a generation fence
+      description: >
+        Writes the project-purge generation fence, then deletes the project
+        from every kb store the ingest path writes (chunks, file index,
+        vectors, code embeddings, curator code-unit vectors, canonical index,
+        code-unit jobs, pdf vectors, minhash), continuing past per-store
+        failures. The fence is NOT cleared here — call purge-finalize (or
+        purge-cancel) once the caller's own deletion completed. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeProjectRequest"
+      responses:
+        "200":
+          description: Purge fan-out completed (see per-store outcomes)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeProjectResponse"
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "409":
+          description: A live fence is held by another owner (takeover absent)
+        "500":
+          description: Fence write failed
+
+  /maintenance/purge-heartbeat:
+    post:
+      operationId: postMaintenancePurgeHeartbeat
+      summary: Refresh the project-purge fence heartbeat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeFenceRequest"
+      responses:
+        "200":
+          description: Heartbeat outcome (refreshed false on fence mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeHeartbeatResponse"
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "500":
+          description: Heartbeat failed
+
+  /maintenance/purge-finalize:
+    post:
+      operationId: postMaintenancePurgeFinalize
+      summary: Clear the project-purge fence after deletion completed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeFenceRequest"
+      responses:
+        "200":
+          description: Clear outcome (cleared false on fence mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeClearResponse"
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "500":
+          description: Clear failed
+
+  /maintenance/purge-cancel:
+    post:
+      operationId: postMaintenancePurgeCancel
+      summary: Clear the project-purge fence on abort
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeFenceRequest"
+      responses:
+        "200":
+          description: Clear outcome (cleared false on fence mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeClearResponse"
+        "400":
+          description: Missing or invalid parameters
         "401":
           description: Unauthorized
         "500":

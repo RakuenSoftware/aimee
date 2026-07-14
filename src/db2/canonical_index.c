@@ -17,6 +17,7 @@
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "db2.h"
 #include "db2_internal.h"
+#include "kb_runtime_state.h" /* db2_kb_purge_fence_active: commit-point fence check */
 
 #include "aimee.h"
 #include "db_postgres.h"
@@ -196,14 +197,18 @@ static int ci_file_modified_since(void *conn, int64_t project_id, const char *re
 
 /* ---- File body replacement (transactional) --------------------- */
 
-static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, const char *content)
+/* Returns 0 on success, -1 when the write was aborted at its commit point
+ * because a purge fence is active for `project` (webchat-project-lifecycle
+ * slice 2) — callers must stop the scan for that project. */
+static int ci_replace_file_data(void *conn, const char *project, int64_t file_id, const char *ext,
+                                const char *content)
 {
    char err[CI_ERRBUF] = "";
 
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
    {
       LOG_WARN(CI_LOG_TAG, "BEGIN failed: %s", err);
-      return;
+      return 0;
    }
 
    db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
@@ -365,11 +370,23 @@ static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, c
          aimee_pg_finalize(st);
    }
 
+   /* Generation-fence check INSIDE the transaction, immediately before
+    * COMMIT: an in-flight scan that started pre-fence still cannot commit
+    * index rows for a project being purged. */
+   if (db2_kb_purge_fence_active(project))
+   {
+      LOG_WARN(CI_LOG_TAG, "purge fence active for project '%s': aborting index write",
+               project ? project : "?");
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       LOG_WARN(CI_LOG_TAG, "COMMIT failed: %s", err);
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    }
+   return 0;
 }
 
 /* CSS migration assistant (WP-C/D): build the style graph for .css files and the
@@ -1106,7 +1123,15 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
       }
 
       const char *ext = ci_get_extension(full);
-      ci_replace_file_data(conn, file_id, ext, content);
+      if (ci_replace_file_data(conn, name, file_id, ext, content) != 0)
+      {
+         /* Purge fence: abort the whole scan for this project. */
+         free(content);
+         for (int j = i; j < list.count; j++)
+            free(list.paths[j]);
+         free(list.paths);
+         return -1;
+      }
       ci_css_index_file(file_id, ext, content, css_on);
 
       free(content);
@@ -1159,7 +1184,13 @@ int canonical_index_scan_files(const char *name, const char *root_label,
          continue;
 
       const char *css_ext = ci_get_extension(rel);
-      ci_replace_file_data(conn, file_id, css_ext, content);
+      if (ci_replace_file_data(conn, name, file_id, css_ext, content) != 0)
+      {
+         /* Purge fence: abort the whole scan for this project. */
+         if (inspected_out)
+            *inspected_out = inspected;
+         return -1;
+      }
       ci_css_index_file(file_id, css_ext, content, css_on);
       scanned++;
    }
