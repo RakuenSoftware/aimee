@@ -55,6 +55,33 @@ static long wfe_sched_concurrency(void)
    return 8;
 }
 
+/* Stage class for sweep priority: LOWER runs first. Downstream-first ("drain
+ * the pipe"): an item at a gate/forge stage is a finished diff waiting on
+ * review/CI/merge, while every impl delegate launched competes with panel
+ * seats for the same small agent roster (observed live: concurrent impl
+ * traffic drove review-agent health streaks down and panels degraded with
+ * "no viable review agent"). Handing workers to gate stages first lets
+ * panels run against a quieter roster and converts WIP into PRs before new
+ * WIP starts. Unknown stages rank with implement; LRU breaks ties. */
+static int wfe_stage_class(const char *stage)
+{
+   if (!stage)
+      return 5;
+   if (!strcmp(stage, "merge"))
+      return 0;
+   if (!strcmp(stage, "ci"))
+      return 1;
+   if (!strcmp(stage, "pr"))
+      return 2;
+   if (!strcmp(stage, "rt_gate") || !strncmp(stage, "gate", 4))
+      return 3;
+   if (!strcmp(stage, "freeze"))
+      return 4;
+   if (!strcmp(stage, "scope") || !strcmp(stage, "slices"))
+      return 6;
+   return 5; /* impl + anything workflow-specific */
+}
+
 /* Work-stealing cursor shared by the pass workers. */
 typedef struct
 {
@@ -123,6 +150,23 @@ void wfe_scheduler_run_once(void)
    }
    if (run && run_n > 0)
    {
+      /* Stable sort by stage class (downstream first), preserving the LRU
+       * order within a class: insertion sort on a small array (run_n is the
+       * active-item count, tens at most). qsort is not stability-guaranteed,
+       * and losing the LRU tie-break would reintroduce intra-class
+       * starvation. */
+      for (int i = 1; i < run_n; i++)
+      {
+         db1_work_item_t tmp = run[i];
+         int c = wfe_stage_class(tmp.current_stage);
+         int j = i - 1;
+         while (j >= 0 && wfe_stage_class(run[j].current_stage) > c)
+         {
+            run[j + 1] = run[j];
+            j--;
+         }
+         run[j + 1] = tmp;
+      }
       sched_pass_t pass = {run, run_n, 0, PTHREAD_MUTEX_INITIALIZER};
       long want = wfe_sched_concurrency();
       int k = (int)((want < run_n) ? want : run_n);
