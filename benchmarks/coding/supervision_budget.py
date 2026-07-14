@@ -353,7 +353,12 @@ class BudgetLedger:
         # ``primary_tokens_by_turn`` (running total, monotonic). This view
         # preserves the per-turn shape so drift detection is not blind at the
         # refusal boundary where usage peaks.
-        self._primary_observed = []      
+        self._primary_observed = []
+        # Partial-curve warnings: emitted by the integration seam when at least
+        # one per-row try_record_turn succeeded but a later one failed, so the
+        # per-turn curve is incomplete. Consumers distinguish partial from
+        # fully-aggregated via this list.
+        self.partial_curve_warnings = []      
 
     @property
     def balance(self):
@@ -456,13 +461,35 @@ class BudgetLedger:
                 "primary_spent_at_reject": self._primary_spent,
                 "primary_budget": self._primary_budget,
                 "caller": caller,
+                "reason": "primary_budget_exhausted",
             })
             # Curve stays monotonic on refusal: append the unchanged running
             # total so the per-turn point exists without advancing the balance.
             prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
             self.turn_boundaries.append(prev)
             return False, prev
-        new_total = self.record_turn(turn_index, primary_tokens_this_turn)
+        # Hard model-token cap (record_turn -> charge -> RuntimeError): the
+        # per-turn row's observed peak was already recorded above, but the
+        # charge would push the model balance negative. Treat this as another
+        # refusal class so callers get a (False, prev) tuple instead of an
+        # exception escaping the supervisor. The observed peak stays visible
+        # via primary_tokens_observed_by_turn / detect_drift(include_observed).
+        prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
+        try:
+            new_total = self.record_turn(turn_index, primary_tokens_this_turn)
+        except (RuntimeError, PrimaryBudgetExhausted) as exc:
+            self.primary_rejections.append({
+                "turn_index": turn_index,
+                "attempted": primary_tokens_this_turn,
+                "primary_spent_at_reject": self._primary_spent,
+                "primary_budget": self._primary_budget,
+                "caller": caller,
+                "reason": "model_token_hard_cap",
+                "detail": str(exc),
+            })
+            # Curve stays monotonic on hard-cap refusal too: append prev.
+            self.turn_boundaries.append(prev)
+            return False, prev
         return True, new_total
 
     def record_cap(self, *, caller, original_tokens, capped_tokens, cap, kind="digest"):
@@ -510,12 +537,36 @@ class BudgetLedger:
         """
         return list(self._primary_observed)
 
+    def record_partial_curve_warning(self, *, appended: int, total: int) -> None:
+        """Record that the per-turn primary curve is incomplete.
+
+        Used by the integration seam in ``run_arm_c_supervised`` when at least
+        one per-row ``try_record_turn`` succeeded but a later one failed. The
+        ledger is left untouched (the rows already appended remain on the
+        curve), and we just stamp an audit row so consumers can tell the
+        curve is partial vs. fully aggregated.
+
+        Per the security review fix (round 2): the aggregate fallback MUST NOT
+        fire on top of already-appended rows, because that would double-count
+        and corrupt the per-turn curve. This warning is the only artifact a
+        caller gets in that case.
+        """
+        if total < 0 or appended < 0:
+            raise ValueError("appended and total must be >= 0")
+        if appended > total:
+            raise ValueError("appended cannot exceed total")
+        self.partial_curve_warnings.append({
+            "appended": int(appended),
+            "total": int(total),
+            "timestamp": _now(),
+        })
+
     @property
     def primary_tokens_total(self):
         """Accumulated primary token spend across all recorded turns."""
         return self.turn_boundaries[-1] if self.turn_boundaries else 0
 
-    def detect_drift(self, *, rapid_growth_factor=4, rapid_growth_window=3):
+    def detect_drift(self, *, rapid_growth_factor=4, rapid_growth_window=3, include_observed: bool = True):
         """Detect drift in ``primary_tokens_by_turn``.
 
         Returns a list of human-readable drift findings. Empty list = no drift.
@@ -569,6 +620,32 @@ class BudgetLedger:
                     f"delta={d} vs median(previous {len(lookback)})={med} "
                     f"(factor > {rapid_growth_factor})"
                 )
+        # 3. Per-turn observed primary spend (F4 drift-blindness fix): the
+        # running-total series is BLIND to a peak that primary_budget refuses,
+        # because try_record_turn does not advance the running total on
+        # refusal. The observed series (one value per try_record_turn call,
+        # accepted OR refused) preserves the actual turn shape, so a refused
+        # peak IS visible here. Without this scan, a primary that hits
+        # primary_budget on a runaway turn would silently pass drift checks.
+        #
+        # We scan the observed VALUES (not deltas) so a baseline of identical
+        # small turns + a single big turn is still flagged: a delta-of-deltas
+        # scan would lose the median when the lookback window is all zeros.
+        if include_observed and len(self._primary_observed) >= 2:
+            for i in range(1, len(self._primary_observed)):
+                cur = self._primary_observed[i]
+                lookback = self._primary_observed[max(0, i - window):i]
+                if not lookback:
+                    continue
+                med = sorted(lookback)[len(lookback) // 2]
+                if med > 0 and cur > rapid_growth_factor * med:
+                    findings.append(
+                        f"primary_tokens_observed grew rapidly at turn {i + 1}: "
+                        f"observed={cur} vs median(previous {len(lookback)})={med} "
+                        f"(factor > {rapid_growth_factor}; peak may have been "
+                        f"refused by primary_budget, making this spike invisible "
+                        f"to the running-total curve)"
+                    )
         return findings
 
 
@@ -590,8 +667,17 @@ class Supervisor:
         sup.gate.close_escalation(caller="arm_c")
     """
 
-    def __init__(self, *, ledger=None, cap=DIGEST_CAP):
-        self.ledger = ledger if ledger is not None else BudgetLedger()
+    def __init__(self, *, ledger=None, cap=DIGEST_CAP,
+                 starting_balance=HARD_MODEL_TOKEN_CAP, primary_budget=None):
+        # Convenience: callers (and BudgetSupervisor) can pass the ledger-level
+        # knobs here and we'll spin up a fresh ledger with them. If they pass an
+        # explicit ledger, it's used as-is - the kwargs are ignored.
+        if ledger is None:
+            ledger = BudgetLedger(
+                starting_balance=starting_balance,
+                primary_budget=primary_budget,
+            )
+        self.ledger = ledger
         self.gate = EscalationGate(self.ledger)
         self.dispatcher = ToolDispatcher(self.gate)
         self.cap = cap
@@ -646,3 +732,11 @@ class Supervisor:
     @property
     def primary_rejections(self):
         return self.ledger.primary_rejections
+
+
+# Public alias: some callers (including the swebench integration seam and the
+# reviewer-blocker tests) ask for the supervisor under the more descriptive name
+# ``BudgetSupervisor``. Functionally identical to ``Supervisor`` - we expose the
+# alias so the ledger surface area is reachable as ``sup.ledger.<field>`` and
+# downstream code can spell out what the object actually is.
+BudgetSupervisor = Supervisor

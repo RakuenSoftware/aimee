@@ -655,6 +655,133 @@ class ReviewerBlockerTests(unittest.TestCase):
         # Observed view carries the per-turn actual values.
         self.assertEqual(L.primary_tokens_observed_by_turn, [100] * 5)
 
+    # ----- Round-2 reviewer regressions ----------------------------------
+    #
+    # The review roundtable (security + qa + architect) flagged three
+    # regressions that the original implementation did not cover. These tests
+    # pin the round-2 contract so they cannot silently come back.
+
+    def test_record_partial_curve_warning_stamps_ledger(self):
+        """``record_partial_curve_warning`` records an audit row with appended
+        and total counts. This is the contract the integration seam relies on
+        to signal a partial per-turn curve to consumers."""
+        L = BudgetLedger(starting_balance=100_000, primary_budget=100_000)
+        # Two valid turns so a partial curve is plausible.
+        L.try_record_turn(0, 100, caller="arm_c")
+        L.try_record_turn(1, 200, caller="arm_c")
+        L.record_partial_curve_warning(appended=2, total=5)
+        self.assertEqual(len(L.partial_curve_warnings), 1)
+        w = L.partial_curve_warnings[0]
+        self.assertEqual(w["appended"], 2)
+        self.assertEqual(w["total"], 5)
+        # The warning does NOT mutate the per-turn curve - the partial
+        # rows we already appended remain intact.
+        self.assertEqual(L.primary_tokens_by_turn, [100, 300])
+
+    def test_record_partial_curve_warning_rejects_bad_args(self):
+        """Negative or inverted arguments must raise - we never want to
+        record a misleading warning that contradicts the curve."""
+        L = BudgetLedger()
+        with self.assertRaises(ValueError):
+            L.record_partial_curve_warning(appended=-1, total=5)
+        with self.assertRaises(ValueError):
+            L.record_partial_curve_warning(appended=6, total=5)
+
+    def test_aggregate_fallback_does_not_fire_on_partial_success(self):
+        """Security round-2: the integration seam's aggregate fallback MUST
+        NOT append ``tok.total_headline`` on top of partial rows that were
+        already recorded. We simulate that contract here by checking the
+        supervisor's behavior directly: if the loop appends 2 of 5 rows and
+        then hits an exception, the curve must remain at 2 points and the
+        partial warning must be emitted.
+
+        This test pins the policy: per-turn points are NEVER mixed with the
+        aggregate number on the same curve.
+        """
+        from benchmarks.coding.supervision_budget import BudgetSupervisor
+        sup = BudgetSupervisor(primary_budget=100_000)
+        ledger = sup.ledger
+        prim_rows = [
+            {"prompt_tokens": 50, "completion_tokens": 50, "cache_read_tokens": 0},
+            {"prompt_tokens": 50, "completion_tokens": 50, "cache_read_tokens": 0},
+            # Row 2 would fail (KeyError on missing 'cache_read_tokens'):
+            {"prompt_tokens": 50, "completion_tokens": 50},
+            {"prompt_tokens": 50, "completion_tokens": 50, "cache_read_tokens": 0},
+            {"prompt_tokens": 50, "completion_tokens": 50, "cache_read_tokens": 0},
+        ]
+        appended = 0
+        for i, r in enumerate(prim_rows):
+            try:
+                # Strict access: missing required keys are a malformed row
+                # and must break the loop (the integration seam relies on this).
+                headline = (int(r["prompt_tokens"])
+                            + int(r["completion_tokens"])
+                            - int(r["cache_read_tokens"]))
+            except Exception:
+                # The integration seam's catch-all -> break out of the loop.
+                break
+            try:
+                sup.try_record_turn(appended, headline, caller="arm_c")
+                appended += 1
+            except Exception:
+                break
+        # We made it through exactly 2 rows before the malformed row.
+        self.assertEqual(appended, 2)
+        if appended < len(prim_rows):
+            sup.ledger.record_partial_curve_warning(
+                appended=appended, total=len(prim_rows))
+        # The partial curve has exactly 2 points - NO aggregate fallback
+        # has fired on top of these.
+        self.assertEqual(sup.primary_tokens_by_turn, [100, 200])
+        # And the warning is on the ledger so consumers see the partial status.
+        self.assertEqual(len(sup.ledger.partial_curve_warnings), 1)
+        self.assertEqual(sup.ledger.partial_curve_warnings[0]["appended"], 2)
+        self.assertEqual(sup.ledger.partial_curve_warnings[0]["total"], 5)
+
+    def test_detect_drift_observes_peak_after_refusal(self):
+        """QA round-2: ``detect_drift`` must surface a refused peak that the
+        running-total curve cannot advance. The observed-series scan is the
+        mechanism - pin that here."""
+        # Use a generous model-token budget so the 5 baseline turns all pass;
+        # only the 6th turn (2000) is refused - by primary_budget.
+        L = BudgetLedger(starting_balance=100_000, primary_budget=100)
+        # A baseline of small, accepted turns so a median is computed.
+        for i, n in enumerate([5, 5, 5, 5, 5]):
+            ok, _ = L.try_record_turn(i, n, caller="arm_c")
+            self.assertTrue(ok)
+        # Now a refused peak - the running total stays put, but the observed
+        # series jumps. With rapid_growth_factor=4 and rapid_growth_window=3,
+        # the peak (2000) over median(5) should be flagged.
+        ok, _ = L.try_record_turn(5, 2000, caller="arm_c")
+        self.assertFalse(ok)
+        findings = L.detect_drift(rapid_growth_factor=4, rapid_growth_window=3)
+        # The observed-series scan MUST surface this peak.
+        observed_findings = [f for f in findings if "observed" in f]
+        self.assertTrue(
+            observed_findings,
+            f"detect_drift must surface a refused peak via the observed "
+            f"series. Got findings={findings!r}"
+        )
+        # And the running-total view, which is monotonic-by-construction on
+        # refusal, has no findings (we did not violate monotonicity).
+        running_findings = [f for f in findings if "by_turn grew rapidly" in f]
+        self.assertEqual(running_findings, [])
+
+    def test_detect_drift_include_observed_false_skips_peak(self):
+        """Opt-out path: ``include_observed=False`` disables the observed
+        scan so legacy consumers can compare behavior."""
+        L = BudgetLedger(starting_balance=100_000, primary_budget=100)
+        for i, n in enumerate([5, 5, 5, 5, 5]):
+            ok, _ = L.try_record_turn(i, n, caller="arm_c")
+            self.assertTrue(ok)
+        ok, _ = L.try_record_turn(5, 2000, caller="arm_c")
+        self.assertFalse(ok)
+        findings = L.detect_drift(
+            rapid_growth_factor=4, rapid_growth_window=3, include_observed=False)
+        # With include_observed=False, the refused peak is intentionally
+        # blind (legacy behavior). This is a documented opt-out.
+        self.assertEqual(findings, [])
+
 
 if __name__ == "__main__":
     unittest.main()

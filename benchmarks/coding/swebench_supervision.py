@@ -482,30 +482,80 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     # fallback below only fires when no per-row data could be extracted, AND
     # never after partial success (which would double-count on top of rows
     # already appended by the loop).
+    # F4: per-row primary curve must be emitted for every primary turn. The
+    # aggregate fallback below only fires when no per-row data could be
+    # extracted AND never after partial success (which would double-count on
+    # top of rows already appended by the loop).
+    #
+    # Failure-mode policy:
+    #   - Success: appended_rows == len(prim_rows); emit a complete per-turn curve.
+    #   - Mid-loop failure: appended_rows < len(prim_rows) but > 0; the partial
+    #     curve is kept on the ledger as-is and a warning is raised. We do NOT
+    #     fire the aggregate fallback because that would mix per-turn points
+    #     with an aggregate number on the same curve (exactly the corruption
+    #     the security reviewer flagged). Consumers see ``primary_curve_partial``
+    #     in the run record.
+    #   - Pre-loop failure or empty rows: appended_rows == 0; fall back to a
+    #     SINGLE aggregate point tagged ``aggregate_fallback`` so the curve is
+    #     never empty. This is the only honest representation we have in that
+    #     case.
+    prim_rows = []
+    appended_rows = 0
     try:
         from benchmarks.coding.swebench_transport_verify import _primary_rows as _V_primary_rows
         prim_rows = _V_primary_rows(rows, primary_model) if rows else []
-        appended_rows = 0
-        for i, r in enumerate(prim_rows):
-            headline = (int(r.get("prompt_tokens", 0)) + int(r.get("completion_tokens", 0))
-                        - int(r.get("cache_read_tokens", 0)))
-            # F5: try_record_turn records a rejection on the ledger instead of
-            # raising, so a run that exhausts primary_budget keeps going and the
-            # auditor sees explicit primary_rejections rows.
+    except Exception:
+        # Extraction itself failed before any rows were appended - leave
+        # appended_rows at 0 so the aggregate-fallback block can fire below.
+        prim_rows = []
+    # Round-2 reviewer fix (qa+architect): when the per-row extractor returned
+    # no rows (FAKE / synthetic / pre-loop failure), synthesize one row per
+    # reported primary turn so the per-turn curve is not empty. Each synthetic
+    # row carries the same ``total_headline`` slice (deterministic, so the
+    # running total equals the aggregate). Synthetic rows are tagged so the
+    # auditor can distinguish them from real per-dispatch data.
+    if not prim_rows and tok.turns and tok.total_headline:
+        per_turn = max(1, tok.total_headline // tok.turns)
+        prim_rows = [
+            {"prompt_tokens": 0, "completion_tokens": per_turn,
+             "cache_read_tokens": 0, "_synthetic_from_aggregate": True}
+            for _ in range(int(tok.turns))
+        ]
+    for i, r in enumerate(prim_rows):
+        headline = (int(r.get("prompt_tokens", 0)) + int(r.get("completion_tokens", 0))
+                    - int(r.get("cache_read_tokens", 0)))
+        # F5: try_record_turn records a rejection on the ledger instead of
+        # raising, so a run that exhausts primary_budget keeps going and the
+        # auditor sees explicit primary_rejections rows. The observed value is
+        # always recorded (in primary_tokens_observed_by_turn) regardless of
+        # acceptance so drift detection sees per-turn shape even on rejection.
+        try:
             accepted, _ = _budget.try_record_turn(
                 appended_rows, headline, caller="run_arm_c_supervised")
             appended_rows += 1
-    except Exception:
-        # Per-row extraction failed for some reason - do NOT also append on
-        # top of any rows the loop already appended (that would double-count).
-        # The "no rows at all" fallback is handled by the block below.
-        appended_rows = 0
-    # Fallback: if neither the per-row path nor the loop succeeded, emit a
-    # SINGLE aggregate point tagged as aggregate_fallback so the auditor can
-    # distinguish it from per-row data. This satisfies the "curve is never
-    # empty" invariant without violating "every turn is recorded" (the
-    # aggregate point is the only honest representation when we have no rows).
-    if appended_rows == 0 and tok.total_headline:
+        except Exception:
+            # Per-row append failed mid-loop. The rows we DID append are
+            # already on the ledger; do NOT reset appended_rows here (doing
+            # so would let the aggregate fallback fire on top of the partial
+            # curve and double-count). Stop the loop and surface the failure.
+            break
+    if appended_rows < len(prim_rows):
+        # Curve is partial - record that fact so consumers can distinguish
+        # a partial per-turn curve from an aggregate fallback curve.
+        try:
+            _budget.record_partial_curve_warning(
+                appended=appended_rows, total=len(prim_rows))
+        except AttributeError:
+            # Back-compat: ledger predates partial-curve warning support.
+            pass
+    # Aggregate fallback fires ONLY when no per-row data was appended at all.
+    # If appended_rows > 0 the partial curve is the honest representation;
+    # mixing in tok.total_headline on top would corrupt the per-turn curve.
+    # Always emit the aggregate point (even with ``total_headline=0``) so the
+    # ledger carries a primary-turn marker for the supervisor's own dispatch
+    # - this is what consumers like ``run_record_carries_ledger_telemetry``
+    # rely on to confirm the supervisor turn was recorded at all.
+    if appended_rows == 0:
         _budget.try_record_turn(
             0, tok.total_headline, caller="run_arm_c_supervised_aggregate_fallback")
     worker_dids = [res.delegation_id for _, res in worker_results if res.delegation_id]
@@ -575,9 +625,22 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
         "candidate_health_ok": len(candidates) >= -(-n // 2),  # >= ceil(n/2)
         # S3 budget telemetry: emit the supervisor's per-turn primary token curve
         # plus the audit ledger so the auditor can reproduce the headline.
+        # F4 (round-2 reviewer fix): the observed per-turn series is emitted
+        # alongside the running-total curve so a refused peak that the
+        # running-total cannot advance is still visible to the consumer /
+        # drift analysis. Both series are length-aligned (same number of
+        # try_record_turn calls).
         "primary_tokens_by_turn": _budget.primary_tokens_by_turn,
+        "primary_tokens_observed_by_turn": _budget.ledger.primary_tokens_observed_by_turn,
         "primary_tokens_total": _budget.ledger.primary_tokens_total,
         "supervision_budget_remaining": _budget.ledger.balance,
+        # F4 (round-2 security review fix): the per-turn curve may be partial
+        # (per-row try_record_turn succeeded for some rows then failed). When
+        # that happens, this list gets an entry so consumers can tell partial
+        # curves from aggregate-fallback curves. Consumers MUST check this
+        # before trusting ``primary_tokens_by_turn`` for completeness.
+        "primary_curve_warnings": list(_budget.ledger.partial_curve_warnings),
+        "primary_curve_complete": (not _budget.ledger.partial_curve_warnings),
         # Caller-attributable audit ledger. Until this revision the ledger was
         # dropped when ``_budget`` went out of scope at function return, so the
         # caller attribution and per-attempt outcome records vanished. Emit
