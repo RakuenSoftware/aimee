@@ -630,10 +630,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
             "\"cost_tier\":2},"
             "{\"name\":\"gemini-cli\",\"provider\":\"gemini\","
             "\"roles\":[\"code\"],\"backend\":\"provider-cli\","
-            "\"cli_kind\":\"gemini\",\"cli_cmd\":\"gemini\"},"
+            "\"cli_kind\":\"gemini\",\"cli_cmd\":\"gemini\",\"enabled\":0},"
             "{\"name\":\"mistral-cli\",\"provider\":\"mistral\","
             "\"roles\":[\"code\"],\"backend\":\"provider-cli\","
-            "\"cli_kind\":\"mistral\",\"cli_cmd\":\"mistral\"},"
+            "\"cli_kind\":\"mistral\",\"cli_cmd\":\"mistral\",\"enabled\":1},"
             "{\"name\":\"claude-code\",\"provider\":\"claude-code\","
             "\"roles\":[\"code\"],\"backend\":\"tmux-cli\","
             "\"cli_kind\":\"claude-code\",\"cli_cmd\":\"/bin/echo\","
@@ -667,6 +667,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[3].provider, "gemini") == 0);
    assert(strcmp(loaded.agents[3].cli_kind, "gemini") == 0);
    assert(strcmp(loaded.agents[3].cli_cmd, "gemini") == 0);
+   /* Numeric "enabled" (hand-edited rosters) must be honored, not treated as
+    * absent-and-therefore-enabled: 0 disables, 1 enables. */
+   assert(loaded.agents[3].enabled == 0);
+   assert(loaded.agents[4].enabled == 1);
    assert(strcmp(loaded.agents[4].name, "mistral-cli") == 0);
    assert(strcmp(loaded.agents[4].provider, "mistral") == 0);
    assert(strcmp(loaded.agents[4].cli_kind, "mistral") == 0);
