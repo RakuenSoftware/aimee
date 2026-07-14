@@ -35,12 +35,39 @@ func (s *server) gitRelay(w http.ResponseWriter, st int, data []byte, err error)
 		Projects []string `json:"projects"`
 		Hosts    []string `json:"hosts"`
 		Root     string   `json:"root"`
+		// Per-project detail rows ({ref, org, name, remote}) from
+		// /v1/workspace/projects; the remote is credential-free by the
+		// server's canonical-remote contract.
+		Details []struct {
+			Ref    string `json:"ref"`
+			Org    string `json:"org"`
+			Name   string `json:"name"`
+			Remote string `json:"remote,omitempty"`
+		} `json:"details"`
+		// Clone-outcome fields: kb ingest result (PR #1332) and the
+		// multi-segment-owner note (org-scoped clones).
+		KBIndexed *bool  `json:"kb_indexed"`
+		KBReason  string `json:"kb_reason"`
+		OrgNote   string `json:"org_note"`
 	}
 	_ = json.Unmarshal(data, &up)
-	out, _ := json.Marshal(map[string]any{
+	m := map[string]any{
 		"ok": true, "name": up.Name, "output": up.Output, "projects": up.Projects,
 		"hosts": up.Hosts, "root": up.Root,
-	})
+	}
+	if up.Details != nil {
+		m["details"] = up.Details
+	}
+	if up.KBIndexed != nil {
+		m["kb_indexed"] = *up.KBIndexed
+		if up.KBReason != "" {
+			m["kb_reason"] = up.KBReason
+		}
+	}
+	if up.OrgNote != "" {
+		m["org_note"] = up.OrgNote
+	}
+	out, _ := json.Marshal(m)
 	w.Write(out)
 }
 
@@ -438,7 +465,7 @@ func (s *server) handleGitProjects(w http.ResponseWriter, r *http.Request) {
 	s.gitRelay(w, st, data, err)
 }
 
-// POST /api/git/clone {url, name?, token?} — clone a repo as a project. An
+// POST /api/git/clone {url, name?, org?, token?} — clone a repo as a project. An
 // optional token authenticates a private repo and is persisted server-side
 // (per host); it is never echoed back to the browser.
 func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +476,7 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL   string `json:"url"`
 		Name  string `json:"name"`
+		Org   string `json:"org"`
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
@@ -457,9 +485,88 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name, "token": req.Token})
+	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name, "org": req.Org, "token": req.Token})
 	st, data, err := s.v1RequestWebuserT(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone", body, cloneTimeout)
 	s.gitRelay(w, st, data, err)
+}
+
+// gitDeleteRelay passes through the project-delete outcome ({ok, ref,
+// kb_status, purge_id, kb}). Typed passthrough, never the raw upstream body;
+// `kb` is the server's per-store purge detail (already credential-free).
+func (s *server) gitDeleteRelay(w http.ResponseWriter, st int, data []byte, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "git: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	var up struct {
+		OK       bool            `json:"ok"`
+		Ref      string          `json:"ref"`
+		KBStatus string          `json:"kb_status"`
+		PurgeID  string          `json:"purge_id"`
+		KB       json.RawMessage `json:"kb"`
+	}
+	_ = json.Unmarshal(data, &up)
+	m := map[string]any{"ok": up.OK, "ref": up.Ref, "kb_status": up.KBStatus, "purge_id": up.PurgeID}
+	if len(up.KB) > 0 {
+		m["kb"] = up.KB
+	}
+	out, _ := json.Marshal(m)
+	w.Write(out)
+}
+
+// validProjectRef minimally validates a project ref before it is forwarded:
+// non-empty, at most 129 bytes, at most one '/', and no empty/"."/".."
+// segments. The server re-validates with the full component alphabet.
+func validProjectRef(ref string) bool {
+	if ref == "" || len(ref) > 129 || strings.Count(ref, "/") > 1 {
+		return false
+	}
+	for _, seg := range strings.Split(ref, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// POST /api/git/projects/delete {ref, force?} — delete a cloned project (and,
+// for its last holder, its indexed knowledge). Relay contract (webchat project
+// lifecycle, slice 2): the accepted body fields are EXACTLY ref and force —
+// unknown fields are rejected so nothing can be smuggled to the server route —
+// and the principal is bound exclusively from the authenticated session (the
+// v1RequestWebuser channel), never from inbound headers or the body.
+func (s *server) handleGitProjectDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Ref   string `json:"ref"`
+		Force bool   `json:"force"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "body accepts exactly {ref, force}")
+		return
+	}
+	if !validProjectRef(req.Ref) {
+		writeJSONError(w, http.StatusBadRequest, "invalid project ref")
+		return
+	}
+	// The purge + filesystem walk of a large clone outlives a normal socket
+	// call; give it the clone deadline.
+	ctx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{"ref": req.Ref, "force": req.Force})
+	st, data, err := s.v1RequestWebuserT(ctx, currentUser(r), http.MethodPost,
+		"/v1/workspace/projects/delete", body, cloneTimeout)
+	s.gitDeleteRelay(w, st, data, err)
 }
 
 // POST /api/git/op {project, op, message?, branch?, n?} — run a git operation.

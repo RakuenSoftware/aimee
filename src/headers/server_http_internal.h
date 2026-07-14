@@ -140,4 +140,19 @@ int rh_git_oauth_github_web_callback(const route_req_t *rq, char *resp, int cap)
 int rh_deploy_apply(const route_req_t *rq, char *resp, int cap);
 int rh_deploy_status(const route_req_t *rq, char *resp, int cap);
 
+/* Webchat git-surface route handlers — defined in server_http_routes_git.c
+ * (relocated out of server_http_routes.c to stay under the line-check
+ * ceiling). Referenced by the route table in server_http_routes.c. */
+int git_surface_enabled(void); /* AIMEE_WEBCHAT_GIT gate shared by every git route */
+int rh_workspace_clone(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_git(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_projects(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap);
+int rh_workspace_editor(const route_req_t *rq, char *resp, int cap);
+int rh_git_credentials(const route_req_t *rq, char *resp, int cap);
+int rh_git_sshkey(const route_req_t *rq, char *resp, int cap);
+
 #endif /* SERVER_HTTP_INTERNAL_H */

@@ -19,20 +19,66 @@
 
 #include <stdio.h>
 
-int git_project_clone(const char *principal, const char *url, const char *name, const char *token,
-                      char *out_path, size_t path_cap, char *out_name, size_t name_cap, char *err,
-                      size_t errlen)
+int git_project_clone(const char *principal, const char *url, const char *name, const char *org,
+                      const char *token, char *out_path, size_t path_cap, char *out_ref,
+                      size_t ref_cap, char *err, size_t errlen)
 {
    (void)principal;
    (void)url;
    (void)name;
+   (void)org;
    (void)token;
    if (out_path && path_cap)
       out_path[0] = '\0';
-   if (out_name && name_cap)
-      out_name[0] = '\0';
+   if (out_ref && ref_cap)
+      out_ref[0] = '\0';
    if (err && errlen)
       snprintf(err, errlen, "stub");
+   return -1;
+}
+
+int git_project_delete(const char *principal, const char *ref, int force,
+                       git_project_delete_result_t *res, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)ref;
+   (void)force;
+   if (res)
+   {
+      res->kb_status[0] = '\0';
+      res->purge_id[0] = '\0';
+      res->generation[0] = '\0';
+      res->kb_detail = NULL;
+   }
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
+int git_project_derive_org(const char *url, char *out, size_t cap, int *multi_segment)
+{
+   (void)url;
+   if (out && cap)
+      out[0] = '\0';
+   if (multi_segment)
+      *multi_segment = 0;
+   return -1;
+}
+
+int git_project_org_candidates(const char *url, char *out, size_t cap)
+{
+   (void)url;
+   if (out && cap)
+      out[0] = '\0';
+   return -1;
+}
+
+int git_project_remote(const char *principal, const char *ref, char *out, size_t cap)
+{
+   (void)principal;
+   (void)ref;
+   if (out && cap)
+      out[0] = '\0';
    return -1;
 }
 

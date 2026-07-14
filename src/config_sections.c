@@ -1533,6 +1533,11 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->kb_reembed_on_dim_change = cJSON_IsTrue(item) ? 1 : 0;
 
+      /* Project-purge generation-fence TTL (webchat-project-lifecycle slice 2). */
+      item = cJSON_GetObjectItemCaseSensitive(kb, "purge_fence_ttl_s");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->kb_purge_fence_ttl_s = (int)item->valuedouble;
+
       cJSON *bg = cJSON_GetObjectItemCaseSensitive(kb, "background_ingest");
       if (cJSON_IsObject(bg))
       {

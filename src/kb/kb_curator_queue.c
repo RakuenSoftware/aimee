@@ -114,6 +114,26 @@ int kb_curator_queue_code_unit(const char *project, const char *file_path, const
    return 0;
 }
 
+int kb_curator_code_unit_jobs_delete_project(const char *project)
+{
+   if (!project || !project[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char err[CQ_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "DELETE FROM kb_code_unit_jobs WHERE project = ?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE) ? changes : -1;
+}
+
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path)
 {
    if (!project || !project[0])

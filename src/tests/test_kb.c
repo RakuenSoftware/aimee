@@ -804,6 +804,102 @@ static void test_clear(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tests: purge generation fence (webchat-project-lifecycle slice 2)   */
+/* ------------------------------------------------------------------ */
+
+static void test_purge_fence_blocks_ingest(void)
+{
+   char tmpdir[] = "/tmp/aimee_kb_test_fence_XXXXXX";
+   char *d = mkdtemp(tmpdir);
+   assert(d != NULL);
+   char fpath[512];
+   snprintf(fpath, sizeof(fpath), "%s/notes.md", tmpdir);
+   write_file(fpath, "# Notes\n\nFenced project notes.\n");
+
+   open_test_db();
+
+   /* No fence yet. */
+   assert(db2_kb_purge_fence_active("fence_proj") == 0);
+   assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
+
+   /* Write, then read back generation/purge_id + liveness. */
+   assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+   char gen[64] = "", pid[64] = "";
+   int live = 0;
+   assert(db2_kb_purge_fence_read("fence_proj", gen, sizeof(gen), pid, sizeof(pid), &live) == 1);
+   assert(strcmp(gen, "gen-1") == 0);
+   assert(strcmp(pid, "pid-1") == 0);
+   assert(live == 1);
+
+   /* Writers refuse to start an ingest for a fenced project; another key is
+    * unaffected. */
+   kb_stats_t stats;
+   assert(kb_build(tmpdir, "fence_proj", NULL, 0, &stats) == -1);
+   assert(kb_build(tmpdir, "other_proj", NULL, 0, &stats) == 0);
+
+   /* Heartbeat: displaced ids no-op, matching ids refresh. */
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-1") == 0);
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
+
+   /* Atomic acquire: a LIVE foreign fence is refused without takeover (the
+    * current owner's ids are returned), displaced with takeover:true. */
+   {
+      char cg[64] = "", cp[64] = "";
+      int replaced = -1;
+      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 0, cg, sizeof(cg), cp,
+                                        sizeof(cp), &replaced) == 0);
+      assert(strcmp(cg, "gen-1") == 0);
+      assert(strcmp(cp, "pid-1") == 0);
+      assert(replaced == 0);
+      /* Same-owner re-acquire is idempotent (no refusal, not a replace). */
+      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-1", "pid-1", 0, cg, sizeof(cg), cp,
+                                        sizeof(cp), &replaced) == 1);
+      assert(replaced == 0);
+      /* Takeover displaces the live owner and reports the displaced ids. */
+      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 1, cg, sizeof(cg), cp,
+                                        sizeof(cp), &replaced) == 1);
+      assert(replaced == 1);
+      assert(strcmp(cg, "gen-1") == 0);
+      assert(strcmp(cp, "pid-1") == 0);
+      /* Restore the gen-1 owner for the remaining assertions. */
+      assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+   }
+
+   /* Fail closed: an identity row WITHOUT a heartbeat row is ACTIVE (cannot
+    * arise from a torn write — the publish transaction writes ts first). */
+   assert(db2_kb_runtime_state_delete("project_purging_ts:fence_proj") == 0);
+   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+   /* A displaced owner still no-ops against the identity-only fence... */
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-0") == 0);
+   /* ...while the matching owner's heartbeat repairs the missing ts row. */
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
+   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+
+   /* A stale heartbeat makes the fence absent for writers (TTL expiry), while
+    * the fence row itself remains readable (live=0). */
+   assert(db2_kb_runtime_state_set("project_purging_ts:fence_proj", "2000-01-01 00:00:00") == 0);
+   assert(db2_kb_purge_fence_active("fence_proj") == 0);
+   live = 1;
+   assert(db2_kb_purge_fence_read("fence_proj", gen, sizeof(gen), pid, sizeof(pid), &live) == 1);
+   assert(live == 0);
+
+   /* Clear: displaced ids no-op, matching ids drop both rows. */
+   assert(db2_kb_purge_fence_clear("fence_proj", "gen-1", "pid-0") == 0);
+   assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 1);
+   assert(db2_kb_purge_fence_clear("fence_proj", "gen-1", "pid-1") == 1);
+   assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
+
+   /* Unfenced: the ingest goes through again. */
+   assert(kb_build(tmpdir, "fence_proj", NULL, 0, &stats) == 0);
+
+   close_test_db();
+   unlink(fpath);
+   platform_test_rmrf(tmpdir);
+   printf("  PASS: purge fence blocks ingest and follows the match rules\n");
+}
+
+/* ------------------------------------------------------------------ */
 /* Tests: multiple projects are isolated                               */
 /* ------------------------------------------------------------------ */
 
@@ -950,6 +1046,9 @@ int main(void)
 
    /* Clear test */
    test_clear();
+
+   /* Purge generation fence (slice 2) */
+   test_purge_fence_blocks_ingest();
 
    /* Isolation test */
    test_project_isolation();

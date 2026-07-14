@@ -1547,6 +1547,13 @@ typedef struct config
     * auto-runs — the destructive reset requires the explicit confirmed command). */
    int kb_reembed_on_dim_change;
 
+   /* webchat-project-lifecycle slice 2: TTL (seconds) after which a stale
+    * project-purge generation fence (kb_runtime_state `project_purging:<key>`)
+    * is treated as absent by kb writers. The owning delete operation heartbeats
+    * the fence between phases, so only a crash between purge and finalize
+    * leaves a fence to expire. JSON key kb.purge_fence_ttl_s (default 900). */
+   int kb_purge_fence_ttl_s;
+
    /* KB maintenance (kb.maintenance.*).
     * kb_maintenance_enabled:        0 = off (default), 1 = run background decay/prune.
     * kb_maintenance_interval_hours: hours between maintenance passes (default 24).

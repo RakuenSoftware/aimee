@@ -122,6 +122,16 @@ static void pgvec_cos_dist_func(sqlite3_context *ctx, int argc, sqlite3_value **
    sqlite3_result_double(ctx, dist);
 }
 
+/* Purge-fence advisory-lock shims: pg_advisory_xact_lock / hashtext are
+ * mapped to no-ops. SQLite's single-writer serialization already provides
+ * the mutual exclusion the transaction-scoped advisory lock exists for. */
+static void shim_noop_int_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+   (void)argc;
+   (void)argv;
+   sqlite3_result_int(ctx, 0);
+}
+
 static void pgvec_register_functions(sqlite3 *db)
 {
    if (!db)
@@ -129,6 +139,10 @@ static void pgvec_register_functions(sqlite3 *db)
    sqlite3_create_function(db, "pgvec_cos_dist", 2,
                            SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS, NULL,
                            pgvec_cos_dist_func, NULL, NULL);
+   sqlite3_create_function(db, "hashtext", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS,
+                           NULL, shim_noop_int_func, NULL, NULL);
+   sqlite3_create_function(db, "pg_advisory_xact_lock", 1, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
+                           shim_noop_int_func, NULL, NULL);
    /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables. */
    sqlite3_exec(
        db,

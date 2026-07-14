@@ -1421,6 +1421,33 @@ int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
+int pgvec_curator_code_unit_delete_project(const char *project)
+{
+   if (!project || !project[0])
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   /* curator_code_unit_vectors has no project column: the writer records the
+    * project as the owning artifact's scope_id (scope_kind='project',
+    * kb_curator_extract_code.c), so delete via that join. The artifacts rows
+    * themselves are NOT deleted — mirroring the ingest force-clear path, which
+    * also leaves artifacts alone. */
+   static const char *sql = "DELETE FROM curator_code_unit_vectors"
+                            " WHERE artifact_id IN"
+                            "  (SELECT id FROM artifacts"
+                            "    WHERE scope_kind = 'project' AND scope_id = :proj)";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "proj", project);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   int changes = aimee_pg_stmt_changes(stmt);
+   aimee_pg_finalize(stmt);
+   return (rc == AIMEE_PG_DONE) ? changes : -1;
+}
+
 int pgvec_curator_code_unit_delete(int64_t point_id)
 {
    void *pg = db2_conn();
