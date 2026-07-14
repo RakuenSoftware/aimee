@@ -650,8 +650,20 @@ int agent_load_config(agent_config_t *cfg)
             ag->timeout_ms = reasoning ? AGENT_REASONING_TIMEOUT_MS : AGENT_DEFAULT_TIMEOUT_MS;
          }
 
+         /* "enabled" accepts a boolean or a 0/1 number: hand-edited rosters
+          * write `"enabled": 0`, and treating a non-bool as "enabled" silently
+          * re-armed agents the operator had switched off (observed live: a
+          * disabled agent with no valid key kept winning role routing and
+          * 401-looped every implement step). Absent key stays enabled. */
          v = cJSON_GetObjectItem(a, "enabled");
-         ag->enabled = (!v || !cJSON_IsBool(v)) ? 1 : cJSON_IsTrue(v);
+         if (!v)
+            ag->enabled = 1;
+         else if (cJSON_IsBool(v))
+            ag->enabled = cJSON_IsTrue(v);
+         else if (cJSON_IsNumber(v))
+            ag->enabled = (v->valueint != 0);
+         else
+            ag->enabled = 1;
 
          v = cJSON_GetObjectItem(a, "tools_enabled");
          if (v && cJSON_IsBool(v))

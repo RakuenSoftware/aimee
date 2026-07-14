@@ -262,9 +262,18 @@ static int wfe_live_verify_run(const char *workdir, char *out_verdict, size_t n)
    cJSON_AddStringToObject(args, "action", "run");
    cJSON_AddBoolToObject(args, "async", 0); /* synchronous: we need the verdict now */
    cJSON_AddStringToObject(args, "format", "json");
+   /* handle_git_verify never reads a "path" arg itself — on the MCP route the
+    * dispatch layer chdirs the run_cmd thread before the handler runs, and
+    * resolve_verify_root() picks the root up from that CWD. Calling the handler
+    * directly (as we do here) skips that layer, so the verdict silently came
+    * from the DAEMON's CWD, not the work-item worktree: the steps ran against
+    * a non-repo dir and vacuously passed, verifying nothing. Pin the run_cmd
+    * thread CWD to the worktree for the duration, exactly like the delegate
+    * run above. */
    if (workdir && workdir[0])
-      cJSON_AddStringToObject(args, "path", workdir);
+      run_cmd_set_cwd(workdir);
    cJSON *resp = handle_git_verify(NULL, args, NULL);
+   run_cmd_set_cwd(NULL);
    cJSON_Delete(args);
    int rc = -1;
    if (resp)
