@@ -1654,6 +1654,28 @@ static cJSON *manager_read_hash_json(const char *path, char *hash)
    fclose(f);
    wfe_sha256_hex(buf, rd, hash);
    cJSON *j = cJSON_Parse(buf);
+   if (!j)
+   {
+      /* Fence tolerance: when the artifact came from the response-persist
+       * fallback (a delegate whose file tools were unavailable), models
+       * routinely wrap the JSON in a markdown fence. Parse the fenced body
+       * rather than failing the whole attempt. */
+      char *start = strstr(buf, "```");
+      if (start)
+      {
+         start += 3;
+         while (*start && *start != '\n')
+            start++; /* skip the info string (```json) */
+         if (*start == '\n')
+            start++;
+         char *end = strstr(start, "```");
+         if (end)
+         {
+            *end = '\0';
+            j = cJSON_Parse(start);
+         }
+      }
+   }
    free(buf);
    return j;
 }
@@ -1731,10 +1753,12 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
    }
    char prompt[14 * 1024];
    snprintf(prompt, sizeof prompt,
-            "Decompose the APPROVED PLAN below into a structured PACKET PLAN and write it as JSON "
-            "to the given path (nothing else): {\"schema_version\":1,\"packets\":[{\"packet_id\":"
-            "\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],"
-            "\"acceptance_criteria\":[\"...\"]}]}. Then commit it.\n\nAPPROVED PLAN:\n%s",
+            "Decompose the APPROVED PLAN below into a structured PACKET PLAN: "
+            "{\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\","
+            "\"target_blocks\":[\"implement\"],\"dependencies\":[],"
+            "\"acceptance_criteria\":[\"...\"]}]}. Write the JSON to the given path and commit it "
+            "if you can; if file tools are unavailable to you, your ENTIRE reply must be exactly "
+            "that JSON document — no prose, no code fences, nothing else.\n\nAPPROVED PLAN:\n%s",
             plan[0] ? plan : "(no plan artifact found — decompose the work item's ask)");
    return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }
