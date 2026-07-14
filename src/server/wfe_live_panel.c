@@ -88,10 +88,23 @@ static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
    const char *proposal = (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)";
-   const char *diff = (pkt->diff && pkt->diff[0])
-                          ? pkt->diff
-                          : "(no code diff — review the plan/proposal artifact against the ask)";
-   size_t cap = 2048 + strlen(focus) + strlen(proposal) + strlen(diff);
+   int have_diff = pkt->diff && pkt->diff[0];
+   const char *diff =
+       have_diff ? pkt->diff : "(no code diff — review the plan/proposal artifact against the ask)";
+   /* Code reviews must GROUND every blocker: a request_changes carries citations
+    * (file:line + the exact quoted text) that the gate replays against the
+    * worktree; an unreproducible objection is re-graded to a non-blocking
+    * comment. Plan/proposal reviews have no lines to cite, so the requirement
+    * (and the replay) only applies when a diff is under review. */
+   const char *cite =
+       have_diff
+           ? " A request_changes MUST also carry \"blockers\":[{\"file\":\"<repo-relative "
+             "path>\",\"line\":<n>,\"quote\":\"<exact text on that line>\",\"summary\":\"<why it "
+             "blocks>\"}] (at most 8) citing real evidence for EVERY blocker; each citation is "
+             "verified against the worktree, an unverifiable blocker is discarded, and a "
+             "request_changes with no verifiable citation counts only as a comment."
+           : "";
+   size_t cap = 2560 + strlen(focus) + strlen(proposal) + strlen(diff);
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
@@ -105,8 +118,8 @@ static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
             "End your reply with EXACTLY one JSON line and nothing after it: "
             "{\"verdict\":\"approve\"} if it satisfies the ask with no high-severity blocker, "
             "{\"verdict\":\"request_changes\",\"high_sev_blockers\":<N>} if there is a real "
-            "blocker, or {\"verdict\":\"comment\"} if you only have non-blocking remarks.",
-            persona, focus, proposal, diff);
+            "blocker, or {\"verdict\":\"comment\"} if you only have non-blocking remarks.%s",
+            persona, focus, proposal, diff, cite);
    return buf;
 }
 
@@ -355,6 +368,24 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
             wfe_panel_verdict_from_review(required[i], pkt->artifact_hash, results[t].response,
                                           &out[filled]);
             snprintf(out[filled].model, sizeof out[filled].model, "%s", taskagent[t]);
+            /* Ground the verdict: replay blocker citations against the worktree.
+             * Only meaningful for a code review — a plan/proposal gate (no diff)
+             * has no lines to cite, so its request_changes stands unverified. */
+            if (out[filled].kind == WFE_V_REQUEST_CHANGES && pkt->diff && pkt->diff[0])
+            {
+               int cited = out[filled].blocker_count;
+               int ver = wfe_panel_blockers_verify(&out[filled], pkt->workdir);
+               if (out[filled].kind == WFE_V_COMMENT)
+                  aimee_log(LOG_WARN, "wfe-panel",
+                            "lens '%s' request_changes from agent '%s' re-graded to comment: "
+                            "%d blocker citation(s), none reproduced in the worktree",
+                            required[i], taskagent[t], cited);
+               else if (ver < cited)
+                  aimee_log(LOG_INFO, "wfe-panel",
+                            "lens '%s': %d/%d blocker citation(s) reproduced (unverified ones "
+                            "discarded)",
+                            required[i], ver, cited);
+            }
             /* Attribute the verdict so a degraded gate is triageable: without
              * this there is no record of WHICH agent served a lens or what it
              * returned. On MALFORMED include the reply's tail — that is the

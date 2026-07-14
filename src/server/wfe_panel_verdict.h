@@ -17,4 +17,16 @@
 void wfe_panel_verdict_from_review(const char *persona, const char *artifact_hash,
                                    const char *review_text, wfe_verdict_t *out);
 
+/* Replay a REQUEST_CHANGES verdict's blocker citations against the worktree
+ * under review: each blocker must cite a repo-relative file:line that exists,
+ * and when it quotes text, that text must reproduce within +/-2 lines of the
+ * cited line. Sets each blocker's `verified` flag and
+ * re-grounds high_sev_blockers to the verified count. When NO citation
+ * reproduces the verdict is re-graded to WFE_V_COMMENT (an interpretive
+ * objection never blocks — the wfe twin of roundtable_grade_item's
+ * NO_EVIDENCE-caps / CONTRADICTED-rejects rule) and a note is appended to
+ * `feedback`. Verdicts of any other kind, and a NULL/empty workdir (nothing to
+ * replay against), are left untouched. Returns the verified-blocker count. */
+int wfe_panel_blockers_verify(wfe_verdict_t *v, const char *workdir);
+
 #endif /* DEC_WFE_PANEL_VERDICT_H */
