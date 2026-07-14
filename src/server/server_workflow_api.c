@@ -871,16 +871,25 @@ int wf_api_item_resume(const char *id, int is_operator, char *resp, int cap)
     * the panel with the (possibly re-authored/raised) budget. */
    if (strcmp(wi.pause_reason, "pending_human") == 0)
    {
+      /* pending_human means one of two very different things:
+       *   - a gate.human node: a DECISION is required — resume must not
+       *     silently bypass it (approve/reject records the signed decision);
+       *   - a loop-cap escalation on ANY OTHER node (roundtable, split, ...):
+       *     the node exhausted its attempt budget and asked for a human. The
+       *     human's lever there IS resume: re-arm the budget and let the loop
+       *     continue (a human cannot force-pass a roundtable, and there is
+       *     nothing to "approve" about a flaky split).
+       * Only a true gate.human refuses resume. */
       char ferr[256];
       wfe_def_t *rdef = wfe_load_workflow(wi.workflow_name, ferr, sizeof ferr);
       const wfe_node_t *rnode = rdef ? wfe_def_node(rdef, wi.current_stage) : NULL;
-      int is_rt = rnode && rnode->block == WFE_BLK_GATE_ROUNDTABLE;
+      int is_human_gate = rnode && rnode->block == WFE_BLK_GATE_HUMAN;
       if (rdef)
          wfe_def_free(rdef);
-      if (!is_rt)
+      if (is_human_gate)
          return err(resp, cap, 409, "run is at a human gate — use Approve or Reject");
-      /* roundtable escalation: fall through to the un-pause below. Re-arm the
-       * loop budget so the gate doesn't instantly re-park at the same cap. */
+      /* loop-cap escalation: re-arm the stage budget so the node doesn't
+       * instantly re-park at the same cap, then fall through to un-pause. */
       db1_stage_attempt_reset(id, wi.current_stage);
    }
    if (db1_work_item_clear_pause(id) != 0)
