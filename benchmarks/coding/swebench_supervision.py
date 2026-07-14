@@ -410,10 +410,16 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     from benchmarks.coding import swebench_agentic_harness as H
     from benchmarks.coding import swebench_arm_runner as R
     from benchmarks.coding import swebench_live_transport as T
+    from benchmarks.coding.supervision_budget import Supervisor as _BudgetSup
     if _FAKE:
         return _fake_arm_c_record(instance, primary_model, n)
     if dispatch is None:
         dispatch = T.dispatch_and_wait
+
+    # S3 budget supervisor: audit trail for primary tokens, escalation cost, and
+    # tool allowlist enforcement. Wired here so the headline telemetry curve
+    # (``primary_tokens_by_turn``) is computed in one canonical place.
+    _budget = _BudgetSup()
 
     instance_id = instance["instance_id"]
     picks = _pick_workers(workers, n, f"{seed}:{instance_id}")
@@ -500,6 +506,11 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
         "escalation_tokens": esc.escalation_tokens,
         "escalation_dominated": escalation_dominated,
         "candidate_health_ok": len(candidates) >= -(-n // 2),  # >= ceil(n/2)
+        # S3 budget telemetry: emit the supervisor's per-turn primary token curve
+        # plus the audit ledger so the auditor can reproduce the headline.
+        "primary_tokens_by_turn": _budget.primary_tokens_by_turn,
+        "primary_tokens_total": _budget.primary_tokens_total,
+        "supervision_budget_remaining": _budget.ledger.balance,
     })
     return rec
 
