@@ -447,9 +447,15 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
          off += n;
    }
 
-   if (content_type)
+   if (content_type && content_type[0])
    {
-      int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", content_type);
+      /* Accept either a full header line ("Content-Type: application/json") or a
+       * bare media type ("application/json"): callers pass both conventions. A
+       * bare value emitted verbatim is a header line with no field name — an
+       * invalid HTTP header that some servers (e.g. api.github.com) reject with
+       * 400 before parsing the body. Prefix the field name when it is absent. */
+      const char *prefix = strchr(content_type, ':') ? "" : "Content-Type: ";
+      int n = snprintf(req + off, cap - (size_t)off, "%s%s\r\n", prefix, content_type);
       if (n > 0 && (size_t)off + (size_t)n < cap)
          off += n;
    }

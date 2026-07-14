@@ -47,12 +47,29 @@ static const char *forge_dir(const char *repo)
  * token rides a CLOEXEC memfd duplicated onto GIT_CRED_TOKEN_TARGET_FD in the
  * git child, where the askpass shim reads it — it never enters the child's
  * environment or argv (the same FD mode git_ops uses). NULL principal resolves
- * per-host vault -> server forge identity. */
+ * per-host vault -> server forge identity.
+ *
+ * The push targets the origin's canonical HTTPS URL, NOT the literal `origin`
+ * remote: a workspace whose origin is an SSH URL (git@github.com:...) would make
+ * git use SSH keys the server has no reason to hold, bypassing the token entirely
+ * (this bit s2 — "Permission denied (publickey)"). Pushing to the HTTPS URL makes
+ * git request the credential the askpass supplies. The same HTTPS URL is passed
+ * as remote_url so per-host token resolution is unambiguous. */
 static int forge_push_branch(const char *dir, const char *branch, const char *what)
 {
-   const char *argv[] = {"git", "-C", dir, "push", "-u", "origin", branch, NULL};
+   char url[512], err[200];
+   if (git_pr_https_origin_url(dir, url, sizeof url, err, sizeof err) != 0)
+   {
+      aimee_log(LOG_WARN, "wfe-forge", "%s %s: resolve https origin: %s", what, branch, err);
+      return -1;
+   }
+   /* Explicit refspec: push the local branch to the same-named remote branch,
+    * independent of any upstream tracking config in the shared checkout. */
+   char refspec[300];
+   snprintf(refspec, sizeof refspec, "%s:refs/heads/%s", branch, branch);
+   const char *argv[] = {"git", "-C", dir, "push", url, refspec, NULL};
    int token_fd = -1;
-   char **envp = git_cred_inject_build_env_for_repo(NULL, NULL, dir, NULL, environ, &token_fd);
+   char **envp = git_cred_inject_build_env_for_repo(NULL, url, dir, NULL, environ, &token_fd);
    char *out = NULL;
    int rc = safe_exec_capture_cwd_env_fd_timeout(argv, dir, envp ? envp : environ, &out, 1 << 16,
                                                  120000, token_fd,
