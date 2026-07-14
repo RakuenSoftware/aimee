@@ -271,8 +271,8 @@ static int live_open(const char *repo, const char *branch, const char *base, con
     * half-built shell command). */
    char ebranch[256], etitle[512], ebody[1024], ebase[128];
    if (shq(ebranch, sizeof ebranch, branch) != 0 ||
-       shq(etitle, sizeof etitle, title ? title : "") != 0 || shq(ebody, sizeof ebody, bclean) != 0 ||
-       shq(ebase, sizeof ebase, base) != 0)
+       shq(etitle, sizeof etitle, title ? title : "") != 0 ||
+       shq(ebody, sizeof ebody, bclean) != 0 || shq(ebase, sizeof ebase, base) != 0)
    {
       aimee_log(LOG_WARN, "wfe-forge", "live_open: arg too long for %s", branch);
       free(bclean);
