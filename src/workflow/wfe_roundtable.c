@@ -145,6 +145,12 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
       (void)safe_exec_capture(dargv, &diff, WFE_REVIEW_DIFF_MAX);
    }
 
+   /* Re-review context: blockers persisted by this work item's previous
+    * REQUEST_CHANGES round (cleared on approve). Present => the panel judges
+    * whether THEY were addressed rather than re-reviewing from scratch. */
+   char prior_blockers[4096];
+   wfe_feedback_read(wi, prior_blockers, sizeof prior_blockers);
+
    wfe_review_packet_t pkt = {
        .artifact_hash = artifact_hash,
        .proposal = proposal ? proposal : "",
@@ -153,6 +159,7 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
        .workdir = workdir,
        .diff = diff ? diff : "",
        .roundtable = (rt_j && cJSON_IsString(rt_j) && rt_j->valuestring) ? rt_j->valuestring : "",
+       .prior_blockers = prior_blockers,
    };
 
    wfe_verdict_t verdicts[WFE_PANEL_MAX];

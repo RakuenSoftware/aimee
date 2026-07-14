@@ -91,22 +91,40 @@ static char *build_prompt(const char *persona, const wfe_review_packet_t *pkt)
    const char *diff = (pkt->diff && pkt->diff[0])
                           ? pkt->diff
                           : "(no code diff — review the plan/proposal artifact against the ask)";
-   size_t cap = 2048 + strlen(focus) + strlen(proposal) + strlen(diff);
+   const char *prior = (pkt->prior_blockers && pkt->prior_blockers[0]) ? pkt->prior_blockers : "";
+   size_t cap = 3072 + strlen(focus) + strlen(proposal) + strlen(diff) + strlen(prior);
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
+   /* Re-review scoping: once a round has produced concrete blockers, later
+    * rounds judge whether THOSE were addressed. Panel seats rotate between
+    * rounds, and an unscoped fresh reviewer reliably finds novel objections —
+    * observed live as a flat 100% request_changes rate across dozens of rounds
+    * (the author kept fixing round N's list while round N+1 raised a new one).
+    * New HIGH-SEVERITY findings still block; preferences and nits do not. */
+   char rereview[4600];
+   if (prior[0])
+      snprintf(rereview, sizeof rereview,
+               "\n\nTHIS IS A RE-REVIEW. The previous round's blockers were:\n%.4000s\n\n"
+               "Verdict approve if these blockers are now adequately addressed and you find no "
+               "NEW high-severity defect. Do NOT request changes for stylistic preferences, "
+               "scope you would merely have done differently, or issues below high severity — "
+               "raise those as comment instead.",
+               prior);
+   else
+      rereview[0] = '\0';
    snprintf(buf, cap,
             "You are the %s lens on a review roundtable. Review the CHANGE UNDER REVIEW below "
             "AGAINST what was asked. Do NOT edit files, and do NOT sweep or re-read the repo to "
             "reconstruct context: trust aimee's index/graph (find_symbol, search_memory) as the "
             "authoritative source for the current codebase, and open a file only to confirm what "
             "the index cannot resolve.\n\nFOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
-            "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
+            "CHANGE UNDER REVIEW (diff vs the base repo):\n%s%s\n\n"
             "End your reply with EXACTLY one JSON line and nothing after it: "
             "{\"verdict\":\"approve\"} if it satisfies the ask with no high-severity blocker, "
             "{\"verdict\":\"request_changes\",\"high_sev_blockers\":<N>} if there is a real "
             "blocker, or {\"verdict\":\"comment\"} if you only have non-blocking remarks.",
-            persona, focus, proposal, diff);
+            persona, focus, proposal, diff, rereview);
    return buf;
 }
 

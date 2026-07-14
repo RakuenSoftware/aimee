@@ -23,9 +23,15 @@ typedef struct
    const char *diff;    /* the change under review vs the base repo, pushed to the panel so it
                          * reads the delta directly (trusting the index for context) instead of
                          * re-running git; "" at a plan gate (no code change yet) */
-   const char *roundtable; /* the roundtable preset this gate convenes (from the node's
-                            * params.roundtable), for its persona->model seat bindings; "" (or
-                            * NULL) means the configured default (roundtable.default) */
+   const char *roundtable;     /* the roundtable preset this gate convenes (from the node's
+                                * params.roundtable), for its persona->model seat bindings; "" (or
+                                * NULL) means the configured default (roundtable.default) */
+   const char *prior_blockers; /* the previous round's persisted blockers when this is a
+                                * RE-REVIEW after REQUEST_CHANGES; "" on a first review. A
+                                * re-review panel judges whether these were addressed (plus any
+                                * NEW high-severity finding) instead of re-litigating from
+                                * scratch — rotating fresh-eyed seats otherwise generate novel
+                                * objections every round and the gate never converges. */
 } wfe_review_packet_t;
 
 /* Panel-provider return sentinels (negative), distinct from a verdict count (>=0). */
