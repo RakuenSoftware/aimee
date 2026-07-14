@@ -56,6 +56,55 @@ export interface GitProjectsResponse {
   error?: string;
 }
 
+/* Knowledge-indexing annotations a clone response (or a clone-org per-repo
+ * result row) may carry: `kb_indexed:false` means the clone succeeded but the
+ * code scan did not run — `kb_reason` says why. A single clone may also carry
+ * `org_note` (multi-segment owner cloned flat; pass an explicit org). */
+export interface CloneKbAnnotations {
+  org_note?: string;
+  kb_indexed?: boolean;
+  kb_reason?: string;
+}
+
+/** POST /api/git/projects/delete response. 200 carries `kb_status`
+ * ("purged" | "retained" | "forced") + `purge_id`; 503 (kb unavailable —
+ * retry or force) and 400/404 carry `error`. `kb` is the per-store detail. */
+export interface ProjectDeleteResponse {
+  ok?: boolean;
+  ref?: string;
+  kb_status?: 'purged' | 'retained' | 'forced';
+  purge_id?: string;
+  kb?: Record<string, unknown>;
+  error?: string;
+}
+
+/** One org heading on the Projects page: the org name ('' = ungrouped legacy
+ * flat clones) and its project refs in server order. */
+export interface OrgGroup {
+  org: string;
+  refs: string[];
+}
+
+/** Group project refs under their orgs for display. The org comes from the
+ * details row when the server sent one, else from the ref itself ("org/name" →
+ * "org", flat → ''). Named orgs sort alphabetically; the ungrouped bucket
+ * (legacy flat clones) comes last. Refs keep server order within a group. */
+export function groupProjectsByOrg(projects: string[], details: ProjectDetail[]): OrgGroup[] {
+  const byRef = new Map(details.map(d => [d.ref, d]));
+  const groups = new Map<string, string[]>();
+  for (const ref of projects) {
+    const d = byRef.get(ref);
+    const slash = ref.indexOf('/');
+    const org = d ? d.org : slash > 0 ? ref.slice(0, slash) : '';
+    const bucket = groups.get(org);
+    if (bucket) bucket.push(ref);
+    else groups.set(org, [ref]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
+    .map(([org, refs]) => ({ org, refs }));
+}
+
 // Hosts whose repo paths are case-insensitive (mirrors the server's
 // util_url_host_is_case_insensitive).
 const CI_HOSTS = ['github.com', 'gitlab.com', 'bitbucket.org'];
