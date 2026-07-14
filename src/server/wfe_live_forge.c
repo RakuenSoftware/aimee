@@ -21,14 +21,51 @@
 #include "wfe_live_forge.h"
 
 #include "config.h"
+#include "git_cred_inject.h" /* FD-mode env for the branch push (token on a memfd) */
+#include "git_pr_api.h"      /* in-process GitHub REST: create/info/ci/merge */
 #include "log.h"
-#include "mcp_git.h"
+#include "util.h" /* safe_exec_capture* */
 #include "wfe_blocks.h"
 #include "wfe_iface.h" /* wfe_autonomous_base / wfe_autonomous_target_ok (merge-target rail) */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+extern char **environ;
+
+/* The local checkout every forge op acts on: the work item's repo binding
+ * resolved to a directory (else $AIMEE_WORKFLOW_REPO). All git here is argv-only
+ * with an explicit -C dir — never a shell string, never the daemon's cwd. */
+static const char *forge_dir(const char *repo)
+{
+   return wfe_repo_local(repo);
+}
+
+/* Push `branch` from `dir` through the sanctioned credential path: the vaulted
+ * token rides a CLOEXEC memfd duplicated onto GIT_CRED_TOKEN_TARGET_FD in the
+ * git child, where the askpass shim reads it — it never enters the child's
+ * environment or argv (the same FD mode git_ops uses). NULL principal resolves
+ * per-host vault -> server forge identity. */
+static int forge_push_branch(const char *dir, const char *branch, const char *what)
+{
+   const char *argv[] = {"git", "-C", dir, "push", "-u", "origin", branch, NULL};
+   int token_fd = -1;
+   char **envp = git_cred_inject_build_env_for_repo(NULL, NULL, dir, NULL, environ, &token_fd);
+   char *out = NULL;
+   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, dir, envp ? envp : environ, &out, 1 << 16,
+                                                 120000, token_fd,
+                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   if (token_fd >= 0)
+      close(token_fd);
+   if (envp)
+      git_cred_inject_free_env(envp);
+   if (rc != 0)
+      aimee_log(LOG_WARN, "wfe-forge", "%s %s failed: %s", what, branch, out ? out : "");
+   free(out);
+   return rc == 0 ? 0 : -1;
+}
 
 /* The master switch: the live forge does nothing unless the operator enabled it.
  * A config_load failure reads as DISABLED (fail closed). */
@@ -44,40 +81,6 @@ static int forge_on(void)
 static int forge_allowed(void)
 {
    return forge_on() && wfe_autonomous_target_ok();
-}
-
-/* Single-quote-escape `s` into a shell '...' literal in `dst` (cap n). Returns 0 on
- * success, -1 if it would TRUNCATE — the caller must abort on -1, never run a
- * half-built command. */
-static int shq(char *dst, size_t n, const char *s)
-{
-   if (!dst || n == 0)
-      return -1;
-   size_t d = 0;
-   for (size_t i = 0; s && s[i]; i++)
-   {
-      if (s[i] == '\'')
-      {
-         if (d + 4 >= n)
-         {
-            dst[n - 1] = '\0';
-            return -1;
-         }
-         memcpy(dst + d, "'\\''", 4);
-         d += 4;
-      }
-      else
-      {
-         if (d + 1 >= n)
-         {
-            dst[n - 1] = '\0';
-            return -1;
-         }
-         dst[d++] = s[i];
-      }
-   }
-   dst[d] = '\0';
-   return 0;
 }
 
 /* Parse the PR number from the canonical .../pull/<N> URL `gh pr create` prints.
@@ -105,22 +108,23 @@ static wfe_ci_status_t live_ci_status(const char *repo, const char *pr)
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return WFE_CI_NONE;
-   char cmd[256];
-   snprintf(cmd, sizeof cmd, "gh pr checks %d 2>&1", num);
-   int rc;
-   char *out = mcp_git_run(cmd, &rc);
-   wfe_ci_status_t st = WFE_CI_NONE; /* default fail-closed */
-   if (out && strstr(out, "no checks reported"))
-      st = WFE_CI_NONE; /* no CI -> don't advance */
-   else if (rc == 0)
-      st = WFE_CI_SUCCESS; /* gh: all checks passed */
-   else if (rc == 8)
-      st = WFE_CI_PENDING; /* gh: some still running */
-   else if (rc == 1)
-      st = WFE_CI_FAILURE; /* gh: some failed */
-   /* any other rc -> NONE (unknown) -> park */
-   free(out);
-   return st;
+   char err[160];
+   switch (git_pr_ci_via_api(NULL, forge_dir(repo), num, err, sizeof err))
+   {
+   case GIT_PR_CI_SUCCESS:
+      return WFE_CI_SUCCESS;
+   case GIT_PR_CI_PENDING:
+      return WFE_CI_PENDING;
+   case GIT_PR_CI_FAILURE:
+      return WFE_CI_FAILURE;
+   case GIT_PR_CI_ERROR:
+      aimee_log(LOG_WARN, "wfe-forge", "ci status for PR %d: %s", num, err);
+      /* unknown -> NONE -> park (never advance) */
+      return WFE_CI_NONE;
+   case GIT_PR_CI_NONE:
+   default:
+      return WFE_CI_NONE;
+   }
 }
 
 static int live_mergeable(const char *repo, const char *pr)
@@ -131,20 +135,14 @@ static int live_mergeable(const char *repo, const char *pr)
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return -1;
-   char cmd[256];
-   snprintf(cmd, sizeof cmd, "gh pr view %d --json mergeable -q .mergeable 2>&1", num);
-   int rc;
-   char *out = mcp_git_run(cmd, &rc);
-   int res = -1; /* unknown -> park */
-   if (rc == 0 && out)
+   git_pr_info_t info;
+   char err[160];
+   if (git_pr_info_via_api(NULL, forge_dir(repo), num, &info, err, sizeof err) != 0)
    {
-      if (strstr(out, "MERGEABLE"))
-         res = 1;
-      else if (strstr(out, "CONFLICTING"))
-         res = 0;
+      aimee_log(LOG_WARN, "wfe-forge", "mergeable for PR %d: %s", num, err);
+      return -1; /* unknown -> park */
    }
-   free(out);
-   return res;
+   return info.mergeable; /* 1 / 0 / -1 (GitHub still computing -> park) */
 }
 
 static int live_is_merged(const char *repo, const char *pr)
@@ -155,15 +153,14 @@ static int live_is_merged(const char *repo, const char *pr)
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return -1;
-   char cmd[256];
-   snprintf(cmd, sizeof cmd, "gh pr view %d --json state -q .state 2>&1", num);
-   int rc;
-   char *out = mcp_git_run(cmd, &rc);
-   int res = -1; /* unknown -> the engine parks (never merges on an undetermined state) */
-   if (rc == 0 && out)
-      res = strstr(out, "MERGED") ? 1 : 0;
-   free(out);
-   return res;
+   git_pr_info_t info;
+   char err[160];
+   if (git_pr_info_via_api(NULL, forge_dir(repo), num, &info, err, sizeof err) != 0)
+   {
+      aimee_log(LOG_WARN, "wfe-forge", "is_merged for PR %d: %s", num, err);
+      return -1; /* unknown -> the engine parks (never merges on an undetermined state) */
+   }
+   return info.merged ? 1 : 0;
 }
 
 static wfe_merge_result_t live_merge(const char *repo, const char *pr)
@@ -174,25 +171,24 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return WFE_MERGE_ERROR;
-   char cmd[256];
-   snprintf(cmd, sizeof cmd, "gh pr merge %d --squash 2>&1", num);
    /* Re-check immediately before the mutating call: close the TOCTOU window where
     * the flag is flipped off / the base becomes protected after the entry check. */
    if (!forge_allowed())
       return WFE_MERGE_ERROR;
-   int rc;
-   char *out = mcp_git_run(cmd, &rc);
-   wfe_merge_result_t res;
-   if (rc == 0)
-      res = WFE_MERGE_OK;
-   else if (out && strstr(out, "already merged"))
-      res = WFE_MERGE_ALREADY;
-   else if (out && (strstr(out, "not mergeable") || strstr(out, "conflict")))
-      res = WFE_MERGE_NOT_MERGEABLE;
-   else
-      res = WFE_MERGE_ERROR; /* unknown -> park for a human */
-   free(out);
-   return res;
+   char err[200];
+   switch (git_pr_merge_via_api(NULL, forge_dir(repo), num, err, sizeof err))
+   {
+   case 0:
+      return WFE_MERGE_OK;
+   case 1:
+      return WFE_MERGE_ALREADY;
+   case 2:
+      aimee_log(LOG_WARN, "wfe-forge", "merge of PR %d: %s", num, err);
+      return WFE_MERGE_NOT_MERGEABLE;
+   default:
+      aimee_log(LOG_WARN, "wfe-forge", "merge of PR %d: %s", num, err);
+      return WFE_MERGE_ERROR; /* unknown -> park for a human */
+   }
 }
 
 /* The repo's real default branch as the vaulted runner sees it: AIMEE_DEFAULT_BRANCH
@@ -201,7 +197,7 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
  * NO "main" guess, so a protected base can be permitted ONLY when we positively
  * resolved it to be the real trunk. Mirrors wfe_repo_default_branch() in the engine so
  * base:trunk means the same trunk on both sides of the forge seam. */
-static int live_default_branch(char *buf, size_t n)
+static int live_default_branch(const char *dir, char *buf, size_t n)
 {
    if (!buf || n < 2)
       return -1;
@@ -213,7 +209,13 @@ static int live_default_branch(char *buf, size_t n)
       return 0;
    }
    int rc = -1;
-   char *out = mcp_git_run("git symbolic-ref --short refs/remotes/origin/HEAD 2>&1", &rc);
+   const char *argv[] = {"git", "-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD",
+                         NULL};
+   char *out = NULL;
+   if (safe_exec_capture(argv, &out, 4096) != 0)
+      rc = -1;
+   else
+      rc = 0;
    if (rc == 0 && out)
    {
       size_t l = strlen(out);
@@ -235,11 +237,11 @@ static int live_default_branch(char *buf, size_t n)
 static int live_open(const char *repo, const char *branch, const char *base, const char *title,
                      const char *body, char out_pr_ref[128])
 {
-   (void)repo;
    if (out_pr_ref)
       out_pr_ref[0] = '\0';
    if (!forge_allowed() || !branch || !branch[0])
       return -1;
+   const char *dir = forge_dir(repo);
    /* Defence in depth beyond exec_pr_open: refuse an empty base, and refuse a protected
     * base UNLESS it is the repo's own default branch (trunk). pr.open only OPENS a PR
     * (never merges), so a human-reviewed PR against the trunk is the intended terminal;
@@ -250,7 +252,7 @@ static int live_open(const char *repo, const char *branch, const char *base, con
    if (wfe_base_is_protected(base))
    {
       char trunk[64];
-      if (live_default_branch(trunk, sizeof trunk) != 0 || strcmp(base, trunk) != 0)
+      if (live_default_branch(dir, trunk, sizeof trunk) != 0 || strcmp(base, trunk) != 0)
       {
          aimee_log(LOG_WARN, "wfe-forge",
                    "refusing PR open against protected base '%s' (not the resolved repo trunk)",
@@ -259,56 +261,27 @@ static int live_open(const char *repo, const char *branch, const char *base, con
       }
    }
 
-   /* Standing directive: no AI co-authorship / "Generated with" attribution in
-    * PR bodies. The body comes from the run's LLM, so strip a copy before it
-    * reaches the forge. */
-   char *bclean = strdup(body ? body : "");
-   if (!bclean)
-      return -1;
-   strip_ai_attribution(bclean);
-
-   /* Escape every interpolated value; ABORT on any truncation (never run a
-    * half-built shell command). */
-   char ebranch[256], etitle[512], ebody[1024], ebase[128];
-   if (shq(ebranch, sizeof ebranch, branch) != 0 ||
-       shq(etitle, sizeof etitle, title ? title : "") != 0 ||
-       shq(ebody, sizeof ebody, bclean) != 0 || shq(ebase, sizeof ebase, base) != 0)
-   {
-      aimee_log(LOG_WARN, "wfe-forge", "live_open: arg too long for %s", branch);
-      free(bclean);
-      return -1;
-   }
-   free(bclean);
-
-   /* Push the work-item branch through the vaulted runner. Worktrees share the
-    * branch namespace, so the push resolves the branch the run committed to. */
-   char cmd[2048];
-   int rc;
+   /* Push the work-item branch (worktrees share the branch namespace, so the
+    * shared checkout resolves the branch the run committed to), then open the
+    * PR in-process via the GitHub REST API — the forge credential stays inside
+    * aimee-server (Authorization header) or on the push's memfd; it never
+    * reaches a child environment, argv, or a gh process. */
    if (!forge_allowed()) /* re-check just before the mutating push (TOCTOU) */
       return -1;
-   snprintf(cmd, sizeof cmd, "git push -u origin '%s' 2>&1", ebranch);
-   char *out = mcp_git_run(cmd, &rc);
-   if (rc != 0)
-   {
-      aimee_log(LOG_WARN, "wfe-forge", "push of %s failed: %s", branch, out ? out : "");
-      free(out);
+   if (forge_push_branch(dir, branch, "push of") != 0)
       return -1;
-   }
-   free(out);
 
    if (!forge_allowed()) /* re-check just before the mutating PR create (TOCTOU) */
       return -1;
-   snprintf(cmd, sizeof cmd, "gh pr create --head '%s' --base '%s' --title '%s' --body '%s' 2>&1",
-            ebranch, ebase, etitle, ebody);
-   out = mcp_git_run(cmd, &rc);
-   if (rc != 0)
+   /* git_pr_create_via_api_ex strips AI attribution from the body itself. */
+   char url[512] = "", err[200] = "";
+   if (git_pr_create_via_api_ex(NULL, dir, branch, base, title ? title : "", body ? body : "", url,
+                                sizeof url, err, sizeof err) != 0)
    {
-      aimee_log(LOG_WARN, "wfe-forge", "pr create for %s failed: %s", branch, out ? out : "");
-      free(out);
+      aimee_log(LOG_WARN, "wfe-forge", "pr create for %s failed: %s", branch, err);
       return -1;
    }
-   int num = parse_pr_number(out);
-   free(out);
+   int num = parse_pr_number(url);
    if (num <= 0)
       return -1;
    snprintf(out_pr_ref, 128, "%d", num);
@@ -321,21 +294,9 @@ static int live_open(const char *repo, const char *branch, const char *base, con
  * runner; refuses a protected/empty branch (defence in depth). */
 static int live_publish_base(const char *repo, const char *branch)
 {
-   (void)repo;
    if (!forge_allowed() || !branch || !branch[0] || wfe_base_is_protected(branch))
       return -1;
-   char ebranch[256];
-   if (shq(ebranch, sizeof ebranch, branch) != 0)
-      return -1;
-   char cmd[512];
-   snprintf(cmd, sizeof cmd, "git push -u origin '%s' 2>&1", ebranch);
-   int rc;
-   char *out = mcp_git_run(cmd, &rc);
-   if (rc != 0)
-      aimee_log(LOG_WARN, "wfe-forge", "publish feature base %s failed: %s", branch,
-                out ? out : "");
-   free(out);
-   return rc == 0 ? 0 : -1;
+   return forge_push_branch(forge_dir(repo), branch, "publish feature base");
 }
 
 static const wfe_forge_t WFE_LIVE_FORGE = {live_ci_status, live_mergeable, live_is_merged,

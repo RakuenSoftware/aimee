@@ -134,35 +134,132 @@ static int parse_github_slug(const char *url, char *owner, size_t ocap, char *re
    return 0;
 }
 
-int git_pr_create_via_api(const char *principal, const char *repo_dir, const char *title,
-                          const char *body, char *out, size_t out_cap, char *err, size_t errlen)
-{
-   if (out && out_cap)
-      out[0] = '\0';
-   if (err && errlen)
-      err[0] = '\0';
+/* ---- shared REST context for the PR ops (create/info/ci/merge) ---- */
 
+typedef struct
+{
+   char owner[128];
+   char repo[128];
+   char token[PR_TOKEN_MAX];
+} gh_ctx_t;
+
+/* Resolve repo_dir's github slug + the credential (vault-first, the ONE policy).
+ * The raw token is held ONLY for Authorization headers built in-process; call
+ * gh_ctx_done to wipe it before returning. */
+static int gh_ctx_resolve(const char *principal, const char *repo_dir, gh_ctx_t *cx, char *err,
+                          size_t errlen)
+{
+   memset(cx, 0, sizeof(*cx));
    char origin[1024];
    if (git_cap(repo_dir, "config --get remote.origin.url", origin, sizeof(origin)) != 0)
    {
       snprintf(err, errlen, "no origin remote");
       return -1;
    }
-   char owner[128], repo[128];
-   if (parse_github_slug(origin, owner, sizeof(owner), repo, sizeof(repo)) != 0)
+   if (parse_github_slug(origin, cx->owner, sizeof(cx->owner), cx->repo, sizeof(cx->repo)) != 0)
    {
-      snprintf(err, errlen, "open-PR requires a github.com origin");
+      snprintf(err, errlen, "requires a github.com origin");
       return -1;
    }
-   char head[256];
-   if (git_cap(repo_dir, "rev-parse --abbrev-ref HEAD", head, sizeof(head)) != 0 ||
-       strcmp(head, "HEAD") == 0)
+   if (git_cred_inject_resolve_token(principal, NULL, repo_dir, NULL, cx->token,
+                                     sizeof(cx->token)) != 1 ||
+       !cx->token[0])
    {
+      wipe(cx->token, sizeof(cx->token));
+      snprintf(err, errlen, "no github credential — connect one in the Git panel");
+      return -1;
+   }
+   return 0;
+}
+
+static void gh_ctx_done(gh_ctx_t *cx)
+{
+   wipe(cx->token, sizeof(cx->token));
+}
+
+#define GH_ACCEPT "Accept: application/vnd.github+json"
+
+/* GET api.github.com/repos/<owner>/<repo>/<path>. The Authorization header is
+ * assembled and wiped here; the token never leaves this process. Returns the
+ * HTTP status (or <0), with *resp the malloc'd body (caller frees). */
+static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
+{
+   *resp = NULL;
+   char url[512];
+   if ((size_t)snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/%s", cx->owner,
+                        cx->repo, path) >= sizeof(url))
+      return -1;
+   /* agent_http_get carries everything in extra_headers (bounded); a token too
+    * long for the line budget fails clean here rather than truncating. */
+   char hdrs[480];
+   if ((size_t)snprintf(hdrs, sizeof(hdrs), "Authorization: Bearer %s\n" GH_ACCEPT, cx->token) >=
+       sizeof(hdrs))
+      return -1;
+   int st = agent_http_get(url, hdrs, resp, 20000);
+   wipe(hdrs, sizeof(hdrs));
+   return st;
+}
+
+/* PUT with a JSON body; same containment as gh_get. */
+static int gh_put(const gh_ctx_t *cx, const char *path, const char *body, char **resp)
+{
+   *resp = NULL;
+   char url[512];
+   if ((size_t)snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/%s", cx->owner,
+                        cx->repo, path) >= sizeof(url))
+      return -1;
+   char auth[PR_TOKEN_MAX + 32];
+   snprintf(auth, sizeof(auth), "Authorization: Bearer %s", cx->token);
+   int st = agent_http_put(url, auth, body, resp, 20000, GH_ACCEPT);
+   wipe(auth, sizeof(auth));
+   return st;
+}
+
+/* Surface GitHub's own "message" field into err when a call fails. */
+static void gh_err(const char *resp, int status, const char *what, char *err, size_t errlen)
+{
+   const char *msg = NULL;
+   cJSON *je = resp ? cJSON_Parse(resp) : NULL;
+   cJSON *m = je ? cJSON_GetObjectItem(je, "message") : NULL;
+   if (cJSON_IsString(m) && m->valuestring)
+      msg = m->valuestring;
+   snprintf(err, errlen, "github API (%s, HTTP %d): %s", what, status, msg ? msg : "failed");
+   cJSON_Delete(je);
+}
+
+int git_pr_create_via_api(const char *principal, const char *repo_dir, const char *title,
+                          const char *body, char *out, size_t out_cap, char *err, size_t errlen)
+{
+   return git_pr_create_via_api_ex(principal, repo_dir, NULL, NULL, title, body, out, out_cap, err,
+                                   errlen);
+}
+
+int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const char *head_in,
+                             const char *base_in, const char *title, const char *body, char *out,
+                             size_t out_cap, char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   char head[256];
+   if (head_in && head_in[0])
+      snprintf(head, sizeof(head), "%s", head_in);
+   else if (git_cap(repo_dir, "rev-parse --abbrev-ref HEAD", head, sizeof(head)) != 0 ||
+            strcmp(head, "HEAD") == 0)
+   {
+      gh_ctx_done(&cx);
       snprintf(err, errlen, "not on a branch");
       return -1;
    }
    char base[256];
-   if (git_cap(repo_dir, "rev-parse --abbrev-ref origin/HEAD", base, sizeof(base)) != 0)
+   if (base_in && base_in[0])
+      snprintf(base, sizeof(base), "%s", base_in);
+   else if (git_cap(repo_dir, "rev-parse --abbrev-ref origin/HEAD", base, sizeof(base)) != 0)
       snprintf(base, sizeof(base), "main"); /* no origin/HEAD ref → assume main */
    else
    {
@@ -177,20 +274,6 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
          title = tbuf;
       else
          title = head;
-   }
-
-   /* Resolve the token through the ONE credential policy (same precedence as the
-    * git exec path) so the ladder never drifts; we use the raw token here only
-    * because it goes into an Authorization header, not an exec env. */
-   char token[PR_TOKEN_MAX] = {0};
-   int have =
-       (git_cred_inject_resolve_token(principal, NULL, repo_dir, NULL, token, sizeof(token)) == 1 &&
-        token[0]);
-   if (!have)
-   {
-      wipe(token, sizeof(token));
-      snprintf(err, errlen, "no github credential — connect one in the Git panel");
-      return -1;
    }
 
    /* Standing directive: no AI co-authorship / "Generated with" attribution in
@@ -209,34 +292,27 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
    cJSON_Delete(j);
    if (!jbody)
    {
-      wipe(token, sizeof(token));
+      gh_ctx_done(&cx);
       snprintf(err, errlen, "internal error");
       return -1;
    }
 
    char url[512];
-   snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/pulls", owner, repo);
+   snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/pulls", cx.owner, cx.repo);
    char auth[PR_TOKEN_MAX + 32];
-   snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+   snprintf(auth, sizeof(auth), "Authorization: Bearer %s", cx.token);
 
    char *resp = NULL;
-   int status = agent_http_post_content_type(url, auth, "application/json", jbody, &resp, 20000,
-                                             "Accept: application/vnd.github+json");
+   int status =
+       agent_http_post_content_type(url, auth, "application/json", jbody, &resp, 20000, GH_ACCEPT);
    /* The token only ever lived in aimee-server's memory; wipe both copies now. */
    wipe(auth, sizeof(auth));
-   wipe(token, sizeof(token));
+   gh_ctx_done(&cx);
    free(jbody);
 
    if (status < 200 || status >= 300 || !resp)
    {
-      /* Surface GitHub's own error message when present. */
-      const char *msg = NULL;
-      cJSON *je = resp ? cJSON_Parse(resp) : NULL;
-      cJSON *m = je ? cJSON_GetObjectItem(je, "message") : NULL;
-      if (cJSON_IsString(m) && m->valuestring)
-         msg = m->valuestring;
-      snprintf(err, errlen, "github API: %s", msg ? msg : "PR not created");
-      cJSON_Delete(je);
+      gh_err(resp, status, "pr create", err, errlen);
       free(resp);
       return -1;
    }
@@ -256,4 +332,125 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
    cJSON_Delete(jr);
    free(resp);
    return ok;
+}
+
+int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
+                        char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (!out || number <= 0)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->mergeable = -1;
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   char path[64];
+   snprintf(path, sizeof(path), "pulls/%d", number);
+   char *resp = NULL;
+   int st = gh_get(&cx, path, &resp);
+   gh_ctx_done(&cx);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      gh_err(resp, st, "pr info", err, errlen);
+      free(resp);
+      return -1;
+   }
+   cJSON *j = cJSON_Parse(resp);
+   free(resp);
+   if (!j)
+   {
+      snprintf(err, errlen, "github API: unparseable pr info");
+      return -1;
+   }
+   const cJSON *state = cJSON_GetObjectItem(j, "state");
+   const cJSON *merged = cJSON_GetObjectItem(j, "merged");
+   const cJSON *mergeable = cJSON_GetObjectItem(j, "mergeable");
+   const cJSON *headj = cJSON_GetObjectItem(j, "head");
+   const cJSON *sha = headj ? cJSON_GetObjectItem(headj, "sha") : NULL;
+   out->open =
+       cJSON_IsString(state) && state->valuestring && strcmp(state->valuestring, "open") == 0;
+   out->merged = cJSON_IsTrue(merged) ? 1 : 0;
+   if (cJSON_IsBool(mergeable))
+      out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
+   if (cJSON_IsString(sha) && sha->valuestring)
+      snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha->valuestring);
+   cJSON_Delete(j);
+   return 0;
+}
+
+git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int number, char *err,
+                              size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   git_pr_info_t info;
+   if (git_pr_info_via_api(principal, repo_dir, number, &info, err, errlen) != 0 ||
+       !info.head_sha[0])
+      return GIT_PR_CI_ERROR;
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return GIT_PR_CI_ERROR;
+   char path[160];
+   snprintf(path, sizeof(path), "commits/%s/check-runs?per_page=100", info.head_sha);
+   char *runs = NULL;
+   int st = gh_get(&cx, path, &runs);
+   if (st < 200 || st >= 300)
+   {
+      gh_ctx_done(&cx);
+      gh_err(runs, st, "check-runs", err, errlen);
+      free(runs);
+      return GIT_PR_CI_ERROR;
+   }
+   /* Fetch the legacy combined status only when there are no check runs. */
+   char *combined = NULL;
+   git_pr_ci_t g = git_pr_ci_grade_json(runs, NULL);
+   if (g == GIT_PR_CI_NONE)
+   {
+      snprintf(path, sizeof(path), "commits/%s/status", info.head_sha);
+      st = gh_get(&cx, path, &combined);
+      if (st >= 200 && st < 300)
+         g = git_pr_ci_grade_json(runs, combined);
+   }
+   gh_ctx_done(&cx);
+   free(runs);
+   free(combined);
+   return g;
+}
+
+int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,
+                         size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (number <= 0)
+      return -1;
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   char path[64];
+   snprintf(path, sizeof(path), "pulls/%d/merge", number);
+   char *resp = NULL;
+   int st = gh_put(&cx, path, "{\"merge_method\":\"squash\"}", &resp);
+   gh_ctx_done(&cx);
+   int res;
+   if (st >= 200 && st < 300)
+      res = 0; /* merged */
+   else if (st == 405 && resp && strstr(resp, "already merged"))
+      res = 1;
+   else if (st == 405 || st == 409)
+   {
+      gh_err(resp, st, "pr merge", err, errlen);
+      res = 2; /* not mergeable / head moved */
+   }
+   else
+   {
+      gh_err(resp, st, "pr merge", err, errlen);
+      res = -1;
+   }
+   free(resp);
+   return res;
 }
