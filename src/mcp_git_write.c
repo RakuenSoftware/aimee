@@ -56,6 +56,14 @@ cJSON *handle_git_commit(cJSON *args)
    if (!cJSON_IsString(jmsg) || !jmsg->valuestring[0])
       return mcp_text("error: 'message' parameter is required");
 
+   /* Standing directive: no AI co-authorship trailers / "Generated with"
+    * attribution in commits. Strip in place (shrink-only, so the cJSON-owned
+    * buffer is safe) rather than reject, so agent commits stay unattended. */
+   strip_ai_attribution(jmsg->valuestring);
+   if (!jmsg->valuestring[0])
+      return mcp_text("error: commit message was only AI attribution lines; "
+                      "provide a real message (no Co-Authored-By / 'Generated with' trailers)");
+
    /* Fetch branch once — used for main-branch guard and ownership check */
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));

@@ -163,6 +163,16 @@ int git_ops_run_session(const char *principal, const char *project, const char *
          snprintf(err, errlen, "commit requires a non-empty message");
          return -1;
       }
+      /* Standing directive: no AI co-authorship trailers / "Generated with"
+       * attribution in commits — strip before the message reaches git. */
+      char msg[4096];
+      snprintf(msg, sizeof(msg), "%s", text_arg);
+      strip_ai_attribution(msg);
+      if (!msg[0])
+      {
+         snprintf(err, errlen, "commit message was only AI attribution lines");
+         return -1;
+      }
       const char *add_argv[] = {"git", "add", "-A", NULL};
       char *add_out = NULL;
       int arc = run_git(principal, dir, add_argv, 0, &add_out);
@@ -172,7 +182,7 @@ int git_ops_run_session(const char *principal, const char *project, const char *
          snprintf(err, errlen, "git add failed (rc=%d)", arc);
          return -1;
       }
-      const char *argv[] = {"git", "commit", "-m", text_arg, NULL};
+      const char *argv[] = {"git", "commit", "-m", msg, NULL};
       int rc = run_git(principal, dir, argv, 0, out);
       if (rc != 0)
       {

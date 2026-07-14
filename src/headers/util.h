@@ -355,6 +355,12 @@ char *safe_strdup(const char *s);
 /* Strip local-model private reasoning scaffolds from a response string. */
 char *strip_llm_private_scaffold(const char *text);
 
+/* Remove AI-attribution lines from a commit message / PR body in place: any
+ * "Co-Authored-By:" trailer and any "Generated with [Claude|Codex ...]"
+ * attribution line (same patterns as the CI ai-attribution gate). Returns the
+ * number of lines removed. */
+int strip_ai_attribution(char *text);
+
 /* Sanitize a string to only contain safe characters (alphanumeric, dash, underscore, dot).
  * Replaces all other characters with underscores in-place. */
 void sanitize_shell_token(char *s);
