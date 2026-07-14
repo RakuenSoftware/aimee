@@ -571,7 +571,15 @@ int worktree_delegate_work_name(const char *sid, char *out, size_t cap)
 /* Check if a path is already inside an aimee worktree. */
 int is_aimee_worktree_path(const char *path)
 {
-   return path && (strstr(path, "/.aimee/worktrees/") != NULL || strstr(path, "/.aimee-") != NULL);
+   /* "/wfe-worktrees/" — the workflow engine's per-work-item worktrees
+    * ($AIMEE_HOME/wfe-worktrees/wi_<id>). A wfe delegate already runs isolated in
+    * one of these, so the session-worktree-isolation guardrail must treat its
+    * edits as already-in-a-worktree — otherwise the guard rewrites the delegate's
+    * own worktree paths into a (malformed) session sibling, scattering edits
+    * where verify can't see them (observed live: every slice's implement step
+    * failed verification because its edits landed in a mangled path). */
+   return path && (strstr(path, "/.aimee/worktrees/") != NULL || strstr(path, "/.aimee-") != NULL ||
+                   strstr(path, "/wfe-worktrees/") != NULL);
 }
 
 int worktree_managed_git_root(const char *path, char *out, size_t out_len)
