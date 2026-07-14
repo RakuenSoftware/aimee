@@ -328,7 +328,11 @@ int ws_reg_rebuild(void)
          continue;
       DIR *ud = opendir(uroot);
       if (!ud)
+      {
+         failed = 1; /* an unreadable user tree must fail the rebuild, not
+                        silently under-count holders */
          continue;
+      }
       struct dirent *lvl1;
       while ((lvl1 = readdir(ud)) != NULL)
       {
@@ -349,7 +353,10 @@ int ws_reg_rebuild(void)
          /* org dir: its children are projects */
          DIR *od = opendir(p1);
          if (!od)
+         {
+            failed = 1;
             continue;
+         }
          struct dirent *lvl2;
          while ((lvl2 = readdir(od)) != NULL)
          {
@@ -362,7 +369,8 @@ int ws_reg_rebuild(void)
                continue;
             if (snprintf(ref, sizeof(ref), "%s/%s", lvl1->d_name, lvl2->d_name) >= (int)sizeof(ref))
                continue;
-            rebuild_add(ref, p2);
+            if (rebuild_add(ref, p2) != 0)
+               failed = 1;
          }
          closedir(od);
       }

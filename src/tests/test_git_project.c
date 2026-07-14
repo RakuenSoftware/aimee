@@ -145,6 +145,10 @@ int main(void)
    assert(run("git -C %s remote set-url origin %s", path, url3) == 0);
    assert(git_project_clone("webuser:bob", url3, "syncy", "acme", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == 0);
+   /* ...and the OTHER direction: cloning the now-STALE registry remote at the
+    * same ref must 409 after resync, not silently join divergent holders */
+   assert(git_project_clone("webuser:carol", url, "syncy", "acme", NULL, path, sizeof(path), name,
+                            sizeof(name), err, sizeof(err)) == GP_ERR_CONFLICT);
 
    /* --- list: alice has srcrepo + myproj + acme/orgproj + Rakuen-Software/sanit
     * + acme/syncy; bob has shared + acme/orgproj + acme/syncy --- */

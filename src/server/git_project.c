@@ -424,11 +424,14 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
          snprintf(err, errlen, "project registry unavailable");
          goto out;
       }
-      if (found == 1 && strcmp(cur_remote, remote) != 0)
+      if (found == 1)
       {
-         /* The registry may be stale after a holder's `git remote set-url`:
-          * resync this ref from the holders' git configs (authoritative,
-          * under the held lock) and re-check before rejecting. */
+         /* The registry entry may be stale after a holder's `git remote
+          * set-url` — in EITHER direction: a stale mismatch would spuriously
+          * 409 a legitimate clone, and a stale MATCH would silently join a
+          * ref whose holders have since diverged. Resync this ref from the
+          * holders' git configs (authoritative, under the held lock) before
+          * any comparison or increment. */
          if (ws_reg_resync(ref) != 0 ||
              (found = ws_reg_lookup(ref, cur_remote, sizeof(cur_remote), &holders)) < 0)
          {
