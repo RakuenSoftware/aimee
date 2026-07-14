@@ -4283,7 +4283,14 @@ paths:
               required: [url]
               properties:
                 url: { type: string, description: Git remote URL (https or ssh) }
-                name: { type: string, description: Project name (default - the repo basename) }
+                name: { type: string, description: Repo name (default - the repo basename) }
+                org:
+                  type: string
+                  description: >
+                    Optional org override. Default - the URL's single-segment
+                    owner path (sanitized); a multi-segment owner (GitLab
+                    subgroups) clones flat unless this is given. The project
+                    ref becomes "<org>/<name>".
                 token:
                   type: string
                   description: >
@@ -4299,7 +4306,14 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
-                  name: { type: string }
+                  name:
+                    type: string
+                    description: The project ref ("<org>/<repo>" or flat "<repo>").
+                  org_note:
+                    type: string
+                    description: >
+                      Present when a multi-segment owner path bailed to a flat
+                      clone; explains how to place it with an explicit org.
                   kb_indexed:
                     type: boolean
                     description: >
@@ -4333,7 +4347,25 @@ paths:
               schema:
                 type: object
                 properties:
-                  projects: { type: array, items: { type: string } }
+                  projects:
+                    type: array
+                    items: { type: string }
+                    description: Project refs ("<org>/<repo>" or flat "<repo>").
+                  details:
+                    type: array
+                    description: Per-project detail rows.
+                    items:
+                      type: object
+                      properties:
+                        ref: { type: string }
+                        org: { type: string, description: Empty for a flat/legacy project. }
+                        name: { type: string }
+                        remote:
+                          type: string
+                          description: >
+                            Credential-free canonical remote (absent for legacy
+                            clones without a sidecar).
+                  root: { type: string }
         "403":
           description: Not a webchat user
           content:

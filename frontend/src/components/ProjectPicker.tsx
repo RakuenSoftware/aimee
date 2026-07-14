@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Picker } from '@rakuensoftware/smoothgui';
+import type { GitProjectsResponse } from '../setup/ownerUrl';
 
 /* ProjectPicker — a compact "select or clone a project" control embedded in each
  * tool tab. Each tab passes its own storageKey so its selected project persists
@@ -52,7 +53,7 @@ export default function ProjectPicker({ storageKey, onChange }: {
   const load = useCallback(async () => {
     try {
       const r = await api('/api/git/projects', { method: 'GET' });
-      const d = await r.json();
+      const d: GitProjectsResponse = await r.json();
       if (!r.ok) { setErr(d.error || 'failed to list projects'); return; }
       const ps: string[] = d.projects || [];
       const rootPath = d.root || '';

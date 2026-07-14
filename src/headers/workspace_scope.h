@@ -26,6 +26,10 @@
  * success; -1 on a non-webuser / malformed principal or filesystem error. */
 int ws_scope_user_root(const char *principal, int create, char *out, size_t cap);
 
+/* Resolve the webusers base dir (parent of every per-user root) into out[cap].
+ * For the registry/lock module, which keeps its state beside the user trees. */
+int ws_scope_webusers_base(char *out, size_t cap);
+
 /* Resolve a single-component `project` name under `principal`'s root into
  * out[cap], canonically and within the root. `must_exist`: 1 => the project dir
  * must already exist (realpath'd; symlink-escape rejected); 0 => return
@@ -58,5 +62,32 @@ int ws_scope_open_project(const char *principal, const char *project, int extra_
  * (allowlist [A-Za-z0-9][A-Za-z0-9._-]*, len<=64, not "."/".."), else 0.
  * Exposed for callers validating user input before resolution. Pure. */
 int ws_scope_name_valid(const char *name);
+
+/* Max bytes of a project ref: two 64-byte components + '/'. */
+#define WS_REF_MAX 129
+/* Component cap shared with ws_scope_name_valid (kept here for ref buffers). */
+#define WS_REF_COMP_MAX 64
+
+/* 1 iff buf[0..len) is a valid project ref: a flat single component, or
+ * exactly <org>/<repo> where BOTH components independently pass
+ * ws_scope_name_valid. This is the ONLY function that ever accepts a '/' in a
+ * project reference; embedded NUL is rejected by byte-scan (the buffer is not
+ * assumed NUL-terminated). Pure. */
+int ws_scope_project_ref_valid(const char *buf, size_t len);
+
+/* openat2(dirfd, name, RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS, O_DIRECTORY|
+ * O_NOFOLLOW|O_CLOEXEC). Returns the fd or -1. The webuser project surface is
+ * gated on ws_scope_openat2_available() and FAILS CLOSED where openat2 (Linux
+ * >= 5.6) is unavailable — no string-path fallback. */
+int ws_scope_openat2_dir(int dirfd, const char *name);
+
+/* 1 iff openat2 with the resolve flags above works here (probed once). */
+int ws_scope_openat2_available(void);
+
+/* Split a NUL-terminated ref into org (empty for a flat ref) + repo,
+ * validating via ws_scope_project_ref_valid. Returns the component count
+ * (1 or 2) or -1 on an invalid ref / short buffer. Buffers should be
+ * WS_REF_COMP_MAX+1 bytes. */
+int ws_scope_ref_split(const char *ref, char *org, size_t org_cap, char *repo, size_t repo_cap);
 
 #endif /* WORKSPACE_SCOPE_H */

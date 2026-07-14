@@ -35,12 +35,39 @@ func (s *server) gitRelay(w http.ResponseWriter, st int, data []byte, err error)
 		Projects []string `json:"projects"`
 		Hosts    []string `json:"hosts"`
 		Root     string   `json:"root"`
+		// Per-project detail rows ({ref, org, name, remote}) from
+		// /v1/workspace/projects; the remote is credential-free by the
+		// server's canonical-remote contract.
+		Details []struct {
+			Ref    string `json:"ref"`
+			Org    string `json:"org"`
+			Name   string `json:"name"`
+			Remote string `json:"remote,omitempty"`
+		} `json:"details"`
+		// Clone-outcome fields: kb ingest result (PR #1332) and the
+		// multi-segment-owner note (org-scoped clones).
+		KBIndexed *bool  `json:"kb_indexed"`
+		KBReason  string `json:"kb_reason"`
+		OrgNote   string `json:"org_note"`
 	}
 	_ = json.Unmarshal(data, &up)
-	out, _ := json.Marshal(map[string]any{
+	m := map[string]any{
 		"ok": true, "name": up.Name, "output": up.Output, "projects": up.Projects,
 		"hosts": up.Hosts, "root": up.Root,
-	})
+	}
+	if up.Details != nil {
+		m["details"] = up.Details
+	}
+	if up.KBIndexed != nil {
+		m["kb_indexed"] = *up.KBIndexed
+		if up.KBReason != "" {
+			m["kb_reason"] = up.KBReason
+		}
+	}
+	if up.OrgNote != "" {
+		m["org_note"] = up.OrgNote
+	}
+	out, _ := json.Marshal(m)
 	w.Write(out)
 }
 
@@ -438,7 +465,7 @@ func (s *server) handleGitProjects(w http.ResponseWriter, r *http.Request) {
 	s.gitRelay(w, st, data, err)
 }
 
-// POST /api/git/clone {url, name?, token?} — clone a repo as a project. An
+// POST /api/git/clone {url, name?, org?, token?} — clone a repo as a project. An
 // optional token authenticates a private repo and is persisted server-side
 // (per host); it is never echoed back to the browser.
 func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +476,7 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL   string `json:"url"`
 		Name  string `json:"name"`
+		Org   string `json:"org"`
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
@@ -457,7 +485,7 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name, "token": req.Token})
+	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name, "org": req.Org, "token": req.Token})
 	st, data, err := s.v1RequestWebuserT(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone", body, cloneTimeout)
 	s.gitRelay(w, st, data, err)
 }
