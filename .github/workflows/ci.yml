@@ -530,9 +530,16 @@ jobs:
   # docs/proposals/pending/aimee-e2e-deploy-matrix.md. GitHub's ubuntu runners
   # ship Docker + compose, so no port offset is needed (8740/8741 are free).
   e2e-docker:
+    # One runner per topology so the deploy matrix runs in PARALLEL instead of
+    # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [T1, T2, T3]
+    name: e2e-docker (${{ matrix.topology }})
     steps:
       - uses: actions/checkout@v4
       - name: Runner diagnostics
@@ -540,16 +547,39 @@ jobs:
           docker version --format '{{.Server.Version}}'
           docker compose version
           df -h / | tail -1
-      - name: Run Docker deploy matrix (T1-T3)
+      - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
-        run: scripts/e2e-matrix.sh --only T1,T2,T3
+        run: scripts/e2e-matrix.sh --only ${{ matrix.topology }}
       - name: Stack logs on failure
         if: failure()
         run: |
           for f in compose.yaml compose.server.yaml compose.server-standalone.yaml; do
             echo "::group::$f"; docker compose -f "$f" logs --tail=80 2>/dev/null || true; echo "::endgroup::"
           done
+
+  e2e-adoption:
+    # Thin-client ADOPTION (TOFU enrollment) as its own parallel E2E flow: a
+    # fresh `aimee` client against a native aimee-server holding the default
+    # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
+    # persist it on both sides; the consumed bootstrap must be dead afterwards.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          # Same apt hygiene as the build jobs: drop flaky third-party repos,
+          # retry update with backoff.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
+            libpq-dev
+      - name: Thin-client adoption E2E
+        run: scripts/aimee-thinclient-adoption-e2e.sh
+      - name: Server log on failure
+        if: failure()
+        run: tail -60 /tmp/*/server.log 2>/dev/null || true
 
   # §2 tree-sitter extraction front-end (opt-in). The default build compiles
   # code_treesitter.c to a stub, so the other jobs never exercise the grammar
