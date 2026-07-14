@@ -543,17 +543,32 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
       snprintf(errbuf, errbuf_size, "payload build failed");
       return -1;
    }
-   /* Generation-fence check immediately before the PDF vector write
-    * (webchat-project-lifecycle slice 2): a job claimed pre-purge must not
-    * land a vector for a project being purged. Failing the job is safe — on
-    * retry after the purge the chunk row is gone (benign skip above). */
-   if (project_buf[0] && db2_kb_purge_fence_active(project_buf))
+   /* Guarded transaction around the PDF vector write with the generation-
+    * fence check inside it (webchat-project-lifecycle slice 2): a job
+    * claimed pre-purge must not land a vector for a project being purged,
+    * and the advisory guard serializes this check+commit against the fence
+    * publish. Failing the job is safe — on retry after the purge the chunk
+    * row is gone (benign skip above). */
+   if (db2_kb_txn_begin() != 0)
    {
+      free(payload_json);
+      snprintf(errbuf, errbuf_size, "pdf vector txn begin failed");
+      return -1;
+   }
+   if (project_buf[0] &&
+       (db2_kb_purge_txn_guard(project_buf) != 0 || db2_kb_purge_fence_active(project_buf)))
+   {
+      db2_kb_txn_rollback();
       free(payload_json);
       snprintf(errbuf, errbuf_size, "purge fence active for project '%s'", project_buf);
       return -1;
    }
    int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);
+   if (db2_kb_txn_commit() != 0)
+   {
+      db2_kb_txn_rollback();
+      upsert_rc = -1;
+   }
    free(payload_json);
    db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, upsert_rc == 0,
                               upsert_rc ? "pdf upsert failed" : NULL);

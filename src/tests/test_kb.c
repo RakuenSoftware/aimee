@@ -842,6 +842,39 @@ static void test_purge_fence_blocks_ingest(void)
    assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-1") == 0);
    assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
 
+   /* Atomic acquire: a LIVE foreign fence is refused without takeover (the
+    * current owner's ids are returned), displaced with takeover:true. */
+   {
+      char cg[64] = "", cp[64] = "";
+      int replaced = -1;
+      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 0, cg, sizeof(cg), cp,
+                                        sizeof(cp), &replaced) == 0);
+      assert(strcmp(cg, "gen-1") == 0);
+      assert(strcmp(cp, "pid-1") == 0);
+      assert(replaced == 0);
+      /* Same-owner re-acquire is idempotent (no refusal, not a replace). */
+      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-1", "pid-1", 0, cg, sizeof(cg), cp,
+                                        sizeof(cp), &replaced) == 1);
+      assert(replaced == 0);
+      /* Takeover displaces the live owner and reports the displaced ids. */
+      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 1, cg, sizeof(cg), cp,
+                                        sizeof(cp), &replaced) == 1);
+      assert(replaced == 1);
+      assert(strcmp(cg, "gen-1") == 0);
+      assert(strcmp(cp, "pid-1") == 0);
+      /* Restore the gen-1 owner for the remaining assertions. */
+      assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+   }
+
+   /* Fail closed: an identity row WITHOUT a heartbeat row is ACTIVE (cannot
+    * arise from a torn write — the publish transaction writes ts first). */
+   assert(db2_kb_runtime_state_delete("project_purging_ts:fence_proj") == 0);
+   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+   /* Heartbeat with matching ids but no ts row is a single-statement no-op
+    * (nothing to refresh); restore the ts row via a full re-publish. */
+   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 0);
+   assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+
    /* A stale heartbeat makes the fence absent for writers (TTL expiry), while
     * the fence row itself remains readable (live=0). */
    assert(db2_kb_runtime_state_set("project_purging_ts:fence_proj", "2000-01-01 00:00:00") == 0);

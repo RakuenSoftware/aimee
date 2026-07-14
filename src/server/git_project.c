@@ -8,6 +8,7 @@
  * fd-pinned via openat2 — no string-path window). */
 #include "git_project.h"
 #include "cJSON.h"           /* kb purge reply parsing (delete path) */
+#include "config.h"          /* kb_purge_fence_ttl_s (heartbeat cadence) */
 #include "git_cred_inject.h" /* git_cred_inject_build_env_for_repo / _free_env */
 #include "git_host_cred.h"   /* per-host token store (single-user, many hosts) */
 #include "kb_client.h"       /* kb purge/finalize/cancel wrappers (slice 2) */
@@ -20,6 +21,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -230,9 +232,15 @@ int git_project_org_candidates(const char *url, char *out, size_t cap)
 
 /* Recursively remove `name` (a directory tree) under `parentfd`. Every descent
  * uses O_NOFOLLOW — directory symlinks are unlinked as entries, never
- * followed. Best-effort; returns 0 when the entry is gone. */
-static int rm_rf_at(int parentfd, const char *name)
+ * followed. Best-effort; returns 0 when the entry is gone. `tick` (optional)
+ * is a progress hook invoked per entry: a non-zero return STOPS the walk
+ * immediately (the delete path uses it to heartbeat the purge fence and to
+ * bail when fence ownership is lost — the partial tree is retried by
+ * re-running the idempotent delete). */
+static int rm_rf_at_tick(int parentfd, const char *name, int (*tick)(void *), void *tick_ctx)
 {
+   if (tick && tick(tick_ctx) != 0)
+      return -1;
    int fd = openat(parentfd, name, O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
       return unlinkat(parentfd, name, 0) == 0 || errno == ENOENT ? 0 : -1;
@@ -242,21 +250,40 @@ static int rm_rf_at(int parentfd, const char *name)
       close(fd);
       return -1;
    }
+   int stopped = 0;
    struct dirent *e;
    while ((e = readdir(d)) != NULL)
    {
       if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
          continue;
+      if (tick && tick(tick_ctx) != 0)
+      {
+         stopped = 1;
+         break;
+      }
       struct stat st;
       if (fstatat(fd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
          continue;
       if (S_ISDIR(st.st_mode))
-         rm_rf_at(fd, e->d_name);
+      {
+         if (rm_rf_at_tick(fd, e->d_name, tick, tick_ctx) != 0 && tick && tick(tick_ctx) != 0)
+         {
+            stopped = 1;
+            break;
+         }
+      }
       else
          unlinkat(fd, e->d_name, 0);
    }
    closedir(d); /* closes fd */
+   if (stopped)
+      return -1;
    return unlinkat(parentfd, name, AT_REMOVEDIR) == 0 ? 0 : -1;
+}
+
+static int rm_rf_at(int parentfd, const char *name)
+{
+   return rm_rf_at_tick(parentfd, name, NULL, NULL);
 }
 
 /* Does `name` under `dirfd` exist as a dir containing a .git entry (i.e. a
@@ -631,15 +658,38 @@ out:
 /* ---- delete (slice 2) ---------------------------------------------------- */
 
 /* One webuser_project_delete_audit_v1 line. Every phase of one operation
- * shares the same purge_id; `extra` (may be "") carries phase-specific
- * key=value pairs (reason=…, kb_status=…, fence_generation=…). */
-static void delete_audit(const char *purge_id, const char *principal, const char *ref,
-                         const char *phase, const char *extra)
+ * shares the same purge_id; `extra_fmt` (may be "") formats phase-specific
+ * key=value pairs (reason=…, kb_status=…, fence_generation=…, kb=…). The
+ * extra tail is built in a heap buffer when needed so the per-store kb detail
+ * is NEVER truncated in the audit record. */
+__attribute__((format(printf, 5, 6))) static void delete_audit(const char *purge_id,
+                                                               const char *principal,
+                                                               const char *ref, const char *phase,
+                                                               const char *extra_fmt, ...)
 {
+   char stackbuf[512];
+   char *extra = stackbuf;
+   va_list ap;
+   va_start(ap, extra_fmt);
+   int need = vsnprintf(stackbuf, sizeof(stackbuf), extra_fmt, ap);
+   va_end(ap);
+   if (need >= (int)sizeof(stackbuf))
+   {
+      char *heap = malloc((size_t)need + 1);
+      if (heap)
+      {
+         va_start(ap, extra_fmt);
+         vsnprintf(heap, (size_t)need + 1, extra_fmt, ap);
+         va_end(ap);
+         extra = heap;
+      } /* OOM: fall back to the truncated stack copy */
+   }
    aimee_log(LOG_INFO, "webuser.project.delete",
              "webuser_project_delete_audit_v1 schema_version=1 purge_id=%s principal=%s ref=%s "
              "phase=%s%s%s",
-             purge_id, principal, ref, phase, extra && extra[0] ? " " : "", extra ? extra : "");
+             purge_id, principal, ref, phase, extra[0] ? " " : "", extra);
+   if (extra != stackbuf)
+      free(extra);
 }
 
 /* Mint a random hex purge id (16 bytes of /dev/urandom -> 32 hex chars;
@@ -710,16 +760,96 @@ static int purge_reply_parse(const char *json, char **detail)
    return ok ? 1 : 0;
 }
 
-/* Did a finalize/cancel wrapper reply reach the kb ({"status":"ok"})? 0/1. */
-static int purge_reply_reached(const char *json)
+/* Was a finalize/cancel CONFIRMED? Requires {"status":"ok","cleared":true} —
+ * cleared:false is the kb's generation/purge_id-mismatch no-op (someone else
+ * owns the fence now) and an absent/malformed `cleared` is NOT confirmation.
+ * 0/1. */
+static int purge_reply_cleared(const char *json)
 {
    cJSON *j = json ? cJSON_Parse(json) : NULL;
    if (!j)
       return 0;
    const cJSON *jstatus = cJSON_GetObjectItemCaseSensitive(j, "status");
-   int ok = cJSON_IsString(jstatus) && strcmp(jstatus->valuestring, "ok") == 0;
+   const cJSON *jcleared = cJSON_GetObjectItemCaseSensitive(j, "cleared");
+   int ok = cJSON_IsString(jstatus) && strcmp(jstatus->valuestring, "ok") == 0 &&
+            cJSON_IsBool(jcleared) && cJSON_IsTrue(jcleared);
    cJSON_Delete(j);
    return ok;
+}
+
+/* The fence TTL, mirroring the kb side (JSON key kb.purge_fence_ttl_s,
+ * default 900s) so both ends agree on the staleness bound. */
+static int gp_fence_ttl_s(void)
+{
+   config_t cfg;
+   if (config_load(&cfg) == 0 && cfg.kb_purge_fence_ttl_s > 0)
+      return cfg.kb_purge_fence_ttl_s;
+   return 900;
+}
+
+/* Heartbeat state for one delete's fence: refreshed at ~TTL/6 cadence during
+ * the filesystem walk so a tree bigger than the TTL cannot let the fence
+ * expire (and writers resume) mid-delete. */
+typedef struct
+{
+   const char *ref, *generation, *purge_id;
+   time_t last;    /* last heartbeat attempt */
+   int interval_s; /* ~TTL/6 (150s at the 900s default) */
+   int fails;      /* consecutive transport failures */
+   int lost;       /* sticky: ownership lost / kb gone — stop the walk */
+} gp_hb_ctx_t;
+
+/* Send one heartbeat now. 0 = the fence is still ours; -1 = ownership lost
+ * (refreshed:false — a takeover displaced this operation) or the transport
+ * failed repeatedly (the fence may expire under us). Sticky via hb->lost. */
+static int gp_hb_beat(gp_hb_ctx_t *hb)
+{
+   if (hb->lost)
+      return -1;
+   char *j = kb_client_purge_heartbeat_json(hb->ref, hb->generation, hb->purge_id);
+   cJSON *r = j ? cJSON_Parse(j) : NULL;
+   int reached = 0, refreshed = 1;
+   if (r)
+   {
+      const cJSON *js = cJSON_GetObjectItemCaseSensitive(r, "status");
+      reached = cJSON_IsString(js) && strcmp(js->valuestring, "ok") == 0;
+      const cJSON *jr = cJSON_GetObjectItemCaseSensitive(r, "refreshed");
+      if (cJSON_IsBool(jr))
+         refreshed = cJSON_IsTrue(jr);
+   }
+   cJSON_Delete(r);
+   free(j);
+   hb->last = time(NULL);
+   if (reached && refreshed)
+   {
+      hb->fails = 0;
+      return 0;
+   }
+   if (reached) /* refreshed:false — a takeover owns the fence now */
+   {
+      hb->lost = 1;
+      return -1;
+   }
+   if (++hb->fails >= 3) /* 3 consecutive misses at TTL/6 is still < TTL/2 */
+   {
+      hb->lost = 1;
+      return -1;
+   }
+   return 0;
+}
+
+/* rm_rf_at_tick progress hook: heartbeat when the cadence elapsed; a non-zero
+ * return stops the walk (fence lost). */
+static int gp_hb_tick(void *ctx)
+{
+   gp_hb_ctx_t *hb = ctx;
+   if (!hb)
+      return 0;
+   if (hb->lost)
+      return -1;
+   if (time(NULL) - hb->last < hb->interval_s)
+      return 0;
+   return gp_hb_beat(hb);
 }
 
 int git_project_delete(const char *principal, const char *ref, int force,
@@ -765,7 +895,7 @@ int git_project_delete(const char *principal, const char *ref, int force,
 
    /* Step 2: audit intent FIRST — before any existence resolution — so a
     * cross-principal or nonexistent ref still leaves a record. */
-   delete_audit(res->purge_id, principal, ref, "intent", "");
+   delete_audit(res->purge_id, principal, ref, "intent", "%s", "");
 
    int lockfd = ws_reg_lock(ref);
    if (lockfd < 0)
@@ -777,7 +907,6 @@ int git_project_delete(const char *principal, const char *ref, int force,
 
    int rc_final = -1, rootfd = -1, orgfd = -1;
    int purge_ran = 0; /* a fence was written — heartbeat + finalize apply */
-   char audit_extra[512];
 
    /* Step 3: resolve strictly under the caller's tree; any failure is a plain
     * not-found (no existence disclosure about other principals' trees). */
@@ -859,9 +988,8 @@ int git_project_delete(const char *principal, const char *ref, int force,
                       "ref '%s': could not roll back the registry decrement after a kb transport "
                       "failure (purge_id=%s); the startup rebuild self-heals",
                       ref, res->purge_id);
-         snprintf(audit_extra, sizeof(audit_extra), "reason=kb-unreachable kb=%.300s",
-                  res->kb_detail ? res->kb_detail : "");
-         delete_audit(res->purge_id, principal, ref, "aborted", audit_extra);
+         delete_audit(res->purge_id, principal, ref, "aborted", "reason=kb-unreachable kb=%s",
+                      res->kb_detail ? res->kb_detail : "");
          snprintf(err, errlen, "knowledge service unavailable");
          rc_final = GP_ERR_KB_UNAVAILABLE;
          goto out;
@@ -869,12 +997,12 @@ int git_project_delete(const char *principal, const char *ref, int force,
       else
       {
          /* The kb was reached but a store failed: a fence exists. The
-          * decrement is reinstated ONLY if purge-cancel confirms the fence
-          * rollback; a failed cancel keeps the fence AND the decrement
-          * (terminal "purge committed but unfinished" — re-running the
-          * delete converges). */
+          * decrement is reinstated ONLY if purge-cancel CONFIRMS the fence
+          * rollback (cleared:true — a cleared:false mismatch no-op or a
+          * failed cancel keeps the fence AND the decrement: terminal "purge
+          * committed but unfinished", re-running the delete converges). */
          char *cj = kb_client_purge_cancel_json(ref, res->generation, res->purge_id);
-         int cancelled = purge_reply_reached(cj);
+         int cancelled = purge_reply_cleared(cj);
          free(cj);
          if (cancelled)
          {
@@ -883,17 +1011,15 @@ int git_project_delete(const char *principal, const char *ref, int force,
                          "ref '%s': could not roll back the registry decrement after purge-cancel "
                          "(purge_id=%s); the startup rebuild self-heals",
                          ref, res->purge_id);
-            snprintf(audit_extra, sizeof(audit_extra), "reason=kb-error kb=%.300s",
-                     res->kb_detail ? res->kb_detail : "");
-            delete_audit(res->purge_id, principal, ref, "aborted", audit_extra);
+            delete_audit(res->purge_id, principal, ref, "aborted", "reason=kb-error kb=%s",
+                         res->kb_detail ? res->kb_detail : "");
             snprintf(err, errlen, "knowledge service unavailable");
          }
          else
          {
-            snprintf(audit_extra, sizeof(audit_extra),
-                     "reason=purge-committed-unfinished fence_generation=%s kb=%.300s",
-                     res->generation, res->kb_detail ? res->kb_detail : "");
-            delete_audit(res->purge_id, principal, ref, "aborted", audit_extra);
+            delete_audit(res->purge_id, principal, ref, "aborted",
+                         "reason=purge-committed-unfinished fence_generation=%s kb=%s",
+                         res->generation, res->kb_detail ? res->kb_detail : "");
             snprintf(err, errlen,
                      "purge committed but unfinished: the knowledge fence is set and the purge "
                      "must be re-run to convergence");
@@ -905,25 +1031,78 @@ int git_project_delete(const char *principal, const char *ref, int force,
 
    /* Step 5: server-local lexical index rows are keyed by project (shared
     * across webusers) and follow the kb decision exactly: deleted on
-    * purged/forced, kept on retained. */
-   if (strcmp(res->kb_status, "retained") != 0)
+    * purged/forced, kept on retained. A failure here ABORTS BEFORE any
+    * filesystem removal — proceeding would strand shared index rows with no
+    * retry path once the clone is gone. The clone still exists, so the
+    * holder is re-registered and the fence cancelled; re-running the delete
+    * converges (the kb deletes are idempotent, and a re-scan restores any
+    * stores this attempt already emptied). */
+   if (strcmp(res->kb_status, "retained") != 0 && db2_code_index_project_delete(ref) != 0)
    {
-      if (db2_code_index_project_delete(ref) != 0)
-         aimee_log(LOG_WARN, "webuser.project.delete",
-                   "ref '%s': server-local lexical index delete failed (purge_id=%s); a re-scan "
-                   "of a future clone overwrites the rows",
-                   ref, res->purge_id);
+      int cancelled;
+      if (purge_ran)
+      {
+         char *cj = kb_client_purge_cancel_json(ref, res->generation, res->purge_id);
+         cancelled = purge_reply_cleared(cj);
+         free(cj);
+      }
+      else
+         cancelled = 1; /* forced transport failure: no fence was ever written */
+      if (cancelled)
+      {
+         if (ws_reg_register(ref, reg_remote) != 0)
+            aimee_log(LOG_ERROR, "webuser.project.delete",
+                      "ref '%s': could not roll back the registry decrement after a local-index "
+                      "failure (purge_id=%s); the startup rebuild self-heals",
+                      ref, res->purge_id);
+         delete_audit(res->purge_id, principal, ref, "aborted", "reason=local-index-failed kb=%s",
+                      res->kb_detail ? res->kb_detail : "");
+         snprintf(err, errlen,
+                  "could not clear the server-local code index; nothing was removed — try again");
+      }
+      else
+      {
+         delete_audit(res->purge_id, principal, ref, "aborted",
+                      "reason=purge-committed-unfinished fence_generation=%s kb=%s",
+                      res->generation, res->kb_detail ? res->kb_detail : "");
+         snprintf(err, errlen,
+                  "purge committed but unfinished: the knowledge fence is set and the purge "
+                  "must be re-run to convergence");
+      }
+      rc_final = GP_ERR_KB_UNAVAILABLE;
+      goto out;
    }
 
-   /* Heartbeat the fence before the filesystem walk (long trees must not
-    * outlive the fence TTL). */
-   if (purge_ran)
-      free(kb_client_purge_heartbeat_json(ref, res->generation, res->purge_id));
+   /* Heartbeat the fence before AND periodically during the filesystem walk
+    * (a tree larger than the TTL must not let the fence expire — and writers
+    * resume — mid-delete). Losing ownership (a takeover displaced us) or the
+    * kb transport stops the walk; the partial tree is retried by re-running
+    * the idempotent delete. */
+   gp_hb_ctx_t hb;
+   memset(&hb, 0, sizeof(hb));
+   hb.ref = ref;
+   hb.generation = res->generation;
+   hb.purge_id = res->purge_id;
+   hb.interval_s = gp_fence_ttl_s() / 6;
+   if (hb.interval_s < 1)
+      hb.interval_s = 1;
+   if (purge_ran && gp_hb_beat(&hb) != 0)
+   {
+      delete_audit(res->purge_id, principal, ref, "aborted",
+                   "reason=fence-lost fence_generation=%s", res->generation);
+      snprintf(err, errlen,
+               "purge fence ownership lost before removal; re-run the delete to convergence");
+      rc_final = GP_ERR_KB_UNAVAILABLE;
+      goto out;
+   }
 
    /* Step 6: filesystem removal — an unlinkat-based walk from the pinned
-    * parent fd (rm_rf_at never follows symlinks). Step 7: prune the org dir
-    * when it emptied (best-effort, still under the first-component lock). */
+    * parent fd (rm_rf_at never follows symlinks), heartbeating via the tick
+    * hook. Step 7: prune the org dir when it emptied (best-effort, still
+    * under the first-component lock). */
    {
+      int (*tick)(void *) = purge_ran ? gp_hb_tick : NULL;
+      void *tick_ctx = purge_ran ? &hb : NULL;
       char org[WS_REF_COMP_MAX + 1], repo[WS_REF_COMP_MAX + 1];
       if (ws_scope_ref_split(ref, org, sizeof(org), repo, sizeof(repo)) < 0)
       {
@@ -947,20 +1126,32 @@ int git_project_delete(const char *principal, const char *ref, int force,
             snprintf(err, errlen, "could not open the org directory");
             goto out;
          }
-         rm_rc = rm_rf_at(orgfd, repo);
+         rm_rc = rm_rf_at_tick(orgfd, repo, tick, tick_ctx);
          close(orgfd);
          orgfd = -1;
          if (rm_rc == 0)
             (void)unlinkat(rootfd, org, AT_REMOVEDIR); /* prune if now empty */
       }
       else
-         rm_rc = rm_rf_at(rootfd, repo);
+         rm_rc = rm_rf_at_tick(rootfd, repo, tick, tick_ctx);
       if (rm_rc != 0)
       {
          /* The kb purge (when one ran) is committed and its fence stays until
-          * finalize or TTL — re-running the delete converges. */
-         delete_audit(res->purge_id, principal, ref, "aborted", "reason=fs-failed");
-         snprintf(err, errlen, "could not remove the project directory");
+          * finalize or TTL — re-running the delete converges over the partial
+          * tree in either case. */
+         if (hb.lost)
+         {
+            delete_audit(res->purge_id, principal, ref, "aborted",
+                         "reason=fence-lost fence_generation=%s", res->generation);
+            snprintf(err, errlen,
+                     "purge fence ownership lost during removal; re-run the delete to convergence");
+            rc_final = GP_ERR_KB_UNAVAILABLE;
+         }
+         else
+         {
+            delete_audit(res->purge_id, principal, ref, "aborted", "reason=fs-failed");
+            snprintf(err, errlen, "could not remove the project directory");
+         }
          goto out;
       }
    }
@@ -970,20 +1161,19 @@ int git_project_delete(const char *principal, const char *ref, int force,
    if (purge_ran)
    {
       char *fj = kb_client_purge_finalize_json(ref, res->generation, res->purge_id);
-      if (!purge_reply_reached(fj))
+      if (!purge_reply_cleared(fj))
          aimee_log(LOG_WARN, "webuser.project.delete",
-                   "ref '%s': purge-finalize did not reach the kb (purge_id=%s); the fence "
-                   "expires via its TTL",
+                   "ref '%s': purge-finalize did not confirm clearing the fence (purge_id=%s); "
+                   "it expires via its TTL",
                    ref, res->purge_id);
       free(fj);
    }
    if (strcmp(res->kb_status, "retained") == 0)
-      snprintf(audit_extra, sizeof(audit_extra), "kb_status=retained fs=removed");
+      delete_audit(res->purge_id, principal, ref, "done", "kb_status=retained fs=removed");
    else
-      snprintf(audit_extra, sizeof(audit_extra),
-               "kb_status=%s fs=removed fence_generation=%s kb=%.300s", res->kb_status,
-               res->generation, res->kb_detail ? res->kb_detail : "");
-   delete_audit(res->purge_id, principal, ref, "done", audit_extra);
+      delete_audit(res->purge_id, principal, ref, "done",
+                   "kb_status=%s fs=removed fence_generation=%s kb=%s", res->kb_status,
+                   res->generation, res->kb_detail ? res->kb_detail : "");
    rc_final = 0;
 
 out:

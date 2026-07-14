@@ -4,12 +4,42 @@
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "kb_runtime_state.h" /* purge fence: guard + commit-point check */
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
 #define CSSG_ERRBUF 256
+
+/* Purge-fence commit gate (webchat-project-lifecycle slice 2): CSS-derived
+ * rows are written by the scan AFTER the fenced per-file canonical-index
+ * transaction, so they need their own guarded commit-point check. Resolves
+ * the owning project from file_id INSIDE the open transaction, takes the
+ * shared advisory guard, then checks the fence. Returns 1 when the commit
+ * must be aborted (fence active or guard failed — fail closed), 0 to
+ * proceed (including "file row gone": the delete cascade already owns it). */
+static int cssg_purge_fence_abort(void *conn, int64_t file_id)
+{
+   char project[256] = "";
+   char err[CSSG_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT p.name FROM projects p"
+                                          " JOIN files f ON f.project_id = p.id"
+                                          " WHERE f.id = ?1",
+                                          err, sizeof(err));
+   if (!st)
+      return 1;
+   aimee_pg_bind_int64(st, "?1", file_id);
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      db2_copy_text(project, sizeof(project), aimee_pg_column_text(st, 0));
+   aimee_pg_finalize(st);
+   if (!project[0])
+      return 0;
+   if (db2_kb_purge_txn_guard(project) != 0)
+      return 1;
+   return db2_kb_purge_fence_active(project) ? 1 : 0;
+}
 
 int64_t db2_css_graph_resolve_file(const char *project, const char *file_path)
 {
@@ -105,6 +135,8 @@ int db2_css_graph_replace(int64_t file_id, const css_rule_t *rules, int n)
       }
    }
 
+   if (rc == 0 && cssg_purge_fence_abort(conn, file_id))
+      rc = -1;
    if (rc == 0)
       aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
    else
@@ -447,6 +479,8 @@ int db2_css_component_resolve(int64_t component_file_id, const char (*tokens)[CS
       aimee_pg_finalize(si);
    }
 
+   if (rc == 0 && cssg_purge_fence_abort(conn, component_file_id))
+      rc = -1;
    if (rc == 0)
       aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
    else

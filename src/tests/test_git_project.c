@@ -258,6 +258,67 @@ int main(void)
    assert(git_project_list("webuser:bob", names, 64) == 1);
    assert(strcmp(names[0], "shared") == 0);
 
+   /* cancel mismatch: the purge reaches the kb but a store fails (fence
+    * written) and the cancel is a generation-mismatch no-op (cleared:false) —
+    * terminal purge-committed-unfinished: the holder count must NOT be
+    * restored and nothing filesystem is removed. */
+   setenv("AIMEE_TEST_KB_PURGE_MODE", "cancel-mismatch", 1);
+   snprintf(check, sizeof(check), "%s/webusers/bob/shared", wsdir);
+   assert(git_project_delete("webuser:bob", "shared", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_KB_UNAVAILABLE);
+   assert(strstr(derr, "unfinished") != NULL);
+   free(dres.kb_detail);
+   assert(stat(check, &st) == 0);                                      /* clone intact */
+   assert(ws_reg_lookup("shared", remo, sizeof(remo), &holders) == 0); /* decrement KEPT */
+   /* re-running converges: the resync step rebuilds the holder from disk and
+    * a now-successful purge completes the delete. */
+   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
+   assert(git_project_delete("webuser:bob", "shared", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "purged") == 0);
+   free(dres.kb_detail);
+   assert(stat(check, &st) != 0);
+
+   /* local-index failure: aborts BEFORE any filesystem removal — the cancel
+    * confirms (cleared:true), the holder is re-registered, the clone stays. */
+   setenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL", "1", 1);
+   snprintf(check, sizeof(check), "%s/webusers/alice/srcrepo", wsdir);
+   assert(git_project_delete("webuser:alice", "srcrepo", 0, &dres, derr, sizeof(derr)) ==
+          GP_ERR_KB_UNAVAILABLE);
+   assert(strstr(derr, "code index") != NULL);
+   free(dres.kb_detail);
+   assert(stat(check, &st) == 0); /* clone intact */
+   assert(ws_reg_lookup("srcrepo", remo, sizeof(remo), &holders) == 1 &&
+          holders == 1); /* holder restored */
+   unsetenv("AIMEE_TEST_CODE_INDEX_DELETE_FAIL");
+   assert(git_project_delete("webuser:alice", "srcrepo", 0, &dres, derr, sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "purged") == 0);
+   free(dres.kb_detail);
+   assert(stat(check, &st) != 0);
+
+   /* fence ownership lost (heartbeat refreshed:false — a takeover displaced
+    * this delete): the walk stops before removing anything; the fence and the
+    * registry decrement stay (the purge committed); a re-run converges. */
+   setenv("AIMEE_TEST_KB_PURGE_MODE", "hb-lost", 1);
+   snprintf(check, sizeof(check), "%s/webusers/alice/Rakuen-Software/sanit", wsdir);
+   assert(git_project_delete("webuser:alice", "Rakuen-Software/sanit", 0, &dres, derr,
+                             sizeof(derr)) == GP_ERR_KB_UNAVAILABLE);
+   assert(strstr(derr, "fence") != NULL);
+   free(dres.kb_detail);
+   assert(stat(check, &st) == 0); /* nothing removed */
+   assert(ws_reg_lookup("Rakuen-Software/sanit", remo, sizeof(remo), &holders) == 0);
+   setenv("AIMEE_TEST_KB_PURGE_MODE", "ok", 1);
+   assert(git_project_delete("webuser:alice", "Rakuen-Software/sanit", 0, &dres, derr,
+                             sizeof(derr)) == 0);
+   assert(strcmp(dres.kb_status, "purged") == 0);
+   free(dres.kb_detail);
+   assert(stat(check, &st) != 0);
+   unsetenv("AIMEE_TEST_KB_PURGE_MODE");
+
+   /* final tally: alice keeps only acme/syncy; bob has nothing left. */
+   assert(git_project_list("webuser:alice", names, 64) == 1);
+   assert(strcmp(names[0], "acme/syncy") == 0);
+   assert(git_project_list("webuser:bob", names, 64) == 0);
+
    assert(run("rm -rf %s", home) == 0);
    printf("git_project: all tests passed\n");
    return 0;

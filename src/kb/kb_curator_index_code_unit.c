@@ -153,7 +153,10 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
       free(payload);
       return 1;
    }
-   if (project[0] && db2_kb_purge_fence_active(project))
+   /* Advisory guard immediately before the fence check: serializes this
+    * check+commit against the fence-publish transaction. Guard failure is
+    * treated like an active fence (fail closed). */
+   if (project[0] && (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
    {
       db2_kb_txn_rollback();
       aimee_log(LOG_WARN, "kb.curator.code_unit",

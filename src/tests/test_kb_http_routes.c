@@ -1209,6 +1209,30 @@ int db2_kb_purge_fence_write(const char *project, const char *generation, const 
    return 0;
 }
 
+/* Mirrors the real acquire's atomic read-decide-write against the in-memory
+ * fence: refuse a live foreign fence without takeover, else publish. */
+int db2_kb_purge_fence_acquire(const char *project, const char *generation, const char *purge_id,
+                               int takeover, char *cur_gen, size_t gen_cap, char *cur_pid,
+                               size_t pid_cap, int *replaced_out)
+{
+   if (cur_gen && gen_cap)
+      snprintf(cur_gen, gen_cap, "%s", g_fence_gen);
+   if (cur_pid && pid_cap)
+      snprintf(cur_pid, pid_cap, "%s", g_fence_pid);
+   if (replaced_out)
+      *replaced_out = 0;
+   if (g_fence_write_rc)
+      return -1;
+   int same = g_fence_present && strcmp(g_fence_gen, generation) == 0 &&
+              strcmp(g_fence_pid, purge_id) == 0;
+   if (g_fence_present && g_fence_live && !same && !takeover)
+      return 0;
+   if (replaced_out)
+      *replaced_out = (g_fence_present && !same);
+   (void)db2_kb_purge_fence_write(project, generation, purge_id);
+   return 1;
+}
+
 int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
                             size_t pid_cap, int *live_out)
 {

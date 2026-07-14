@@ -1975,20 +1975,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 400;
       int takeover = json_bool(body, "takeover", 0);
 
+      /* Atomic read-decide-write: one transaction takes the project advisory
+       * guard, inspects the identity row FOR UPDATE, refuses a LIVE foreign
+       * fence (heartbeat younger than 2x the heartbeat interval, i.e. TTL/3)
+       * without takeover:true, else publishes the new fence. */
       char cur_gen[128] = "", cur_pid[128] = "";
-      int live = 0;
-      int have = db2_kb_purge_fence_read(project, cur_gen, sizeof(cur_gen), cur_pid,
-                                         sizeof(cur_pid), &live);
-      if (have < 0)
+      int fence_replaced = 0;
+      int arc =
+          db2_kb_purge_fence_acquire(project, generation, purge_id, takeover, cur_gen,
+                                     sizeof(cur_gen), cur_pid, sizeof(cur_pid), &fence_replaced);
+      if (arc < 0)
       {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence read failed\"}");
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence write failed\"}");
          return 500;
       }
-      int same_owner =
-          (have == 1 && strcmp(cur_gen, generation) == 0 && strcmp(cur_pid, purge_id) == 0);
-      /* A LIVE fence (heartbeat younger than 2x the heartbeat interval, i.e.
-       * TTL/3) belonging to another owner is refused without takeover:true. */
-      if (have == 1 && live && !same_owner && !takeover)
+      if (arc == 0)
       {
          cJSON *resp = cJSON_CreateObject();
          if (resp)
@@ -1998,12 +1999,6 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
             cJSON_AddStringToObject(resp, "purge_id", cur_pid);
          }
          return purge_respond(resp, out_buf, out_cap, 409);
-      }
-      int fence_replaced = (have == 1 && !same_owner);
-      if (db2_kb_purge_fence_write(project, generation, purge_id) != 0)
-      {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence write failed\"}");
-         return 500;
       }
 
       /* Fan-out: every kb store the ingest path writes, in matrix order. */

@@ -668,16 +668,37 @@ static void kb_flush_batch(const char *project, int64_t *ids, float *vecs, int d
 {
    if (*count <= 0)
       return;
-   /* Generation-fence check immediately before the pgvector batch write: a
-    * batch mid-flight past its enqueue check still must not land vectors for
-    * a project being purged (webchat-project-lifecycle slice 2). */
-   int fenced = project && project[0] && db2_kb_purge_fence_active(project);
+   /* Guarded transaction around the pgvector batch write with the
+    * generation-fence check inside it (webchat-project-lifecycle slice 2):
+    * the advisory guard serializes check+commit against the fence publish,
+    * so a batch mid-flight past its enqueue check still cannot land vectors
+    * for a project being purged. */
+   int fenced = 0;
+   int rc = -1;
+   if (db2_kb_txn_begin() == 0)
+   {
+      int guard_ok = 1;
+      if (project && project[0])
+      {
+         guard_ok = (db2_kb_purge_txn_guard(project) == 0);
+         fenced = guard_ok && db2_kb_purge_fence_active(project);
+      }
+      if (!guard_ok || fenced)
+         db2_kb_txn_rollback();
+      else
+      {
+         rc = pgvec_kb_vector_upsert_document_batch(ids, vecs, dim, (const char *const *)payloads,
+                                                    *count);
+         if (db2_kb_txn_commit() != 0)
+         {
+            db2_kb_txn_rollback();
+            rc = -1;
+         }
+      }
+   }
    if (fenced)
       LOG_WARN("kb_build", "purge fence active for project '%s': dropping %d-vector batch", project,
                *count);
-   int rc = fenced ? -1
-                   : pgvec_kb_vector_upsert_document_batch(ids, vecs, dim,
-                                                           (const char *const *)payloads, *count);
    for (int i = 0; i < *count; i++)
    {
       int ok = (rc == 0);
@@ -687,6 +708,32 @@ static void kb_flush_batch(const char *project, int64_t *ids, float *vecs, int d
       payloads[i] = NULL;
    }
    *count = 0;
+}
+
+/* Minhash signature upsert wrapped in a guarded, fenced transaction: the
+ * near-dup store is part of the purge matrix, so its autocommit write gets
+ * the same commit-point serialization as the vector batch. Returns the
+ * upsert's rc, or -1 when fenced / guard-failed (write dropped). */
+static int kb_minhash_upsert_fenced(const char *project, const char *rel_path, const char *hash,
+                                    const sketch_minhash_t *sig)
+{
+   if (db2_kb_txn_begin() != 0)
+      return -1;
+   if (project && project[0] &&
+       (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
+   {
+      db2_kb_txn_rollback();
+      LOG_WARN("kb_build", "purge fence active for project '%s': dropping minhash signature",
+               project);
+      return -1;
+   }
+   int rc = db2_sketch_minhash_signature_upsert(project, rel_path, hash, sig);
+   if (db2_kb_txn_commit() != 0)
+   {
+      db2_kb_txn_rollback();
+      return -1;
+   }
+   return rc;
 }
 
 static void kb_load_build_sketches(const char *project, int force_rebuild, sketch_bloom_t *bloom,
@@ -798,8 +845,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          delete_file_chunks(c->project, c->files[fi].rel_path);
          db2_sketch_minhash_row_t dup_sig;
          if (dup_path[0] && db2_sketch_minhash_signature_get(c->project, dup_path, &dup_sig) == 1)
-            db2_sketch_minhash_signature_upsert(c->project, c->files[fi].rel_path, hash,
-                                                &dup_sig.signature);
+            kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &dup_sig.signature);
          db2_kb_file_index_upsert(c->project, c->files[fi].rel_path, hash, NULL);
          LOG_INFO("kb_build",
                   "bloom-dedupe: project=%s path=%s hash=%s matched=%s; skipping duplicate",
@@ -854,8 +900,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
    if (near_jaccard >= 0.75)
    {
-      if (db2_sketch_minhash_signature_upsert(c->project, c->files[fi].rel_path, hash,
-                                              &minhash_sig) != 0)
+      if (kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &minhash_sig) != 0)
       {
          LOG_WARN("kb_build", "project=%s path=%s: minhash signature save failed",
                   c->project ? c->project : "?", c->files[fi].rel_path);
@@ -945,8 +990,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    sketch_bloom_add_hash(c->bloom, h64);
    sketch_count_min_add_hash(c->count_min, h64, 1);
    sketch_hll_add_hash(c->hll, sketch_fnv1a(c->files[fi].rel_path, strlen(c->files[fi].rel_path)));
-   if (db2_sketch_minhash_signature_upsert(c->project, c->files[fi].rel_path, hash, &minhash_sig) !=
-       0)
+   if (kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &minhash_sig) != 0)
       LOG_WARN("kb_build", "project=%s path=%s: minhash signature save failed",
                c->project ? c->project : "?", c->files[fi].rel_path);
    kb_file_index_store_from_path(c->project, c->files[fi].rel_path, hash, c->files[fi].path);

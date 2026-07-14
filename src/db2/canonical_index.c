@@ -372,7 +372,16 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
 
    /* Generation-fence check INSIDE the transaction, immediately before
     * COMMIT: an in-flight scan that started pre-fence still cannot commit
-    * index rows for a project being purged. */
+    * index rows for a project being purged. The advisory guard serializes
+    * this check+commit against the fence-publish transaction, closing the
+    * "checked no-fence, fence lands, stale commit" window. */
+   if (db2_kb_purge_txn_guard(project) != 0)
+   {
+      LOG_WARN(CI_LOG_TAG, "purge guard failed for project '%s': aborting index write",
+               project ? project : "?");
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
    if (db2_kb_purge_fence_active(project))
    {
       LOG_WARN(CI_LOG_TAG, "purge fence active for project '%s': aborting index write",

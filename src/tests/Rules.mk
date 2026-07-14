@@ -635,6 +635,7 @@ $(TESTPREFIX)/unit-test-fidelity-check: \
 $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/tests/test_css_graph.o \
                                        $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
@@ -648,6 +649,7 @@ $(TESTPREFIX)/unit-test-css-insights: \
                                        $(OBJDIR)/tests/test_css_insights.o \
                                        $(OBJDIR)/db2/css_insights.o \
                                        $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
@@ -679,6 +681,7 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/tests/test_css_migration.o \
                                        $(OBJDIR)/db2/css_migration.o \
                                        $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
@@ -696,6 +699,7 @@ $(TESTPREFIX)/unit-test-css-render: \
                                        $(OBJDIR)/css_render_oracle.o \
                                        $(OBJDIR)/db2/css_migration.o \
                                        $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/typed_facts.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
