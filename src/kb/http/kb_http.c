@@ -2001,26 +2001,61 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return purge_respond(resp, out_buf, out_cap, 409);
       }
 
-      /* Fan-out: every kb store the ingest path writes, in matrix order. */
+      /* Fan-out: every kb store the ingest path writes, in matrix order. The
+       * OWN fence heartbeat is refreshed between stores so a slow delete (or
+       * a fan-out longer than the TTL) cannot let the fence lapse mid-purge;
+       * losing ownership (a takeover displaced us) aborts the remaining
+       * stores fail-closed. */
       cJSON *stores = cJSON_CreateObject();
       if (!stores)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
          return 500;
       }
-      int all_ok = 1;
-      purge_store_add(stores, "chunks", db2_kb_service_clear_project(project), &all_ok);
-      purge_store_add(stores, "file_index", db2_kb_file_index_delete_project(project), &all_ok);
-      purge_store_add(stores, "vectors", pgvec_kb_vector_delete_project(project), &all_ok);
-      purge_store_add(stores, "code_embeddings", pgvec_code_delete_project(project), &all_ok);
-      purge_store_add(stores, "curator_code_unit_vectors",
-                      pgvec_curator_code_unit_delete_project(project), &all_ok);
-      purge_store_add(stores, "canonical_index", db2_code_index_project_delete(project), &all_ok);
-      purge_store_add(stores, "code_unit_jobs", kb_curator_code_unit_jobs_delete_project(project),
-                      &all_ok);
-      purge_store_add(stores, "pdf_vectors", pgvec_kbpdf_delete_project(project), &all_ok);
-      purge_store_add(stores, "minhash", db2_sketch_minhash_signature_delete_project(project),
-                      &all_ok);
+      typedef int (*purge_store_fn)(const char *);
+      static const struct
+      {
+         const char *name;
+         purge_store_fn fn;
+      } purge_matrix[] = {
+          {"chunks", db2_kb_service_clear_project},
+          {"file_index", db2_kb_file_index_delete_project},
+          {"vectors", pgvec_kb_vector_delete_project},
+          {"code_embeddings", pgvec_code_delete_project},
+          {"curator_code_unit_vectors", pgvec_curator_code_unit_delete_project},
+          {"canonical_index", db2_code_index_project_delete},
+          {"code_unit_jobs", kb_curator_code_unit_jobs_delete_project},
+          {"pdf_vectors", pgvec_kbpdf_delete_project},
+          {"minhash", db2_sketch_minhash_signature_delete_project},
+      };
+      int all_ok = 1, fence_lost = 0;
+      for (size_t si = 0; si < sizeof(purge_matrix) / sizeof(purge_matrix[0]); si++)
+      {
+         purge_store_add(stores, purge_matrix[si].name, purge_matrix[si].fn(project), &all_ok);
+         if (si + 1 < sizeof(purge_matrix) / sizeof(purge_matrix[0]) &&
+             db2_kb_purge_fence_heartbeat(project, generation, purge_id) != 1)
+         {
+            /* Ownership lost mid-fan-out: mark the remaining stores as
+             * errored (fail closed) — the displaced owner's purge re-runs
+             * them idempotently. */
+            fence_lost = 1;
+            all_ok = 0;
+            for (size_t sj = si + 1; sj < sizeof(purge_matrix) / sizeof(purge_matrix[0]); sj++)
+            {
+               cJSON *e = cJSON_CreateObject();
+               if (e)
+               {
+                  cJSON_AddStringToObject(e, "error", "fence lost");
+                  cJSON_AddItemToObject(stores, purge_matrix[sj].name, e);
+               }
+            }
+            aimee_log(LOG_WARN, "kb.purge",
+                      "purge-project '%s': fence ownership lost after store '%s' — remaining "
+                      "stores aborted",
+                      project, purge_matrix[si].name);
+            break;
+         }
+      }
 
       cJSON *resp = cJSON_CreateObject();
       if (!resp)
@@ -2035,6 +2070,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       cJSON_AddStringToObject(resp, "generation", generation);
       cJSON_AddStringToObject(resp, "purge_id", purge_id);
       cJSON_AddBoolToObject(resp, "fence_replaced", fence_replaced);
+      if (fence_lost)
+         cJSON_AddBoolToObject(resp, "fence_lost", 1);
       if (fence_replaced)
       {
          cJSON *displaced = cJSON_CreateObject();
