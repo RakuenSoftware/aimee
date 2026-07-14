@@ -763,22 +763,18 @@ int db1_stage_attempt_get(const char *wi, const char *stage)
    return v;
 }
 
-static int txn_exec(const char *cmd)
-{
-   sqlite3 *db = db1_conn();
-   if (!db)
-      return -1;
-   return sqlite3_exec(db, cmd, NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
-}
+/* All three route through the db1 transaction gate (db1_internal.h): begin
+ * holds the cross-thread mutex until the matching commit/rollback, so parallel
+ * engine advances can't interleave transactions on the shared connection. */
 int db1_lifecycle_txn_begin(void)
 {
-   return txn_exec("BEGIN IMMEDIATE");
+   return db1_txn_begin(db1_conn(), "BEGIN IMMEDIATE");
 }
 int db1_lifecycle_txn_commit(void)
 {
-   return txn_exec("COMMIT");
+   return db1_txn_end(db1_conn(), "COMMIT");
 }
 int db1_lifecycle_txn_rollback(void)
 {
-   return txn_exec("ROLLBACK");
+   return db1_txn_end(db1_conn(), "ROLLBACK");
 }

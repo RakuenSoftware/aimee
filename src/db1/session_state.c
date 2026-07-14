@@ -174,12 +174,8 @@ int db1_session_state_save(const char *sid, const session_state_t *in)
    if (!db)
       return -1;
 
-   char *err = NULL;
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, &err) != SQLITE_OK)
-   {
-      sqlite3_free(err);
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return -1;
-   }
 
    /* Upsert scalar row. */
    sqlite3_stmt *stmt = NULL;
@@ -387,15 +383,12 @@ int db1_session_state_save(const char *sid, const session_state_t *in)
       sqlite3_finalize(stmt);
    }
 
-   if (sqlite3_exec(db, "COMMIT", NULL, NULL, &err) != SQLITE_OK)
-   {
-      sqlite3_free(err);
-      goto rollback;
-   }
+   if (db1_txn_end(db, "COMMIT") != 0)
+      return -1; /* gate already released; a failed COMMIT auto-rolls-back */
    return 0;
 
 rollback:
-   sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+   db1_txn_end(db, "ROLLBACK");
    return -1;
 }
 
