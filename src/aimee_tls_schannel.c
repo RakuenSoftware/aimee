@@ -218,12 +218,13 @@ static int pinned_leaf_matches(PCCERT_CONTEXT cert)
  * against the pinned self-signed cert at <aimee_home>/remote-ca.pem. Returns 0 on
  * success, -1 on any failure.
  *
- * Two accept paths, hostname/SAN enforced in BOTH (matching the OpenSSL backend):
- *   1. System trust: the chain builds to a trusted root AND the name matches.
- *   2. Pinned: the system chain is untrusted (unknown CA / self-signed), so we
- *      ignore ONLY that error in a second name-checking policy run AND require the
- *      leaf to byte-match remote-ca.pem (strict leaf pin). A different cert fails
- *      the DER compare; a wrong hostname fails the still-enforced name check. */
+ * Two accept paths (matching the OpenSSL backend):
+ *   1. Pinned: the leaf byte-matches remote-ca.pem (strict leaf pin). This alone
+ *      IS the identity (SSH known_hosts semantics) — hostname/SAN is deliberately
+ *      not consulted, because a containerized/NAT'd server cannot know its
+ *      reachable address at cert-mint time, and a MITM cannot present the pinned
+ *      cert without its private key.
+ *   2. System trust: the chain builds to a trusted root AND the name matches. */
 static int verify_server_cert(aimee_tls_t *t)
 {
    /* Fail closed if there is no hostname to verify against: a NULL pwszServerName
@@ -235,6 +236,13 @@ static int verify_server_cert(aimee_tls_t *t)
    PCCERT_CONTEXT cert = NULL;
    if (QueryContextAttributes(&t->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &cert) != SEC_E_OK || !cert)
       return -1;
+
+   /* Path 1: exact-leaf pin decides the identity on its own. */
+   if (pinned_leaf_matches(cert))
+   {
+      CertFreeCertificateContext(cert);
+      return 0;
+   }
 
    int ok = -1;
    PCCERT_CHAIN_CONTEXT chain = NULL;
@@ -258,10 +266,7 @@ static int verify_server_cert(aimee_tls_t *t)
       }
 
       if (ssl_policy_check(chain, whost, 0) == 0)
-         ok = 0; /* path 1: trusted system root + name match */
-      else if (pinned_leaf_matches(cert) &&
-               ssl_policy_check(chain, whost, SECURITY_FLAG_IGNORE_UNKNOWN_CA) == 0)
-         ok = 0; /* path 2: strict leaf pin + name match (untrusted root ignored) */
+         ok = 0; /* path 2: trusted system root + name match */
 
       CertFreeCertificateChain(chain);
    }

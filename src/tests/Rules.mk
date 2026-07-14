@@ -298,6 +298,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-bootstrap \
                $(TESTPREFIX)/unit-test-pki \
                $(TESTPREFIX)/unit-test-aimee-tls-clientcert \
+               $(TESTPREFIX)/unit-test-aimee-tls-pin \
                $(TESTPREFIX)/unit-test-vault-server-key \
                $(TESTPREFIX)/unit-test-vault-capability \
                $(TESTPREFIX)/unit-test-agent-key-import \
@@ -3142,6 +3143,11 @@ $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/tests/test_vault_server_key.
 
 $(TESTPREFIX)/unit-test-aimee-tls-clientcert: $(OBJDIR)/tests/test_aimee_tls_clientcert.o \
                               $(OBJDIR)/aimee_tls.o $(OBJDIR)/aimee_home.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-aimee-tls-pin: $(OBJDIR)/tests/test_aimee_tls_pin.o \
+                              $(OBJDIR)/aimee_tls.o $(OBJDIR)/kb/pki.o \
+                              $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-capability: $(OBJDIR)/tests/test_vault_capability.o \
