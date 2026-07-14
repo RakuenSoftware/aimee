@@ -1654,6 +1654,28 @@ static cJSON *manager_read_hash_json(const char *path, char *hash)
    fclose(f);
    wfe_sha256_hex(buf, rd, hash);
    cJSON *j = cJSON_Parse(buf);
+   if (!j)
+   {
+      /* Fence tolerance: when the artifact came from the response-persist
+       * fallback (a delegate whose file tools were unavailable), models
+       * routinely wrap the JSON in a markdown fence. Parse the fenced body
+       * rather than failing the whole attempt. */
+      char *start = strstr(buf, "```");
+      if (start)
+      {
+         start += 3;
+         while (*start && *start != '\n')
+            start++; /* skip the info string (```json) */
+         if (*start == '\n')
+            start++;
+         char *end = strstr(start, "```");
+         if (end)
+         {
+            *end = '\0';
+            j = cJSON_Parse(start);
+         }
+      }
+   }
    free(buf);
    return j;
 }
@@ -1669,6 +1691,13 @@ static wfe_step_result_t manager_produce(wfe_ctx *ctx, const wfe_node_t *node, c
    resolve_workdir(ctx, wd, sizeof wd);
    char path[1200];
    manager_artifact_path(ctx, node, path, sizeof path);
+   /* Author each attempt FRESH: the provider persists the model's reply to the
+    * artifact only when the file is absent/empty (so tool-written artifacts
+    * aren't clobbered by the chat response) — which means one bad attempt's
+    * leftovers would otherwise poison every retry: the fresh reply is dropped
+    * and validation re-reads the stale file forever (observed live: a split
+    * that could never recover from its first refusal). */
+   remove(path);
    char commit[64] = "";
    double cost = 0.0;
    if (wfe_delegate_dispatch(wd, role, node_delegate(node), prompt, path, commit, &cost) < 0)
@@ -1724,10 +1753,12 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
    }
    char prompt[14 * 1024];
    snprintf(prompt, sizeof prompt,
-            "Decompose the APPROVED PLAN below into a structured PACKET PLAN and write it as JSON "
-            "to the given path (nothing else): {\"schema_version\":1,\"packets\":[{\"packet_id\":"
-            "\"p1\",\"summary\":\"...\",\"target_blocks\":[\"implement\"],\"dependencies\":[],"
-            "\"acceptance_criteria\":[\"...\"]}]}. Then commit it.\n\nAPPROVED PLAN:\n%s",
+            "Decompose the APPROVED PLAN below into a structured PACKET PLAN: "
+            "{\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\","
+            "\"target_blocks\":[\"implement\"],\"dependencies\":[],"
+            "\"acceptance_criteria\":[\"...\"]}]}. Write the JSON to the given path and commit it "
+            "if you can; if file tools are unavailable to you, your ENTIRE reply must be exactly "
+            "that JSON document — no prose, no code fences, nothing else.\n\nAPPROVED PLAN:\n%s",
             plan[0] ? plan : "(no plan artifact found — decompose the work item's ask)");
    return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }
