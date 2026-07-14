@@ -322,6 +322,7 @@ static const config_schema_entry_t config_schema[] = {
     {"ingress_max_raw_scans", SCHEMA_INT, 0},
     {"code_span_max_lines", SCHEMA_INT, 0},
     {"require_session_worktree", SCHEMA_BOOL, 0},
+    {"require_aimee_memory", SCHEMA_BOOL, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
@@ -727,6 +728,10 @@ static void config_set_defaults(config_t *cfg)
     * sessions sharing one checkout collide on a single git HEAD. Explicit
     * `require_session_worktree: false` bypasses (see cli_attention_guard.c). */
    cfg->require_session_worktree = 1;
+   /* Default ON: agent-authored durable memories go through aimee's memory
+    * system, not external per-harness memory files. Explicit
+    * `require_aimee_memory: false` bypasses (see cli_attention_guard.c). */
+   cfg->require_aimee_memory = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -1187,6 +1192,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "require_session_worktree");
    if (cJSON_IsBool(item))
       cfg->require_session_worktree = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_memory");
+   if (cJSON_IsBool(item))
+      cfg->require_aimee_memory = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
    if (cJSON_IsBool(item))

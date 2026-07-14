@@ -412,6 +412,11 @@ typedef struct config
     * worktree (.aimee/worktrees/...), forcing every mutating session into an
     * isolated worktree+branch off the default branch. Default 0 (off). */
    int require_session_worktree;
+   /* External-memory guard (default on): the PreToolUse attention-guard blocks
+    * agent writes to external file-based agent-memory stores
+    * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into
+    * aimee's memory system (`aimee memory store`). Explicit false opts out. */
+   int require_aimee_memory;
 
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a

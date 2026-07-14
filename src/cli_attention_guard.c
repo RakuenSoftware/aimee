@@ -408,13 +408,13 @@ static int attn_config_ingress_max_raw_scans(void)
    return value;
 }
 
-/* Parse a boolean `require_session_worktree:` line from an aimee.yaml buffer.
- * Accepts true/1/yes/on (case-insensitive) as true; anything else (incl. a
- * missing key) is false. Mirrors attn_parse_ingress_max_raw_scans' lean,
+/* Parse a boolean `<key>:` line from an aimee.yaml buffer. Accepts
+ * true/1/yes/on (case-insensitive) as true; anything else (incl. a missing
+ * key) leaves *out untouched. Mirrors attn_parse_ingress_max_raw_scans' lean,
  * link-free YAML-line scan so the guard need not pull in the full config. */
-static int attn_parse_require_session_worktree(const char *buf, int *out)
+static int attn_parse_bool_key(const char *buf, const char *key, int *out)
 {
-   if (!buf || !out)
+   if (!buf || !key || !out)
       return 0;
 
    const char *line = buf;
@@ -430,8 +430,8 @@ static int attn_parse_require_session_worktree(const char *buf, int *out)
          if (*p == '"' || *p == '\'')
             quote = *p++;
 
-         size_t key_len = strlen("require_session_worktree");
-         if (strncmp(p, "require_session_worktree", key_len) == 0)
+         size_t key_len = strlen(key);
+         if (strncmp(p, key, key_len) == 0)
          {
             p += key_len;
             if (quote)
@@ -484,7 +484,30 @@ static int attn_config_require_session_worktree(void)
       return 1; /* no config file -> default ON */
 
    int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_require_session_worktree(buf, &value);
+   (void)attn_parse_bool_key(buf, "require_session_worktree", &value);
+   free(buf);
+   return value;
+}
+
+static int attn_config_require_aimee_memory(void)
+{
+   /* Default ON: durable memories authored by an agent belong in aimee's memory
+    * system (`aimee memory store`), where they are indexed, recalled, and
+    * audited — not in per-harness markdown files aimee never sees. Only an
+    * explicit `require_aimee_memory: false` opts out. */
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return 1; /* no resolvable home -> fail closed to enforcement */
+
+   char path[1024];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+
+   char *buf = NULL;
+   if (!attn_read_file(path, &buf))
+      return 1; /* no config file -> default ON */
+
+   int value = 1; /* default ON; only an explicit key overrides */
+   (void)attn_parse_bool_key(buf, "require_aimee_memory", &value);
    free(buf);
    return value;
 }
@@ -590,15 +613,132 @@ static int attn_path_in_managed_worktree(const char *norm)
 }
 
 /* Returns 1 iff `norm` is harness-owned session state rather than repo content:
- * Claude Code's per-project state dir ("~/.claude/projects/<slug>/..." — auto-
- * memory, transcripts, tool-result spills). The harness writes there as part of
- * normal operation from ANY cwd; blocking it doesn't protect the checkout, it
- * just breaks the harness (observed: memory writes refused mid-session). The
- * loose "/.claude/" prefix stays blocked — only the projects state dir is
- * carved out. */
+ * Claude Code's per-project state dir ("~/.claude/projects/<slug>/..." —
+ * transcripts, tool-result spills). The harness writes there as part of normal
+ * operation from ANY cwd; blocking it doesn't protect the checkout, it just
+ * breaks the harness. The loose "/.claude/" prefix stays blocked — only the
+ * projects state dir is carved out. NOTE: the file-based agent-memory subtree
+ * of this dir is NOT writable through this carve-out — the external-memory
+ * guard (attn_external_memory_blocked, checked first) redirects memory writes
+ * into aimee's memory system. */
 static int attn_path_is_harness_state(const char *norm)
 {
    return norm && strstr(norm, "/.claude/projects/") != NULL;
+}
+
+/* Returns 1 iff `norm` points into an external file-based agent-memory store:
+ * Claude Code's per-project auto-memory dir
+ * ("~/.claude/projects/<slug>/memory/..." incl. its MEMORY.md index). Matches
+ * the "/memory" component itself and anything under it. */
+static int attn_path_is_external_agent_memory(const char *norm)
+{
+   const char *m = norm ? strstr(norm, "/.claude/projects/") : NULL;
+   if (!m)
+      return 0;
+   const char *mem = strstr(m + 18, "/memory"); /* 18 = strlen("/.claude/projects/") */
+   if (!mem)
+      return 0;
+   return mem[7] == '\0' || mem[7] == '/';
+}
+
+/* True when `cmd` contains an output redirect that actually lands somewhere
+ * ('>' / '>>'), ignoring pure-discard ("> /dev/null") and fd-dup ("2>&1")
+ * forms so a read like `cat f 2>/dev/null` is not misread as a write. */
+static int cmd_has_real_redirect(const char *cmd)
+{
+   for (const char *p = cmd ? strchr(cmd, '>') : NULL; p; p = strchr(p + 1, '>'))
+   {
+      const char *q = p + 1;
+      if (*q == '>')
+         q++;
+      if (*q == '&')
+      {
+         q++;
+         if (isdigit((unsigned char)*q))
+            continue; /* fd dup, e.g. 2>&1 */
+      }
+      while (*q == ' ' || *q == '\t')
+         q++;
+      if (strncmp(q, "/dev/null", 9) == 0)
+         continue;
+      return 1;
+   }
+   return 0;
+}
+
+/* True when `tok` appears in `cmd` at a word START (preceded by whitespace,
+ * start-of-string, or a shell separator) — the right side is unconstrained so
+ * "python" matches "python3" and "node" matches "nodejs". Over-matching is the
+ * fail-closed direction here. */
+static int cmd_has_word_prefix(const char *cmd, const char *tok)
+{
+   size_t n = strlen(tok);
+   for (const char *p = cmd; (p = strstr(p, tok)) != NULL; p += n)
+   {
+      char l = (p == cmd) ? ' ' : p[-1];
+      if (l == ' ' || l == '\t' || l == '\n' || l == ';' || l == '|' || l == '&' || l == '(' ||
+          l == '`' || l == '$')
+         return 1;
+   }
+   return 0;
+}
+
+/* True if `cmd` plausibly writes files: a real output redirect, an in-place
+ * editor, a file-moving tool, or an interpreter (which can write anything).
+ * Conservative substring matching, same spirit as bash_is_hard(): a false
+ * positive blocks with a clear redirect message; a false negative would let a
+ * memory write slip through. */
+static int bash_cmd_can_write(const char *cmd)
+{
+   if (!cmd || !cmd[0])
+      return 0;
+   if (cmd_has_real_redirect(cmd))
+      return 1;
+   static const char *toks[] = {
+       "tee",  "sed -i", "sed --in-place", "perl -i", "awk -i",  "cp",    "mv",
+       "rm",   "touch",  "truncate",       "shred",   "install", "rsync", "dd",
+       "ln",   "chmod",  "chown",          "mkdir",   "python",  "perl",  "ruby",
+       "node", "php",    "xargs",          "sh -c",   "bash -c", NULL};
+   for (int i = 0; toks[i]; i++)
+      if (strchr(toks[i], ' ') ? strstr(cmd, toks[i]) != NULL : cmd_has_word_prefix(cmd, toks[i]))
+         return 1;
+   return 0;
+}
+
+/* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
+ * that would WRITE the harness's file-based agent-memory store — directly
+ * (a mutating file tool whose target resolves into the store) or via a Bash
+ * command that names the store with write intent (the observed bypass:
+ * `cat > .../memory/x.md`, `sed -i`, `python3 - <<EOF`). Reads stay free.
+ * For Bash the RAW command text is scanned — the path may be smuggled through
+ * a variable, but the literal store path has to appear somewhere for the
+ * command to reach it in a fresh shell. */
+int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char *file_path,
+                                 const char *bash_cmd, const char *cwd)
+{
+   if (tool_name && strcmp(tool_name, "Bash") == 0)
+   {
+      const char *m = bash_cmd ? strstr(bash_cmd, ".claude/projects/") : NULL;
+      if (!m || !strstr(m, "memory"))
+         return 0;
+      return bash_cmd_can_write(bash_cmd);
+   }
+
+   /* File-target tools: only mutating ops (Write/Edit/NotebookEdit classify
+    * SOFT; Read never blocks). */
+   if (op != ATTN_OP_SOFT && op != ATTN_OP_HARD)
+      return 0;
+   if (!file_path || !file_path[0])
+      return 0;
+
+   char joined[2048];
+   if (file_path[0] == '/')
+      snprintf(joined, sizeof(joined), "%s", file_path);
+   else
+      snprintf(joined, sizeof(joined), "%s/%s", cwd ? cwd : "", file_path);
+   char norm[2048];
+   attn_lexical_normalize(joined, norm, sizeof(norm));
+   return attn_path_is_external_agent_memory(norm);
 }
 
 /* Pure decision for the session-isolation guard (testable in isolation).
@@ -651,6 +791,41 @@ int handle_attention_guard(void)
 
    long now_ts = (long)time(NULL);
    attn_op_t op = attn_classify(tool, bash_cmd);
+
+   /* External-memory guard (operator ruling 2026-07-14, default ON via
+    * require_aimee_memory): an agent must not author harness-local memory files
+    * (~/.claude/projects/<slug>/memory/...) directly — memories go through
+    * aimee's memory system. Checked BEFORE the harness-state carve-out in the
+    * isolation guard below would allow the write, and inspects Bash command
+    * text too, closing the observed cat/sed/python bypass around the file-tool
+    * block. */
+   if (attn_config_require_aimee_memory())
+   {
+      char mcwd[1024];
+      if (!getcwd(mcwd, sizeof(mcwd)))
+         mcwd[0] = '\0';
+      const char *mfp = NULL;
+      if (ti)
+      {
+         const char *keys[] = {"file_path", "path", "notebook_path"};
+         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]) && !mfp; k++)
+            mfp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, keys[k]));
+      }
+      if (attn_external_memory_blocked(op, tool, mfp, bash_cmd, mcwd))
+      {
+         fprintf(stderr,
+                 "aimee attention-guard: refusing a direct write to an external agent-memory "
+                 "store (~/.claude/projects/<project>/memory/...). Durable memories must be "
+                 "pushed to aimee's memory system, where they are indexed, recalled, and "
+                 "audited: use `aimee memory store <key> \"<content>\" [--tier L2] [--kind "
+                 "fact]` (recall via `aimee memory search` / the search_memory tool). Reading "
+                 "the file store is still allowed. An operator may set require_aimee_memory: "
+                 "false in aimee.yaml to disable this — there is no env-var bypass.\n");
+         cJSON_Delete(hook);
+         free(stdin_data);
+         return 2;
+      }
+   }
 
    /* Session-isolation guard (OPT-IN via require_session_worktree). Fails closed
     * on a mutating op outside an aimee-managed worktree, so a session that never

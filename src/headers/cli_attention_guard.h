@@ -64,6 +64,17 @@ int attn_weight_for(attn_op_t op);
  * handle_attention_guard only when require_session_worktree is enabled. */
 int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd);
 
+/* External-memory decision (pure, testable). Returns 1 to BLOCK a tool call
+ * that would WRITE an external file-based agent-memory store
+ * (~/.claude/projects/<slug>/memory/...): a mutating file tool whose target
+ * resolves into the store, or a Bash command that names the store with write
+ * intent (redirect, in-place editor, file tool, or interpreter). Reads are
+ * never blocked. Durable memories belong in aimee's memory system
+ * (`aimee memory store`). Enforced by handle_attention_guard unless aimee.yaml
+ * sets `require_aimee_memory: false` (default ON; no env-var bypass). */
+int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char *file_path,
+                                 const char *bash_cmd, const char *cwd);
+
 /* `aimee attention-guard` PreToolUse-hook entry. Reads the host hook JSON from
  * stdin, updates the per-session attention log, and returns the hook exit code
  * (2 = block a hard-destructive op on a high-attention file, or — only when a

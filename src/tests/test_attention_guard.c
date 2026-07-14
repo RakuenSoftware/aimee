@@ -237,6 +237,119 @@ static void test_session_isolation_decision(void)
    printf("isolation decision OK\n");
 }
 
+/* Pure decision tests for the external-memory guard. */
+static void test_external_memory_decision(void)
+{
+   const char *mem = "/home/u/.claude/projects/-home-u-repo/memory/fact.md";
+   const char *mem_idx = "/home/u/.claude/projects/-home-u-repo/memory/MEMORY.md";
+   const char *state = "/home/u/.claude/projects/-home-u-repo/transcript.jsonl";
+   const char *cwd = "/home/u/repo/.aimee/worktrees/ab/main";
+
+   /* Mutating file tools targeting the memory store -> BLOCKED, even from a
+    * managed-worktree cwd (the store is outside the repo entirely). */
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Write", mem, NULL, cwd) == 1);
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Edit", mem_idx, NULL, cwd) == 1);
+   assert(attn_external_memory_blocked(ATTN_OP_HARD, "Bash", NULL,
+                                       "rm -rf /home/u/.claude/projects/p/memory", cwd) == 1);
+
+   /* Reads never block. */
+   assert(attn_external_memory_blocked(ATTN_OP_READ, "Read", mem, NULL, cwd) == 0);
+   assert(attn_external_memory_blocked(ATTN_OP_READ, "Bash", NULL,
+                                       "grep -n hook /home/u/.claude/projects/p/memory/MEMORY.md",
+                                       cwd) == 0);
+   /* A discard-only redirect is still a read. */
+   assert(attn_external_memory_blocked(ATTN_OP_READ, "Bash", NULL,
+                                       "cat /home/u/.claude/projects/p/memory/m.md 2>/dev/null",
+                                       cwd) == 0);
+
+   /* Other harness state (transcripts etc.) is NOT the memory store. */
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Write", state, NULL, cwd) == 0);
+   /* ...nor is an unrelated dir that merely ends in /memory elsewhere. */
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Write", "/home/u/repo/src/memory/x.c", NULL,
+                                       cwd) == 0);
+
+   /* The observed Bash bypasses are all caught: heredoc/cat redirect, sed -i,
+    * an interpreter, and an append. */
+   assert(attn_external_memory_blocked(
+              ATTN_OP_READ, "Bash", NULL,
+              "MEMDIR=/home/u/.claude/projects/p/memory; cat > \"$MEMDIR/x.md\" <<'EOF'\nhi\nEOF",
+              cwd) == 1);
+   assert(attn_external_memory_blocked(
+              ATTN_OP_READ, "Bash", NULL,
+              "sed -i 's/a/b/' /home/u/.claude/projects/p/memory/MEMORY.md", cwd) == 1);
+   assert(attn_external_memory_blocked(
+              ATTN_OP_READ, "Bash", NULL,
+              "python3 - <<'EOF'\nopen('/home/u/.claude/projects/p/memory/m.md','w')\nEOF",
+              cwd) == 1);
+   assert(attn_external_memory_blocked(
+              ATTN_OP_SOFT, "Bash", NULL,
+              "echo '- hook' >> /home/u/.claude/projects/p/memory/MEMORY.md", cwd) == 1);
+
+   /* A '..' traversal into the store is normalized and blocked. */
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Write",
+                                       "/home/u/.claude/projects/p/logs/../memory/m.md", NULL,
+                                       cwd) == 1);
+
+   /* NULL safety. */
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Write", NULL, NULL, NULL) == 0);
+   assert(attn_external_memory_blocked(ATTN_OP_SOFT, "Bash", NULL, NULL, NULL) == 0);
+   printf("external-memory decision OK\n");
+}
+
+/* Functional test: the require_aimee_memory gate (default ON, explicit false
+ * opts out, no env-var bypass). */
+static void test_external_memory_enforcement(void)
+{
+   snprintf(g_home, sizeof(g_home), "/tmp/aimee_mem_test_%d", (int)getpid());
+   mkdir(g_home, 0700);
+   char cfgpath[400];
+   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
+
+#define WRITE_MEMORY_HOOK                                                                          \
+   "{\"session_id\":\"memtest\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":"            \
+   "\"/home/u/.claude/projects/p/memory/fact.md\"}}"
+#define BASH_MEMORY_HOOK                                                                           \
+   "{\"session_id\":\"memtest\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":"               \
+   "\"sed -i 's/a/b/' /home/u/.claude/projects/p/memory/MEMORY.md\"}}"
+#define READ_MEMORY_HOOK                                                                           \
+   "{\"session_id\":\"memtest\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":"             \
+   "\"/home/u/.claude/projects/p/memory/fact.md\"}}"
+
+   /* (1) Default ON: no config -> a Write into the store is BLOCKED. */
+   rm_path(cfgpath);
+   g_stdin_json = WRITE_MEMORY_HOOK;
+   assert(handle_attention_guard() == 2);
+
+   /* (2) The Bash workaround is BLOCKED too. */
+   g_stdin_json = BASH_MEMORY_HOOK;
+   assert(handle_attention_guard() == 2);
+
+   /* (3) Reading the store stays allowed (worktree isolation off so only the
+    *     memory guard is in play). */
+   write_config("require_session_worktree: false\n");
+   g_stdin_json = READ_MEMORY_HOOK;
+   assert(handle_attention_guard() == 0);
+
+   /* (4) Explicit opt-out re-opens the store (the harness-state carve-out then
+    *     applies to the file tool; the Bash text check is off too). */
+   write_config("require_aimee_memory: false\nrequire_session_worktree: false\n");
+   g_stdin_json = WRITE_MEMORY_HOOK;
+   assert(handle_attention_guard() == 0);
+   g_stdin_json = BASH_MEMORY_HOOK;
+   assert(handle_attention_guard() == 0);
+
+   /* (5) No env-var bypass. */
+   write_config("require_session_worktree: false\n");
+   setenv("AIMEE_GUARD", "0", 1);
+   g_stdin_json = WRITE_MEMORY_HOOK;
+   assert(handle_attention_guard() == 2);
+   unsetenv("AIMEE_GUARD");
+
+   rm_path(cfgpath);
+   g_stdin_json = NULL;
+   printf("external-memory enforcement OK\n");
+}
+
 /* Functional test: the require_session_worktree gate. The handler uses the real
  * process cwd (the build dir — not a managed worktree), so an Edit with an
  * absolute file_path drives the decision deterministically. */
@@ -301,6 +414,8 @@ int main(void)
    test_guard_enforcement();
    test_session_isolation_decision();
    test_isolation_enforcement();
+   test_external_memory_decision();
+   test_external_memory_enforcement();
    printf("all tests passed\n");
    return 0;
 }
