@@ -892,8 +892,9 @@ static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost
       int ok = 0;
       for (long attempt = 0; attempt <= retry_max && !ok; attempt++)
       {
-         /* retry-DIFFERENT-delegate: the first attempt uses the pinned delegate;
-          * retries use $random so a fresh perspective takes over (Q2). */
+         /* retry-DIFFERENT-delegate: the first attempt uses the pinned delegate
+          * (an unnamed one resolves to a random roster agent); retries force
+          * $random so a fresh perspective takes over (Q2). */
          const char *deleg = (attempt == 0) ? node_delegate(node) : "$random";
          char uc[64] = "";
          if (wfe_delegate_dispatch(wd, "engineer", deleg, prompt, NULL, uc, cost) < 0)
