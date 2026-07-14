@@ -18,6 +18,14 @@
 #ifndef KB_HTTP_RESP_MAX
 #define KB_HTTP_RESP_MAX (1024 * 1024)
 #endif
+/* Protective request-body bound. Oversized bodies are REJECTED with 413 —
+ * never silently truncated (truncation turned any large /v1/code/scan push
+ * into a 400 "invalid json" with no hint of the real cause). Generous because
+ * pushed-file scans of large repos are a legitimate workload; the bound only
+ * guards the single-threaded listener against absurd Content-Length values. */
+#ifndef KB_HTTP_BODY_MAX
+#define KB_HTTP_BODY_MAX (256 * 1024 * 1024)
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,11 +176,19 @@ void handle_connection(int fd)
    if (cl_hdr)
    {
       cl_hdr += 18;
-      req_body_len = atoi(cl_hdr);
-      if (req_body_len < 0)
-         req_body_len = 0;
-      if (req_body_len > 1048576)
-         req_body_len = 1048576; /* 1 MB cap */
+      long cl = atol(cl_hdr);
+      if (cl < 0)
+         cl = 0;
+      if (cl > KB_HTTP_BODY_MAX)
+      {
+         free(resp_heap);
+         aimee_log(LOG_WARN, "kb.http",
+                   "request_id=%s method=%s path=%s status=413 (body %ld > %d)", request_id, method,
+                   clean_path, cl, KB_HTTP_BODY_MAX);
+         send_response_ex(fd, 413, "{\"error\":\"request body too large\"}", request_id, NULL);
+         return;
+      }
+      req_body_len = (int)cl;
       req_body_heap = malloc((size_t)req_body_len + 1);
       if (req_body_heap)
       {

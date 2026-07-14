@@ -190,13 +190,13 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
 }
 
 #ifdef AIMEE_POSIX
-/* Per-batch content budget for pushed-file scans. The binding limit is
- * aimee-kb's 1 MB request-body cap (kb_http_conn.c): a whole-tree push of any
- * non-trivial repo would be silently truncated there and 400 as invalid JSON.
- * The kb scan upserts per project+path, so batches accumulate — the same
- * contract the thin client's /v1/index/ingest streamer relies on. JSON
- * escaping inflates the wire body above the raw content total, so budget well
- * under 1 MB. */
+/* Per-batch content budget for pushed-file scans. Batching keeps client
+ * memory to ~one batch regardless of tree size, gives per-batch progress
+ * against the scan timeout, and stays under the 1 MB request-body cap of
+ * pre-KB_HTTP_BODY_MAX aimee-kb images (which silently truncated bigger
+ * bodies into 400 "invalid json"). The kb scan upserts per project+path, so
+ * batches accumulate — the same contract the thin client's /v1/index/ingest
+ * streamer relies on. */
 #define KB_CLIENT_SCAN_BATCH_BYTES (600 * 1024)
 
 /* Streaming scan-push state: code_collect_files_cb hands over one file at a

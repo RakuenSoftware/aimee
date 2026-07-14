@@ -87,6 +87,7 @@ void send_response_ex(int fd, int status, const char *body, const char *request_
                         : status == 401 ? "Unauthorized"
                         : status == 404 ? "Not Found"
                         : status == 405 ? "Method Not Allowed"
+                        : status == 413 ? "Content Too Large"
                         : status == 500 ? "Internal Server Error"
                         : status == 503 ? "Service Unavailable"
                                         : "Bad Request";

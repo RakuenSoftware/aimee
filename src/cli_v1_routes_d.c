@@ -1097,9 +1097,10 @@ static const char *cli_ws_err_message(cJSON *resp)
  * code-scan upserts per project+path, so batches accumulate. Returns 0 on
  * success, nonzero if any batch failed. */
 
-/* Per-batch content budget. The binding limit is aimee-kb's 1 MB request-body
- * cap (the server relays each batch on to kb); JSON escaping inflates the wire
- * body above the raw content total, so budget well under 1 MB. */
+/* Per-batch content budget. Batching bounds client memory and keeps each
+ * relayed request under the 1 MB body cap of pre-KB_HTTP_BODY_MAX aimee-kb
+ * images (the server relays each batch on to kb); JSON escaping inflates the
+ * wire body above the raw content total, so budget well under 1 MB. */
 #define CLI_INGEST_BATCH_BYTES (600 * 1024)
 
 /* POST one batch of files (adopted/freed) as project `name`/`root`, polling the

@@ -4208,6 +4208,43 @@ static void test_code_structure_missing_params(void)
    assert(s == 400);
    assert(strstr(buf, "missing project") != NULL);
 }
+/* handle_connection (plain-HTTP listener): a Content-Length over
+ * KB_HTTP_BODY_MAX must be rejected up front with 413 — never silently
+ * truncated (truncation turned every large /v1/code/scan push into an opaque
+ * 400 "invalid json"). */
+extern void handle_connection(int fd);
+
+static void *conn_serve_thread(void *a)
+{
+   handle_connection(*(int *)a);
+   return NULL;
+}
+
+static void test_http_body_too_large_413(void)
+{
+   int sv[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+   pthread_t th;
+   assert(pthread_create(&th, NULL, conn_serve_thread, &sv[0]) == 0);
+
+   const char *req = "POST /v1/code/scan HTTP/1.1\r\n"
+                     "Content-Length: 999999999999\r\n"
+                     "\r\n";
+   assert(write(sv[1], req, strlen(req)) == (ssize_t)strlen(req));
+   pthread_join(th, NULL); /* handler replies before reading any body */
+   close(sv[0]);           /* EOF for the reader below */
+
+   char resp[2048];
+   int total = 0, n;
+   while ((n = (int)read(sv[1], resp + total, sizeof(resp) - 1 - (size_t)total)) > 0)
+      total += n;
+   resp[total] = '\0';
+   close(sv[1]);
+
+   assert(strstr(resp, "413"));
+   assert(strstr(resp, "request body too large"));
+}
+
 int main(void)
 {
    printf("kb_http_routes: ");
@@ -4229,6 +4266,7 @@ int main(void)
    test_enroll_redeem_route();
    test_mtls_serve();
    test_mtls_listener();
+   test_http_body_too_large_413();
    test_bearer_auth_ok();
    test_bearer_auth_missing();
    test_bearer_auth_wrong();
