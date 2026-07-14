@@ -36,8 +36,12 @@ static int g_notified;
  * dead-ending the run. Terminal/interactive items are skipped. */
 void wfe_scheduler_run_once(void)
 {
+   /* LRU order (least-recently-updated first): the pass below is sequential
+    * and each item may hold the thread up to its wall-clock cap, so a fixed
+    * newest-first order lets the busiest items eat every sweep and starve the
+    * rest (observed live: 2 of 13 slices monopolized 3.5h of sweeps). */
    db1_work_item_t *items = NULL;
-   int n = db1_work_item_list(&items);
+   int n = db1_work_item_list_lru(&items);
    if (n <= 0 || !items)
       return;
    for (int i = 0; i < n; i++)

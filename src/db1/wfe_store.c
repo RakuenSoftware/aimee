@@ -582,14 +582,13 @@ int db1_work_item_inc_override(const char *wi)
    return -1;
 }
 
-int db1_work_item_list(db1_work_item_t **out)
+static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
 {
    if (out)
       *out = NULL;
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   static const char *sql = "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC";
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
@@ -618,6 +617,21 @@ int db1_work_item_list(db1_work_item_t **out)
    else
       free(arr);
    return n;
+}
+
+int db1_work_item_list(db1_work_item_t **out)
+{
+   return work_item_list_ordered(out,
+                                 "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC");
+}
+
+int db1_work_item_list_lru(db1_work_item_t **out)
+{
+   /* Staleness-first (see wfe_store.h). id ASC tie-break keeps the order total
+    * and deterministic for same-second updates (a fresh fan-out stamps every
+    * child in one batch). */
+   return work_item_list_ordered(out, "SELECT " WI_COLS
+                                      " FROM lifecycle_work_item ORDER BY updated_at ASC, id ASC");
 }
 
 int db1_lifecycle_event_add(const char *wi, const char *stage, const char *kind, const char *actor,
