@@ -27,6 +27,11 @@ import time
 from dataclasses import dataclass, field
 
 
+def _now():
+    """Monotonic timestamp helper for audit timestamps (seconds since epoch)."""
+    return time.time()
+
+
 CHARS_PER_TOKEN = 4
 
 # Primary-context cap, in tokens. Mirrors CONTEXT_TOTAL_CAP in swebench_supervision: the
@@ -145,6 +150,11 @@ class EscalationGate:
         self._ledger = ledger
         self._cost = cost
         self._open = None
+        # F2/F3 auditability: every attempted escalation - granted OR denied -
+        # is recorded here so an auditor sees the full attempt history, including
+        # denied tool-dispatch attempts that did not flow through
+        # open_escalation. Append-only; read by audit.
+        self.attempts = []
 
     @property
     def is_open(self):
@@ -223,10 +233,30 @@ class EscalationGate:
 
     def check_tool(self, tool):
         if tool in CODE_TOOLS and not self.is_open:
+            # F2/F3: log the denied attempt before raising so the auditor sees
+            # the dispatch denial, not just the exception.
+            self.record_denied_tool_attempt(tool)
             raise EscalationDenied(
                 f"tool {tool!r} requires an active escalation; open one via "
                 f"gated_escalate before invoking code-reading tools"
             )
+
+    def record_denied_tool_attempt(self, tool, *, caller="unknown"):
+        """Append a denied-attempt audit row to ``self.attempts``.
+
+        Called when a tool-dispatch is refused because the supervisor allowlist
+        forbids the tool (no active escalation, unknown tool, etc). The attempt
+        is recorded with ``granted=False`` and a denial_reason so the auditor
+        sees every dispatch attempt, including denials.
+        """
+        self.attempts.append({
+            "caller": caller,
+            "reason": f"tool_dispatch:{tool}",
+            "granted": False,
+            "denial_reason": "tool_not_in_allowlist",
+            "timestamp": _now(),
+            "cost": 0,
+        })
 
 
 def tool_allowed(tool, *, escalated):
@@ -250,8 +280,26 @@ class ToolDispatcher:
     def __init__(self, gate):
         self._gate = gate
 
-    def check(self, tool):
+    def check(self, tool, *, caller="unknown"):
         if not tool_allowed(tool, escalated=self._gate.is_open):
+            # F2/F3 auditability: every attempted escalation - granted OR denied -
+            # is recorded in the ledger so the auditor can see denied attempts.
+            # route the denial through the gate so ``self._gate.attempts`` gets
+            # a row before we raise.
+            try:
+                self._gate.record_denied_tool_attempt(tool, caller=caller)
+            except AttributeError:
+                # Backwards-compat: if the gate does not yet implement the
+                # denied-attempt recorder (older EscalationGate versions), log
+                # a best-effort row directly so the ledger still has the audit.
+                self._gate.attempts.append({
+                    "caller": caller,
+                    "reason": f"tool_dispatch:{tool}",
+                    "granted": False,
+                    "denial_reason": "tool_not_in_allowlist",
+                    "timestamp": _now(),
+                    "cost": 0,
+                })
             raise EscalationDenied(f"tool {tool!r} blocked by supervisor allowlist")
 
 
@@ -299,7 +347,13 @@ class BudgetLedger:
         # exceed primary_budget, the rejection is recorded here so a run that
         # exhausts its primary budget emits an explicit audit row instead of
         # aborting with an uncaught RuntimeError. Append-only; read by audit.
-        self.primary_rejections = []      
+        self.primary_rejections = []
+        # Per-turn observed primary tokens (F4): one point per try_record_turn
+        # call (accepted OR refused), in arrival order. Distinct from
+        # ``primary_tokens_by_turn`` (running total, monotonic). This view
+        # preserves the per-turn shape so drift detection is not blind at the
+        # refusal boundary where usage peaks.
+        self._primary_observed = []      
 
     @property
     def balance(self):
@@ -381,9 +435,20 @@ class BudgetLedger:
 
         This is the path the live supervisor should call - the original
         ``record_turn`` stays strict for callers that want a hard error.
+
+        Drift-detection contract (roundtable F4): the running-total curve
+        ``primary_tokens_by_turn`` records a point for every turn so the curve
+        is not blind at peak usage. On refusal the running balance is not
+        advanced, so the curve point equals the prior balance (monotonicity
+        preserved). The per-turn observed primary tokens of the refused turn
+        are recorded in ``primary_tokens_observed_by_turn`` (and
+        ``primary_rejections``) so drift detection still has a per-turn shape.
         """
         if primary_tokens_this_turn < 0:
             raise ValueError("primary_tokens_this_turn must be >= 0")
+        # Always record the observed per-turn primary tokens so the per-turn
+        # telemetry view has one point per turn (accepted or refused).
+        self._primary_observed.append(int(primary_tokens_this_turn))
         if self._primary_spent + primary_tokens_this_turn > self._primary_budget:
             self.primary_rejections.append({
                 "turn_index": turn_index,
@@ -392,7 +457,10 @@ class BudgetLedger:
                 "primary_budget": self._primary_budget,
                 "caller": caller,
             })
+            # Curve stays monotonic on refusal: append the unchanged running
+            # total so the per-turn point exists without advancing the balance.
             prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
+            self.turn_boundaries.append(prev)
             return False, prev
         new_total = self.record_turn(turn_index, primary_tokens_this_turn)
         return True, new_total
@@ -423,8 +491,24 @@ class BudgetLedger:
         This is the supervisor's per-turn telemetry curve - one point per recorded turn,
         monotonically non-decreasing. It does NOT include escalation charges, which live
         in ``entries`` for separate audit.
+
+        F4 auditability: a row is appended for every turn - accepted or refused - so the
+        curve has no gaps. On refusal the row equals the unchanged running total
+        (balance was not advanced), preserving monotonicity.
         """
         return list(self.turn_boundaries)
+
+    @property
+    def primary_tokens_observed_by_turn(self):
+        """Per-turn observed primary tokens in arrival order, oldest first.
+
+        Distinct from ``primary_tokens_by_turn``: this view records the ACTUAL primary
+        tokens consumed each turn, regardless of whether the charge was accepted or
+        refused. Use this view for drift detection (a single turn spike is visible).
+        ``primary_tokens_by_turn`` is the monotonic running-total view; both views
+        are length-aligned (same number of rows).
+        """
+        return list(self._primary_observed)
 
     @property
     def primary_tokens_total(self):
@@ -528,8 +612,14 @@ class Supervisor:
         )
         return text2, orig, capped
 
-    def check_tool_dispatch(self, tool):
-        self.dispatcher.check(tool)
+    def check_tool_dispatch(self, tool, *, caller="unknown"):
+        """Dispatch boundary: raises EscalationDenied if tool is not allowed.
+
+        F2/F3 auditability: every denied attempt is recorded on
+        ``self.gate.attempts`` before the exception propagates, so the ledger
+        shows denied tool-dispatch attempts (not only granted escalations).
+        """
+        self.dispatcher.check(tool, caller=caller)
 
     def record_turn(self, turn_index, primary_tokens):
         return self.ledger.record_turn(turn_index, primary_tokens)

@@ -356,8 +356,14 @@ class TestRunArmCBudgetTelemetry(unittest.TestCase):
         self.assertEqual(rej["primary_spent_at_reject"], 250)
         self.assertEqual(rej["primary_budget"], 300)
         self.assertEqual(rej["caller"], "arm_c")
-        # Curve still has only the two accepted points.
-        self.assertEqual(len(L.turn_boundaries), 2)
+        # F4 (roundtable): the curve records a row for every turn, so drift
+        # detection is not blind at peak usage. On refusal the running balance
+        # is unchanged but the curve point still exists (equals prior balance).
+        self.assertEqual(len(L.turn_boundaries), 3)
+        self.assertEqual(L.turn_boundaries, [100, 250, 250])
+        # Per-turn observed view carries the actual per-turn tokens
+        # (accepted AND refused) so drift detection has per-turn shape.
+        self.assertEqual(L.primary_tokens_observed_by_turn, [100, 150, 999])
 
     def test_frame_cap_audit_records_truncation(self):
         """F1 invariant: a truncated frame leaves a cap_events row.

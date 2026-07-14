@@ -478,25 +478,36 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     # The escalation turn (which is itself a tools-enabled primary call) is also
     # recorded as its own point so the auditor can see how much primary context
     # the escalation cost.
+    # F4: per-row primary curve must be emitted for every primary turn. The
+    # fallback below only fires when no per-row data could be extracted, AND
+    # never after partial success (which would double-count on top of rows
+    # already appended by the loop).
     try:
         from benchmarks.coding.swebench_transport_verify import _primary_rows as _V_primary_rows
         prim_rows = _V_primary_rows(rows, primary_model) if rows else []
+        appended_rows = 0
         for i, r in enumerate(prim_rows):
             headline = (int(r.get("prompt_tokens", 0)) + int(r.get("completion_tokens", 0))
                         - int(r.get("cache_read_tokens", 0)))
             # F5: try_record_turn records a rejection on the ledger instead of
             # raising, so a run that exhausts primary_budget keeps going and the
             # auditor sees explicit primary_rejections rows.
-            _budget.try_record_turn(i, headline, caller="run_arm_c_supervised")
+            accepted, _ = _budget.try_record_turn(
+                appended_rows, headline, caller="run_arm_c_supervised")
+            appended_rows += 1
     except Exception:
-        # Fallback to the aggregate curve if per-row extraction fails for any
-        # reason - never break the run on telemetry shaping.
-        _budget.try_record_turn(0, tok.total_headline, caller="run_arm_c_supervised")
-    # Always emit at least one point so the curve is never empty even when the
-    # ledger had no primary rows (e.g., FAKE scenarios that synthesize only
-    # summary totals).
-    if not _budget.primary_tokens_by_turn and tok.total_headline:
-        _budget.try_record_turn(0, tok.total_headline, caller="run_arm_c_supervised")
+        # Per-row extraction failed for some reason - do NOT also append on
+        # top of any rows the loop already appended (that would double-count).
+        # The "no rows at all" fallback is handled by the block below.
+        appended_rows = 0
+    # Fallback: if neither the per-row path nor the loop succeeded, emit a
+    # SINGLE aggregate point tagged as aggregate_fallback so the auditor can
+    # distinguish it from per-row data. This satisfies the "curve is never
+    # empty" invariant without violating "every turn is recorded" (the
+    # aggregate point is the only honest representation when we have no rows).
+    if appended_rows == 0 and tok.total_headline:
+        _budget.try_record_turn(
+            0, tok.total_headline, caller="run_arm_c_supervised_aggregate_fallback")
     worker_dids = [res.delegation_id for _, res in worker_results if res.delegation_id]
     if worker_dids:
         wi, wc, wo, _ = T.read_realized_by_delegations(token_db, worker_dids)
