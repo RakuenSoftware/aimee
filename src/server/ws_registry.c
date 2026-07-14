@@ -1,13 +1,16 @@
 /* ws_registry.c — deployment-global project-key registry + lifecycle lock.
  * See ws_registry.h and docs/proposals/pending/webchat-project-lifecycle.md. */
 #include "ws_registry.h"
+#include "git_project.h" /* git_project_canonical_remote — git config is authoritative */
 #include "log.h"
+#include "util.h" /* safe_exec_capture_cwd_env_fd_timeout */
 #include "workspace_scope.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -191,36 +194,69 @@ int ws_reg_unregister(const char *ref)
    return holders - 1;
 }
 
-/* Read a published clone's credential-free remote sidecar (.aimee/remote,
- * single line). Returns 0 + out, -1 when absent/unreadable. */
-static int sidecar_read(const char *proj_path, char *out, size_t cap)
+/* The clone's own `git config remote.origin.url`, canonicalized. This is the
+ * AUTHORITATIVE identity: a user-run `git remote set-url` is honored here.
+ * Length-capped, argv-exec'd (no shell). 0 + out, or -1. */
+static int git_config_remote(const char *proj_path, char *out, size_t cap)
 {
-   char p[PATH_MAX];
-   if (snprintf(p, sizeof(p), "%s/.aimee/remote", proj_path) >= (int)sizeof(p))
+   const char *argv[] = {"git", "-C", proj_path, "config", "--get", "remote.origin.url", NULL};
+   extern char **environ;
+   char *raw = NULL;
+   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, environ, &raw, 4096, 10000, -1, -1);
+   if (rc != 0 || !raw || !raw[0])
+   {
+      free(raw);
       return -1;
-   FILE *fp = fopen(p, "r");
-   if (!fp)
-      return -1;
-   char line[WSREG_REMOTE_MAX];
-   const char *got = fgets(line, sizeof(line), fp);
-   fclose(fp);
-   if (!got)
-      return -1;
-   line[strcspn(line, "\n")] = '\0';
-   if (!line[0])
-      return -1;
-   snprintf(out, cap, "%s", line);
-   return 0;
+   }
+   raw[strcspn(raw, "\n")] = '\0';
+   int crc = git_project_canonical_remote(raw, out, cap);
+   free(raw);
+   return crc;
 }
 
-/* Accumulate one published clone into the (already wiped) registry. */
-static void rebuild_add(const char *ref, const char *proj_path)
+/* Refresh a clone's .aimee/remote sidecar (fd-pinned, no symlink following;
+ * creates .aimee when absent). Best-effort — a failed refresh keeps the old
+ * sidecar and is logged by the caller via its return. */
+static int sidecar_refresh(const char *proj_path, const char *remote)
+{
+   int pfd = open(proj_path, O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   if (pfd < 0)
+      return -1;
+   if (mkdirat(pfd, ".aimee", 0700) != 0 && errno != EEXIST)
+   {
+      close(pfd);
+      return -1;
+   }
+   int afd = ws_scope_openat2_dir(pfd, ".aimee");
+   close(pfd);
+   if (afd < 0)
+      return -1;
+   int sfd = openat(afd, "remote", O_CREAT | O_TRUNC | O_WRONLY | O_NOFOLLOW | O_CLOEXEC, 0600);
+   close(afd);
+   if (sfd < 0)
+      return -1;
+   size_t rl = strlen(remote);
+   int ok = write(sfd, remote, rl) == (ssize_t)rl && write(sfd, "\n", 1) == 1 && fsync(sfd) == 0;
+   close(sfd);
+   return ok ? 0 : -1;
+}
+
+/* Accumulate one published clone into the (already wiped) registry. The
+ * identity comes from the clone's git config (authoritative), with the
+ * sidecar refreshed to match; a clone whose remote is unreadable registers
+ * under a per-ref unknown marker (delete treats UNKNOWN conservatively).
+ * Returns 0, or -1 on a registry write failure (the caller fails the whole
+ * rebuild — a partially-populated authoritative registry is worse than a
+ * disabled surface). */
+static int rebuild_add(const char *ref, const char *proj_path)
 {
    char remote[WSREG_REMOTE_MAX];
-   if (sidecar_read(proj_path, remote, sizeof(remote)) != 0)
+   if (git_config_remote(proj_path, remote, sizeof(remote)) == 0)
+      (void)sidecar_refresh(proj_path, remote); /* cache refresh; git config stays authoritative */
+   else
    {
-      /* No sidecar (legacy clone) — register under a per-ref unknown marker so
-       * holder counting still works; delete treats UNKNOWN conservatively. */
+      aimee_log(LOG_WARN, "ws.registry",
+                "rebuild: ref '%s' has no readable remote — registering as unknown", ref);
       snprintf(remote, sizeof(remote), "unknown://%s", ref);
    }
    int rc = ws_reg_register(ref, remote);
@@ -230,17 +266,19 @@ static void rebuild_add(const char *ref, const char *proj_path)
        * first registration and count the holder anyway (conservative). */
       char cur[WSREG_REMOTE_MAX];
       int holders = 0;
-      if (ws_reg_lookup(ref, cur, sizeof(cur), &holders) == 1)
-      {
-         char dir[PATH_MAX], name[WS_REF_MAX + 1], path[PATH_MAX];
-         if (entry_path(ref, dir, sizeof(dir), name, sizeof(name), path, sizeof(path)) == 0)
-            entry_write(dir, name, holders + 1, cur);
-      }
+      if (ws_reg_lookup(ref, cur, sizeof(cur), &holders) != 1)
+         return -1;
+      char dir[PATH_MAX], name[WS_REF_MAX + 1], path[PATH_MAX];
+      if (entry_path(ref, dir, sizeof(dir), name, sizeof(name), path, sizeof(path)) != 0 ||
+          entry_write(dir, name, holders + 1, cur) != 0)
+         return -1;
       aimee_log(LOG_WARN, "ws.registry",
                 "rebuild: ref '%s' held with divergent remotes — counting holder, keeping "
                 "first-seen remote",
                 ref);
+      return 0;
    }
+   return rc == 0 ? 0 : -1;
 }
 
 /* Is `path` a published project dir (has a .git entry)? */
@@ -279,6 +317,7 @@ int ws_reg_rebuild(void)
    DIR *bd = opendir(base);
    if (!bd)
       return 0; /* fresh install: nothing to count */
+   int failed = 0;
    struct dirent *user;
    while ((user = readdir(bd)) != NULL)
    {
@@ -303,7 +342,8 @@ int ws_reg_rebuild(void)
             continue;
          if (is_project_dir(p1))
          {
-            rebuild_add(lvl1->d_name, p1); /* flat project */
+            if (rebuild_add(lvl1->d_name, p1) != 0) /* flat project */
+               failed = 1;
             continue;
          }
          /* org dir: its children are projects */
@@ -329,5 +369,75 @@ int ws_reg_rebuild(void)
       closedir(ud);
    }
    closedir(bd);
-   return 0;
+   return failed ? -1 : 0;
+}
+
+int ws_reg_resync(const char *ref)
+{
+   char org[WS_REF_COMP_MAX + 1], repo[WS_REF_COMP_MAX + 1];
+   int comps = ws_scope_ref_split(ref, org, sizeof(org), repo, sizeof(repo));
+   if (comps < 0)
+      return -1;
+   char base[PATH_MAX], dir[PATH_MAX], name[WS_REF_MAX + 1], path[PATH_MAX];
+   if (ws_scope_webusers_base(base, sizeof(base)) != 0 ||
+       entry_path(ref, dir, sizeof(dir), name, sizeof(name), path, sizeof(path)) != 0)
+      return -1;
+
+   /* Walk every webuser's published clone at this ref, re-deriving each
+    * identity from its git config (authoritative — honors `git remote
+    * set-url`) and refreshing sidecars. Server-internal: callers still return
+    * only generic conflict messages. */
+   char first_remote[WSREG_REMOTE_MAX] = "";
+   int holders = 0;
+   DIR *bd = opendir(base);
+   if (bd)
+   {
+      struct dirent *user;
+      while ((user = readdir(bd)) != NULL)
+      {
+         if (user->d_name[0] == '.' || !ws_scope_name_valid(user->d_name))
+            continue;
+         char proj[PATH_MAX];
+         int n = comps == 2
+                     ? snprintf(proj, sizeof(proj), "%s/%s/%s/%s", base, user->d_name, org, repo)
+                     : snprintf(proj, sizeof(proj), "%s/%s/%s", base, user->d_name, repo);
+         if (n < 0 || (size_t)n >= sizeof(proj) || !is_project_dir(proj))
+            continue;
+         char remote[WSREG_REMOTE_MAX];
+         if (git_config_remote(proj, remote, sizeof(remote)) == 0)
+            (void)sidecar_refresh(proj, remote);
+         else
+            snprintf(remote, sizeof(remote), "unknown://%s", ref);
+         if (!first_remote[0])
+            snprintf(first_remote, sizeof(first_remote), "%s", remote);
+         else if (strcmp(first_remote, remote) != 0)
+            aimee_log(LOG_WARN, "ws.registry",
+                      "resync: ref '%s' held with divergent remotes — keeping first-seen", ref);
+         holders++;
+      }
+      closedir(bd);
+   }
+   if (holders == 0)
+      return unlink(path) == 0 || errno == ENOENT ? 0 : -1;
+   return entry_write(dir, name, holders, first_remote);
+}
+
+static pthread_mutex_t g_ready_mu = PTHREAD_MUTEX_INITIALIZER;
+static int g_ready = 0;
+
+int ws_reg_ready(void)
+{
+   pthread_mutex_lock(&g_ready_mu);
+   if (!g_ready)
+   {
+      if (ws_reg_rebuild() == 0)
+         g_ready = 1;
+      else
+         aimee_log(LOG_ERROR, "ws.registry",
+                   "registry rebuild failed — the webuser project surface stays disabled "
+                   "(fail closed); it retries on the next request");
+   }
+   int r = g_ready;
+   pthread_mutex_unlock(&g_ready_mu);
+   return r;
 }

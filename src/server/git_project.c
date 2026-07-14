@@ -69,25 +69,31 @@ static int derive_name(const char *url, const char *name_in, char *out, size_t c
 
 /* Sanitize a candidate org component to the ws_scope_name_valid alphabet:
  * invalid bytes -> '-', runs collapsed, leading/trailing '-'/'.' trimmed.
- * Returns 0 iff the result is non-empty AND passes ws_scope_name_valid. */
+ * Returns 0 iff the FULL sanitized result fits WS_REF_COMP_MAX and passes
+ * ws_scope_name_valid — an over-long org is REJECTED, never truncated (two
+ * distinct overrides must never collapse onto one identity). */
 static int sanitize_org(const char *in, char *out, size_t cap)
 {
    if (!in || !in[0] || cap == 0)
       return -1;
    size_t o = 0;
    int last_dash = 0;
-   for (const char *p = in; *p && o + 1 < cap && o < WS_REF_COMP_MAX; p++)
+   for (const char *p = in; *p; p++)
    {
       unsigned char c = (unsigned char)*p;
       int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
                c == '.' || c == '_';
       if (ok)
       {
+         if (o >= WS_REF_COMP_MAX || o + 1 >= cap)
+            return -1; /* sanitized form overflows the component cap */
          out[o++] = (char)c;
          last_dash = 0;
       }
       else if (!last_dash && o > 0) /* collapse runs; no leading '-' */
       {
+         if (o >= WS_REF_COMP_MAX || o + 1 >= cap)
+            return -1;
          out[o++] = '-';
          last_dash = 1;
       }
@@ -172,6 +178,51 @@ int git_project_derive_org(const char *url, char *out, size_t cap, int *multi_se
    return sanitize_org(owner, out, cap) == 0 ? 0 : -1;
 }
 
+int git_project_org_candidates(const char *url, char *out, size_t cap)
+{
+   if (!url || !out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   char remote[GP_PATH_MAX];
+   if (git_project_canonical_remote(url, remote, sizeof(remote)) != 0)
+      return -1;
+   const char *scheme_end = strstr(remote, "://");
+   if (!scheme_end)
+      return -1;
+   const char *path = strchr(scheme_end + 3, '/');
+   if (!path)
+      return -1;
+   path++;
+   const char *last_slash = strrchr(path, '/');
+   if (!last_slash || last_slash == path)
+      return -1;
+   /* Sanitize each owner segment independently and join with ", ". */
+   size_t o = 0;
+   const char *seg = path;
+   while (seg < last_slash)
+   {
+      const char *end = memchr(seg, '/', (size_t)(last_slash - seg));
+      if (!end)
+         end = last_slash;
+      char raw[WS_REF_COMP_MAX * 2], clean[WS_REF_COMP_MAX + 1];
+      size_t sl = (size_t)(end - seg);
+      if (sl > 0 && sl < sizeof(raw))
+      {
+         memcpy(raw, seg, sl);
+         raw[sl] = '\0';
+         if (sanitize_org(raw, clean, sizeof(clean)) == 0)
+         {
+            int n = snprintf(out + o, cap - o, "%s%s", o ? ", " : "", clean);
+            if (n < 0 || (size_t)n >= cap - o)
+               break;
+            o += (size_t)n;
+         }
+      }
+      seg = end + 1;
+   }
+   return o > 0 ? 0 : -1;
+}
+
 /* Recursively remove `name` (a directory tree) under `parentfd`. Every descent
  * uses O_NOFOLLOW — directory symlinks are unlinked as entries, never
  * followed. Best-effort; returns 0 when the entry is gone. */
@@ -237,6 +288,11 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       snprintf(err, errlen,
                "the webuser project surface requires openat2 (Linux >= 5.6); it is disabled on "
                "this kernel");
+      return -1;
+   }
+   if (!ws_reg_ready())
+   {
+      snprintf(err, errlen, "the project registry is unavailable; try again shortly");
       return -1;
    }
    /* Reject an empty or flag-like URL. The '--' separator below also stops git
@@ -325,6 +381,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
             close(ofd);
             if (exists)
             {
+               rc_final = GP_ERR_CONFLICT;
                snprintf(err, errlen, "project '%s' already exists", ref);
                goto out;
             }
@@ -332,6 +389,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
          /* flat/org namespace conflict: org name taken by a flat project */
          if (is_published_project_at(rootfd, org))
          {
+            rc_final = GP_ERR_CONFLICT;
             snprintf(err, errlen, "a project named '%s' already exists; the org name is taken",
                      org);
             goto out;
@@ -343,6 +401,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
          {
             /* flat target exists — as a project (409) or as an org dir (the
              * reverse namespace conflict). */
+            rc_final = GP_ERR_CONFLICT;
             if (is_published_project_at(rootfd, probe))
                snprintf(err, errlen, "project '%s' already exists", ref);
             else
@@ -367,15 +426,38 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       }
       if (found == 1 && strcmp(cur_remote, remote) != 0)
       {
+         /* The registry may be stale after a holder's `git remote set-url`:
+          * resync this ref from the holders' git configs (authoritative,
+          * under the held lock) and re-check before rejecting. */
+         if (ws_reg_resync(ref) != 0 ||
+             (found = ws_reg_lookup(ref, cur_remote, sizeof(cur_remote), &holders)) < 0)
+         {
+            snprintf(err, errlen, "project registry unavailable");
+            goto out;
+         }
+         if (found == 1 && strcmp(cur_remote, remote) != 0)
+         {
+            rc_final = GP_ERR_CONFLICT;
+            snprintf(err, errlen,
+                     "ref '%s' is already bound to a different remote; pass a distinct org", ref);
+            goto out;
+         }
+      }
+   }
+   {
+      int reg_rc = ws_reg_register(ref, remote);
+      if (reg_rc == 1)
+      {
+         rc_final = GP_ERR_CONFLICT;
          snprintf(err, errlen,
                   "ref '%s' is already bound to a different remote; pass a distinct org", ref);
          goto out;
       }
-   }
-   if (ws_reg_register(ref, remote) != 0)
-   {
-      snprintf(err, errlen, "could not register the project key");
-      goto out;
+      if (reg_rc != 0)
+      {
+         snprintf(err, errlen, "could not register the project key");
+         goto out;
+      }
    }
    registered = 1;
 
@@ -546,8 +628,16 @@ int git_project_remote(const char *principal, const char *ref, char *out, size_t
    int pfd = ws_scope_open_project(principal, ref, 0);
    if (pfd < 0)
       return -1;
-   int sfd = openat(pfd, ".aimee/remote", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+   /* The project tree is user-writable (editor), so `.aimee` could be a
+    * planted symlink: open it with RESOLVE_NO_SYMLINKS relative to the pinned
+    * project fd, then the single-component file with O_NOFOLLOW — no
+    * component of the sidecar path can escape the project. */
+   int afd = ws_scope_openat2_dir(pfd, ".aimee");
    close(pfd);
+   if (afd < 0)
+      return -1;
+   int sfd = openat(afd, "remote", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+   close(afd);
    if (sfd < 0)
       return -1;
    char line[1024];

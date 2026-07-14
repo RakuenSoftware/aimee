@@ -37,6 +37,18 @@ int ws_reg_register(const char *ref, const char *remote);
  * signal for the delete path.) */
 int ws_reg_unregister(const char *ref);
 
+/* Re-derive one ref's registry entry from the git config of every published
+ * clone at that ref (honors `git remote set-url`; refreshes sidecars; removes
+ * the entry when no holder remains). Caller MUST hold the lifecycle lock.
+ * Returns 0 or -1. */
+int ws_reg_resync(const char *ref);
+
+/* 1 iff the registry is ready (the startup rebuild succeeded). The first call
+ * runs the rebuild lazily under a mutex; a FAILED rebuild keeps the surface
+ * disabled (a partially-populated authoritative registry must never accept
+ * registrations) and is retried on the next call. */
+int ws_reg_ready(void);
+
 /* Rebuild the registry from the published clones on disk (each webuser tree's
  * sidecars). Crash-window drift self-heals here; counts derive from PUBLISHED
  * clones only. Called once at server startup. Returns 0 or -1. */

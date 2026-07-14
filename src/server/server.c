@@ -2086,16 +2086,17 @@ int server_run(server_ctx_t *ctx)
     * exist (CORE gateway_policy can't read agent state itself). */
    server_install_gateway_delegate_policy();
 
-   /* Rebuild the webuser project-key registry from the published clones on
-    * disk (crash-window drift self-heals; counts derive from published clones
-    * only). Also probes openat2 once so the webuser project surface's
-    * fail-closed gate is decided before the first request. */
-   if (ws_scope_openat2_available())
-      (void)ws_reg_rebuild();
-   else
+   /* Warm the webuser project-key registry (rebuild from published clones;
+    * crash-window drift self-heals) and probe openat2 once, so the surface's
+    * fail-closed gates are decided — and logged — before the first request.
+    * ws_reg_ready() keeps the surface disabled on a failed rebuild and
+    * retries lazily per request. */
+   if (!ws_scope_openat2_available())
       aimee_log(LOG_WARN, "server",
                 "openat2 unavailable on this kernel: the webuser project clone surface is "
                 "disabled (fail closed)");
+   else
+      (void)ws_reg_ready();
 
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to

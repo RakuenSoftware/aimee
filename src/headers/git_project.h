@@ -23,8 +23,12 @@
  * writes the absolute project path to out_path[path_cap] and the project REF
  * to out_ref[ref_cap], and returns 0. On failure returns -1 with a short,
  * non-sensitive message in err[errlen] (canonical remotes in messages are
- * credential-free; a registry conflict never echoes the other remote).
- * Requires openat2 (Linux >= 5.6); fails closed otherwise. */
+ * credential-free; a registry conflict never echoes the other remote), or
+ * GP_ERR_CONFLICT (-2) when the failure is an identity conflict (existing
+ * project, flat/org namespace clash, same-key-different-remote) so callers
+ * can 409 instead of 400. Requires openat2 (Linux >= 5.6); fails closed
+ * otherwise. */
+#define GP_ERR_CONFLICT (-2)
 int git_project_clone(const char *principal, const char *url, const char *name, const char *org,
                       const char *token, char *out_path, size_t path_cap, char *out_ref,
                       size_t ref_cap, char *err, size_t errlen);
@@ -38,6 +42,10 @@ int git_project_canonical_remote(const char *url, char *out, size_t cap);
  * *multi_segment when the owner path had multiple segments — GitLab
  * subgroups — which bail to flat by design). */
 int git_project_derive_org(const char *url, char *out, size_t cap, int *multi_segment);
+
+/* For a multi-segment owner URL: the sanitized candidate org segments, comma
+ * joined ("group, sub"), for the org_note guidance. 0 or -1. */
+int git_project_org_candidates(const char *url, char *out, size_t cap);
 
 /* Read the credential-free canonical remote of `principal`'s project `ref`
  * (the .aimee/remote sidecar) into out[cap]. 0 or -1 (legacy clones without a

@@ -47,6 +47,14 @@ int git_project_derive_org(const char *url, char *out, size_t cap, int *multi_se
    return -1;
 }
 
+int git_project_org_candidates(const char *url, char *out, size_t cap)
+{
+   (void)url;
+   if (out && cap)
+      out[0] = '\0';
+   return -1;
+}
+
 int git_project_remote(const char *principal, const char *ref, char *out, size_t cap)
 {
    (void)principal;

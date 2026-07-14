@@ -1244,7 +1244,9 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    const cJSON *jtoken = cJSON_GetObjectItemCaseSensitive(body, "token");
    const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
    const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
-   const char *org = (cJSON_IsString(jorg) && jorg->valuestring) ? jorg->valuestring : NULL;
+   /* An empty-string org (the webchat relay always sends the field) means
+    * "derive", identical to an absent field. */
+   const char *org = (cJSON_IsString(jorg) && jorg->valuestring[0]) ? jorg->valuestring : NULL;
    const char *token = (cJSON_IsString(jtoken) && jtoken->valuestring) ? jtoken->valuestring : NULL;
 
    char dest[MAX_PATH_LEN], pname[GIT_PROJECT_NAME_MAX], err[256];
@@ -1261,9 +1263,14 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
       if (git_project_derive_org(url, cand, sizeof(cand), &multi) != 0 && multi)
          flat_multi = 1;
    }
+   char org_cands[256] = "";
+   if (flat_multi)
+      (void)git_project_org_candidates(url, org_cands, sizeof(org_cands));
    cJSON_Delete(body);
    if (rc != 0)
-      return err_json(resp, cap, 400, err);
+      /* Identity conflicts (existing project, flat/org clash, same key bound
+       * to a different remote) are 409; validation failures stay 400. */
+      return err_json(resp, cap, rc == GP_ERR_CONFLICT ? 409 : 400, err);
 
    /* Best-effort index so the new project is searchable by the agent + listed. */
    index_scan_project(pname, dest, 0);
@@ -1272,9 +1279,14 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddStringToObject(out, "name", pname); /* the project REF (org/repo or flat) */
    if (flat_multi)
-      cJSON_AddStringToObject(out, "org_note",
-                              "multi-segment owner path: cloned flat; pass an explicit 'org' to "
-                              "place it under an org");
+   {
+      char note[512];
+      snprintf(note, sizeof(note),
+               "multi-segment owner path (candidate orgs: %s): cloned flat; pass an explicit "
+               "'org' to place it under an org",
+               org_cands[0] ? org_cands : "none derivable");
+      cJSON_AddStringToObject(out, "org_note", note);
+   }
    rh_clone_kb_scan(pname, dest, out);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
