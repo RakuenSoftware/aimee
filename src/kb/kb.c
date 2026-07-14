@@ -8,6 +8,7 @@
 #include "db2/kb_service_backend.h"
 #include "db2/memory_query.h"
 #include "db2/vector_index_ops.h"
+#include "db2/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
 #include "db2/sketch.h"
 #include "kb_vectors.h"
 #include "kb_curator_notify.h"
@@ -602,18 +603,84 @@ int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
    return 0;
 }
 
+/* ── Purge-fence write discipline (webchat-project-lifecycle slice 2) ──
+ * EVERY project-scoped ingest write runs inside an explicit transaction that
+ * takes the project advisory guard and re-checks the generation fence before
+ * the write(s): an ingest that began pre-fence cannot commit stale rows once
+ * the fence lands (the guard serializes the check+commit against the fence
+ * publish). Guard failure is fail closed. Returns 1 proceed (transaction
+ * open), 0 fenced / guard failed (nothing open), -1 transaction error. */
+int kb_purge_fenced_txn_begin(const char *project)
+{
+   if (db2_kb_txn_begin() != 0)
+      return -1;
+   if (project && project[0] &&
+       (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
+   {
+      db2_kb_txn_rollback();
+      LOG_WARN("kb_build", "purge fence active for project '%s': dropping ingest write", project);
+      return 0;
+   }
+   return 1;
+}
+
+/* Commit a kb_purge_fenced_txn_begin transaction. 0 on success, -1 (rolled
+ * back) on commit failure. */
+int kb_purge_fenced_txn_commit(void)
+{
+   if (db2_kb_txn_commit() != 0)
+   {
+      db2_kb_txn_rollback();
+      return -1;
+   }
+   return 0;
+}
+
+/* File-index upsert behind the fenced-transaction discipline (the file index
+ * is a purge-matrix store). Returns the upsert rc, -1 when dropped. */
+int kb_file_index_upsert_fenced(const char *project, const char *file_path, const char *hash,
+                                const char *content)
+{
+   if (kb_purge_fenced_txn_begin(project) != 1)
+      return -1;
+   int rc = db2_kb_file_index_upsert(project, file_path, hash, content);
+   if (kb_purge_fenced_txn_commit() != 0)
+      rc = -1;
+   return rc;
+}
+
+/* Single-point vector upsert (the dimension-mismatch fallback and the doc
+ * ingest worker) behind the fenced-transaction discipline. */
+int kb_sync_vector_embedding_fenced(const char *project, int64_t doc_id, const float *vec, int dim)
+{
+   if (kb_purge_fenced_txn_begin(project) != 1)
+      return -1;
+   int rc = sync_vector_embedding(doc_id, vec, dim);
+   if (kb_purge_fenced_txn_commit() != 0)
+      rc = -1;
+   return rc;
+}
+
 /* Delete all chunks for a given file path in a project.
  *
  * Caps at 1024 ids per call; a single source file producing >1024
  * chunks is far past the chunker's MAX_CHUNKS_PER_FILE (256), so the
- * cap is comfortably above any realistic value. */
-void delete_file_chunks(const char *project, const char *file_path)
+ * cap is comfortably above any realistic value.
+ *
+ * The chunk/vector/minhash removals run in one guarded, fenced transaction;
+ * returns 0 committed, -1 dropped (purge fence active / txn failure) —
+ * callers must then stop processing that file. */
+int delete_file_chunks(const char *project, const char *file_path)
 {
    /* Invalidate curator artifacts derived from this file before its chunks go
     * away; the post-ingest queue then re-extracts the (changed) source, and a
-    * best-effort push notifies a subscribed server. */
+    * best-effort push notifies a subscribed server. Runs OUTSIDE the guarded
+    * transaction: artifacts are retained by purge, and the broadcast is a
+    * network call that must not hold the advisory lock. */
    int curator_stale = db2_curator_invalidate_doc(project, file_path);
-   kb_curator_invalidation_broadcast(project, file_path, curator_stale);
+
+   if (kb_purge_fenced_txn_begin(project) != 1)
+      return -1;
    int64_t ids[1024];
    int n_ids = db2_kb_documents_list_chunk_ids_for_file(project, file_path, ids,
                                                         (int)(sizeof(ids) / sizeof(ids[0])));
@@ -624,6 +691,10 @@ void delete_file_chunks(const char *project, const char *file_path)
    }
    db2_kb_documents_delete_for_file(project, file_path);
    db2_sketch_minhash_signature_delete(project, file_path);
+   int rc = kb_purge_fenced_txn_commit();
+
+   kb_curator_invalidation_broadcast(project, file_path, curator_stale);
+   return rc;
 }
 
 /* ------------------------------------------------------------------ */
@@ -662,21 +733,49 @@ int kb_async_enabled(void)
 /* Build / Update                                                       */
 /* ------------------------------------------------------------------ */
 
-static void kb_flush_batch(int64_t *ids, float *vecs, int dim, char **payloads, int *count)
+static void kb_flush_batch(const char *project, int64_t *ids, float *vecs, int dim, char **payloads,
+                           int *count)
 {
    if (*count <= 0)
       return;
-   int rc =
-       pgvec_kb_vector_upsert_document_batch(ids, vecs, dim, (const char *const *)payloads, *count);
+   /* Guarded transaction around the pgvector batch write with the
+    * generation-fence check inside it (webchat-project-lifecycle slice 2):
+    * the advisory guard serializes check+commit against the fence publish,
+    * so a batch mid-flight past its enqueue check still cannot land vectors
+    * for a project being purged. */
+   int t = kb_purge_fenced_txn_begin(project);
+   int fenced = (t == 0);
+   int rc = -1;
+   if (t == 1)
+   {
+      rc = pgvec_kb_vector_upsert_document_batch(ids, vecs, dim, (const char *const *)payloads,
+                                                 *count);
+      if (kb_purge_fenced_txn_commit() != 0)
+         rc = -1;
+   }
    for (int i = 0; i < *count; i++)
    {
       int ok = (rc == 0);
-      const char *err = rc ? "batch upsert failed" : NULL;
+      const char *err = rc ? (fenced ? "purge fence active" : "batch upsert failed") : NULL;
       db2_vector_index_op_record(ids[i], pgvec_kb_vector_collection_name(), 0, ok, err);
       free(payloads[i]);
       payloads[i] = NULL;
    }
    *count = 0;
+}
+
+/* Minhash signature upsert behind the shared fenced-transaction discipline:
+ * the near-dup store is part of the purge matrix. Returns the upsert's rc,
+ * or -1 when fenced / guard-failed (write dropped). */
+static int kb_minhash_upsert_fenced(const char *project, const char *rel_path, const char *hash,
+                                    const sketch_minhash_t *sig)
+{
+   if (kb_purge_fenced_txn_begin(project) != 1)
+      return -1;
+   int rc = db2_sketch_minhash_signature_upsert(project, rel_path, hash, sig);
+   if (kb_purge_fenced_txn_commit() != 0)
+      rc = -1;
+   return rc;
 }
 
 static void kb_load_build_sketches(const char *project, int force_rebuild, sketch_bloom_t *bloom,
@@ -772,7 +871,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       {
          if (strcmp(stored, hash) == 0)
          {
-            db2_kb_file_index_upsert(c->project, c->files[fi].rel_path, hash, NULL);
+            kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
             c->stats->files_skipped++;
             return;
          }
@@ -785,12 +884,12 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       int dup_exists = db2_kb_documents_hash_exists(c->project, hash, dup_path, sizeof(dup_path));
       if (dup_exists == 1)
       {
-         delete_file_chunks(c->project, c->files[fi].rel_path);
+         if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
+            return; /* purge fence: drop this file */
          db2_sketch_minhash_row_t dup_sig;
          if (dup_path[0] && db2_sketch_minhash_signature_get(c->project, dup_path, &dup_sig) == 1)
-            db2_sketch_minhash_signature_upsert(c->project, c->files[fi].rel_path, hash,
-                                                &dup_sig.signature);
-         db2_kb_file_index_upsert(c->project, c->files[fi].rel_path, hash, NULL);
+            kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &dup_sig.signature);
+         kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
          LOG_INFO("kb_build",
                   "bloom-dedupe: project=%s path=%s hash=%s matched=%s; skipping duplicate",
                   c->project ? c->project : "?", c->files[fi].rel_path, hash,
@@ -804,7 +903,8 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
 
    /* Remove old chunks for this file */
-   delete_file_chunks(c->project, c->files[fi].rel_path);
+   if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
+      return; /* purge fence: drop this file */
 
    /* Chunk the file */
    int n_chunks = chunk_file(c->files[fi].path, c->chunks, MAX_CHUNKS_PER_FILE);
@@ -844,8 +944,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
    if (near_jaccard >= 0.75)
    {
-      if (db2_sketch_minhash_signature_upsert(c->project, c->files[fi].rel_path, hash,
-                                              &minhash_sig) != 0)
+      if (kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &minhash_sig) != 0)
       {
          LOG_WARN("kb_build", "project=%s path=%s: minhash signature save failed",
                   c->project ? c->project : "?", c->files[fi].rel_path);
@@ -856,7 +955,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          sketch_count_min_add_hash(c->count_min, h64, 1);
          sketch_hll_add_hash(c->hll,
                              sketch_fnv1a(c->files[fi].rel_path, strlen(c->files[fi].rel_path)));
-         if (db2_kb_file_index_upsert(c->project, c->files[fi].rel_path, hash, NULL) == 0)
+         if (kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL) == 0)
          {
             kb_neardup_propose(c->project, c->files[fi].rel_path, near_path, near_jaccard);
             c->stats->files_skipped++;
@@ -867,19 +966,43 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       }
    }
 
-   /* Insert chunks and link neighbours */
+   /* Insert chunks and link neighbours — ALL rows for this file in ONE
+    * guarded, fenced transaction (phase 1). Embeddings run afterwards
+    * (phase 2): the advisory guard must never be held across the slow
+    * external embedder calls. */
+   int64_t *doc_ids = malloc((size_t)n_chunks * sizeof(int64_t));
+   if (!doc_ids)
+      return;
+   if (kb_purge_fenced_txn_begin(c->project) != 1)
+   {
+      free(doc_ids); /* purge fence: drop this file */
+      return;
+   }
    int64_t prev_doc_id = 0;
    for (int ci = 0; ci < n_chunks; ci++)
    {
-      int64_t doc_id = db2_kb_documents_insert_chunk(
-          c->project, c->files[fi].rel_path, hash, ci, c->chunks[ci].heading_path,
-          c->chunks[ci].line_start, c->chunks[ci].line_end, c->chunks[ci].content,
-          c->chunks[ci].token_count);
+      doc_ids[ci] = db2_kb_documents_insert_chunk(c->project, c->files[fi].rel_path, hash, ci,
+                                                  c->chunks[ci].heading_path,
+                                                  c->chunks[ci].line_start, c->chunks[ci].line_end,
+                                                  c->chunks[ci].content, c->chunks[ci].token_count);
+      if (doc_ids[ci] < 0)
+         continue;
+      db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
+      prev_doc_id = doc_ids[ci];
+      c->stats->chunks_added++;
+   }
+   if (kb_purge_fenced_txn_commit() != 0)
+   {
+      free(doc_ids);
+      return;
+   }
+
+   /* Phase 2: embed each committed chunk (sync or async). */
+   for (int ci = 0; ci < n_chunks; ci++)
+   {
+      int64_t doc_id = doc_ids[ci];
       if (doc_id < 0)
          continue;
-      db2_kb_documents_link_neighbours(doc_id, prev_doc_id);
-      prev_doc_id = doc_id;
-      c->stats->chunks_added++;
 
       /* Generate embedding synchronously or enqueue it for async draining. */
       if (c->async_enabled)
@@ -906,9 +1029,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
              * 384-d collection instead of corrupting the batch. */
             if (dim != c->kb_expected_dim)
             {
-               kb_flush_batch(c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
+               kb_flush_batch(c->project, c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
                               c->kb_batch_payloads, c->kb_batch_count);
-               sync_vector_embedding(doc_id, vec, dim);
+               kb_sync_vector_embedding_fenced(c->project, doc_id, vec, dim);
             }
             else
             {
@@ -925,18 +1048,18 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                c->kb_batch_payloads[*c->kb_batch_count] = payload_json;
                (*c->kb_batch_count)++;
                if (*c->kb_batch_count >= c->kb_batch_size)
-                  kb_flush_batch(c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
+                  kb_flush_batch(c->project, c->kb_batch_ids, c->kb_batch_vecs, c->kb_expected_dim,
                                  c->kb_batch_payloads, c->kb_batch_count);
             }
          }
       }
    }
+   free(doc_ids);
 
    sketch_bloom_add_hash(c->bloom, h64);
    sketch_count_min_add_hash(c->count_min, h64, 1);
    sketch_hll_add_hash(c->hll, sketch_fnv1a(c->files[fi].rel_path, strlen(c->files[fi].rel_path)));
-   if (db2_sketch_minhash_signature_upsert(c->project, c->files[fi].rel_path, hash, &minhash_sig) !=
-       0)
+   if (kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &minhash_sig) != 0)
       LOG_WARN("kb_build", "project=%s path=%s: minhash signature save failed",
                c->project ? c->project : "?", c->files[fi].rel_path);
    kb_file_index_store_from_path(c->project, c->files[fi].rel_path, hash, c->files[fi].path);
@@ -948,6 +1071,14 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
 {
    if (!root_path || !db2_is_initialized())
       return -1;
+   /* Generation fence (webchat-project-lifecycle slice 2): refuse to start an
+    * ingest for a project whose purge is in flight. Per-batch commit-point
+    * checks in kb_flush_batch cover a fence raised mid-ingest. */
+   if (project && project[0] && db2_kb_purge_fence_active(project))
+   {
+      LOG_WARN("kb_build", "purge fence active for project '%s': refusing ingest", project);
+      return -1;
+   }
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
 
    kb_stats_t stats;
@@ -1041,7 +1172,8 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
    for (int fi = 0; fi < n_files; fi++)
       kb_process_one_file(&fctx, fi);
 
-   kb_flush_batch(kb_batch_ids, kb_batch_vecs, kb_expected_dim, kb_batch_payloads, &kb_batch_count);
+   kb_flush_batch(project, kb_batch_ids, kb_batch_vecs, kb_expected_dim, kb_batch_payloads,
+                  &kb_batch_count);
    free(kb_batch_ids);
    free(kb_batch_vecs);
    free(kb_batch_payloads);

@@ -4485,6 +4485,99 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/projects/delete:
+    post:
+      summary: Delete a cloned project under the calling webchat user's workspace
+      description: >
+        Delete the project at `ref` ("<org>/<repo>" or flat "<repo>") from the
+        authenticated `webuser:` principal's workspace (webchat project
+        lifecycle, slice 2). Identity comes EXCLUSIVELY from the attested
+        `X-Aimee-Webuser` layer; a ref outside the caller's tree is a plain
+        404. Under the project lifecycle lock the last holder of the ref runs
+        the fenced knowledge purge before the filesystem removal; other
+        holders keep the shared knowledge (`kb_status` "retained"). When the
+        knowledge service is unreachable or a store fails, the delete aborts
+        with 503 and nothing is destroyed unless `force` is true, in which
+        case the filesystem proceeds and the response carries the full
+        per-store detail (`kb_status` "forced"). Every attempt — including
+        aborts — writes structured webuser_project_delete_audit_v1 lines
+        sharing the echoed `purge_id`. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ref]
+              properties:
+                ref:
+                  type: string
+                  description: The project ref ("<org>/<repo>" or flat "<repo>").
+                force:
+                  type: boolean
+                  description: >
+                    Proceed with the filesystem removal even when the knowledge
+                    purge fails or the service is unreachable. The response and
+                    audit carry the per-store outcome so the purge can be
+                    re-run to convergence later.
+      responses:
+        "200":
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  ref: { type: string }
+                  kb_status:
+                    type: string
+                    enum: [purged, retained, forced]
+                    description: >
+                      purged — last holder, all knowledge stores cleared;
+                      retained — other holders keep the shared knowledge;
+                      forced — filesystem removed despite a kb failure.
+                  purge_id:
+                    type: string
+                    description: >
+                      The operation id shared by every audit line and the
+                      knowledge fence for this delete.
+                  kb:
+                    type: object
+                    additionalProperties: true
+                    description: >
+                      Per-store purge detail (row counts, or {"error": ...})
+                      when a purge ran; absent when retained.
+        "400":
+          description: Missing/invalid ref
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: The ref does not resolve under the caller's workspace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: >
+            Knowledge service unavailable or a store failed (without force):
+            nothing was removed; the body's `kb` member carries the detail. A
+            failed purge-cancel is reported here too ("purge committed but
+            unfinished") — re-running the delete converges.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  kb:
+                    type: object
+                    additionalProperties: true
   /workspace/git:
     post:
       summary: Run a git operation on the calling webchat user's project

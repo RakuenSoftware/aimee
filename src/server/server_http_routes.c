@@ -1524,6 +1524,81 @@ static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
+/* POST /v1/workspace/projects/delete {ref, force?} — delete a cloned project
+ * under the calling webchat user's scoped workspace (webchat project lifecycle
+ * proposal, slice 2). The ONLY identity source is the attested X-Aimee-Webuser
+ * principal; another webuser's ref is a plain 404. The last holder of a ref
+ * triggers the fenced kb purge (503 abort without `force`); other holders keep
+ * the shared knowledge (kb_status "retained"). Capability: tool:execute. */
+static int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap)
+{
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jref = cJSON_GetObjectItemCaseSensitive(body, "ref");
+   const cJSON *jforce = cJSON_GetObjectItemCaseSensitive(body, "force");
+   char ref[GIT_PROJECT_NAME_MAX];
+   ref[0] = '\0';
+   if (cJSON_IsString(jref) && jref->valuestring && strlen(jref->valuestring) < sizeof(ref))
+      snprintf(ref, sizeof(ref), "%s", jref->valuestring);
+   int force = cJSON_IsBool(jforce) && cJSON_IsTrue(jforce);
+   cJSON_Delete(body);
+   if (!ref[0])
+      return err_json(resp, cap, 400, "ref required");
+
+   git_project_delete_result_t res;
+   char err[512];
+   int rc = git_project_delete(principal, ref, force, &res, err, sizeof(err));
+   if (rc == GP_ERR_NOT_FOUND)
+   {
+      free(res.kb_detail);
+      return err_json(resp, cap, 404, "not found");
+   }
+   if (rc == GP_ERR_KB_UNAVAILABLE)
+   {
+      cJSON *out = cJSON_CreateObject();
+      cJSON_AddStringToObject(out, "error", err);
+      cJSON *kb = res.kb_detail ? cJSON_Parse(res.kb_detail) : NULL;
+      if (kb)
+         cJSON_AddItemToObject(out, "kb", kb);
+      free(res.kb_detail);
+      char *s = cJSON_PrintUnformatted(out);
+      int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+      free(s);
+      cJSON_Delete(out);
+      return (n > 0 && n < cap) ? 503 : err_json(resp, cap, 503, "knowledge service unavailable");
+   }
+   if (rc != 0)
+   {
+      free(res.kb_detail);
+      return err_json(resp, cap, 400, err);
+   }
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "ref", ref);
+   cJSON_AddStringToObject(out, "kb_status", res.kb_status);
+   cJSON_AddStringToObject(out, "purge_id", res.purge_id);
+   cJSON *kb = res.kb_detail ? cJSON_Parse(res.kb_detail) : NULL;
+   if (kb)
+      cJSON_AddItemToObject(out, "kb", kb);
+   free(res.kb_detail);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
  * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
  * db1 webchat_live row as the answer streams; the browser tails it on a fixed
@@ -2367,6 +2442,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
+    {"POST", "/v1/workspace/projects/delete", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_workspace_projects_delete},
     {"GET", "/v1/workspace/org-repos", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_org_repos},
     {"POST", "/v1/workspace/clone-org", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,

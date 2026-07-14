@@ -210,6 +210,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Git projects (webchat-git WP-F): clone + per-project ops + listing,
 	// forwarded to /v1/workspace/* with the user's webuser: assertion.
 	mux.HandleFunc("/api/git/projects", s.requireAuth(s.handleGitProjects))
+	mux.HandleFunc("/api/git/projects/delete", s.requireAuth(s.handleGitProjectDelete))
 	mux.HandleFunc("/api/git/clone", s.requireAuth(s.handleGitClone))
 	mux.HandleFunc("/api/git/org-repos", s.requireAuth(s.handleGitOrgRepos))
 	mux.HandleFunc("/api/git/clone-org", s.requireAuth(s.handleGitCloneOrg))

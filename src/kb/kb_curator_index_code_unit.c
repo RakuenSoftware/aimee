@@ -20,6 +20,8 @@
 #include "db2/artifacts.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
+#include "db2/kb_payload.h"       /* db2_kb_txn_* wrappers */
+#include "db2/kb_runtime_state.h" /* db2_kb_purge_fence_active */
 #include "db2/pgvec_transport.h"
 
 #include <stdint.h>
@@ -52,7 +54,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    if (!conn)
       return 0;
 
-   static const char *sql = "SELECT id, payload"
+   static const char *sql = "SELECT id, payload, scope_id"
                             " FROM artifacts"
                             " WHERE kind = 'code_unit' AND state = 'proposed'"
                             " ORDER BY id LIMIT 1";
@@ -62,13 +64,16 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
       return 0;
 
    char id[64] = "";
+   char project[256] = ""; /* the extractor stores the project as scope_id */
    char *payload = NULL;
    int found = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       const char *c_id = aimee_pg_column_text(st, 0);
       const char *c_pl = aimee_pg_column_text(st, 1);
+      const char *c_scope = aimee_pg_column_text(st, 2);
       snprintf(id, sizeof(id), "%s", c_id ? c_id : "");
+      snprintf(project, sizeof(project), "%s", c_scope ? c_scope : "");
       payload = strdup(c_pl ? c_pl : "{}");
       found = 1;
    }
@@ -95,6 +100,14 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    if (!intent_text[0] && !sig_text[0] && !body_text[0])
    {
       cJSON_Delete(pj);
+      /* Fence check before the state write: a project being purged must not
+       * see even a bare artifact state transition. Return 0 (stop this drain
+       * tick) so the still-proposed row cannot spin the caller. */
+      if (project[0] && db2_kb_purge_fence_active(project))
+      {
+         free(payload);
+         return 0;
+      }
       db2_artifact_set_state(id, "committed");
       free(payload);
       return 1;
@@ -109,6 +122,50 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    int d1 = memory_embed_text(intent_text, embed_cmd, intent_vec, CURATOR_CODE_UNIT_DIM);
    int d2 = memory_embed_text(sig_text, embed_cmd, sig_vec, CURATOR_CODE_UNIT_DIM);
    int d3 = memory_embed_text(body_text, embed_cmd, body_vec, CURATOR_CODE_UNIT_DIM);
+
+   /* Job-row re-check + vector upsert + artifact commit in ONE transaction,
+    * with the purge fence checked INSIDE it: a job claimed pre-purge can never
+    * re-insert into the vector store post-purge (webchat-project-lifecycle
+    * slice 2). On fence, return 0 (this drain tick stops) so the untouched
+    * proposed row cannot spin the caller. */
+   if (db2_kb_txn_begin() != 0)
+   {
+      cJSON_Delete(pj);
+      free(payload);
+      return 0;
+   }
+   int still_proposed = 0;
+   {
+      aimee_pg_stmt_t *chk = aimee_pg_prepare(
+          conn, "SELECT 1 FROM artifacts WHERE id = ?1 AND state = 'proposed'", err, sizeof(err));
+      if (chk)
+      {
+         aimee_pg_bind_text(chk, "?1", id);
+         still_proposed = (aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW);
+         aimee_pg_finalize(chk);
+      }
+   }
+   if (!still_proposed)
+   {
+      /* Purged (or committed elsewhere) since the claim: nothing to index. */
+      db2_kb_txn_rollback();
+      cJSON_Delete(pj);
+      free(payload);
+      return 1;
+   }
+   /* Advisory guard immediately before the fence check: serializes this
+    * check+commit against the fence-publish transaction. Guard failure is
+    * treated like an active fence (fail closed). */
+   if (project[0] && (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
+   {
+      db2_kb_txn_rollback();
+      aimee_log(LOG_WARN, "kb.curator.code_unit",
+                "purge fence active for project '%s': aborting code_unit %s", project, id);
+      cJSON_Delete(pj);
+      free(payload);
+      return 0;
+   }
+
    if (d1 > 0 && d1 == d2 && d2 == d3)
    {
       int64_t pid = fnv1a(id);
@@ -126,6 +183,13 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    }
 
    db2_artifact_set_state(id, "committed");
+   if (db2_kb_txn_commit() != 0)
+   {
+      db2_kb_txn_rollback();
+      cJSON_Delete(pj);
+      free(payload);
+      return 0;
+   }
    aimee_log(LOG_INFO, "kb.curator.code_unit", "indexed code_unit %s", id);
 
    cJSON_Delete(pj);

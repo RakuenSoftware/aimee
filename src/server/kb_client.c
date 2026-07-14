@@ -426,6 +426,63 @@ char *kb_client_clear_json(const char *project)
    return kb_error_json("knowledge service /v1/maintenance/clear did not respond");
 }
 
+/* webchat-project-lifecycle slice 2: shared POST body/transport handling for
+ * the /v1/maintenance/purge-* fence routes. `takeover` < 0 omits the field. */
+static char *kb_client_purge_post_json(const char *endpoint, const char *project,
+                                       const char *generation, const char *purge_id, int takeover)
+{
+   if (!project || !project[0] || !generation || !generation[0] || !purge_id || !purge_id[0])
+      return kb_error_json("purge requires project, generation and purge_id");
+
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return kb_error_json("out of memory");
+   cJSON_AddStringToObject(req, "project", project);
+   cJSON_AddStringToObject(req, "generation", generation);
+   cJSON_AddStringToObject(req, "purge_id", purge_id);
+   if (takeover > 0)
+      cJSON_AddTrueToObject(req, "takeover");
+
+   int http_status = -1;
+   char *resp = kb_client_v1_post_json(endpoint, req, CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   cJSON_Delete(req);
+   if (resp)
+      return resp;
+   char msg[160];
+   if (http_status >= 100)
+      snprintf(msg, sizeof(msg), "knowledge service %s returned HTTP %d", endpoint, http_status);
+   else
+      snprintf(msg, sizeof(msg), "knowledge service %s did not respond", endpoint);
+   return kb_error_json(msg);
+}
+
+char *kb_client_purge_project_json(const char *project, const char *generation,
+                                   const char *purge_id, int takeover)
+{
+   return kb_client_purge_post_json("/v1/maintenance/purge-project", project, generation, purge_id,
+                                    takeover ? 1 : 0);
+}
+
+char *kb_client_purge_heartbeat_json(const char *project, const char *generation,
+                                     const char *purge_id)
+{
+   return kb_client_purge_post_json("/v1/maintenance/purge-heartbeat", project, generation,
+                                    purge_id, -1);
+}
+
+char *kb_client_purge_finalize_json(const char *project, const char *generation,
+                                    const char *purge_id)
+{
+   return kb_client_purge_post_json("/v1/maintenance/purge-finalize", project, generation, purge_id,
+                                    -1);
+}
+
+char *kb_client_purge_cancel_json(const char *project, const char *generation, const char *purge_id)
+{
+   return kb_client_purge_post_json("/v1/maintenance/purge-cancel", project, generation, purge_id,
+                                    -1);
+}
+
 /* Synchronous build/update now run entirely inside aimee-kb (which owns DB2
  * and the filesystem) via the /v1/code/{build,update} endpoints — no
  * server-side compute or chunk push. */

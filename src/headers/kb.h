@@ -38,7 +38,20 @@ int chunk_stream(FILE *f, text_chunk_t *chunks, int max_chunks);
 const char *kb_effective_embedding_cmd(const char *embedding_cmd);
 int accept_generated_embedding(int64_t doc_id, const float *vec, int dim);
 int sync_vector_embedding(int64_t doc_id, const float *vec, int dim);
-void delete_file_chunks(const char *project, const char *file_path);
+/* Purge-fence write discipline (webchat-project-lifecycle slice 2): every
+ * project-scoped ingest write runs inside kb_purge_fenced_txn_begin/commit —
+ * an explicit transaction taking the project advisory guard and re-checking
+ * the generation fence before the write(s). begin: 1 proceed (txn open),
+ * 0 fenced / guard failed (fail closed, nothing open), -1 error. */
+int kb_purge_fenced_txn_begin(const char *project);
+int kb_purge_fenced_txn_commit(void);
+/* Fenced single-write conveniences built on the discipline above. */
+int kb_file_index_upsert_fenced(const char *project, const char *file_path, const char *hash,
+                                const char *content);
+int kb_sync_vector_embedding_fenced(const char *project, int64_t doc_id, const float *vec, int dim);
+/* Returns 0 committed, -1 dropped (purge fence active) — stop processing the
+ * file on -1. */
+int delete_file_chunks(const char *project, const char *file_path);
 /* Read |src_path| whole and upsert it as the kb_file_index body for
  * (project, file_path) — the whole-file copy served by GET /v1/kb/file, stored
  * alongside the chunks. Oversize/unreadable files store no body (chunks still

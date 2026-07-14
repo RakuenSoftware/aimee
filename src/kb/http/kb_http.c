@@ -38,6 +38,9 @@
 #include "db2/vector_index_ops.h"
 #include "db2/kb_runtime_state.h"
 #include "db2/corpus_jobs.h"
+#include "db2/code_index.h"
+#include "db2/pgvec_transport.h"
+#include "db2/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
 #include "log.h"
@@ -592,6 +595,72 @@ static int kb_http_owner_required(char *out, int cap, const char *what)
 {
    snprintf(out, (size_t)cap, "{\"error\":\"forbidden: %s requires the owner credential\"}", what);
    return 403;
+}
+
+/* ── webchat-project-lifecycle slice 2: purge-route helpers ─────────────── */
+
+/* Append one purge fan-out store outcome: a plain count on success (0 for the
+ * primitives that report no count), {"error":...} on failure. A failing store
+ * clears *all_ok but never stops the fan-out. */
+static void purge_store_add(cJSON *stores, const char *name, int rc, int *all_ok)
+{
+   if (rc < 0)
+   {
+      cJSON *e = cJSON_CreateObject();
+      if (e)
+         cJSON_AddStringToObject(e, "error", "delete failed");
+      cJSON_AddItemToObject(stores, name, e);
+      *all_ok = 0;
+      return;
+   }
+   cJSON_AddNumberToObject(stores, name, rc);
+}
+
+/* Serialize `resp` into out_buf and delete it. Returns `status`. */
+static int purge_respond(cJSON *resp, char *out_buf, int out_cap, int status)
+{
+   char *out = resp ? cJSON_PrintUnformatted(resp) : NULL;
+   snprintf(out_buf, (size_t)out_cap, "%s", out ? out : "{\"error\":\"out of memory\"}");
+   free(out);
+   cJSON_Delete(resp);
+   return out ? status : 500;
+}
+
+/* Parse the shared purge-route body {project, generation, purge_id}. Returns 0
+ * on success; otherwise writes a 400 body and returns -1. Generation/purge_id
+ * become the space-separated fence value, so embedded spaces are rejected. */
+static int purge_body_parse(const char *body, char *project, size_t project_cap, char *generation,
+                            size_t generation_cap, char *purge_id, size_t purge_id_cap,
+                            char *out_buf, int out_cap)
+{
+   project[0] = generation[0] = purge_id[0] = '\0';
+   if (!json_str(body, "project", project, project_cap) || !project[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
+      return -1;
+   }
+   if (!json_str(body, "generation", generation, generation_cap) || !generation[0] ||
+       strchr(generation, ' '))
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid generation\"}");
+      return -1;
+   }
+   if (!json_str(body, "purge_id", purge_id, purge_id_cap) || !purge_id[0] || strchr(purge_id, ' '))
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid purge_id\"}");
+      return -1;
+   }
+   return 0;
+}
+
+/* Current fence rendered as its stored "generation purge_id" value (empty when
+ * no fence row exists) — echoed by heartbeat/finalize/cancel mismatch paths. */
+static void purge_fence_current(const char *project, char *out, size_t out_cap)
+{
+   char gen[128] = "", pid[128] = "";
+   out[0] = '\0';
+   if (db2_kb_purge_fence_read(project, gen, sizeof(gen), pid, sizeof(pid), NULL) == 1)
+      snprintf(out, out_cap, "%s %s", gen, pid);
 }
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
@@ -1886,6 +1955,207 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       pos = json_escape(project, out_buf, pos, out_cap);
       snprintf(out_buf + pos, (size_t)(out_cap - pos), "\",\"chunks_deleted\":%d}", deleted);
       return 200;
+   }
+   /* POST /v1/maintenance/purge-project {project, generation, purge_id, takeover?}
+    * (webchat-project-lifecycle slice 2). Writes the generation fence, then fans
+    * out the writer→store→delete matrix IN ORDER, continuing past per-store
+    * failures. The fence is NOT cleared here — /v1/maintenance/purge-finalize
+    * (or purge-cancel) clears it after the server-side deletion completes.
+    * Idempotent: a re-run on a purged key returns zeros. */
+   if (strcmp(path, "/v1/maintenance/purge-project") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      char project[256], generation[128], purge_id[128];
+      if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
+                           sizeof(purge_id), out_buf, out_cap) != 0)
+         return 400;
+      int takeover = json_bool(body, "takeover", 0);
+
+      /* Atomic read-decide-write: one transaction takes the project advisory
+       * guard, inspects the identity row FOR UPDATE, refuses a LIVE foreign
+       * fence (heartbeat younger than 2x the heartbeat interval, i.e. TTL/3)
+       * without takeover:true, else publishes the new fence. */
+      char cur_gen[128] = "", cur_pid[128] = "";
+      int fence_replaced = 0;
+      int arc =
+          db2_kb_purge_fence_acquire(project, generation, purge_id, takeover, cur_gen,
+                                     sizeof(cur_gen), cur_pid, sizeof(cur_pid), &fence_replaced);
+      if (arc < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence write failed\"}");
+         return 500;
+      }
+      if (arc == 0)
+      {
+         cJSON *resp = cJSON_CreateObject();
+         if (resp)
+         {
+            cJSON_AddStringToObject(resp, "error", "purge fence held");
+            cJSON_AddStringToObject(resp, "generation", cur_gen);
+            cJSON_AddStringToObject(resp, "purge_id", cur_pid);
+         }
+         return purge_respond(resp, out_buf, out_cap, 409);
+      }
+
+      /* Fan-out: every kb store the ingest path writes, in matrix order. The
+       * OWN fence heartbeat is refreshed between stores so a slow delete (or
+       * a fan-out longer than the TTL) cannot let the fence lapse mid-purge;
+       * losing ownership (a takeover displaced us) aborts the remaining
+       * stores fail-closed. */
+      cJSON *stores = cJSON_CreateObject();
+      if (!stores)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+         return 500;
+      }
+      typedef int (*purge_store_fn)(const char *);
+      static const struct
+      {
+         const char *name;
+         purge_store_fn fn;
+      } purge_matrix[] = {
+          {"chunks", db2_kb_service_clear_project},
+          {"file_index", db2_kb_file_index_delete_project},
+          {"vectors", pgvec_kb_vector_delete_project},
+          {"code_embeddings", pgvec_code_delete_project},
+          {"curator_code_unit_vectors", pgvec_curator_code_unit_delete_project},
+          {"canonical_index", db2_code_index_project_delete},
+          {"code_unit_jobs", kb_curator_code_unit_jobs_delete_project},
+          {"pdf_vectors", pgvec_kbpdf_delete_project},
+          {"minhash", db2_sketch_minhash_signature_delete_project},
+      };
+      int all_ok = 1, fence_lost = 0;
+      for (size_t si = 0; si < sizeof(purge_matrix) / sizeof(purge_matrix[0]); si++)
+      {
+         purge_store_add(stores, purge_matrix[si].name, purge_matrix[si].fn(project), &all_ok);
+         if (si + 1 < sizeof(purge_matrix) / sizeof(purge_matrix[0]) &&
+             db2_kb_purge_fence_heartbeat(project, generation, purge_id) != 1)
+         {
+            /* Ownership lost mid-fan-out: mark the remaining stores as
+             * errored (fail closed) — the displaced owner's purge re-runs
+             * them idempotently. */
+            fence_lost = 1;
+            all_ok = 0;
+            for (size_t sj = si + 1; sj < sizeof(purge_matrix) / sizeof(purge_matrix[0]); sj++)
+            {
+               cJSON *e = cJSON_CreateObject();
+               if (e)
+               {
+                  cJSON_AddStringToObject(e, "error", "fence lost");
+                  cJSON_AddItemToObject(stores, purge_matrix[sj].name, e);
+               }
+            }
+            aimee_log(LOG_WARN, "kb.purge",
+                      "purge-project '%s': fence ownership lost after store '%s' — remaining "
+                      "stores aborted",
+                      project, purge_matrix[si].name);
+            break;
+         }
+      }
+
+      cJSON *resp = cJSON_CreateObject();
+      if (!resp)
+      {
+         cJSON_Delete(stores);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+         return 500;
+      }
+      cJSON_AddStringToObject(resp, "status", "ok");
+      cJSON_AddBoolToObject(resp, "ok", all_ok);
+      cJSON_AddStringToObject(resp, "project", project);
+      cJSON_AddStringToObject(resp, "generation", generation);
+      cJSON_AddStringToObject(resp, "purge_id", purge_id);
+      cJSON_AddBoolToObject(resp, "fence_replaced", fence_replaced);
+      if (fence_lost)
+         cJSON_AddBoolToObject(resp, "fence_lost", 1);
+      if (fence_replaced)
+      {
+         cJSON *displaced = cJSON_CreateObject();
+         if (displaced)
+         {
+            cJSON_AddStringToObject(displaced, "generation", cur_gen);
+            cJSON_AddStringToObject(displaced, "purge_id", cur_pid);
+         }
+         cJSON_AddItemToObject(resp, "displaced", displaced);
+      }
+      cJSON_AddItemToObject(resp, "stores", stores);
+      return purge_respond(resp, out_buf, out_cap, 200);
+   }
+   /* POST /v1/maintenance/purge-heartbeat {project, generation, purge_id}:
+    * the owning delete op refreshes the fence heartbeat between phases. A
+    * displaced owner mismatches and no-ops (refreshed:false + current fence). */
+   if (strcmp(path, "/v1/maintenance/purge-heartbeat") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      char project[256], generation[128], purge_id[128];
+      if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
+                           sizeof(purge_id), out_buf, out_cap) != 0)
+         return 400;
+      int rc = db2_kb_purge_fence_heartbeat(project, generation, purge_id);
+      if (rc < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence heartbeat failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      if (resp)
+      {
+         cJSON_AddStringToObject(resp, "status", "ok");
+         cJSON_AddBoolToObject(resp, "refreshed", rc == 1);
+         if (rc != 1)
+         {
+            char fence[280] = "";
+            purge_fence_current(project, fence, sizeof(fence));
+            cJSON_AddStringToObject(resp, "fence", fence);
+         }
+      }
+      return purge_respond(resp, out_buf, out_cap, 200);
+   }
+   /* POST /v1/maintenance/purge-finalize | purge-cancel {project, generation,
+    * purge_id}: clear BOTH fence rows iff generation AND purge_id match. A
+    * mismatch (displaced owner) is a logged no-op returning the current fence. */
+   if (strcmp(path, "/v1/maintenance/purge-finalize") == 0 ||
+       strcmp(path, "/v1/maintenance/purge-cancel") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      char project[256], generation[128], purge_id[128];
+      if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
+                           sizeof(purge_id), out_buf, out_cap) != 0)
+         return 400;
+      int rc = db2_kb_purge_fence_clear(project, generation, purge_id);
+      if (rc < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence clear failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      if (resp)
+      {
+         cJSON_AddStringToObject(resp, "status", "ok");
+         cJSON_AddBoolToObject(resp, "cleared", rc == 1);
+         if (rc != 1)
+         {
+            char fence[280] = "";
+            purge_fence_current(project, fence, sizeof(fence));
+            LOG_WARN("kb_http",
+                     "%s: fence mismatch for project '%s' (presented %s %s, current '%s') — no-op",
+                     path, project, generation, purge_id, fence);
+            cJSON_AddStringToObject(resp, "fence", fence);
+         }
+      }
+      return purge_respond(resp, out_buf, out_cap, 200);
    }
    /* GET /v1/jobs/{id} */
    if (strncmp(path, "/v1/jobs/", 9) == 0 && path[9])

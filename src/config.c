@@ -782,6 +782,7 @@ static void config_set_defaults(config_t *cfg)
 #endif
    cfg->kb_bg_watch_debounce_secs = 30;
    cfg->kb_reembed_on_dim_change = 0; /* §2c: refuse-and-instruct by default */
+   cfg->kb_purge_fence_ttl_s = 900;   /* project-purge fence staleness bound */
    cfg->kb_maintenance_enabled = 0;
    cfg->kb_maintenance_interval_hours = 24;
    cfg->kb_maintenance_lambda = 0.005;
