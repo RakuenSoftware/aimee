@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { parseOwner, repoAlreadyCloned, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
+import { parseOwner, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
 
 /* Wizard — Workspaces & projects. A workspace is your collection of projects: the
  * repos under an owner/org (e.g. github.com/RakuenSoftware). Point at that owner,
@@ -40,7 +40,7 @@ interface Repo {
   private?: boolean;
 }
 
-interface CloneResult {
+interface CloneResult extends CloneKbAnnotations {
   name: string;
   ok: boolean;
   project?: string | null;
@@ -157,7 +157,7 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
   const ownerName = parseOwner(ownerInput)?.owner || '';
   const toggleAll = (on: boolean) => {
     const sel: Record<string, boolean> = {};
-    for (const r of repos) sel[r.name] = on;
+    for (const r of repos) sel[r.name] = on && !repoAlreadyCloned(r, ownerName, projects, details);
     setSelected(sel);
   };
 
@@ -196,12 +196,12 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
             {repos.map((repo) => {
               const already = repoAlreadyCloned(repo, ownerName, projects, details);
               return (
-                <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!!selected[repo.name]}
+                <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: already ? 'default' : 'pointer' }}>
+                  <input type="checkbox" disabled={already} checked={!already && !!selected[repo.name]}
                     onChange={(e) => setSelected((p) => ({ ...p, [repo.name]: e.target.checked }))} />
-                  <span style={{ fontFamily: 'monospace', flex: 1 }}>{repo.name}</span>
+                  <span style={{ fontFamily: 'monospace', flex: 1, color: already ? '#99a' : undefined }}>{repo.name}</span>
                   {repo.private && <span style={{ fontSize: 10.5, color: '#8a5a00', background: '#fff6e6', border: '1px solid #f0d8a8', borderRadius: 4, padding: '0 5px' }}>private</span>}
-                  {already && <span style={{ fontSize: 11, color: '#2a7' }}>● cloned</span>}
+                  {already && <span style={{ fontSize: 11, color: '#2a7' }}>cloned</span>}
                 </label>
               );
             })}
@@ -221,6 +221,9 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
             <div key={res.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
               <span aria-hidden>{res.ok ? '✅' : '⛔'}</span>
               <span style={{ fontFamily: 'monospace', flex: 1 }}>{res.name}</span>
+              {res.ok && res.org_note && <span style={{ fontSize: 11, color: '#8a5a00' }}>{res.org_note}</span>}
+              {res.ok && res.kb_indexed === false &&
+                <span style={{ fontSize: 11, color: '#8a5a00' }}>not indexed — {res.kb_reason || 'knowledge service unavailable'}</span>}
               {!res.ok && <span style={{ color: '#c62828' }}>{res.error || 'failed'}</span>}
             </div>
           ))}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalRemote, parseOwner, parseOwnerOnly, repoAlreadyCloned, type ProjectDetail } from './ownerUrl';
+import { canonicalRemote, groupProjectsByOrg, parseOwner, parseOwnerOnly, repoAlreadyCloned, type ProjectDetail } from './ownerUrl';
 
 describe('parseOwner', () => {
   it('parses the plain owner form', () => {
@@ -95,5 +95,41 @@ describe('repoAlreadyCloned', () => {
   it('uses the plain projects list when the server sends no details', () => {
     expect(repoAlreadyCloned(repo, 'RakuenSoftware', ['RakuenSoftware/aimee'], [])).toBe(true);
     expect(repoAlreadyCloned(repo, 'RakuenSoftware', ['other'], [])).toBe(false);
+  });
+});
+
+describe('groupProjectsByOrg', () => {
+  const details: ProjectDetail[] = [
+    { ref: 'zeta/one', org: 'zeta', name: 'one' },
+    { ref: 'acme/foo', org: 'acme', name: 'foo' },
+    { ref: 'legacy', org: '', name: 'legacy' },
+    { ref: 'acme/bar', org: 'acme', name: 'bar' },
+  ];
+
+  it('groups refs under their orgs, orgs alphabetical, ungrouped last', () => {
+    expect(groupProjectsByOrg(['zeta/one', 'acme/foo', 'legacy', 'acme/bar'], details)).toEqual([
+      { org: 'acme', refs: ['acme/foo', 'acme/bar'] },
+      { org: 'zeta', refs: ['zeta/one'] },
+      { org: '', refs: ['legacy'] },
+    ]);
+  });
+
+  it('derives the org from the ref when the server sends no details', () => {
+    expect(groupProjectsByOrg(['acme/foo', 'legacy'], [])).toEqual([
+      { org: 'acme', refs: ['acme/foo'] },
+      { org: '', refs: ['legacy'] },
+    ]);
+  });
+
+  it('round-trips: every ref appears exactly once and joins back to the input', () => {
+    const projects = ['zeta/one', 'acme/foo', 'legacy', 'acme/bar'];
+    const flat = groupProjectsByOrg(projects, details).flatMap(g => g.refs);
+    expect(flat.slice().sort()).toEqual(projects.slice().sort());
+    expect(flat).toHaveLength(projects.length);
+  });
+
+  it('handles all-ungrouped and empty inputs', () => {
+    expect(groupProjectsByOrg(['a', 'b'], [])).toEqual([{ org: '', refs: ['a', 'b'] }]);
+    expect(groupProjectsByOrg([], [])).toEqual([]);
   });
 });
