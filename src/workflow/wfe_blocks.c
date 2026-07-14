@@ -1721,12 +1721,34 @@ static wfe_step_result_t manager_produce(wfe_ctx *ctx, const wfe_node_t *node, c
 
 static wfe_step_result_t exec_understand(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   return manager_produce(
-       ctx, node, "architect",
-       "Scope this work item into a structured INTENT RECORD and write it as JSON to the given "
-       "path (nothing else): {\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"<one "
-       "line>\",\"rationale\":\"<why>\",\"acceptance_criteria\":[\"<testable>\"]}. Then commit it.",
-       wfe_intent_validate);
+   /* Same read-only-persona contract as exec_split: the architect persona's
+    * delegates may have no file tools, in which case the response-persist
+    * fallback is the artifact path — the reply itself must be the JSON. Thread
+    * the packet/proposal content in so a slice child scopes ITS packet rather
+    * than guessing. */
+   char src[12 * 1024];
+   src[0] = '\0';
+   const char *ppath = wfe_ctx_proposal_path(ctx);
+   if (ppath && ppath[0])
+   {
+      FILE *f = fopen(ppath, "rb");
+      if (f)
+      {
+         size_t n = fread(src, 1, sizeof src - 1, f);
+         src[n] = '\0';
+         fclose(f);
+      }
+   }
+   char prompt[14 * 1024];
+   snprintf(prompt, sizeof prompt,
+            "Scope the WORK ITEM below into a structured INTENT RECORD: "
+            "{\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"<one line>\","
+            "\"rationale\":\"<why>\",\"acceptance_criteria\":[\"<testable>\"]}. Write the JSON to "
+            "the given path and commit it if you can; if file tools are unavailable to you, your "
+            "ENTIRE reply must be exactly that JSON document — no prose, no code fences, nothing "
+            "else.\n\nWORK ITEM:\n%s",
+            src[0] ? src : "(no packet artifact found — scope the work item's ask)");
+   return manager_produce(ctx, node, "architect", prompt, wfe_intent_validate);
 }
 
 static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
