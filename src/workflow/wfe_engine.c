@@ -274,13 +274,17 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
 
    /* --- atomic critical section: cost reservation + step + state update.
     * Fail closed: if we cannot open the transaction we must NOT mutate the
-    * work item outside it (a half-applied step would corrupt the ledger). --- */
-   if (db1_lifecycle_txn_begin() != 0)
-   {
-      snprintf(err, errlen, "could not begin advance transaction");
-      wfe_def_free(def);
-      return -1;
-   }
+    * work item outside it (a half-applied step would corrupt the ledger).
+    *
+    * SCOPE: the transaction covers ONLY the post-executor state writes — it
+    * must NEVER span the executor itself. A live executor runs delegates for
+    * MINUTES; holding BEGIN IMMEDIATE on the shared db1 connection for that
+    * long makes every concurrent write on the connection (operator
+    * pause/resume, other items' events, trigger state) silently JOIN the open
+    * transaction: invisible to other readers until this step commits, and
+    * DISCARDED WHOLESALE if it rolls back (observed live: operator resumes
+    * that returned 200 yet never persisted, and a WAL frozen for the length
+    * of an implement stage). --- */
 
    /* Every state-mutating DB write below is checked; on ANY failure we roll the
     * whole step back (goto txn_fail) so the work item is never left advanced but
@@ -293,9 +297,16 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
          goto txn_fail;                                                                            \
    } while (0)
 
-   /* cost pre-flight (estimate is 0 for stubs; executors report actuals). */
+   /* cost pre-flight (estimate is 0 for stubs; executors report actuals).
+    * Its pause+event pair rides a short transaction of its own. */
    if (wi.work_item_max_cost_usd > 0 && wi.cum_cost_usd >= wi.work_item_max_cost_usd)
    {
+      if (db1_lifecycle_txn_begin() != 0)
+      {
+         snprintf(err, errlen, "could not begin advance transaction");
+         wfe_def_free(def);
+         return -1;
+      }
       WFE_CKW(db1_work_item_set_pause(work_item_id, "budget_exceeded", node->id));
       db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "budget_exceeded", "", 0);
       db1_lifecycle_txn_commit();
@@ -306,11 +317,24 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       return 0;
    }
 
+   /* The executor runs OUTSIDE any transaction (see scope note above). Its own
+    * incidental db1 writes (attempt counters, loop audit events) auto-commit
+    * individually, which is strictly better than riding a step txn that a later
+    * write failure would erase. */
    wfe_ctx ctx = {work_item_id, def, node, &wi};
    wfe_step_result_t r = fn(&ctx, node);
    out->last_status = r.status;
    out->failure_class = r.failure_class;
    out->failure_has_new_input = r.failure_has_new_input;
+
+   /* --- atomic critical section: cost + step outcome + state update. Held only
+    * for these writes (milliseconds), never across the executor above. --- */
+   if (db1_lifecycle_txn_begin() != 0)
+   {
+      snprintf(err, errlen, "could not begin advance transaction");
+      wfe_def_free(def);
+      return -1;
+   }
    if (r.cost_usd > 0)
       WFE_CKW(db1_work_item_add_cost(work_item_id, r.cost_usd));
    /* post-executor budget re-check: a single step's cost can push over the cap,
