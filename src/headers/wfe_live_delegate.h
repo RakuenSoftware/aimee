@@ -13,11 +13,12 @@ void wfe_autonomy_register(void);
 
 #include "agent_config.h"
 
-/* Resolve a workflow step's delegate name to a concrete agent. "" -> "" (route
- * by role); a specific name -> itself; the sentinel "$random" -> a uniformly
- * random ENABLED agent from `acfg`. Returns 0 on success (out filled, possibly
- * ""), -1 if "$random" but no enabled agent exists (fail fast — never leak the
- * sentinel). */
+/* Resolve a workflow step's delegate name to a concrete agent. A specific name
+ * -> itself; "" (no per-step delegate) and the sentinel "$random" both -> a
+ * uniformly random ENABLED agent from `acfg` — an unnamed delegate means "any
+ * agent", not "the same first-in-roster agent every dispatch". Returns 0 on
+ * success (out filled), -1 if no enabled agent exists (fail fast — never leak
+ * the sentinel). */
 int wfe_resolve_delegate(const char *name, agent_config_t *acfg, char *out, size_t outn);
 
 /* Seed the $random selector for deterministic tests. */

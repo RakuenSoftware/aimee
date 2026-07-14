@@ -44,7 +44,7 @@ int wfe_resolve_delegate(const char *name, agent_config_t *acfg, char *out, size
    if (out && outn)
       out[0] = '\0';
    if (!name || !name[0])
-      return 0; /* no per-step delegate -> route by role */
+      name = "$random"; /* no per-step delegate -> random over the enabled roster */
    if (strcmp(name, "$random") != 0)
    {
       if (out)

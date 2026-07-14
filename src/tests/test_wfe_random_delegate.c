@@ -14,8 +14,7 @@ int main(void)
    printf("wfe-random-delegate: ");
    char out[64];
 
-   /* Empty / specific names pass through. */
-   assert(wfe_resolve_delegate("", NULL, out, sizeof out) == 0 && out[0] == '\0');
+   /* Specific names pass through. */
    assert(wfe_resolve_delegate("mistral", NULL, out, sizeof out) == 0 &&
           strcmp(out, "mistral") == 0);
 
@@ -47,10 +46,28 @@ int main(void)
    }
    assert(saw_alpha && saw_gamma); /* both enabled agents reachable */
 
-   /* Empty roster -> fail fast (never leak "$random"). */
+   /* An UNNAMED delegate ("") routes through the same random selector — it
+    * means "any enabled agent", never a fixed roster-order pick. */
+   int e_alpha = 0, e_gamma = 0;
+   for (unsigned s = 1; s <= 20; s++)
+   {
+      wfe_resolve_delegate_seed(s);
+      assert(wfe_resolve_delegate("", &acfg, out, sizeof out) == 0);
+      assert(strcmp(out, "beta") != 0); /* disabled excluded */
+      assert(strcmp(out, "alpha") == 0 || strcmp(out, "gamma") == 0);
+      if (!strcmp(out, "alpha"))
+         e_alpha = 1;
+      if (!strcmp(out, "gamma"))
+         e_gamma = 1;
+   }
+   assert(e_alpha && e_gamma);
+
+   /* Empty roster -> fail fast (never leak "$random"), named or unnamed. */
    agent_config_t empty;
    memset(&empty, 0, sizeof empty);
    assert(wfe_resolve_delegate("$random", &empty, out, sizeof out) == -1);
+   assert(out[0] == '\0');
+   assert(wfe_resolve_delegate("", &empty, out, sizeof out) == -1);
    assert(out[0] == '\0');
 
    printf("ok\n");

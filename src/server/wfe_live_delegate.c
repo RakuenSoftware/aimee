@@ -95,13 +95,15 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
       return -1;
    }
 
-   /* Resolve the step's delegate ("$random" -> a random roster agent; "" -> route
-    * by role). Fail fast rather than leak the sentinel downstream. */
+   /* Resolve the step's delegate: a specific name -> itself; "" and "$random"
+    * -> a uniformly random ENABLED roster agent (an unnamed delegate means "any
+    * agent", so successive dispatches assort across the roster instead of
+    * pinning to one). Fail fast rather than leak the sentinel downstream. */
    char agent_name[MAX_AGENT_NAME] = "";
    if (wfe_resolve_delegate(delegate, &acfg, agent_name, sizeof agent_name) != 0)
    {
       if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: no enabled agent for '$random'");
+         snprintf(err, errlen, "wfe live delegate: no enabled agent in the roster");
       return -1;
    }
 
@@ -113,77 +115,28 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
     * agent can serve. */
    const char *persona = (role && role[0]) ? role : "engineer";
    char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-   persona_t pinfo;
-   memset(&pinfo, 0, sizeof pinfo);
-   persona_load(NULL, persona, &pinfo);
 
    /* Run WITH TOOLS, pinned to the work-item worktree, so file edits land there.
-    * A specific agent runs by name; otherwise route by persona. */
+    * The resolve above always yields a concrete agent name, so dispatch is
+    * uniformly by name; an unroutable pick fails here and the block's retry
+    * loop re-rolls a different agent. */
    run_cmd_set_cwd(workdir);
    agent_result_t res;
    memset(&res, 0, sizeof(res));
    int rc;
-   if (agent_name[0])
+   agent_t *ag = agent_find(&acfg, agent_name);
+   if (!ag)
    {
-      agent_t *ag = agent_find(&acfg, agent_name);
-      if (!ag)
-      {
-         run_cmd_set_cwd(NULL);
-         free(sys_prompt);
-         persona_free(&pinfo);
-         if (err && errlen)
-            snprintf(err, errlen, "wfe live delegate: unknown delegate '%s'", agent_name);
-         return -1;
-      }
-      rc = agent_execute_with_tools(ag, &acfg.network, sys_prompt ? sys_prompt : "", prompt,
-                                    AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
+      run_cmd_set_cwd(NULL);
+      free(sys_prompt);
+      if (err && errlen)
+         snprintf(err, errlen, "wfe live delegate: unknown delegate '%s'", agent_name);
+      return -1;
    }
-   else
-   {
-      /* Route by the persona's allowed roles (ordered by preference): for the
-       * first role that ANY healthy, persona-eligible agent serves, pick the
-       * lowest-cost-tier such agent. Scanning every agent per role (not just
-       * agent_route's single best) means a persona-ineligible best-tier agent
-       * can't shadow an eligible one that serves the same role. */
-      agent_t *chosen = NULL;
-      const char *chosen_role = NULL;
-      int best_tier = 0;
-      for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
-      {
-         const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
-         for (int ai = 0; ai < acfg.agent_count; ai++)
-         {
-            agent_t *ag = &acfg.agents[ai];
-            if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
-                !agent_is_available_for_routing(ag))
-               continue;
-            if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-               continue;
-            if (!chosen || ag->cost_tier < best_tier)
-            {
-               chosen = ag;
-               chosen_role = r;
-               best_tier = ag->cost_tier;
-            }
-         }
-      }
-      if (!chosen)
-      {
-         run_cmd_set_cwd(NULL);
-         free(sys_prompt);
-         persona_free(&pinfo);
-         if (err && errlen)
-            snprintf(err, errlen, "wfe live delegate: no enabled agent eligible for persona '%s'",
-                     persona);
-         return -1;
-      }
-      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
-                                             sys_prompt ? sys_prompt : "", prompt,
-                                             AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
-   }
+   rc = agent_execute_with_tools(ag, &acfg.network, sys_prompt ? sys_prompt : "", prompt,
+                                 AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
    run_cmd_set_cwd(NULL);
    free(sys_prompt);
-   persona_free(&pinfo);
 
    if (rc != 0)
    {
