@@ -1743,10 +1743,13 @@ static wfe_step_result_t exec_understand(wfe_ctx *ctx, const wfe_node_t *node)
    snprintf(prompt, sizeof prompt,
             "Scope the WORK ITEM below into a structured INTENT RECORD: "
             "{\"schema_version\":1,\"status\":\"unconfirmed\",\"summary\":\"<one line>\","
-            "\"rationale\":\"<why>\",\"acceptance_criteria\":[\"<testable>\"]}. Write the JSON to "
-            "the given path and commit it if you can; if file tools are unavailable to you, your "
-            "ENTIRE reply must be exactly that JSON document — no prose, no code fences, nothing "
-            "else.\n\nWORK ITEM:\n%s",
+            "\"rationale\":\"<why>\",\"acceptance_criteria\":[\"<testable>\"]}. The record must "
+            "describe the ENGINEERING TASK in the work item — what changes, where, and how it is "
+            "verified. Producing the record is NOT the task: never write a summary or criteria "
+            "about creating/confirming intent records, and never mention work-item ids. Write the "
+            "JSON to the given path and commit it if you can; if file tools are unavailable to "
+            "you, your ENTIRE reply must be exactly that JSON document — no prose, no code "
+            "fences, nothing else.\n\nWORK ITEM:\n%s",
             src[0] ? src : "(no packet artifact found — scope the work item's ask)");
    return manager_produce(ctx, node, "architect", prompt, wfe_intent_validate);
 }
