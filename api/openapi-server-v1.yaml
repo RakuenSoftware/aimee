@@ -4323,7 +4323,15 @@ paths:
                     type: string
                     description: Why the kb scan was skipped (present when kb_indexed is false).
         "400":
-          description: Invalid URL/name, or the project already exists
+          description: Invalid URL/name/org (validation failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: >-
+            Identity conflict: the project already exists, the org name clashes
+            with a flat project (or vice versa), or the ref is already bound to
+            a different canonical remote (the other remote is never echoed).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
