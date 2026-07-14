@@ -234,6 +234,34 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
                                    errlen);
 }
 
+int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, char *err,
+                            size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+   char origin[1024];
+   if (git_cap(repo_dir, "config --get remote.origin.url", origin, sizeof(origin)) != 0)
+   {
+      snprintf(err, errlen, "no origin remote");
+      return -1;
+   }
+   char owner[128], repo[128];
+   if (parse_github_slug(origin, owner, sizeof(owner), repo, sizeof(repo)) != 0)
+   {
+      snprintf(err, errlen, "requires a github.com origin");
+      return -1;
+   }
+   if ((size_t)snprintf(out, out_cap, "https://github.com/%s/%s.git", owner, repo) >= out_cap)
+   {
+      snprintf(err, errlen, "url too long");
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
+
 int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const char *head_in,
                              const char *base_in, const char *title, const char *body, char *out,
                              size_t out_cap, char *err, size_t errlen)

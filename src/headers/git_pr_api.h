@@ -20,6 +20,14 @@
 int git_pr_create_via_api(const char *principal, const char *repo_dir, const char *title,
                           const char *body, char *out, size_t out_cap, char *err, size_t errlen);
 
+/* Resolve repo_dir's `origin` to its canonical HTTPS URL
+ * (https://github.com/<owner>/<repo>.git), regardless of whether origin is an
+ * https or an SSH/scp URL. Lets a git network op push over HTTPS — where the
+ * vaulted forge token authenticates via the askpass shim — instead of over an
+ * SSH origin the server has no key for. Returns 0 + out, or -1 + err. */
+int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, char *err,
+                            size_t errlen);
+
 /* Like git_pr_create_via_api, but with an EXPLICIT head branch and base — the
  * head need not be checked out in repo_dir (the wfe forge opens PRs for
  * work-item branches while the shared checkout sits on the base). NULL/"" head
