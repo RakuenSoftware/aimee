@@ -118,7 +118,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-sliced-build \
                $(TESTPREFIX)/unit-test-wfe-foreach \
                $(TESTPREFIX)/unit-test-wfe-foreach-spawn \
-               $(TESTPREFIX)/unit-test-wfe-panel-verdict \
+               $(TESTPREFIX)/unit-test-wfe-panel-roundtable \
+               $(TESTPREFIX)/unit-test-wfe-replay-worktree \
                $(TESTPREFIX)/unit-test-wfe-autonomy \
                $(TESTPREFIX)/unit-test-wfe-custom \
                $(TESTPREFIX)/unit-test-wfe-safety \
@@ -1703,11 +1704,16 @@ $(TESTPREFIX)/unit-test-wfe-foreach: $(OBJDIR)/tests/test_wfe_foreach.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Live panel: the review-reply -> verdict mapping (pure; cJSON + wfe_verdict).
-$(TESTPREFIX)/unit-test-wfe-panel-verdict: $(OBJDIR)/tests/test_wfe_panel_verdict.o \
-                                    $(OBJDIR)/server/wfe_panel_verdict.o \
-                                    $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+# Live panel: verified roundtable items -> per-lens wfe verdicts (pure mapper).
+$(TESTPREFIX)/unit-test-wfe-panel-roundtable: $(OBJDIR)/tests/test_wfe_panel_roundtable.o \
+                                    $(OBJDIR)/server/wfe_panel_roundtable.o \
+                                    $(OBJDIR)/workflow/wfe_verdict.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Live panel: the worktree-grounded evidence-replay backend.
+$(TESTPREFIX)/unit-test-wfe-replay-worktree: $(OBJDIR)/tests/test_wfe_replay_worktree.o \
+                              $(OBJDIR)/server/wfe_replay_worktree.o $(OBJDIR)/server/evidence_replay.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Live foreach spawner: a split packet-plan -> child slice work items (parent linkage).
 $(TESTPREFIX)/unit-test-wfe-foreach-spawn: $(OBJDIR)/tests/test_wfe_foreach_spawn.o \
