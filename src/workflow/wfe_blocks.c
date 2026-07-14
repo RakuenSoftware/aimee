@@ -1009,13 +1009,34 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
       if (run_fanout_units(wd, node, &cost) < 0)
          return with_cost(wfe_step_failed_class(WFE_FAIL_DEGRADED, 0), cost);
    }
-   else if (wfe_delegate_dispatch(
-                wd, "engineer", node_delegate(node),
-                "Implement the approved plan on the work-item branch: split into units, delegate "
-                "each, VERIFY each with `aimee git verify` and fix any failures, then commit the "
-                "accepted work.",
-                NULL, commit, &cost) < 0)
-      return with_cost(wfe_step_looped(), cost);
+   else
+   {
+      /* Fold any persisted roundtable blockers into the prompt — the SAME
+       * refine-not-reauthor contract exec_author has had. Without it the
+       * gate.roundtable -> on_fail -> implement loop re-dispatched a BLIND
+       * generic prompt every round: the delegate never learned why the panel
+       * rejected the diff, re-produced substantially the same change, and the
+       * loop burned its full attempt budget without converging (observed
+       * live: dozens of impl<->rt_gate rounds, zero gate passes). */
+      char feedback[4096];
+      wfe_feedback_read(wfe_ctx_work_item(ctx), feedback, sizeof feedback);
+      const char *base_prompt =
+          "Implement the approved plan on the work-item branch: split into units, delegate "
+          "each, VERIFY each with `aimee git verify` and fix any failures, then commit the "
+          "accepted work.";
+      char prompt[4096 + 640];
+      if (feedback[0])
+         snprintf(prompt, sizeof prompt,
+                  "%s\n\nA review roundtable REQUESTED CHANGES on the branch's current "
+                  "implementation. Do NOT start over: keep the existing work and REVISE it to "
+                  "address every blocker below, then commit:\n\n%s",
+                  base_prompt, feedback);
+      else
+         snprintf(prompt, sizeof prompt, "%s", base_prompt);
+      if (wfe_delegate_dispatch(wd, "engineer", node_delegate(node), prompt, NULL, commit, &cost) <
+          0)
+         return with_cost(wfe_step_looped(), cost);
+   }
 
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
