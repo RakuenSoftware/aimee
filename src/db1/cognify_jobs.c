@@ -79,7 +79,7 @@ int db1_cognify_job_claim_next(db1_cognify_job_t *out)
       return -1;
    memset(out, 0, sizeof(*out));
 
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return -1;
    if (sqlite3_prepare_v2(db, sel_sql, -1, &sel, NULL) != SQLITE_OK)
       goto fail;
@@ -87,7 +87,7 @@ int db1_cognify_job_claim_next(db1_cognify_job_t *out)
    if (sqlite3_step(sel) != SQLITE_ROW)
    {
       sqlite3_finalize(sel);
-      sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+      db1_txn_end(db, "COMMIT");
       return 0;
    }
 
@@ -114,7 +114,7 @@ int db1_cognify_job_claim_next(db1_cognify_job_t *out)
       goto fail;
    sqlite3_finalize(upd);
 
-   if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_end(db, "COMMIT") != 0)
       return -1;
    snprintf(out->status, sizeof(out->status), "%s", "running");
    return 1;
@@ -124,7 +124,7 @@ fail:
       sqlite3_finalize(sel);
    if (upd)
       sqlite3_finalize(upd);
-   sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+   db1_txn_end(db, "ROLLBACK");
    return -1;
 }
 
