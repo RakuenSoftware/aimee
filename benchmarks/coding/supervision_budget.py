@@ -427,6 +427,12 @@ class BudgetLedger:
             "running_total": new_total,
         })
         self._primary_spent += primary_tokens_this_turn
+        # Observed per-turn series (F4): one point per accepted turn, aligned 1:1
+        # with ``turn_boundaries``. Recorded here (not only in ``try_record_turn``)
+        # so a strict-path caller still gets a populated observed curve and the two
+        # views never drift out of length-alignment. The refusal path in
+        # ``try_record_turn`` appends its own observed point separately.
+        self._primary_observed.append(int(primary_tokens_this_turn))
         return new_total
 
     def try_record_turn(self, turn_index, primary_tokens_this_turn, *, caller=""):
