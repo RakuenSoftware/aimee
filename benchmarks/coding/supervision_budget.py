@@ -457,10 +457,12 @@ class BudgetLedger:
         """
         if primary_tokens_this_turn < 0:
             raise ValueError("primary_tokens_this_turn must be >= 0")
-        # Always record the observed per-turn primary tokens so the per-turn
-        # telemetry view has one point per turn (accepted or refused).
-        self._primary_observed.append(int(primary_tokens_this_turn))
         if self._primary_spent + primary_tokens_this_turn > self._primary_budget:
+            # Refusal path A: primary_budget exhausted. The observed per-turn
+            # point must be recorded here (NOT in record_turn, which we never
+            # reach on this path) so the curve has one point per refused turn
+            # and stays length-aligned with turn_boundaries.
+            self._primary_observed.append(int(primary_tokens_this_turn))
             self.primary_rejections.append({
                 "turn_index": turn_index,
                 "attempted": primary_tokens_this_turn,
@@ -474,16 +476,22 @@ class BudgetLedger:
             prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
             self.turn_boundaries.append(prev)
             return False, prev
-        # Hard model-token cap (record_turn -> charge -> RuntimeError): the
-        # per-turn row's observed peak was already recorded above, but the
-        # charge would push the model balance negative. Treat this as another
-        # refusal class so callers get a (False, prev) tuple instead of an
-        # exception escaping the supervisor. The observed peak stays visible
-        # via primary_tokens_observed_by_turn / detect_drift(include_observed).
+        # Hard model-token cap (record_turn -> charge -> RuntimeError):
+        # record_turn appends to _primary_observed on success (its own
+        # observation point), so we must NOT pre-append here on the accept
+        # path. On the refusal path below, record_turn is never reached,
+        # so we add the observed peak in the except branch to keep the
+        # curve length-aligned with turn_boundaries. The observed peak
+        # remains visible via primary_tokens_observed_by_turn /
+        # detect_drift(include_observed).
         prev = self.turn_boundaries[-1] if self.turn_boundaries else 0
         try:
             new_total = self.record_turn(turn_index, primary_tokens_this_turn)
         except (RuntimeError, PrimaryBudgetExhausted) as exc:
+            # Refusal path B: model_token hard cap. record_turn was not
+            # entered, so record the observed peak here so the curve has
+            # exactly one point per refused turn.
+            self._primary_observed.append(int(primary_tokens_this_turn))
             self.primary_rejections.append({
                 "turn_index": turn_index,
                 "attempted": primary_tokens_this_turn,

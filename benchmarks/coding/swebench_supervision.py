@@ -511,16 +511,45 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
     # Round-2 reviewer fix (qa+architect): when the per-row extractor returned
     # no rows (FAKE / synthetic / pre-loop failure), synthesize one row per
     # reported primary turn so the per-turn curve is not empty. Each synthetic
-    # row carries the same ``total_headline`` slice (deterministic, so the
-    # running total equals the aggregate). Synthetic rows are tagged so the
-    # auditor can distinguish them from real per-dispatch data.
+    # row carries an exact slice of ``total_headline`` (base + at most 1 to
+    # absorb the integer remainder) so the running total across the synthetic
+    # rows is GUARANTEED to equal ``total_headline`` - the previous
+    # ``max(1, total_headline // turns)`` formulation discarded the remainder
+    # AND emitted slices that could exceed the aggregate when
+    # ``total_headline < turns``. Equal-width slices also cannot reveal
+    # context drift, so every synthetic row is tagged with explicit
+    # uncertainty: ``_synthetic_distribution_remainder`` records how much of
+    # the per-turn shape is fabricated rather than measured, and
+    # ``_synthetic_uncertainty_pct`` gives the relative width of that
+    # fabricated band so any drift detector downstream knows to discount it.
     if not prim_rows and tok.turns and tok.total_headline:
-        per_turn = max(1, tok.total_headline // tok.turns)
-        prim_rows = [
-            {"prompt_tokens": 0, "completion_tokens": per_turn,
-             "cache_read_tokens": 0, "_synthetic_from_aggregate": True}
-            for _ in range(int(tok.turns))
-        ]
+        n = int(tok.turns)
+        base, rem = divmod(int(tok.total_headline), n)
+        # Deterministic remainder distribution: the FIRST ``rem`` slices get
+        # base+1, the rest get base. This is exact (sums to total_headline)
+        # and reproducible across runs.
+        prim_rows = []
+        for k in range(n):
+            slice_tokens = base + (1 if k < rem else 0)
+            prim_rows.append({
+                "prompt_tokens": 0,
+                "completion_tokens": slice_tokens,
+                "cache_read_tokens": 0,
+                "_synthetic_from_aggregate": True,
+                # How much of THIS slice came from the integer-remainder
+                # redistribution rather than a measured per-turn spend.
+                # base slices have uncertainty 0, remainder slices carry the
+                # whole redistribution unit. Consumers can use this to
+                # suppress or weight any per-turn shape claim.
+                "_synthetic_distribution_remainder": (1 if k < rem else 0),
+                # Per-slice relative uncertainty band. base slices have ~0%
+                # (the slice IS the measured value), remainder slices carry
+                # the entire ``base / slice`` width as the honest range.
+                "_synthetic_uncertainty_pct": (
+                    100.0 if slice_tokens == 0 else
+                    round(100.0 * (1.0 / max(slice_tokens, 1)), 3)
+                ),
+            })
     for i, r in enumerate(prim_rows):
         headline = (int(r.get("prompt_tokens", 0)) + int(r.get("completion_tokens", 0))
                     - int(r.get("cache_read_tokens", 0)))
@@ -577,9 +606,15 @@ def run_arm_c_supervised(instance: dict, *, workers: list[str], n: int, allocato
             _budget.gate.open_escalation(caller=f"{primary_agent}@arm_c",
                                          reason=f"no candidate for {instance_id}")
             try:
-                _budget.check_tool_dispatch("read_file")
-                _budget.check_tool_dispatch("bash")
-                _budget.check_tool_dispatch("grep")
+                # F2/F3: every escalation-bound tool-dispatch check must carry
+                # the same caller identity that opened the gate so a denied
+                # attempt is attributed to the actual supervisor primary, not
+                # "unknown" (which would otherwise let denied attempts slip
+                # out of the escalation_attempts audit row).
+                _check_caller = f"{primary_agent}@arm_c"
+                _budget.check_tool_dispatch("read_file", caller=_check_caller)
+                _budget.check_tool_dispatch("bash", caller=_check_caller)
+                _budget.check_tool_dispatch("grep", caller=_check_caller)
                 branch = H.worktree_branch(instance_id, "C-esc", 0)
                 e = dispatch("code", H.agentic_prompt(instance, arm="C"), via=primary_agent, tools=True,
                              worktree=branch, token_db=token_db, aimee_bin=aimee_bin,
