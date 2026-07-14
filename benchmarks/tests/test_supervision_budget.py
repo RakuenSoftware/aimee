@@ -350,10 +350,6 @@ class SupervisorFacadeTests(unittest.TestCase):
         self.assertTrue(sup.ledger.escalations[0].granted)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ReviewerBlockerTests(unittest.TestCase):
     """Tests that lock down the three reviewer blockers from the second round."""
 
@@ -545,7 +541,6 @@ class ReviewerBlockerTests(unittest.TestCase):
         # (accepted AND refused), so the drift curve has one point per turn.
         self.assertEqual(L.primary_tokens_observed_by_turn, [100, 5000])
         # ``record_turn`` still raises for callers that want the strict error.
-        import pytest  # type: ignore  # noqa: F401  (not strictly needed)
         try:
             from benchmarks.coding.supervision_budget import PrimaryBudgetExhausted
         except ImportError:
@@ -659,3 +654,7 @@ class ReviewerBlockerTests(unittest.TestCase):
         self.assertEqual(L.primary_tokens_by_turn, [0, 0, 0, 0, 0])
         # Observed view carries the per-turn actual values.
         self.assertEqual(L.primary_tokens_observed_by_turn, [100] * 5)
+
+
+if __name__ == "__main__":
+    unittest.main()
