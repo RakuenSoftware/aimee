@@ -45,6 +45,20 @@ struct cJSON;
 /* Maximum length of the generated summary text */
 #define SESSION_COMPACT_SUMMARY_MAX 8192
 
+/* Pre-boundary read-only tool signatures captured for the rounds-to-resume
+ * metric (see docs/proposals/pending/compaction-quality-measurement.md).
+ *
+ * Why capture here: compaction DELETES the summarised messages, so the set of
+ * tool calls the agent had already made is destroyed by the very operation we
+ * want to measure. It cannot be recovered afterwards from any surviving table —
+ * it has to be read out before the delete, or not at all.
+ *
+ * These are reported, not persisted: session_compact() stays a pure function of
+ * the messages array, and the caller decides whether the numbers are worth
+ * storing. */
+#define SESSION_COMPACT_MAX_SIGS 64
+#define SESSION_COMPACT_SIG_LEN  64
+
 typedef struct
 {
    int warn_pct;    /* warn threshold %; 0 = use default (70) */
@@ -60,6 +74,18 @@ typedef struct
    int messages_removed; /* messages replaced by the summary boundary */
    int repairs;          /* tool-pair repairs performed before compaction */
    char summary[SESSION_COMPACT_SUMMARY_MAX]; /* generated summary text */
+
+   /* Read-only tool signatures ("<name>:<16-hex FNV-1a of arguments>") found in
+    * the messages about to be discarded, deduplicated. A post-boundary call
+    * matching one of these re-derives state the agent already had — that is the
+    * rounds-to-resume signal.
+    *
+    * Only tools whose repetition can ONLY mean lost context are recorded; see
+    * compact_tool_is_readonly() for the list and why it is not the `readonly`
+    * toolset. */
+   int readonly_sig_count;    /* entries in readonly_sigs */
+   int readonly_sigs_dropped; /* distinct sigs beyond the cap */
+   char readonly_sigs[SESSION_COMPACT_MAX_SIGS][SESSION_COMPACT_SIG_LEN];
 } session_compact_result_t;
 
 /* Estimate the approximate token count for a cJSON messages array.

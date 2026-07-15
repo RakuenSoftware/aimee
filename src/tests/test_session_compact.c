@@ -20,6 +20,60 @@ static cJSON *make_msg(const char *role, const char *content)
    return msg;
 }
 
+/* An OpenAI-shape assistant tool call: {role, tool_calls:[{function:{name,arguments}}]} */
+static cJSON *make_tool_call_msg(const char *name, const char *arguments)
+{
+   cJSON *msg = cJSON_CreateObject();
+   cJSON_AddStringToObject(msg, "role", "assistant");
+   cJSON *calls = cJSON_AddArrayToObject(msg, "tool_calls");
+   cJSON *call = cJSON_CreateObject();
+   cJSON_AddStringToObject(call, "id", "call_1");
+   cJSON *fn = cJSON_AddObjectToObject(call, "function");
+   cJSON_AddStringToObject(fn, "name", name);
+   cJSON_AddStringToObject(fn, "arguments", arguments);
+   cJSON_AddItemToArray(calls, call);
+   return msg;
+}
+
+/* An Anthropic-shape assistant tool call: content:[{type:"tool_use",name,input}] */
+static cJSON *make_tool_use_msg(const char *name, const char *input_key, const char *input_val)
+{
+   cJSON *msg = cJSON_CreateObject();
+   cJSON_AddStringToObject(msg, "role", "assistant");
+   cJSON *content = cJSON_AddArrayToObject(msg, "content");
+   cJSON *block = cJSON_CreateObject();
+   cJSON_AddStringToObject(block, "type", "tool_use");
+   cJSON_AddStringToObject(block, "name", name);
+   cJSON *input = cJSON_AddObjectToObject(block, "input");
+   cJSON_AddStringToObject(input, input_key, input_val);
+   cJSON_AddItemToArray(content, block);
+   return msg;
+}
+
+/* Returns 1 if `sig_prefix` ("<name>:") matches any captured signature. */
+static int sigs_have_tool(const session_compact_result_t *r, const char *name)
+{
+   size_t nlen = strlen(name);
+   for (int i = 0; i < r->readonly_sig_count; i++)
+      if (strncmp(r->readonly_sigs[i], name, nlen) == 0 && r->readonly_sigs[i][nlen] == ':')
+         return 1;
+   return 0;
+}
+
+/* Pad an array with filler pairs so the compactor has something to summarise
+ * beyond the anchor and the retained tail. */
+static void pad_conversation(cJSON *arr, int n_pairs)
+{
+   for (int i = 0; i < n_pairs; i++)
+   {
+      char ubuf[64], abuf[64];
+      snprintf(ubuf, sizeof(ubuf), "Filler user message %d with enough text to matter.", i);
+      snprintf(abuf, sizeof(abuf), "Filler assistant reply %d with enough text to matter.", i);
+      cJSON_AddItemToArray(arr, make_msg("user", ubuf));
+      cJSON_AddItemToArray(arr, make_msg("assistant", abuf));
+   }
+}
+
 /* Build a messages array with n_user user/assistant pairs plus a leading system msg */
 static cJSON *make_long_conversation(int n_pairs)
 {
@@ -373,6 +427,151 @@ static void test_compact_result_counts(void)
 
 /* ------------------------------------------------------------------ main */
 
+/* ------------------------------------------- pre-boundary signature capture */
+
+static void test_sigs_capture_readonly_calls(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("grep", "{\"pattern\":\"foo\"}"));
+   pad_conversation(arr, 8);
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(r.compacted == 1);
+   assert(sigs_have_tool(&r, "read_file"));
+   assert(sigs_have_tool(&r, "grep"));
+   assert(r.readonly_sig_count == 2);
+
+   cJSON_Delete(arr);
+   PASS("sigs capture read-only calls from the discarded range");
+}
+
+/* THE falsification: a repeated `test` after an edit is progress, not
+ * re-derivation. If this list ever counts it, rounds-to-resume is a lie. */
+static void test_sigs_exclude_mutating_and_verifying_tools(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("test", "{\"suite\":\"unit\"}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("edit_file", "{\"path\":\"src/a.c\"}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("write_file", "{\"path\":\"src/b.c\"}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("bash", "{\"cmd\":\"make\"}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("verify", "{}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("env_get", "{\"key\":\"PATH\"}"));
+   pad_conversation(arr, 8);
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(r.compacted == 1);
+   assert(!sigs_have_tool(&r, "test"));
+   assert(!sigs_have_tool(&r, "edit_file"));
+   assert(!sigs_have_tool(&r, "write_file"));
+   assert(!sigs_have_tool(&r, "bash"));
+   assert(!sigs_have_tool(&r, "verify"));
+   assert(!sigs_have_tool(&r, "env_get"));
+   assert(r.readonly_sig_count == 0);
+
+   cJSON_Delete(arr);
+   PASS("sigs exclude mutating/verifying tools (repeated test is progress)");
+}
+
+static void test_sigs_distinguish_args(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   /* Same tool, same args, twice -> one fact. */
+   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
+   /* Same tool, different args -> a distinct fact. */
+   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/b.c\"}"));
+   pad_conversation(arr, 8);
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(r.readonly_sig_count == 2); /* deduped, but args-sensitive */
+
+   cJSON_Delete(arr);
+   PASS("sigs dedupe identical calls and separate differing args");
+}
+
+static void test_sigs_capture_anthropic_shape(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   cJSON_AddItemToArray(arr, make_tool_use_msg("find_symbol", "name", "session_compact"));
+   cJSON_AddItemToArray(arr, make_tool_use_msg("edit_file", "path", "src/a.c"));
+   pad_conversation(arr, 8);
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(sigs_have_tool(&r, "find_symbol"));
+   assert(!sigs_have_tool(&r, "edit_file"));
+   assert(r.readonly_sig_count == 1);
+
+   cJSON_Delete(arr);
+   PASS("sigs capture the Anthropic tool_use shape");
+}
+
+static void test_sigs_only_from_discarded_range(void)
+{
+   /* A read-only call inside the retained tail is NOT lost context — the agent
+    * can still see it after the boundary, so it must not be counted. */
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"discarded.c\"}"));
+   pad_conversation(arr, 8);
+   /* Land this call inside the final SESSION_COMPACT_RETAIN_TAIL messages. */
+   cJSON_AddItemToArray(arr, make_tool_call_msg("grep", "{\"pattern\":\"retained\"}"));
+   pad_conversation(arr, 2);
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(r.compacted == 1);
+   assert(sigs_have_tool(&r, "read_file")); /* discarded -> counted */
+   assert(!sigs_have_tool(&r, "grep"));     /* retained  -> not counted */
+
+   cJSON_Delete(arr);
+   PASS("sigs come only from the discarded range, not the retained tail");
+}
+
+static void test_sigs_cap_is_reported_not_silent(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   for (int i = 0; i < SESSION_COMPACT_MAX_SIGS + 10; i++)
+   {
+      char args[64];
+      snprintf(args, sizeof(args), "{\"path\":\"src/file_%d.c\"}", i);
+      cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", args));
+   }
+   pad_conversation(arr, 8);
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(r.readonly_sig_count == SESSION_COMPACT_MAX_SIGS);
+   assert(r.readonly_sigs_dropped == 10); /* never silently truncate */
+
+   cJSON_Delete(arr);
+   PASS("sig cap reports what it dropped");
+}
+
+static void test_sigs_zero_when_nothing_compacted(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
+   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
+
+   session_compact_result_t r;
+   assert(session_compact(arr, NULL, &r) == 0);
+   assert(r.compacted == 0);
+   assert(r.readonly_sig_count == 0); /* no boundary -> no lost context */
+
+   cJSON_Delete(arr);
+   PASS("no compaction -> no signatures");
+}
+
 int main(void)
 {
    printf("session_compact:\n");
@@ -398,6 +597,14 @@ int main(void)
    test_compact_summary_has_structured_sections();
    test_compact_idempotent_on_small();
    test_compact_result_counts();
+
+   test_sigs_capture_readonly_calls();
+   test_sigs_exclude_mutating_and_verifying_tools();
+   test_sigs_distinguish_args();
+   test_sigs_capture_anthropic_shape();
+   test_sigs_only_from_discarded_range();
+   test_sigs_cap_is_reported_not_silent();
+   test_sigs_zero_when_nothing_compacted();
 
    printf("all session_compact tests passed\n");
    return 0;
