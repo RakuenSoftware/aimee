@@ -60,7 +60,13 @@ static void add_session_context_tools(cJSON *tools)
                          cJSON_Parse("{\"type\":\"object\",\"properties\":{}}")));
    mcp_add_gateway_tools(tools);
 }
-cJSON *mcp_build_tools_list(void)
+/* `collapse` folds coherent families (index, memory, lsp, ...) into one multiplexed
+ * tool with a discriminator — a PRESENTATION choice that keeps an external client's
+ * tool count down. aimee's own agents want the flat names: their toolsets name tools
+ * individually (review_indexed gets index_find_callers but not index_hybrid), which a
+ * single collapsed `index` tool cannot express. The legacy flat names stay directly
+ * callable either way (see mcp_family_demux), so only the advert differs. */
+static cJSON *mcp_build_tools_list_ex(int collapse)
 {
    cJSON *tools = cJSON_CreateArray();
    mcp_add_discovery_tools(tools); /* find_tools / describe_tool (P2) */
@@ -1709,7 +1715,8 @@ cJSON *mcp_build_tools_list(void)
    /* Collapse coherent families into single multiplexed tools (P4). Runs after
     * every builtin member exists, before plugin/remote tools (which are left as
     * separate, namespaced entries). */
-   mcp_collapse_families(tools);
+   if (collapse)
+      mcp_collapse_families(tools);
 
    /* Plugin tools: load registry + project-local, add enabled tools */
    {
@@ -1774,4 +1781,18 @@ cJSON *mcp_build_tools_list(void)
    cJSON_Delete(remote_tools);
 
    return tools;
+}
+
+cJSON *mcp_build_tools_list(void)
+{
+   return mcp_build_tools_list_ex(1);
+}
+
+/* The same tools, families NOT collapsed — flat, individually-named entries.
+ * aimee's own agents are offered tools one at a time (a toolset names
+ * index_find_callers without naming index_hybrid), which the collapsed `index`
+ * multiplexer cannot express. Same handlers, same schemas, different presentation. */
+cJSON *mcp_build_tools_list_flat(void)
+{
+   return mcp_build_tools_list_ex(0);
 }

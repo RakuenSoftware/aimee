@@ -229,23 +229,55 @@ static void test_update_notification(void)
 static void test_tool_update(void)
 {
    char out[2048];
-   /* started -> tool_call / in_progress, with title. */
-   assert(acp_build_tool_update("s1", "started", "read_file", out, sizeof(out)) == 1);
+   /* started -> tool_call / in_progress, with the tool name as the title and the
+    * caller's id as the handle. */
+   assert(acp_build_tool_update("s1", "read_file-1", "started", "read_file", out, sizeof(out)) ==
+          1);
    cJSON *o = parse(out);
    cJSON *u = cJSON_GetObjectItem(cJSON_GetObjectItem(o, "params"), "update");
    assert(strcmp(cJSON_GetObjectItem(u, "sessionUpdate")->valuestring, "tool_call") == 0);
-   assert(strcmp(cJSON_GetObjectItem(u, "toolCallId")->valuestring, "read_file") == 0);
+   assert(strcmp(cJSON_GetObjectItem(u, "toolCallId")->valuestring, "read_file-1") == 0);
    assert(strcmp(cJSON_GetObjectItem(u, "title")->valuestring, "read_file") == 0);
    assert(strcmp(cJSON_GetObjectItem(u, "status")->valuestring, "in_progress") == 0);
    cJSON_Delete(o);
-   /* completed -> tool_call_update / completed. */
-   assert(acp_build_tool_update("s1", "completed", "read_file", out, sizeof(out)) == 1);
+   /* completed -> tool_call_update / completed, carrying the SAME id so the client
+    * can find the call it updates. */
+   assert(acp_build_tool_update("s1", "read_file-1", "completed", "read_file", out, sizeof(out)) ==
+          1);
    o = parse(out);
    u = cJSON_GetObjectItem(cJSON_GetObjectItem(o, "params"), "update");
    assert(strcmp(cJSON_GetObjectItem(u, "sessionUpdate")->valuestring, "tool_call_update") == 0);
+   assert(strcmp(cJSON_GetObjectItem(u, "toolCallId")->valuestring, "read_file-1") == 0);
    assert(strcmp(cJSON_GetObjectItem(u, "status")->valuestring, "completed") == 0);
    cJSON_Delete(o);
    printf("  PASS: tool_update\n");
+}
+
+/* Two calls to the SAME tool in one session must not share a toolCallId.
+ *
+ * The id was the tool name, so an agent that read three files emitted three
+ * tool_calls under the id "read_file" — a client keys tool_call_update off the id
+ * to find the call it updates, so all three collapsed into one entry that flipped
+ * in_progress/completed as each landed. The ids are the caller's to number; this
+ * pins the contract that distinct calls get distinct handles. */
+static void test_tool_call_ids_are_unique_per_call(void)
+{
+   char a[2048], b[2048];
+   assert(acp_build_tool_update("s1", "read_file-1", "started", "read_file", a, sizeof(a)) == 1);
+   assert(acp_build_tool_update("s1", "read_file-2", "started", "read_file", b, sizeof(b)) == 1);
+   cJSON *oa = parse(a), *ob = parse(b);
+   const char *ida =
+       cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(oa, "params"), "update"),
+                           "toolCallId")
+           ->valuestring;
+   const char *idb =
+       cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(ob, "params"), "update"),
+                           "toolCallId")
+           ->valuestring;
+   assert(strcmp(ida, idb) != 0);
+   cJSON_Delete(oa);
+   cJSON_Delete(ob);
+   printf("  PASS: tool_call_ids_are_unique_per_call\n");
 }
 
 static void test_session_prompt_parse(void)
@@ -284,6 +316,7 @@ int main(void)
    test_prompt_parse();
    test_session_prompt_parse();
    test_tool_update();
+   test_tool_call_ids_are_unique_per_call();
    test_build_prompt_result();
    test_build_prompt_stop();
    test_session_load();

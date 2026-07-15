@@ -1150,6 +1150,90 @@ int agent_tools_is_git_write(const char *name)
           strcmp(name, "git_branch") == 0 || strcmp(name, "git_pr") == 0;
 }
 
+/* The MCP-derived surface: tools declared once in the server's MCP table and
+ * registered here so aimee's own agents get them too. See agent_tools.h. */
+static agent_mcp_call_fn g_mcp_call_fn = NULL;
+static agent_mcp_advert_fn g_mcp_advert_fn = NULL;
+static char g_mcp_tools[256][64];
+static int g_mcp_tool_count = 0;
+
+void agent_tools_set_mcp_provider(agent_mcp_call_fn call, agent_mcp_advert_fn advert)
+{
+   g_mcp_call_fn = call;
+   g_mcp_advert_fn = advert;
+}
+
+agent_mcp_call_fn agent_tools_mcp_call_provider(void)
+{
+   return g_mcp_call_fn;
+}
+
+void agent_tools_register_mcp_tool(const char *name)
+{
+   if (!name || !name[0])
+      return;
+   if (agent_tools_is_mcp_derived(name))
+      return;
+   if (g_mcp_tool_count >= (int)(sizeof(g_mcp_tools) / sizeof(g_mcp_tools[0])))
+   {
+      LOG_ERROR("agent_tools", "MCP tool registry full (%d); '%s' DROPPED and uncallable",
+                g_mcp_tool_count, name);
+      return;
+   }
+   snprintf(g_mcp_tools[g_mcp_tool_count++], sizeof(g_mcp_tools[0]), "%s", name);
+}
+
+int agent_tools_is_mcp_derived(const char *name)
+{
+   if (!name)
+      return 0;
+   for (int i = 0; i < g_mcp_tool_count; i++)
+      if (strcmp(g_mcp_tools[i], name) == 0)
+         return 1;
+   return 0;
+}
+
+/* Advertise the MCP-derived tools, reusing each tool's own MCP schema. A tool whose
+ * advert the provider cannot produce is skipped rather than offered with an empty
+ * schema: an agent handed a parameterless git_commit will call it wrong. */
+static void emit_mcp_tools(cJSON *tools, unsigned surface)
+{
+   if (!g_mcp_call_fn || !g_mcp_advert_fn)
+      return;
+   for (int i = 0; i < g_mcp_tool_count; i++)
+   {
+      cJSON *advert = g_mcp_advert_fn(g_mcp_tools[i]);
+      cJSON *schema = cJSON_DetachItemFromObjectCaseSensitive(advert, "inputSchema");
+      cJSON *desc = cJSON_GetObjectItemCaseSensitive(advert, "description");
+      if (!schema || !cJSON_IsString(desc))
+      {
+         LOG_WARN("agent_tools", "MCP tool '%s' has no usable advert; not offered natively",
+                  g_mcp_tools[i]);
+         cJSON_Delete(advert);
+         cJSON_Delete(schema);
+         continue;
+      }
+      cJSON *tool = cJSON_CreateObject();
+      cJSON_AddStringToObject(tool, "type", "function");
+      if (surface == TSURF_CHAT)
+      {
+         cJSON *fn = cJSON_CreateObject();
+         cJSON_AddStringToObject(fn, "name", g_mcp_tools[i]);
+         cJSON_AddStringToObject(fn, "description", desc->valuestring);
+         cJSON_AddItemToObject(fn, "parameters", schema);
+         cJSON_AddItemToObject(tool, "function", fn);
+      }
+      else
+      {
+         cJSON_AddStringToObject(tool, "name", g_mcp_tools[i]);
+         cJSON_AddStringToObject(tool, "description", desc->valuestring);
+         cJSON_AddItemToObject(tool, "parameters", schema);
+      }
+      cJSON_AddItemToArray(tools, tool);
+      cJSON_Delete(advert);
+   }
+}
+
 static agent_shell_git_gate_fn g_shell_git_gate = NULL;
 
 void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn)
@@ -1200,6 +1284,7 @@ cJSON *build_tools_array(void)
 {
    cJSON *tools = cJSON_CreateArray();
    emit_builtin_tools(tools, TSURF_CHAT);
+   emit_mcp_tools(tools, TSURF_CHAT);
    append_remote_tools(tools, 1);
    return tools;
 }
@@ -1209,6 +1294,7 @@ cJSON *build_tools_array_responses(void)
 {
    cJSON *tools = cJSON_CreateArray();
    emit_builtin_tools(tools, TSURF_RESP);
+   emit_mcp_tools(tools, TSURF_RESP);
    append_remote_tools(tools, 0);
    return tools;
 }

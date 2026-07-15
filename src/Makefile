@@ -1217,7 +1217,15 @@ clean:
 # you genuinely need a different binary.
 CLANG_FORMAT ?= clang-format-19
 
-lint: inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check
+lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check
+
+# aimee's own agents must not fall behind aimee's MCP surface. A tool added to the
+# MCP table reaches every external client (Claude Code, thin clients) and silently
+# NOT aimee's delegates or review panelists — that is how git_commit came to be
+# MCP-only while require_aimee_git told delegates to use it, and how a review panel
+# asked "is this still called?" had nothing that could answer. Ratchets down.
+native-tool-parity-check:
+	@python3 ../scripts/check-native-tool-parity.py --src-dir .
 
 # Prompt-sanitizer boundary guard (graph-feedback §4 / P0): call-site register
 # lockstep + attack-corpus completeness. See docs/SANITIZER_CALL_SITES.md.

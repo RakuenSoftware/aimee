@@ -740,6 +740,8 @@ static char *td_git_status(cJSON *args, const char *name, const char *dispatch_c
  * handler would resolve against the daemon's cwd — the bug #1318 fixed on the
  * verify gate. The handler returns MCP content blocks; the native surface wants a
  * plain string, so flatten the text blocks. */
+static char *mcp_content_flatten(cJSON *content);
+
 static char *td_git_write(cJSON *args, const char *name, const char *dispatch_cwd,
                           const char *dispatch_sid, int timeout_ms)
 {
@@ -764,7 +766,14 @@ static char *td_git_write(cJSON *args, const char *name, const char *dispatch_cw
    cJSON_Delete(call);
    if (!content)
       return safe_strdup("error: git tool unavailable on this surface");
+   return mcp_content_flatten(content);
+}
 
+/* MCP content blocks -> the plain string the native tool surface returns. Consumes
+ * `content`. Shared by every tool that reaches an MCP handler across a provider
+ * seam. */
+static char *mcp_content_flatten(cJSON *content)
+{
    dstr_t out;
    dstr_init(&out);
    cJSON *item = NULL;
@@ -782,6 +791,28 @@ static char *td_git_write(cJSON *args, const char *name, const char *dispatch_cw
    char *result = safe_strdup(out.len && out.data ? out.data : "(no output)");
    dstr_free(&out);
    return result;
+}
+
+/* Tools declared native in the server's MCP table (see agent_tools.h). The handler
+ * is the same one external MCP clients reach, so aimee's agents and Claude Code run
+ * identical code — which is the point of the merge: there is no second
+ * implementation to drift.
+ *
+ * No arg injection here: that is the git tools' own need (mcp_chdir_git_root reads
+ * args["path"]), not a property of MCP tools in general. When the git-write seam is
+ * folded into this path, its path fallback has to come with it. */
+static char *td_mcp_tool(cJSON *args, const char *name, const char *dispatch_cwd,
+                         const char *dispatch_sid, int timeout_ms)
+{
+   (void)dispatch_cwd;
+   (void)timeout_ms;
+   agent_mcp_call_fn fn = agent_tools_mcp_call_provider();
+   if (!fn) /* never advertised without a provider: a caller invented the name */
+      return safe_strdup("error: tool is not available on this surface");
+   cJSON *content = fn(name, args, dispatch_sid);
+   if (!content)
+      return safe_strdup("error: tool unavailable on this surface");
+   return mcp_content_flatten(content);
 }
 
 static char *td_env_get(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -1775,6 +1806,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          cJSON_Delete(remote_result);
       }
    }
+   /* Last, so a hand-written native tool always wins over the MCP handler of the
+    * same name — this only ever adds tools, it never silently reroutes one. */
+   else if (agent_tools_is_mcp_derived(name))
+      result = td_mcp_tool(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else
    {
       char err[256];
