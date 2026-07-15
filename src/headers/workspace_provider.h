@@ -27,11 +27,25 @@ typedef enum
 {
    WS_PROVIDER_SHARED = 0,   /* direct filesystem on the server host (default) */
    WS_PROVIDER_DETACHED = 1, /* marshalled over /v1 to the serving client */
-   WS_PROVIDER_MIRROR = 2    /* server-side bare mirror + reconstructed worktree;
+   WS_PROVIDER_MIRROR = 2,   /* server-side bare mirror + reconstructed worktree;
                               * file/exec run direct-fs on that local worktree
                               * (so it resolves through the `shared` provider),
                               * the lifecycle being driven from the registry's
                               * vcs.remote + head (workspace-resource-plane §3) */
+   WS_PROVIDER_CONTAINER = 3 /* file/exec marshalled into a delegate's own
+                              * container via a delegate backend (normally
+                              * `docker`). See workspace_provider_container.h.
+                              *
+                              * Deliberately NOT resolvable by name or by
+                              * workspace_provider_for_kind: an instance needs a
+                              * live container handle, so it is bound per delegate
+                              * by the code that acquired the container. A
+                              * config-selectable kind would have to fall back to
+                              * `shared` when no container exists — silently
+                              * running the delegate on the host, which is exactly
+                              * what the sandbox exists to prevent. A fallback
+                              * that defeats the feature is worse than no
+                              * fallback. */
 } ws_provider_kind_t;
 
 typedef struct
