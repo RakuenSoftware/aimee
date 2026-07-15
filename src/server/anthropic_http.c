@@ -383,7 +383,8 @@ static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driv
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+             0 /* buffered ingress: never ask the upstream to stream */);
       if (!prov_body)
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
@@ -884,14 +885,23 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        * case); legacy fallback on failure / flag off. For codex the reply is
        * fetched buffered + replayed as Anthropic SSE below, so no IR-delta stream
        * translation is needed here. */
+      /* Whether we ask the UPSTREAM to stream is decided by how we will read its
+       * reply, NOT by what the client asked for. When the buffered replay below
+       * takes over (prevent-subagents, or a /responses wire), we fetch the reply to
+       * completion; asking for SSE there and then cJSON_Parse'ing it is exactly the
+       * "primary provider returned an unparseable reply" bug. /responses is the
+       * exception: codex requires stream=true and its replay parses the raw SSE
+       * text, so it keeps the flag. */
+      int buffered_replay = gateway_prevent_subagents_enabled() || responses_wire;
+      int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), upstream_stream);
       if (!prov_body)
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), 1);
+                                         jo_num(req, "temperature", 1.0), upstream_stream);
    }
 
    /* P2c streaming: when gateway_prevent_subagents is ON, or the primary
