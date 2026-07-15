@@ -163,6 +163,11 @@ CFG_KEY_DESC = {
     "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "
     "(~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory "
     "system via `aimee memory store` (default on).",
+    "require_aimee_git": "Block a delegate from running `git` or `gh` in a shell (reads "
+    "included) and redirect git/forge work to aimee's `git_*` tools, which execute on "
+    "aimee-server where the forge credential stays in-process; delegates are also spawned "
+    "without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed "
+    "SSH to any host) and neuters the global/system git config (default on).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
