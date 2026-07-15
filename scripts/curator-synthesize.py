@@ -37,8 +37,13 @@ def emit_error(msg: str) -> None:
 def strip_think(text: str) -> str:
     """Drop a reasoning model's <think>...</think> preamble and code fences."""
     text = text.strip()
-    if "</think>" in text:
-        text = text.rsplit("</think>", 1)[1].strip()
+    # Only a block at the very START is a reasoning preamble; an occurrence
+    # later belongs to the content. Splitting on the last tag anywhere silently
+    # destroyed answers that merely mentioned it (see curator-extract.py).
+    if text.startswith("<think>"):
+        end = text.find("</think>")
+        if end != -1:
+            text = text[end + len("</think>") :].strip()
     if text.startswith("```"):
         lines = text.splitlines()
         end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
