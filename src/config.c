@@ -324,6 +324,7 @@ static const config_schema_entry_t config_schema[] = {
     {"require_session_worktree", SCHEMA_BOOL, 0},
     {"require_aimee_memory", SCHEMA_BOOL, 0},
     {"require_aimee_git", SCHEMA_BOOL, 0},
+    {"delegate_sandbox", SCHEMA_BOOL, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
@@ -1203,6 +1204,22 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_memory");
    if (cJSON_IsBool(item))
       cfg->require_aimee_memory = cJSON_IsTrue(item);
+
+   /* require_aimee_git had a config_fields[] row, a schema row, a default, a
+    * config_save writer and NO parse — so `require_aimee_git: false` in aimee.yaml
+    * never loaded, and `aimee config set require_aimee_git false` persisted a value
+    * that silently reverted to ON at the next restart. The operator escape hatch
+    * cmd_hooks.c offers ("Operator: require_aimee_git: false ...") could not work.
+    * Exactly the failure the comment below this block already warns about. */
+   item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_git");
+   if (cJSON_IsBool(item))
+      cfg->require_aimee_git = cJSON_IsTrue(item);
+
+   /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
+    * explicit `delegate_sandbox: true` turns it on. */
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
+   if (cJSON_IsBool(item))
+      cfg->delegate_sandbox = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
    if (cJSON_IsBool(item))
