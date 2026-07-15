@@ -60,6 +60,12 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
       return "ir_passthrough";
    case AIMEE_IR_M_IR_PATH:
       return "ir_path";
+   case AIMEE_IR_M_LEGACY_FALLBACK:
+      return "ir_legacy_fallback";
+   case AIMEE_IR_M_BODY_MISMATCH:
+      return "ir_body_mismatch";
+   case AIMEE_IR_M_BODY_MATCH:
+      return "ir_body_match";
    case AIMEE_IR_M__COUNT:
    default:
       return "unknown";

@@ -29,6 +29,7 @@
 #include "gw_stage_memory.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
+#include "aimee_ir_metrics.h"
 #include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
 #include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
@@ -386,9 +387,12 @@ static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driv
              agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
              0 /* buffered ingress: never ask the upstream to stream */);
       if (!prov_body)
+      {
+         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                          jo_num(req, "temperature", 1.0), 0);
+      }
    }
    return prov_body;
 }
@@ -898,10 +902,30 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
              agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), upstream_stream);
+      /* Shadow: build what LEGACY would have sent for this same request and compare
+       * byte-for-byte. This is the evidence that retires the translators — proving
+       * the IR sends the provider the same bytes, not merely that it "worked". Off
+       * unless AIMEE_IR_SHADOW is set: the extra build is real work. */
+      if (prov_body && aimee_ir_shadow_enabled())
+      {
+         char *legacy_body =
+             build_provider_body(driver, ag, messages, tools, system_text,
+                                 agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                 jo_num(req, "temperature", 1.0), upstream_stream);
+         aimee_ir_shadow_compare_bodies(prov_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
+         free(legacy_body);
+      }
       if (!prov_body)
+      {
+         /* Served by the LEGACY translator. Counted at the call site, not inside the
+          * IR builder: the *_FAIL counters record that a stage failed, this records
+          * that a real request was answered by legacy. Deleting the translators is
+          * gated on this reading 0 over a live window. */
+         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                          jo_num(req, "temperature", 1.0), upstream_stream);
+      }
    }
 
    /* P2c streaming: when gateway_prevent_subagents is ON, or the primary
