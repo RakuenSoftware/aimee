@@ -135,3 +135,10 @@ src/vendor/tree-sitter-groovy/
 src/vendor/tree-sitter-objc/
 src/vendor/tree-sitter-elixir/
 src/vendor/tree-sitter-powershell/
+
+# wfe run bookkeeping. The scope node writes an intent record into the work
+# item's checkout; it describes the run, not the product, so implement must not
+# commit it into the branch it is building. Ignored so a slice PR carries only
+# its engineering diff. See wfe_manager_artifacts.c (intent_self_referential).
+.wfe-scope.json
+intent_record_*.json
