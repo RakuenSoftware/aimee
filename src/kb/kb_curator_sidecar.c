@@ -177,17 +177,27 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
     *    form was `sh -c "<cmd> < tmp"`, where `< tmp` is parsed alongside cmd:
     *    for `a | b` it binds to b, the last pipeline command. Redirecting the
     *    wrapper's stdin instead would hand the file to `a` — a silent change in
-    *    meaning. So append the redirection to the script and pass the path as a
-    *    positional ($1) rather than interpolating it: `sh -c '<cmd> < "$1"' sh
-    *    <tmppath>`. $1 is inside single quotes, so only the INNER shell expands
-    *    it, and the path never re-parses. */
-   char script[640];
-   int sn = snprintf(script, sizeof(script), "%s < \"$1\"", cmd);
-   char qscript[2688]; /* worst case: every byte of the script is a quote */
-   char qtmp[1040];
+    *    meaning. So the script keeps the same `<cmd> < <path>` shape the bare
+    *    popen produced, with the path shell-quoted as a LITERAL.
+    *
+    * The path is embedded literally rather than passed as a positional ($1):
+    * with `sh -c '<cmd> < "$1"' sh <path>`, a configured command containing
+    * `set --` would rebind $1 before the redirection expanded and read a
+    * different file. A literal cannot be reassigned. */
+   char qtmp[1040]; /* worst case: every byte of a 256-char path is a quote */
+   if (kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+   {
+      unlink(tmppath);
+      if (errbuf)
+         snprintf(errbuf, errlen, "sidecar temp path too long to quote safely");
+      return NULL;
+   }
+
+   char script[1600];
+   int sn = snprintf(script, sizeof(script), "%s < %s", cmd, qtmp);
+   char qscript[6464]; /* worst case: every byte of the script is a quote */
    if (sn < 0 || (size_t)sn >= sizeof(script) ||
-       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0 ||
-       kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0)
    {
       unlink(tmppath);
       if (errbuf)
@@ -195,9 +205,8 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
       return NULL;
    }
 
-   char full_cmd[3840];
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s sh %s", CS_SIDECAR_TIMEOUT_S,
-            qscript, qtmp);
+   char full_cmd[6528];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s", CS_SIDECAR_TIMEOUT_S, qscript);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)

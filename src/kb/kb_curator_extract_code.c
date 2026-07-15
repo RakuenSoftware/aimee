@@ -418,27 +418,31 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
     * builtins, operators) — passing it as timeout's own argv would break those
     * and let compound commands escape the bound.
     *
-    * The script is shell-QUOTED and the redirection stays inside the command's
-    * own parse context, passing the path as $1 — see kb_curator_sidecar_run for
-    * the full reasoning. Raw interpolation would let an embedded quote/$/backtick
-    * re-parse the command, and redirecting the wrapper's stdin instead of the
-    * command's would hand the file to the wrong end of a pipeline. */
-   char script[640];
-   int sn = snprintf(script, sizeof(script), "%s < \"$1\"", cmd);
-   char qscript[2688]; /* worst case: every byte of the script is a quote */
-   char qtmp[1040];
+    * The script is shell-QUOTED, the redirection stays inside the command's own
+    * parse context, and the path is embedded as a quoted LITERAL — see
+    * kb_curator_sidecar_run for the full reasoning. */
+   char qtmp[1040]; /* worst case: every byte of a 256-char path is a quote */
+   if (kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+   {
+      unlink(tmppath);
+      snprintf(errbuf, errlen, "sidecar temp path too long to quote safely");
+      return NULL;
+   }
+
+   char script[1600];
+   int sn = snprintf(script, sizeof(script), "%s < %s", cmd, qtmp);
+   char qscript[6464]; /* worst case: every byte of the script is a quote */
    if (sn < 0 || (size_t)sn >= sizeof(script) ||
-       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0 ||
-       kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0)
    {
       unlink(tmppath);
       snprintf(errbuf, errlen, "sidecar command too long to quote safely");
       return NULL;
    }
 
-   char full_cmd[3840];
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s sh %s", CCU_SIDECAR_TIMEOUT_S,
-            qscript, qtmp);
+   char full_cmd[6528];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s", CCU_SIDECAR_TIMEOUT_S,
+            qscript);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)

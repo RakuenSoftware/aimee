@@ -579,6 +579,16 @@ static void test_sidecar_quoting_end_to_end(void)
    assert(counted == 2);
    free(out3);
 
+   /* The request path is embedded as a quoted literal, not passed as $1. With a
+    * positional, a command containing `set --` rebinds $1 before the redirection
+    * expands and the sidecar silently reads a DIFFERENT file — measured at 5
+    * bytes (/etc/hostname) instead of the 2-byte request. A literal cannot be
+    * reassigned, so this still reads the request. */
+   char *out4 = kb_curator_sidecar_run("set -- /etc/hostname; wc -c", "{}", 256, err, sizeof(err));
+   assert(out4 != NULL);
+   assert(strtol(out4, NULL, 10) == 2);
+   free(out4);
+
    printf("  PASS: test_sidecar_quoting_end_to_end\n");
 }
 
