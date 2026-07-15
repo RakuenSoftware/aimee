@@ -5,6 +5,8 @@
 #include "workspace_turn.h"
 #include "workspace_provider.h"
 #include "config.h"
+#include "delegate_backend.h"
+#include "workspace_provider_container.h"
 #include "aimee_home.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -14,6 +16,57 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ── fake docker backend for the delegate-sandbox cases ───────────────────── */
+
+static int g_acquires, g_releases, g_last_hibernate, g_acquire_fails;
+static int g_fake_state = 1;
+
+static int fake_acquire(delegate_backend_t *self, const char *task_id,
+                        const delegate_backend_config_t *cfg, void **out)
+{
+   (void)self;
+   (void)task_id;
+   (void)cfg;
+   g_acquires++;
+   if (g_acquire_fails)
+      return -1;
+   *out = &g_fake_state;
+   return 0;
+}
+
+static void fake_release(delegate_backend_t *self, void *state, int hibernate)
+{
+   (void)self;
+   (void)state;
+   g_releases++;
+   g_last_hibernate = hibernate;
+}
+
+static int fake_exec(delegate_backend_t *self, void *state, const char *command, int timeout_ms,
+                     delegate_exec_result_t *r)
+{
+   (void)self;
+   (void)state;
+   (void)command;
+   (void)timeout_ms;
+   if (r)
+      r->exit_code = 0;
+   return 0;
+}
+
+/* Registered under the name "docker" so workspace_turn_bind_container finds it:
+ * the seam looks the backend up by name, and a test must not need a real daemon. */
+static delegate_backend_t g_fake_docker = {.name = "docker",
+                                           .description = "fake docker for tests",
+                                           .acquire = fake_acquire,
+                                           .release = fake_release,
+                                           .exec = fake_exec,
+                                           .read_file = NULL,
+                                           .write_file = NULL,
+                                           .list_dir = NULL,
+                                           .get_cwd = NULL,
+                                           .set_cwd = NULL};
 
 int main(void)
 {
@@ -112,6 +165,87 @@ int main(void)
       rc = safe_exec_capture_env(argv, NULL, &out, 256);
       assert(rc == 0 && out && out[0] == '\0');
       free(out);
+   }
+
+   /* ── delegate sandbox: workspace_turn_bind_container ─────────────────────
+    *
+    * Binding this is the difference between a delegate's shell running in its own
+    * container and running IN-PROCESS inside aimee-server with the server's
+    * filesystem and environment. Each case below is a way that distinction could
+    * silently collapse back to "on the host". */
+   {
+      delegate_backend_reset_for_test();
+      assert(delegate_backend_register(&g_fake_docker) == 0);
+
+      /* Dial OFF (the default): no container, no acquire, and the active provider
+       * is untouched — the turn runs in-process exactly as it does today. */
+      {
+         config_t c;
+         memset(&c, 0, sizeof(c));
+         config_load(&c);
+         c.delegate_sandbox = 0;
+         assert(config_save(&c) == 0);
+         g_acquires = g_releases = 0;
+         assert(workspace_turn_bind_container("deleg-1", NULL) == 0);
+         assert(g_acquires == 0); /* must not even try to take a container */
+         assert(workspace_provider_active() == shared);
+      }
+
+      /* Dial ON: acquires a container and binds a CONTAINER provider — not shared.
+       * If this ever resolved to `shared` the delegate would be on the host while
+       * the operator believed it was sandboxed. */
+      {
+         config_t c;
+         memset(&c, 0, sizeof(c));
+         config_load(&c);
+         c.delegate_sandbox = 1;
+         assert(config_save(&c) == 0);
+         g_acquires = g_releases = 0;
+         assert(workspace_turn_bind_container("deleg-2", NULL) == 1);
+         assert(g_acquires == 1);
+         const workspace_provider_t *p = workspace_provider_active();
+         assert(p != shared);
+         assert(p->kind == WS_PROVIDER_CONTAINER);
+
+         /* Unbind must RELEASE the container, not just drop the pointer: a leaked
+          * container outlives its turn and pins its workspace. And the active
+          * provider must go back to shared — a pooled worker thread that kept the
+          * binding would run the NEXT delegate's tools in a dead container. */
+         workspace_turn_unbind_active();
+         assert(g_releases == 1);
+         assert(workspace_provider_active() == shared);
+      }
+
+      /* Acquire failure must NOT bind: falling through with a half-bound provider
+       * would send every op to the host. It returns 0, so the caller runs
+       * in-process (and the seam logs at ERROR). */
+      {
+         g_acquires = g_releases = 0;
+         g_acquire_fails = 1;
+         assert(workspace_turn_bind_container("deleg-3", NULL) == 0);
+         assert(g_acquires == 1);
+         assert(g_releases == 0); /* nothing to release: it never took one */
+         assert(workspace_provider_active() == shared);
+         g_acquire_fails = 0;
+      }
+
+      /* An empty task_id is refused before any container is taken. */
+      {
+         g_acquires = 0;
+         assert(workspace_turn_bind_container("", NULL) == 0);
+         assert(workspace_turn_bind_container(NULL, NULL) == 0);
+         assert(g_acquires == 0);
+      }
+
+      /* No docker backend registered at all: the dial is on but there is nothing
+       * to bind to. Must refuse rather than silently run on the host. */
+      {
+         delegate_backend_reset_for_test();
+         g_acquires = 0;
+         assert(workspace_turn_bind_container("deleg-4", NULL) == 0);
+         assert(workspace_provider_active() == shared);
+      }
+      delegate_backend_reset_for_test();
    }
 
    printf("workspace_turn: all tests passed\n");

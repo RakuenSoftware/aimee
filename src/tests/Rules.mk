@@ -2224,7 +2224,7 @@ $(TESTPREFIX)/unit-test-workspace-runner-registry: \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-workspace-turn: $(OBJDIR)/tests/test_workspace_turn.o \
-                      $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/tests/support/git_cred_inject_stub.o \
+                      $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/server/workspace_provider_detached.o \
                       $(OBJDIR)/server/workspace_runner_registry.o \
                       $(OBJDIR)/server/workspace_runner_queue.o \
