@@ -470,7 +470,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n"               \
    "pdf_search_chunks {max_results,project,query} req:project,query\n"                             \
    "pipeline "                                                                                     \
-   "{admin,artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,"       \
+   "{artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,"             \
    "pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n"      \
    "prospective_memory "                                                                           \
    "{action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_"  \
