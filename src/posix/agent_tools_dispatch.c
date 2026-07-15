@@ -1570,39 +1570,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
-   /* --- No git/gh in a delegate's shell (require_aimee_git) --- */
-   /* The native agent IS the wfe `implement` delegate, so this is the path that
-    * decides whether the rule means anything at all. The DECISION lives server-side
-    * behind a seam (see agent_tools.h): it needs the config dial, the forge
-    * credential and the command classifier, none of which the agent tier may link.
-    * Unregistered — thin client, unit tests — there is no gate and nothing changes. */
-   {
-      const char *shell_cmd = NULL;
-      if (strcmp(name, "bash") == 0)
-      {
-         cJSON *c = cJSON_GetObjectItem(args, "command");
-         if (cJSON_IsString(c))
-            shell_cmd = c->valuestring;
-      }
-      else if (strcmp(name, "execute_script") == 0)
-      {
-         cJSON *b = cJSON_GetObjectItem(args, "body");
-         if (cJSON_IsString(b))
-            shell_cmd = b->valuestring;
-      }
-      agent_shell_git_gate_fn gate = agent_tools_shell_git_gate();
-      if (shell_cmd && gate && gate(shell_cmd))
-      {
-         cJSON_Delete(args);
-         return safe_strdup(
-             "error: run git through aimee, not a shell — use git_status, git_log, "
-             "git_diff, git_branch, git_commit, git_push or git_pr. They execute on "
-             "aimee-server, which holds the forge credential; this shell has none, so a "
-             "raw git/gh command cannot authenticate anyway. (Operator: "
-             "require_aimee_git: false in aimee.yaml opts out.)");
-      }
-   }
-
    /* --- Guardrail enforcement for ALL tool execution paths --- */
    /* dispatch_sid and cwd are kept in scope so read_file can update read-tracking below. */
    const char *dispatch_sid = session_id();
@@ -1618,6 +1585,45 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          snprintf(dispatch_cwd, sizeof(dispatch_cwd), "%s", tl_cwd);
       else if (!getcwd(dispatch_cwd, sizeof(dispatch_cwd)))
          dispatch_cwd[0] = '\0';
+   }
+
+   /* --- No git/gh in a delegate's shell (require_aimee_git) --- */
+   /* The native agent IS the wfe `implement` delegate, so this is the path that
+    * decides whether the rule means anything at all. The DECISION lives server-side
+    * behind a seam (see agent_tools.h): it needs the config dial, the forge
+    * credential and the command classifier, none of which the agent tier may link.
+    * Unregistered — thin client, unit tests — there is no gate and nothing changes.
+    *
+    * Sits AFTER dispatch_cwd on purpose: the credential half of the decision asks
+    * whether aimee can do git FOR THIS REPO, and the per-host vault rung resolves
+    * that from the checkout's origin. Asked without a directory it can only see the
+    * server's own identity, which most deployments do not set — the gate then reads
+    * "aimee has no git" and silently never fires. */
+   {
+      const char *shell_cmd = NULL;
+      if (strcmp(name, "bash") == 0)
+      {
+         cJSON *c = cJSON_GetObjectItem(args, "command");
+         if (cJSON_IsString(c))
+            shell_cmd = c->valuestring;
+      }
+      else if (strcmp(name, "execute_script") == 0)
+      {
+         cJSON *b = cJSON_GetObjectItem(args, "body");
+         if (cJSON_IsString(b))
+            shell_cmd = b->valuestring;
+      }
+      agent_shell_git_gate_fn gate = agent_tools_shell_git_gate();
+      if (shell_cmd && gate && gate(shell_cmd, dispatch_cwd))
+      {
+         cJSON_Delete(args);
+         return safe_strdup(
+             "error: run git through aimee, not a shell — use git_status, git_log, "
+             "git_diff, git_branch, git_commit, git_push or git_pr. They execute on "
+             "aimee-server, which holds the forge credential; this shell has none, so a "
+             "raw git/gh command cannot authenticate anyway. (Operator: "
+             "require_aimee_git: false in aimee.yaml opts out.)");
+      }
    }
 
    {
