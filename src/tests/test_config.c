@@ -367,6 +367,11 @@ int main(void)
        * class: a default-on save-guard that emits only the non-default state). */
       cfg.reduce_freeze_guard_enabled = 0;
       cfg.reduce_freeze_guard_horizon = 3;
+      /* require_aimee_git (default ON) + delegate_sandbox (default OFF): both are
+       * enforcement dials, so a value that does not survive save+reload is a guard
+       * silently in the wrong state after every restart. */
+      cfg.require_aimee_git = 0;
+      cfg.delegate_sandbox = 1;
       config_save(&cfg);
 
       static config_t cfg2;
@@ -398,6 +403,14 @@ int main(void)
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);
+      /* regression, the MIRROR of the remote_writes bug above: require_aimee_git was
+       * WRITTEN by config_save and never PARSED back, so `require_aimee_git: false`
+       * in aimee.yaml did nothing and the dial silently reverted to ON at every
+       * restart — while cmd_hooks.c told operators that exact line was the way to
+       * turn it off. Save-without-parse and parse-without-save are the same bug from
+       * opposite ends; a round-trip is the only thing that catches either. */
+      assert(cfg2.require_aimee_git == 0);
+      assert(cfg2.delegate_sandbox == 1);
       assert(cfg2.ingress_preinject_assembly_budget == 8192);
       assert(cfg2.ingress_max_raw_scans == 2);
       assert(cfg2.workspace_count == 3);
