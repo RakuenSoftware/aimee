@@ -16,10 +16,11 @@ current version and prints it once after an upgrade.
   bridge; use `aimee persona use <name>` instead.
 - **Removed: the `aimee work` queue.** `work add|add-batch|claim|complete|fail|
   list|board|cancel|release|clear|gc|sync-proposals|stats`, the `/v1/work/*`
-  routes, and the `work_list` / `work_board` MCP tools are gone. Existing
-  databases keep their `work_queue` and `work_queue_log` tables and rows —
-  nothing reads them, and the upgrade does not drop user data. Fresh installs
-  never create them.
+  routes, and the `work_list` / `work_board` MCP tools are gone. **Upgrading drops
+  the `work_queue` and `work_queue_log` tables**, including any rows still in
+  them: nothing reads that data any more, and leaving the tables behind would
+  make an upgraded database permanently different from a fresh install. If you
+  still need the contents, dump them before upgrading.
 - **Removed: `aimee migrate v2`.** The server side was retired some time ago and
   answers `UNKNOWN_METHOD`; the command could not do anything but fail. The
   client plumbing is now gone too.

@@ -44,6 +44,18 @@ static int col_exists(sqlite3 *db, const char *tbl, const char *col)
    return found;
 }
 
+static int table_exists(sqlite3 *db, const char *tbl)
+{
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1", -1, &st,
+                          NULL) != SQLITE_OK)
+      return 0;
+   sqlite3_bind_text(st, 1, tbl, -1, SQLITE_STATIC);
+   int found = (sqlite3_step(st) == SQLITE_ROW);
+   sqlite3_finalize(st);
+   return found;
+}
+
 /* ── tests ──────────────────────────────────────────────────────────────── */
 
 static void test_busy_handler_api(void)
@@ -133,10 +145,53 @@ static void test_trigram_table_created(void)
 
 /* ── main ───────────────────────────────────────────────────────────────── */
 
+/* The retired work queue's tables are dropped on upgrade, not left behind.
+ *
+ * Guards the disposition, not just the SQL: a legacy DB carries work_queue +
+ * work_queue_log with rows, and applying the schema must remove both. Leaving
+ * them would make an upgraded DB and a fresh install structurally different
+ * forever, which is exactly the drift this migration exists to prevent. */
+static void test_retired_work_queue_tables_are_dropped(void)
+{
+   sqlite3 *db = open_mem();
+   /* A legacy DB, mid-flight: both tables present and non-empty. */
+   assert(sqlite3_exec(db,
+                       "CREATE TABLE work_queue (id TEXT PRIMARY KEY, title TEXT);"
+                       "CREATE TABLE work_queue_log (id INTEGER PRIMARY KEY, item_id TEXT);"
+                       "INSERT INTO work_queue VALUES ('wq1', 'legacy item');"
+                       "INSERT INTO work_queue_log VALUES (1, 'wq1');",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(table_exists(db, "work_queue"));
+   assert(table_exists(db, "work_queue_log"));
+
+   char err[256] = "";
+   assert(db1_apply_schema_sqlite(db, err, sizeof(err)) == 0);
+
+   assert(!table_exists(db, "work_queue"));
+   assert(!table_exists(db, "work_queue_log"));
+   sqlite3_close(db);
+   printf("  PASS: test_retired_work_queue_tables_are_dropped\n");
+}
+
+/* A fresh DB must not resurrect them, and the drop must not abort the apply
+ * when there is nothing to drop (the statements run with errors ignored). */
+static void test_fresh_db_has_no_work_queue_tables(void)
+{
+   sqlite3 *db = open_mem();
+   char err[256] = "";
+   assert(db1_apply_schema_sqlite(db, err, sizeof(err)) == 0);
+   assert(!table_exists(db, "work_queue"));
+   assert(!table_exists(db, "work_queue_log"));
+   sqlite3_close(db);
+   printf("  PASS: test_fresh_db_has_no_work_queue_tables\n");
+}
+
 int main(void)
 {
    printf("db1_write_retry:\n");
    test_busy_handler_api();
+   test_retired_work_queue_tables_are_dropped();
+   test_fresh_db_has_no_work_queue_tables();
    test_reconcile_adds_missing_column();
    test_reconcile_idempotent();
    test_trigram_table_created();

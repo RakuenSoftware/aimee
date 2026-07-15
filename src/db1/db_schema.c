@@ -60,6 +60,15 @@ static void db1_run_migrations(sqlite3 *db)
         * over, leaving only idx_ensembles_status (created by the schema SQL). */
        "ALTER TABLE workflow_sessions RENAME TO ensembles",
        "DROP INDEX IF EXISTS idx_workflow_sessions_status",
+       /* The inter-session work queue is retired. Its tables are dropped rather
+        * than left behind: an upgraded DB would otherwise keep them forever while
+        * a fresh install never creates them, so the two would diverge by
+        * installation history — and any code that still touched them would work
+        * on one and fail on the other. Nothing reads these rows now; the queue's
+        * whole surface (CLI, /v1 routes, MCP tools, handlers) is gone. Dropped
+        * child-first, though there is no FK between them. */
+       "DROP TABLE IF EXISTS work_queue_log",
+       "DROP TABLE IF EXISTS work_queue",
        NULL,
    };
    for (int i = 0; migrations[i]; i++)

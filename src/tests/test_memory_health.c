@@ -10,6 +10,36 @@
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 
+/* Sum of a relation's edge weights — a cheap stand-in for "did anything change".
+ * Weight is the only column normalize touches. */
+static long long edge_weight_checksum(const char *relation)
+{
+   char qerr[128] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT COALESCE(SUM(weight), 0) FROM entity_edges WHERE relation = ?1", qerr,
+       sizeof(qerr));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", relation);
+   assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+   long long v = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return v;
+}
+
+static int edge_weight_max(const char *relation)
+{
+   char qerr[128] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT COALESCE(MAX(weight), 0) FROM entity_edges WHERE relation = ?1", qerr,
+       sizeof(qerr));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", relation);
+   assert(aimee_pg_step(st, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
+   int v = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return v;
+}
+
 int main(void)
 {
    printf("memory_health: ");
@@ -221,6 +251,57 @@ int main(void)
       aimee_pg_finalize(stmt);
       assert(rows == 1); /* the prune must not have eaten the fixture */
       assert(max_w == 100);
+   }
+
+   /* --- normalize converges and then stops writing ---
+    *
+    * The property both backends must satisfy, tested without depending on either
+    * one's UPDATE semantics. postgres divides by a statement-start snapshot of
+    * MAX(weight); the sqlite shim re-evaluates it per row and sees its own
+    * writes, so the per-run arithmetic legitimately differs (2,4 -> 50,100 on
+    * postgres; 50,8 then 100,8 under the shim). What must hold everywhere is the
+    * fixpoint: the per-relation maximum ends at 100, and once converged a further
+    * maintenance cycle changes nothing.
+    *
+    * The second half is the one that matters operationally. normalize now runs on
+    * EVERY maintenance cycle, so rewriting rows whose value is already correct
+    * would burn postgres WAL and bump updated_at forever on an idle graph. It did
+    * exactly that (measured: 2 of 2 rows on a converged graph) until the pass
+    * learned to skip converged rows. Asserted on the ROWS-UPDATED count, not on a
+    * checksum: rewriting a row to the value it already holds is a real write that
+    * no value comparison can see. */
+   {
+      char qerr[128] = "";
+      memory_t anchor;
+      memory_insert(TIER_L1, KIND_FACT, "conv-anchor", "anchor for convergence", 0.9, "sess-c",
+                    &anchor);
+
+      aimee_pg_stmt_t *ins =
+          aimee_pg_prepare(db2_conn(),
+                           "INSERT INTO entity_edges (source, relation, target, weight) VALUES "
+                           "('conv-anchor', 'rel-conv', 'conv-anchor', 3), "
+                           "('conv-anchor', 'rel-conv', 'conv-anchor', 6), "
+                           "('conv-anchor', 'rel-conv', 'conv-anchor', 9)",
+                           qerr, sizeof(qerr));
+      assert(ins);
+      assert(aimee_pg_step(ins, qerr, sizeof(qerr)) == AIMEE_PG_DONE);
+      aimee_pg_finalize(ins);
+
+      /* Drive to the fixpoint. Three cycles is enough for either backend. */
+      int p_ = 0, d_ = 0, e_ = 0;
+      for (int i = 0; i < 3; i++)
+         memory_run_maintenance(&p_, &d_, &e_);
+
+      long long before = edge_weight_checksum("rel-conv");
+      int max_w = edge_weight_max("rel-conv");
+      assert(max_w == 100); /* converged: the per-relation max is normalized */
+
+      /* Converged: the pass must now touch nothing at all. */
+      assert(memory_graph_normalize() == 0); /* zero rows rewritten, not "same values" */
+
+      memory_run_maintenance(&p_, &d_, &e_);
+      long long after = edge_weight_checksum("rel-conv");
+      assert(after == before); /* and the values stay put */
    }
 
    db1_shutdown();

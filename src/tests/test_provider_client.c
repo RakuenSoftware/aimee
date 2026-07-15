@@ -129,6 +129,68 @@ static void test_parse_failures(void)
    printf("provider_client: parse failures ok\n");
 }
 
+/* The reasoning_content shape matrix.
+ *
+ * These are the JSON shapes real providers actually emit, and the precedence
+ * between them is the whole point: reasoning_content is PRIVATE reasoning, never
+ * the answer. The one exception is content:null — the answer is absent and the
+ * reasoning is all there is, which is why the old code returned rc=-1
+ * "unparseable provider response" and threw a usable reply away. Each case below
+ * pins one shape so that recovery cannot quietly widen into "reasoning is the
+ * answer whenever content looks empty". */
+static void test_parse_reasoning_shapes(void)
+{
+   provider_completion_t out;
+
+   /* (1) both present: content wins, reasoning is handed back separately. */
+   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":\"the answer\","
+                                       "\"reasoning_content\":\"weighing it up\"}}]}",
+                                       &out) == 0);
+   assert(out.content && strcmp(out.content, "the answer") == 0);
+   assert(out.reasoning && strcmp(out.reasoning, "weighing it up") == 0);
+   provider_completion_free(&out);
+
+   /* (2) content:null with reasoning — the shape that used to fail outright.
+    * The reasoning IS the reply here; recovering it is the fix. */
+   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":null,"
+                                       "\"reasoning_content\":\"recovered body\"}}]}",
+                                       &out) == 0);
+   assert(out.content && strcmp(out.content, "recovered body") == 0);
+   provider_completion_free(&out);
+
+   /* (3) content absent entirely (not an explicit null) behaves the same. */
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"message\":{\"reasoning_content\":\"only reasoning\"}}]}", &out) ==
+          0);
+   assert(out.content && strcmp(out.content, "only reasoning") == 0);
+   provider_completion_free(&out);
+
+   /* (4) reasoning present but NOT a string: no coercion, no silent fallback.
+    * A malformed field must not become the answer. Guarded by the conjunction
+    * cJSON_IsString(reasoning) && reasoning->valuestring && ...[0] — belt and
+    * braces, so dropping either half alone is still safe; drop both and this case
+    * segfaults on strdup(NULL), which is what it is here to catch. */
+   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":null,"
+                                       "\"reasoning_content\":{\"nested\":1}}}]}",
+                                       &out) == -1);
+   provider_completion_free(&out);
+
+   /* (5) neither: still the honest failure it always was. */
+   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":null}}]}", &out) ==
+          -1);
+   provider_completion_free(&out);
+
+   /* (6) a <think> preamble in content is split, not deleted: the answer is the
+    * tail and the reasoning is preserved on the side. */
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"message\":{\"content\":\"<think>hmm</think>real answer\"}}]}",
+              &out) == 0);
+   assert(out.content && strcmp(out.content, "real answer") == 0);
+   provider_completion_free(&out);
+
+   printf("provider_client: reasoning shapes ok\n");
+}
+
 static void test_complete_arg_guards(void)
 {
    char err[128];
@@ -341,6 +403,7 @@ int main(void)
    test_build_options_and_schema();
    test_parse_success();
    test_parse_failures();
+   test_parse_reasoning_shapes();
    test_complete_arg_guards();
    test_complete_success();
    test_complete_trailing_slash();
