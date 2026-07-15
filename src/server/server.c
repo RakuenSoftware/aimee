@@ -12,6 +12,7 @@
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "primary_cli_ingestor.h"
 #include "server.h"
+#include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 
 #include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
@@ -2137,6 +2138,12 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * end-to-end server-side. Registration runs nothing on its own — a run begins
     * only when intake creates a work item and the autonomy driver advances it. */
    wfe_autonomy_register();
+   /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
+    * precede any toolset_registry_init() / build_tools_array(), which snapshot the
+    * registrations. aimee's agents and an external MCP client now reach the SAME
+    * handler, so the two surfaces cannot drift apart: the drift is what left review
+    * panelists unable to ask "is this still called?" while Claude Code could. */
+   mcp_tool_register_native_surface();
    /* Hand the native agent surface aimee's git-write tools. Without this the
     * builtin set is read-only git, so a delegate's ONLY way to land work is to
     * shell out to `git` — the thing we then tell it not to do. The tools are

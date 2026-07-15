@@ -1359,11 +1359,29 @@ static void acp_stream_delta(const char *delta, void *ud)
 }
 
 /* Per-tool callback: emit a standard ACP session/update tool_call notification
- * as each tool starts/completes during the turn. `ud` carries the session id. */
+ * as each tool starts/completes during the turn. `ud` carries the session id.
+ *
+ * The toolCallId must be unique within the session — a client keys the
+ * tool_call_update off it to find the tool_call it updates. It used to be the tool
+ * name, so an agent that read three files emitted three calls under one id and the
+ * client had no way to tell them apart. Number them instead.
+ *
+ * A plain counter is enough: this runs on the one thread draining the server's
+ * event stream, and the server emits each tool's started before its completed, so
+ * "the current value" always names the call in flight. It lives as long as the
+ * process, which for `aimee acp` is exactly one ACP session — the scope the id
+ * must be unique over. */
+static unsigned g_acp_tool_seq;
+
 static void acp_stream_tool(const char *phase, const char *name, void *ud)
 {
    char out[1024];
-   if (acp_build_tool_update((const char *)ud, phase, name, out, sizeof(out)) == 1 && out[0])
+   char call_id[128];
+   if (!phase || strcmp(phase, "completed") != 0)
+      g_acp_tool_seq++;
+   snprintf(call_id, sizeof(call_id), "%s-%u", name ? name : "tool", g_acp_tool_seq);
+   if (acp_build_tool_update((const char *)ud, call_id, phase, name, out, sizeof(out)) == 1 &&
+       out[0])
    {
       fputs(out, stdout);
       fputc('\n', stdout);

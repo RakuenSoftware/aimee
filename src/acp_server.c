@@ -327,9 +327,18 @@ int acp_build_update_notification(const char *session_id, const char *delta, cha
 
 /* Build a standard ACP tool-call session/update notification. `phase` is
  * "started" (→ sessionUpdate "tool_call", status "in_progress") or "completed"
- * (→ "tool_call_update", status "completed"). Pure. Returns 1. */
-int acp_build_tool_update(const char *session_id, const char *phase, const char *tool_name,
-                          char *out, size_t out_n)
+ * (→ "tool_call_update", status "completed").
+ *
+ * `tool_call_id` must be unique WITHIN THE SESSION: it is the handle a client uses
+ * to match a tool_call_update to the tool_call it updates. It used to be the tool
+ * NAME, which is not unique — an agent that reads three files emitted three calls
+ * sharing one id, and a client folds those into a single entry that flips between
+ * in_progress and completed as each one lands. The caller numbers them; this stays
+ * pure. `tool_name` remains the human-facing title.
+ *
+ * Pure. Returns 1. */
+int acp_build_tool_update(const char *session_id, const char *tool_call_id, const char *phase,
+                          const char *tool_name, char *out, size_t out_n)
 {
    int completed = (phase && strcmp(phase, "completed") == 0);
    cJSON *root = cJSON_CreateObject();
@@ -339,7 +348,9 @@ int acp_build_tool_update(const char *session_id, const char *phase, const char 
    cJSON_AddStringToObject(params, "sessionId", session_id ? session_id : "");
    cJSON *update = cJSON_AddObjectToObject(params, "update");
    cJSON_AddStringToObject(update, "sessionUpdate", completed ? "tool_call_update" : "tool_call");
-   cJSON_AddStringToObject(update, "toolCallId", tool_name ? tool_name : "");
+   cJSON_AddStringToObject(update, "toolCallId",
+                           (tool_call_id && tool_call_id[0]) ? tool_call_id
+                                                             : (tool_name ? tool_name : ""));
    if (!completed)
       cJSON_AddStringToObject(update, "title", tool_name ? tool_name : "");
    cJSON_AddStringToObject(update, "status", completed ? "completed" : "in_progress");

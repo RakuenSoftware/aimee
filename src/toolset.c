@@ -17,9 +17,19 @@ typedef struct
 } builtin_toolset_t;
 
 static const builtin_toolset_t BUILTINS[] = {
+    /* The code-intelligence tools (index_find_callers, index_blast_radius, ...) are
+     * NOT listed here: they are declared native in the server's MCP table and land in
+     * `core` and `review_indexed` by registration. One declaration, one schema, one
+     * handler shared with external MCP clients. */
     {"core",
      {NULL},
-     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory", NULL}},
+     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory",
+      /* aimee condenses long tool output and leaves a '[... ref "tc-..."]' pointer.
+       * The tool that expands it was advertised to every agent (TSURF_ALL) and named
+       * by no toolset, so agent_tools_filter_for_role stripped it from every role
+       * that has one: agents were handed a ref they had no tool to redeem. It
+       * belongs in core because the condensation applies to every tool. */
+      "tool_output_get", NULL}},
     {"git", {NULL}, {"git_status", "git_log", "git_diff", NULL}},
     /* Git WRITES, deliberately split from the read-only `git` set above: `git` is
      * inherited by `readonly` (and thence review), which must never gain the power
@@ -83,6 +93,7 @@ static const char *const KNOWN_TOOLS[] = {
     "test",
     "request_input",
     "code_search",
+    "tool_output_get",
     "web_search",
     "create_note",
     "list_notes",
@@ -121,6 +132,41 @@ static int name_valid(const char *name)
    return 1;
 }
 
+/* Tools registered from the MCP table at startup (see toolset_register_native_tool).
+ * Sized to hold every MCP tool: the intended end state is that most of them are
+ * native, so the table growing must never silently truncate. */
+typedef struct
+{
+   char name[TOOLSET_TOOL_MAX];
+   char toolset[TOOLSET_NAME_MAX];
+} registered_tool_t;
+
+static registered_tool_t g_registered[256];
+static int g_registered_count;
+
+void toolset_register_native_tool(const char *name, const char *toolset)
+{
+   if (!name || !name[0] || !toolset || !toolset[0])
+      return;
+   /* Dedup on the (tool, set) PAIR, not the name: one tool legitimately belongs to
+    * several sets — the code-intelligence tools go to coding roles and to review
+    * panelists both, and those sets do not include one another. */
+   for (int i = 0; i < g_registered_count; i++)
+      if (strcmp(g_registered[i].name, name) == 0 && strcmp(g_registered[i].toolset, toolset) == 0)
+         return; /* idempotent: re-registration is not an error */
+   if (g_registered_count >= (int)(sizeof(g_registered) / sizeof(g_registered[0])))
+   {
+      /* Loud: a dropped tool is exactly the silent-uncallable failure this
+       * registry exists to end. */
+      LOG_ERROR("toolset", "native tool registry full (%d); '%s' DROPPED and uncallable",
+                g_registered_count, name);
+      return;
+   }
+   registered_tool_t *r = &g_registered[g_registered_count++];
+   snprintf(r->name, sizeof(r->name), "%s", name);
+   snprintf(r->toolset, sizeof(r->toolset), "%s", toolset);
+}
+
 int toolset_tool_known(const char *name)
 {
    if (!name || !name[0])
@@ -129,6 +175,9 @@ int toolset_tool_known(const char *name)
       return 1;
    for (int i = 0; KNOWN_TOOLS[i]; i++)
       if (strcmp(KNOWN_TOOLS[i], name) == 0)
+         return 1;
+   for (int i = 0; i < g_registered_count; i++)
+      if (strcmp(g_registered[i].name, name) == 0)
          return 1;
    return 0;
 }
@@ -194,6 +243,21 @@ void toolset_registry_init(toolset_registry_t *registry)
          toolset_add_include(def, BUILTINS[i].include[j]);
       for (int j = 0; BUILTINS[i].tools[j]; j++)
          toolset_add_tool(def, BUILTINS[i].tools[j]);
+   }
+   /* Fold in the tools the server registered from the MCP table. A registration
+    * naming a set that does not exist is a typo in the MCP table, not a reason to
+    * invent a set: say so rather than create an orphan nothing includes. */
+   for (int i = 0; i < g_registered_count; i++)
+   {
+      if (!toolset_registry_find(registry, g_registered[i].toolset))
+      {
+         LOG_ERROR("toolset", "native tool '%s' names unknown toolset '%s'; not callable",
+                   g_registered[i].name, g_registered[i].toolset);
+         continue;
+      }
+      toolset_def_t *def = toolset_registry_upsert(registry, g_registered[i].toolset);
+      if (def)
+         toolset_add_tool(def, g_registered[i].name);
    }
 }
 

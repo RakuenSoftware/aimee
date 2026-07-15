@@ -3,6 +3,8 @@
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "server_mcp_internal.h"
 #include "server.h"
+#include "agent_tools.h" /* the native surface this table registers into */
+#include "toolset.h"     /* toolset_register_native_tool */
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "dstr.h"
@@ -1315,99 +1317,122 @@ static cJSON *mcph_workflow_run(struct mcp_call *c)
    return content;
 }
 
-/* ── name → handler table (exact match; order is irrelevant — names unique) ── */
+/* ── name → handler table (exact match; order is irrelevant — names unique) ──
+ *
+ * THIS TABLE IS THE SINGLE SOURCE OF TRUTH for which tools aimee has.
+ *
+ * `native` names the toolset(s) — comma-separated — whose roles may call the tool
+ * as one of aimee's OWN agents (a delegate, a review panelist). NULL means the tool
+ * is for external MCP clients only. Set it and the tool becomes native everywhere:
+ * advertised, schema'd from this same handler's MCP schema, dispatchable, and
+ * present in the toolset — no second registry to keep in step, because the second
+ * registry is what kept going wrong. git_commit/git_push/git_pr were MCP-only, so
+ * aimee's implement delegate had no way to land work but shelling out to git — the
+ * one thing require_aimee_git forbids. index_find_callers was MCP-only, so a review
+ * panel asked "is this still called?" hedged on a symbol with twelve callers one
+ * query away. Both shipped green.
+ *
+ * Marking a tool native asserts it works with NO client session behind it: a native
+ * call passes ctx=NULL and conn=NULL. Today no handler touches ctx and only
+ * session_search / workflow_run touch conn — keep those two external-only (they are
+ * about an external client's own session anyway, and are EXEMPT in
+ * check-native-tool-parity.py for that reason).
+ *
+ * scripts/check-native-tool-parity.py fails the build on an unmarked, unexempted
+ * new tool, so this stays true rather than becoming a comment that used to be. */
 
 static const struct
 {
    const char *name;
    mcp_tool_handler_fn fn;
+   const char *native;
 } mcp_tool_table[] = {
-    {"get_help", mcph_get_help},
-    {"ast_grep_search", mcph_ast_grep_search},
-    {"search_memory", mcph_search_memory},
-    {"mutate", mcph_mutate},
-    {"memory_ask", mcph_memory_ask},
-    {"search_graph", mcph_search_graph},
-    {"get_episode", mcph_get_episode},
-    {"get_entity", mcph_get_entity},
-    {"get_entity_edges", mcph_get_entity_edges},
-    {"get_context_block", mcph_get_context_block},
-    {"memory_get", mcph_memory_get},
-    {"list_facts", mcph_list_facts},
-    {"memory_briefing", mcph_memory_briefing},
-    {"get_identity", mcph_get_identity},
-    {"list_curiosity_items", mcph_list_curiosity_items},
-    {"create_prospective_memory", mcph_create_prospective_memory},
-    {"list_prospective_memories", mcph_list_prospective_memories},
-    {"complete_prospective_memory", mcph_complete_prospective_memory},
-    {"memory_alerts", mcph_memory_alerts},
-    {"memory_recall", mcph_memory_recall},
-    {"list_epistemic_directives", mcph_list_epistemic_directives},
-    {"create_epistemic_directive", mcph_create_epistemic_directive},
-    {"resolve_epistemic_directive", mcph_resolve_epistemic_directive},
-    {"memory_maintain", mcph_memory_maintain},
-    {"get_host", mcph_get_host},
-    {"list_hosts", mcph_list_hosts},
-    {"find_symbol", mcph_find_symbol},
-    {"preview_blast_radius", mcph_preview_blast_radius},
-    {"record_attempt", mcph_record_attempt},
-    {"list_attempts", mcph_list_attempts},
-    {"rules_propose", mcph_rules_propose},
-    {"rules_list", mcph_rules_list},
-    {"store_workflow", mcph_store_workflow},
-    {"learning_propose", mcph_learning_propose},
-    {"learning_review", mcph_learning_review},
-    {"skill_manage", mcph_skill_manage},
-    {"create_note", mcph_create_note},
-    {"list_notes", mcph_list_notes},
-    {"search_notes", mcph_search_notes},
-    {"job_start", mcph_job_start},
-    {"job_status", mcph_job_status},
-    {"autopilot", mcph_autopilot},
-    {"lsp_diagnostics", mcph_lsp_diagnostics},
-    {"lsp_definition", mcph_lsp_definition_or_references},
-    {"lsp_references", mcph_lsp_definition_or_references},
-    {"session_context_search", mcph_session_context_search},
-    {"session_context_expand", mcph_session_context_expand},
-    {"session_context_status", mcph_session_context_status},
-    {"session_search", mcph_session_search},
-    {"payload_rewrite_status", mcph_payload_rewrite_status},
-    {"compact_context", mcph_compact_context},
-    {"set_primary_agent", mcph_set_primary_agent},
-    {"upsert_persona", mcph_upsert_persona},
-    {"upsert_role_template", mcph_upsert_role_template},
+    {"get_help", mcph_get_help, NULL},
+    {"ast_grep_search", mcph_ast_grep_search, "core,review_indexed"},
+    {"search_memory", mcph_search_memory, NULL},
+    {"mutate", mcph_mutate, NULL},
+    {"memory_ask", mcph_memory_ask, NULL},
+    {"search_graph", mcph_search_graph, "core,review_indexed"},
+    {"get_episode", mcph_get_episode, NULL},
+    {"get_entity", mcph_get_entity, NULL},
+    {"get_entity_edges", mcph_get_entity_edges, NULL},
+    {"get_context_block", mcph_get_context_block, "core,review_indexed"},
+    {"memory_get", mcph_memory_get, NULL},
+    {"list_facts", mcph_list_facts, NULL},
+    {"memory_briefing", mcph_memory_briefing, NULL},
+    {"get_identity", mcph_get_identity, NULL},
+    {"list_curiosity_items", mcph_list_curiosity_items, NULL},
+    {"create_prospective_memory", mcph_create_prospective_memory, NULL},
+    {"list_prospective_memories", mcph_list_prospective_memories, NULL},
+    {"complete_prospective_memory", mcph_complete_prospective_memory, NULL},
+    {"memory_alerts", mcph_memory_alerts, NULL},
+    {"memory_recall", mcph_memory_recall, NULL},
+    {"list_epistemic_directives", mcph_list_epistemic_directives, NULL},
+    {"create_epistemic_directive", mcph_create_epistemic_directive, NULL},
+    {"resolve_epistemic_directive", mcph_resolve_epistemic_directive, NULL},
+    {"memory_maintain", mcph_memory_maintain, NULL},
+    {"get_host", mcph_get_host, NULL},
+    {"list_hosts", mcph_list_hosts, NULL},
+    {"find_symbol", mcph_find_symbol, NULL},
+    {"preview_blast_radius", mcph_preview_blast_radius, NULL},
+    {"record_attempt", mcph_record_attempt, NULL},
+    {"list_attempts", mcph_list_attempts, NULL},
+    {"rules_propose", mcph_rules_propose, NULL},
+    {"rules_list", mcph_rules_list, NULL},
+    {"store_workflow", mcph_store_workflow, NULL},
+    {"learning_propose", mcph_learning_propose, NULL},
+    {"learning_review", mcph_learning_review, NULL},
+    {"skill_manage", mcph_skill_manage, NULL},
+    {"create_note", mcph_create_note, NULL},
+    {"list_notes", mcph_list_notes, NULL},
+    {"search_notes", mcph_search_notes, NULL},
+    {"job_start", mcph_job_start, NULL},
+    {"job_status", mcph_job_status, NULL},
+    {"autopilot", mcph_autopilot, NULL},
+    {"lsp_diagnostics", mcph_lsp_diagnostics, NULL},
+    {"lsp_definition", mcph_lsp_definition_or_references, NULL},
+    {"lsp_references", mcph_lsp_definition_or_references, NULL},
+    {"session_context_search", mcph_session_context_search, NULL},
+    {"session_context_expand", mcph_session_context_expand, NULL},
+    {"session_context_status", mcph_session_context_status, NULL},
+    {"session_search", mcph_session_search, NULL},
+    {"payload_rewrite_status", mcph_payload_rewrite_status, NULL},
+    {"compact_context", mcph_compact_context, NULL},
+    {"set_primary_agent", mcph_set_primary_agent, NULL},
+    {"upsert_persona", mcph_upsert_persona, NULL},
+    {"upsert_role_template", mcph_upsert_role_template, NULL},
     /* P3 extended read-only tools */
-    {"roadmap_list", mcph_roadmap_list},
-    {"roadmap_show", mcph_roadmap_show},
-    {"task_list", mcph_task_list},
-    {"index_find_callers", mcph_index_find_callers},
-    {"index_structure", mcph_index_structure},
-    {"code_span_get", mcph_code_span_get},
-    {"index_hybrid", mcph_index_hybrid},
-    {"index_graph_hubs", mcph_index_graph_hubs},
-    {"index_graph_audit", mcph_index_graph_audit},
-    {"index_graph_diff", mcph_index_graph_diff},
-    {"index_lessons", mcph_index_lessons},
-    {"index_graph_surprising", mcph_index_graph_surprising},
-    {"index_graph_node", mcph_index_graph_node},
-    {"memory_explain_match", mcph_memory_explain_match},
+    {"roadmap_list", mcph_roadmap_list, NULL},
+    {"roadmap_show", mcph_roadmap_show, NULL},
+    {"task_list", mcph_task_list, NULL},
+    {"index_find_callers", mcph_index_find_callers, "core,review_indexed"},
+    {"index_structure", mcph_index_structure, "core,review_indexed"},
+    {"code_span_get", mcph_code_span_get, NULL},
+    {"index_hybrid", mcph_index_hybrid, NULL},
+    {"index_graph_hubs", mcph_index_graph_hubs, NULL},
+    {"index_graph_audit", mcph_index_graph_audit, NULL},
+    {"index_graph_diff", mcph_index_graph_diff, NULL},
+    {"index_lessons", mcph_index_lessons, NULL},
+    {"index_graph_surprising", mcph_index_graph_surprising, NULL},
+    {"index_graph_node", mcph_index_graph_node, NULL},
+    {"memory_explain_match", mcph_memory_explain_match, NULL},
     /* P3b */
-    {"index_blast_radius", mcph_index_blast_radius},
-    {"memory_provenance", mcph_memory_provenance},
-    {"memory_fact_history", mcph_memory_fact_history},
-    {"dashboard_metrics", mcph_dashboard_metrics},
+    {"index_blast_radius", mcph_index_blast_radius, "core,review_indexed"},
+    {"memory_provenance", mcph_memory_provenance, NULL},
+    {"memory_fact_history", mcph_memory_fact_history, NULL},
+    {"dashboard_metrics", mcph_dashboard_metrics, NULL},
     /* Structured-PDF evidence (access-gated citation retrieval) */
-    {"pdf_search_chunks", mcph_pdf_search_chunks},
-    {"pdf_open_page", mcph_pdf_open_page},
-    {"pdf_open_neighbors", mcph_pdf_open_neighbors},
-    {"pdf_inspect_structure", mcph_pdf_inspect_structure},
-    {"pdf_lookup_table", mcph_pdf_lookup_table},
-    {"pdf_list_assets", mcph_pdf_list_assets},
-    {"pdf_open_asset", mcph_pdf_open_asset},
+    {"pdf_search_chunks", mcph_pdf_search_chunks, NULL},
+    {"pdf_open_page", mcph_pdf_open_page, NULL},
+    {"pdf_open_neighbors", mcph_pdf_open_neighbors, NULL},
+    {"pdf_inspect_structure", mcph_pdf_inspect_structure, NULL},
+    {"pdf_lookup_table", mcph_pdf_lookup_table, NULL},
+    {"pdf_list_assets", mcph_pdf_list_assets, NULL},
+    {"pdf_open_asset", mcph_pdf_open_asset, NULL},
     /* Primary-as-manager S2 interactive driver */
-    {"advance_request", mcph_advance_request},
+    {"advance_request", mcph_advance_request, NULL},
     /* Start a saved workflow-engine run from a written proposal */
-    {"workflow_run", mcph_workflow_run},
+    {"workflow_run", mcph_workflow_run, NULL},
 };
 
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
@@ -1416,4 +1441,71 @@ mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
       if (strcmp(mcp_tool_table[i].name, tool) == 0)
          return mcp_tool_table[i].fn;
    return NULL;
+}
+
+/* ── the native surface, derived from the table above ────────────────────── */
+
+/* Run an MCP tool for one of aimee's own agents: the same handler an external MCP
+ * client reaches, so there is no second implementation that can drift. ctx/conn are
+ * NULL — see the table's header for why only ctx/conn-free tools may be native. */
+static cJSON *mcp_native_call(const char *tool, cJSON *args, const char *sid)
+{
+   mcp_tool_handler_fn fn = mcp_tool_lookup(tool);
+   if (!fn)
+      return NULL;
+   struct mcp_call c = {
+       .ctx = NULL, .conn = NULL, .jargs = args, .sid = sid, .tool = tool, .structured = NULL};
+   return fn(&c);
+}
+
+/* The tool's tools/list entry ({"description","inputSchema"}), so the native surface
+ * advertises the tool's OWN schema instead of a hand-copied second one. Copying is
+ * how git_commit came to advertise parameters its handler never accepted.
+ * Caller owns the result. */
+static cJSON *mcp_native_advert(const char *tool)
+{
+   static cJSON *list = NULL;
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+   pthread_mutex_lock(&lock);
+   if (!list)
+      /* FLAT, not the collapsed list: mcp_collapse_families folds index_find_callers
+       * and friends into one multiplexed `index` tool, so a lookup by flat name found
+       * nothing and every code-intelligence tool was silently dropped from the advert
+       * ("has no usable advert; not offered natively") while still resolving in the
+       * toolset. The flat names stay directly callable (mcp_family_demux), so dispatch
+       * was fine and only the advert lied — exactly the silent shape this merge exists
+       * to end. Caught by running a real server, not by CI. */
+      list = mcp_build_tools_list_flat(); /* process-lifetime cache; the list is static */
+   cJSON *found = NULL;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, list)
+   {
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
+      if (cJSON_IsString(name) && strcmp(name->valuestring, tool) == 0)
+      {
+         found = cJSON_Duplicate(item, 1);
+         break;
+      }
+   }
+   pthread_mutex_unlock(&lock);
+   return found;
+}
+
+void mcp_tool_register_native_surface(void)
+{
+   agent_tools_set_mcp_provider(mcp_native_call, mcp_native_advert);
+   for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
+   {
+      if (!mcp_tool_table[i].native)
+         continue;
+      agent_tools_register_mcp_tool(mcp_tool_table[i].name);
+      /* `native` is a comma-separated set list: one tool can belong to several
+       * toolsets that do not include one another (coding roles and review
+       * panelists both need the code-intelligence tools). */
+      char sets[128];
+      snprintf(sets, sizeof(sets), "%s", mcp_tool_table[i].native);
+      for (char *save = NULL, *tok = strtok_r(sets, ",", &save); tok;
+           tok = strtok_r(NULL, ",", &save))
+         toolset_register_native_tool(mcp_tool_table[i].name, tok);
+   }
 }

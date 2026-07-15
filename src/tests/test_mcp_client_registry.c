@@ -623,11 +623,66 @@ static void test_tool_profile_filter(void)
    cJSON_Delete(t);
 }
 
+static int tools_have(cJSON *tools, const char *name)
+{
+   cJSON *t = NULL;
+   cJSON_ArrayForEach(t, tools)
+   {
+      cJSON *n = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+         return 1;
+   }
+   return 0;
+}
+
+/* The flat list keeps family members; the collapsed one folds them away.
+ *
+ * mcp_collapse_families presents coherent families as ONE multiplexed tool
+ * (index{command:"find_callers"}) to keep an external client's tool count down.
+ * aimee's own agents need the individual names, because a toolset grants tools one
+ * at a time -- review_indexed gets index_find_callers but not index_hybrid, which a
+ * single `index` tool cannot express.
+ *
+ * The native advert first looked the flat names up in the COLLAPSED list, found
+ * nothing, and silently dropped every code-intelligence tool ("has no usable
+ * advert; not offered natively") -- while the toolset still resolved them. So a
+ * review panel was granted index_find_callers and never offered it. Dispatch was
+ * fine throughout (the flat names stay callable via mcp_family_demux); only the
+ * advert lied. Four green CI runs and a passing unit test with a faked provider all
+ * missed it; a real server on real hardware caught it in one line of log. */
+static void test_flat_list_keeps_family_members(void)
+{
+   cJSON *flat = mcp_build_tools_list_flat();
+   cJSON *collapsed = mcp_build_tools_list();
+
+   /* A family member: flat has the individual tool, collapsed folds it into `index`. */
+   assert(tools_have(flat, "index_find_callers"));
+   assert(!tools_have(collapsed, "index_find_callers"));
+   assert(tools_have(collapsed, "index"));
+   assert(!tools_have(flat, "index"));
+
+   /* Every tool the native surface declares must survive in the flat list, or it is
+    * registered, resolvable in a toolset, and never offered to the model. */
+   const char *native[] = {"index_find_callers", "index_blast_radius", "index_structure",
+                           "get_context_block",  "search_graph",       "ast_grep_search"};
+   for (size_t i = 0; i < sizeof(native) / sizeof(native[0]); i++)
+      assert(tools_have(flat, native[i]));
+
+   /* A non-family tool is in both: collapsing changes nothing for it. */
+   assert(tools_have(flat, "ast_grep_search") && tools_have(collapsed, "ast_grep_search"));
+
+   assert(cJSON_GetArraySize(flat) > cJSON_GetArraySize(collapsed));
+   cJSON_Delete(flat);
+   cJSON_Delete(collapsed);
+   printf("  PASS: flat_list_keeps_family_members\n");
+}
+
 int main(void)
 {
    printf("test_mcp_client_registry\n");
    test_tools_list_surface();
    test_tool_profile_filter();
+   test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();
    test_namespaced_tools_and_dispatch();
    test_failed_client_does_not_abort_boot();
