@@ -27,6 +27,12 @@ struct mcp_call
 typedef cJSON *(*mcp_tool_handler_fn)(struct mcp_call *c);
 cJSON *json_result_content(cJSON *result);
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool);
+
+/* Give aimee's own agents the MCP tools marked native in mcp_tool_table, and
+ * register the handler that runs them. Call once at server startup, BEFORE the
+ * first toolset_registry_init() or build_tools_array(). See the table's header
+ * comment in server_mcp_call_table.c. */
+void mcp_tool_register_native_surface(void);
 cJSON *tool_complete_prospective_memory(cJSON *args);
 cJSON *smcp_tool_create_note(cJSON *args);
 cJSON *tool_create_prospective_memory(cJSON *args);

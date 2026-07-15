@@ -7,6 +7,11 @@
 /* Build the complete MCP tools list (core + git tools).
  * Returns a cJSON array suitable for tools/list responses. */
 cJSON *mcp_build_tools_list(void);
+/* The same list with coherent families left FLAT (uncollapsed). The collapsed form
+ * is a presentation choice for external clients — one `index` tool with a command
+ * discriminator instead of N. aimee's own agents need the individual names, because
+ * a toolset grants tools one at a time. See mcp_collapse_families. */
+cJSON *mcp_build_tools_list_flat(void);
 
 /* Resolve the active MCP presentation profile: the explicit argument if set,
  * else AIMEE_MCP_TOOL_PROFILE, else "core" (the lean default). Not owned. */

@@ -86,6 +86,40 @@ agent_git_write_fn agent_tools_git_write_provider(void);
 /* 1 if `name` is one of the git-write tools that ride the seam above. */
 int agent_tools_is_git_write(const char *name);
 
+/* MCP-derived tools ────────────────────────────────────────────────────────
+ *
+ * aimee's MCP dispatch table is the single source of truth for which tools exist.
+ * Entries marked native are registered here at startup so aimee's OWN agents get
+ * them too, deriving the advert, the schema and the dispatch from the one
+ * declaration instead of restating each by hand in a separate registry.
+ *
+ * That restating is not a hypothetical cost. git_commit/git_push/git_pr were
+ * MCP-only, so the implement delegate's only route to land work was shelling out
+ * to git — the exact thing require_aimee_git forbids. index_find_callers was
+ * MCP-only, so a review panel asked "is this still called?" had no tool that could
+ * answer and hedged on a symbol with twelve callers one query away. Both shipped
+ * green and were found by watching a delegate on real hardware.
+ *
+ * Reusing the MCP schema rather than writing a native one is deliberate: a second
+ * hand-written schema is how git_commit came to advertise parameters (add_all,
+ * set_upstream) that its handler had never accepted.
+ *
+ * `call` runs the tool; `advert` returns its MCP tools/list entry ({"description",
+ * "inputSchema"}, caller owns) or NULL if unknown. Unregistered — thin client,
+ * unit tests — no MCP-derived tool is advertised or dispatchable, so a binary
+ * without the server tier links and behaves exactly as before. */
+typedef struct cJSON *(*agent_mcp_call_fn)(const char *tool, struct cJSON *args, const char *sid);
+typedef struct cJSON *(*agent_mcp_advert_fn)(const char *tool);
+void agent_tools_set_mcp_provider(agent_mcp_call_fn call, agent_mcp_advert_fn advert);
+agent_mcp_call_fn agent_tools_mcp_call_provider(void);
+
+/* Declare an MCP tool as part of aimee's native surface. Idempotent. Must be
+ * called before the first build_tools_array() so the schema cache sees it. */
+void agent_tools_register_mcp_tool(const char *name);
+
+/* 1 if `name` was registered above and so dispatches through the MCP provider. */
+int agent_tools_is_mcp_derived(const char *name);
+
 /* Shell-git gate seam: 1 if this shell command must be refused because git belongs
  * to aimee (require_aimee_git). Registered by the server for the same reason as the
  * git-write provider — the decision needs the config dial, the forge credential and
