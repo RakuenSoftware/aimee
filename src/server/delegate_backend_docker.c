@@ -119,6 +119,16 @@ typedef struct
     * must not land root-owned. */
    int mount_host_tree;
    int mount_read_only; /* :ro — the tree is not this delegate's to change */
+   /* The in-container working directory, and what relative tool paths resolve
+    * against. Per-state, not the global resolve_docker_workdir(): a caller-provided
+    * tree is mounted at its OWN absolute host path (see docker_build_mounts), so
+    * /workspace is not where its files live. Anchoring resolution on a global while
+    * the mount moved is how a tool would read the wrong tree and report it as
+    * missing. */
+   char workdir[MAX_PATH_LEN];
+   /* Bind mounts for `docker create`, already in "<src>:<dst>[:ro]" form. */
+   char mounts[3][MAX_PATH_LEN * 2 + 8];
+   int mount_count;
 } docker_state_t;
 
 #define DOCKER_DEFAULT_IMAGE   "ubuntu:22.04"
@@ -210,6 +220,181 @@ static int run_docker(const char *const argv[])
    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+/* Read a linked worktree's `.git` pointer file: "gitdir: <absolute path>".
+ * Returns 0 and fills `out` on success. */
+static int docker_read_gitlink(const char *gitfile, char *out, size_t outsz)
+{
+   FILE *f = fopen(gitfile, "r");
+   if (!f)
+      return -1;
+   char line[MAX_PATH_LEN + 16];
+   if (!fgets(line, sizeof(line), f))
+   {
+      fclose(f);
+      return -1;
+   }
+   fclose(f);
+   const char *p = strstr(line, "gitdir:");
+   if (!p)
+      return -1;
+   p += 7;
+   while (*p == ' ' || *p == '\t')
+      p++;
+   size_t n = strlen(p);
+   while (n && (p[n - 1] == '\n' || p[n - 1] == '\r' || p[n - 1] == ' '))
+      n--;
+   if (!n || p[0] != '/' || n >= outsz)
+      return -1; /* must be absolute: a relative gitdir is not one we can mount */
+   memcpy(out, p, n);
+   out[n] = '\0';
+   return 0;
+}
+
+/* Add "<src>:<dst>[:ro]" to the state's mount list. */
+static int docker_add_mount(docker_state_t *st, const char *src, const char *dst, int ro)
+{
+   if (st->mount_count >= (int)(sizeof(st->mounts) / sizeof(st->mounts[0])))
+      return -1;
+   if ((size_t)snprintf(st->mounts[st->mount_count], sizeof(st->mounts[0]), "%s:%s%s", src, dst,
+                        ro ? ":ro" : "") >= sizeof(st->mounts[0]))
+      return -1;
+   st->mount_count++;
+   return 0;
+}
+
+/* Decide what to mount for a caller-provided tree `real` (already canonical).
+ *
+ * A LINKED WORKTREE's .git is a FILE holding `gitdir: <absolute host path>` into
+ * the main repo, so mounting the worktree alone leaves that path absent inside the
+ * container and every git command fails — after the delegate has started work,
+ * looking like a corrupt repo rather than a bad mount. Mounting the repo at its OWN
+ * absolute path makes the pointer resolve verbatim, with no rewriting.
+ *
+ * Isolation decides the modes, and they are measured, not assumed (validated on
+ * docker 26.1.5):
+ *   <repo>:ro     the whole tree is readable; a write outside the worktree fails
+ *                 with "Read-only file system"
+ *   <worktree>    this delegate's files, writable — a nested mount correctly
+ *                 overlays the read-only repo
+ *   <gitdir>      this delegate's git metadata, writable — `git status` refreshes
+ *                 its index here, so a read-only .git does not break it
+ * `git commit` inside then fails (blobs cannot be written to the :ro object store),
+ * which is intended: git_commit runs server-side and require_aimee_git forbids the
+ * shell route anyway.
+ *
+ * A PLAIN checkout needs none of that: one mount at its own absolute path.
+ * Returns 0 on success. */
+static int docker_build_mounts(docker_state_t *st, const char *real, int read_only)
+{
+   char gitmark[MAX_PATH_LEN];
+   if ((size_t)snprintf(gitmark, sizeof(gitmark), "%s/.git", real) >= sizeof(gitmark))
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace path '%s' is too long to check for .git; refusing", real);
+      return -1;
+   }
+   struct stat gst;
+   if (lstat(gitmark, &gst) != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace '%s' is not a git checkout (no .git); refusing to bind-mount an "
+                "arbitrary host directory into a delegate container",
+                real);
+      return -1;
+   }
+   if (S_ISLNK(gst.st_mode))
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace '%s' has a symlinked .git; refusing to treat it as a checkout", real);
+      return -1;
+   }
+
+   if (S_ISDIR(gst.st_mode))
+   {
+      /* Plain checkout: the tree carries its own .git. Mount it at its own absolute
+       * path so paths inside the container match the host's. */
+      snprintf(st->workdir, sizeof(st->workdir), "%s", real);
+      return docker_add_mount(st, real, real, read_only);
+   }
+
+   /* Linked worktree. */
+   char gitdir[MAX_PATH_LEN];
+   if (docker_read_gitlink(gitmark, gitdir, sizeof(gitdir)) != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace '%s': .git is a file but carries no absolute `gitdir:` pointer; "
+                "refusing rather than mounting a worktree whose git would be broken",
+                real);
+      return -1;
+   }
+   struct stat gdst;
+   if (stat(gitdir, &gdst) != 0 || !S_ISDIR(gdst.st_mode))
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace '%s': gitdir '%s' does not exist on the host; refusing", real, gitdir);
+      return -1;
+   }
+   /* The repo root is what contains that gitdir: <repo>/.git/worktrees/<name>. */
+   const char *marker = strstr(gitdir, "/.git/");
+   if (!marker)
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace '%s': gitdir '%s' is not under a <repo>/.git/ — cannot derive the repo "
+                "root to mount; refusing",
+                real, gitdir);
+      return -1;
+   }
+   char repo[MAX_PATH_LEN];
+   size_t rlen = (size_t)(marker - gitdir);
+   if (rlen == 0 || rlen >= sizeof(repo))
+      return -1;
+   memcpy(repo, gitdir, rlen);
+   repo[rlen] = '\0';
+
+   /* The worktree and its gitdir must live under that repo root, or the nested
+    * overlay does not apply and we would be mounting unrelated trees. */
+   size_t plen = strlen(repo);
+   if (strncmp(real, repo, plen) != 0 || (real[plen] != '/' && real[plen] != '\0'))
+   {
+      aimee_log(LOG_ERROR, "delegate-backend-docker",
+                "workspace '%s' is not inside its repo root '%s'; refusing (the nested "
+                "read-only overlay would not apply)",
+                real, repo);
+      return -1;
+   }
+
+   snprintf(st->workdir, sizeof(st->workdir), "%s", real);
+   /* Order matters: the repo first, then the writable parts nested over it. */
+   if (docker_add_mount(st, repo, repo, 1) != 0 ||
+       docker_add_mount(st, real, real, read_only) != 0 ||
+       docker_add_mount(st, gitdir, gitdir, read_only) != 0)
+      return -1;
+   aimee_log(LOG_INFO, "delegate-backend-docker",
+             "linked worktree '%s': mounting repo '%s' read-only with the worktree and its gitdir "
+             "%s over it",
+             real, repo, read_only ? "read-only" : "writable");
+   return 0;
+}
+
+/* 32-bit FNV-1a over the mount specs. The container is resumed by NAME
+ * (`docker start` first, create only on failure), so a task id reused with a
+ * DIFFERENT workspace would silently resume a container carrying the OLD mounts —
+ * the delegate would then work in the previous tree and nothing would say so. I hit
+ * exactly this while testing: containers created against one image were resumed and
+ * the new image ignored. Folding the mounts into the name makes a changed mount a
+ * different container by construction. */
+static unsigned docker_mounts_fingerprint(const docker_state_t *st)
+{
+   unsigned h = 2166136261u;
+   for (int i = 0; i < st->mount_count; i++)
+      for (const char *p = st->mounts[i]; *p; p++)
+      {
+         h ^= (unsigned char)*p;
+         h *= 16777619u;
+      }
+   return h;
+}
+
 static int docker_acquire(delegate_backend_t *self, const char *task_id,
                           const delegate_backend_config_t *cfg, void **state_out)
 {
@@ -232,13 +417,10 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    snprintf(st->image, sizeof(st->image), "%s", image);
    if (cfg && cfg->workspace && cfg->workspace[0])
    {
-      /* Caller-provided tree: mount it AS the workspace, so the delegate gets the
-       * entire current source tree by bind-mount — it IS the tree, not a copy that
-       * can drift. Everything below is a refusal, and each one is a way a delegate
-       * could otherwise end up reasoning about a tree that is not the one it was
-       * told about. */
-
-      /* Canonicalize FIRST. stat() follows symlinks and so does the docker daemon,
+      /* Caller-provided tree: mount it so the delegate gets the entire current
+       * source tree — by bind-mount, so it IS the tree, not a copy that can drift.
+       *
+       * Canonicalize FIRST: stat() follows symlinks and so does the docker daemon,
        * so validating the path as given and mounting the same string would let a
        * symlinked component point the mount somewhere the checks never saw. */
       char real[MAX_PATH_LEN];
@@ -251,7 +433,6 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          free(st);
          return -1;
       }
-
       struct stat wst;
       if (stat(real, &wst) != 0 || !S_ISDIR(wst.st_mode))
       {
@@ -260,64 +441,8 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          free(st);
          return -1;
       }
-
-      /* It must be a git checkout. Not fussiness: it is what bounds the mount. The
-       * caller derives this path from a session cwd, so without this an unlucky or
-       * hostile cwd — '/', a secrets directory, the server's own checkout — becomes
-       * a read-write bind mount into a delegate's container. A repository root is a
-       * thing someone deliberately made; '/' is not. */
-      char gitmark[MAX_PATH_LEN];
-      if ((size_t)snprintf(gitmark, sizeof(gitmark), "%s/.git", real) >= sizeof(gitmark))
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace path '%s' is too long to check for .git; refusing", real);
-         free(st);
-         return -1;
-      }
-      /* lstat, not stat: a .git that is a SYMLINK is not a marker we should trust —
-       * it points outside the tree we just canonicalized, so the thing vouching for
-       * this directory lives somewhere the checks never looked. */
-      struct stat gst;
-      if (lstat(gitmark, &gst) != 0)
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace '%s' is not a git checkout (no .git); refusing to bind-mount an "
-                   "arbitrary host directory into a delegate container",
-                   real);
-         free(st);
-         return -1;
-      }
-
-      /* A LINKED worktree's .git is a FILE holding `gitdir: <absolute host path>`
-       * into the main repo. Mounting only the worktree leaves that path absent
-       * inside the container, so every git command fails — and it fails AFTER the
-       * delegate has started work, looking like a broken repo rather than a bad
-       * mount. Refuse until the mount can carry the common gitdir too (mounting the
-       * main repo at its own absolute path, so the gitlink resolves).
-       *
-       * This is the wfe delegate's case, so the sandbox does not cover it yet. Said
-       * out loud, at acquire time, rather than discovered by a delegate. */
-      if (S_ISLNK(gst.st_mode))
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace '%s' has a symlinked .git; refusing to treat it as a checkout", real);
-         free(st);
-         return -1;
-      }
-      if (S_ISREG(gst.st_mode))
-      {
-         aimee_log(LOG_ERROR, "delegate-backend-docker",
-                   "workspace '%s' is a linked git worktree (.git is a gitdir pointer, not a "
-                   "directory): mounting it alone would leave git broken inside the container. "
-                   "Refusing — worktree support needs the common gitdir mounted too",
-                   real);
-         free(st);
-         return -1;
-      }
-
-      /* Copy the CANONICAL path, and refuse truncation: a path that passed the
-       * checks above but does not fit would mount a different directory than the
-       * one that was validated. */
+      /* Refuse truncation: a path that passed the checks but does not fit would
+       * mount a different directory than the one that was validated. */
       if ((size_t)snprintf(st->workspace_host, sizeof(st->workspace_host), "%s", real) >=
           sizeof(st->workspace_host))
       {
@@ -328,8 +453,13 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          free(st);
          return -1;
       }
-      st->mount_host_tree = 1;
       st->mount_read_only = (cfg->workspace_read_only != 0);
+      if (docker_build_mounts(st, real, st->mount_read_only) != 0)
+      {
+         free(st);
+         return -1;
+      }
+      st->mount_host_tree = 1;
    }
    else if (compute_workspace_host(task_id, st->workspace_host, sizeof(st->workspace_host)) != 0 ||
             docker_mkdir_p(st->workspace_host) != 0)
@@ -337,7 +467,34 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       free(st);
       return -1;
    }
-   snprintf(st->cwd, sizeof(st->cwd), "%s", resolve_docker_workdir());
+   else
+   {
+      /* Our own scratch dir: keep the historical /workspace contract. */
+      snprintf(st->workdir, sizeof(st->workdir), "%s", resolve_docker_workdir());
+      if (docker_add_mount(st, st->workspace_host, st->workdir, 0) != 0)
+      {
+         free(st);
+         return -1;
+      }
+   }
+   snprintf(st->cwd, sizeof(st->cwd), "%s", st->workdir);
+
+   /* Fold the mounts into the container's identity. `docker start` resumes by name,
+    * so without this a task id reused with a different workspace resumes a container
+    * carrying the OLD mounts, and the delegate works in the previous tree with
+    * nothing to say so. Only for caller-provided trees: the scratch dir is derived
+    * from the task id already, and hibernate/resume there is the point. */
+   if (st->mount_host_tree)
+   {
+      char suffix[16];
+      snprintf(suffix, sizeof(suffix), "-%08x", docker_mounts_fingerprint(st));
+      size_t have = strlen(st->container_name);
+      if (have + strlen(suffix) < sizeof(st->container_name))
+         memcpy(st->container_name + have, suffix, strlen(suffix) + 1);
+      else /* truncating would collide two different mount sets onto one name */
+         snprintf(st->container_name + sizeof(st->container_name) - sizeof(suffix), sizeof(suffix),
+                  "%s", suffix);
+   }
 
    /* Try `docker start` first — if a container with this name already
     * exists (operator opted hibernate=1 last release), starting it
@@ -345,11 +502,6 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    const char *start_argv[] = {"docker", "start", st->container_name, NULL};
    if (run_docker(start_argv) != 0)
    {
-      /* Build the volume mount string: <host>:/workspace */
-      const char *workdir = resolve_docker_workdir();
-      char mount[MAX_PATH_LEN + 32];
-      snprintf(mount, sizeof(mount), "%s:%s%s", st->workspace_host, workdir,
-               st->mount_read_only ? ":ro" : "");
       /* Run as the server's uid:gid when the mount is the caller's real tree.
        * Containers run as root by default, so every file the delegate creates in
        * the user's checkout would land root-owned — the user could not then edit
@@ -360,7 +512,9 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       if (st->mount_host_tree)
          snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
 
-      const char *create_argv[12 + 2];
+      /* Sized from the mount array itself: a hand-counted bound silently overflows
+       * the day a fourth mount is added. */
+      const char *create_argv[16 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
       int n = 0;
       create_argv[n++] = "docker";
       create_argv[n++] = "create";
@@ -371,10 +525,13 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          create_argv[n++] = "--user";
          create_argv[n++] = userflag;
       }
-      create_argv[n++] = "-v";
-      create_argv[n++] = mount;
+      for (int m = 0; m < st->mount_count; m++)
+      {
+         create_argv[n++] = "-v";
+         create_argv[n++] = st->mounts[m];
+      }
       create_argv[n++] = "-w";
-      create_argv[n++] = workdir;
+      create_argv[n++] = st->workdir;
       create_argv[n++] = st->image;
       create_argv[n++] = "sleep";
       create_argv[n++] = "infinity";
@@ -631,7 +788,8 @@ static int docker_resolve_in_workspace(const docker_state_t *st, const char *rel
       if (*p == '/')
          p++;
    }
-   if (snprintf(out, outsz, "%s/%s", resolve_docker_workdir(), rel) >= (int)outsz)
+   if (snprintf(out, outsz, "%s/%s", st->workdir[0] ? st->workdir : resolve_docker_workdir(),
+                rel) >= (int)outsz)
       return -1;
    return 0;
 }

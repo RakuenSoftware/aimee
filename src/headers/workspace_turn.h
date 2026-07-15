@@ -39,6 +39,14 @@ int workspace_turn_bind_active(const char *cwd);
  *
  * Unlike workspace_turn_bind_active this is not cwd-driven: a container provider
  * needs a live container handle, so the caller that owns the delegate decides. */
+/* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` (which
+ * is what the caller must then mount — the check and the mount must be the same
+ * path) and returns 1 if it lives inside a REGISTERED workspace root. Refusals are
+ * logged. Repository-ness is not authorization; the registered roots are the bound.
+ * Exposed so every path that can hand a workspace to the backend shares ONE bound —
+ * a second copy is a second thing to forget. */
+int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t out_cap);
+
 int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
                                   int workspace_read_only);
 

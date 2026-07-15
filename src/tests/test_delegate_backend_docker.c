@@ -596,21 +596,66 @@ static void test_docker_workspace_validation_refusals(void)
    assert(b->acquire(b, "task-val-1", &cfg, &state) == -1);
    assert(state == NULL);
 
-   /* A LINKED worktree (.git is a gitdir POINTER FILE): mounting it alone leaves
-    * git broken inside the container, and broken AFTER the delegate starts work —
-    * looking like a corrupt repo rather than a bad mount. */
-   char wt[300];
-   snprintf(wt, sizeof(wt), "%s/worktree", base);
-   mkdir(wt, 0700);
-   char gitfile[400];
-   snprintf(gitfile, sizeof(gitfile), "%s/.git", wt);
-   FILE *g = fopen(gitfile, "w");
-   assert(g != NULL);
-   fputs("gitdir: /some/host/path/.git/worktrees/x\n", g);
-   fclose(g);
-   cfg.workspace = wt;
-   assert(b->acquire(b, "task-val-2", &cfg, &state) == -1);
-   assert(state == NULL);
+   /* A LINKED worktree is now MOUNTED, not refused: the repo goes in read-only at
+    * its own absolute path so the gitlink resolves verbatim, with the worktree and
+    * its gitdir nested writable over it. Validated on docker 26.1.5: git status
+    * refreshes its index in the per-worktree gitdir, git describe works, and a
+    * write outside the worktree fails with "Read-only file system". */
+   char repo[300];
+   snprintf(repo, sizeof(repo), "%s/repo", base);
+   char repogit[400];
+   snprintf(repogit, sizeof(repogit), "%s/.git", repo);
+   char wtdir[500];
+   snprintf(wtdir, sizeof(wtdir), "%s/worktrees/task01", repogit);
+   char cmd2[900];
+   snprintf(cmd2, sizeof(cmd2), "mkdir -p %s %s/.aimee/worktrees/k/task01", wtdir, repo);
+   (void)system(cmd2);
+   char wt2[400];
+   snprintf(wt2, sizeof(wt2), "%s/.aimee/worktrees/k/task01", repo);
+   char gitfile2[500];
+   snprintf(gitfile2, sizeof(gitfile2), "%s/.git", wt2);
+   FILE *g2 = fopen(gitfile2, "w");
+   assert(g2 != NULL);
+   fprintf(g2, "gitdir: %s\n", wtdir);
+   fclose(g2);
+
+   cfg.workspace = wt2;
+   cfg.workspace_read_only = 0;
+   assert(b->acquire(b, "task-wt", &cfg, &state) == 0);
+   {
+      char *l = read_fake_docker_create_argv();
+      assert(l != NULL);
+      /* the repo mounted READ-ONLY at its own path — the gitlink target */
+      char m_repo[700];
+      snprintf(m_repo, sizeof(m_repo), "%s:%s:ro", repo, repo);
+      assert(strstr(l, m_repo) != NULL);
+      /* the worktree writable, nested over it */
+      char m_wt[900];
+      snprintf(m_wt, sizeof(m_wt), "%s:%s", wt2, wt2);
+      assert(strstr(l, m_wt) != NULL);
+      /* the per-worktree gitdir writable — this is where git status writes its index */
+      char m_gd[1100];
+      snprintf(m_gd, sizeof(m_gd), "%s:%s", wtdir, wtdir);
+      assert(strstr(l, m_gd) != NULL);
+      /* and the workdir is the worktree, not /workspace */
+      assert(strstr(l, wt2) != NULL);
+      free(l);
+   }
+   b->release(b, state, 0);
+
+   /* A worktree whose .git carries no absolute gitdir cannot be mounted usefully:
+    * refuse rather than leave git broken inside the container. */
+   char wtbad[400];
+   snprintf(wtbad, sizeof(wtbad), "%s/wtbad", base);
+   mkdir(wtbad, 0700);
+   char gbad[500];
+   snprintf(gbad, sizeof(gbad), "%s/.git", wtbad);
+   FILE *fb = fopen(gbad, "w");
+   assert(fb != NULL);
+   fputs("gitdir: ../relative/path\n", fb);
+   fclose(fb);
+   cfg.workspace = wtbad;
+   assert(b->acquire(b, "task-wtbad", &cfg, &state) == -1);
 
    /* A symlink to a valid checkout must not slip past canonicalization: stat()
     * follows symlinks and so does the daemon, so the mount could land somewhere

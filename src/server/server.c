@@ -24,6 +24,7 @@
 #include "config.h"     /* config_t / config_load for api.status, api.enable */
 #include "delegate_backend_docker.h"
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
+#include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
 #include "delegate_backend_local.h"
 #include "delegate_backend_ssh.h"
 #include "server_delegate_monitor.h"
@@ -444,6 +445,9 @@ static int handle_delegate_backend_list(server_ctx_t *ctx, server_conn_t *conn, 
  *   task_id       (required) — workspace identifier
  *   command       (required) — bash command line for exec()
  *   image         (optional) — docker image hint
+ *   workspace     (optional) — host dir to expose AS the workspace (a checkout or
+ *                              a linked worktree); default = the backend's scratch
+ *   workspace_read_only (optional bool) — mount `workspace` :ro
  *   host          (optional) — ssh target
  *   no_hibernate  (optional bool) — release with hibernate=0 if true
  * Response fields:
@@ -471,6 +475,29 @@ static int handle_delegate_backend_exec(server_ctx_t *ctx, server_conn_t *conn, 
    cJSON *jhost = cJSON_GetObjectItemCaseSensitive(req, "host");
    if (cJSON_IsString(jhost))
       cfg.host = jhost->valuestring;
+   /* The workspace to expose to the container, and whether it is the delegate's to
+    * change. This RPC exists to smoke-test the registry end-to-end without the
+    * legacy delegate flow, and the mount is the part that most needs a real daemon
+    * to believe: a linked worktree's gitlink only resolves if the repo is mounted
+    * at its own absolute path, which no unit test can prove. */
+   cJSON *jws = cJSON_GetObjectItemCaseSensitive(req, "workspace");
+   char ws_authorized[MAX_PATH_LEN] = "";
+   if (cJSON_IsString(jws) && jws->valuestring[0])
+   {
+      /* Through the SAME bound the delegate turn uses. This RPC takes a path from a
+       * request, so without it any caller who can reach the registry could name any
+       * host directory and have it bind-mounted into a container. The seam having
+       * the check is not enough — a second entrance needs the same lock, and the
+       * helper exists precisely so there is one lock rather than two copies. */
+      if (!workspace_turn_workspace_authorized(jws->valuestring, ws_authorized,
+                                               sizeof(ws_authorized)))
+         return server_send_error(conn, "workspace not inside a registered workspace root",
+                                  jws->valuestring);
+      cfg.workspace = ws_authorized;
+   }
+   cJSON *jro = cJSON_GetObjectItemCaseSensitive(req, "workspace_read_only");
+   if (cJSON_IsBool(jro) && cJSON_IsTrue(jro))
+      cfg.workspace_read_only = 1;
    cJSON *jnh = cJSON_GetObjectItemCaseSensitive(req, "no_hibernate");
    if (cJSON_IsBool(jnh) && cJSON_IsTrue(jnh))
       cfg.hibernate_on_exit = 0;
