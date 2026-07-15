@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 53
+Total commands: 54
 
 ## Core commands
 
@@ -231,6 +231,18 @@ Subcommands:
 ```
   status           Show the loopback /v1 listener config and emit VS Code /
                    OpenAI-compatible model-provider setup snippets
+```
+
+### `aimee aux`
+
+Auxiliary model routing.
+
+Subcommands:
+
+```
+  config           Show resolved aux task->provider/model mapping
+  test <task> "<prompt>"
+                   Execute a single auxiliary task call
 ```
 
 ### `aimee claude-proxy`
