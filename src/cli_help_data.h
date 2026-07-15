@@ -168,6 +168,33 @@
      "  config           Show resolved aux task->provider/model mapping\n"
      "  test <task> \"<prompt>\"\n"
      "                   Execute a single auxiliary task call\n"},
+    {"audit", "WORM audit store and retrieval evidence", CLIENT_TIER_ADVANCED, 0,
+     "  verify           Verify the WORM audit chain + checkpoint MACs\n"
+     "                   (exit 0=green, 1=amber, 2=red); the default with no subcommand\n"
+     "  checkpoint       Append a checkpoint committing the current chain head\n"
+     "  seal             Export an immutable, verifiable snapshot of the WORM store\n"
+     "  snapshot         Append a hash-chained metric.snapshot row\n"
+     "  trace            Audit a retrieval-evidence trace\n"
+     "  provenance       Audit source provenance for a retrieval event\n"
+     "  fidelity         Audit answer fidelity for a retrieval event\n"},
+    {"ensemble", "A panel of agents (mixture-of-agents, roundtable)", CLIENT_TIER_ADVANCED, 0,
+     "  aggregate        Mixture-of-Agents ensemble aggregate\n"
+     "  roundtable       Multi-round agent roundtable\n"},
+    {"pipeline", "Roundtable authoring pipelines", CLIENT_TIER_ADVANCED, 0,
+     "  start            Start an authoring pipeline from a one-line idea\n"
+     "  status           Show a pipeline's state, phase, latest review digest and gate\n"
+     "  list             List roundtable authoring pipelines\n"
+     "  advance          Drive one tick of the pipeline loop\n"
+     "  gate             Resolve a human gate (pass|fail)\n"
+     "  resume           Resume a pipeline from the durable ledger\n"
+     "  cancel           Cancel a pipeline and any in-flight roundtable\n"},
+    {"notes", "Investigation notes", CLIENT_TIER_ADVANCED, 0,
+     "  search           Search investigation notes by content or title\n"},
+    {"workers", "Server worker-pool status", CLIENT_TIER_ADVANCED, 0, NULL},
+    {"repo", "Per-repo cross-repo trust", CLIENT_TIER_ADMIN, 0,
+     "  trust            Set per-repo cross-repo trust\n"},
+    {"migrate", "Data migration utility", CLIENT_TIER_ADMIN, 0,
+     "  v2               Run the v2 data migration (long-running)\n"},
     {"cron", "Cron jobs and watchdog runs", CLIENT_TIER_ADVANCED, 0,
      "  list             List configured cron jobs\n"
      "  add <id>         Add or update a cron job\n"

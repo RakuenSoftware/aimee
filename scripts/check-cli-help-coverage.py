@@ -11,10 +11,10 @@ route and execute perfectly while `aimee help <cmd>` answered "Unknown command:
 This check fails `make lint` when a routed command has no client_help[] entry, so
 the next command to ship cannot repeat it.
 
-KNOWN_GAPS below are pre-existing violations, recorded rather than fixed: their
-help text has to be written by someone who knows what the subcommands actually
-do, and inventing plausible-looking help is worse than admitting it is missing.
-Deleting a name from this list is the fix; adding one is a regression.
+KNOWN_GAPS is empty and should stay that way: the seven original violations
+(audit, ensemble, migrate, notes, pipeline, repo, workers) were filled in from
+authoritative sources rather than guessed. Adding a name here is a regression —
+write the help entry instead.
 """
 import re
 import sys
@@ -25,15 +25,7 @@ ROUTES = ROOT / "src" / "cli_v1_routes.c"
 HELP = ROOT / "src" / "cli_help_data.h"
 
 # Routed commands that still lack a client_help[] entry. Shrink this, never grow it.
-KNOWN_GAPS = {
-    "audit",
-    "ensemble",
-    "migrate",
-    "notes",
-    "pipeline",
-    "repo",
-    "workers",
-}
+KNOWN_GAPS: set[str] = set()
 
 
 def main() -> int:
