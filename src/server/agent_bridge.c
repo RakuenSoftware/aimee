@@ -227,56 +227,21 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
 
 /* --- Response parsers --- */
 
-/* Strip <think>...</think> blocks from a model response.
+/* Split a <think>...</think> reasoning preamble off a model response.
  * Qwen3 and similar reasoning models embed thinking in the content field when
  * the llama.cpp server is not configured to separate it into reasoning_content.
- * Returns a new malloc'd string; caller must free. Returns NULL on alloc failure. */
+ *
+ * Prefix-anchored via the shared text_split_reasoning_prefix(): this previously
+ * removed <think> pairs (and bare close tags) from ANYWHERE in the text, which
+ * silently corrupted any answer that legitimately discussed the tag — the same
+ * defect that killed curator jobs summarising this very function. One rule, one
+ * implementation, shared with provider_client.c and llm-chat.py.
+ * Returns a new malloc'd string; caller must free. NULL on alloc failure. */
 static char *strip_thinking_blocks(const char *text)
 {
    if (!text)
       return NULL;
-   if (!strstr(text, "<think>") && !strstr(text, "</think>"))
-      return strdup(text);
-
-   size_t len = strlen(text);
-   char *out = malloc(len + 1);
-   if (!out)
-      return NULL;
-
-   size_t wpos = 0;
-   const char *p = text;
-   while (*p)
-   {
-      if (strncmp(p, "<think>", 7) == 0)
-      {
-         const char *end = strstr(p + 7, "</think>");
-         if (end)
-         {
-            p = end + 8;
-            while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
-               p++;
-            continue;
-         }
-      }
-      if (strncmp(p, "</think>", 8) == 0)
-      {
-         p += 8;
-         while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
-            p++;
-         continue;
-      }
-      out[wpos++] = *p++;
-   }
-   out[wpos] = '\0';
-
-   /* Trim leading whitespace */
-   size_t start = 0;
-   while (out[start] == '\n' || out[start] == '\r' || out[start] == ' ' || out[start] == '\t')
-      start++;
-   if (start > 0)
-      memmove(out, out + start, strlen(out + start) + 1);
-
-   return out;
+   return strdup(text_split_reasoning_prefix(text, NULL, NULL));
 }
 static int append_text(char **out, const char *text)
 {

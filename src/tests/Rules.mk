@@ -3395,6 +3395,7 @@ $(TESTPREFIX)/unit-test-kb-curator-provider: $(OBJDIR)/tests/test_kb_curator_pro
 $(TESTPREFIX)/unit-test-kb-curator-llm: $(OBJDIR)/tests/test_kb_curator_llm.o \
                                   $(OBJDIR)/kb/kb_curator_llm.o $(OBJDIR)/kb/kb_curator_sidecar.o \
                                   $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/provider_client.o \
+                                  $(OBJDIR)/text.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/mock_agent_http.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

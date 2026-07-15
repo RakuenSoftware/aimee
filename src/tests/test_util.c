@@ -14,6 +14,61 @@
  * sequence for encoding UTF8: 0xe2 0x22 0x7d" (the partial byte, then the closing
  * quote and brace). ~5,300 jobs died that way, reported only as "artifact write
  * failed". */
+/* text_split_reasoning_prefix: the ONE rule for separating a reasoning preamble
+ * from an answer, shared by provider_client.c and agent_bridge.c (and mirrored
+ * by llm-chat.py's split_reasoning).
+ *
+ * Before this, three hand-rolled copies disagreed: agent_bridge stripped <think>
+ * pairs from ANYWHERE, delegate_xml_fallback did the same for <think> and
+ * [THINK], and provider_client did nothing at all. The "anywhere" rule corrupts
+ * any answer that legitimately discusses the tag — which is precisely how
+ * curator jobs summarising strip_thinking_blocks() died. */
+static void test_split_reasoning_prefix(void)
+{
+   const char *rsn;
+   size_t rlen;
+
+   /* (a) a genuine preamble is split off, and HANDED BACK rather than destroyed. */
+   const char *s = "<think>weighing options</think>\nthe answer";
+   const char *ans = text_split_reasoning_prefix(s, &rsn, &rlen);
+   assert(strcmp(ans, "the answer") == 0);
+   assert(rlen == strlen("weighing options"));
+   assert(strncmp(rsn, "weighing options", rlen) == 0);
+
+   /* (b) THE REGRESSION: a tag NOT at the start is content and must survive
+    *     whole — the old "strip anywhere" rule ate exactly this. */
+   const char *mention = "drops the <think></think> preamble if present";
+   ans = text_split_reasoning_prefix(mention, &rsn, &rlen);
+   assert(ans == mention); /* untouched, same pointer */
+   assert(rlen == 0 && rsn == NULL);
+
+   /* (c) preamble AND a mention in the answer: strip one, keep the other. */
+   const char *both = "<think>hmm</think>\nit removes </think> tags";
+   ans = text_split_reasoning_prefix(both, &rsn, &rlen);
+   assert(strcmp(ans, "it removes </think> tags") == 0);
+   assert(rlen == strlen("hmm"));
+
+   /* (d) leading whitespace before the tag still counts as a preamble. */
+   ans = text_split_reasoning_prefix("\n  <think>x</think>ans", &rsn, &rlen);
+   assert(strcmp(ans, "ans") == 0);
+
+   /* (e) unterminated: don't guess — hand back the whole thing untouched. */
+   const char *unterm = "<think>never closed, answer lost?";
+   ans = text_split_reasoning_prefix(unterm, &rsn, &rlen);
+   assert(ans == unterm && rlen == 0);
+
+   /* (f) no reasoning at all is the common case and must be a no-op. */
+   const char *plain = "{\"status\":\"ok\"}";
+   ans = text_split_reasoning_prefix(plain, &rsn, &rlen);
+   assert(ans == plain && rlen == 0);
+
+   /* (g) NULL-safe; out-params optional. */
+   assert(text_split_reasoning_prefix(NULL, &rsn, &rlen) == NULL);
+   assert(strcmp(text_split_reasoning_prefix("<think>a</think>b", NULL, NULL), "b") == 0);
+
+   printf("  PASS: test_split_reasoning_prefix\n");
+}
+
 static void test_trim_partial_utf8(void)
 {
    char buf[32];
@@ -332,6 +387,7 @@ int main(void)
    test_stem_word();
    test_is_likely_path();
    test_trim_partial_utf8();
+   test_split_reasoning_prefix();
    test_shlex_split();
    test_split_camel_case();
    test_is_contradiction();
