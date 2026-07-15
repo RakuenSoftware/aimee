@@ -35,10 +35,10 @@ def emit_error(msg: str) -> None:
 
 
 def strip_think(text: str) -> str:
-    """Drop a reasoning model's <think>...</think> preamble and code fences."""
+    """Drop code fences. Reasoning is already split off by llm-chat.py."""
     text = text.strip()
-    if "</think>" in text:
-        text = text.rsplit("</think>", 1)[1].strip()
+    # No <think> handling: llm-chat.py split reasoning off at the wire boundary,
+    # so anything reaching here is the answer. See its split_reasoning().
     if text.startswith("```"):
         lines = text.splitlines()
         end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
