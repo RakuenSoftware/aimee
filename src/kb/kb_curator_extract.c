@@ -18,6 +18,7 @@
 #include "db2/feature_rows.h"
 #include "kb_mdl.h"
 
+#include <pthread.h> /* reclaim throttle is shared across the doc workers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -236,28 +237,48 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
  * Scoped to kind='extract_doc': kb_async_jobs is shared with other kinds that
  * own their own claim/lease lifecycle, and reclaiming those from here would
  * yank jobs out from under their stage. Throttled — the drain calls the entry
- * point once per job. */
+ * point once per job.
+ *
+ * The throttle is mutex-guarded because kb_curator_extract_one runs on the main
+ * LLM lane AND on every kb_curator_extract_docs_workers thread, so the state is
+ * genuinely shared. The lock is held across the UPDATE, which is free in
+ * practice: it is taken once per CE_RECLAIM_EVERY_S, and workers that lose the
+ * race just observe the throttle and return. */
 static void ce_reclaim_stale_running(int max_attempts)
 {
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    static time_t last_run = 0;
-   time_t now = time(NULL);
-   if (last_run != 0 && now - last_run < CE_RECLAIM_EVERY_S)
-      return;
-   last_run = now;
 
    if (max_attempts < 1)
       max_attempts = 1;
 
+   pthread_mutex_lock(&lock);
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < CE_RECLAIM_EVERY_S)
+   {
+      pthread_mutex_unlock(&lock);
+      return;
+   }
+
    void *conn = db2_conn();
    if (!conn)
+   {
+      /* Deliberately do NOT arm the throttle here, nor on the failures below: a
+       * reclaim that never ran must not suppress the next attempt for a minute.
+       * Only a completed UPDATE counts as "ran recently". */
+      pthread_mutex_unlock(&lock);
       return;
+   }
    char err[CE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "UPDATE kb_async_jobs"
        " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
        "     claimed_by = '', claimed_at = '',"
-       "     last_error = CASE WHEN attempts >= ?1"
+       /* Only fill last_error when the worker left none: an existing message is
+        * the diagnostic from the attempt that died, and 'reclaimed after max
+        * attempts' only says we gave up — overwriting would destroy the reason. */
+       "     last_error = CASE WHEN attempts >= ?1 AND last_error = ''"
        "                       THEN 'stale running lease reclaimed after max attempts'"
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
@@ -265,11 +286,19 @@ static void ce_reclaim_stale_running(int max_attempts)
        "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
        err, sizeof(err));
    if (!st)
+   {
+      aimee_log(LOG_WARN, "kb.curator.extract", "stale-lease reclaim could not prepare: %s", err);
+      pthread_mutex_unlock(&lock);
       return;
+   }
    aimee_pg_bind_int(st, "?1", max_attempts);
    aimee_pg_bind_text(st, "?2", CE_STALE_LEASE);
-   (void)aimee_pg_step(st, err, sizeof(err));
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+      last_run = now; /* only a completed UPDATE arms the throttle */
+   else
+      aimee_log(LOG_WARN, "kb.curator.extract", "stale-lease reclaim failed: %s", err);
    aimee_pg_finalize(st);
+   pthread_mutex_unlock(&lock);
 }
 
 /* Pick the curator-extract sidecar command from a candidate list. Shared by the

@@ -170,25 +170,27 @@ static void mf_mark_retry_or_fail(int64_t job_id, int attempts, const char *erro
  * attempts is preserved (incremented at claim time).
  *
  * Scoped to kind='memory_facts' so it cannot disturb the other stages sharing
- * kb_async_jobs. Throttled — the drain calls this once per batch. */
+ * kb_async_jobs. Throttled — the drain calls this once per batch. Unlike the
+ * extract_doc reclaim, the throttle needs no lock: kb_memory_facts_drain has a
+ * single caller on the drain thread (no worker pool), so this is single-entry. */
 static void mf_reclaim_stale_running(void)
 {
    static time_t last_run = 0;
    time_t now = time(NULL);
    if (last_run != 0 && now - last_run < MF_RECLAIM_EVERY_S)
       return;
-   last_run = now;
 
    void *conn = db2_conn();
    if (!conn)
-      return;
+      return; /* never ran: leave the throttle unarmed so the next call retries */
    char err[MF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "UPDATE kb_async_jobs"
        " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
        "     claimed_by = '', claimed_at = '',"
-       "     last_error = CASE WHEN attempts >= ?1"
+       /* Preserve an existing diagnostic; see the extract_doc reclaim. */
+       "     last_error = CASE WHEN attempts >= ?1 AND last_error = ''"
        "                       THEN 'stale running lease reclaimed after max attempts'"
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
@@ -196,10 +198,16 @@ static void mf_reclaim_stale_running(void)
        "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
        err, sizeof(err));
    if (!st)
+   {
+      aimee_log(LOG_WARN, "kb.memory.facts", "stale-lease reclaim could not prepare: %s", err);
       return;
+   }
    aimee_pg_bind_int(st, "?1", MF_MAX_ATTEMPTS);
    aimee_pg_bind_text(st, "?2", MF_STALE_LEASE);
-   (void)aimee_pg_step(st, err, sizeof(err));
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+      last_run = now; /* only a completed UPDATE arms the throttle */
+   else
+      aimee_log(LOG_WARN, "kb.memory.facts", "stale-lease reclaim failed: %s", err);
    aimee_pg_finalize(st);
 }
 

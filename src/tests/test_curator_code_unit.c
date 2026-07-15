@@ -381,15 +381,18 @@ static void test_describe_wait_status(void)
    kb_curator_describe_wait_status(124 << 8, 0, out, sizeof(out));
    assert(strcmp(out, "sidecar exited 124") == 0);
 
-   /* (e) A real signal death — SIGKILL is the OOM-killer signature we care about
-    *     on a box where the model shares RAM with the drain. */
+   /* (e) A real signal death — the kernel says so via WIFSIGNALED, so the
+    *     message may state it as fact. SIGKILL is the OOM-killer signature we
+    *     care about on a box where the model shares RAM with the drain. */
    kb_curator_describe_wait_status(9 /* WIFSIGNALED: low 7 bits = signo */, 300, out, sizeof(out));
-   assert(strncmp(out, "sidecar killed by signal 9", 26) == 0);
+   assert(strcmp(out, "sidecar killed by signal 9 (Killed)") == 0);
 
-   /* (f) A shell reports a signal-killed child as 128+n; decode rather than
-    *     printing a bare 137. */
+   /* (f) 128+n is the SHELL's convention for a signal-killed child — but a
+    *     process can also exit(137) itself, and the two are indistinguishable
+    *     here. So report the exit code as fact and the signal as a reading:
+    *     asserting a kill outright would fake an OOM that never happened. */
    kb_curator_describe_wait_status((128 + 9) << 8, 300, out, sizeof(out));
-   assert(strncmp(out, "sidecar killed by signal 9", 26) == 0);
+   assert(strcmp(out, "sidecar exited 137 (128+9: likely killed by signal 9, Killed)") == 0);
 
    /* (g) pclose itself failing is distinct from any child status. */
    kb_curator_describe_wait_status(-1, 300, out, sizeof(out));

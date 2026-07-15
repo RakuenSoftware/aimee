@@ -15,6 +15,19 @@
 
 #define CS_DEFAULT_OUTBUF 8192
 
+/* Hard wall-clock cap for the sidecar, mirroring the code-unit stage's bound.
+ *
+ * This is load-bearing for the stale-lease reclaims (kb_curator_extract.c,
+ * kb_memory_facts.c), not just hygiene. An unbounded popen/pclose wedges its
+ * drain thread forever — and a reclaim that re-arms a job whose original worker
+ * is STILL running would hand the same job to a second worker: duplicate
+ * artifacts, and the wedged thread later clobbering the status of a job it no
+ * longer owns. A lease is only safe if the work under it is bounded well below
+ * the lease. 300s sits comfortably under the 15-minute lease (and far above the
+ * 13-22s a real doc extraction takes), so a job that outlives this cap is
+ * genuinely wedged and its slot is free by the time the reclaim fires. */
+#define CS_SIDECAR_TIMEOUT_S 300
+
 /* Render a pclose(3) return value into an operator-legible reason.
  *
  * pclose returns a wait(2)-encoded status, NOT an exit code: reporting it raw
@@ -47,10 +60,13 @@ void kb_curator_describe_wait_status(int status, int timeout_s, char *errbuf, si
       if (timeout_s > 0 && code == 124)
          snprintf(errbuf, errlen, "sidecar timed out after %ds", timeout_s);
       else if (code > 128)
-         /* A shell reports a signal-killed child as 128+n; distinguishing which
-          * signal is what tells OOM (9) apart from a clean TERM (15). */
-         snprintf(errbuf, errlen, "sidecar killed by signal %d (%s)", code - 128,
-                  strsignal(code - 128));
+         /* A shell reports a signal-killed child as 128+n, so 137 is very likely
+          * an OOM kill — but a process can also exit(137) of its own accord, and
+          * the two are indistinguishable from here. Report the exit code as the
+          * fact and the signal as the reading, rather than asserting a kill that
+          * may not have happened and sending an operator hunting a phantom OOM. */
+         snprintf(errbuf, errlen, "sidecar exited %d (128+%d: likely killed by signal %d, %s)",
+                  code, code - 128, code - 128, strsignal(code - 128));
       else
          snprintf(errbuf, errlen, "sidecar exited %d", code);
       return;
@@ -99,8 +115,16 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
    }
    close(fd);
 
+   /* Bound the sidecar with coreutils `timeout` (present on the kb image):
+    * SIGTERM at the ceiling, SIGKILL 10s later if it ignores TERM. Run the
+    * configured command under `sh -c` INSIDE timeout so it keeps the shell
+    * semantics popen() gave it (env-var prefixes like `FOO=bar python …`,
+    * builtins, operators) — passing it as timeout's own argv would break those
+    * and let compound commands escape the bound. `cmd` is trusted config.
+    * Mirrors ccu_invoke_sidecar in kb_curator_extract_code.c. */
    char full_cmd[1024];
-   snprintf(full_cmd, sizeof(full_cmd), "%s < %s", cmd, tmppath);
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s", CS_SIDECAR_TIMEOUT_S,
+            cmd, tmppath);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)
@@ -135,9 +159,7 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
 
    if (rc != 0)
    {
-      /* This caller does not wrap the command in timeout(1), so 124 carries no
-       * special meaning here. */
-      kb_curator_describe_wait_status(rc, 0, errbuf, errlen);
+      kb_curator_describe_wait_status(rc, CS_SIDECAR_TIMEOUT_S, errbuf, errlen);
       free(out);
       return NULL;
    }
