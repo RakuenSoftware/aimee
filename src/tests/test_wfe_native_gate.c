@@ -80,6 +80,76 @@ int main(void)
    /* externalizing + bound + not delivered + not-hard (advisory/soft) -> WARN (soak) */
    assert(wfe_native_gate_decision(1, 1, 0, 0) == WFE_NATIVE_WARN);
 
+   /* --- forbidden outright: admin override of branch protection is human-only --- */
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge 12 --admin"));
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge --admin 12")); /* flag first */
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge --squash --admin 12"));
+   assert(wfe_native_tool_forbidden("Bash", "true; gh pr merge 12 --admin")); /* compound */
+   assert(wfe_native_tool_forbidden("Bash", "gh\tpr merge 12 --admin"));      /* tab sep */
+   /* the gh api equivalent: PUT to the merge endpoint */
+   assert(wfe_native_tool_forbidden("Bash", "gh api -X PUT repos/o/r/pulls/12/merge"));
+   assert(wfe_native_tool_forbidden("Bash", "gh api --method PUT repos/o/r/pulls/12/merge"));
+
+   /* a plain merge is NOT forbidden here -- it is still subject to the ordinary
+    * externalization truth table above, just not blocked unconditionally. */
+   assert(!wfe_native_tool_forbidden("Bash", "gh pr merge 12"));
+   assert(!wfe_native_tool_forbidden("Bash", "gh pr merge 12 --squash"));
+   /* --admin without a merge is not this rule's business */
+   assert(!wfe_native_tool_forbidden("Bash", "gh pr create --admin"));
+   /* a GET of the merge endpoint is a read, not a bypass */
+   assert(!wfe_native_tool_forbidden("Bash", "gh api repos/o/r/pulls/12/merge"));
+   /* non-shell tools carry no command to inspect */
+   assert(!wfe_native_tool_forbidden("Read", "gh pr merge 12 --admin"));
+   assert(!wfe_native_tool_forbidden("Bash", NULL));
+   assert(!wfe_native_tool_forbidden(NULL, "gh pr merge 12 --admin"));
+
+   /* --- no git/gh in a delegate shell (require_aimee_git) --- */
+   /* the plain cases: every verb, read and write alike -- there is no verb list */
+   assert(wfe_shell_invokes_git("Bash", "git push"));
+   assert(wfe_shell_invokes_git("Bash", "git status"));
+   assert(wfe_shell_invokes_git("Bash", "git log --oneline -5"));
+   assert(wfe_shell_invokes_git("Bash", "gh pr view 12"));
+   assert(wfe_shell_invokes_git("Bash", "gh"));
+
+   /* command position, not mere mention */
+   assert(wfe_shell_invokes_git("Bash", "/usr/bin/git push"));  /* absolute path */
+   assert(wfe_shell_invokes_git("Bash", "sudo git push"));      /* prefix word */
+   assert(wfe_shell_invokes_git("Bash", "AIMEE_X=1 git push")); /* assignment prefix */
+   assert(wfe_shell_invokes_git("Bash", "true; git push"));     /* after a separator */
+   assert(wfe_shell_invokes_git("Bash", "make && git push"));   /* && */
+   assert(wfe_shell_invokes_git("Bash", "ls | grep x; gh pr list"));
+   assert(wfe_shell_invokes_git("Bash", "{ git push;}"));          /* brace group */
+   assert(wfe_shell_invokes_git("Bash", "$(git rev-parse HEAD)")); /* subshell */
+   /* a newline is a command separator, not mere spacing */
+   assert(wfe_shell_invokes_git("Bash", "make build\ngit push"));
+   assert(wfe_shell_invokes_git("Bash", "cd /tmp\ngh pr create"));
+
+   /* `bash -c '<cmd>'`: the command string is parsed, not treated as data */
+   assert(wfe_shell_invokes_git("Bash", "bash -lc 'git push'"));
+   assert(wfe_shell_invokes_git("Bash", "sh -c \"git push\""));
+   /* quotes are stripped, so a split command name still resolves */
+   assert(wfe_shell_invokes_git("Bash", "gi''t push"));
+
+   /* NOT invocations: git/gh appears as an ARGUMENT, not the command. A blunt
+    * substring match -- or treating every quote as a command separator -- would
+    * false-positive on all of these. */
+   assert(!wfe_shell_invokes_git("Bash", "grep git file.txt"));
+   assert(!wfe_shell_invokes_git("Bash", "grep \"git\" file.txt")); /* quoted mention */
+   assert(!wfe_shell_invokes_git("Bash", "echo git"));
+   assert(!wfe_shell_invokes_git("Bash", "echo 'git'"));
+   assert(!wfe_shell_invokes_git("Bash", "ls .github/workflows"));
+   assert(!wfe_shell_invokes_git("Bash", "cat gitlog.txt"));
+   assert(!wfe_shell_invokes_git("Bash", "python3 legit.py")); /* substring of a word */
+   assert(!wfe_shell_invokes_git("Bash", "make build"));
+   /* a non-shell binary's quoted argument is data, even if it looks like a command */
+   assert(!wfe_shell_invokes_git("Bash", "echo 'git push'"));
+
+   /* non-shell tools carry no command; NULL/empty are not invocations */
+   assert(!wfe_shell_invokes_git("Read", "git push"));
+   assert(!wfe_shell_invokes_git("Bash", NULL));
+   assert(!wfe_shell_invokes_git("Bash", ""));
+   assert(!wfe_shell_invokes_git(NULL, "git push"));
+
    printf("ok\n");
    return 0;
 }

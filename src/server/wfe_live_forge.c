@@ -188,6 +188,35 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return WFE_MERGE_ERROR;
+
+   /* CI must be green before we merge (operator ruling 2026-07-15). The canonical
+    * `build` DAG already orders a ci node ahead of merge, so this is defence in
+    * depth at the seam itself -- the same rationale as forge_allowed() re-checking
+    * on every op: the forge must be safe on its own, not only when driven by a
+    * well-ordered workflow. A zero-check PR merges (nothing to fail); an
+    * undetermined verdict never does. */
+   char cierr[160];
+   git_pr_ci_t ci = git_pr_ci_via_api(NULL, forge_dir(repo), num, cierr, sizeof cierr);
+   if (!git_pr_ci_permits_merge(ci))
+   {
+      /* PENDING loops; everything else parks. The two merge seams answer "pending"
+       * differently on purpose, because their retry models differ: here the engine
+       * re-runs the node on NOT_MERGEABLE, so a transient pending resolves itself
+       * with no human involved. server_pipeline_merge has no such loop -- its caller
+       * drives retries via pipeline.advance -- so it parks in *_merge_pending and is
+       * re-checked on the next advance. Both refuse to merge on pending; only the
+       * mechanism for coming back differs.
+       *
+       * Red CI does NOT loop: the ci node owns the bounded red-CI retry
+       * (AIMEE_AUTONOMY_CI_RETRY_MAX), so reaching merge with a red head means the
+       * run is out of order and a human should see it. */
+      if (ci == GIT_PR_CI_PENDING)
+         return WFE_MERGE_NOT_MERGEABLE;
+      aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: CI not green (%s)", num,
+                ci == GIT_PR_CI_FAILURE ? "failed" : cierr);
+      return WFE_MERGE_ERROR;
+   }
+
    /* Re-check immediately before the mutating call: close the TOCTOU window where
     * the flag is flipped off / the base becomes protected after the entry check. */
    if (!forge_allowed())

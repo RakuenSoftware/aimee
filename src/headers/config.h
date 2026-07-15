@@ -417,6 +417,25 @@ typedef struct config
     * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into
     * aimee's memory system (`aimee memory store`). Explicit false opts out. */
    int require_aimee_memory;
+   /* Forge-tooling guard (default on): a delegate may not run `git` or `gh` in a
+    * shell — every git/forge action goes through aimee's git_* tools and executes
+    * on aimee-server, where the forge credential lives and never reaches a child's
+    * environment or argv. Reads are blocked too (git_status / git_log /
+    * git_diff_summary / git_pr action=view cover them), so the rule is simply "no
+    * git or gh in a shell" with no verb list to drift. Explicit false opts out.
+    *
+    * Two layers, neither of which is a proof: the classifier
+    * (wfe_shell_invokes_git) is a string match a determined agent can evade, and
+    * the env-strip at spawn (delegate_child_strip_forge_creds) removes the
+    * credentials we know how to name. Together they raise the cost sharply; they do
+    * not constitute a credential boundary.
+    *
+    * SIDE EFFECT worth knowing before enabling: the env-strip also drops
+    * SSH_AUTH_SOCK, so a delegate cannot use agent-backed SSH to ANY host — not
+    * just the forge. It also points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null, so a
+    * delegate sees no global git config (including user.name/user.email; commits go
+    * through git_commit on the server, which supplies its own identity). */
+   int require_aimee_git;
 
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a

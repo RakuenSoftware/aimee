@@ -265,11 +265,14 @@ cJSON *handle_git_pr(cJSON *args)
    {
       /* Policy-aware merge executor (authoring-pipeline #50). The caller passes
        * the PR number, optional merge_method (merge|squash|rebase, default
-       * merge), optional admin (gh pr merge --admin for branch-policy/CI-billing
-       * cases this repo hits), and optional expected_head_sha for drift safety
-       * (gh refuses the merge if the head moved). Captures executor/command/
-       * exit/output and the resulting merge SHA so the ledger has full
-       * evidence. */
+       * merge), and optional expected_head_sha for drift safety (gh refuses the
+       * merge if the head moved). Captures executor/command/exit/output and the
+       * resulting merge SHA so the ledger has full evidence.
+       *
+       * There is deliberately NO admin/bypass option: a merge that requires an
+       * admin override of branch protection is HUMAN-ONLY (operator ruling
+       * 2026-07-15). A protection-blocked merge fails here and parks for a
+       * human; it is never forced through. */
       cJSON *jnum = cJSON_GetObjectItemCaseSensitive(args, "number");
       if (!cJSON_IsNumber(jnum))
          return mcp_text("error: 'number' parameter is required for merge");
@@ -284,9 +287,6 @@ cJSON *handle_git_pr(cJSON *args)
          else if (strcmp(jmethod->valuestring, "rebase") == 0)
             mflag = "--rebase";
       }
-      cJSON *jadmin = cJSON_GetObjectItemCaseSensitive(args, "admin");
-      const char *admin = cJSON_IsTrue(jadmin) ? " --admin" : "";
-
       char match[160] = {0};
       cJSON *jhead = cJSON_GetObjectItemCaseSensitive(args, "expected_head_sha");
       if (cJSON_IsString(jhead) && jhead->valuestring[0])
@@ -304,8 +304,49 @@ cJSON *handle_git_pr(cJSON *args)
             snprintf(match, sizeof(match), " --match-head-commit %s", h);
       }
 
+      /* CI must be fully green before the merge (operator ruling 2026-07-15). Reuses
+       * the same `gh pr checks` read (and its 0/1/8 tri-state) as action=checks, so
+       * this stays correct for a detached workspace, where the command is marshalled
+       * to the client that holds the creds.
+       *
+       * Fails CLOSED on anything it cannot positively classify. In particular the
+       * verdict is taken from gh's EXIT CODE, never inferred from parsed counters:
+       * a zero count means "no rows parsed", which is equally true of genuinely
+       * zero checks and of output we failed to understand (or a NULL from an alloc
+       * failure) — merging on that would be a fail-open. Only gh's own explicit
+       * "no checks reported" is accepted as genuinely zero, which the operator
+       * ruling says may merge (nothing to fail). */
+      {
+         char ccmd[128];
+         snprintf(ccmd, sizeof(ccmd), "gh pr checks %d 2>&1", pr_num);
+         int crc = 0;
+         char *cout = mcp_git_run(ccmd, &crc);
+         const char *why = NULL;
+         if (!cout)
+            why = "could not read CI status (no output)";
+         else if (strstr(cout, "no checks reported"))
+            why = NULL; /* genuinely zero checks -> nothing to fail -> merge */
+         else if (crc == 0)
+            why = NULL; /* gh: every check passed */
+         else if (crc == 8)
+            why = "CI has not finished; re-try once checks settle";
+         else if (crc == 1)
+            why = "CI is not green (at least one check failed)";
+         else
+            why = "could not read CI status";
+         if (why)
+         {
+            char msg[320];
+            snprintf(msg, sizeof(msg),
+                     "error: merge blocked — %s. A merge requires fully green CI.", why);
+            free(cout);
+            return mcp_text(msg);
+         }
+         free(cout);
+      }
+
       char cmd[512];
-      snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s%s 2>&1", pr_num, mflag, admin, match);
+      snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s 2>&1", pr_num, mflag, match);
       int rc = 0;
       char *out = mcp_git_run(cmd, &rc);
       cJSON *res = cJSON_CreateObject();

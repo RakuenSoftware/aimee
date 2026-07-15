@@ -946,7 +946,9 @@ static cJSON *marshal_graph_explain(int argc, char **argv)
 /* Roundtable authoring pipeline (pipeline.*). */
 static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv)
 {
-   static const char *bool_flags[] = {"admin", NULL};
+   /* No bool flags: `--admin` was removed — a merge needing an admin override of
+    * branch protection is human-only (operator ruling 2026-07-15). */
+   static const char *bool_flags[] = {NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
 
@@ -1012,8 +1014,6 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
          cJSON_AddStringToObject(req, "reason", v);
       if ((v = rpc_get(&opts, "operator-principal")) && v[0])
          cJSON_AddStringToObject(req, "operator_principal", v);
-      if (rpc_get(&opts, "admin"))
-         cJSON_AddTrueToObject(req, "admin");
    }
    else /* status / cancel / resume / advance */
    {

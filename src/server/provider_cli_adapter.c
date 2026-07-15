@@ -353,11 +353,63 @@ static void provider_cli_terminate_child(pid_t pid)
    (void)waitpid(pid, NULL, 0);
 }
 
+/* Remove the git/forge credentials a delegate child would otherwise inherit, so the
+ * no-git rule does not rest on the classifier alone: wfe_shell_invokes_git() is a
+ * string match over a shell line and a determined agent can evade it, whereas a
+ * credential that is not in the environment cannot be talked around. git/forge work
+ * belongs to aimee's git_* tools, which run in aimee-server where the token is
+ * resolved per call and lives only in process memory.
+ *
+ * This is defence in depth, NOT a credential boundary. It removes what we know how
+ * to name; it cannot prove the child has no other path to a token (a key on disk, a
+ * helper we do not enumerate, a credential minted later). Treat it as raising the
+ * cost, not as a guarantee.
+ *
+ * Called post-fork. `flag` is resolved by the PARENT because config_load reads files
+ * and allocates, and running that between fork and exec in a threaded process risks
+ * a malloc-lock deadlock. setenv/unsetenv may themselves allocate, so this is not
+ * strictly async-signal-safe either -- it matches the risk the adjacent
+ * unsetenv()/platform_setenv() calls already take here rather than adding a new one.
+ * The clean fix, if this ever bites, is to build the sanitized envp in the parent
+ * and execve() it. */
+static void delegate_child_strip_forge_creds(int flag)
+{
+   if (!flag)
+      return;
+   /* Ambient forge tokens gh/git would pick up. */
+   unsetenv("GH_TOKEN");
+   unsetenv("GITHUB_TOKEN");
+   unsetenv("GH_ENTERPRISE_TOKEN");
+   unsetenv("GITHUB_ENTERPRISE_TOKEN");
+   /* Credential plumbing: the askpass shim, an agent-forwarded SSH key, and any
+    * inherited credential helper reachable via the global/system git config.
+    * SSH_AUTH_SOCK is broader than git: dropping it means a delegate cannot use
+    * agent-backed SSH to ANY host, not just the forge. That is intended (a forwarded
+    * agent is a general-purpose credential we do not want in a delegate), but it is
+    * the one strip here that can bite non-git work -- see require_aimee_git in
+    * config.h. */
+   unsetenv("GIT_ASKPASS");
+   unsetenv("SSH_ASKPASS");
+   unsetenv("SSH_AUTH_SOCK");
+   setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+   setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+   /* gh reads its stored oauth token from GH_CONFIG_DIR (default ~/.config/gh);
+    * point it at a path that holds no hosts.yml rather than leaving the default. */
+   setenv("GH_CONFIG_DIR", "/nonexistent/aimee-delegate-no-gh", 1);
+   /* Never let a credential prompt block the child waiting on a tty. */
+   setenv("GIT_TERMINAL_PROMPT", "0", 1);
+}
+
 int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
                             int *stdout_fd, pid_t *pid_out)
 {
    if (!argv || !argv[0] || !stdin_fd || !stdout_fd || !pid_out)
       return -1;
+
+   /* Resolve the dial BEFORE forking (see delegate_child_strip_forge_creds).
+    * Unreadable config reads as enforcing: a guard that fails open is not a guard. */
+   config_t spawn_cfg;
+   int strip_forge_creds = (config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git;
 
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
@@ -404,6 +456,7 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
        * source context from the forking thread's TLS, immune to the parent-side
        * concurrent env clobber. */
       delegate_child_export_context_env();
+      delegate_child_strip_forge_creds(strip_forge_creds);
       execvp(argv[0], argv);
       _exit(127);
    }

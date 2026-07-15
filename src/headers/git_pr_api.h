@@ -69,6 +69,17 @@ git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int n
  * queued/in-progress -> PENDING; else SUCCESS. */
 git_pr_ci_t git_pr_ci_grade_json(const char *check_runs_json, const char *combined_status_json);
 
+/* 1 if this CI verdict permits a merge, 0 if it must not (operator ruling
+ * 2026-07-15: a merge requires fully green CI). SUCCESS merges; NONE merges too —
+ * a PR with no CI reported has nothing to fail. PENDING, FAILURE and ERROR all
+ * refuse: "unknown" is never "pass".
+ *
+ * The single home for that ruling: every merge seam asks here rather than re-deriving
+ * it, so the three cannot drift apart. Each seam still chooses how to COME BACK from
+ * a refusal (the engine loops the node, the pipeline gate parks for the next
+ * advance) — only the go/no-go lives here. Pure; unit-tested. */
+int git_pr_ci_permits_merge(git_pr_ci_t ci);
+
 /* Squash-merge PUT /pulls/<n>/merge. Returns 0 merged, 1 already merged,
  * 2 not mergeable (405/409), -1 error. */
 int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,

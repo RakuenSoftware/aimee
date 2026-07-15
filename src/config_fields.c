@@ -106,6 +106,7 @@ const config_field_t config_fields[] = {
     {"require_session_worktree", offsetof(config_t, require_session_worktree), sizeof(int), 0,
      CFG_BOOL},
     {"require_aimee_memory", offsetof(config_t, require_aimee_memory), sizeof(int), 0, CFG_BOOL},
+    {"require_aimee_git", offsetof(config_t, require_aimee_git), sizeof(int), 0, CFG_BOOL},
     {"typed_facts_enabled", offsetof(config_t, typed_facts_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_pdf_ingest_enabled", offsetof(config_t, kb_pdf_ingest_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_pdf_vector_enabled", offsetof(config_t, kb_pdf_vector_enabled), sizeof(int), 0, CFG_BOOL},
