@@ -16,7 +16,6 @@ static int g_drivers_inited;
 extern const delegate_driver_t delegate_driver_openai;
 extern const delegate_driver_t delegate_driver_anthropic;
 extern const delegate_driver_t delegate_driver_chatgpt;
-extern const delegate_driver_t delegate_driver_gemini;
 extern const delegate_driver_t delegate_driver_openrouter;
 extern const delegate_driver_t delegate_driver_mistral;
 extern const delegate_driver_t delegate_driver_minimax;
@@ -45,7 +44,6 @@ void delegate_drivers_init(void)
    delegate_driver_register(&delegate_driver_openai);
    delegate_driver_register(&delegate_driver_anthropic);
    delegate_driver_register(&delegate_driver_chatgpt);
-   delegate_driver_register(&delegate_driver_gemini);
    delegate_driver_register(&delegate_driver_openrouter);
    delegate_driver_register(&delegate_driver_mistral);
    delegate_driver_register(&delegate_driver_minimax);

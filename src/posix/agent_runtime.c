@@ -108,11 +108,6 @@ static int is_anthropic_provider(const agent_t *agent)
    return strcmp(agent->provider, "anthropic") == 0;
 }
 
-static int is_gemini_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "gemini") == 0;
-}
-
 static int agent_allows_json_content_rescue(const agent_t *agent)
 {
    if (!agent)
@@ -136,7 +131,7 @@ static int agent_should_inject_respond_tool(const agent_t *agent, const char *ro
       return 0;
    if (!agent->tools_enabled || !agent->inject_respond_tool)
       return 0;
-   if (is_chatgpt_provider(agent) || is_anthropic_provider(agent) || is_gemini_provider(agent))
+   if (is_chatgpt_provider(agent) || is_anthropic_provider(agent))
       return 0;
    return 1;
 }
@@ -490,7 +485,7 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
          return provider_cli_adapter_execute(adapter, agent, run_cmd_get_cwd(), system_prompt,
                                              user_prompt, out);
       snprintf(out->error, sizeof(out->error),
-               "provider-cli: unknown cli_kind '%s' (expected: codex, claude, gemini, mistral, "
+               "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "
                "mistral-plan, vibe-plan)",
                agent->cli_kind);
       return -1;
@@ -586,7 +581,6 @@ native_provider_http:
    char url[MAX_ENDPOINT_LEN + 64];
    int chatgpt = is_chatgpt_provider(agent);
    int anthropic = is_anthropic_provider(agent);
-   int gemini = is_gemini_provider(agent);
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
    if (delegate_build_url(driver, agent, url, sizeof(url)) != 0)
@@ -598,7 +592,7 @@ native_provider_http:
    /* Build tools JSON (reused each turn, format depends on provider) */
    cJSON *tools = chatgpt     ? build_tools_array_responses()
                   : anthropic ? build_tools_array_anthropic()
-                              : build_tools_array(); /* OpenAI format; Gemini driver converts */
+                              : build_tools_array(); /* OpenAI format */
    agent_tools_filter_for_role(tools, role);
    int inject_respond_tool = agent_should_inject_respond_tool(agent, role);
    if (inject_respond_tool)
@@ -612,26 +606,15 @@ native_provider_http:
    if (!chatgpt && !anthropic)
       agent_tools_sanitize_for_agent(tools, agent);
 
-   /* Gemini prompt cache: try to create a cached-content resource for the system prompt.
-    * Falls back silently to uncached requests if creation fails. */
-   char gemini_cache_name[256] = {0};
-   if (gemini && sys && sys[0])
-   {
-      gemini_prompt_cache_create(agent->endpoint[0] ? agent->endpoint : NULL, auth_header,
-                                 agent->model, sys, agent->timeout_ms, gemini_cache_name,
-                                 sizeof(gemini_cache_name));
-      /* gemini_cache_name[0] == '\0' means uncached — that's fine */
-   }
-
    /* Build conversation history. Primary sessions pass structured provider
     * history here; delegate runs start empty and remain single-task. */
    cJSON *messages = initial_messages ? cJSON_Duplicate(initial_messages, 1) : cJSON_CreateArray();
    int has_prior_messages = messages && cJSON_GetArraySize(messages) > 0;
 
    /* For OpenAI, system prompt goes in messages array.
-    * For Anthropic, ChatGPT, and Gemini, it goes in the request body (handled by the
-    * respective request builder) or in a cached-content resource (Gemini). */
-   if (!has_prior_messages && !chatgpt && !anthropic && !gemini)
+    * For Anthropic and ChatGPT it goes in the request body, handled by the
+    * respective request builder. */
+   if (!has_prior_messages && !chatgpt && !anthropic)
    {
       cJSON *sys_msg = cJSON_CreateObject();
       cJSON_AddStringToObject(sys_msg, "role", "system");
@@ -784,7 +767,7 @@ native_provider_http:
                sys = assembled_sys;
 
                /* Update system message in conversation for OpenAI providers */
-               if (!chatgpt && !anthropic && !gemini)
+               if (!chatgpt && !anthropic)
                {
                   cJSON *first = cJSON_GetArrayItem(messages, 0);
                   if (first)
@@ -798,8 +781,7 @@ native_provider_http:
       message_history_repair(messages);
       messages_compact_consecutive(messages);
 
-      maybe_compact_before_request(&fb_agent, messages,
-                                   (chatgpt || anthropic || gemini) ? sys : NULL);
+      maybe_compact_before_request(&fb_agent, messages, (chatgpt || anthropic) ? sys : NULL);
 
       /* Primary sessions (role == NULL) never close the tool budget — the user
        * can always send another message.  Pass max_turns=0 so HARD never fires. */
@@ -833,7 +815,7 @@ native_provider_http:
             memset(&rcfg, 0, sizeof(rcfg));
             rcfg.delegate_seam = 1;
             /* The synthetic fold turns are {role,content:string} — valid input for
-             * anthropic / openai / gemini builders, but the chatgpt Responses
+             * anthropic / openai builders, but the chatgpt Responses
              * builder passes the array through unconverted and its API expects
              * top-level typed items, so feeding it folded turns is unverified.
              * Keep the Responses path measure-only here; fold it in a later slice
@@ -911,9 +893,6 @@ native_provider_http:
          req = agent_build_request_anthropic(&fb_agent, anth_msgs, active_tools, sys, tok,
                                              temperature);
       }
-      else if (gemini)
-         req = agent_build_request_gemini(&fb_agent, eff_messages, active_tools, sys, tok,
-                                          temperature, gemini_cache_name);
       else
          req = agent_build_request_openai(&fb_agent, eff_messages, active_tools, tok, temperature);
 
@@ -924,7 +903,7 @@ native_provider_http:
        * request (mirrors anthropic_http.c). Gated to delegates (role != NULL); the
        * primary shares the pipeline but is not policed here. */
       if (gateway_delegate_run_request_pipeline(
-              req, gateway_delegate_tool_shape(anthropic, chatgpt, gemini), role != NULL) < 0)
+              req, gateway_delegate_tool_shape(anthropic, chatgpt), role != NULL) < 0)
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
@@ -1016,9 +995,6 @@ native_provider_http:
             fb_req = agent_build_request_anthropic(&fb_agent, fb_anth_msgs, active_tools, sys, tok,
                                                    temperature);
          }
-         else if (gemini)
-            fb_req = agent_build_request_gemini(&fb_agent, messages, active_tools, sys, tok,
-                                                temperature, gemini_cache_name);
          else
             fb_req =
                 agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
@@ -1118,8 +1094,6 @@ native_provider_http:
          {
             if (anthropic)
                agent_parse_response_anthropic(root, &parsed);
-            else if (gemini)
-               agent_parse_response_gemini(root, &parsed);
             else
                agent_parse_response_openai(root, &parsed);
             cJSON_Delete(root);
@@ -1133,7 +1107,7 @@ native_provider_http:
 
       /* Universal-gateway P4 (response side): police a denied tool_use the model
        * emitted anyway. Shape-agnostic — operates on the normalized parsed_response_t,
-       * so it covers every provider (incl. gemini). Config-gated internally and gated
+       * so it covers every provider. Config-gated internally and gated
        * to delegate calls here: the primary spawns delegates via the very Task/Subagent
        * tool this would drop, so policing the primary's response would neuter aimee's
        * own delegation. Drop count discarded, as in the ingress (anthropic_http.c). */
@@ -1212,14 +1186,14 @@ native_provider_http:
                cJSON_Delete(parsed.assistant_message);
                parsed.assistant_message = NULL;
             }
-            if (!chatgpt && !anthropic && !gemini)
+            if (!chatgpt && !anthropic)
                parsed.assistant_message = build_openai_assistant_message_from_xml_calls(&parsed);
             out->rescue_recoveries++;
          }
       }
 
       int respond_strip = inject_respond_tool ? agent_tools_strip_delegate_respond(&parsed) : 0;
-      if (respond_strip == 2 && !chatgpt && !anthropic && !gemini)
+      if (respond_strip == 2 && !chatgpt && !anthropic)
       {
          if (parsed.assistant_message)
             cJSON_Delete(parsed.assistant_message);
@@ -1310,19 +1284,6 @@ native_provider_http:
          cJSON *asst = cJSON_CreateObject();
          cJSON_AddStringToObject(asst, "role", "assistant");
          cJSON_AddItemToObject(asst, "content", cJSON_Duplicate(parsed.assistant_message, 1));
-         cJSON_AddItemToArray(messages, asst);
-      }
-      else if (gemini && parsed.assistant_message)
-      {
-         /* Gemini: assistant_message is {"parts":[...]}, role must be "model".
-          * We store it in the messages array using "role":"assistant" so that
-          * messages_to_gemini_contents() can detect and convert it. */
-         cJSON *asst = cJSON_CreateObject();
-         cJSON_AddStringToObject(asst, "role", "assistant");
-         /* Copy parts from the Gemini content block */
-         cJSON *native_parts = cJSON_GetObjectItem(parsed.assistant_message, "parts");
-         if (native_parts)
-            cJSON_AddItemToObject(asst, "parts", cJSON_Duplicate(native_parts, 1));
          cJSON_AddItemToArray(messages, asst);
       }
       else if (!chatgpt && parsed.assistant_message)
@@ -1741,11 +1702,6 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
-
-   /* Cleanup Gemini prompt cache (relies on TTL if DELETE fails, which is fine) */
-   if (gemini && gemini_cache_name[0])
-      gemini_prompt_cache_delete(agent->endpoint[0] ? agent->endpoint : NULL, auth_header,
-                                 gemini_cache_name, agent->timeout_ms);
 
    /* Cleanup ephemeral SSH */
    if (has_ephemeral_ssh)

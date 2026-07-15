@@ -997,8 +997,11 @@ extern const provider_cli_adapter_t acp_provider_cli_adapter;
 const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
 {
    static const provider_cli_adapter_t *adapters[] = {
-       &codex_provider_cli_adapter,   &claude_provider_cli_adapter, &gemini_provider_cli_adapter,
-       &mistral_provider_cli_adapter, &acp_provider_cli_adapter,    NULL,
+       &codex_provider_cli_adapter,
+       &claude_provider_cli_adapter,
+       &mistral_provider_cli_adapter,
+       &acp_provider_cli_adapter,
+       NULL,
    };
 
    if (!cli_kind || !cli_kind[0])

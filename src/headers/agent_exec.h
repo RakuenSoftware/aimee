@@ -360,16 +360,10 @@ void agent_http_cleanup(void);
  * On success fills cache_name_out and returns 0; returns -1 on any error.
  * endpoint_base: e.g. "https://generativelanguage.googleapis.com/v1beta" (NULL = default)
  * timeout_ms: per-request HTTP timeout */
-int gemini_prompt_cache_create(const char *endpoint_base, const char *auth_header,
-                               const char *model, const char *system_prompt, int timeout_ms,
-                               char *cache_name_out, size_t name_len);
 
 /* Attach a cached-content reference to an already-built Gemini request body.
  * Removes "systemInstruction" (it lives in the cache) and adds "cachedContent". */
-void gemini_prompt_cache_attach(struct cJSON *req, const char *cache_name);
 
 /* Delete a cached-content resource. Errors are logged at DEBUG, never surfaced. */
-void gemini_prompt_cache_delete(const char *endpoint_base, const char *auth_header,
-                                const char *cache_name, int timeout_ms);
 
 #endif /* DEC_AGENT_EXEC_H */

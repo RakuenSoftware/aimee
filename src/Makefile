@@ -252,7 +252,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/events.c posix/cmd_infra.c \
         posix/cmd_agent_delegate.c posix/cmd_describe.c \
         posix/cmd_hooks.c posix/memory.c posix/memory_embed.c posix/server_compute.c \
-        posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c posix/agent_shell_gemini.c \
+        posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
         posix/agent_runtime.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c posix/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c posix/agent_tools_dispatch.c posix/td_search_render.c posix/sandbox.c
@@ -268,7 +268,7 @@ else
         posix/events.c posix/cmd_infra.c \
         posix/cmd_agent_delegate.c posix/cmd_describe.c \
         posix/cmd_hooks.c posix/memory.c posix/memory_embed.c posix/server_compute.c \
-        posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c posix/agent_shell_gemini.c \
+        posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
         posix/agent_runtime.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c posix/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c posix/agent_tools_dispatch.c posix/td_search_render.c posix/sandbox.c
@@ -334,9 +334,9 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 AGENT_SRCS = server/agent_runtime.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/agent_policy_intercept.c server/agent_eval.c server/agent_eval_memory_support.c server/agent_eval_baseline.c server/agent_eval_benchmarks.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
-             server/process_mgr.c server/agent_loop.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/provider_cli_adapter.c server/cli_claude.c server/cli_gemini.c server/cli_mistral.c server/cli_acp.c server/session_compact.c server/compact_prune.c server/context_engine.c \
-             server/delegate_backend.c server/delegate_backend_local.c server/delegate_backend_ssh.c server/delegate_backend_docker.c server/delegate_driver.c server/delegate_openai.c server/delegate_gemini.c server/delegate_xml_fallback.c \
-             server/model_provider.c server/model_sampling.c server/openrouter_profile.c server/openai_profile.c server/anthropic_profile.c server/gemini_profile.c server/ollama_profile.c server/llama_native_profile.c server/mistral_profile.c server/minimax_profile.c server/aux_router.c \
+             server/process_mgr.c server/agent_loop.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/provider_cli_adapter.c server/cli_claude.c  server/cli_mistral.c server/cli_acp.c server/session_compact.c server/compact_prune.c server/context_engine.c \
+             server/delegate_backend.c server/delegate_backend_local.c server/delegate_backend_ssh.c server/delegate_backend_docker.c server/delegate_driver.c server/delegate_openai.c  server/delegate_xml_fallback.c \
+             server/model_provider.c server/model_sampling.c server/openrouter_profile.c server/openai_profile.c server/anthropic_profile.c  server/ollama_profile.c server/llama_native_profile.c server/mistral_profile.c server/minimax_profile.c server/aux_router.c \
              server/otel.c server/oauth_pkce.c server/oauth_tokens.c server/mcp_client.c server/mcp_client_registry.c \
              server/agent_shell.c server/agent_cli_shell.c
 AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)

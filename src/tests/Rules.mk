@@ -23,7 +23,7 @@ TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/main
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
-                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
+                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_eval.o $(OBJDIR)/server/agent_eval_memory_support.o $(OBJDIR)/server/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
                              $(OBJDIR)/server/kb_client.o $(OBJDIR)/server/kb_client_cache.o $(OBJDIR)/server/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/server/kb_client_index_parse.o $(OBJDIR)/server/kb_client_memory.o $(OBJDIR)/server/kb_client_memory_mutations.o $(OBJDIR)/server/kb_client_agent.o $(OBJDIR)/server/kb_client_dashboard.o $(OBJDIR)/server/kb_client_tasks.o $(OBJDIR)/server/kb_client_data.o $(OBJDIR)/tests/server/kb_client_tool_registry.o $(OBJDIR)/server/kb_client_prospective.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
@@ -38,8 +38,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/process_mgr.o \
                              $(OBJDIR)/lsp_manager.o $(OBJDIR)/lsp_client.o \
                              $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
-                             $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/gemini_profile.o \
-                             $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
+                             $(OBJDIR)/server/anthropic_profile.o                             $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
                              $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
                              $(OBJDIR)/server/minimax_profile.o \
                              $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -875,8 +874,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o $(OBJDIR)/server/delegate_gemini.o \
-                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -891,8 +889,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/server/tool_call_args.o \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o $(OBJDIR)/server/delegate_gemini.o \
-                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -907,8 +904,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o $(OBJDIR)/server/delegate_gemini.o \
-                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -927,7 +923,7 @@ $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                       $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o \
-                      $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o \
+                      $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o \
                       $(OBJDIR)/server/cli_acp.o $(OBJDIR)/posix/workspace_provider.o \
                       $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -936,7 +932,7 @@ $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                       $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o \
-                      $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o \
+                      $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o \
                       $(OBJDIR)/server/cli_acp.o $(OBJDIR)/posix/workspace_provider.o \
                       $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1284,8 +1280,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/server/delegate_backend_local.o \
 	                                $(OBJDIR)/server/delegate_backend_ssh.o $(OBJDIR)/server/delegate_backend_docker.o \
 	                                $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
-	                                $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/gemini_profile.o \
-	                                $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
+	                                $(OBJDIR)/server/anthropic_profile.o	                                $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
 	                                $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
 	                                $(OBJDIR)/server/minimax_profile.o \
 	                                $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/model_registry.o \
@@ -2117,8 +2112,7 @@ $(TESTPREFIX)/unit-test-agent-policy-intercept: $(OBJDIR)/tests/test_agent_polic
 $(TESTPREFIX)/unit-test-http-retry: $(OBJDIR)/tests/test_http_retry.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                             $(OBJDIR)/db1/interaction_events.o \
                             $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
-                            $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/gemini_profile.o \
-                            $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
+                            $(OBJDIR)/server/anthropic_profile.o                            $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
                             $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
                             $(OBJDIR)/server/minimax_profile.o \
                             $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o \
@@ -2467,7 +2461,6 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
                                           $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_gemini.o \
                                           $(OBJDIR)/server/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
@@ -2480,7 +2473,6 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
                                           $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_gemini.o \
                                           $(OBJDIR)/server/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
@@ -2493,7 +2485,6 @@ $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o 
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
                                           $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_gemini.o \
                                           $(OBJDIR)/server/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
@@ -3289,7 +3280,6 @@ $(TESTPREFIX)/unit-test-model-provider: $(OBJDIR)/tests/test_model_provider.o \
                                 $(OBJDIR)/server/model_provider.o \
                                 $(OBJDIR)/server/openai_profile.o \
                                 $(OBJDIR)/server/anthropic_profile.o \
-                                $(OBJDIR)/server/gemini_profile.o \
                                 $(OBJDIR)/server/openrouter_profile.o \
                                 $(OBJDIR)/server/ollama_profile.o \
                                 $(OBJDIR)/server/llama_native_profile.o \
@@ -3303,7 +3293,6 @@ $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o 
                                  $(OBJDIR)/server/delegate_driver.o \
                                  $(OBJDIR)/server/agent_request_shaping.o \
                                  $(OBJDIR)/server/delegate_openai.o \
-                                 $(OBJDIR)/server/delegate_gemini.o \
                                  $(OBJDIR)/server/delegate_xml_fallback.o \
                                  $(OBJDIR)/model_registry.o \
                                  $(OBJDIR)/server/agent_tools.o \
@@ -3316,7 +3305,6 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/server/delegate_driver.o \
                                 $(OBJDIR)/server/delegate_openai.o \
-                                $(OBJDIR)/server/delegate_gemini.o \
                                 $(OBJDIR)/server/delegate_xml_fallback.o \
                                 $(OBJDIR)/model_registry.o \
                                 $(OBJDIR)/server/agent_tools.o \
@@ -3341,7 +3329,6 @@ $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surf
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/server/delegate_driver.o \
                                 $(OBJDIR)/server/delegate_openai.o \
-                                $(OBJDIR)/server/delegate_gemini.o \
                                 $(OBJDIR)/server/delegate_xml_fallback.o \
                                 $(OBJDIR)/model_registry.o \
                                 $(OBJDIR)/server/agent_tools.o \
@@ -3628,7 +3615,6 @@ $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/delegate_driver.o \
                      $(OBJDIR)/server/delegate_openai.o \
-                     $(OBJDIR)/server/delegate_gemini.o \
                      $(OBJDIR)/server/delegate_xml_fallback.o \
                      $(OBJDIR)/model_registry.o \
                      $(OBJDIR)/server/agent_tools.o \
@@ -3689,7 +3675,6 @@ $(TESTPREFIX)/unit-test-plugin-loader: $(OBJDIR)/tests/test_plugin_loader.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/delegate_driver.o \
                      $(OBJDIR)/server/delegate_openai.o \
-                     $(OBJDIR)/server/delegate_gemini.o \
                      $(OBJDIR)/server/delegate_xml_fallback.o \
                      $(OBJDIR)/model_registry.o \
                      $(OBJDIR)/server/agent_tools.o \
