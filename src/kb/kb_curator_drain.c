@@ -949,6 +949,46 @@ static void *kb_curator_code_worker_main(void *arg)
    return NULL;
 }
 
+/* Dedicated extract_doc worker: the exact analogue of the extract_code worker
+ * above, and minimal for the same reason — no sweeps, no other stages, so N
+ * workers map 1:1 onto the synth backend's parallel slots.
+ *
+ * The doc stage needs this as much as the code stage does. Both are one LLM
+ * sidecar call per job, but the shared LLM lane spends most of each pass on the
+ * OTHER LLM stages (a code unit, resolve_entities, synthesize, promote_entity),
+ * so extract_doc gets a thin slice of one thread. On the .254 appliance, with
+ * extract_code.workers=4 and no doc pool, that measured as ~30 docs/hr against
+ * ~1,750 code units/hr — a backlog that drains in days rather than hours. */
+static void *kb_curator_doc_worker_main(void *arg)
+{
+   kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
+   while (!ctx->stop)
+   {
+      config_t cfg;
+      config_load(&cfg);
+      if (!cfg.kb_curator_extract_docs_enabled)
+      {
+         sleep(DRAIN_POLL_SECS);
+         continue;
+      }
+      kb_curator_extract_opts_t opts;
+      memset(&opts, 0, sizeof(opts));
+      snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
+               cfg.kb_curator_extract_command);
+      opts.max_tokens =
+          cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
+      opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
+
+      int r = kb_curator_extract_one(&opts);
+      db2_lease_release_idle();
+      if (r == 1)
+         continue; /* did work — claim the next job immediately */
+      /* empty queue (0) or error (<0): back off the poll interval */
+      sleep(DRAIN_POLL_SECS);
+   }
+   return NULL;
+}
+
 static void *kb_curator_index_lane_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
@@ -1057,6 +1097,28 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
       aimee_log(LOG_INFO, "kb.curator.drain", "%d extract_code worker thread(s) started",
                 ctx->code_active);
    }
+
+   /* Dedicated extract_doc workers — same contract as the code workers above:
+    * kb_curator_extract_docs_workers - 1 extra threads, since the main LLM lane
+    * still contributes one doc per pass. Claims are transactional (UPDATE ...
+    * SELECT ... LIMIT 1 FOR UPDATE SKIP LOCKED), so workers never double-claim. */
+   ctx->doc_active = 0;
+   if (cfg.kb_curator_extract_docs_enabled && cfg.kb_curator_extract_docs_workers > 1)
+   {
+      int extra = cfg.kb_curator_extract_docs_workers - 1;
+      if (extra > KB_CURATOR_MAX_DOC_WORKERS)
+         extra = KB_CURATOR_MAX_DOC_WORKERS;
+      for (int i = 0; i < extra; i++)
+      {
+         if (pthread_create(&ctx->doc_threads[ctx->doc_active], NULL, kb_curator_doc_worker_main,
+                            ctx) == 0)
+            ctx->doc_active++;
+         else
+            break;
+      }
+      aimee_log(LOG_INFO, "kb.curator.drain", "%d extract_doc worker thread(s) started",
+                ctx->doc_active);
+   }
    if (pthread_create(&ctx->index_thread, NULL, kb_curator_index_lane_main, ctx) == 0)
    {
       ctx->index_active = 1;
@@ -1070,7 +1132,8 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
 
 void kb_curator_drain_shutdown(kb_curator_drain_ctx_t *ctx)
 {
-   if (!ctx || (!ctx->active && !ctx->index_active && ctx->code_active <= 0))
+   if (!ctx ||
+       (!ctx->active && !ctx->index_active && ctx->code_active <= 0 && ctx->doc_active <= 0))
       return;
    ctx->stop = 1;
    if (ctx->active)
@@ -1086,5 +1149,8 @@ void kb_curator_drain_shutdown(kb_curator_drain_ctx_t *ctx)
    for (int i = 0; i < ctx->code_active; i++)
       pthread_join(ctx->code_threads[i], NULL);
    ctx->code_active = 0;
+   for (int i = 0; i < ctx->doc_active; i++)
+      pthread_join(ctx->doc_threads[i], NULL);
+   ctx->doc_active = 0;
    aimee_log(LOG_DEBUG, "kb.curator.drain", "drain threads stopped");
 }

@@ -4,6 +4,7 @@
 #include <pthread.h>
 
 #define KB_CURATOR_MAX_CODE_WORKERS 8
+#define KB_CURATOR_MAX_DOC_WORKERS  8
 
 typedef struct
 {
@@ -15,6 +16,9 @@ typedef struct
     * many sidecar extractions in parallel. */
    pthread_t code_threads[KB_CURATOR_MAX_CODE_WORKERS];
    int code_active; /* number of spawned extract_code workers */
+   /* Dedicated extract_doc workers — same shape, same rationale. */
+   pthread_t doc_threads[KB_CURATOR_MAX_DOC_WORKERS];
+   int doc_active; /* number of spawned extract_doc workers */
    int active;
    int index_active;
    volatile int stop;

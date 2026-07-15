@@ -18,6 +18,7 @@
 #include "config.h"
 #include "kb_curator_extract.h"
 #include "kb/kb_curator_grounding.h"
+#include "kb/kb_curator_sidecar.h"
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
@@ -74,6 +75,91 @@ static void test_queue_null_args(void)
 }
 
 /* ── DB-backed tests ────────────────────────────────────────────────────── */
+
+/* Read one column of a kb_code_unit_jobs row into buf. Returns 0 on success. */
+static int ccu_test_job_field(sqlite3 *db, long long id, const char *col, char *buf, size_t buflen)
+{
+   char sql[256];
+   snprintf(sql, sizeof(sql), "SELECT %s FROM kb_code_unit_jobs WHERE id=%lld", col, id);
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   int rc = -1;
+   if (sqlite3_step(st) == SQLITE_ROW)
+   {
+      const unsigned char *t = sqlite3_column_text(st, 0);
+      snprintf(buf, buflen, "%s", t ? (const char *)t : "");
+      rc = 0;
+   }
+   sqlite3_finalize(st);
+   return rc;
+}
+
+/* ccu_reclaim_stale_running: the code-unit analogue of the extract_doc reclaim.
+ * ccu_claim_job only ever selects status='pending', so a job orphaned in
+ * 'running' (worker crash/restart, wedged sidecar) is never retried and pins a
+ * db2 pool member past its ceiling.
+ *
+ * MUST run before any other test that calls kb_curator_extract_code_unit_one:
+ * the reclaim throttles on a process-wide static, and a successful reclaim in an
+ * earlier test would arm it and make this one silently skip. max_attempts=1 puts
+ * every reclaimed row on the terminal branch so the follow-on claim stays quiet
+ * and these assertions are about the reclaim alone. */
+static void test_reclaim_stale_running_code_unit(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+
+   /* (a) orphan: stale claim, attempts exhausted -> 'failed', and its existing
+    *     diagnostic is PRESERVED rather than overwritten with the reclaim's own
+    *     message — that error is why the attempt died. */
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "last_error,claimed_by,claimed_at) VALUES (9101,'p','a.c','fn_a','running',"
+                       "1,'mkstemp failed for /tmp/x: No space left on device','kb.curator.drain',"
+                       "datetime('now','-60 minutes'))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   /* (b) orphan with no diagnostic -> reclaim explains why it is terminal. */
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "last_error,claimed_by,claimed_at) VALUES (9102,'p','b.c','fn_b','running',"
+                       "1,'','kb.curator.drain',datetime('now','-60 minutes'))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   /* (c) claimed just now: in-flight, NOT orphaned — reclaiming would yank live
+    *     work out from under a running sidecar. */
+   assert(sqlite3_exec(db,
+                       "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
+                       "last_error,claimed_by,claimed_at) VALUES (9103,'p','c.c','fn_c','running',"
+                       "1,'','kb.curator.drain',datetime('now'))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   kb_curator_extract_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.max_attempts = 1;
+   opts.max_tokens = 256;
+   (void)kb_curator_extract_code_unit_one(&opts);
+
+   char buf[256];
+   assert(ccu_test_job_field(db, 9101, "status", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "failed") == 0);
+   assert(ccu_test_job_field(db, 9101, "last_error", buf, sizeof(buf)) == 0);
+   assert(strstr(buf, "No space left on device") != NULL); /* diagnostic survived */
+
+   assert(ccu_test_job_field(db, 9102, "status", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "failed") == 0);
+   assert(ccu_test_job_field(db, 9102, "last_error", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "stale running lease reclaimed after max attempts") == 0);
+
+   assert(ccu_test_job_field(db, 9103, "status", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "running") == 0); /* in-flight untouched */
+
+   db2_test_shim_close();
+   printf("  PASS: test_reclaim_stale_running_code_unit (orphans reclaimed; diagnostic preserved; "
+          "in-flight untouched)\n");
+}
 
 static void test_extract_code_unit_one_empty_queue(void)
 {
@@ -352,6 +438,160 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
  * candidate even when it is not executable — invoked as `python3 <path>`, the
  * old access(X_OK) check wrongly rejected the shipped 0644 script and stalled
  * every extract job — and (c) fall back to the cwd-relative path when none match. */
+/* kb_curator_describe_wait_status: pclose(3) hands back a wait(2)-encoded status,
+ * not an exit code. Reporting it raw wrote "sidecar exited 256" into
+ * kb_code_unit_jobs.last_error for a sidecar that merely exit(1)'d — an opaque
+ * number that reads like an exotic fault and hides the real failure mode. These
+ * assert each status class decodes to something an operator can act on. */
+static void test_describe_wait_status(void)
+{
+   char out[256];
+
+   /* (a) The regression: exit(1) is 1<<8 == 256 in wait encoding. */
+   kb_curator_describe_wait_status(1 << 8, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 1") == 0);
+
+   /* (b) Success-shaped status still renders an exit line if a caller asks. */
+   kb_curator_describe_wait_status(0, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 0") == 0);
+
+   /* (c) timeout(1) reports its wall-clock cap as exit 124 — named only when the
+    *     caller says it wrapped the command, and echoing the cap it was given.
+    *     Hedged, because timeout also PROPAGATES a command's own exit 124: the
+    *     two are indistinguishable, so the message must not assert either. */
+   kb_curator_describe_wait_status(124 << 8, 300, out, sizeof(out));
+   assert(strcmp(out,
+                 "sidecar exited 124 (timeout after 300s, or the command itself exited 124)") == 0);
+
+   /* (d) Same status WITHOUT a timeout wrapper is just the command's exit code;
+    *     claiming a timeout there would be a lie (kb_curator_sidecar.c does not
+    *     wrap, and passes 0). */
+   kb_curator_describe_wait_status(124 << 8, 0, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 124") == 0);
+
+   /* (e) A real signal death — the kernel says so via WIFSIGNALED, so the
+    *     message may state it as fact. SIGKILL is the OOM-killer signature we
+    *     care about on a box where the model shares RAM with the drain. */
+   kb_curator_describe_wait_status(9 /* WIFSIGNALED: low 7 bits = signo */, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar killed by signal 9 (Killed)") == 0);
+
+   /* (f) 128+n is the SHELL's convention for a signal-killed child — but a
+    *     process can also exit(137) itself, and the two are indistinguishable
+    *     here. So report the exit code as fact and the signal as a reading:
+    *     asserting a kill outright would fake an OOM that never happened. */
+   kb_curator_describe_wait_status((128 + 9) << 8, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 137 (128+9: likely killed by signal 9, Killed)") == 0);
+
+   /* (g) pclose itself failing is distinct from any child status. */
+   kb_curator_describe_wait_status(-1, 300, out, sizeof(out));
+   assert(strncmp(out, "pclose failed:", 14) == 0);
+
+   /* (h) Null/zero-length buffers must not be written through. */
+   kb_curator_describe_wait_status(1 << 8, 300, NULL, 0);
+   kb_curator_describe_wait_status(1 << 8, 300, out, 0);
+
+   printf("  PASS: test_describe_wait_status\n");
+}
+
+/* kb_curator_shell_quote: bounding the sidecar with timeout(1) means a SECOND
+ * shell parses the command line, so the configured command must be quoted rather
+ * than interpolated raw. Without this, adding the timeout wrapper would silently
+ * re-interpret commands that worked fine under a bare popen — an embedded quote
+ * ends the string early, and $VAR expands twice. */
+static void test_shell_quote(void)
+{
+   char out[2176];
+
+   /* (a) an ordinary command is wrapped, contents untouched. */
+   assert(kb_curator_shell_quote("python3 /opt/aimee/scripts/curator-extract.py", out,
+                                 sizeof(out)) == 0);
+   assert(strcmp(out, "'python3 /opt/aimee/scripts/curator-extract.py'") == 0);
+
+   /* (b) the regression: shell metacharacters must survive as LITERALS. Inside
+    *     single quotes nothing is special, so $VAR cannot expand and the double
+    *     quote cannot terminate anything. */
+   assert(kb_curator_shell_quote("python3 -c \"print($HOME)\"", out, sizeof(out)) == 0);
+   assert(strcmp(out, "'python3 -c \"print($HOME)\"'") == 0);
+
+   /* (c) an embedded single quote is the one case single-quoting can't nest:
+    *     close, escape, reopen. */
+   assert(kb_curator_shell_quote("echo 'hi'", out, sizeof(out)) == 0);
+   assert(strcmp(out, "'echo '\\''hi'\\'''") == 0);
+
+   /* (d) backslashes and backticks are literal too. */
+   assert(kb_curator_shell_quote("a\\b`id`", out, sizeof(out)) == 0);
+   assert(strcmp(out, "'a\\b`id`'") == 0);
+
+   /* (e) empty string still yields a valid empty shell word. */
+   assert(kb_curator_shell_quote("", out, sizeof(out)) == 0);
+   assert(strcmp(out, "''") == 0);
+
+   /* (f) overflow is a hard error, never a truncated (and thus mis-quoted)
+    *     string the caller might still run. */
+   char tiny[8];
+   assert(kb_curator_shell_quote("aaaaaaaaaaaaaaaa", tiny, sizeof(tiny)) == -1);
+   assert(kb_curator_shell_quote("abc", NULL, 16) == -1);
+   assert(kb_curator_shell_quote(NULL, out, sizeof(out)) == -1);
+
+   printf("  PASS: test_shell_quote\n");
+}
+
+/* The quoting must survive a REAL shell round-trip, not just a string compare.
+ *
+ * The invariant is NOT "nothing expands" — the command still runs under `sh -c`,
+ * so the INNER shell applies normal semantics, exactly as the bare popen did.
+ * The invariant is that wrapping in timeout(1) changes NOTHING about how the
+ * command is interpreted. This command is chosen so the two disagree:
+ *
+ *   bare popen (correct):        lit::"q"
+ *   new, quoted wrapper:         lit::"q"   <- identical, semantics preserved
+ *   old, raw interpolation:      lit::q     <- outer shell ate the \" escapes
+ */
+static void test_sidecar_quoting_end_to_end(void)
+{
+   char err[256] = "";
+   char *out = kb_curator_sidecar_run("printf '%s' \"lit:$NOT_A_REAL_VAR:\\\"q\\\"\"", "{}", 256,
+                                      err, sizeof(err));
+   assert(out != NULL);
+   assert(strcmp(out, "lit::\"q\"") == 0);
+   free(out);
+
+   /* A single-quoted argument is the case the '\'' escaping exists for. */
+   char *out2 = kb_curator_sidecar_run("printf '%s' 'a b'", "{}", 256, err, sizeof(err));
+   assert(out2 != NULL);
+   assert(strcmp(out2, "a b") == 0);
+   free(out2);
+
+   /* The redirection must stay in the COMMAND's parse context, not the wrapper's.
+    * A pipeline is where the two diverge: under the bare popen the line is
+    * `printf ABC | wc -c < tmp`, so `< tmp` binds to wc (the LAST command) and
+    * wc counts the 2-byte request. Redirecting the timeout wrapper's stdin
+    * instead would feed tmp to printf and leave wc counting printf's 3 bytes —
+    * a silent change of meaning. Asserting 2 pins the bare-popen semantics.
+    *
+    *   bare popen:                  2
+    *   wrapper stdin redirect:      3   <- the bug
+    *   redirect inside, path as $1: 2   <- preserved
+    */
+   char *out3 = kb_curator_sidecar_run("printf ABC | wc -c", "{}", 256, err, sizeof(err));
+   assert(out3 != NULL);
+   long counted = strtol(out3, NULL, 10);
+   assert(counted == 2);
+   free(out3);
+
+   /* The request path is embedded as a quoted literal, not passed as $1. With a
+    * positional, a command containing `set --` rebinds $1 before the redirection
+    * expands and the sidecar silently reads a DIFFERENT file — measured at 5
+    * bytes (/etc/hostname) instead of the 2-byte request. A literal cannot be
+    * reassigned, so this still reads the request. */
+   char *out4 = kb_curator_sidecar_run("set -- /etc/hostname; wc -c", "{}", 256, err, sizeof(err));
+   assert(out4 != NULL);
+   assert(strtol(out4, NULL, 10) == 2);
+   free(out4);
+
+   printf("  PASS: test_sidecar_quoting_end_to_end\n");
+}
+
 static void test_pick_sidecar_command_resolution(void)
 {
    char out[768];
@@ -390,6 +630,10 @@ int main(void)
    printf("curator_code_unit:\n");
 
    test_force_curator_gate_off();
+   /* MUST precede any other kb_curator_extract_code_unit_one caller: the
+    * reclaim's throttle is a process-wide static that a successful earlier
+    * reclaim would arm, silently skipping this one. */
+   test_reclaim_stale_running_code_unit();
    test_queue_code_unit_gate_off();
    test_queue_code_units_for_project_gate_off();
    test_queue_null_args();
@@ -405,6 +649,9 @@ int main(void)
    test_extract_accepts_pure_function();
    test_extract_reads_body_from_db2_when_file_absent();
    test_pick_sidecar_command_resolution();
+   test_describe_wait_status();
+   test_shell_quote();
+   test_sidecar_quoting_end_to_end();
 
    printf("ok\n");
    return 0;

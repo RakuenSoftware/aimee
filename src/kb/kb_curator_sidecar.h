@@ -17,4 +17,27 @@
 char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_cap, char *errbuf,
                              size_t errlen);
 
+/* Quote `in` as a single sh word (POSIX single-quote form), so it can be
+ * interpolated into a shell command line without the shell re-parsing its
+ * contents. Exposed for testing.
+ *
+ * Needed because bounding a sidecar with timeout(1) means handing the configured
+ * command to a SECOND shell: interpolating it raw into `sh -c "<cmd>"` would let
+ * an embedded quote, $, backtick or backslash change the command's meaning —
+ * commands that worked under a bare popen. Returns 0 on success, -1 if the
+ * quoted form does not fit (caller must treat that as a hard error, never as a
+ * reason to fall back to the raw string). */
+int kb_curator_shell_quote(const char *in, char *out, size_t outlen);
+
+/* Render a pclose(3) wait status into an operator-legible reason. Shared with
+ * callers that run their own popen (the code-unit stage wraps its command in
+ * timeout(1)); exposed for testing.
+ *
+ * pclose returns a wait(2)-encoded status, not an exit code — reporting it raw
+ * logged "sidecar exited 256" for a plain exit(1). Distinguishes a non-zero
+ * exit, a signal kill (OOM), and a timeout. Pass timeout_s > 0 only if the
+ * command was wrapped in coreutils timeout(1) (whose cap shows as exit 124);
+ * callers that do not wrap pass 0. */
+void kb_curator_describe_wait_status(int status, int timeout_s, char *errbuf, size_t errlen);
+
 #endif /* KB_CURATOR_SIDECAR_H */

@@ -24,6 +24,18 @@
 
 #define KBS_ERRBUF 256
 
+/* The job kinds this drain handles — the single source of truth for BOTH the
+ * claim's IN-list and the dispatch in db2_kb_service_async_queue_drain. They
+ * must agree, and the failure mode when they drift is silent and destructive:
+ * kb_async_jobs is shared with the curator stages (extract_doc, memory_facts),
+ * which own their own claim lifecycle, and the dispatch marks every kind it
+ * does not recognize 'failed'. An unfiltered claim therefore takes the
+ * lowest-id pending row of ANY kind, so a single call to the drain endpoint
+ * would destroy the curator's queued work. Adding a kind here without adding a
+ * dispatch branch fails those jobs; adding a dispatch branch without adding it
+ * here leaves them unclaimed forever. */
+#define KBS_ASYNC_DRAIN_KINDS_SQL "('embed_raw', 'embed_pdf')"
+
 static const char *DB2_KB_DIRECTIVE_SELECT_COLS =
     "id, question, topic, anchor_entity, anchor_file, cause, priority, state,"
     " memory_a_id, memory_b_id, resolution_memory_id, evidence, source_session,"
@@ -305,12 +317,13 @@ static int db2_kb_service_async_queue_claim_next(int64_t *job_id, int64_t *docum
     * id=?2 AND status='pending' guard plus the changes!=1 check below: if
     * two workers race on the same row, only one UPDATE will see status =
     * 'pending' and report changes==1; the loser ROLLBACKs and retries. */
-   aimee_pg_stmt_t *sel = aimee_pg_prepare(conn,
-                                           "SELECT id, document_id, kind"
-                                           " FROM kb_async_jobs"
-                                           " WHERE status = 'pending'"
-                                           " ORDER BY id ASC LIMIT 1",
-                                           err, sizeof(err));
+   aimee_pg_stmt_t *sel =
+       aimee_pg_prepare(conn,
+                        "SELECT id, document_id, kind"
+                        " FROM kb_async_jobs"
+                        " WHERE status = 'pending'"
+                        "   AND kind IN " KBS_ASYNC_DRAIN_KINDS_SQL " ORDER BY id ASC LIMIT 1",
+                        err, sizeof(err));
    if (!sel)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -624,7 +637,14 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
          rc = db2_kb_service_async_process_embed_pdf(document_id, effective_cmd, errbuf,
                                                      sizeof(errbuf));
       else
-         snprintf(errbuf, sizeof(errbuf), "unknown job kind: %s", kind);
+         /* Unreachable unless KBS_ASYNC_DRAIN_KINDS_SQL and this chain have
+          * drifted apart — the claim cannot hand us a kind not in that list. If
+          * it ever happens the job is about to be marked 'failed', so say so
+          * loudly rather than discarding another stage's work in silence. */
+         snprintf(errbuf, sizeof(errbuf),
+                  "unknown job kind: %s (claimed but not dispatchable — "
+                  "KBS_ASYNC_DRAIN_KINDS_SQL is out of sync with the dispatch)",
+                  kind);
 
       if (rc == 0)
          (void)db2_kb_service_async_queue_mark_job(job_id, "done", "");
