@@ -1913,23 +1913,21 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
       aimee_log(LOG_DEBUG, "shell-git-gate", "allow: require_aimee_git is off (operator opt-out)");
       return 0;
    }
-   /* Ask per REPO, not in the abstract. The credential ladder resolves a per-host
-    * vault token from the checkout's origin, so `cwd` is what makes "can aimee do
-    * git here?" answerable. Passing NULL leaves only the server's own identity rung
-    * (AIMEE_FORGE_TOKEN / a forge App), which most deployments never set — the gate
-    * would then read "aimee has no git" and never fire, on precisely the boxes whose
-    * forge works fine through a vaulted per-host token. Found on .254: the forge had
-    * opened a real PR minutes earlier while this check returned 0. */
-   if (!git_cred_forge_configured(cwd))
+   /* "Has aimee-server got git configured?" is a property of the SERVER, not of the
+    * directory this thread happens to sit in. Asking it per-repo made the SAME
+    * command allowed from one cwd and refused from another — observed live on .254:
+    * DENY inside a wfe worktree, then allow from the daemon's cwd twelve seconds
+    * later, because the per-host rung only resolves where a checkout has an origin. */
+   if (!git_cred_forge_configured())
    {
-      /* The silently-inert case, and the one that hid the NULL-repo bug: the agent
-       * reached for git, the rule is ON, and we allowed it anyway because aimee has
-       * no credential to offer instead. That is deliberate — no aimee route, no
-       * restriction — but it must never be invisible, or a gate that has quietly
-       * stopped working looks exactly like a gate nobody is testing. */
+      /* The agent reached for git, the rule is ON, and we allowed it anyway because
+       * aimee-server has no credential to offer instead. Deliberate — no aimee route,
+       * no restriction — but never silent: a gate that has quietly stopped working
+       * looks exactly like a gate nobody is testing, which is how two guards shipped
+       * inert today. Server-level now, so it is the same answer every time. */
       aimee_log(LOG_INFO, "shell-git-gate",
-                "allow: agent ran git in '%s' but aimee-server has no forge credential for it "
-                "— nothing to redirect to (no aimee route, no restriction)",
+                "allow: agent ran git in '%s' but aimee-server has NO forge credential "
+                "configured — nothing to redirect to (no aimee route, no restriction)",
                 (cwd && cwd[0]) ? cwd : "(no cwd)");
       return 0;
    }
@@ -1939,8 +1937,8 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
 
 /* Boot-time posture, mirroring primary_cli_ingestor_log_posture: make "the rule is
  * on but nothing enforces it" visible at startup instead of leaving it to be
- * discovered on a box months later. The credential half is per-repo and cannot be
- * resolved here, so it is reported per-decision above rather than claimed now. */
+ * discovered on a box months later. Every condition is now a server-level fact, so
+ * this states the real answer rather than a hopeful one. */
 static void server_shell_git_gate_log_posture(void)
 {
    config_t cfg;
@@ -1958,9 +1956,16 @@ static void server_shell_git_gate_log_posture(void)
                 "rule would forbid the shell with nothing to redirect to, so it will not fire");
       return;
    }
+   if (!git_cred_forge_configured())
+   {
+      aimee_log(LOG_WARN, "shell-git-gate",
+                "INERT: require_aimee_git is on but aimee-server has NO forge credential "
+                "configured — aimee's own git cannot work either, so the shell is not refused "
+                "(no aimee route, no restriction)");
+      return;
+   }
    aimee_log(LOG_INFO, "shell-git-gate",
-             "ARMED: git/gh in a delegate shell is refused wherever aimee-server holds a forge "
-             "credential for the checkout (per-repo; logged per decision)");
+             "ARMED: git/gh in a delegate shell is refused; delegates use the git_* tools");
 }
 
 int server_init(server_ctx_t *ctx, const char *socket_path)
