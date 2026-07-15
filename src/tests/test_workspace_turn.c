@@ -270,6 +270,29 @@ int main(void)
          workspace_turn_unbind_active();
       }
 
+      /* The shared bound itself: every entrance that can hand a workspace to the
+       * backend must go through this ONE check. A second copy is a second thing to
+       * forget, which is how the delegate.backend_exec RPC came to accept any host
+       * path while the seam refused them. */
+      {
+         char outp[MAX_PATH_LEN] = "";
+         mkdir("/tmp/ws-shared", 0700);
+         assert(workspace_turn_workspace_authorized("/tmp/ws-shared", outp, sizeof(outp)) == 1);
+         assert(strcmp(outp, "/tmp/ws-shared") == 0); /* canonical, and what to mount */
+
+         mkdir("/tmp/aimee-outside-roots", 0700);
+         outp[0] = 'x';
+         assert(workspace_turn_workspace_authorized("/tmp/aimee-outside-roots", outp,
+                                                    sizeof(outp)) == 0);
+         assert(outp[0] == '\0');
+         rmdir("/tmp/aimee-outside-roots");
+
+         assert(workspace_turn_workspace_authorized(NULL, outp, sizeof(outp)) == 0);
+         assert(workspace_turn_workspace_authorized("", outp, sizeof(outp)) == 0);
+         assert(workspace_turn_workspace_authorized("/tmp/does-not-exist-at-all", outp,
+                                                    sizeof(outp)) == 0);
+      }
+
       /* A registered root of "/" must NOT authorize the whole host: that is not a
        * workspace registration, it is the absence of one. */
       {

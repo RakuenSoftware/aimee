@@ -295,6 +295,61 @@ int workspace_turn_bind_active(const char *cwd)
    return 0; /* cwd not in any registered workspace */
 }
 
+/* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` and
+ * returns 1 if it lives inside one of the operator's REGISTERED workspace roots.
+ *
+ * Repository-ness is NOT authorization: `mkdir .git` in any directory satisfies
+ * that, so the backend's own .git check is a backstop, not the bound. The bound is
+ * the registered roots — the same list workspace_turn_bind_active resolves a turn's
+ * cwd against. A path outside them is not a workspace the operator ever offered
+ * aimee, and bind-mounting it into a delegate container would expose whatever it
+ * happens to be: a home directory, a secrets tree, `/`.
+ *
+ * Canonicalize first: the check and the mount must be the same path, and both
+ * stat() and the docker daemon follow symlinks. */
+int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t out_cap)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (!workspace || !workspace[0] || !out || out_cap == 0)
+      return 0;
+   char real[MAX_PATH_LEN];
+   if (!realpath(workspace, real))
+   {
+      LOG_ERROR("delegate-sandbox", "workspace '%s' does not resolve (%s)", workspace,
+                strerror(errno));
+      return 0;
+   }
+   config_t cfg;
+   config_load(&cfg);
+   for (int i = 0; i < cfg.workspace_count; i++)
+   {
+      char root_real[MAX_PATH_LEN];
+      if (!realpath(cfg.workspaces[i], root_real))
+         continue;
+      /* "/" as a registered root would authorize every path on the host, which is
+       * not a workspace registration — it is the absence of one. */
+      if (strcmp(root_real, "/") == 0)
+      {
+         LOG_WARN("delegate-sandbox",
+                  "ignoring registered workspace root '/' for sandbox authorization: it would "
+                  "authorize every directory on the host");
+         continue;
+      }
+      if (cwd_in_workspace(real, root_real))
+      {
+         snprintf(out, out_cap, "%s", real);
+         return 1;
+      }
+   }
+   LOG_ERROR("delegate-sandbox",
+             "refusing to mount '%s' — it is not inside any registered workspace root (%d "
+             "registered). A directory the operator never registered is not a tree aimee may "
+             "hand a delegate",
+             real, cfg.workspace_count);
+   return 0;
+}
+
 int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
                                   int workspace_read_only)
 {
@@ -306,59 +361,10 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    if (!cfg.delegate_sandbox)
       return 0; /* default off: the delegate keeps running in-process, as today */
 
-   /* Authorize the tree before handing it to the backend as a bind mount.
-    *
-    * Repository-ness is NOT authorization: `mkdir .git` in any directory would
-    * satisfy that, so the backend's own .git check is a backstop, not the bound.
-    * The bound is the operator's REGISTERED workspace roots — the same list
-    * workspace_turn_bind_active resolves a turn's cwd against. A path outside them
-    * is not a workspace the operator ever offered aimee, and bind-mounting it
-    * read-write into a delegate container would expose whatever it happens to be:
-    * a home directory, a secrets tree, `/`, the server's own checkout.
-    *
-    * Canonicalize first — the check and the mount must be the same path, and both
-    * stat() and the docker daemon follow symlinks. */
    char ws_real[MAX_PATH_LEN] = "";
-   if (workspace && workspace[0])
-   {
-      if (!realpath(workspace, ws_real))
-      {
-         LOG_ERROR("delegate-sandbox",
-                   "delegate '%s': workspace '%s' does not resolve (%s); not binding a container",
-                   task_id, workspace, strerror(errno));
-         return 0;
-      }
-      int authorized = 0;
-      for (int i = 0; i < cfg.workspace_count; i++)
-      {
-         char root_real[MAX_PATH_LEN];
-         if (!realpath(cfg.workspaces[i], root_real))
-            continue;
-         /* "/" as a registered root would authorize every path on the host, which
-          * is not a workspace registration — it is the absence of one. */
-         if (strcmp(root_real, "/") == 0)
-         {
-            LOG_WARN("delegate-sandbox",
-                     "ignoring registered workspace root '/' for sandbox authorization: it would "
-                     "authorize every directory on the host");
-            continue;
-         }
-         if (cwd_in_workspace(ws_real, root_real))
-         {
-            authorized = 1;
-            break;
-         }
-      }
-      if (!authorized)
-      {
-         LOG_ERROR("delegate-sandbox",
-                   "delegate '%s': refusing to mount '%s' — it is not inside any registered "
-                   "workspace root (%d registered). A directory the operator never registered is "
-                   "not a tree aimee may hand a delegate; the turn stays in-process",
-                   task_id, ws_real, cfg.workspace_count);
-         return 0;
-      }
-   }
+   if (workspace && workspace[0] &&
+       !workspace_turn_workspace_authorized(workspace, ws_real, sizeof(ws_real)))
+      return 0; /* refused + logged; the turn stays in-process */
 
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
