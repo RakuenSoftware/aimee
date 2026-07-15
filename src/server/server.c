@@ -22,6 +22,7 @@
 #include "server_tls.h" /* server_http_api_status_report */
 #include "config.h"     /* config_t / config_load for api.status, api.enable */
 #include "delegate_backend_docker.h"
+#include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "delegate_backend_local.h"
 #include "delegate_backend_ssh.h"
 #include "server_delegate_monitor.h"
@@ -1939,6 +1940,71 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
  * on but nothing enforces it" visible at startup instead of leaving it to be
  * discovered on a box months later. Every condition is now a server-level fact, so
  * this states the real answer rather than a hopeful one. */
+/* Say at boot whether the delegate sandbox can actually bite.
+ *
+ * Two guards shipped earlier today read correctly and were inert on the deployed
+ * box, and neither said so — the whole reason this idiom exists. This one has a
+ * worse failure than inertness: a sandbox believed-on but not binding means every
+ * delegate runs its shell on the HOST, which is precisely what it was enabled to
+ * prevent. An operator must not have to read the code to learn that. */
+static void delegate_sandbox_log_posture(void)
+{
+   config_t cfg;
+   int dial_on = (config_load(&cfg) == 0) && cfg.delegate_sandbox;
+   if (!dial_on)
+   {
+      aimee_log(LOG_INFO, "delegate-sandbox",
+                "OFF: delegate_sandbox=false — a delegate's shell and file ops run IN-PROCESS "
+                "inside aimee-server, with the server's filesystem and environment");
+      return;
+   }
+   delegate_backend_t *b = delegate_backend_lookup("docker");
+   if (!b || !b->acquire)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "INERT: delegate_sandbox is ON but the docker backend is not registered — every "
+                "delegate will run on the HOST while appearing sandboxed");
+      return;
+   }
+
+   /* The backend being REGISTERED proves nothing: delegate_backend_register_docker()
+    * only installs a vtable, so the lookup above succeeds on a box with no docker at
+    * all. Reporting ARMED on that box would be the exact bug this whole idiom exists
+    * to catch — a guard that reads correctly and cannot fire, saying nothing. So
+    * probe the daemon the backend would actually use (honouring AIMEE_DOCKER_BIN,
+    * which the tests' fake-docker fixture sets). */
+   const char *bin = getenv("AIMEE_DOCKER_BIN");
+   if (!bin || !bin[0])
+      bin = "docker";
+   const char *probe[] = {bin, "version", "--format", "{{.Server.Version}}", NULL};
+   char *ver = NULL;
+   const workspace_provider_t *sh = workspace_provider_shared();
+   int rc = sh->exec(sh, probe, &ver, 256);
+   if (rc != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "INERT: delegate_sandbox is ON and the docker backend is registered, but `%s "
+                "version` failed (rc=%d) — no daemon reachable, so every delegate will run on "
+                "the HOST while appearing sandboxed",
+                bin, rc);
+      free(ver);
+      return;
+   }
+   if (ver)
+   {
+      char *nl = strchr(ver, '\n');
+      if (nl)
+         *nl = '\0';
+   }
+   aimee_log(LOG_WARN, "delegate-sandbox",
+             "ARMED: delegate file/exec will bind to a per-delegate container (docker server %s). "
+             "NOTE this is not yet the full seal: the container still has a network and this does "
+             "not take it away, so the shell-git gate and the credential strip remain the live "
+             "boundary",
+             (ver && ver[0]) ? ver : "?");
+   free(ver);
+}
+
 static void server_shell_git_gate_log_posture(void)
 {
    config_t cfg;
@@ -2167,6 +2233,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Say at boot whether the rule can actually bite. Two guards shipped today read
     * correctly and were inert on the deployed box; neither said so. */
    server_shell_git_gate_log_posture();
+   delegate_sandbox_log_posture();
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
