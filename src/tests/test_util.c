@@ -66,6 +66,22 @@ static void test_split_reasoning_prefix(void)
    assert(text_split_reasoning_prefix(NULL, &rsn, &rlen) == NULL);
    assert(strcmp(text_split_reasoning_prefix("<think>a</think>b", NULL, NULL), "b") == 0);
 
+   /* (h) a LEADING close tag with no opener: providers emit this when the
+    * reasoning went out-of-band via reasoning_content and only the delimiter
+    * leaked into content. Drop the tag; there is no reasoning to hand back.
+    * (Regression: the prefix rule originally only matched "<think>", which left
+    * "</think>\n\nFinal answer" untouched as the answer.) */
+   rsn = (const char *)0x1;
+   rlen = 42;
+   s = "</think>\n\nFinal answer";
+   assert(strcmp(text_split_reasoning_prefix(s, &rsn, &rlen), "Final answer") == 0);
+   assert(rsn == NULL);
+   assert(rlen == 0);
+
+   /* (i) but a close tag that is NOT at the front is ordinary content. */
+   s = "the answer is a</think>b";
+   assert(strcmp(text_split_reasoning_prefix(s, &rsn, &rlen), "the answer is a</think>b") == 0);
+
    printf("  PASS: test_split_reasoning_prefix\n");
 }
 

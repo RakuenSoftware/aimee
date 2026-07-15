@@ -84,6 +84,20 @@ const char *text_split_reasoning_prefix(const char *text, const char **reasoning
    const char *p = text;
    while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
       p++;
+
+   /* A LEADING close tag with no opener. Real providers emit this: the reasoning
+    * itself went out-of-band in reasoning_content and only the closing delimiter
+    * leaked into content, so there is nothing to hand back as reasoning — the tag
+    * is a leftover delimiter, not content. Still prefix-anchored: a close tag
+    * anywhere but the front is ordinary text and is left alone. */
+   if (strncmp(p, "</think>", 8) == 0)
+   {
+      const char *answer = p + 8;
+      while (*answer == '\n' || *answer == '\r' || *answer == ' ' || *answer == '\t')
+         answer++;
+      return answer;
+   }
+
    if (strncmp(p, "<think>", 7) != 0)
       return text; /* no preamble: an inner tag is content, leave it alone */
 
