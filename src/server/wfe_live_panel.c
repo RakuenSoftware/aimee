@@ -16,9 +16,13 @@
  * review agent is eligible right now the panel QUEUES for a seat up to
  * AIMEE_PANEL_SEAT_WAIT_SECS before the gate degrades.
  *
- * NOTE: panelists are tool-less (the engine embeds the change in the prompt),
- * so the panel no longer touches the worktree at all; only the verification
- * pass reads it. Dispatch requires reachable review agents, so this provider is
+ * NOTE: the engine embeds the change in the prompt, and panelists additionally
+ * carry aimee's INDEX-ONLY review toolset (`review_indexed`: code_search /
+ * find_symbol / search_memory / search_docs) so they can check what the diff
+ * cannot show — callers, writers, whether a named alternative exists. Still no
+ * filesystem or write tools: the panel does not touch the worktree (a remote seat
+ * may not reach it, and a reviewer must not edit what it judges); only the
+ * verification pass reads it. Dispatch requires reachable review agents, so this provider is
  * exercised by integration (a live deployment); the risk-bearing pieces — the
  * verdict mapping and the worktree replay backend — are unit-tested in
  * test_wfe_panel_roundtable / test_wfe_replay_worktree. */
@@ -69,9 +73,11 @@ static long wfe_panel_seat_wait_secs(void)
 
 #define WFE_PANEL_SEAT_POLL_SECS 15
 
-/* The engine review task: what was asked plus the change under review. The
- * panelists are tool-less — the diff IS the material — and the engine's own
- * REVIEW round instruction supplies the structured-items output contract
+/* The engine review task: what was asked, the change under review, and the standing
+ * questions the diff alone cannot answer. Panelists carry aimee's index-only
+ * toolset, so the diff is the SUBJECT rather than the whole of the material — they
+ * look up callers, writers and alternatives themselves. The engine's own REVIEW
+ * round instruction supplies the structured-items output contract
  * (severity/category/location/summary/recommendation + replayable evidence). */
 static char *build_review_task(const wfe_review_packet_t *pkt)
 {
@@ -89,6 +95,19 @@ static char *build_review_task(const wfe_review_packet_t *pkt)
             "Review the CHANGE UNDER REVIEW below AGAINST what was asked.\n\n"
             "FOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
             "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
+            "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "
+            "The diff shows what CHANGED; it does not show whether the change is REAL. Look "
+            "the rest up — do not infer it from the diff:\n"
+            "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "
+            "Name the path from a real entrypoint to this code in the artifact that actually "
+            "ships. Code with no caller, or whose only caller needs a binary or config the "
+            "deployment lacks, is inert — that is a blocking defect no matter how correct the "
+            "code reads.\n"
+            "2. PRODUCT: every added file must be something we ship. Search for what writes it. "
+            "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"
+            "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "
+            "confirm the replacement it points people to actually exists and works on the "
+            "surface it targets. A rule with no working alternative is breakage.\n\n"
             "For every item, location is \"file:line\" from the change wherever possible, and a "
             "blocking severity REQUIRES reproducible factual evidence about this code.",
             focus, proposal, diff);

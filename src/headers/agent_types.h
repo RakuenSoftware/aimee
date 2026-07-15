@@ -301,6 +301,14 @@ typedef struct
     * distinct agents instead of N copies of the one default agent. When NULL,
     * routing is unchanged (role-based default route). */
    const char *agent;
+   /* Run this task WITH tools (default 0 = the historical plain completion, so no
+    * existing fan-out changes). Set by the review panel: a panelist holding only a
+    * diff cannot check whether the change is reachable, or whether a new file is
+    * product — the facts that decide if a change is real live outside the diff.
+    * With tools the task's role picks the toolset (`review` -> the index-only
+    * `review_indexed`: code_search / find_symbol / search_memory / search_docs);
+    * write tools stay off regardless. */
+   int use_tools;
 } agent_task_t;
 
 typedef struct

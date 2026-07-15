@@ -411,6 +411,40 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    return rc;
 }
 
+int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
+                               const char *system_prompt, const char *user_prompt, int max_tokens,
+                               double temperature, agent_result_t *out)
+{
+   memset(out, 0, sizeof(*out));
+
+   agent_t *src = agent_find(cfg, name);
+   if (!src || !src->enabled)
+   {
+      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", name ? name : "");
+      snprintf(out->error, sizeof(out->error), "named participant '%s' not found or disabled",
+               name ? name : "(null)");
+      return -1;
+   }
+
+   agent_t local = *src; /* clone before mutating — see agent_run_named */
+   agent_apply_runtime_config(&local);
+   local.ablation = cfg->ablation;
+   /* write_capable stays 0: this exists for REVIEWERS, and a reviewer that can edit
+    * the code it is judging is not a reviewer — the tree that passed the gate would
+    * no longer be the tree that was judged. The role's toolset (review -> the
+    * index-only `review_indexed`) is what actually decides which tools appear. */
+   local.write_capable = 0;
+
+   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                               temperature, 1 /* use_tools */, out);
+   {
+      agent_outcome_t oc;
+      classify_outcome(out, local.max_turns, &oc);
+      record_outcome(out->agent_name, role ? role : "ensemble", &oc);
+   }
+   return rc;
+}
+
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                          const char *system_prompt, const char *user_prompt,
                                          int max_tokens, int enforce_writes, agent_result_t *out)

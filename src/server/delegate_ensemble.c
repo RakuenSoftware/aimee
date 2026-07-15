@@ -1142,6 +1142,17 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
        * the diverse lineup); the round prompt still drives the output shape. */
       personas[i] = panel_persona_prompt(cfg, mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
+      /* Reviewers get aimee. A panelist holding only a diff cannot answer the
+       * questions that decide whether a change is REAL — does anything call this?
+       * is this new file product or run bookkeeping? — because those facts live
+       * outside the diff. Blind reviews pass blind: one slice cleared 12 rounds
+       * still carrying its own scope artifact, and a guard was approved that no
+       * deployed path could ever execute. The `review` role resolves to the
+       * index-only `review_indexed` toolset (code_search / find_symbol /
+       * search_memory / search_docs), so panelists navigate the repo through
+       * aimee's own index rather than a worktree a remote seat cannot reach, and
+       * still get no write tools. Drafting stays tool-less. */
+      tasks[i].use_tools = (mode == ROUNDTABLE_REVIEW);
       tasks[i].agent = cfg->ensemble_reference_models[i];
       tasks[i].system_prompt = personas[i];
       tasks[i].user_prompt = prompts[i];

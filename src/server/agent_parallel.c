@@ -50,8 +50,13 @@ static void *parallel_worker(void *arg)
    /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
    double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
    if (ctx->task->agent && ctx->task->agent[0])
-      agent_run_named(ctx->cfg, ctx->task->agent, ctx->task->role, ctx->task->system_prompt,
-                      ctx->task->user_prompt, ctx->task->max_tokens, temp, ctx->result);
+      (ctx->task->use_tools ? agent_run_named_with_tools : agent_run_named)(
+          ctx->cfg, ctx->task->agent, ctx->task->role, ctx->task->system_prompt,
+          ctx->task->user_prompt, ctx->task->max_tokens, temp, ctx->result);
+   else if (ctx->task->use_tools)
+      agent_run_with_tools_write_enforce(ctx->cfg, ctx->task->role, ctx->task->system_prompt,
+                                         ctx->task->user_prompt, ctx->task->max_tokens, 1,
+                                         ctx->result);
    else
       agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
                    ctx->task->max_tokens, temp, ctx->result);
@@ -215,8 +220,13 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       double temp = tasks[0].temperature > 0.0 ? tasks[0].temperature : 0.3;
       int rc;
       if (tasks[0].agent && tasks[0].agent[0])
-         rc = agent_run_named(cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt,
-                              tasks[0].user_prompt, tasks[0].max_tokens, temp, &out[0]);
+         rc = (tasks[0].use_tools ? agent_run_named_with_tools : agent_run_named)(
+             cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
+             tasks[0].max_tokens, temp, &out[0]);
+      else if (tasks[0].use_tools)
+         rc = agent_run_with_tools_write_enforce(cfg, tasks[0].role, tasks[0].system_prompt,
+                                                 tasks[0].user_prompt, tasks[0].max_tokens, 1,
+                                                 &out[0]);
       else
          rc = agent_run_ex(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
                            tasks[0].max_tokens, temp, &out[0]);
