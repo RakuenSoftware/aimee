@@ -247,33 +247,13 @@ def call_llm(prompt: str, max_tokens: int) -> tuple[str | None, str | None]:
         return None, str(exc)
 
 
-def _strip_think_prefix(text: str) -> str:
-    """Remove a single leading <think>...</think> block, if present.
-
-    Only a block at the very start is a reasoning preamble; an occurrence later
-    in the text belongs to the content and must survive.
-    """
-    if not text.startswith("<think>"):
-        return text
-    end = text.find("</think>")
-    if end == -1:
-        return text
-    return text[end + len("</think>") :].strip()
-
-
 def strip_fences(text: str) -> str:
     text = text.strip()
-    # Reasoning models (e.g. MiniMax-M3, Qwen3) PREPEND a <think>...</think>
-    # block, so only strip one off the front.
-    #
-    # This used to rsplit on the last "</think>" anywhere in the response, which
-    # silently destroyed any answer that merely MENTIONED the tag inside its
-    # JSON — e.g. summarising a function whose own job is stripping think blocks
-    # (strip_think, strip_thinking_blocks). rsplit cut the JSON mid-string, so a
-    # valid response became "Expecting value: line 1 column 1 (char 0)" and the
-    # job died after 3 attempts. Anchoring to the prefix means a tag inside the
-    # payload is left alone; _first_json_object below still drops any prose.
-    text = _strip_think_prefix(text)
+    # No <think> handling here by design: llm-chat.py splits reasoning off at the
+    # wire boundary (see split_reasoning), so stdout carries the answer only. A
+    # "</think>" reaching this function is therefore CONTENT — e.g. a docstring
+    # about stripping think blocks — and must survive. Re-deriving the split from
+    # text here is what previously cut valid JSON mid-string and killed the job.
     if text.startswith("```"):
         lines = text.splitlines()
         end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
