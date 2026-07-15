@@ -62,9 +62,12 @@ extern "C"
     * text chunk of the in-flight turn (no id — it's a notification). `session_id`
     * may be NULL/"". Pure. Returns 1 on success. */
    /* Build a standard ACP tool-call session/update notification. `phase` is
-    * "started" or "completed". Pure. Returns 1. */
-   int acp_build_tool_update(const char *session_id, const char *phase, const char *tool_name,
-                             char *out, size_t out_n);
+    * "started" or "completed". `tool_call_id` must be unique within the session --
+    * it is how a client matches a tool_call_update to its tool_call; the tool NAME
+    * is not unique and collapses repeat calls into one flickering entry.
+    * `tool_name` is the human-facing title. Pure. Returns 1. */
+   int acp_build_tool_update(const char *session_id, const char *tool_call_id, const char *phase,
+                             const char *tool_name, char *out, size_t out_n);
 
    int acp_build_update_notification(const char *session_id, const char *delta, char *out,
                                      size_t out_n);
