@@ -417,6 +417,15 @@ typedef struct config
     * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into
     * aimee's memory system (`aimee memory store`). Explicit false opts out. */
    int require_aimee_memory;
+   /* Forge-tooling guard (default on): a delegate may not run `git` or `gh` in a
+    * shell — every git/forge action goes through aimee's git_* tools and executes
+    * on aimee-server, where the forge credential lives and never reaches a child's
+    * environment or argv. Reads are blocked too (git_status / git_log /
+    * git_diff_summary / git_pr action=view cover them), so the rule is simply "no
+    * git or gh in a shell" with no verb list to drift. Explicit false opts out.
+    * Defence in depth, not the whole defence: delegates are also spawned without
+    * git/gh credentials configured, so an evaded classifier still cannot push. */
+   int require_aimee_git;
 
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a

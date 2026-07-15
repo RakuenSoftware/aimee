@@ -19,7 +19,7 @@
 #define DEC_WFE_NATIVE_GATE_H 1
 
 /* Bump when the pattern set changes so audit tooling can pin what was in effect. */
-#define WFE_NATIVE_GATE_PATTERN_VERSION 2
+#define WFE_NATIVE_GATE_PATTERN_VERSION 3
 
 /* 1 if `tool_name` is a general shell/command execution tool whose argument is a
  * command string we should inspect (Bash, bash, sh, shell, run_command, exec,
@@ -54,6 +54,25 @@ int wfe_native_tool_externalizes(const char *tool_name, const char *command);
  * Same honest-scope caveat as the header note: a NEGATIVE result means "no KNOWN
  * bypass pattern", never "provably safe". */
 int wfe_native_tool_forbidden(const char *tool_name, const char *command);
+
+/* 1 if this shell command INVOKES `git` or `gh` — as opposed to merely mentioning
+ * one. `git push`, `/usr/bin/git push`, `sudo git push` and `bash -lc 'git push'`
+ * match; `grep git file` and `echo git` do not (there it is an argument, not the
+ * command). Command-prefix words (sudo/env/nohup/...) and VAR=val assignments are
+ * looked through.
+ *
+ * Callers gate this on config `require_aimee_git` (default on) and deny: a delegate
+ * runs no git/forge command itself; it uses aimee's git_* tools, which execute on
+ * aimee-server where the forge credential lives in-process and never reaches a
+ * child's environment or argv. Reads are included — git_status / git_log /
+ * git_diff_summary / git_pr action=view cover them — so the rule needs no verb list
+ * to keep current.
+ *
+ * The classifier is defence in depth, not the guarantee: it is a string match over a
+ * shell line and the header's honest-scope note applies in full (subshells, base64,
+ * env indirection). The guarantee is that delegates are spawned WITHOUT git/gh
+ * credentials, so an evaded match still cannot reach the forge. */
+int wfe_shell_invokes_git(const char *tool_name, const char *command);
 
 typedef enum
 {

@@ -323,6 +323,7 @@ static const config_schema_entry_t config_schema[] = {
     {"code_span_max_lines", SCHEMA_INT, 0},
     {"require_session_worktree", SCHEMA_BOOL, 0},
     {"require_aimee_memory", SCHEMA_BOOL, 0},
+    {"require_aimee_git", SCHEMA_BOOL, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
@@ -732,6 +733,11 @@ static void config_set_defaults(config_t *cfg)
     * system, not external per-harness memory files. Explicit
     * `require_aimee_memory: false` bypasses (see cli_attention_guard.c). */
    cfg->require_aimee_memory = 1;
+   /* Default ON: a delegate never runs `git`/`gh` in a shell — git and forge
+    * actions go through aimee's git_* tools and execute on aimee-server, where
+    * the forge credential stays in-process. Explicit `require_aimee_git: false`
+    * bypasses (see wfe_native_gate.c). */
+   cfg->require_aimee_git = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled

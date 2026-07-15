@@ -353,11 +353,50 @@ static void provider_cli_terminate_child(pid_t pid)
    (void)waitpid(pid, NULL, 0);
 }
 
+/* Strip every git/forge credential from a delegate child's environment, so a
+ * delegate is not merely FORBIDDEN from running git/gh (wfe_shell_invokes_git) but
+ * is incapable of authenticating one: the classifier is a string match a determined
+ * agent can evade, whereas an absent credential cannot be talked around. git/forge
+ * work belongs to aimee's git_* tools, which run in aimee-server where the token is
+ * resolved per-call and lives only in process memory.
+ *
+ * Called post-fork, so it must stay allocation-free and syscall-only: `flag` is
+ * resolved by the PARENT (config_load reads files and allocates; running it between
+ * fork and exec in a threaded process risks a malloc-lock deadlock). setenv/unsetenv
+ * may allocate in theory, but the surrounding code already relies on them. */
+static void delegate_child_strip_forge_creds(int flag)
+{
+   if (!flag)
+      return;
+   /* Ambient forge tokens gh/git would pick up. */
+   unsetenv("GH_TOKEN");
+   unsetenv("GITHUB_TOKEN");
+   unsetenv("GH_ENTERPRISE_TOKEN");
+   unsetenv("GITHUB_ENTERPRISE_TOKEN");
+   /* Credential plumbing: the askpass shim, an agent-forwarded SSH key, and any
+    * inherited credential helper reachable via the global/system git config. */
+   unsetenv("GIT_ASKPASS");
+   unsetenv("SSH_ASKPASS");
+   unsetenv("SSH_AUTH_SOCK");
+   setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+   setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+   /* gh reads its stored oauth token from GH_CONFIG_DIR (default ~/.config/gh);
+    * point it at a path that holds no hosts.yml rather than leaving the default. */
+   setenv("GH_CONFIG_DIR", "/nonexistent/aimee-delegate-no-gh", 1);
+   /* Never let a credential prompt block the child waiting on a tty. */
+   setenv("GIT_TERMINAL_PROMPT", "0", 1);
+}
+
 int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
                             int *stdout_fd, pid_t *pid_out)
 {
    if (!argv || !argv[0] || !stdin_fd || !stdout_fd || !pid_out)
       return -1;
+
+   /* Resolve the dial BEFORE forking (see delegate_child_strip_forge_creds).
+    * Unreadable config reads as enforcing: a guard that fails open is not a guard. */
+   config_t spawn_cfg;
+   int strip_forge_creds = (config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git;
 
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
@@ -404,6 +443,7 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
        * source context from the forking thread's TLS, immune to the parent-side
        * concurrent env clobber. */
       delegate_child_export_context_env();
+      delegate_child_strip_forge_creds(strip_forge_creds);
       execvp(argv[0], argv);
       _exit(127);
    }

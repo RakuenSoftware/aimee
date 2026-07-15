@@ -155,6 +155,98 @@ static int has_external_url(const char *cmd)
    return 0;
 }
 
+/* Shell characters after which the next word sits in COMMAND position. Quote marks
+ * are deliberately included: it makes `bash -lc 'git push'` read as a git
+ * invocation -- the obvious evasion -- at the cost of also flagging `echo 'git'`.
+ * That false positive is an accepted trade: this gate fails closed and its message
+ * names the tool to use instead, whereas a miss lets a delegate push with a
+ * credential it should never have touched. */
+static int is_cmd_start(char c)
+{
+   return c == ';' || c == '&' || c == '|' || c == '(' || c == ')' || c == '{' || c == '}' ||
+          c == '\n' || c == '`' || c == '\'' || c == '"';
+}
+
+/* 1 if `cmd` INVOKES one of `names` as a command, rather than merely mentioning it:
+ * `git push` and `/usr/bin/git push` and `sudo git push` match; `grep git file` and
+ * `echo git` do not (there `git` is an argument). A leading path is reduced to its
+ * basename, and command-prefix words (sudo/env/...) and VAR=val assignments are
+ * looked through so the real command is still reached. */
+static int shell_invokes(const char *cmd, const char *const *names, size_t nnames)
+{
+   if (!cmd)
+      return 0;
+   static const char *const prefixes[] = {"sudo", "env",  "command", "nohup",
+                                          "time", "doas", "exec",    "builtin"};
+   int at_cmd = 1;
+   const char *p = cmd;
+   while (*p)
+   {
+      if (isspace((unsigned char)*p))
+      {
+         p++;
+         continue;
+      }
+      if (is_cmd_start(*p))
+      {
+         at_cmd = 1;
+         p++;
+         continue;
+      }
+      const char *s = p;
+      while (*p && !isspace((unsigned char)*p) && !is_cmd_start(*p))
+         p++;
+      if (!at_cmd)
+         continue; /* an argument of the command already seen */
+
+      const char *b = s; /* basename: /usr/bin/git -> git */
+      for (const char *q = s; q < p; q++)
+         if (*q == '/')
+            b = q + 1;
+      size_t blen = (size_t)(p - b);
+      if (blen == 0)
+      {
+         at_cmd = 0;
+         continue;
+      }
+
+      /* `VAR=val cmd` — an assignment prefix keeps the next word in command position. */
+      int assign = 0;
+      for (const char *q = s; q < p; q++)
+         if (*q == '=')
+         {
+            assign = 1;
+            break;
+         }
+      if (assign)
+         continue;
+
+      int looked_through = 0;
+      for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++)
+         if (strlen(prefixes[i]) == blen && strncmp(b, prefixes[i], blen) == 0)
+         {
+            looked_through = 1;
+            break;
+         }
+      if (looked_through)
+         continue; /* still at_cmd: `sudo git push` */
+
+      for (size_t i = 0; i < nnames; i++)
+         if (strlen(names[i]) == blen && strncmp(b, names[i], blen) == 0)
+            return 1;
+      at_cmd = 0; /* this word was the command; what follows are its arguments */
+   }
+   return 0;
+}
+
+int wfe_shell_invokes_git(const char *tool_name, const char *command)
+{
+   if (!wfe_is_shell_tool(tool_name) || !command || !command[0])
+      return 0;
+   static const char *const names[] = {"git", "gh"};
+   return shell_invokes(command, names, sizeof(names) / sizeof(names[0]));
+}
+
 int wfe_native_tool_forbidden(const char *tool_name, const char *command)
 {
    if (!wfe_is_shell_tool(tool_name) || !command || !command[0])

@@ -103,6 +103,40 @@ int main(void)
    assert(!wfe_native_tool_forbidden("Bash", NULL));
    assert(!wfe_native_tool_forbidden(NULL, "gh pr merge 12 --admin"));
 
+   /* --- no git/gh in a delegate shell (require_aimee_git) --- */
+   /* the plain cases: every verb, read and write alike -- there is no verb list */
+   assert(wfe_shell_invokes_git("Bash", "git push"));
+   assert(wfe_shell_invokes_git("Bash", "git status"));
+   assert(wfe_shell_invokes_git("Bash", "git log --oneline -5"));
+   assert(wfe_shell_invokes_git("Bash", "gh pr view 12"));
+   assert(wfe_shell_invokes_git("Bash", "gh"));
+
+   /* command position, not mere mention */
+   assert(wfe_shell_invokes_git("Bash", "/usr/bin/git push"));   /* absolute path */
+   assert(wfe_shell_invokes_git("Bash", "sudo git push"));       /* prefix word */
+   assert(wfe_shell_invokes_git("Bash", "AIMEE_X=1 git push"));  /* assignment prefix */
+   assert(wfe_shell_invokes_git("Bash", "true; git push"));      /* after a separator */
+   assert(wfe_shell_invokes_git("Bash", "make && git push"));    /* && */
+   assert(wfe_shell_invokes_git("Bash", "ls | grep x; gh pr list"));
+   assert(wfe_shell_invokes_git("Bash", "bash -lc 'git push'")); /* quoted evasion */
+   assert(wfe_shell_invokes_git("Bash", "{ git push;}"));        /* brace group */
+   assert(wfe_shell_invokes_git("Bash", "$(git rev-parse HEAD)")); /* subshell */
+
+   /* NOT invocations: git/gh appears as an argument, not the command. A blunt
+    * substring match would false-positive on all of these. */
+   assert(!wfe_shell_invokes_git("Bash", "grep git file.txt"));
+   assert(!wfe_shell_invokes_git("Bash", "echo git"));
+   assert(!wfe_shell_invokes_git("Bash", "ls .github/workflows"));
+   assert(!wfe_shell_invokes_git("Bash", "cat gitlog.txt"));
+   assert(!wfe_shell_invokes_git("Bash", "python3 legit.py")); /* substring of a word */
+   assert(!wfe_shell_invokes_git("Bash", "make build"));
+
+   /* non-shell tools carry no command; NULL/empty are not invocations */
+   assert(!wfe_shell_invokes_git("Read", "git push"));
+   assert(!wfe_shell_invokes_git("Bash", NULL));
+   assert(!wfe_shell_invokes_git("Bash", ""));
+   assert(!wfe_shell_invokes_git(NULL, "git push"));
+
    printf("ok\n");
    return 0;
 }
