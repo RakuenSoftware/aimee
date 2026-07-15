@@ -168,6 +168,14 @@ CFG_KEY_DESC = {
     "aimee-server where the forge credential stays in-process; delegates are also spawned "
     "without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed "
     "SSH to any host) and neuters the global/system git config (default on).",
+    "delegate_sandbox": "Run a delegate's shell and file ops INSIDE its own container "
+    "(via the `docker` delegate backend) instead of in-process in aimee-server. Off (the "
+    "default) a delegate's `bash`/read/write/list run with aimee-server's filesystem and "
+    "environment. This is not yet a full sandbox on its own: the container still has a "
+    "network, so `require_aimee_git` and the credential strip remain the live boundary. The "
+    "delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The "
+    "server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an "
+    "unreachable daemon means every delegate runs on the host (default off).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
