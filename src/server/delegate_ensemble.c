@@ -1165,6 +1165,30 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
+
+   /* Did the reviewers actually LOOK? A review panel was tool-less for its whole
+    * life, and giving it tools is worth nothing if the panelists never call one —
+    * a diff-only reviewer that hedges ("audit every caller before deleting")
+    * reads exactly like one that checked and found nothing. Without this line the
+    * two are indistinguishable from outside, which is how the tool-less panel
+    * passed 12 rounds on a slice carrying its own scope artifact.
+    *
+    * Zero across a whole round is the signal: the tools are offered but unused,
+    * so the panel is still judging the diff alone. */
+   if (mode == ROUNDTABLE_REVIEW)
+   {
+      int total_calls = 0, used = 0;
+      for (int i = 0; i < ref_count; i++)
+      {
+         total_calls += results[i].tool_calls;
+         if (results[i].tool_calls > 0)
+            used++;
+      }
+      aimee_log(total_calls > 0 ? LOG_INFO : LOG_WARN, "roundtable.progress",
+                "round %d: %d/%d panelists used aimee tools (%d call%s total)%s", round, used,
+                ref_count, total_calls, total_calls == 1 ? "" : "s",
+                total_calls > 0 ? "" : " — reviewing the diff ALONE (tools offered, none called)");
+   }
    for (int i = 0; i < ref_count; i++)
    {
       free(prompts[i]);
