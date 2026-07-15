@@ -32,6 +32,7 @@ typedef enum
    AIMEE_IR_M_BODY_MISMATCH,
    /* Shadow: IR and legacy produced byte-identical provider bodies. */
    AIMEE_IR_M_BODY_MATCH,
+   AIMEE_IR_M_RESCUE_RECOVERIES,
    AIMEE_IR_M__COUNT
 } aimee_ir_metric_t;
 

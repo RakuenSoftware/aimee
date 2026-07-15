@@ -147,9 +147,10 @@ __attribute__((weak)) char *aimee_ir_build_provider_body(const void *req, const 
 /* IR observability counters. The ingress increments these on the legacy-fallback and
  * shadow-compare paths; the minimal-link tests don't link the metrics table, so the
  * counter is inert here. Real aimee_ir_metrics.o wins when linked. */
-__attribute__((weak)) void aimee_ir_metric_inc(int metric)
+__attribute__((weak)) void aimee_ir_metric_inc(int metric, int frontend)
 {
    (void)metric;
+   (void)frontend;
 }
 
 __attribute__((weak)) int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,

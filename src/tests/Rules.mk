@@ -148,6 +148,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-binding \
                $(TESTPREFIX)/unit-test-aimee-ir \
                $(TESTPREFIX)/unit-test-ir-legacy-parity \
+               $(TESTPREFIX)/unit-test-aimee-ir-rescue \
                $(TESTPREFIX)/unit-test-aimee-ir-metrics \
                $(TESTPREFIX)/unit-test-aimee-frontend \
                $(TESTPREFIX)/unit-test-aimee-backend \
@@ -4158,4 +4159,12 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
                                        $(OBJDIR)/server/aimee_frontend_responses.o \
                                        $(OBJDIR)/server/aimee_ir.o \
                                        $(OBJDIR)/server/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-aimee-ir-rescue: $(OBJDIR)/tests/test_aimee_ir_rescue.o \
+                                         $(OBJDIR)/server/aimee_ir_rescue.o \
+                                         $(OBJDIR)/server/aimee_ir.o \
+                                         $(OBJDIR)/server/aimee_ir_metrics.o \
+                                         $(OBJDIR)/server/delegate_xml_fallback.o \
+                                         $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
