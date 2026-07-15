@@ -47,7 +47,22 @@ static int s2_decide(const char *sid, const char *tool_name, const char *tool_in
       }
    }
    int externalizes = wfe_native_tool_externalizes(tool_name, command);
+   int forbidden = wfe_native_tool_forbidden(tool_name, command);
    free(cmd_heap);
+
+   /* Forbidden outright: denied regardless of binding / delivery / enforce stage.
+    * Checked before the binding lookup because no binding state can permit it. */
+   if (forbidden)
+   {
+      audit_log("s2-native-gate", "DENY-forbidden sid=%s tool=%s (admin merge override)", sid,
+                tool_name);
+      snprintf(msg, msg_n,
+               "aimee: merging with an admin override of branch protection is human-only. "
+               "Open the PR and let a human decide; aimee's own merge paths have no bypass "
+               "either.");
+      return 2;
+   }
+
    if (!externalizes)
       return 0;
 

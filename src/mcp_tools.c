@@ -730,8 +730,7 @@ cJSON *mcp_build_tools_list(void)
                   "\"reason\":{\"type\":\"string\",\"description\":\"Fail reason (folded into the "
                   "next review brief).\"},"
                   "\"operator_principal\":{\"type\":\"string\",\"description\":\"Enrolled local "
-                  "operator principal authorizing the gate.\"},"
-                  "\"admin\":{\"type\":\"boolean\",\"description\":\"Use gh pr merge --admin.\"}},"
+                  "operator principal authorizing the gate.\"}},"
                   "\"required\":[\"pipeline_id\",\"verdict\",\"operator_principal\"]}")));
 
       cJSON_AddItemToArray(

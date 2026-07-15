@@ -155,6 +155,29 @@ static int has_external_url(const char *cmd)
    return 0;
 }
 
+int wfe_native_tool_forbidden(const char *tool_name, const char *command)
+{
+   if (!wfe_is_shell_tool(tool_name) || !command || !command[0])
+      return 0;
+
+   /* An admin override of branch protection is human-only. `--admin` is only
+    * meaningful to `gh pr merge`, but we do not require the two to be adjacent:
+    * flags may precede the subcommand, and a compound line may carry both. Any
+    * shell line that both merges a PR and asks for the admin bypass is denied. */
+   if (cmd_has(command, "gh pr merge") &&
+       (cmd_has(command, "--admin") || cmd_has(command, "-admin")))
+      return 1;
+
+   /* The `gh api` equivalent: a PUT to .../pulls/<n>/merge. `gh api` is otherwise a
+    * documented accepted residual (see wfe_native_tool_externalizes), but the merge
+    * endpoint is the same bypass wearing a different hat when the token is an admin's. */
+   if (cmd_has(command, "gh api") && strstr(command, "/merge") &&
+       (cmd_has(command, "-X PUT") || cmd_has(command, "--method PUT")))
+      return 1;
+
+   return 0;
+}
+
 int wfe_native_tool_externalizes(const char *tool_name, const char *command)
 {
    if (!tool_name || !tool_name[0])

@@ -19,7 +19,7 @@
 #define DEC_WFE_NATIVE_GATE_H 1
 
 /* Bump when the pattern set changes so audit tooling can pin what was in effect. */
-#define WFE_NATIVE_GATE_PATTERN_VERSION 1
+#define WFE_NATIVE_GATE_PATTERN_VERSION 2
 
 /* 1 if `tool_name` is a general shell/command execution tool whose argument is a
  * command string we should inspect (Bash, bash, sh, shell, run_command, exec,
@@ -38,6 +38,22 @@ int wfe_is_shell_tool(const char *tool_name);
  * `command` may be NULL/"" for non-shell tools (classified by name only).
  * Returns 0 when no known pattern matches -- NOT a safety proof (see header note). */
 int wfe_native_tool_externalizes(const char *tool_name, const char *command);
+
+/* 1 if this native tool call is FORBIDDEN OUTRIGHT — denied regardless of binding,
+ * delivery, or enforce stage. This is orthogonal to the externalization truth table
+ * below: externalization asks "does this cross the trust boundary, and is this
+ * session allowed to yet?", whereas this asks "may an agent do this at all?".
+ *
+ * Currently: an admin override of branch protection (`gh pr merge --admin`, and the
+ * `gh api` equivalent). Merging something that branch protection refuses is a
+ * HUMAN-ONLY act (operator ruling 2026-07-15) — an agent may open a PR and merge a
+ * green one, but may never force one past the rules. aimee's own merge paths no
+ * longer offer a bypass; this closes the matching hole for an agent that types the
+ * flag into a shell itself.
+ *
+ * Same honest-scope caveat as the header note: a NEGATIVE result means "no KNOWN
+ * bypass pattern", never "provably safe". */
+int wfe_native_tool_forbidden(const char *tool_name, const char *command);
 
 typedef enum
 {

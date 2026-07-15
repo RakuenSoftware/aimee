@@ -165,7 +165,21 @@ static void s2_native_gate_pretool(const char *sid, const char *tool_name, const
       }
    }
    int externalizes = wfe_native_tool_externalizes(tool_name, command);
+   int forbidden = wfe_native_tool_forbidden(tool_name, command);
    free(cmd_heap);
+
+   /* Forbidden outright: denied regardless of binding / delivery / enforce stage.
+    * Checked before the binding lookup because no binding state can permit it. */
+   if (forbidden)
+   {
+      audit_log("s2-native-gate", "DENY-forbidden sid=%s tool=%s (admin merge override)", sid,
+                tool_name);
+      emit_pretool_deny_json(
+          "aimee: merging with an admin override of branch protection is human-only. "
+          "Open the PR and let a human decide; aimee's own merge paths have no bypass either.");
+      exit(0);
+   }
+
    if (!externalizes)
       return; /* not an externalizing tool -> never gated */
 

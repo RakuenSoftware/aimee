@@ -80,6 +80,29 @@ int main(void)
    /* externalizing + bound + not delivered + not-hard (advisory/soft) -> WARN (soak) */
    assert(wfe_native_gate_decision(1, 1, 0, 0) == WFE_NATIVE_WARN);
 
+   /* --- forbidden outright: admin override of branch protection is human-only --- */
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge 12 --admin"));
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge --admin 12"));    /* flag first */
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge --squash --admin 12"));
+   assert(wfe_native_tool_forbidden("Bash", "true; gh pr merge 12 --admin")); /* compound */
+   assert(wfe_native_tool_forbidden("Bash", "gh\tpr merge 12 --admin"));      /* tab sep */
+   /* the gh api equivalent: PUT to the merge endpoint */
+   assert(wfe_native_tool_forbidden("Bash", "gh api -X PUT repos/o/r/pulls/12/merge"));
+   assert(wfe_native_tool_forbidden("Bash", "gh api --method PUT repos/o/r/pulls/12/merge"));
+
+   /* a plain merge is NOT forbidden here -- it is still subject to the ordinary
+    * externalization truth table above, just not blocked unconditionally. */
+   assert(!wfe_native_tool_forbidden("Bash", "gh pr merge 12"));
+   assert(!wfe_native_tool_forbidden("Bash", "gh pr merge 12 --squash"));
+   /* --admin without a merge is not this rule's business */
+   assert(!wfe_native_tool_forbidden("Bash", "gh pr create --admin"));
+   /* a GET of the merge endpoint is a read, not a bypass */
+   assert(!wfe_native_tool_forbidden("Bash", "gh api repos/o/r/pulls/12/merge"));
+   /* non-shell tools carry no command to inspect */
+   assert(!wfe_native_tool_forbidden("Read", "gh pr merge 12 --admin"));
+   assert(!wfe_native_tool_forbidden("Bash", NULL));
+   assert(!wfe_native_tool_forbidden(NULL, "gh pr merge 12 --admin"));
+
    printf("ok\n");
    return 0;
 }

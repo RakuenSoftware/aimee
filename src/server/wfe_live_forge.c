@@ -188,6 +188,35 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return WFE_MERGE_ERROR;
+
+   /* CI must be green before we merge (operator ruling 2026-07-15). The canonical
+    * `build` DAG already orders a ci node ahead of merge, so this is defence in
+    * depth at the seam itself -- the same rationale as forge_allowed() re-checking
+    * on every op: the forge must be safe on its own, not only when driven by a
+    * well-ordered workflow. A zero-check PR merges (nothing to fail); an
+    * undetermined verdict never does. */
+   char cierr[160];
+   switch (git_pr_ci_via_api(NULL, forge_dir(repo), num, cierr, sizeof cierr))
+   {
+   case GIT_PR_CI_SUCCESS:
+   case GIT_PR_CI_NONE: /* no CI reported for the head commit -> nothing to fail */
+      break;
+   case GIT_PR_CI_PENDING:
+      /* Still running: retry the node rather than park -- the engine loops on
+       * NOT_MERGEABLE, and CI finishing is exactly what we are waiting for. */
+      return WFE_MERGE_NOT_MERGEABLE;
+   case GIT_PR_CI_FAILURE:
+      /* Red CI is definitive: park for a human instead of looping. The ci node owns
+       * the bounded red-CI retry (AIMEE_AUTONOMY_CI_RETRY_MAX); reaching merge with a
+       * red head means the run is out of order, which a human should see. */
+      aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: CI is not green", num);
+      return WFE_MERGE_ERROR;
+   default: /* GIT_PR_CI_ERROR -> undetermined -> never merge */
+      aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: CI status unknown: %s", num,
+                cierr);
+      return WFE_MERGE_ERROR;
+   }
+
    /* Re-check immediately before the mutating call: close the TOCTOU window where
     * the flag is flipped off / the base becomes protected after the entry check. */
    if (!forge_allowed())
