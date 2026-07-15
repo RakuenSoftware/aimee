@@ -1116,6 +1116,18 @@ int agent_tools_is_git_write(const char *name)
           strcmp(name, "git_branch") == 0 || strcmp(name, "git_pr") == 0;
 }
 
+static agent_shell_git_gate_fn g_shell_git_gate = NULL;
+
+void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn)
+{
+   g_shell_git_gate = fn;
+}
+
+agent_shell_git_gate_fn agent_tools_shell_git_gate(void)
+{
+   return g_shell_git_gate;
+}
+
 static void emit_builtin_tools(cJSON *tools, unsigned surface)
 {
    size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);

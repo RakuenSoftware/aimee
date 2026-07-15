@@ -86,6 +86,19 @@ agent_git_write_fn agent_tools_git_write_provider(void);
 /* 1 if `name` is one of the git-write tools that ride the seam above. */
 int agent_tools_is_git_write(const char *name);
 
+/* Shell-git gate seam: 1 if this shell command must be refused because git belongs
+ * to aimee (require_aimee_git). Registered by the server for the same reason as the
+ * git-write provider — the decision needs the config dial, the forge credential and
+ * the command classifier, which live in tiers the agent surface cannot link.
+ *
+ * The server only registers it when refusing is HONEST: the dial is on, aimee-server
+ * actually holds a forge credential, and the git_* tools are available to point at.
+ * Unregistered, there is no gate — a rule with no working alternative is breakage,
+ * not policy, so the absence of the alternative disables the rule by construction. */
+typedef int (*agent_shell_git_gate_fn)(const char *command);
+void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn);
+agent_shell_git_gate_fn agent_tools_shell_git_gate(void);
+
 /* Tool-call lifecycle hook. A streaming chat worker or a /v1/runs worker
  * installs a thread-local callback (NULL by default — every other caller is
  * unaffected) before running a turn; dispatch_tool_call_ctx fires it as each

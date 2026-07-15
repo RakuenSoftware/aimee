@@ -7,7 +7,6 @@
 #include "aimee_home.h"
 #include "delegate_ephemeral_ws.h"
 #include "log.h"
-#include "mcp_git.h" /* mcp_git_run_tool: git writes go through the MCP dispatch */
 #include "tool_condense.h"
 #include "tool_args_coerce.h"
 #include "workspace_provider.h"
@@ -1568,6 +1567,39 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          cJSON_Delete(args);
          return current_code_role_policy_error(
              active_role, "mutating or broad aimee context commands are disabled for this role");
+      }
+   }
+
+   /* --- No git/gh in a delegate's shell (require_aimee_git) --- */
+   /* The native agent IS the wfe `implement` delegate, so this is the path that
+    * decides whether the rule means anything at all. The DECISION lives server-side
+    * behind a seam (see agent_tools.h): it needs the config dial, the forge
+    * credential and the command classifier, none of which the agent tier may link.
+    * Unregistered — thin client, unit tests — there is no gate and nothing changes. */
+   {
+      const char *shell_cmd = NULL;
+      if (strcmp(name, "bash") == 0)
+      {
+         cJSON *c = cJSON_GetObjectItem(args, "command");
+         if (cJSON_IsString(c))
+            shell_cmd = c->valuestring;
+      }
+      else if (strcmp(name, "execute_script") == 0)
+      {
+         cJSON *b = cJSON_GetObjectItem(args, "body");
+         if (cJSON_IsString(b))
+            shell_cmd = b->valuestring;
+      }
+      agent_shell_git_gate_fn gate = agent_tools_shell_git_gate();
+      if (shell_cmd && gate && gate(shell_cmd))
+      {
+         cJSON_Delete(args);
+         return safe_strdup(
+             "error: run git through aimee, not a shell — use git_status, git_log, "
+             "git_diff, git_branch, git_commit, git_push or git_pr. They execute on "
+             "aimee-server, which holds the forge credential; this shell has none, so a "
+             "raw git/gh command cannot authenticate anyway. (Operator: "
+             "require_aimee_git: false in aimee.yaml opts out.)");
       }
    }
 
