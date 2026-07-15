@@ -558,6 +558,20 @@ static void tp_prop(cJSON *props, const char *name, const char *type, const char
    cJSON_AddItemToObject(props, name, p);
 }
 
+/* An array-of-strings property. Separate from tp_prop because a bare
+ * {"type":"array"} is incomplete JSON Schema — `items` is what tells a provider
+ * what the array holds, and strict ones reject the schema without it. */
+static void tp_prop_str_array(cJSON *props, const char *name, const char *desc)
+{
+   cJSON *p = cJSON_CreateObject();
+   cJSON_AddStringToObject(p, "type", "array");
+   cJSON_AddStringToObject(p, "description", desc);
+   cJSON *items = cJSON_CreateObject();
+   cJSON_AddStringToObject(items, "type", "string");
+   cJSON_AddItemToObject(p, "items", items);
+   cJSON_AddItemToObject(props, name, p);
+}
+
 static cJSON *tp_bash(void)
 {
    cJSON *params = tp_obj();
@@ -735,9 +749,12 @@ static cJSON *tp_git_commit(void)
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "message", "string", "Commit message");
-   tp_prop(props, "path", "string",
-           "Path to the git repository (defaults to the session worktree)");
-   tp_prop(props, "add_all", "boolean", "Stage all modified/untracked files first (default false)");
+   /* `files` is how anything gets STAGED — including a file you just created.
+    * There is deliberately no add-everything flag: sensitive paths are screened
+    * per file. Omit it and only already-staged changes are committed. */
+   tp_prop_str_array(props, "files",
+                     "Paths to stage before committing (git add -- <files>). REQUIRED for a new "
+                     "or unstaged file; without it only already-staged changes are committed.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("message"));
@@ -749,9 +766,10 @@ static cJSON *tp_git_push(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string",
-           "Path to the git repository (defaults to the session worktree)");
-   tp_prop(props, "set_upstream", "boolean", "Push with -u to set upstream (default false)");
+   /* No path/upstream args: the handler pushes the current branch of the session
+    * worktree and sets upstream itself. */
+   tp_prop(props, "force", "boolean", "Force-push with lease (default false)");
+   tp_prop(props, "mirror", "boolean", "Push to the configured mirror remote (default false)");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
    return params;
@@ -761,10 +779,11 @@ static cJSON *tp_git_branch(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "action", "string", "list | create | claim | current");
-   tp_prop(props, "name", "string", "Branch name (for create/claim)");
-   tp_prop(props, "path", "string",
-           "Path to the git repository (defaults to the session worktree)");
+   tp_prop(props, "action", "string", "list | create | switch | claim | delete | orphan");
+   tp_prop(props, "name", "string", "Branch name (for create/switch/claim/delete)");
+   tp_prop(props, "base", "string", "Base ref for create (defaults to the current HEAD)");
+   tp_prop(props, "remote", "boolean", "Include remote branches when listing");
+   tp_prop(props, "force", "boolean", "Force the operation (e.g. delete an unmerged branch)");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("action"));
@@ -777,11 +796,15 @@ static cJSON *tp_git_pr(void)
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "action", "string",
-           "create | view | list | edit | checks | merge_status | merge");
+           "create | view | list | edit | checks | watch | merge_status | merge");
    tp_prop(props, "number", "integer", "PR number (for view/edit/checks/merge_status/merge)");
    tp_prop(props, "title", "string", "PR title (for create/edit)");
    tp_prop(props, "body", "string", "PR body (for create/edit)");
    tp_prop(props, "base", "string", "Base branch (for create/edit)");
+   tp_prop(props, "merge_method", "string", "merge | squash | rebase (for merge; default merge)");
+   tp_prop(props, "expected_head_sha", "string",
+           "For merge: refuse if the PR head has moved from this SHA (drift safety)");
+   tp_prop(props, "wait", "boolean", "For checks: poll until the checks settle");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("action"));
