@@ -113,15 +113,6 @@ static verify_job_t *verify_job_alloc_locked(const char *session_id)
    return NULL;
 }
 
-verify_job_t *verify_job_alloc(void)
-{
-   pthread_mutex_lock(&g_jobs_lock);
-   verify_reap_finished_locked(NULL);
-   verify_job_t *job = verify_job_alloc_locked(NULL);
-   pthread_mutex_unlock(&g_jobs_lock);
-   return job;
-}
-
 verify_job_t *verify_job_alloc_for_session(const char *session_id, int *busy)
 {
    if (busy)
