@@ -47,5 +47,4 @@ void agent_shell_driver_register(const agent_shell_driver_t *d);
 /* Look up a driver by name. Returns NULL if not found. */
 const agent_shell_driver_t *agent_shell_driver_get(const char *name);
 
-
 #endif /* DEC_AGENT_SHELL_H */
