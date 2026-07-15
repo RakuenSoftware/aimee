@@ -298,8 +298,7 @@ static int scan_cmd(const char *cmd, const char *const *names, size_t nnames, in
          while (*p == ' ' || *p == '\t')
             p++;
          char inner[2048];
-         if (read_word(&p, inner, sizeof(inner)) > 0 &&
-             scan_cmd(inner, names, nnames, depth + 1))
+         if (read_word(&p, inner, sizeof(inner)) > 0 && scan_cmd(inner, names, nnames, depth + 1))
             return 1;
       }
    }

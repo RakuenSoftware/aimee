@@ -337,8 +337,8 @@ cJSON *handle_git_pr(cJSON *args)
          if (why)
          {
             char msg[320];
-            snprintf(msg, sizeof(msg), "error: merge blocked — %s. A merge requires fully green CI.",
-                     why);
+            snprintf(msg, sizeof(msg),
+                     "error: merge blocked — %s. A merge requires fully green CI.", why);
             free(cout);
             return mcp_text(msg);
          }

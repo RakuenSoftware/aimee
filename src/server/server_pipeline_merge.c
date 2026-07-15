@@ -85,8 +85,8 @@ int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *
    if (!why)
    {
       char cierr[160];
-      git_pr_ci_t ci = git_pr_ci_via_api(NULL, rtp_git_cwd(run), gate->pr_number, cierr,
-                                         sizeof(cierr));
+      git_pr_ci_t ci =
+          git_pr_ci_via_api(NULL, rtp_git_cwd(run), gate->pr_number, cierr, sizeof(cierr));
       if (!git_pr_ci_permits_merge(ci))
          why = ci == GIT_PR_CI_PENDING
                    ? "CI has not finished; verdict preserved, re-check once checks settle"

@@ -82,7 +82,7 @@ int main(void)
 
    /* --- forbidden outright: admin override of branch protection is human-only --- */
    assert(wfe_native_tool_forbidden("Bash", "gh pr merge 12 --admin"));
-   assert(wfe_native_tool_forbidden("Bash", "gh pr merge --admin 12"));    /* flag first */
+   assert(wfe_native_tool_forbidden("Bash", "gh pr merge --admin 12")); /* flag first */
    assert(wfe_native_tool_forbidden("Bash", "gh pr merge --squash --admin 12"));
    assert(wfe_native_tool_forbidden("Bash", "true; gh pr merge 12 --admin")); /* compound */
    assert(wfe_native_tool_forbidden("Bash", "gh\tpr merge 12 --admin"));      /* tab sep */
@@ -112,11 +112,11 @@ int main(void)
    assert(wfe_shell_invokes_git("Bash", "gh"));
 
    /* command position, not mere mention */
-   assert(wfe_shell_invokes_git("Bash", "/usr/bin/git push"));   /* absolute path */
-   assert(wfe_shell_invokes_git("Bash", "sudo git push"));       /* prefix word */
-   assert(wfe_shell_invokes_git("Bash", "AIMEE_X=1 git push"));  /* assignment prefix */
-   assert(wfe_shell_invokes_git("Bash", "true; git push"));      /* after a separator */
-   assert(wfe_shell_invokes_git("Bash", "make && git push"));    /* && */
+   assert(wfe_shell_invokes_git("Bash", "/usr/bin/git push"));  /* absolute path */
+   assert(wfe_shell_invokes_git("Bash", "sudo git push"));      /* prefix word */
+   assert(wfe_shell_invokes_git("Bash", "AIMEE_X=1 git push")); /* assignment prefix */
+   assert(wfe_shell_invokes_git("Bash", "true; git push"));     /* after a separator */
+   assert(wfe_shell_invokes_git("Bash", "make && git push"));   /* && */
    assert(wfe_shell_invokes_git("Bash", "ls | grep x; gh pr list"));
    assert(wfe_shell_invokes_git("Bash", "{ git push;}"));          /* brace group */
    assert(wfe_shell_invokes_git("Bash", "$(git rev-parse HEAD)")); /* subshell */
