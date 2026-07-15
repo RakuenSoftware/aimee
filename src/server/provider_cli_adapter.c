@@ -3,6 +3,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
+#include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no strip */
 #include "util.h"
 
 #include <errno.h>
@@ -407,9 +408,17 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
       return -1;
 
    /* Resolve the dial BEFORE forking (see delegate_child_strip_forge_creds).
-    * Unreadable config reads as enforcing: a guard that fails open is not a guard. */
+    * Unreadable config reads as enforcing: a guard that fails open is not a guard.
+    *
+    * ...but ONLY strip when aimee-server actually holds a forge credential
+    * (operator ruling 2026-07-15). The point of taking the delegate's credentials
+    * away is to push its git through aimee, which runs on the server. If the server
+    * has no credential, aimee's git cannot work either, so stripping would remove
+    * the delegate's only route and leave it nothing — breakage dressed as policy.
+    * No aimee route, no restriction. */
    config_t spawn_cfg;
-   int strip_forge_creds = (config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git;
+   int strip_forge_creds = ((config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git) &&
+                           git_cred_forge_configured(NULL);
 
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};

@@ -1521,6 +1521,29 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    return content;
 }
 
+/* See mcp_git.h. The native agent surface's door into the git tools: one dispatch
+ * path, so a delegate committing through git_commit gets byte-for-byte the same
+ * chdir/worktree refusal, mutating-context guard, branch-ownership check and
+ * attribution strip an external MCP client gets. ctx/conn are NULL-safe here
+ * because every use of them sits behind the git_verify branch, which this refuses. */
+cJSON *mcp_git_run_tool(const char *tool, cJSON *args, const char *sid)
+{
+   if (!tool || !tool[0])
+      return NULL;
+   if (strcmp(tool, "git_verify") == 0)
+      return NULL; /* needs the server ctx/conn; native agents use their own `verify` */
+   int known = 0;
+   for (size_t i = 0; i < sizeof(git_tool_table) / sizeof(git_tool_table[0]); i++)
+      if (strcmp(tool, git_tool_table[i].name) == 0)
+      {
+         known = 1;
+         break;
+      }
+   if (!known)
+      return NULL;
+   return dispatch_git_tool(NULL, NULL, tool, args, sid);
+}
+
 /* ── Discovery meta-tools (P2) ────────────────────────────────────────────────
  * find_tools / describe_tool introspect the FULL served catalog (unfiltered by
  * the presentation profile) so a lean tools/list loses no reach: the model can

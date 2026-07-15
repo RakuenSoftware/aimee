@@ -721,6 +721,74 @@ static cJSON *tp_git_diff(void)
    return params;
 }
 
+/* The git WRITE tools. These exist so a delegate has an aimee route to commit /
+ * push / open a PR at all: before this, the native builtin set carried read-only
+ * git (log/diff/status), so the ONLY way for a delegate to land work was shelling
+ * out to `git` — which is exactly what require_aimee_git forbids. A rule with no
+ * permitted alternative is just breakage, so the tools land first.
+ *
+ * They dispatch through mcp_git_run_tool, i.e. the same path an external MCP
+ * client takes, so the safety rails (worktree refusal, branch ownership, the
+ * verify gate, AI-attribution stripping) hold identically on both surfaces. */
+static cJSON *tp_git_commit(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "message", "string", "Commit message");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (defaults to the session worktree)");
+   tp_prop(props, "add_all", "boolean", "Stage all modified/untracked files first (default false)");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("message"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_git_push(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "path", "string",
+           "Path to the git repository (defaults to the session worktree)");
+   tp_prop(props, "set_upstream", "boolean", "Push with -u to set upstream (default false)");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
+   return params;
+}
+
+static cJSON *tp_git_branch(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "action", "string", "list | create | claim | current");
+   tp_prop(props, "name", "string", "Branch name (for create/claim)");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (defaults to the session worktree)");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("action"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_git_pr(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "action", "string",
+           "create | view | list | edit | checks | merge_status | merge");
+   tp_prop(props, "number", "integer", "PR number (for view/edit/checks/merge_status/merge)");
+   tp_prop(props, "title", "string", "PR title (for create/edit)");
+   tp_prop(props, "body", "string", "PR body (for create/edit)");
+   tp_prop(props, "base", "string", "Base branch (for create/edit)");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("action"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_git_status(void)
 {
    cJSON *params = tp_obj();
@@ -946,6 +1014,25 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      TSURF_ALL},
     {"git_status", "Show git status (porcelain format) for a repository.", tp_git_status,
      TSURF_ALL},
+    /* Git writes go through these, never through `bash`: they run on aimee-server,
+     * where the forge credential is resolved per call and stays in process memory
+     * instead of reaching a child's environment. They also carry the rails a raw
+     * `git` command has no idea about — branch ownership, the verify gate, and
+     * attribution stripping. Appended after the read-only git tools so the
+     * pre-existing surface order (which the tools/list golden pins) is untouched. */
+    {"git_commit",
+     "Commit staged (or, with add_all, all) changes in the session worktree. Use this instead "
+     "of running `git commit` in a shell.",
+     tp_git_commit, TSURF_ALL},
+    {"git_push",
+     "Push the current branch to the forge. Authenticates on aimee-server; you do not need "
+     "(and will not have) git credentials. Use this instead of running `git push`.",
+     tp_git_push, TSURF_ALL},
+    {"git_branch", "List, create, claim, or show the current git branch.", tp_git_branch,
+     TSURF_ALL},
+    {"git_pr",
+     "Create, view, list, edit, or check a pull request. Use this instead of running `gh`.",
+     tp_git_pr, TSURF_ALL},
     {"env_get", "Get the value of an environment variable.", tp_env_get, TSURF_ALL},
     {"test",
      "Check file/dir existence, type, and permissions. "
@@ -1007,6 +1094,28 @@ static const builtin_tool_def_t g_builtin_tools[] = {
  * using that surface's JSON shape:
  *   TSURF_CHAT: {"type":"function","function":{name,description,parameters}}
  *   TSURF_RESP: {"type":"function",name,description,parameters}            */
+/* The git-write seam. Registered by the server at startup; NULL everywhere else
+ * (thin client, unit tests), where the git-write tools are simply not offered. */
+static agent_git_write_fn g_git_write_fn = NULL;
+
+void agent_tools_set_git_write_provider(agent_git_write_fn fn)
+{
+   g_git_write_fn = fn;
+}
+
+agent_git_write_fn agent_tools_git_write_provider(void)
+{
+   return g_git_write_fn;
+}
+
+int agent_tools_is_git_write(const char *name)
+{
+   if (!name)
+      return 0;
+   return strcmp(name, "git_commit") == 0 || strcmp(name, "git_push") == 0 ||
+          strcmp(name, "git_branch") == 0 || strcmp(name, "git_pr") == 0;
+}
+
 static void emit_builtin_tools(cJSON *tools, unsigned surface)
 {
    size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
@@ -1014,6 +1123,12 @@ static void emit_builtin_tools(cJSON *tools, unsigned surface)
    {
       const builtin_tool_def_t *d = &g_builtin_tools[i];
       if (!(d->surfaces & surface))
+         continue;
+      /* Never advertise a tool that cannot run: without the server's git dispatcher
+       * the git-write tools have no implementation behind them. Offering them anyway
+       * would teach an agent to call a tool that always errors — and, worse, would
+       * let require_aimee_git point at tools that do not exist. */
+      if (agent_tools_is_git_write(d->name) && !g_git_write_fn)
          continue;
       cJSON *tool = cJSON_CreateObject();
       cJSON_AddStringToObject(tool, "type", "function");

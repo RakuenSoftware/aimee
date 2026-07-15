@@ -66,6 +66,26 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
 void agent_tools_set_dispatch_role(const char *role);
 const char *agent_tools_dispatch_role(void);
 
+/* Git-write seam (git_commit / git_push / git_branch / git_pr).
+ *
+ * Those tools are implemented in the SERVER tier (the MCP git dispatch, which owns
+ * the worktree refusal, branch-ownership and verify rails), but the agent tool
+ * surface lives in the agent tier and is linked by binaries and tests that carry no
+ * server objects. Calling across that boundary directly would break their links and
+ * invert the tier order, so the server REGISTERS its dispatcher here at startup and
+ * the agent tier calls through the pointer — the same shape as wfe_set_forge_provider
+ * and workspace_provider_active.
+ *
+ * Unregistered (thin client, unit tests) the git-write tools are neither ADVERTISED
+ * nor dispatchable: an agent is never offered a tool that cannot work. Returns MCP
+ * content blocks (caller owns), or NULL for an unknown tool. */
+typedef struct cJSON *(*agent_git_write_fn)(const char *tool, struct cJSON *args, const char *sid);
+void agent_tools_set_git_write_provider(agent_git_write_fn fn);
+agent_git_write_fn agent_tools_git_write_provider(void);
+
+/* 1 if `name` is one of the git-write tools that ride the seam above. */
+int agent_tools_is_git_write(const char *name);
+
 /* Tool-call lifecycle hook. A streaming chat worker or a /v1/runs worker
  * installs a thread-local callback (NULL by default — every other caller is
  * unaffected) before running a turn; dispatch_tool_call_ctx fires it as each
