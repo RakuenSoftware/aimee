@@ -21,6 +21,15 @@ static const builtin_toolset_t BUILTINS[] = {
      {NULL},
      {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory", NULL}},
     {"git", {NULL}, {"git_status", "git_log", "git_diff", NULL}},
+    /* Git WRITES, deliberately split from the read-only `git` set above: `git` is
+     * inherited by `readonly` (and thence review), which must never gain the power
+     * to commit or push. Only `code` pulls this in.
+     *
+     * Without it a delegate has no way to land work but `bash git` — the very thing
+     * require_aimee_git forbids. Adding the tools to the builtin registry is not
+     * enough on its own: agent_tools_filter_for_role strips anything the role's
+     * toolset does not name, so the rule would point at tools the filter hides. */
+    {"git_write", {NULL}, {"git_commit", "git_push", "git_branch", "git_pr", NULL}},
     {"web", {NULL}, {"web_search", NULL}},
     {"readonly", {"core", "git", NULL}, {"verify", "env_get", "test", NULL}},
     {"validate", {"readonly", NULL}, {"bash", "execute_script", NULL}},
@@ -29,7 +38,7 @@ static const builtin_toolset_t BUILTINS[] = {
      {"bash", "execute_script", "read_file", "write_file", "edit_file", "list_files", "verify",
       "grep", "env_get", "test", NULL}},
     {"code",
-     {"core", "git", "web", NULL},
+     {"core", "git", "git_write", "web", NULL},
      {"bash", "execute_script", "write_file", "edit_file", "verify", "env_get", "test",
       "run_background_process", "get_background_output", "kill_background_process",
       "list_background_processes", NULL}},
@@ -60,6 +69,16 @@ static const char *const KNOWN_TOOLS[] = {
     "grep",
     "git_diff",
     "git_status",
+    /* Git writes. This list is a NAME ALLOWLIST, checked independently of the
+     * builtin tool registry — a toolset naming a tool that is not here is pruned
+     * with a warning, which is exactly how git_write silently lost all four and a
+     * live delegate reported "there is no git_commit tool in my available toolset".
+     * Adding a tool means agreeing in three places: the builtin registry, a
+     * toolset, and here. */
+    "git_commit",
+    "git_push",
+    "git_branch",
+    "git_pr",
     "env_get",
     "test",
     "request_input",
