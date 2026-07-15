@@ -592,6 +592,51 @@ static void test_sidecar_quoting_end_to_end(void)
    printf("  PASS: test_sidecar_quoting_end_to_end\n");
 }
 
+/* kb_curator_append_sidecar_error: curator-extract.py's emit_error() prints
+ * {"status":"error","error":<why>} to stdout and exits 1. That output was being
+ * freed unread, so a job that failed for a knowable reason recorded only
+ * "sidecar exited 1". */
+static void test_append_sidecar_error(void)
+{
+   char err[256];
+
+   /* (a) the real shape: the sidecar's reason is appended to the exit code. */
+   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
+   kb_curator_append_sidecar_error(
+       "{\"version\":1,\"status\":\"error\",\"error\":\"LLM returned non-JSON: boom\"}", err,
+       sizeof(err));
+   assert(strcmp(err, "sidecar exited 1: LLM returned non-JSON: boom") == 0);
+
+   /* (b) a SUCCESSFUL payload is not an error — must not be appended. */
+   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
+   kb_curator_append_sidecar_error("{\"status\":\"ok\",\"artifacts\":[]}", err, sizeof(err));
+   assert(strcmp(err, "sidecar exited 1") == 0);
+
+   /* (c) non-JSON / empty / NULL output leaves the wait-status description
+    *     intact rather than inheriting a misleading fragment. */
+   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
+   kb_curator_append_sidecar_error("Traceback (most recent call last):", err, sizeof(err));
+   assert(strcmp(err, "sidecar exited 1") == 0);
+   kb_curator_append_sidecar_error("", err, sizeof(err));
+   assert(strcmp(err, "sidecar exited 1") == 0);
+   kb_curator_append_sidecar_error(NULL, err, sizeof(err));
+   assert(strcmp(err, "sidecar exited 1") == 0);
+
+   /* (d) an error field that is not a string is ignored, not printed as junk. */
+   snprintf(err, sizeof(err), "%s", "sidecar exited 1");
+   kb_curator_append_sidecar_error("{\"status\":\"error\",\"error\":42}", err, sizeof(err));
+   assert(strcmp(err, "sidecar exited 1") == 0);
+
+   /* (e) a full errbuf must not overflow. */
+   char tiny[20];
+   snprintf(tiny, sizeof(tiny), "%s", "sidecar exited 1");
+   kb_curator_append_sidecar_error("{\"status\":\"error\",\"error\":\"a very long reason here\"}",
+                                   tiny, sizeof(tiny));
+   assert(strlen(tiny) < sizeof(tiny));
+
+   printf("  PASS: test_append_sidecar_error\n");
+}
+
 static void test_pick_sidecar_command_resolution(void)
 {
    char out[768];
@@ -652,6 +697,7 @@ int main(void)
    test_describe_wait_status();
    test_shell_quote();
    test_sidecar_quoting_end_to_end();
+   test_append_sidecar_error();
 
    printf("ok\n");
    return 0;

@@ -67,6 +67,41 @@ static int trigram_in_set(const char *tri, trigram_t *set, int count)
    return 0;
 }
 
+/* Drop a trailing partial UTF-8 character. See util.h for why this matters.
+ *
+ * Walk back from the end over continuation bytes (10xxxxxx) to the character's
+ * lead byte, then compare the bytes actually present against the length the lead
+ * byte declares. Short => the character was cut by a byte-wise truncation, so
+ * terminate at the lead byte and drop it. A well-formed tail is left alone. */
+void text_trim_partial_utf8(char *s)
+{
+   if (!s || !s[0])
+      return;
+
+   size_t len = strlen(s);
+   /* A UTF-8 character is at most 4 bytes, so the lead byte of the final
+    * character is within 4 bytes of the end; anything further back is already a
+    * complete character. */
+   for (size_t back = 1; back <= 4 && back <= len; back++)
+   {
+      size_t i = len - back;
+      unsigned char c = (unsigned char)s[i];
+      if ((c & 0xC0) == 0x80)
+         continue; /* continuation byte — keep walking back to the lead */
+
+      size_t need = (c & 0x80) == 0x00   ? 1  /* 0xxxxxxx: ASCII */
+                    : (c & 0xE0) == 0xC0 ? 2  /* 110xxxxx */
+                    : (c & 0xF0) == 0xE0 ? 3  /* 1110xxxx */
+                    : (c & 0xF8) == 0xF0 ? 4  /* 11110xxx */
+                                         : 0; /* 10xxxxxx handled above; else invalid */
+      if (need == 0 || back < need)
+         s[i] = '\0'; /* invalid lead, or too few bytes present: drop the char */
+      return;         /* the last character is complete — nothing to do */
+   }
+   /* Four continuation bytes with no lead: not UTF-8 at all. Leave it; this
+    * function's contract is to undo truncation, not to sanitise arbitrary bytes. */
+}
+
 double trigram_similarity(const char *a, const char *b)
 {
    if (!a || !b || !a[0] || !b[0])

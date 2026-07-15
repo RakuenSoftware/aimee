@@ -40,4 +40,15 @@ int kb_curator_shell_quote(const char *in, char *out, size_t outlen);
  * callers that do not wrap pass 0. */
 void kb_curator_describe_wait_status(int status, int timeout_s, char *errbuf, size_t errlen);
 
+/* Append the sidecar's OWN error to errbuf, if it wrote one before exiting.
+ *
+ * curator-extract.py's emit_error() prints {"status":"error","error":<why>} to
+ * stdout and exits 1 — so the reason ("LLM returned non-JSON: …", "unknown
+ * role", the provider's error) is sitting in the captured output at the exact
+ * moment the caller is about to throw it away and report a bare "sidecar exited
+ * 1". Call this after kb_curator_describe_wait_status to keep the reason. A
+ * no-op when the output is absent or is not a structured error. Exposed for
+ * testing. */
+void kb_curator_append_sidecar_error(const char *out, char *errbuf, size_t errlen);
+
 #endif /* KB_CURATOR_SIDECAR_H */

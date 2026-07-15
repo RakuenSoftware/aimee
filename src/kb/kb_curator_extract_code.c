@@ -476,6 +476,9 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
    if (rc != 0)
    {
       kb_curator_describe_wait_status(rc, CCU_SIDECAR_TIMEOUT_S, errbuf, errlen);
+      /* Before discarding the output: the sidecar may have explained itself in
+       * it. Keep the reason, not just the exit code. */
+      kb_curator_append_sidecar_error(out, errbuf, errlen);
       free(out);
       return NULL;
    }
@@ -598,6 +601,15 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
 
       if (wrc != 0)
       {
+         /* db2_artifact_write swallows the backend's message, so the only record
+          * of WHY was postgres' own log — which is how ~5,300 jobs died as a bare
+          * "artifact write failed" while the server had been saying "invalid byte
+          * sequence for encoding UTF8" all along. Name the artifact so the next
+          * one is findable without cross-referencing container logs by timestamp. */
+         aimee_log(LOG_WARN, "kb.curator.extract_code",
+                   "artifact write rejected for symbol '%s' (job %lld, kind=%s); see the db2 log "
+                   "for the backend reason",
+                   job->symbol, (long long)job->job_id, kind_j->valuestring);
          aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
          return -1;
       }
@@ -681,7 +693,13 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(inp, "line", job.line);
    cJSON_AddStringToObject(inp, "body", body);
    /* Stash a bounded signature (first non-blank line) + body excerpt for the
-    * code_unit artifact payload before the body buffer is released. */
+    * code_unit artifact payload before the body buffer is released.
+    *
+    * Both cuts are byte-wise, so both can split a multi-byte character — source
+    * comments in this tree are full of em-dashes. The partial bytes end up in the
+    * artifact payload's JSON, and postgres then rejects the entire INSERT with
+    * "invalid byte sequence for encoding UTF8", failing the job. Trim back to a
+    * character boundary. */
    {
       const char *p = body;
       while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
@@ -691,7 +709,9 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
          siglen++;
       memcpy(job.signature, p, siglen);
       job.signature[siglen] = '\0';
+      text_trim_partial_utf8(job.signature);
       snprintf(job.body_excerpt, sizeof(job.body_excerpt), "%s", body);
+      text_trim_partial_utf8(job.body_excerpt);
    }
    free(body);
    cJSON *conf = cJSON_AddObjectToObject(req, "config");

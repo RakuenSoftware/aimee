@@ -5,6 +5,7 @@
 #endif
 
 #include "kb_curator_sidecar.h"
+#include "cJSON.h" /* the sidecar's own error payload is JSON */
 
 #include <errno.h>
 #include <stdio.h>
@@ -116,6 +117,33 @@ void kb_curator_describe_wait_status(int status, int timeout_s, char *errbuf, si
       return;
    }
    snprintf(errbuf, errlen, "sidecar ended abnormally (wait status %d)", status);
+}
+
+/* Append the sidecar's own error to errbuf. See the header for why.
+ *
+ * Parses rather than string-matches: the payload is JSON the sidecar wrote, and
+ * cJSON is already linked everywhere this file is. Anything that is not a
+ * well-formed {"status":"error","error":<string>} is left alone — a non-zero exit
+ * with garbage on stdout should keep the wait-status description, not inherit a
+ * misleading fragment of it. */
+void kb_curator_append_sidecar_error(const char *out, char *errbuf, size_t errlen)
+{
+   if (!out || !out[0] || !errbuf || errlen == 0)
+      return;
+
+   cJSON *root = cJSON_Parse(out);
+   if (!root)
+      return;
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
+   const cJSON *why = cJSON_GetObjectItemCaseSensitive(root, "error");
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0 && cJSON_IsString(why) &&
+       why->valuestring[0])
+   {
+      size_t used = strlen(errbuf);
+      if (used + 2 < errlen)
+         snprintf(errbuf + used, errlen - used, ": %s", why->valuestring);
+   }
+   cJSON_Delete(root);
 }
 
 char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_cap, char *errbuf,
@@ -242,6 +270,9 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
    if (rc != 0)
    {
       kb_curator_describe_wait_status(rc, CS_SIDECAR_TIMEOUT_S, errbuf, errlen);
+      /* Before discarding the output: the sidecar may have explained itself in
+       * it. Keep the reason, not just the exit code. */
+      kb_curator_append_sidecar_error(out, errbuf, errlen);
       free(out);
       return NULL;
    }

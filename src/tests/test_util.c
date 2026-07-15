@@ -6,6 +6,57 @@
 #include <string.h>
 #include "aimee.h"
 
+/* text_trim_partial_utf8: undo a byte-wise truncation that split a character.
+ *
+ * The production failure this guards: a code body was copied into a 1536-byte
+ * buffer, the cut landed inside an em-dash (e2 80 94), and the leftover 0xe2 went
+ * into the artifact JSON — postgres rejected the whole INSERT with "invalid byte
+ * sequence for encoding UTF8: 0xe2 0x22 0x7d" (the partial byte, then the closing
+ * quote and brace). ~5,300 jobs died that way, reported only as "artifact write
+ * failed". */
+static void test_trim_partial_utf8(void)
+{
+   char buf[32];
+
+   /* (a) the exact production shape: text ending in a chopped em-dash. */
+   snprintf(buf, sizeof(buf), "%s", "here \xe2\x80\x94");
+   buf[6] = '\0'; /* cut mid-character: keeps "here " + 0xe2 */
+   assert((unsigned char)buf[5] == 0xe2);
+   text_trim_partial_utf8(buf);
+   assert(strcmp(buf, "here ") == 0); /* partial char dropped */
+
+   /* (b) a COMPLETE multi-byte character must survive untouched. */
+   snprintf(buf, sizeof(buf), "%s", "here \xe2\x80\x94");
+   text_trim_partial_utf8(buf);
+   assert(strcmp(buf, "here \xe2\x80\x94") == 0);
+
+   /* (c) 2-byte lead (0xc2, e.g. non-breaking space) cut short. */
+   snprintf(buf, sizeof(buf), "%s", "x\xc2");
+   text_trim_partial_utf8(buf);
+   assert(strcmp(buf, "x") == 0);
+
+   /* (d) 4-byte lead (emoji) with only 3 bytes present. */
+   snprintf(buf, sizeof(buf), "%s", "hi\xf0\x9f\x98");
+   text_trim_partial_utf8(buf);
+   assert(strcmp(buf, "hi") == 0);
+
+   /* (e) complete 4-byte emoji survives. */
+   snprintf(buf, sizeof(buf), "%s", "hi\xf0\x9f\x98\x80");
+   text_trim_partial_utf8(buf);
+   assert(strcmp(buf, "hi\xf0\x9f\x98\x80") == 0);
+
+   /* (f) plain ASCII and empty input are no-ops; NULL must not crash. */
+   snprintf(buf, sizeof(buf), "%s", "plain ascii");
+   text_trim_partial_utf8(buf);
+   assert(strcmp(buf, "plain ascii") == 0);
+   buf[0] = '\0';
+   text_trim_partial_utf8(buf);
+   assert(buf[0] == '\0');
+   text_trim_partial_utf8(NULL);
+
+   printf("  PASS: test_trim_partial_utf8\n");
+}
+
 static void test_normalize_key(void)
 {
    char buf[256];
@@ -280,6 +331,7 @@ int main(void)
    test_trigram_similarity();
    test_stem_word();
    test_is_likely_path();
+   test_trim_partial_utf8();
    test_shlex_split();
    test_split_camel_case();
    test_is_contradiction();
