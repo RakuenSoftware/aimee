@@ -69,6 +69,16 @@ static const char *const KNOWN_TOOLS[] = {
     "grep",
     "git_diff",
     "git_status",
+    /* Git writes. This list is a NAME ALLOWLIST, checked independently of the
+     * builtin tool registry — a toolset naming a tool that is not here is pruned
+     * with a warning, which is exactly how git_write silently lost all four and a
+     * live delegate reported "there is no git_commit tool in my available toolset".
+     * Adding a tool means agreeing in three places: the builtin registry, a
+     * toolset, and here. */
+    "git_commit",
+    "git_push",
+    "git_branch",
+    "git_pr",
     "env_get",
     "test",
     "request_input",
