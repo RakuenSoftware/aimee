@@ -28,6 +28,43 @@
  * genuinely wedged and its slot is free by the time the reclaim fires. */
 #define CS_SIDECAR_TIMEOUT_S 300
 
+/* Quote `in` as a single sh word. See the header for why this is required.
+ *
+ * The POSIX-portable form: wrap in single quotes, and render each embedded
+ * single quote as '\'' (close, escaped quote, reopen). Nothing inside single
+ * quotes is special to the shell, so this is total — no per-metacharacter
+ * escaping to get subtly wrong. */
+int kb_curator_shell_quote(const char *in, char *out, size_t outlen)
+{
+   if (!in || !out || outlen < 3)
+      return -1;
+
+   size_t o = 0;
+   out[o++] = '\'';
+   for (const char *p = in; *p; p++)
+   {
+      if (*p == '\'')
+      {
+         /* '\'' — 4 bytes, plus the closing quote and NUL still to come. */
+         if (o + 4 + 2 > outlen)
+            return -1;
+         out[o++] = '\'';
+         out[o++] = '\\';
+         out[o++] = '\'';
+         out[o++] = '\'';
+      }
+      else
+      {
+         if (o + 1 + 2 > outlen)
+            return -1;
+         out[o++] = *p;
+      }
+   }
+   out[o++] = '\'';
+   out[o] = '\0';
+   return 0;
+}
+
 /* Render a pclose(3) return value into an operator-legible reason.
  *
  * pclose returns a wait(2)-encoded status, NOT an exit code: reporting it raw
@@ -115,16 +152,31 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
    }
    close(fd);
 
-   /* Bound the sidecar with coreutils `timeout` (present on the kb image):
-    * SIGTERM at the ceiling, SIGKILL 10s later if it ignores TERM. Run the
-    * configured command under `sh -c` INSIDE timeout so it keeps the shell
-    * semantics popen() gave it (env-var prefixes like `FOO=bar python …`,
-    * builtins, operators) — passing it as timeout's own argv would break those
-    * and let compound commands escape the bound. `cmd` is trusted config.
-    * Mirrors ccu_invoke_sidecar in kb_curator_extract_code.c. */
-   char full_cmd[1024];
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s", CS_SIDECAR_TIMEOUT_S,
-            cmd, tmppath);
+   /* Bound the sidecar with coreutils `timeout` (present on every image — they
+    * are all debian-slim): SIGTERM at the ceiling, SIGKILL 10s later if it
+    * ignores TERM. Run the configured command under `sh -c` INSIDE timeout so it
+    * keeps the shell semantics popen() gave it (env-var prefixes like `FOO=bar
+    * python …`, builtins, operators) — passing it as timeout's own argv would
+    * break those and let compound commands escape the bound.
+    *
+    * Both cmd and tmppath are shell-QUOTED rather than interpolated raw: the
+    * timeout wrapper means a second shell parses this line, and a command
+    * containing a quote, $ or backtick would otherwise be re-interpreted —
+    * silently changing the meaning of commands that worked under a bare popen. */
+   char qcmd[2176]; /* worst case: every byte of a 512-char command is a quote */
+   char qtmp[1040];
+   if (kb_curator_shell_quote(cmd, qcmd, sizeof(qcmd)) != 0 ||
+       kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+   {
+      unlink(tmppath);
+      if (errbuf)
+         snprintf(errbuf, errlen, "sidecar command too long to quote safely");
+      return NULL;
+   }
+
+   char full_cmd[3328];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s < %s", CS_SIDECAR_TIMEOUT_S,
+            qcmd, qtmp);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)

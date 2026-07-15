@@ -18,6 +18,7 @@
 #include "db2/db_postgres.h"
 
 #include <errno.h>
+#include <pthread.h> /* reclaim throttle is shared across the code workers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -147,39 +148,68 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
  * so they retry, or to 'failed' once attempts are exhausted so a poison job
  * cannot loop. attempts is preserved (it was incremented at claim time).
  * Throttled to at most once per CCU_RECLAIM_EVERY_S since the drain calls the
- * entry point once per job. */
+ * entry point once per job.
+ *
+ * The throttle is mutex-guarded because kb_curator_extract_code_unit_one runs on
+ * the main LLM lane AND on every kb_curator_extract_code_workers thread, so the
+ * state is genuinely shared (this box runs 4). The lock is held across the
+ * UPDATE, which is free in practice: it is taken once per CCU_RECLAIM_EVERY_S,
+ * and workers that lose the race just observe the throttle and return. */
 static void ccu_reclaim_stale_running(int max_attempts)
 {
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    static time_t last_run = 0;
-   time_t now = time(NULL);
-   if (last_run != 0 && now - last_run < CCU_RECLAIM_EVERY_S)
-      return;
-   last_run = now;
 
    if (max_attempts < 1)
       max_attempts = 1;
 
+   pthread_mutex_lock(&lock);
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < CCU_RECLAIM_EVERY_S)
+   {
+      pthread_mutex_unlock(&lock);
+      return;
+   }
+
    void *conn = db2_conn();
    if (!conn)
+   {
+      /* Deliberately do NOT arm the throttle here, nor on the failures below: a
+       * reclaim that never ran must not suppress the next attempt for a minute.
+       * Only a completed UPDATE counts as "ran recently". */
+      pthread_mutex_unlock(&lock);
       return;
+   }
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "UPDATE kb_code_unit_jobs"
        " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
        "     claimed_by = '', claimed_at = '',"
-       "     last_error = CASE WHEN attempts >= ?1"
+       /* Only fill last_error when the worker left none: an existing message is
+        * the diagnostic from the attempt that died, and 'reclaimed after max
+        * attempts' only says we gave up — overwriting would destroy the reason. */
+       "     last_error = CASE WHEN attempts >= ?1 AND last_error = ''"
        "                       THEN 'stale running lease reclaimed after max attempts'"
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
        " WHERE status = 'running' AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
        err, sizeof(err));
    if (!st)
+   {
+      aimee_log(LOG_WARN, "kb.curator.extract_code", "stale-lease reclaim could not prepare: %s",
+                err);
+      pthread_mutex_unlock(&lock);
       return;
+   }
    aimee_pg_bind_int(st, "?1", max_attempts);
    aimee_pg_bind_text(st, "?2", CCU_STALE_LEASE);
-   (void)aimee_pg_step(st, err, sizeof(err));
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+      last_run = now; /* only a completed UPDATE arms the throttle */
+   else
+      aimee_log(LOG_WARN, "kb.curator.extract_code", "stale-lease reclaim failed: %s", err);
    aimee_pg_finalize(st);
+   pthread_mutex_unlock(&lock);
 }
 
 /* ── Body extraction ─────────────────────────────────────────────────────── */
@@ -379,7 +409,6 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
    }
    close(fd);
 
-   char full_cmd[1024];
    /* Bound the sidecar with coreutils `timeout` (present on the kb image):
     * SIGTERM at the ceiling, SIGKILL 10s later if it ignores TERM. Without this
     * a hung sidecar wedges the drain thread forever via pclose(); on timeout
@@ -387,9 +416,24 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
     * Run the configured command under `sh -c` INSIDE timeout so it keeps the
     * shell semantics popen() gave it (env-var prefixes like `FOO=bar python …`,
     * builtins, operators) — passing it as timeout's own argv would break those
-    * and let compound commands escape the bound. `cmd` is trusted config. */
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s", CCU_SIDECAR_TIMEOUT_S,
-            cmd, tmppath);
+    * and let compound commands escape the bound.
+    *
+    * cmd and tmppath are shell-QUOTED: the timeout wrapper hands this line to a
+    * second shell, so interpolating them raw would let an embedded quote, $ or
+    * backtick re-parse the command (and expand $VARs twice). */
+   char qcmd[2176]; /* worst case: every byte of a 512-char command is a quote */
+   char qtmp[1040];
+   if (kb_curator_shell_quote(cmd, qcmd, sizeof(qcmd)) != 0 ||
+       kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+   {
+      unlink(tmppath);
+      snprintf(errbuf, errlen, "sidecar command too long to quote safely");
+      return NULL;
+   }
+
+   char full_cmd[3328];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s < %s", CCU_SIDECAR_TIMEOUT_S,
+            qcmd, qtmp);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)
