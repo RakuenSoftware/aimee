@@ -91,11 +91,16 @@ int agent_tools_is_git_write(const char *name);
  * git-write provider — the decision needs the config dial, the forge credential and
  * the command classifier, which live in tiers the agent surface cannot link.
  *
- * The server only registers it when refusing is HONEST: the dial is on, aimee-server
- * actually holds a forge credential, and the git_* tools are available to point at.
+ * `cwd` is the directory the command would run in, and is REQUIRED for the decision
+ * to be correct rather than merely safe: "can aimee do git here?" is answered per
+ * repo (the credential ladder's per-host vault rung keys on the checkout's origin).
+ * Passing no directory collapses the question to "does the server have its own
+ * identity?", which most deployments never configure — the gate then concludes
+ * aimee has no git and never fires, on exactly the boxes where it should.
+ *
  * Unregistered, there is no gate — a rule with no working alternative is breakage,
  * not policy, so the absence of the alternative disables the rule by construction. */
-typedef int (*agent_shell_git_gate_fn)(const char *command);
+typedef int (*agent_shell_git_gate_fn)(const char *command, const char *cwd);
 void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn);
 agent_shell_git_gate_fn agent_tools_shell_git_gate(void);
 

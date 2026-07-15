@@ -1903,14 +1903,21 @@ static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t 
  *    wires this gate immediately after the provider), so we never forbid the shell
  *    while the alternative is absent.
  * An unreadable config reads as ON: a guard that fails open is not a guard. */
-static int server_shell_git_blocked(const char *command)
+static int server_shell_git_blocked(const char *command, const char *cwd)
 {
    if (!command || !command[0] || !wfe_shell_invokes_git("bash", command))
       return 0;
    config_t cfg;
    if (config_load(&cfg) == 0 && !cfg.require_aimee_git)
       return 0;
-   return git_cred_forge_configured(NULL);
+   /* Ask per REPO, not in the abstract. The credential ladder resolves a per-host
+    * vault token from the checkout's origin, so `cwd` is what makes "can aimee do
+    * git here?" answerable. Passing NULL leaves only the server's own identity rung
+    * (AIMEE_FORGE_TOKEN / a forge App), which most deployments never set — the gate
+    * would then read "aimee has no git" and never fire, on precisely the boxes whose
+    * forge works fine through a vaulted per-host token. Found on .254: the forge had
+    * opened a real PR minutes earlier while this check returned 0. */
+   return git_cred_forge_configured(cwd);
 }
 
 int server_init(server_ctx_t *ctx, const char *socket_path)
