@@ -92,6 +92,53 @@ static void test_git_write_tools_reach_coding_roles_only(void)
    printf("  git_write_tools_reach_coding_roles_only: ok\n");
 }
 
+/* find_callers must reach BOTH a reviewer and a coding delegate.
+ *
+ * It is the only tool that answers "is this still called?" — code_search is
+ * semantic (it matched a file not containing the symbol) and find_symbol returns
+ * definitions only. A review panel asked to judge a deletion had neither, so it
+ * hedged: "unsafe absent a full audit of call sites". The lens that asks for a
+ * call path is only honest while this resolves. */
+static void test_find_callers_reaches_reviewers_and_coders(void)
+{
+   /* The tool is declared native in the server's MCP table, which this binary does
+    * not link — so register it here exactly as mcp_tool_register_native_surface()
+    * would. That is the point of the check: the mechanism must carry a tool all the
+    * way from one declaration to a resolved role, through BOTH gates that used to
+    * need hand-editing (KNOWN_TOOLS, which silently pruned git_write's four tools,
+    * and toolset membership, which agent_tools_filter_for_role enforces). */
+   toolset_register_native_tool("index_find_callers", "core");
+   toolset_register_native_tool("index_find_callers", "review_indexed");
+
+   toolset_registry_t reg;
+   toolset_registry_init(&reg);
+   char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
+   char err[TOOLSET_ERROR_MAX] = "";
+   const char *roles[] = {"review_indexed", "review",     "readonly",
+                          "code",           "full_stack", "script_rpc"};
+   for (size_t i = 0; i < sizeof(roles) / sizeof(roles[0]); i++)
+   {
+      int n = toolset_resolve(&reg, roles[i], tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
+      assert(n > 0);
+      if (strcmp(roles[i], "script_rpc") == 0)
+         continue; /* the scripted RPC surface is pinned separately; not a reviewer */
+      assert(has_tool(tools, n, "index_find_callers"));
+   }
+   printf("  find_callers_reaches_reviewers_and_coders: ok\n");
+}
+
+/* A registration naming a set that does not exist must not invent it: an orphan set
+ * nothing includes would leave the tool advertised and unreachable — the silent
+ * failure this whole mechanism exists to end. It should be reported and dropped. */
+static void test_native_tool_unknown_toolset_is_not_invented(void)
+{
+   toolset_register_native_tool("index_find_callers", "no_such_toolset");
+   toolset_registry_t reg;
+   toolset_registry_init(&reg);
+   assert(toolset_registry_find(&reg, "no_such_toolset") == NULL);
+   printf("  native_tool_unknown_toolset_is_not_invented: ok\n");
+}
+
 /* review_indexed gives a reviewer aimee's branch-indexed capabilities and NO
  * filesystem/git tools, so a caller-provided-diff review cannot fall back to
  * reading a worktree it does not have. */
@@ -258,6 +305,7 @@ int main(void)
    printf("test_toolset:\n");
    test_full_stack_resolves_union();
    test_git_write_tools_reach_coding_roles_only();
+   test_find_callers_reaches_reviewers_and_coders();
    test_review_indexed_excludes_filesystem();
    test_cycle_rejected();
    test_unknown_tool_dropped();
@@ -266,6 +314,10 @@ int main(void)
    test_script_rpc_toolset();
    test_script_allowed_tools_config();
    test_script_allowed_tools_unknown_rejected();
+   /* Last: registrations are process-global (the server registers once at startup),
+    * so this test's deliberately-bad entry would otherwise re-report on every
+    * subsequent registry_init and drown the other tests' output. */
+   test_native_tool_unknown_toolset_is_not_invented();
    printf("All toolset tests passed.\n");
    return 0;
 }
