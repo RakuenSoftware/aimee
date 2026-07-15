@@ -1323,6 +1323,25 @@ void delegate_worker(void *arg)
                    deleg_id);
       }
    }
+   /* Delegate sandbox (default OFF): run this delegate's shell and file ops INSIDE
+    * its own container rather than in-process here.
+    *
+    * Mutually exclusive with the detached binding above, and that is not a policy
+    * choice — a DETACHED workspace's files live on the CLIENT, served over the
+    * reverse channel, so a server-side container cannot see them. Binding both
+    * would silently replace the client's tree with an unrelated empty one. So the
+    * sandbox only applies where the files are already server-side: a shared
+    * workspace, or the ephemeral fallback above (whose client has disconnected).
+    *
+    * Bound AFTER the write guards and the detached/ephemeral resolution: those
+    * decide policy and WHICH tree, identical for every provider; this only changes
+    * WHERE the already-resolved I/O runs. Off — or if no container can be acquired
+    * — it returns 0 and the turn runs in-process exactly as today; the failure
+    * paths log at ERROR rather than falling back silently.
+    *
+    * Keyed by deleg_id, so each delegation gets its own container. */
+   int container_bound = detached_bound ? 0 : workspace_turn_bind_container(deleg_id, NULL);
+
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                            max_tokens, force_tools, delegate_allows_writes,
@@ -1332,6 +1351,11 @@ void delegate_worker(void *arg)
    concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
    if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
+      workspace_turn_unbind_active();
+   /* Same call, and never both (see the bind): it clears the active pointer AND
+    * releases the container. Unconditional on this path so a pooled worker thread
+    * cannot carry a dead container into the next delegation. */
+   if (container_bound)
       workspace_turn_unbind_active();
    if (ephemeral_ws[0])
    {
@@ -1428,6 +1452,7 @@ void delegate_worker(void *arg)
    agent_tools_write_capable_set(1);
    if (parent_write_guard_active)
       agent_tools_parent_write_guard_clear();
+
    /* Server-initiated delegates review their own worktree (target is not
     * caller-supplied), so cwd-grounding applies. Threading a request-level
     * caller-provided-target signal here is a follow-up. */
