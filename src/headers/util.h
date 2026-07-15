@@ -152,6 +152,17 @@ char *normalize_key(const char *key, char *buf, size_t buf_len);
 /* Trigram Jaccard similarity between two strings. Returns 0.0-1.0. */
 double trigram_similarity(const char *a, const char *b);
 
+/* Drop a trailing PARTIAL UTF-8 character, in place.
+ *
+ * Copying text into a fixed buffer (snprintf/memcpy) cuts at a byte offset, which
+ * splits any multi-byte character straddling the limit and leaves a byte sequence
+ * that is not valid UTF-8. That matters the moment the value reaches something
+ * that validates encoding: postgres rejects the whole INSERT with "invalid byte
+ * sequence for encoding UTF8", so a single em-dash at the cut point can fail an
+ * entire row. Call this after any byte-wise truncation of text that may be
+ * non-ASCII. A string that ends on a complete character is left untouched. */
+void text_trim_partial_utf8(char *s);
+
 /* Basic Porter-like stemming. Result written to buf. Returns buf. */
 char *stem_word(const char *word, char *buf, size_t buf_len);
 

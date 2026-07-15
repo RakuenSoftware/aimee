@@ -174,9 +174,17 @@ static int ce_fetch_document(ce_job_t *job)
       const char *fp = aimee_pg_column_text(st, 0);
       const char *hp = aimee_pg_column_text(st, 1);
       const char *ct = aimee_pg_column_text(st, 2);
+      /* These cuts are byte-wise, so a doc chunk longer than the buffer has its
+       * final multi-byte character split. The partial bytes flow into the request
+       * JSON and then the artifact payload, where postgres rejects the INSERT
+       * with "invalid byte sequence for encoding UTF8" — the job dies for one
+       * stray em-dash at the cut point. Trim back to a character boundary. */
       snprintf(job->file_path, sizeof(job->file_path), "%s", fp ? fp : "");
+      text_trim_partial_utf8(job->file_path);
       snprintf(job->heading_path, sizeof(job->heading_path), "%s", hp ? hp : "");
+      text_trim_partial_utf8(job->heading_path);
       snprintf(job->content, sizeof(job->content), "%s", ct ? ct : "");
+      text_trim_partial_utf8(job->content);
       found = 1;
    }
    aimee_pg_finalize(st);
