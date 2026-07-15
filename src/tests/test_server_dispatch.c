@@ -1514,7 +1514,6 @@ static void test_routing(void)
    int has_delegate_status = 0;
    int has_delegate_launch = 0;
    int has_launch_run = 0;
-   int has_work_claim = 0;
    int has_jobs_logs = 0;
    int has_coord_job_status = 0;
    int has_dogfood_review = 0;
@@ -1532,8 +1531,6 @@ static void test_routing(void)
          has_delegate_launch = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "launch.run") == 0)
          has_launch_run = 1;
-      if (cJSON_IsString(m) && strcmp(m->valuestring, "work.claim") == 0)
-         has_work_claim = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "jobs.logs") == 0)
          has_jobs_logs = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "job.status") == 0)
@@ -1554,7 +1551,6 @@ static void test_routing(void)
    assert(has_delegate_status);
    assert(has_delegate_launch);
    assert(has_launch_run);
-   assert(has_work_claim);
    assert(has_jobs_logs);
    assert(has_coord_job_status);
    assert(has_dogfood_review);
@@ -1693,12 +1689,6 @@ static void test_routing(void)
                         strlen("{\"method\":\"job.status\",\"job_id\":1}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "job.status") == 0);
    assert(strcmp(g_last_handler, "job.status") == 0);
-   cJSON_Delete(json);
-
-   json = dispatch_json(ctx, conn, "{\"method\":\"work.claim\"}",
-                        strlen("{\"method\":\"work.claim\"}"));
-   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "work.claim") == 0);
-   assert(strcmp(g_last_handler, "work.claim") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"eval.run\",\"suite_dir\":\"evals/delegate\"}",

@@ -166,15 +166,6 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_tool(tools, "dashboard_metrics",
             "Operational snapshot: server metrics plus the vector-store status, as JSON.");
 
-   /* ── Work queue ──────────────────────────────────────────────────────────── */
-   t = ext_tool(tools, "work_list",
-                "List items in the work queue (id, title, source, status, claim, result).");
-   ext_prop(t, "status_filter", "string",
-            "Filter by status: pending / claimed / done / failed / cancelled. Omit for all.");
-
-   ext_tool(tools, "work_board",
-            "The work queue grouped by status (pending / claimed / done / failed / cancelled).");
-
    /* ── Structured-PDF evidence: access-gated citation retrieval ─────────────── */
    t = ext_tool(
        tools, "pdf_search_chunks",
@@ -396,10 +387,6 @@ static const struct fam_def MCP_FAMILIES[] = {
      "command",
      "Project roadmaps. Set 'command'.",
      {{"list", "roadmap_list"}, {"show", "roadmap_show"}, {NULL, NULL}}},
-    {"work",
-     "command",
-     "Work queue. Set 'command'.",
-     {{"list", "work_list"}, {"board", "work_board"}, {NULL, NULL}}},
     {"job",
      "command",
      "Coordinated parallel jobs. Set 'command'.",

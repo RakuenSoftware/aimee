@@ -1336,10 +1336,6 @@ static const http_route_t g_v1_routes[] = {
      * remote_writes=off and allows them only at remote_writes=data/full after
      * capability checks. caps still derive from the op. */
     {"POST", "/v1/memory/store", NULL, RM_EXACT, "memory.store", 0, rh_dispatch_op},
-    {"POST", "/v1/work/add", NULL, RM_EXACT, "work.add", 0, rh_dispatch_op},
-    {"POST", "/v1/work/claim", NULL, RM_EXACT, "work.claim", 0, rh_dispatch_op},
-    {"POST", "/v1/work/complete", NULL, RM_EXACT, "work.complete", 0, rh_dispatch_op},
-    {"POST", "/v1/work/fail", NULL, RM_EXACT, "work.fail", 0, rh_dispatch_op},
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
@@ -1369,8 +1365,6 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/skills", NULL, RM_EXACT, "skill.list", 0, rh_dispatch_op},
     {"POST", "/v1/skills/show", NULL, RM_EXACT, "skill.show", 0, rh_dispatch_op},
     {"GET", "/v1/hosts", NULL, RM_EXACT, "hosts.list", 0, rh_dispatch_op},
-    {"GET", "/v1/work", NULL, RM_EXACT, "work.list", 0, rh_dispatch_op},
-    {"GET", "/v1/work/stats", NULL, RM_EXACT, "work.stats", 0, rh_dispatch_op},
 
     /* HUD status + trajectory export read families (hub-migration P1),
      * dispatch-backed; caps derived from the op (both CAP_SESSION_READ). */
@@ -1568,11 +1562,6 @@ static const http_route_t g_v1_routes[] = {
      * rules.generate and eval.run are deliberately excluded (LLM/long-running —
      * see docs/v1-op-parity-buildout.md). */
     {"POST", "/v1/work/add_batch", NULL, RM_EXACT, "work.add_batch", 0, rh_dispatch_op},
-    {"GET", "/v1/work/board", NULL, RM_EXACT, "work.board", 0, rh_dispatch_op},
-    {"POST", "/v1/work/cancel", NULL, RM_EXACT, "work.cancel", 0, rh_dispatch_op},
-    {"POST", "/v1/work/clear", NULL, RM_EXACT, "work.clear", 0, rh_dispatch_op},
-    {"POST", "/v1/work/gc", NULL, RM_EXACT, "work.gc", 0, rh_dispatch_op},
-    {"POST", "/v1/work/release", NULL, RM_EXACT, "work.release", 0, rh_dispatch_op},
     {"POST", "/v1/work/sync_proposals", NULL, RM_EXACT, "work.sync_proposals", 0, rh_dispatch_op},
     {"POST", "/v1/wm/context", NULL, RM_EXACT, "wm.context", 0, rh_dispatch_op},
     {"POST", "/v1/wm/get", NULL, RM_EXACT, "wm.get", 0, rh_dispatch_op},

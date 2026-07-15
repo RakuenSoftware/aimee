@@ -1335,8 +1335,6 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_insights_overview(argc, argv);
    if (strcmp(method, "worktree.gc") == 0)
       return marshal_worktree_gc(argc, argv);
-   if (strncmp(method, "work.", 5) == 0)
-      return marshal_work_request(method, argc, argv);
    if (strcmp(method, "delegate") == 0)
       return marshal_delegate(argc, argv);
    if (strcmp(method, "delegate.aggregate") == 0)

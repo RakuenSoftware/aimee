@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 59
+Total commands: 58
 
 ## Core commands
 
@@ -557,27 +557,6 @@ Subcommands:
   list             List trigger runs
   status           Show one trigger run
   cancel           Cancel a queued trigger run
-```
-
-### `aimee work`
-
-Inter-session work queue.
-
-Subcommands:
-
-```
-  add              Add a work item to the queue
-  add-batch        Batch-add items (--from-proposals)
-  claim            Claim the next pending item
-  complete         Mark claimed item as done
-  fail             Mark claimed item as failed
-  list             List work items
-  cancel           Cancel a pending item
-  release          Release a claimed item back to pending
-  clear            Remove items by status
-  gc               Release stale claims
-  sync-proposals   Close items whose proposal moved out of pending/
-  stats            Show queue statistics
 ```
 
 ### `aimee workers`

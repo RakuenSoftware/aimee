@@ -801,10 +801,6 @@ int main(void)
              server_capability_for_method("skill.list"));
       assert(server_http_route_caps("GET", "/v1/skills") == CAP_SESSION_READ);
       assert(server_http_route_caps("POST", "/v1/skills/show") == CAP_SESSION_READ);
-      assert(server_http_route_caps("GET", "/v1/work") == CAP_SESSION_READ);
-      assert(server_http_route_caps("GET", "/v1/work/stats") == CAP_SESSION_READ);
-      /* Wrong verb does not match these read routes. */
-      assert(server_http_route_caps("POST", "/v1/work") == 0);
       assert(server_http_route_caps("GET", "/v1/skills/show") == 0);
 
       /* HUD + trajectory read families (P1): session-read, from their op twins. */
@@ -846,25 +842,14 @@ int main(void)
       const char *sb = "scope:project:alpha:s3cr3t";
       /* Caps still derive from the op for the local path. */
       assert(server_http_route_caps("POST", "/v1/memory/store") == CAP_MEMORY_WRITE);
-      assert(server_http_route_caps("POST", "/v1/work/add") ==
-             server_capability_for_method("work.add"));
 
       /* Mutating routes are allowed on UDS (is_tcp == 0) ... */
       assert(server_http_route_allowed(0, NULL, "POST", "/v1/memory/store", 0) == 1);
-      assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/add", 0) == 1);
-      assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/claim", 0) == 1);
-      assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/complete", 0) == 1);
-      assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/fail", 0) == 1);
       /* ... but not over TCP at the default, regardless of bearer (unscoped or scoped). */
       assert(server_http_route_allowed(1, NULL, "POST", "/v1/memory/store", 0) == 0);
       assert(server_http_route_allowed(1, "plain-token", "POST", "/v1/memory/store", 0) == 0);
       assert(server_http_route_allowed(1, sb, "POST", "/v1/memory/store", 0) == 0);
-      assert(server_http_route_allowed(1, NULL, "POST", "/v1/work/add", 0) == 0);
-      assert(server_http_route_allowed(1, "plain-token", "POST", "/v1/work/claim", 0) == 0);
-      assert(server_http_route_allowed(1, NULL, "POST", "/v1/work/complete", 0) == 0);
-      assert(server_http_route_allowed(1, NULL, "POST", "/v1/work/fail", 0) == 0);
       /* Read routes are unaffected: still reachable over TCP. */
-      assert(server_http_route_allowed(1, NULL, "GET", "/v1/work", 0) == 1);
       assert(server_http_route_allowed(1, NULL, "POST", "/v1/memory/search", 0) == 1);
 
       /* Later write batches: session + rules/collab-rules + skill mutations, all
@@ -906,8 +891,6 @@ int main(void)
       /* DATA: an unscoped TCP bearer reaches data-mutating routes (caps satisfied);
        * a scoped query-only bearer still cannot; reads are unchanged. */
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/memory/store",
-                                       SERVER_REMOTE_WRITES_DATA) == 1);
-      assert(server_http_route_allowed(1, "plain", "POST", "/v1/work/add",
                                        SERVER_REMOTE_WRITES_DATA) == 1);
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/rules/delete",
                                        SERVER_REMOTE_WRITES_DATA) == 1);
@@ -1084,7 +1067,6 @@ int main(void)
       } cases[] = {
           {"POST", "/v1/cron/add", "{\"name\":\"nightly\"}", "cron.add"},
           {"POST", "/v1/provider/set", "{\"name\":\"openai\"}", "provider.set"},
-          {"POST", "/v1/work/cancel", "{\"id\":7}", "work.cancel"},
           {"POST", "/v1/wm/context", "{\"k\":\"v\"}", "wm.context"},
           {"POST", "/v1/agent/add", "{\"name\":\"a\"}", "agent.add"},
           {"POST", "/v1/mcp/audit", "{}", "mcp.audit"},

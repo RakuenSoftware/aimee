@@ -416,7 +416,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 52
+#define MCP_TOOLS_GOLDEN_COUNT 51
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -488,7 +488,6 @@ static void test_osv_offline_cache_miss_allows(void)
    "req:action,name\n"                                                                             \
    "store_workflow {project,rule,signal_type} req:rule,signal_type\n"                              \
    "task_list {limit,session_id,state} req:\n"                                                     \
-   "work {command,status_filter} req:command\n"                                                    \
    "workflow_run {proposal_md,repo,workflow} req:proposal_md\n"
 
 /* --- mcp_build_tools_list surface net ---

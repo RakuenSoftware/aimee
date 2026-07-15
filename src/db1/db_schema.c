@@ -35,9 +35,6 @@ static void db1_run_migrations(sqlite3 *db)
        /* Gateway ambient-presence: track which platform/channel originated a session */
        "ALTER TABLE server_sessions ADD COLUMN source TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE server_sessions ADD COLUMN chat_key TEXT NOT NULL DEFAULT ''",
-       /* Work-queue lane: a partial UNIQUE index in schema.sql depends on this
-        * column, so legacy DBs must gain it before the schema SQL runs. */
-       "ALTER TABLE work_queue ADD COLUMN lane TEXT DEFAULT ''",
        /* Autonomous-dev: persist the forge PR ref opened by pr.open so the
         * downstream gate.ci / check.mergeable / merge blocks resolve the real PR
         * instead of the work-item id (full-autonomous-development Phase A). */
@@ -74,7 +71,7 @@ int db1_apply_schema_sqlite(sqlite3 *db, char *errbuf, size_t errlen)
    if (!db)
       return -1;
    /* Run catch-up ALTERs BEFORE the canonical schema. The schema SQL contains
-    * objects (e.g. the partial UNIQUE index idx_work_queue_lane_active) that
+    * objects (e.g. a partial UNIQUE index over a later-added column) that
     * reference columns added to a CREATE TABLE after the table first shipped.
     * On a legacy DB the table pre-exists, so the table's `IF NOT EXISTS` is a
     * no-op and the dependent index would fail ("no such column"), aborting the

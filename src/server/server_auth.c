@@ -60,8 +60,6 @@ const method_policy_t method_registry[] = {
     {"wm.*", CAP_SESSION_READ, "working memory operation"},
     /* Per-session primary agent selection */
     {"primary.*", CAP_SESSION_READ, "primary agent selection"},
-    {"work.list", CAP_SESSION_READ, "work queue list"},
-    {"work.stats", CAP_SESSION_READ, "work queue stats"},
     {"work.*", CAP_TOOL_EXECUTE, "work queue operation"},
     {"attempt.*", CAP_SESSION_READ, "attempt log operation"},
     /* Dashboard (prefix) */
@@ -204,7 +202,6 @@ const method_policy_t method_registry[] = {
     /* Rules generation creates rules via LLM (admin), unlike the rules.* reads. */
     {"rules.generate", CAP_RULES_ADMIN, "generate collab rules"},
     /* Work board is a read view (the work.* default is tool:execute). */
-    {"work.board", CAP_SESSION_READ, "work board view"},
     /* Delegate worktree maintenance. */
     {"worktree.gc", CAP_TOOL_EXECUTE, "garbage-collect delegate worktrees"},
     /* Sentinel */

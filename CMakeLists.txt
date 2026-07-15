@@ -349,7 +349,6 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/agent_log.c
     ${AIMEE_SRC_DIR}/db1/agent_jobs.c
     ${AIMEE_SRC_DIR}/db1/coord_jobs.c
-    ${AIMEE_SRC_DIR}/db1/work_queue.c
     ${AIMEE_SRC_DIR}/db1/execution_plans.c
     ${AIMEE_SRC_DIR}/db1/pipelines.c
     ${AIMEE_SRC_DIR}/db1/secrets.c
@@ -754,7 +753,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/server/delegate_role.c
     ${AIMEE_SRC_DIR}/server/delegate_economics.c
     ${AIMEE_SRC_DIR}/cmd_wm.c
-    ${AIMEE_SRC_DIR}/cmd_work.c
     ${AIMEE_SRC_DIR}/cmd_cancel.c
     ${AIMEE_SRC_DIR}/cmd_rewind.c
     ${AIMEE_SRC_DIR}/cmd_branch.c
@@ -878,7 +876,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_state_index.c
     ${AIMEE_SRC_DIR}/server/server_plugin.c
-    ${AIMEE_SRC_DIR}/server/server_work.c
     ${AIMEE_SRC_DIR}/server/server_delegate_monitor.c
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c

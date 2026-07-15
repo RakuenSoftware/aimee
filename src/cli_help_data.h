@@ -65,19 +65,6 @@
     {"worktree", "Manage session worktrees (gc abandoned ones)", CLIENT_TIER_ADVANCED, 0,
      "  gc               Garbage-collect abandoned session worktrees\n"
      "                   (--days N, default 14; --force; --dry-run)\n"},
-    {"work", "Inter-session work queue", CLIENT_TIER_ADVANCED, 0,
-     "  add              Add a work item to the queue\n"
-     "  add-batch        Batch-add items (--from-proposals)\n"
-     "  claim            Claim the next pending item\n"
-     "  complete         Mark claimed item as done\n"
-     "  fail             Mark claimed item as failed\n"
-     "  list             List work items\n"
-     "  cancel           Cancel a pending item\n"
-     "  release          Release a claimed item back to pending\n"
-     "  clear            Remove items by status\n"
-     "  gc               Release stale claims\n"
-     "  sync-proposals   Close items whose proposal moved out of pending/\n"
-     "  stats            Show queue statistics\n"},
     {"insights", "Token usage totals over the last N days (--days N, default 30)", CLIENT_TIER_CORE,
      0, NULL},
     {"server", "Manage the local aimee-server", CLIENT_TIER_ADVANCED, 0,
