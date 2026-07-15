@@ -1906,10 +1906,13 @@ static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t 
 static int server_shell_git_blocked(const char *command, const char *cwd)
 {
    if (!command || !command[0] || !wfe_shell_invokes_git("bash", command))
-      return 0;
+      return 0; /* not a git command — the overwhelmingly common case, stays silent */
    config_t cfg;
    if (config_load(&cfg) == 0 && !cfg.require_aimee_git)
+   {
+      aimee_log(LOG_DEBUG, "shell-git-gate", "allow: require_aimee_git is off (operator opt-out)");
       return 0;
+   }
    /* Ask per REPO, not in the abstract. The credential ladder resolves a per-host
     * vault token from the checkout's origin, so `cwd` is what makes "can aimee do
     * git here?" answerable. Passing NULL leaves only the server's own identity rung
@@ -1917,7 +1920,47 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
     * would then read "aimee has no git" and never fire, on precisely the boxes whose
     * forge works fine through a vaulted per-host token. Found on .254: the forge had
     * opened a real PR minutes earlier while this check returned 0. */
-   return git_cred_forge_configured(cwd);
+   if (!git_cred_forge_configured(cwd))
+   {
+      /* The silently-inert case, and the one that hid the NULL-repo bug: the agent
+       * reached for git, the rule is ON, and we allowed it anyway because aimee has
+       * no credential to offer instead. That is deliberate — no aimee route, no
+       * restriction — but it must never be invisible, or a gate that has quietly
+       * stopped working looks exactly like a gate nobody is testing. */
+      aimee_log(LOG_INFO, "shell-git-gate",
+                "allow: agent ran git in '%s' but aimee-server has no forge credential for it "
+                "— nothing to redirect to (no aimee route, no restriction)",
+                (cwd && cwd[0]) ? cwd : "(no cwd)");
+      return 0;
+   }
+   audit_log("shell-git-gate", "DENY cwd=%s cmd=%.120s", (cwd && cwd[0]) ? cwd : "-", command);
+   return 1;
+}
+
+/* Boot-time posture, mirroring primary_cli_ingestor_log_posture: make "the rule is
+ * on but nothing enforces it" visible at startup instead of leaving it to be
+ * discovered on a box months later. The credential half is per-repo and cannot be
+ * resolved here, so it is reported per-decision above rather than claimed now. */
+static void server_shell_git_gate_log_posture(void)
+{
+   config_t cfg;
+   int dial_on = (config_load(&cfg) != 0) || cfg.require_aimee_git;
+   if (!dial_on)
+   {
+      aimee_log(LOG_INFO, "shell-git-gate",
+                "OFF: require_aimee_git=false — delegates may run git/gh in a shell");
+      return;
+   }
+   if (!agent_tools_git_write_provider())
+   {
+      aimee_log(LOG_WARN, "shell-git-gate",
+                "INERT: require_aimee_git is on but the git_* tools are not registered — the "
+                "rule would forbid the shell with nothing to redirect to, so it will not fire");
+      return;
+   }
+   aimee_log(LOG_INFO, "shell-git-gate",
+             "ARMED: git/gh in a delegate shell is refused wherever aimee-server holds a forge "
+             "credential for the checkout (per-repo; logged per decision)");
 }
 
 int server_init(server_ctx_t *ctx, const char *socket_path)
@@ -2116,6 +2159,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * A rule whose alternative is missing is breakage, so the alternative is wired
     * first and the rule hangs off it. */
    agent_tools_set_shell_git_gate(server_shell_git_blocked);
+   /* Say at boot whether the rule can actually bite. Two guards shipped today read
+    * correctly and were inert on the deployed box; neither said so. */
+   server_shell_git_gate_log_posture();
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
