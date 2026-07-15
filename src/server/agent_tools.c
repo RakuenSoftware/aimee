@@ -749,6 +749,9 @@ static cJSON *tp_git_commit(void)
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "message", "string", "Commit message");
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
    /* `files` is how anything gets STAGED — including a file you just created.
     * There is deliberately no add-everything flag: sensitive paths are screened
     * per file. Omit it and only already-staged changes are committed. */
@@ -766,8 +769,10 @@ static cJSON *tp_git_push(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   /* No path/upstream args: the handler pushes the current branch of the session
-    * worktree and sets upstream itself. */
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
+   /* No upstream arg: the handler pushes the current branch and sets upstream itself. */
    tp_prop(props, "force", "boolean", "Force-push with lease (default false)");
    tp_prop(props, "mirror", "boolean", "Push to the configured mirror remote (default false)");
    cJSON_AddItemToObject(params, "properties", props);
@@ -780,6 +785,9 @@ static cJSON *tp_git_branch(void)
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "action", "string", "list | create | switch | claim | delete | orphan");
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
    tp_prop(props, "name", "string", "Branch name (for create/switch/claim/delete)");
    tp_prop(props, "base", "string", "Base ref for create (defaults to the current HEAD)");
    tp_prop(props, "remote", "boolean", "Include remote branches when listing");
@@ -797,6 +805,9 @@ static cJSON *tp_git_pr(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "action", "string",
            "create | view | list | edit | checks | watch | merge_status | merge");
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
    tp_prop(props, "number", "integer", "PR number (for view/edit/checks/merge_status/merge)");
    tp_prop(props, "title", "string", "PR title (for create/edit)");
    tp_prop(props, "body", "string", "PR body (for create/edit)");
