@@ -744,7 +744,16 @@ int db2_entity_edge_normalize_weights(void)
                             " WHERE weight > 0"
                             " AND COALESCE(edge_origin, '') != 'code_projection'"
                             " AND (SELECT MAX(weight) FROM entity_edges e2"
-                            "      WHERE e2.relation = entity_edges.relation) > 1";
+                            "      WHERE e2.relation = entity_edges.relation) > 1"
+                            /* Skip rows that are already at their normalized value.
+                             * Without this the pass rewrites every edge to the value
+                             * it already holds on each run — measured: 2 of 2 rows on
+                             * a converged graph. Harmless when normalize was dead
+                             * code, but it now runs on EVERY maintenance cycle, so an
+                             * idle graph would burn WAL and bump updated_at forever. */
+                            " AND weight <> CAST(weight * 100.0 /"
+                            "  (SELECT MAX(weight) FROM entity_edges e2"
+                            "   WHERE e2.relation = entity_edges.relation) AS INTEGER)";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

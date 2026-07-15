@@ -58,6 +58,14 @@ extern "C"
    typedef struct
    {
       char *content;                  /* malloc'd completion text; NULL if none. Caller frees. */
+      char *reasoning;                /* malloc'd reasoning/chain-of-thought, when the provider
+                                       * returned any: either as `reasoning_content` (llama.cpp
+                                       * --jinja, DeepSeek/Qwen APIs) or as a <think> preamble on
+                                       * an inlining endpoint. Kept SEPARATE from content rather
+                                       * than discarded — dropping it silently is what left the
+                                       * curator unable to say why an extraction went wrong, and
+                                       * the canonical IR models it as AIMEE_BLK_THINKING. NULL
+                                       * when the provider sent none. Caller frees. */
       int prompt_tokens;              /* from usage; 0 when absent. */
       int completion_tokens;          /* from usage; 0 when absent. */
       char model[PROVIDER_MODEL_LEN]; /* provider-reported model id; "" when absent. */

@@ -814,8 +814,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->skills_curator_interval_hours = 168;
    cfg->skills_stale_after_days = 30;
    cfg->skills_archive_after_days = 90;
-   cfg->skills_min_idle_minutes = 30;
-   cfg->skills_manage_enabled = 0;
    cfg->skills_dispatch_enabled = 1;
    cfg->skills_dispatch_max_index = 24;
    cfg->skills_dispatch_advisory = 0;

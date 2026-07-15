@@ -69,8 +69,6 @@ int main(void)
       assert(cfg.skills_curator_interval_hours == 168);
       assert(cfg.skills_stale_after_days == 30);
       assert(cfg.skills_archive_after_days == 90);
-      assert(cfg.skills_min_idle_minutes == 30);
-      assert(cfg.skills_manage_enabled == 0);
       assert(cfg.skills_dispatch_enabled == 1);
       assert(cfg.skills_dispatch_max_index == 24);
       assert(cfg.skills_dispatch_advisory == 0);
@@ -183,8 +181,6 @@ int main(void)
       cfg.skills_curator_interval_hours = 240;
       cfg.skills_stale_after_days = 45;
       cfg.skills_archive_after_days = 120;
-      cfg.skills_min_idle_minutes = 20;
-      cfg.skills_manage_enabled = 1;
       cfg.skills_dispatch_enabled = 0;
       cfg.skills_dispatch_max_index = 7;
       cfg.skills_dispatch_advisory = 1;
@@ -454,8 +450,6 @@ int main(void)
       assert(cfg2.skills_curator_interval_hours == 240);
       assert(cfg2.skills_stale_after_days == 45);
       assert(cfg2.skills_archive_after_days == 120);
-      assert(cfg2.skills_min_idle_minutes == 20);
-      assert(cfg2.skills_manage_enabled == 1);
       assert(cfg2.skills_dispatch_enabled == 0);
       assert(cfg2.skills_dispatch_max_index == 7);
       assert(cfg2.skills_dispatch_advisory == 1);

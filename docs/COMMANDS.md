@@ -82,9 +82,9 @@ progress, not part of the installed CLI contract.
 
 ### Chat
 
-- `aimee` or `aimee chat`: start the primary-agent chat session.
-
-Bare `aimee` launches the OpenCode v2 TUI through `opencode attach`.
+There is no built-in interactive chat client; bare `aimee` prints usage. Reach the
+primary agent through any OpenAI-compatible front end pointed at
+`POST /v1/chat/completions`, the web chat, or `aimee acp-serve` from an ACP editor.
 The server still owns provider routing, primary session IDs, memory, guardrails,
 and tool execution.
 
@@ -168,7 +168,6 @@ Useful flags:
     entirely, set `AIMEE_API_BEARER_TOKEN` on the server (secret store) to pin your
     own bearer; an explicit env token disables the auto-rotation.
 - `aimee worktree gc [--days N] [--force] [--dry-run]`: garbage-collect abandoned session worktrees.
-- `aimee work add`, `add-batch`, `claim`, `complete`, `fail`, `list`, `board`, `cancel`, `release`, `clear`, `gc`, `sync-proposals`, `stats`: manage the inter-session work queue.
 - `aimee jobs list [--limit N]`: list recent durable delegate jobs.
 - `aimee jobs status <job-id>`: show one durable delegate job.
 - `aimee jobs logs <job-id>`: print the recorded result/log body for one durable delegate job.

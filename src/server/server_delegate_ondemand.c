@@ -45,14 +45,6 @@ void delegate_ondemand_set_ceiling(int ceiling)
    pthread_mutex_unlock(&g_delegate_inflight_mutex);
 }
 
-int delegate_ondemand_inflight(void)
-{
-   pthread_mutex_lock(&g_delegate_inflight_mutex);
-   int n = g_delegate_inflight;
-   pthread_mutex_unlock(&g_delegate_inflight_mutex);
-   return n;
-}
-
 /* Add the on-demand delegate diagnostics to an `aimee workers` response object:
  * the live in-flight count, its peak, and the cumulative total. Read together
  * under one lock for a consistent snapshot. Kept here (not in server_state.c)

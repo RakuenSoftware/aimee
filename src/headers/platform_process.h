@@ -78,18 +78,4 @@ void platform_signal_int(platform_signal_handler_t handler);
  * POSIX: kill(pid, SIGTERM). Windows: OpenProcess + TerminateProcess. */
 int platform_signal_send_term(int pid);
 
-/* Ignore SIGPIPE (broken pipe) — no-op on Windows.
- * POSIX: signal(SIGPIPE, SIG_IGN). */
-#ifdef AIMEE_POSIX
-#include <signal.h>
-static inline void platform_signal_ignore_pipe(void)
-{
-   signal(SIGPIPE, SIG_IGN);
-}
-#else
-static inline void platform_signal_ignore_pipe(void)
-{
-}
-#endif
-
 #endif /* DEC_PLATFORM_PROCESS_H */

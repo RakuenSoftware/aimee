@@ -20,7 +20,7 @@
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
 #include "delegate_plan.h"
-#include "cli_tui.h"
+#include "cli_chat_stream.h"
 #include "platform.h"
 #include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
@@ -991,165 +991,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
 /* Minimal growing string buffer for assembling the session-start context
  * without depending on open_memstream's feature-test macros. */
 
-/* No-arg `aimee` launch path.
- *
- * Calls the launch.run /v1 call to mint a fresh session_id, materialize any
- * sibling worktrees, and resolve the provider/model/worktree_cwd. The
- * client then writes the session-ppid file (so MCP children spawned by
- * the agent can find their session), chdirs into the worktree, and
- * starts aimee's built-in primary-agent chat. */
-static int launch_session_with_input(int json_output, int debug, int default_launch, int chat_argc,
-                                     char **chat_argv)
-{
-   /* A remote aimee-server runs the agent + tools on the server; serve THIS
-    * client's working tree over the reverse-channel so those tools act here (the
-    * client never absorbs the engine or a DB). A co-located server uses the local
-    * socket as before. */
-   int remote = cli_v1_remote_endpoint_is_network();
-   const char *sock = NULL;
-   if (remote)
-   {
-      cli_workspace_reverse_channel_start();
-   }
-   else
-   {
-      sock = cli_ensure_server_for_method("launch.run");
-      if (!sock)
-      {
-         fprintf(stderr, "aimee: cannot launch session; server unavailable\n");
-         return 1;
-      }
-   }
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "launch.run");
-
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
-
-   cJSON *resp;
-   if (remote)
-   {
-      char *endpoint = cli_v1_client_endpoint();
-      char *bearer = cli_v1_client_bearer();
-      char *body = cJSON_PrintUnformatted(req);
-      int status = 0;
-      resp = (endpoint && body) ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer,
-                                                   30000, &status)
-                                : NULL;
-      free(endpoint);
-      free(bearer);
-      free(body);
-   }
-   else
-   {
-      resp = cli_v1_dispatch_local(req, 30000);
-   }
-   cJSON_Delete(req);
-
-   if (!resp)
-   {
-      fprintf(stderr, "aimee: cannot launch session; server request failed\n");
-      if (remote)
-         cli_workspace_reverse_channel_stop();
-      return 1;
-   }
-
-   cJSON *jstatus = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(jstatus) || strcmp(jstatus->valuestring, "ok") != 0)
-   {
-      cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      fprintf(stderr, "aimee: launch failed: %s\n",
-              cJSON_IsString(jmsg) ? jmsg->valuestring : "server returned error");
-      cJSON_Delete(resp);
-      if (remote)
-         cli_workspace_reverse_channel_stop();
-      return 1;
-   }
-
-   cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(resp, "provider");
-   cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(resp, "model");
-   cJSON *jauto = cJSON_GetObjectItemCaseSensitive(resp, "autonomous");
-   cJSON *jwt = cJSON_GetObjectItemCaseSensitive(resp, "worktree_cwd");
-   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(resp, "session_id");
-
-   const char *provider = cJSON_IsString(jprovider) ? jprovider->valuestring : "claude";
-   const char *model = cJSON_IsString(jmodel) ? jmodel->valuestring : "";
-   int autonomous = cJSON_IsTrue(jauto);
-   const char *worktree_cwd = cJSON_IsString(jwt) ? jwt->valuestring : NULL;
-   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
-
-   if (json_output)
-   {
-      char *s = cJSON_PrintUnformatted(resp);
-      if (s)
-      {
-         puts(s);
-         free(s);
-      }
-      cJSON_Delete(resp);
-      if (remote)
-         cli_workspace_reverse_channel_stop();
-      return 0;
-   }
-
-   if (debug)
-      fprintf(stderr, "aimee: starting %s chat (session %s)%s\n", provider, sid ? sid : "?",
-              worktree_cwd ? "" : "");
-
-   if (autonomous)
-      fprintf(stderr,
-              "aimee: warning: autonomous mode is active -- aimee guardrails are the sole safety "
-              "boundary\n");
-
-   /* Persist session-ppid so MCP children spawned by the agent (whose
-    * PPID will be this process post-exec) can recover the session id. */
-   if (sid && sid[0])
-   {
-      const char *base = aimee_home();
-      if (base && base[0])
-      {
-         char ppid_path[512];
-         snprintf(ppid_path, sizeof(ppid_path), "%s/session-ppid-%d", base, (int)getpid());
-         FILE *fp = fopen(ppid_path, "w");
-         if (fp)
-         {
-            fputs(sid, fp);
-            fclose(fp);
-         }
-      }
-   }
-
-   /* Co-located only: chdir into the server-resolved worktree (it lives on this
-    * host). For a remote server the worktree is the client's own cwd (a detached
-    * workspace served over the reverse-channel), so there is nothing to chdir. */
-   if (!remote && worktree_cwd && worktree_cwd[0])
-   {
-      if (chdir(worktree_cwd) != 0)
-         fprintf(stderr, "aimee: warning: could not chdir to worktree: %s\n", worktree_cwd);
-      else if (debug)
-         fprintf(stderr, "aimee: session cwd: %s\n", worktree_cwd);
-   }
-
-   /* Make sure hooks/MCP children inherit the active socket (co-located only;
-    * a remote session reaches the server over the configured /v1 endpoint). */
-   if (!remote && sock)
-      platform_setenv("AIMEE_SOCK", sock);
-
-   int rc = builtin_chat_loop(sock, provider, model, sid, autonomous, debug, default_launch,
-                              chat_argc, chat_argv);
-   if (remote)
-      cli_workspace_reverse_channel_stop();
-   cJSON_Delete(resp);
-   return rc;
-}
-
-static int launch_session(int json_output, int debug)
-{
-   return launch_session_with_input(json_output, debug, 1, 0, NULL);
-}
-
 /* --- aimee clean [--force] --- */
 
 /* Remove aimee hooks and MCP entries from a JSON settings file. */
@@ -1760,8 +1601,14 @@ int main(int argc, char **argv)
          (void)response_profile;
          return client_help_command(1, all_arg);
       }
-      /* No subcommand: forward "launch" to server, parse metadata, exec provider */
-      return launch_session(json_output, debug);
+      /* No subcommand: print usage. `aimee` used to forward a "launch" to the
+       * server and exec a provider TUI, which is not a sensible default for a
+       * CLI — it made the bare command do the single heaviest thing available,
+       * and off a TTY it exited 0 having printed nothing at all. `aimee chat`
+       * still launches a session; the bare command now says what it can do. */
+      (void)debug;
+      usage();
+      return 0;
    }
 
    const char *cmd = argv[cmd_start];
@@ -1850,9 +1697,6 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "roles") == 0)
       return cmd_roles_client_run(sub_argc, sub_argv, json_output);
 #endif
-
-   if (strcmp(cmd, "chat") == 0)
-      return launch_session_with_input(json_output, debug, 0, sub_argc, sub_argv);
 
    if (strcmp(cmd, "session") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "brief") == 0)
       return client_session_brief(sub_argc - 1, sub_argv + 1);

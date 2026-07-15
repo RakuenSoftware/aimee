@@ -39,8 +39,6 @@ typedef struct
    unsigned int seed;
 } agent_eval_run_options_t;
 
-int agent_eval_run(agent_config_t *cfg, const char *suite_dir, eval_result_t *results,
-                   int max_results);
 int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
                                 const agent_eval_run_options_t *options, eval_result_t *results,
                                 int max_results);

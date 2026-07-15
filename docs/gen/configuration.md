@@ -261,7 +261,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
 - **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
-- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `manage`, `review`
+- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
 - **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
 - **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
@@ -276,7 +276,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 155 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 152 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -301,10 +301,8 @@ The binaries read 155 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_API_BEARER` | Bearer token for the `/v1` API endpoint. |
 | `AIMEE_API_ENDPOINT` | Override the `/v1` API endpoint used by the client RPC layer. |
 | `AIMEE_ATTACH_ID` | Presence attach id used when joining an existing session. |
-| `AIMEE_EFFORT` | Reasoning-effort hint for the session/model. |
 | `AIMEE_HOOK_CLIENT` | Identifies the calling hook client (e.g. claude/codex) for hook routing. |
 | `AIMEE_MODE` | Operating-mode override (e.g. interactive / autonomous). |
-| `AIMEE_MODEL` | Override the primary model for the session. |
 | `AIMEE_NO_AUTOSTART` | If set, the client does not auto-start a local aimee-server. |
 | `AIMEE_PROFILE` | Active working-profile name. |
 | `AIMEE_SERVER_TOKEN` | Bearer token presented to aimee-server over TCP. |
@@ -399,7 +397,6 @@ The binaries read 155 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_DELEGATE_WORKTREE_ROOT` | Root directory for delegate worktrees. |
 | `AIMEE_DOCKER_BIN` | Docker delegate-backend binary. |
 | `AIMEE_DOCKER_WORKDIR` | Docker delegate-backend working directory. |
-| `AIMEE_OPENCODE_BIN` | opencode CLI frontend binary. |
 | `AIMEE_PARENT_DELEGATION_ID` | Parent delegation id (threading). |
 | `AIMEE_SSH_BIN` | SSH delegate-backend binary. |
 
@@ -505,13 +502,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `LLAMA_HOST` | llama.cpp server host/URL. |
 | `OLLAMA_HOST` | Ollama server host/URL for local models. |
 
-### Reasoning effort
-
-| Variable | Description |
-|----------|-------------|
-| `CODEX_REASONING_EFFORT` | Reasoning-effort passed through the Codex frontend. |
-| `OPENAI_REASONING_EFFORT` | Reasoning-effort default for OpenAI-family models. |
-
 ### Network / proxy
 
 | Variable | Description |
@@ -533,7 +523,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `CLAUDE_SESSION_ID` | Claude Code session id when aimee runs as its backend. |
 | `CODEX_CWD` | Working directory reported by the Codex frontend. |
 | `CODEX_HOME` | Codex home directory (Codex-frontend integration). |
-| `CODEX_MODEL` | Model the Codex frontend requests. |
 | `CODEX_SANDBOX` | Codex sandbox mode. |
 | `CODEX_THREAD_ID` | Codex conversation/thread id. |
 

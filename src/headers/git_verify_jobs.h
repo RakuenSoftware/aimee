@@ -21,7 +21,7 @@ typedef struct verify_job
 } verify_job_t;
 
 verify_job_t *verify_job_get(int id);
-verify_job_t *verify_job_alloc(void);
+
 verify_job_t *verify_job_alloc_for_session(const char *session_id, int *busy);
 void verify_job_release(verify_job_t *job);
 int verify_session_has_active_job(const char *session_id);

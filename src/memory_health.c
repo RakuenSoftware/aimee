@@ -358,6 +358,12 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
    /* Prune graph edges where both endpoints have no L1+ memory */
    memory_graph_prune();
 
+   /* Rescale edge weights per relation so the maximum is 100. Runs after the
+    * prune so removed edges cannot hold the per-relation maximum and squash the
+    * survivors. Idempotent once converged: the max is already 100, so the
+    * rescale is identity until a new edge exceeds it. */
+   memory_graph_normalize();
+
    return 0;
 }
 

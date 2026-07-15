@@ -204,12 +204,6 @@ static void eval_log_hard_negative(const char *suite_name, const eval_task_t *ta
    fclose(fp);
 }
 
-int agent_eval_run(agent_config_t *cfg, const char *suite_dir, eval_result_t *results,
-                   int max_results)
-{
-   return agent_eval_run_with_options(cfg, suite_dir, NULL, results, max_results);
-}
-
 int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
                                 const agent_eval_run_options_t *options, eval_result_t *results,
                                 int max_results)

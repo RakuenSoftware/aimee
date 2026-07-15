@@ -15,7 +15,7 @@ These are the primary AI coding tools that aimee integrates with for memory inje
 |---|---|---|---:|---|---|
 | Claude Code | `SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd` | Anthropic Messages, `POST /v1/messages` | 1.x | Full | Full hook coverage; `aimee claude-proxy enable` reroutes to any primary model. |
 | Codex CLI | `PreToolUse`, `PostToolUse`, `SessionStart`, local plugin, MCP | OpenAI Responses, `POST /v1/responses` | 1.x | Full | Hooks + MCP; `~/.codex/config.toml` model provider runs any primary model, incl. the function-call tool loop. |
-| OpenCode | TUI front end via `opencode attach` | OpenAI-compatible, `POST /v1/chat/completions` | 2.x | Full | Front end onto aimee's primary model over the OpenAI-compatible ingress. |
+| OpenCode | OpenAI-compatible front end | OpenAI-compatible, `POST /v1/chat/completions` | 2.x | Full | Front end onto aimee's primary model over the OpenAI-compatible ingress. |
 | Gemini CLI | `BeforeTool`, `AfterTool`, `SessionStart` | Provider CLI | 2.x | Full | Uses Gemini CLI hook model rather than Claude-style hook names. |
 | Mistral Vibe-compatible Mistral | native HTTP adapter using Vibe-compatible defaults | Provider CLI | 2.9.6 source-compatible defaults | Expected | Used by Aimee's built-in primary chat and `mistral-plan` delegate route without launching `vibe`. |
 

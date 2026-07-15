@@ -44,13 +44,13 @@ static int col_exists(sqlite3 *db, const char *tbl, const char *col)
    return found;
 }
 
-static int index_exists(sqlite3 *db, const char *idx)
+static int table_exists(sqlite3 *db, const char *tbl)
 {
    sqlite3_stmt *st = NULL;
-   if (sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1", -1, &st,
+   if (sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1", -1, &st,
                           NULL) != SQLITE_OK)
       return 0;
-   sqlite3_bind_text(st, 1, idx, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 1, tbl, -1, SQLITE_STATIC);
    int found = (sqlite3_step(st) == SQLITE_ROW);
    sqlite3_finalize(st);
    return found;
@@ -143,51 +143,58 @@ static void test_trigram_table_created(void)
    printf("  PASS: test_trigram_table_created\n");
 }
 
-/* Regression: a legacy DB whose work_queue table predates the `lane` column
- * must still apply the canonical schema. schema.sql carries a partial UNIQUE
- * index over work_queue(lane); if the catch-up ALTER does not run first, the
- * CREATE INDEX aborts the whole apply and db1_init leaves DB1 unavailable
- * (observed in production: "db1_init: schema apply failed: no such column:
- * lane" -> delegate job creation fails). */
-static void test_schema_apply_legacy_workqueue(void)
+/* ── main ───────────────────────────────────────────────────────────────── */
+
+/* The retired work queue's tables are dropped on upgrade, not left behind.
+ *
+ * Guards the disposition, not just the SQL: a legacy DB carries work_queue +
+ * work_queue_log with rows, and applying the schema must remove both. Leaving
+ * them would make an upgraded DB and a fresh install structurally different
+ * forever, which is exactly the drift this migration exists to prevent. */
+static void test_retired_work_queue_tables_are_dropped(void)
 {
    sqlite3 *db = open_mem();
-   /* Pre-existing work_queue WITHOUT the lane column (its original shape). */
+   /* A legacy DB, mid-flight: both tables present and non-empty. */
    assert(sqlite3_exec(db,
-                       "CREATE TABLE work_queue ("
-                       " id TEXT PRIMARY KEY, title TEXT NOT NULL,"
-                       " description TEXT DEFAULT '', source TEXT DEFAULT '',"
-                       " priority INTEGER DEFAULT 0,"
-                       " status TEXT NOT NULL DEFAULT 'pending',"
-                       " claimed_by TEXT, claimed_at TEXT, completed_at TEXT,"
-                       " result TEXT DEFAULT '', created_by TEXT,"
-                       " created_at TEXT NOT NULL, metadata TEXT DEFAULT '',"
-                       " effort TEXT DEFAULT '', tags TEXT DEFAULT '')",
+                       "CREATE TABLE work_queue (id TEXT PRIMARY KEY, title TEXT);"
+                       "CREATE TABLE work_queue_log (id INTEGER PRIMARY KEY, item_id TEXT);"
+                       "INSERT INTO work_queue VALUES ('wq1', 'legacy item');"
+                       "INSERT INTO work_queue_log VALUES (1, 'wq1');",
                        NULL, NULL, NULL) == SQLITE_OK);
-   assert(!col_exists(db, "work_queue", "lane"));
+   assert(table_exists(db, "work_queue"));
+   assert(table_exists(db, "work_queue_log"));
 
    char err[256] = "";
-   int rc = db1_apply_schema_sqlite(db, err, sizeof(err));
-   assert(rc == 0); /* must not abort on the lane-dependent index */
+   assert(db1_apply_schema_sqlite(db, err, sizeof(err)) == 0);
 
-   /* The catch-up ALTER added the column and the schema's index now exists. */
-   assert(col_exists(db, "work_queue", "lane"));
-   assert(index_exists(db, "idx_work_queue_lane_active"));
-
+   assert(!table_exists(db, "work_queue"));
+   assert(!table_exists(db, "work_queue_log"));
    sqlite3_close(db);
-   printf("  PASS: test_schema_apply_legacy_workqueue\n");
+   printf("  PASS: test_retired_work_queue_tables_are_dropped\n");
 }
 
-/* ── main ───────────────────────────────────────────────────────────────── */
+/* A fresh DB must not resurrect them, and the drop must not abort the apply
+ * when there is nothing to drop (the statements run with errors ignored). */
+static void test_fresh_db_has_no_work_queue_tables(void)
+{
+   sqlite3 *db = open_mem();
+   char err[256] = "";
+   assert(db1_apply_schema_sqlite(db, err, sizeof(err)) == 0);
+   assert(!table_exists(db, "work_queue"));
+   assert(!table_exists(db, "work_queue_log"));
+   sqlite3_close(db);
+   printf("  PASS: test_fresh_db_has_no_work_queue_tables\n");
+}
 
 int main(void)
 {
    printf("db1_write_retry:\n");
    test_busy_handler_api();
+   test_retired_work_queue_tables_are_dropped();
+   test_fresh_db_has_no_work_queue_tables();
    test_reconcile_adds_missing_column();
    test_reconcile_idempotent();
    test_trigram_table_created();
-   test_schema_apply_legacy_workqueue();
    printf("ok\n");
    return 0;
 }

@@ -1627,24 +1627,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work:
-    get:
-      summary: List work-queue items
-      responses:
-        "200":
-          description: Work items envelope
-          content:
-            application/json:
-              schema: { type: object }
-  /work/stats:
-    get:
-      summary: Work-queue counts by state
-      responses:
-        "200":
-          description: Work stats envelope
-          content:
-            application/json:
-              schema: { type: object }
   /hud:
     get:
       summary: Session HUD status snapshot
@@ -2466,40 +2448,6 @@ paths:
       summary: Batch trajectory export
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Batch result, content: { application/json: { schema: { type: object } } } } }
-  /work/add_batch:
-    post:
-      summary: Add a batch of work items
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Added, content: { application/json: { schema: { type: object } } } } }
-  /work/board:
-    get:
-      summary: Work board view
-      responses: { "200": { description: Board, content: { application/json: { schema: { type: object } } } } }
-  /work/cancel:
-    post:
-      summary: Cancel a work item
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Cancelled, content: { application/json: { schema: { type: object } } } } }
-  /work/clear:
-    post:
-      summary: Clear work items
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Cleared, content: { application/json: { schema: { type: object } } } } }
-  /work/gc:
-    post:
-      summary: Garbage-collect work items
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Collected, content: { application/json: { schema: { type: object } } } } }
-  /work/release:
-    post:
-      summary: Release a claimed work item
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Released, content: { application/json: { schema: { type: object } } } } }
-  /work/sync_proposals:
-    post:
-      summary: Sync work items from proposals
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Synced, content: { application/json: { schema: { type: object } } } } }
   /wm/context:
     post:
       summary: Working-memory context
@@ -3003,99 +2951,6 @@ paths:
               schema: { type: object }
         "400":
           description: Missing key/content or invalid body
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work/add:
-    post:
-      summary: Add a work-queue item (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [title]
-              properties:
-                title: { type: string }
-                desc: { type: string }
-                source: { type: string }
-      responses:
-        "200":
-          description: Work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-        "400":
-          description: Missing title or invalid body
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work/claim:
-    post:
-      summary: Claim a work-queue item (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id: { type: string }
-                lane: { type: string }
-                effort: { type: string }
-      responses:
-        "200":
-          description: Claimed work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-  /work/complete:
-    post:
-      summary: Mark a work-queue item done (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [id]
-              properties:
-                id: { type: string }
-      responses:
-        "200":
-          description: Updated work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-        "400":
-          description: Missing id or invalid body
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work/fail:
-    post:
-      summary: Mark a work-queue item failed (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [id]
-              properties:
-                id: { type: string }
-      responses:
-        "200":
-          description: Updated work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-        "400":
-          description: Missing id or invalid body
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

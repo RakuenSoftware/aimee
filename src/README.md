@@ -762,7 +762,7 @@ at a reverse proxy and use its `http://` address.
 
 **What a remote thin client can and can't do.** The remote transport drives the
 **data/RPC plane**: `memory`, `kb`, `rules`, `index`, `sessions`, `notes`, and so
-on. Interactive **`aimee chat` / `aimee launch` need a *co-located* server**: they
+on. Interactive front ends (**web chat**, `acp-serve`) need a *co-located* server: they
 run the agent and its tools on the client host and chdir into a local worktree, so
 they refuse a remote endpoint. **Writes are off by default over the network**
 (leaked-bearer protection): a remote bearer is read/query only until the server opts
@@ -1079,7 +1079,7 @@ override them. The TCP host may be a DNS name or an IPv4/IPv6 literal
 (`tcp:[::1]:8740`).
 
 This drives the **data/RPC plane** (`memory`, `kb`, `rules`, `index`, `sessions`,
-`notes`, …). Interactive **`aimee chat` / `aimee launch` need a co-located server**:
+`notes`, …). Interactive front ends (web chat, `acp-serve`) need a co-located server**:
 they run the agent and its tools on the client host and chdir into a local worktree,
 so they refuse a remote `tcp:` endpoint with a clear message.
 
@@ -1221,7 +1221,7 @@ methods; the thin CLI maps supported commands to them in `cli_v1_routes.inc`
 | Tools / MCP | `tool.execute`, `mcp.tools_list/audit/recheck/call` |
 | Triggers / cron | `trigger.fire/list/status/cancel`, `cron.list/add/show/history/run/enable/disable/remove` |
 | Providers / models | `provider.list/show/models/test/quota/get/set`, `provider.slot_acquire/release`, `model.list/show/refresh` |
-| Insights / migrate | `insights.overview`, `migrate.v2` |
+| Insights | `insights.overview` |
 
 Request shape: `{"method": "...", "protocol_version": 2, ...params}`. Success:
 `{"status": "ok", ...data}`. Error: `{"status": "error", "error": "...",

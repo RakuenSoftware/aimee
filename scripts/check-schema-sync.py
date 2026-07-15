@@ -104,8 +104,6 @@ DB1_ONLY_TABLES = {
     "window_files",
     "window_terms",
     "windows",
-    "work_queue",
-    "work_queue_log",
     "wc_channel_messages",
     "wc_channels",
     "ensembles",

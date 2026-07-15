@@ -110,6 +110,54 @@ int provider_client_parse_openai(const char *body, provider_completion_t *out)
          if (out->content)
             rc = 0;
       }
+
+      /* Reasoning models split their output in two, and BOTH halves matter.
+       *
+       * A compliant server (llama.cpp --jinja, the DeepSeek/Qwen APIs) returns
+       * the chain-of-thought in `reasoning_content` and leaves `content` clean.
+       * Reading only `content` was not merely lossy: these models routinely
+       * return content:null with the answer in reasoning_content, and the
+       * strdup above then never runs, rc stays -1, and the caller reports
+       * "unparseable provider response" — every curator stage on such a model
+       * failing with an error that names the wrong thing. agent_bridge.c:429
+       * has carried this exact fallback for the agent path all along; the
+       * curator's own provider path never got it. */
+      cJSON *reasoning = msg ? cJSON_GetObjectItemCaseSensitive(msg, "reasoning_content") : NULL;
+      if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0])
+      {
+         out->reasoning = strdup(reasoning->valuestring);
+         if (!out->content || !out->content[0])
+         {
+            /* Answer arrived in reasoning_content: use it rather than failing. */
+            free(out->content);
+            out->content = strdup(reasoning->valuestring);
+            if (out->content)
+               rc = 0;
+         }
+      }
+      else if (out->content)
+      {
+         /* Inlining endpoint: normalise a <think> PREAMBLE to the same shape.
+          * Prefix-anchored on purpose — a tag anywhere else is content (a
+          * docstring may legitimately discuss it), and cutting there is what
+          * corrupted valid answers elsewhere in this tree. */
+         const char *rsn = NULL;
+         size_t rsn_len = 0;
+         const char *answer = text_split_reasoning_prefix(out->content, &rsn, &rsn_len);
+         if (answer != out->content)
+         {
+            if (rsn && rsn_len)
+            {
+               out->reasoning = strndup(rsn, rsn_len);
+            }
+            char *body = strdup(answer);
+            if (body)
+            {
+               free(out->content);
+               out->content = body;
+            }
+         }
+      }
       cJSON *fr = cJSON_GetObjectItemCaseSensitive(choice0, "finish_reason");
       if (cJSON_IsString(fr) && fr->valuestring)
          snprintf(out->finish_reason, sizeof(out->finish_reason), "%s", fr->valuestring);
@@ -284,4 +332,6 @@ void provider_completion_free(provider_completion_t *out)
       return;
    free(out->content);
    out->content = NULL;
+   free(out->reasoning);
+   out->reasoning = NULL;
 }

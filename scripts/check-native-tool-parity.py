@@ -121,8 +121,6 @@ BASELINE_DRIFT = {
     "task_list",
     "upsert_persona",
     "upsert_role_template",
-    "work_board",
-    "work_list",
     "workflow_run",
 }
 

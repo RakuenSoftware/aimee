@@ -819,58 +819,6 @@ int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "primary.clear");
 }
-int handle_work_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.add");
-}
-int handle_work_add_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.add_batch");
-}
-int handle_work_claim(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.claim");
-}
-int handle_work_complete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.complete");
-}
-int handle_work_fail(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.fail");
-}
-int handle_work_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.list");
-}
-int handle_work_board(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.board");
-}
-int handle_work_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.cancel");
-}
-int handle_work_release(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.release");
-}
-int handle_work_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.clear");
-}
-int handle_work_gc(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.gc");
-}
-int handle_work_sync_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.sync_proposals");
-}
-int handle_work_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.stats");
-}
 int handle_attempt_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "attempt.record");
@@ -1514,7 +1462,6 @@ static void test_routing(void)
    int has_delegate_status = 0;
    int has_delegate_launch = 0;
    int has_launch_run = 0;
-   int has_work_claim = 0;
    int has_jobs_logs = 0;
    int has_coord_job_status = 0;
    int has_dogfood_review = 0;
@@ -1532,8 +1479,6 @@ static void test_routing(void)
          has_delegate_launch = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "launch.run") == 0)
          has_launch_run = 1;
-      if (cJSON_IsString(m) && strcmp(m->valuestring, "work.claim") == 0)
-         has_work_claim = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "jobs.logs") == 0)
          has_jobs_logs = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "job.status") == 0)
@@ -1554,7 +1499,6 @@ static void test_routing(void)
    assert(has_delegate_status);
    assert(has_delegate_launch);
    assert(has_launch_run);
-   assert(has_work_claim);
    assert(has_jobs_logs);
    assert(has_coord_job_status);
    assert(has_dogfood_review);
@@ -1693,12 +1637,6 @@ static void test_routing(void)
                         strlen("{\"method\":\"job.status\",\"job_id\":1}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "job.status") == 0);
    assert(strcmp(g_last_handler, "job.status") == 0);
-   cJSON_Delete(json);
-
-   json = dispatch_json(ctx, conn, "{\"method\":\"work.claim\"}",
-                        strlen("{\"method\":\"work.claim\"}"));
-   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "work.claim") == 0);
-   assert(strcmp(g_last_handler, "work.claim") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"eval.run\",\"suite_dir\":\"evals/delegate\"}",

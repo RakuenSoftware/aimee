@@ -13,7 +13,6 @@
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
 #include "dashboard.h"
-#include "work_queue.h"
 #include "mcp_tools.h"
 #include "mcp_git.h"
 #include "git_verify.h"

@@ -622,18 +622,6 @@ static char *build_session_context(const char *client_cwd)
       free(ws_ctx);
    }
 
-   /* Work queue summary */
-   if (verbose && pos + 256 < cap)
-   {
-      int wlen = work_queue_summary(buf + pos, cap - pos);
-      if (wlen > 0)
-      {
-         pos += (size_t)wlen;
-         if (pos < cap)
-            buf[pos++] = '\n';
-      }
-   }
-
    /* aimee capabilities reference */
    if (verbose)
    {
@@ -710,10 +698,6 @@ void prune_stale_sessions(const config_t *cfg)
       /* Fold this session's L0 memories into L1 (runs inside aimee-kb). */
       kb_client_memory_fold_session(stale_sid);
       did_maintenance = 1;
-
-      /* Release any work queue items claimed by this stale session */
-      if (db1_work_queue_release_claimed_by(stale_sid) < 0)
-         LOG_ERROR("prune_stale_sessions", "release work items failed for sid=%s", stale_sid);
 
       /* Remove worktrees for this session */
       remove_stale_worktrees(cfg, stale_sid);

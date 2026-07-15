@@ -544,7 +544,6 @@ int config_save(const config_t *cfg)
    }
    if (cfg->skills_review_nudge_interval != 10 || cfg->skills_curator_interval_hours != 168 ||
        cfg->skills_stale_after_days != 30 || cfg->skills_archive_after_days != 90 ||
-       cfg->skills_min_idle_minutes != 30 || cfg->skills_manage_enabled ||
        cfg->skills_review_enabled || cfg->skills_curator_enabled || !cfg->skills_dispatch_enabled ||
        cfg->skills_dispatch_max_index != 24 || cfg->skills_dispatch_advisory ||
        cfg->skills_capability_autostub || cfg->skills_eval_gate_enabled ||
@@ -565,9 +564,6 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(skills, "curator_interval_hours", cfg->skills_curator_interval_hours);
       cJSON_AddNumberToObject(skills, "stale_after_days", cfg->skills_stale_after_days);
       cJSON_AddNumberToObject(skills, "archive_after_days", cfg->skills_archive_after_days);
-      cJSON_AddNumberToObject(skills, "min_idle_minutes", cfg->skills_min_idle_minutes);
-      cJSON *manage = cJSON_AddObjectToObject(skills, "manage");
-      cJSON_AddBoolToObject(manage, "enabled", cfg->skills_manage_enabled ? 1 : 0);
       cJSON *dispatch = cJSON_AddObjectToObject(skills, "dispatch");
       cJSON_AddBoolToObject(dispatch, "enabled", cfg->skills_dispatch_enabled ? 1 : 0);
       cJSON_AddNumberToObject(dispatch, "max_index", cfg->skills_dispatch_max_index);

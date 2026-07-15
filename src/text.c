@@ -67,6 +67,56 @@ static int trigram_in_set(const char *tri, trigram_t *set, int count)
    return 0;
 }
 
+/* Split a reasoning preamble off the front of a model response. See util.h.
+ *
+ * Deliberately prefix-anchored and non-destructive: the two things every
+ * hand-rolled copy of this got wrong. */
+const char *text_split_reasoning_prefix(const char *text, const char **reasoning,
+                                        size_t *reasoning_len)
+{
+   if (reasoning)
+      *reasoning = NULL;
+   if (reasoning_len)
+      *reasoning_len = 0;
+   if (!text)
+      return NULL;
+
+   const char *p = text;
+   while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
+      p++;
+
+   /* A LEADING close tag with no opener. Real providers emit this: the reasoning
+    * itself went out-of-band in reasoning_content and only the closing delimiter
+    * leaked into content, so there is nothing to hand back as reasoning — the tag
+    * is a leftover delimiter, not content. Still prefix-anchored: a close tag
+    * anywhere but the front is ordinary text and is left alone. */
+   if (strncmp(p, "</think>", 8) == 0)
+   {
+      const char *answer = p + 8;
+      while (*answer == '\n' || *answer == '\r' || *answer == ' ' || *answer == '\t')
+         answer++;
+      return answer;
+   }
+
+   if (strncmp(p, "<think>", 7) != 0)
+      return text; /* no preamble: an inner tag is content, leave it alone */
+
+   const char *open = p + 7;
+   const char *close = strstr(open, "</think>");
+   if (!close)
+      return text; /* unterminated: don't guess, hand back the whole thing */
+
+   if (reasoning)
+      *reasoning = open;
+   if (reasoning_len)
+      *reasoning_len = (size_t)(close - open);
+
+   const char *answer = close + 8;
+   while (*answer == '\n' || *answer == '\r' || *answer == ' ' || *answer == '\t')
+      answer++;
+   return answer;
+}
+
 /* Drop a trailing partial UTF-8 character. See util.h for why this matters.
  *
  * Walk back from the end over continuation bytes (10xxxxxx) to the character's

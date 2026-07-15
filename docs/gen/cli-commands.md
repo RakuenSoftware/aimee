@@ -5,19 +5,9 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 53
+Total commands: 58
 
 ## Core commands
-
-### `aimee chat`
-
-Start the aimee primary-agent chat.
-
-Subcommands:
-
-```
-  [message...]     Send one message, or start an interactive chat with no message
-```
 
 ### `aimee config`
 
@@ -233,6 +223,35 @@ Subcommands:
                    OpenAI-compatible model-provider setup snippets
 ```
 
+### `aimee audit`
+
+WORM audit store and retrieval evidence.
+
+Subcommands:
+
+```
+  verify           Verify the WORM audit chain + checkpoint MACs
+                   (exit 0=green, 1=amber, 2=red); the default with no subcommand
+  checkpoint       Append a checkpoint committing the current chain head
+  seal             Export an immutable, verifiable snapshot of the WORM store
+  snapshot         Append a hash-chained metric.snapshot row
+  trace            Audit a retrieval-evidence trace
+  provenance       Audit source provenance for a retrieval event
+  fidelity         Audit answer fidelity for a retrieval event
+```
+
+### `aimee aux`
+
+Auxiliary model routing.
+
+Subcommands:
+
+```
+  config           Show resolved aux task->provider/model mapping
+  test <task> "<prompt>"
+                   Execute a single auxiliary task call
+```
+
 ### `aimee claude-proxy`
 
 Route Claude Code through aimee's primary model.
@@ -315,6 +334,17 @@ Subcommands:
   report           Build a monthly dogfood report (--month YYYY-MM, --json)
 ```
 
+### `aimee ensemble`
+
+A panel of agents (mixture-of-agents, roundtable).
+
+Subcommands:
+
+```
+  aggregate        Mixture-of-Agents ensemble aggregate
+  roundtable       Multi-round agent roundtable
+```
+
 ### `aimee episode`
 
 Delegation episodes.
@@ -392,6 +422,16 @@ Subcommands:
   refresh          Refresh model metadata cache
 ```
 
+### `aimee notes`
+
+Investigation notes.
+
+Subcommands:
+
+```
+  search           Search investigation notes by content or title
+```
+
 ### `aimee optimize`
 
 Bandit optimization loop.
@@ -406,6 +446,22 @@ Subcommands:
   run [--suite <s>] [--arm <a>]   Run the offline benchmark suite (ranks baseline vs on)
   compare --baseline <a> --candidate <b>  Per-metric delta between two arms
   promote --point <p> --candidate <a> [--guarded] [--apply]  Gate/apply a promotion (credible interval)
+```
+
+### `aimee pipeline`
+
+Roundtable authoring pipelines.
+
+Subcommands:
+
+```
+  start            Start an authoring pipeline from a one-line idea
+  status           Show a pipeline's state, phase, latest review digest and gate
+  list             List roundtable authoring pipelines
+  advance          Drive one tick of the pipeline loop
+  gate             Resolve a human gate (pass|fail)
+  resume           Resume a pipeline from the durable ledger
+  cancel           Cancel a pipeline and any in-flight roundtable
 ```
 
 ### `aimee profile`
@@ -503,26 +559,9 @@ Subcommands:
   cancel           Cancel a queued trigger run
 ```
 
-### `aimee work`
+### `aimee workers`
 
-Inter-session work queue.
-
-Subcommands:
-
-```
-  add              Add a work item to the queue
-  add-batch        Batch-add items (--from-proposals)
-  claim            Claim the next pending item
-  complete         Mark claimed item as done
-  fail             Mark claimed item as failed
-  list             List work items
-  cancel           Cancel a pending item
-  release          Release a claimed item back to pending
-  clear            Remove items by status
-  gc               Release stale claims
-  sync-proposals   Close items whose proposal moved out of pending/
-  stats            Show queue statistics
-```
+Server worker-pool status.
 
 ### `aimee workflow`
 
@@ -607,3 +646,13 @@ Subcommands:
 ### `aimee mcp-serve`
 
 MCP stdio bridge to aimee-server.
+
+### `aimee repo`
+
+Per-repo cross-repo trust.
+
+Subcommands:
+
+```
+  trust            Set per-repo cross-repo trust
+```

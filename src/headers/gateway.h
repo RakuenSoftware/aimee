@@ -57,8 +57,6 @@ typedef struct gateway_platform_entry
 
 const gateway_platform_entry_t *gateway_platform_entries(int *count_out);
 
-void gateway_ctx_init(gateway_ctx_t *ctx, const gateway_platform_entry_t *entries, int count);
-
 int gateway_session_key_build(const session_source_t *source, int group_sessions_per_user,
                               char *buf, size_t bufsz);
 

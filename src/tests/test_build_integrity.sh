@@ -377,111 +377,26 @@ else
     fail "aimee-kb split packaging regressions:$split_failures"
 fi
 
-# 7h. The retired Codex remote frontend bridge must stay removed.
-codex_frontend_refs=$(find . ../CMakeLists.txt -type f \
+# 7h. The retired chat frontends must stay removed.
+#
+# Codex went first; the OpenCode frontend, its native fallback loop and `aimee
+# chat` followed — the whole interactive TUI surface is gone, and bare `aimee`
+# prints usage instead of launching one. What used to sit here were ~20
+# assertions that the OpenCode TUI was WIRED (prompt extraction, queued-turn
+# acknowledgements, GlobalEvent envelopes, aggregateID sync). Those pinned code
+# that no longer exists, so they are replaced by the inverse guard: the surface
+# must not come back. cli_chat_stream.c keeps the headless /v1 streaming path
+# that acp-serve needs, and it must stay terminal-free.
+retired_frontend_refs=$(find . ../CMakeLists.txt -type f \
     \( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name 'Makefile' -o -name 'CMakeLists.txt' \) \
     ! -path './tests/test_build_integrity.sh' \
     -print0 | xargs -0 grep -En \
-    'cli_tui_codex|codex_exec_tui|codex_ui_|AIMEE_CODEX_(FRONTEND|NATIVE)_BIN|codex-frontend|codex-branded' \
+    'cli_tui_codex|codex_exec_tui|codex_ui_|AIMEE_CODEX_(FRONTEND|NATIVE)_BIN|codex-frontend|codex-branded|opencode_exec_tui|opencode_v2_|builtin_chat_loop|builtin_chat_native_loop|AIMEE_OPENCODE_BIN|cli_tui_opencode' \
     2>/dev/null || true)
-if [ -z "$codex_frontend_refs" ]; then
-    pass "Retired Codex chat frontend bridge is absent"
+if [ -z "$retired_frontend_refs" ]; then
+    pass "Retired chat frontends (Codex, OpenCode, native TUI) are absent"
 else
-    fail "Retired Codex chat frontend bridge references remain:$codex_frontend_refs"
-fi
-if grep -q 'opencode_exec_tui' ./cli_tui.c ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode chat frontend adapter is wired"
-else
-    fail "OpenCode chat frontend adapter is missing"
-fi
-if grep -q 'opencode_v2_extract_prompt' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'cJSON_GetObjectItemCaseSensitive(root, "prompt")' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'cJSON_GetObjectItemCaseSensitive(prompt, "text")' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c; then
-    pass "OpenCode v2 prompt text is extracted"
-else
-    fail "OpenCode v2 prompt.text extraction is missing"
-fi
-if grep -q 'opencode_v2_prompt_job_t' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'opencode_v2_prompt_job_main' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'response_mode == 2' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'pthread_create(&tid, NULL, opencode_v2_prompt_job_main, worker)' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'while ((b->busy || opencode_v2_has_prior_unstarted_turn_locked(b, turn)) && !b->closing)' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c; then
-    pass "OpenCode async prompt acknowledgements are queued behind active turns"
-else
-    fail "OpenCode async prompt acknowledgement queue is missing"
-fi
-if grep -q 'opencode_v2_queue_count_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'opencode_v2_publish_user_turn_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'opencode_v2_create_turn_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'message_id' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'turn->user_published = 1' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'turn->prompt_published = 1' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'opencode_v2_publish_user_turn_locked(b, turn);' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q '"idle"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c &&
-   grep -q 'cJSON_AddNumberToObject(status, "queued", opencode_v2_queue_count_locked(b))' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c; then
-    pass "OpenCode queued prompts render before their turn starts"
-else
-    fail "OpenCode queued prompt rendering is missing"
-fi
-if ! grep -q 'queued:%d' ./cli_tui_legacy_aimee_fullscreen.inc 2>/dev/null &&
-   ! grep -q 'Queued input\|Replaced queued input' ./cli_tui_legacy_aimee_fullscreen.inc 2>/dev/null; then
-    pass "Legacy TUI does not advertise queued message state"
-else
-    fail "Legacy TUI still advertises queued message state"
-fi
-if grep -q 'OpenCode TUI exited during startup; falling back to native TUI' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null \
-   && ! grep -q 'if (forced || default_launch)' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode auto frontend falls back to native TUI"
-else
-    fail "OpenCode auto frontend fallback is missing"
-fi
-if grep -q 'opencode_v2_ascending_id_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'opencode_v2_extract_message_id' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   ! grep -q 'opencode_v2_hash_id(turn->user_id' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode v2 chat message IDs preserve TUI queue ordering"
-else
-    fail "OpenCode v2 chat message IDs must be ascending and preserve submitted messageID"
-fi
-if grep -q '"message.updated"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null && \
-   grep -q '"message.part.updated"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null && \
-   grep -q '"session.next.text.delta"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode chat frontend publishes message and text events"
-else
-    fail "OpenCode chat frontend is missing response-rendering events"
-fi
-if grep -q 'opencode_v2_legacy_message_props_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'opencode_v2_legacy_part_props_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'opencode_v2_legacy_delta_props_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q '"message.updated"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q '"message.part.updated"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q '"message.part.delta"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode v2 live path publishes rendered message events"
-else
-    fail "OpenCode v2 live path must publish message.updated/part events for the TUI"
-fi
-if grep -q 'opencode_v2_global_event_body' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'cJSON_AddStringToObject(root, "project", "aimee")' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'cJSON_AddItemToObject(root, "payload", payload)' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'opencode_v2_stream_events(b, fd, 0)' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'opencode_v2_stream_events(b, fd, 1)' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode v2 global events use TUI GlobalEvent envelope"
-else
-    fail "OpenCode v2 /global/event must wrap events for the TUI"
-fi
-if grep -q 'opencode_v2_prompt_props_locked' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'cJSON_AddItemToObject(prompt, "files", cJSON_CreateArray())' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'cJSON_AddItemToObject(prompt, "agents", cJSON_CreateArray())' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   grep -q 'cJSON_AddItemToObject(prompt, "references", cJSON_CreateArray())' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   ! grep -A2 '"session.next.prompted"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null | grep -q 'opencode_v2_text_props_locked'; then
-    pass "OpenCode v2 prompted event carries prompt object"
-else
-    fail "OpenCode v2 prompted event must carry properties.prompt for TUI rendering"
-fi
-if grep -q '"aggregateID"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null &&
-   ! grep -q '"aggregate_id"' ./cli_tui_opencode_v2.c ./cli_tui_opencode_v2b.c 2>/dev/null; then
-    pass "OpenCode v2 sync history uses aggregateID"
-else
-    fail "OpenCode v2 sync history must use aggregateID"
+    fail "Retired chat frontend references remain:$retired_frontend_refs"
 fi
 
 route_drift=""

@@ -650,25 +650,6 @@ static cJSON *marshal_get_help(int argc, char **argv)
    return req;
 }
 
-static cJSON *marshal_storage_migrate(int argc, char **argv)
-{
-   if (argc < 1 || !argv[0] || !argv[0][0])
-   {
-      fprintf(stderr, "usage: aimee migrate v2 <legacy-store>\n");
-      return NULL;
-   }
-
-   cJSON *req = marshal_no_args("migrate.v2");
-   if (!req)
-      return NULL;
-   cJSON_AddStringToObject(req, "source_path", argv[0]);
-
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
-   return req;
-}
-
 static cJSON *marshal_provider_set(int argc, char **argv)
 {
    cJSON *req = marshal_no_args("provider.set");
@@ -1354,8 +1335,6 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_insights_overview(argc, argv);
    if (strcmp(method, "worktree.gc") == 0)
       return marshal_worktree_gc(argc, argv);
-   if (strncmp(method, "work.", 5) == 0)
-      return marshal_work_request(method, argc, argv);
    if (strcmp(method, "delegate") == 0)
       return marshal_delegate(argc, argv);
    if (strcmp(method, "delegate.aggregate") == 0)
@@ -1433,8 +1412,6 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_get_help(argc, argv);
    if (strcmp(method, "git.verify") == 0)
       return marshal_git_verify(argc, argv);
-   if (strcmp(method, "migrate.v2") == 0)
-      return marshal_storage_migrate(argc, argv);
    if (strcmp(method, "dogfood.tag") == 0)
       return marshal_dogfood_tag(argc, argv);
    if (strcmp(method, "dogfood.review") == 0)

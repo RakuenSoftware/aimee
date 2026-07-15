@@ -794,21 +794,6 @@ static void test_cron_routes_and_marshaling(void)
    printf("  PASS: test_cron_routes_and_marshaling\n");
 }
 
-static void test_work_routes_lookup(void)
-{
-   cli_v1_route_t route;
-   char *claim_argv[] = {"claim"};
-   assert(cli_v1_lookup("work", 1, claim_argv, &route));
-   assert(strcmp(route.method, "work.claim") == 0);
-   assert(route.skip_subcmd == 1);
-
-   char *sync_argv[] = {"sync-proposals"};
-   assert(cli_v1_lookup("work", 1, sync_argv, &route));
-   assert(strcmp(route.method, "work.sync_proposals") == 0);
-   assert(route.skip_subcmd == 1);
-   printf("  PASS: test_work_routes_lookup\n");
-}
-
 static void test_session_brief_route_marshaled(void)
 {
    cli_v1_route_t route;
@@ -832,36 +817,6 @@ static void test_session_brief_route_marshaled(void)
    cJSON_Delete(req);
 
    printf("  PASS: test_session_brief_route_marshaled\n");
-}
-
-static void test_work_claim_marshaled(void)
-{
-   unsetenv("AIMEE_SESSION_ID");
-   unsetenv("CLAUDE_SESSION_ID");
-   char *argv[] = {"--effort", "M", "--tag", "server", "--exclude-tag", "blocked", "--skip", "2"};
-   cJSON *req = marshal_work_request("work.claim", 8, argv);
-   assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "work.claim") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "effort")->valuestring, "M") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "tag")->valuestring, "server") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "exclude_tag")->valuestring, "blocked") == 0);
-   assert(cJSON_GetObjectItem(req, "skip")->valueint == 2);
-   assert(strcmp(cJSON_GetObjectItem(req, "session_id")->valuestring, "default") == 0);
-   cJSON_Delete(req);
-   printf("  PASS: test_work_claim_marshaled\n");
-}
-
-static void test_work_add_batch_marshaled(void)
-{
-   char *argv[] = {"--from-proposals", "--dir", "docs/proposals/pending"};
-   cJSON *req = marshal_work_request("work.add_batch", 3, argv);
-   assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "work.add_batch") == 0);
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "from_proposals")));
-   assert(strcmp(cJSON_GetObjectItem(req, "dir")->valuestring, "docs/proposals/pending") == 0);
-   assert(cJSON_IsString(cJSON_GetObjectItem(req, "client_cwd")));
-   cJSON_Delete(req);
-   printf("  PASS: test_work_add_batch_marshaled\n");
 }
 
 static void test_jobs_routes_lookup(void)
@@ -1333,10 +1288,7 @@ int main(void)
    test_eval_routes_and_marshaling();
    test_trigger_fire_token_marshaled();
    test_cron_routes_and_marshaling();
-   test_work_routes_lookup();
    test_session_brief_route_marshaled();
-   test_work_claim_marshaled();
-   test_work_add_batch_marshaled();
    test_jobs_routes_lookup();
    test_jobs_requests_marshaled();
    test_coord_job_routes_lookup();

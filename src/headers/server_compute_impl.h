@@ -111,8 +111,7 @@ void delegate_worker(void *arg);
 int delegate_spawn_ondemand(compute_ctx_t *cctx);
 /* Set the max concurrent on-demand delegates (<=0 keeps the current value). */
 void delegate_ondemand_set_ceiling(int ceiling);
-/* Current count of in-flight on-demand delegates (for `aimee workers`). */
-int delegate_ondemand_inflight(void);
+
 /* Block until in-flight on-demand delegates drain to zero or timeout_ms elapses
  * (used at shutdown so detached workers don't touch a freed server_ctx). */
 void delegate_ondemand_drain(int timeout_ms);

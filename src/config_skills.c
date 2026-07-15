@@ -60,26 +60,6 @@ int config_parse_skills(config_t *cfg, const cJSON *root)
                               "skills.stale_after_days");
    issues += skills_int_field(&cfg->skills_archive_after_days, skills, "archive_after_days",
                               "skills.archive_after_days");
-   issues += skills_int_field(&cfg->skills_min_idle_minutes, skills, "min_idle_minutes",
-                              "skills.min_idle_minutes");
-   const cJSON *manage = cJSON_GetObjectItemCaseSensitive(skills, "manage");
-   if (manage)
-   {
-      if (!cJSON_IsObject(manage))
-         issues += config_issue("\"skills.manage\" expected object, got %s", jo_type_name(manage));
-      else
-      {
-         const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(manage, "enabled");
-         if (enabled)
-         {
-            if (!cJSON_IsBool(enabled))
-               issues += config_issue("\"skills.manage.enabled\" expected boolean, got %s",
-                                      jo_type_name(enabled));
-            else
-               cfg->skills_manage_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
-         }
-      }
-   }
    const cJSON *dispatch = cJSON_GetObjectItemCaseSensitive(skills, "dispatch");
    if (dispatch)
    {

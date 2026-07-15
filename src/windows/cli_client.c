@@ -1,5 +1,5 @@
 /* cli_client.c: Windows named-pipe client for aimee-server RPC, plus the Winsock
- * /v1 HTTP client the thin client's shared code (cli_main/cli_tui/cli_mcp_serve)
+ * /v1 HTTP client the thin client's shared code (cli_main/cli_chat_stream/cli_mcp_serve)
  * now calls. Windows has no Unix-domain socket, so the local aimee-http.sock
  * ("unix:" / absolute-path) transport is unsupported here — those callers fail
  * gracefully; the cross-platform remote path goes through aimee_client_request. */

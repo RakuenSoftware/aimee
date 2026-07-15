@@ -152,6 +152,25 @@ char *normalize_key(const char *key, char *buf, size_t buf_len);
 /* Trigram Jaccard similarity between two strings. Returns 0.0-1.0. */
 double trigram_similarity(const char *a, const char *b);
 
+/* Split a reasoning PREAMBLE off the front of a model response.
+ *
+ * Reasoning models PREPEND <think>...</think> when the server is not configured
+ * to separate it into `reasoning_content`. Returns a pointer INTO `text` at the
+ * first byte of the answer, and (when non-NULL) writes the preamble's span to
+ * *reasoning / *reasoning_len — the reasoning is HANDED BACK, never destroyed.
+ *
+ * Only a block at the very START is a preamble. An occurrence anywhere else is
+ * CONTENT and is left untouched: a model summarising a function about stripping
+ * think blocks legitimately quotes the tag, and cutting there corrupts the
+ * answer. That is not hypothetical — it killed curator jobs on .254, where the
+ * python sidecar split on the last "</think>" anywhere and cut the JSON
+ * mid-string. This is the C counterpart of llm-chat.py's split_reasoning().
+ *
+ * Returns `text` unchanged (and *reasoning_len = 0) when there is no preamble.
+ * Does not allocate; the returned pointer aliases `text`. */
+const char *text_split_reasoning_prefix(const char *text, const char **reasoning,
+                                        size_t *reasoning_len);
+
 /* Drop a trailing PARTIAL UTF-8 character, in place.
  *
  * Copying text into a fixed buffer (snprintf/memcpy) cuts at a byte offset, which

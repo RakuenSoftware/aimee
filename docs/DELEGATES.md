@@ -471,14 +471,14 @@ Practical notes:
   `agent add --provider claude`.) The thin-client routing is automatic when the
   workspace is `detached`.
 - If no client is currently serving the workspace, the CLI agent cannot run
-  (there is nowhere with the binary), start the client / open `aimee chat` for
+  (there is nowhere with the binary), start the client for
   that root, or use an HTTP provider.
 
 #### Claude via the CLI is primary-only by default
 
 Claude run via the `claude` CLI / tmux login, authenticated by the **interactive
 Claude subscription login, not an API key**, is **primary-only by default**. It
-can be your interactive primary (`aimee chat`), but it is **not** eligible as a
+can be your interactive primary (via the web chat or `acp-serve`), but it is **not** eligible as a
 delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
 use it as a delegate fails with a message pointing you here.
 
