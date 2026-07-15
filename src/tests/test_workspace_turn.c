@@ -20,6 +20,8 @@
 /* ── fake docker backend for the delegate-sandbox cases ───────────────────── */
 
 static int g_acquires, g_releases, g_last_hibernate, g_acquire_fails;
+static char g_last_workspace[512];
+static int g_last_read_only;
 static int g_fake_state = 1;
 
 static int fake_acquire(delegate_backend_t *self, const char *task_id,
@@ -27,8 +29,10 @@ static int fake_acquire(delegate_backend_t *self, const char *task_id,
 {
    (void)self;
    (void)task_id;
-   (void)cfg;
    g_acquires++;
+   snprintf(g_last_workspace, sizeof(g_last_workspace), "%s",
+            (cfg && cfg->workspace) ? cfg->workspace : "");
+   g_last_read_only = cfg ? cfg->workspace_read_only : -1;
    if (g_acquire_fails)
       return -1;
    *out = &g_fake_state;
@@ -186,7 +190,7 @@ int main(void)
          c.delegate_sandbox = 0;
          assert(config_save(&c) == 0);
          g_acquires = g_releases = 0;
-         assert(workspace_turn_bind_container("deleg-1", NULL) == 0);
+         assert(workspace_turn_bind_container("deleg-1", NULL, NULL, 0) == 0);
          assert(g_acquires == 0); /* must not even try to take a container */
          assert(workspace_provider_active() == shared);
       }
@@ -201,7 +205,7 @@ int main(void)
          c.delegate_sandbox = 1;
          assert(config_save(&c) == 0);
          g_acquires = g_releases = 0;
-         assert(workspace_turn_bind_container("deleg-2", NULL) == 1);
+         assert(workspace_turn_bind_container("deleg-2", NULL, NULL, 0) == 1);
          assert(g_acquires == 1);
          const workspace_provider_t *p = workspace_provider_active();
          assert(p != shared);
@@ -216,13 +220,109 @@ int main(void)
          assert(workspace_provider_active() == shared);
       }
 
+      /* The tree reaches the backend. Without this the backend mints an EMPTY
+       * scratch dir and mounts that — the delegate opens the file named in its
+       * task and finds nothing, then reasons about code it cannot see. */
+      {
+         g_acquires = g_releases = 0;
+         g_last_workspace[0] = '\0';
+         /* /tmp/ws-shared is a REGISTERED workspace root (see the config above), so
+          * it is authorized. mkdir it so realpath resolves. */
+         mkdir("/tmp/ws-shared", 0700);
+         assert(workspace_turn_bind_container("deleg-5", NULL, "/tmp/ws-shared", 0) == 1);
+         assert(strcmp(g_last_workspace, "/tmp/ws-shared") == 0);
+         workspace_turn_unbind_active();
+         assert(g_releases == 1);
+      }
+
+      /* No tree given: the backend keeps its historical empty scratch dir. Passed
+       * as NULL rather than "" so the backend can tell "use your default" from a
+       * caller that meant a path and computed an empty string. */
+      {
+         g_acquires = 0;
+         g_last_workspace[0] = 'x';
+         assert(workspace_turn_bind_container("deleg-6", NULL, NULL, 0) == 1);
+         assert(g_last_workspace[0] == '\0');
+         workspace_turn_unbind_active();
+      }
+      {
+         g_last_workspace[0] = 'x';
+         assert(workspace_turn_bind_container("deleg-7", NULL, "", 0) == 1);
+         assert(g_last_workspace[0] == '\0'); /* "" is not a path: same as NULL */
+         workspace_turn_unbind_active();
+      }
+
+      /* The read-only MODE must reach the backend. A delegate's changes must not
+       * leave its container, so a tree that is not its own has to be unwritable at
+       * the MOUNT — a guard above the provider is a rule, a :ro bind is a property.
+       * If this ever silently became rw, two delegates on one tree would write over
+       * each other with nothing to notice it. */
+      {
+         mkdir("/tmp/ws-shared", 0700);
+         g_last_read_only = -1;
+         assert(workspace_turn_bind_container("deleg-ro", NULL, "/tmp/ws-shared", 1) == 1);
+         assert(g_last_read_only == 1);
+         workspace_turn_unbind_active();
+
+         g_last_read_only = -1;
+         assert(workspace_turn_bind_container("deleg-rw", NULL, "/tmp/ws-shared", 0) == 1);
+         assert(g_last_read_only == 0);
+         workspace_turn_unbind_active();
+      }
+
+      /* A registered root of "/" must NOT authorize the whole host: that is not a
+       * workspace registration, it is the absence of one. */
+      {
+         config_t c;
+         memset(&c, 0, sizeof(c));
+         config_load(&c);
+         c.workspace_count = 1;
+         snprintf(c.workspaces[0], MAX_PATH_LEN, "/");
+         c.workspace_providers[0][0] = '\0';
+         c.delegate_sandbox = 1;
+         assert(config_save(&c) == 0);
+
+         g_acquires = 0;
+         mkdir("/tmp/aimee-root-authorized", 0700);
+         assert(workspace_turn_bind_container("deleg-9", NULL, "/tmp/aimee-root-authorized", 1) ==
+                0);
+         assert(g_acquires == 0);
+         rmdir("/tmp/aimee-root-authorized");
+
+         /* restore the real roots for the cases below */
+         memset(&c, 0, sizeof(c));
+         config_load(&c);
+         c.workspace_count = 2;
+         snprintf(c.workspaces[0], MAX_PATH_LEN, "/tmp/ws-detached");
+         snprintf(c.workspace_providers[0], sizeof(c.workspace_providers[0]), "detached");
+         snprintf(c.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
+         c.workspace_providers[1][0] = '\0';
+         c.delegate_sandbox = 1;
+         assert(config_save(&c) == 0);
+      }
+
+      /* A tree OUTSIDE every registered workspace root must be refused. Repository-
+       * ness is not authorization — `mkdir .git` anywhere would satisfy that — so
+       * the bound is the operator's registered roots. Without this, an unlucky or
+       * hostile session cwd (a home directory, a secrets tree, /) becomes a
+       * read-write bind mount inside a delegate's container. */
+      {
+         g_acquires = 0;
+         mkdir("/tmp/aimee-unregistered-tree", 0700);
+         assert(workspace_turn_bind_container("deleg-8", NULL, "/tmp/aimee-unregistered-tree", 0) ==
+                0);
+         assert(g_acquires == 0); /* refused BEFORE taking a container */
+         assert(workspace_provider_active() == shared);
+         rmdir("/tmp/aimee-unregistered-tree");
+      }
+
       /* Acquire failure must NOT bind: falling through with a half-bound provider
        * would send every op to the host. It returns 0, so the caller runs
        * in-process (and the seam logs at ERROR). */
       {
          g_acquires = g_releases = 0;
          g_acquire_fails = 1;
-         assert(workspace_turn_bind_container("deleg-3", NULL) == 0);
+         assert(workspace_turn_bind_container("deleg-3", NULL, NULL, 0) == 0);
          assert(g_acquires == 1);
          assert(g_releases == 0); /* nothing to release: it never took one */
          assert(workspace_provider_active() == shared);
@@ -232,8 +332,8 @@ int main(void)
       /* An empty task_id is refused before any container is taken. */
       {
          g_acquires = 0;
-         assert(workspace_turn_bind_container("", NULL) == 0);
-         assert(workspace_turn_bind_container(NULL, NULL) == 0);
+         assert(workspace_turn_bind_container("", NULL, NULL, 0) == 0);
+         assert(workspace_turn_bind_container(NULL, NULL, NULL, 0) == 0);
          assert(g_acquires == 0);
       }
 
@@ -242,7 +342,7 @@ int main(void)
       {
          delegate_backend_reset_for_test();
          g_acquires = 0;
-         assert(workspace_turn_bind_container("deleg-4", NULL) == 0);
+         assert(workspace_turn_bind_container("deleg-4", NULL, NULL, 0) == 0);
          assert(workspace_provider_active() == shared);
       }
       delegate_backend_reset_for_test();

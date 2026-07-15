@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include "log.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -112,6 +113,12 @@ typedef struct
    char image[256];
    char workspace_host[MAX_PATH_LEN]; /* host-side mount point */
    char cwd[MAX_PATH_LEN];            /* in-container cwd, defaults to /workspace */
+   /* 1 when workspace_host is the CALLER's real tree rather than our own scratch
+    * dir. It changes who the container must run as: files written into a scratch
+    * dir we own are ours to clean up, but files written into the user's checkout
+    * must not land root-owned. */
+   int mount_host_tree;
+   int mount_read_only; /* :ro — the tree is not this delegate's to change */
 } docker_state_t;
 
 #define DOCKER_DEFAULT_IMAGE   "ubuntu:22.04"
@@ -223,8 +230,109 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    }
    const char *image = (cfg && cfg->image && cfg->image[0]) ? cfg->image : DOCKER_DEFAULT_IMAGE;
    snprintf(st->image, sizeof(st->image), "%s", image);
-   if (compute_workspace_host(task_id, st->workspace_host, sizeof(st->workspace_host)) != 0 ||
-       docker_mkdir_p(st->workspace_host) != 0)
+   if (cfg && cfg->workspace && cfg->workspace[0])
+   {
+      /* Caller-provided tree: mount it AS the workspace, so the delegate gets the
+       * entire current source tree by bind-mount — it IS the tree, not a copy that
+       * can drift. Everything below is a refusal, and each one is a way a delegate
+       * could otherwise end up reasoning about a tree that is not the one it was
+       * told about. */
+
+      /* Canonicalize FIRST. stat() follows symlinks and so does the docker daemon,
+       * so validating the path as given and mounting the same string would let a
+       * symlinked component point the mount somewhere the checks never saw. */
+      char real[MAX_PATH_LEN];
+      if (!realpath(cfg->workspace, real))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s' does not resolve (%s); refusing to mount it — a delegate "
+                   "would see an empty tree and conclude the code is missing",
+                   cfg->workspace, strerror(errno));
+         free(st);
+         return -1;
+      }
+
+      struct stat wst;
+      if (stat(real, &wst) != 0 || !S_ISDIR(wst.st_mode))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s' is not an existing directory; refusing to mount it", real);
+         free(st);
+         return -1;
+      }
+
+      /* It must be a git checkout. Not fussiness: it is what bounds the mount. The
+       * caller derives this path from a session cwd, so without this an unlucky or
+       * hostile cwd — '/', a secrets directory, the server's own checkout — becomes
+       * a read-write bind mount into a delegate's container. A repository root is a
+       * thing someone deliberately made; '/' is not. */
+      char gitmark[MAX_PATH_LEN];
+      if ((size_t)snprintf(gitmark, sizeof(gitmark), "%s/.git", real) >= sizeof(gitmark))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace path '%s' is too long to check for .git; refusing", real);
+         free(st);
+         return -1;
+      }
+      /* lstat, not stat: a .git that is a SYMLINK is not a marker we should trust —
+       * it points outside the tree we just canonicalized, so the thing vouching for
+       * this directory lives somewhere the checks never looked. */
+      struct stat gst;
+      if (lstat(gitmark, &gst) != 0)
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s' is not a git checkout (no .git); refusing to bind-mount an "
+                   "arbitrary host directory into a delegate container",
+                   real);
+         free(st);
+         return -1;
+      }
+
+      /* A LINKED worktree's .git is a FILE holding `gitdir: <absolute host path>`
+       * into the main repo. Mounting only the worktree leaves that path absent
+       * inside the container, so every git command fails — and it fails AFTER the
+       * delegate has started work, looking like a broken repo rather than a bad
+       * mount. Refuse until the mount can carry the common gitdir too (mounting the
+       * main repo at its own absolute path, so the gitlink resolves).
+       *
+       * This is the wfe delegate's case, so the sandbox does not cover it yet. Said
+       * out loud, at acquire time, rather than discovered by a delegate. */
+      if (S_ISLNK(gst.st_mode))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s' has a symlinked .git; refusing to treat it as a checkout", real);
+         free(st);
+         return -1;
+      }
+      if (S_ISREG(gst.st_mode))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s' is a linked git worktree (.git is a gitdir pointer, not a "
+                   "directory): mounting it alone would leave git broken inside the container. "
+                   "Refusing — worktree support needs the common gitdir mounted too",
+                   real);
+         free(st);
+         return -1;
+      }
+
+      /* Copy the CANONICAL path, and refuse truncation: a path that passed the
+       * checks above but does not fit would mount a different directory than the
+       * one that was validated. */
+      if ((size_t)snprintf(st->workspace_host, sizeof(st->workspace_host), "%s", real) >=
+          sizeof(st->workspace_host))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace path '%s' is too long for the mount buffer; refusing rather than "
+                   "mounting a truncated path",
+                   real);
+         free(st);
+         return -1;
+      }
+      st->mount_host_tree = 1;
+      st->mount_read_only = (cfg->workspace_read_only != 0);
+   }
+   else if (compute_workspace_host(task_id, st->workspace_host, sizeof(st->workspace_host)) != 0 ||
+            docker_mkdir_p(st->workspace_host) != 0)
    {
       free(st);
       return -1;
@@ -240,10 +348,37 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       /* Build the volume mount string: <host>:/workspace */
       const char *workdir = resolve_docker_workdir();
       char mount[MAX_PATH_LEN + 32];
-      snprintf(mount, sizeof(mount), "%s:%s", st->workspace_host, workdir);
-      const char *create_argv[] = {"docker",  "create", "--name",   st->container_name,
-                                   "-v",      mount,    "-w",       workdir,
-                                   st->image, "sleep",  "infinity", NULL};
+      snprintf(mount, sizeof(mount), "%s:%s%s", st->workspace_host, workdir,
+               st->mount_read_only ? ":ro" : "");
+      /* Run as the server's uid:gid when the mount is the caller's real tree.
+       * Containers run as root by default, so every file the delegate creates in
+       * the user's checkout would land root-owned — the user could not then edit
+       * or delete their own files, and git would report "dubious ownership" and
+       * refuse to operate on the tree at all. Our own scratch dir keeps the
+       * historical behaviour: nobody else owns it. */
+      char userflag[64] = "";
+      if (st->mount_host_tree)
+         snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
+
+      const char *create_argv[12 + 2];
+      int n = 0;
+      create_argv[n++] = "docker";
+      create_argv[n++] = "create";
+      create_argv[n++] = "--name";
+      create_argv[n++] = st->container_name;
+      if (userflag[0])
+      {
+         create_argv[n++] = "--user";
+         create_argv[n++] = userflag;
+      }
+      create_argv[n++] = "-v";
+      create_argv[n++] = mount;
+      create_argv[n++] = "-w";
+      create_argv[n++] = workdir;
+      create_argv[n++] = st->image;
+      create_argv[n++] = "sleep";
+      create_argv[n++] = "infinity";
+      create_argv[n] = NULL;
       if (run_docker(create_argv) != 0)
       {
          free(st);

@@ -21,8 +21,15 @@ int workspace_turn_bind_active(const char *cwd);
 /* Bind this thread's file/exec tools to a DELEGATE'S OWN CONTAINER for the turn:
  * acquire a container from the `docker` backend keyed by `task_id`, and route
  * td_bash / read / write / list through it. `image` may be NULL for the backend's
- * default. Returns 1 if bound (pair it with workspace_turn_unbind_active, which
- * also RELEASES the container), 0 otherwise.
+ * default; `workspace` is the host directory to expose AS the container's
+ * workspace — normally the tree the delegate already has server-side, so it gets
+ * the entire current source tree by bind-mount rather than the backend's empty
+ * scratch dir. NULL keeps that historical empty dir. `workspace_read_only` mounts
+ * it :ro — required whenever the tree is not the delegate's own, because a
+ * delegate's changes must not leave its container: a shared tree must be
+ * unwritable at the MOUNT, not merely guarded above it. Returns 1 if bound (pair it
+ * with workspace_turn_unbind_active, which also RELEASES the container), 0
+ * otherwise.
  *
  * Returns 0 — leaving the turn in-process, exactly as today — when the
  * `delegate_sandbox` config dial is off (the default), or when the docker backend
@@ -32,7 +39,8 @@ int workspace_turn_bind_active(const char *cwd);
  *
  * Unlike workspace_turn_bind_active this is not cwd-driven: a container provider
  * needs a live container handle, so the caller that owns the delegate decides. */
-int workspace_turn_bind_container(const char *task_id, const char *image);
+int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
+                                  int workspace_read_only);
 
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */

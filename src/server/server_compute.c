@@ -1340,7 +1340,58 @@ void delegate_worker(void *arg)
     * paths log at ERROR rather than falling back silently.
     *
     * Keyed by deleg_id, so each delegation gets its own container. */
-   int container_bound = detached_bound ? 0 : workspace_turn_bind_container(deleg_id, NULL);
+   /* Mount the tree the delegate already has server-side, so the container gets
+    * the ENTIRE CURRENT SOURCE TREE — by bind-mount, so it IS that tree rather
+    * than a copy that can drift from it. Without it the backend mints an empty
+    * scratch dir, and the delegate opens the file named in its task to find
+    * nothing.
+    *
+    * A DELEGATE'S CHANGES MUST NOT LEAVE ITS CONTAINER. That is what decides the
+    * mode here, and aimee already draws the line this needs: write-capable
+    * delegates get their OWN sibling worktree, read-only delegates share the
+    * parent workspace (delegate_resolve_worktree). So:
+    *
+    *   its own worktree  -> read-write. Isolated by construction: nothing else is
+    *                        looking at that tree, and git shares the object store
+    *                        rather than copying it.
+    *   the shared parent -> READ-ONLY. Not because the delegate is untrusted, but
+    *                        because the tree is not its own; two delegates on one
+    *                        tree would write over each other with no way to tell.
+    *                        Read-only at the mount is a property, not a rule the
+    *                        way the write guard above is.
+    *
+    * The write guard still applies above this; the two agree, and neither is load-
+    * bearing alone. */
+   const char *container_ws = NULL;
+   int container_ws_ro = 1;
+   if (delegate_worktree_path[0] && !delegate_shared_worktree)
+   {
+      container_ws = delegate_worktree_path; /* this delegate's own tree */
+      container_ws_ro = 0;
+   }
+   else if (cwd[0] == '/' && !delegate_allows_writes)
+   {
+      container_ws = cwd; /* shared: readable, never writable */
+      container_ws_ro = 1;
+   }
+   /* A WRITE-capable delegate with no tree of its own is deliberately left
+    * unsandboxed rather than handed a read-only mount. Isolation is the constraint,
+    * so its writes must not reach a shared tree — but a writer fighting a :ro mount
+    * fails in a way that reads as a broken repo, not as a policy. Better to run it
+    * where it works, under the write guard, and say so. Its own worktree is what
+    * makes it sandboxable; without one there is nothing safe to give it. */
+   else if (cwd[0] == '/' && delegate_allows_writes)
+   {
+      aimee_log(LOG_WARN, "delegate-sandbox",
+                "delegate %s: write-capable but has no worktree of its own (shared=%d); NOT "
+                "sandboxing it — a shared tree must stay read-only, and a writer cannot use a "
+                "read-only tree. Running in-process under the write guard",
+                deleg_id, delegate_shared_worktree);
+   }
+   int container_bound =
+       detached_bound
+           ? 0
+           : workspace_turn_bind_container(deleg_id, NULL, container_ws, container_ws_ro);
 
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
