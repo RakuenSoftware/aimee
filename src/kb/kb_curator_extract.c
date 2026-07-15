@@ -28,6 +28,13 @@
 #define CE_DOCBUF 65536
 #define CE_OUTBUF (256 * 1024)
 
+/* A job left in 'running' longer than this lease was orphaned (worker crash/
+ * restart or a wedged sidecar). Mirrors the code-unit stage's lease; both sit
+ * comfortably above that stage's sidecar wall-clock cap. */
+#define CE_STALE_LEASE "-15 minutes"
+/* Reclaim runs at most this often (throttled; the drain calls the entry per job). */
+#define CE_RECLAIM_EVERY_S 60
+
 /* System prompt for the extract stage (Tier-A) when routed through a configured
  * provider (§2b). The legacy python sidecar carried its own prompt; the in-process
  * provider needs one here. The request JSON's `role`/`prompt_version` select the
@@ -217,6 +224,54 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
    aimee_pg_finalize(st);
 }
 
+/* Reclaim extract_doc jobs orphaned in 'running'. ce_claim_job only ever selects
+ * status='pending', so a job whose worker crashed/restarted or whose sidecar
+ * wedged stays 'running' forever: the document is never extracted, and the row
+ * pins a db2 pool member well past its 300s ceiling ("missed lease_end?"). The
+ * code-unit stage has had this guard since it shipped; kb_async_jobs never got
+ * one, which stranded a job for 15h in production. Reset rows older than the
+ * lease to 'pending' so they retry, or to 'failed' once attempts are exhausted
+ * so a poison job cannot loop. attempts is preserved (incremented at claim).
+ *
+ * Scoped to kind='extract_doc': kb_async_jobs is shared with other kinds that
+ * own their own claim/lease lifecycle, and reclaiming those from here would
+ * yank jobs out from under their stage. Throttled — the drain calls the entry
+ * point once per job. */
+static void ce_reclaim_stale_running(int max_attempts)
+{
+   static time_t last_run = 0;
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < CE_RECLAIM_EVERY_S)
+      return;
+   last_run = now;
+
+   if (max_attempts < 1)
+      max_attempts = 1;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+   char err[CE_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "UPDATE kb_async_jobs"
+       " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
+       "     claimed_by = '', claimed_at = '',"
+       "     last_error = CASE WHEN attempts >= ?1"
+       "                       THEN 'stale running lease reclaimed after max attempts'"
+       "                       ELSE last_error END,"
+       "     updated_at = pg_now_text()"
+       " WHERE kind = 'extract_doc' AND status = 'running'"
+       "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_int(st, "?1", max_attempts);
+   aimee_pg_bind_text(st, "?2", CE_STALE_LEASE);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
 /* Pick the curator-extract sidecar command from a candidate list. Shared by the
  * doc and code extract stages and exposed for testing. The script is invoked as
  * `python3 <path>`, so it only needs to be READABLE — the previous code checked
@@ -365,6 +420,10 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
 {
    ce_job_t job;
    memset(&job, 0, sizeof(job));
+
+   /* Recover jobs orphaned in 'running' before claiming fresh work, so a crash/
+    * restart or a previously-wedged sidecar cannot permanently strand them. */
+   ce_reclaim_stale_running(opts ? opts->max_attempts : 1);
 
    if (!ce_claim_job(&job))
       return 0; /* queue empty */

@@ -18,6 +18,7 @@
 #include "config.h"
 #include "kb_curator_extract.h"
 #include "kb/kb_curator_grounding.h"
+#include "kb/kb_curator_sidecar.h"
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
@@ -352,6 +353,55 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
  * candidate even when it is not executable — invoked as `python3 <path>`, the
  * old access(X_OK) check wrongly rejected the shipped 0644 script and stalled
  * every extract job — and (c) fall back to the cwd-relative path when none match. */
+/* kb_curator_describe_wait_status: pclose(3) hands back a wait(2)-encoded status,
+ * not an exit code. Reporting it raw wrote "sidecar exited 256" into
+ * kb_code_unit_jobs.last_error for a sidecar that merely exit(1)'d — an opaque
+ * number that reads like an exotic fault and hides the real failure mode. These
+ * assert each status class decodes to something an operator can act on. */
+static void test_describe_wait_status(void)
+{
+   char out[256];
+
+   /* (a) The regression: exit(1) is 1<<8 == 256 in wait encoding. */
+   kb_curator_describe_wait_status(1 << 8, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 1") == 0);
+
+   /* (b) Success-shaped status still renders an exit line if a caller asks. */
+   kb_curator_describe_wait_status(0, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 0") == 0);
+
+   /* (c) timeout(1) reports its wall-clock cap as exit 124 — named only when the
+    *     caller says it wrapped the command, and echoing the cap it was given. */
+   kb_curator_describe_wait_status(124 << 8, 300, out, sizeof(out));
+   assert(strcmp(out, "sidecar timed out after 300s") == 0);
+
+   /* (d) Same status WITHOUT a timeout wrapper is just the command's exit code;
+    *     claiming a timeout there would be a lie (kb_curator_sidecar.c does not
+    *     wrap, and passes 0). */
+   kb_curator_describe_wait_status(124 << 8, 0, out, sizeof(out));
+   assert(strcmp(out, "sidecar exited 124") == 0);
+
+   /* (e) A real signal death — SIGKILL is the OOM-killer signature we care about
+    *     on a box where the model shares RAM with the drain. */
+   kb_curator_describe_wait_status(9 /* WIFSIGNALED: low 7 bits = signo */, 300, out, sizeof(out));
+   assert(strncmp(out, "sidecar killed by signal 9", 26) == 0);
+
+   /* (f) A shell reports a signal-killed child as 128+n; decode rather than
+    *     printing a bare 137. */
+   kb_curator_describe_wait_status((128 + 9) << 8, 300, out, sizeof(out));
+   assert(strncmp(out, "sidecar killed by signal 9", 26) == 0);
+
+   /* (g) pclose itself failing is distinct from any child status. */
+   kb_curator_describe_wait_status(-1, 300, out, sizeof(out));
+   assert(strncmp(out, "pclose failed:", 14) == 0);
+
+   /* (h) Null/zero-length buffers must not be written through. */
+   kb_curator_describe_wait_status(1 << 8, 300, NULL, 0);
+   kb_curator_describe_wait_status(1 << 8, 300, out, 0);
+
+   printf("  PASS: test_describe_wait_status\n");
+}
+
 static void test_pick_sidecar_command_resolution(void)
 {
    char out[768];
@@ -405,6 +455,7 @@ int main(void)
    test_extract_accepts_pure_function();
    test_extract_reads_body_from_db2_when_file_absent();
    test_pick_sidecar_command_resolution();
+   test_describe_wait_status();
 
    printf("ok\n");
    return 0;

@@ -750,6 +750,12 @@ $(TESTPREFIX)/unit-test-curator-custom-stages: $(OBJDIR)/tests/test_curator_cust
 $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/tests/test_curator_queue.o \
                                        $(OBJDIR)/kb/kb_curator_queue.o \
+                                       $(OBJDIR)/kb/kb_curator_extract.o \
+                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
+                                       $(OBJDIR)/provider_client.o \
+                                       $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/index.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/kb_payload.o \
@@ -2626,6 +2632,7 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(OBJDIR)/kb/kb_curator_queue.o \
                                        $(OBJDIR)/kb/kb_curator_extract_code.o \
                                        $(OBJDIR)/kb/kb_curator_extract.o \
+                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/kb_curator_grounding.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \

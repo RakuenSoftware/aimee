@@ -9,6 +9,7 @@
 
 #include "kb_curator_extract.h"
 #include "kb_curator_grounding.h"
+#include "kb_curator_sidecar.h" /* kb_curator_describe_wait_status */
 #include "aimee.h"
 #include "cJSON.h"
 #include "log.h"
@@ -16,6 +17,7 @@
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -349,12 +351,21 @@ static char *ccu_read_body(const char *file_path, int line, char *errbuf, size_t
 static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *errbuf,
                                 size_t errlen)
 {
+   /* Honour TMPDIR like the rest of the tree (see code_collect.c): a hardcoded
+    * /tmp gives an operator no way to move the spool off a full or slow
+    * filesystem. */
+   const char *tmpdir = getenv("TMPDIR");
+   if (!tmpdir || !tmpdir[0])
+      tmpdir = "/tmp";
    char tmppath[256];
-   snprintf(tmppath, sizeof(tmppath), "/tmp/aimee_ccu_XXXXXX");
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_ccu_XXXXXX", tmpdir);
    int fd = mkstemp(tmppath);
    if (fd < 0)
    {
-      snprintf(errbuf, errlen, "mkstemp failed");
+      /* Carry errno: ENOSPC (full spool), EMFILE (fd exhaustion) and EACCES are
+       * different incidents with different fixes, and last_error is the only
+       * forensic record a failed job leaves behind. */
+      snprintf(errbuf, errlen, "mkstemp failed for %s: %s", tmppath, strerror(errno));
       return NULL;
    }
 
@@ -411,7 +422,7 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
 
    if (rc != 0)
    {
-      snprintf(errbuf, errlen, "sidecar exited %d", rc);
+      kb_curator_describe_wait_status(rc, CCU_SIDECAR_TIMEOUT_S, errbuf, errlen);
       free(out);
       return NULL;
    }

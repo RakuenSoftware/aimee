@@ -304,11 +304,19 @@ static int db2_kb_service_async_queue_claim_next(int64_t *job_id, int64_t *docum
    /* Single-claim correctness comes from the follow-up UPDATE's WHERE
     * id=?2 AND status='pending' guard plus the changes!=1 check below: if
     * two workers race on the same row, only one UPDATE will see status =
-    * 'pending' and report changes==1; the loser ROLLBACKs and retries. */
+    * 'pending' and report changes==1; the loser ROLLBACKs and retries.
+    *
+    * The kind filter is load-bearing, not a nicety: kb_async_jobs is shared with
+    * the curator stages (extract_doc, memory_facts), which own their own claim
+    * lifecycle. Without it this claim takes the lowest-id pending row of ANY
+    * kind, and the dispatch below marks everything it does not recognize
+    * 'failed' — so one call to the drain endpoint would silently destroy the
+    * curator's queued work. Keep this list in sync with that dispatch. */
    aimee_pg_stmt_t *sel = aimee_pg_prepare(conn,
                                            "SELECT id, document_id, kind"
                                            " FROM kb_async_jobs"
                                            " WHERE status = 'pending'"
+                                           "   AND kind IN ('embed_raw', 'embed_pdf')"
                                            " ORDER BY id ASC LIMIT 1",
                                            err, sizeof(err));
    if (!sel)

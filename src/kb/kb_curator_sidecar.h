@@ -17,4 +17,15 @@
 char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_cap, char *errbuf,
                              size_t errlen);
 
+/* Render a pclose(3) wait status into an operator-legible reason. Shared with
+ * callers that run their own popen (the code-unit stage wraps its command in
+ * timeout(1)); exposed for testing.
+ *
+ * pclose returns a wait(2)-encoded status, not an exit code — reporting it raw
+ * logged "sidecar exited 256" for a plain exit(1). Distinguishes a non-zero
+ * exit, a signal kill (OOM), and a timeout. Pass timeout_s > 0 only if the
+ * command was wrapped in coreutils timeout(1) (whose cap shows as exit 124);
+ * callers that do not wrap pass 0. */
+void kb_curator_describe_wait_status(int status, int timeout_s, char *errbuf, size_t errlen);
+
 #endif /* KB_CURATOR_SIDECAR_H */
