@@ -2,6 +2,7 @@
  * See kb_memory_facts.h. Mirrors the claim/done/fail job lifecycle of
  * kb_curator_extract.c against kb_async_jobs (kind='memory_facts'). */
 #include "kb_memory_facts.h"
+#include "kb_curator_sidecar.h"
 
 #include "aimee.h"
 #include "cJSON.h"
@@ -104,6 +105,8 @@ static int mf_claim_job(mf_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'memory_facts' AND status = 'pending'"
+                            /* Skip jobs still serving their retry backoff. */
+                            "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
                             "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                             " )"
                             " RETURNING id, document_id, attempts";
@@ -112,6 +115,9 @@ static int mf_claim_job(mf_job_t *out)
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
+   char now_text[32];
+   kb_curator_now_text(now_text, sizeof(now_text));
+   aimee_pg_bind_text(st, "?1", now_text);
 
    int found = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -148,12 +154,16 @@ static void mf_mark_retry_or_fail(int64_t job_id, int attempts, const char *erro
       return;
    const char *new_status = (attempts >= MF_MAX_ATTEMPTS) ? "failed" : "pending";
    char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "UPDATE kb_async_jobs SET status=?1, last_error=?2, updated_at=pg_now_text() WHERE id=?3",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_async_jobs SET status=?1, last_error=?2, next_attempt_at=?4,"
+                        " updated_at=pg_now_text() WHERE id=?3",
+                        err, sizeof(err));
    if (!st)
       return;
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?4", next_at);
    aimee_pg_bind_text(st, "?1", new_status);
    aimee_pg_bind_text(st, "?2", error_msg ? error_msg : "");
    aimee_pg_bind_int64(st, "?3", job_id);

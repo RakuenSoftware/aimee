@@ -39,6 +39,11 @@ static void db2_run_sqlite_migrations(sqlite3 *db)
     * ignored so legacy and fresh DBs both continue to the canonical schema. */
    static const char *migrations[] = {
        "ALTER TABLE code_embeddings ADD COLUMN body_hash TEXT NOT NULL DEFAULT ''",
+       /* Retry backoff: sqlite has no ADD COLUMN IF NOT EXISTS, so the duplicate
+        * on an already-migrated shim DB is swallowed by the errors-ignored loop
+        * (the postgres side uses IF NOT EXISTS in schema.sql). */
+       "ALTER TABLE kb_async_jobs ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE kb_code_unit_jobs ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
        NULL,
    };
    for (int i = 0; migrations[i]; i++)

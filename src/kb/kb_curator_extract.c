@@ -7,6 +7,7 @@
 #endif
 
 #include "kb_curator_extract.h"
+#include "kb_curator_sidecar.h"
 #include "kb_curator_llm.h"
 #include "aimee.h"
 #include "config.h" /* config_current_mode, aimee_mode_t, config_load */
@@ -126,6 +127,9 @@ static int ce_claim_job(ce_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'extract_doc' AND status = 'pending'"
+                            /* Skip jobs still serving their retry backoff. '' is
+                             * "never failed" and must always be claimable. */
+                            "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
                             "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                             " )"
                             " RETURNING id, document_id, project, attempts";
@@ -134,6 +138,9 @@ static int ce_claim_job(ce_job_t *out)
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
+   char now_text[32];
+   kb_curator_now_text(now_text, sizeof(now_text));
+   aimee_pg_bind_text(st, "?1", now_text);
 
    int found = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -216,14 +223,19 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
 
    const char *new_status = (attempts >= max_attempts) ? "failed" : "pending";
    char err[CE_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE kb_async_jobs"
-                        " SET status = ?1, last_error = ?2, updated_at = pg_now_text()"
-                        " WHERE id = ?3",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "UPDATE kb_async_jobs"
+                                          " SET status = ?1, last_error = ?2, next_attempt_at = ?4,"
+                                          "     updated_at = pg_now_text()"
+                                          " WHERE id = ?3",
+                                          err, sizeof(err));
    if (!st)
       return;
+   /* Back the retry off. A terminal 'failed' still gets a stamp — harmless, and
+    * it keeps the column meaningful if the job is ever re-queued by hand. */
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?4", next_at);
    aimee_pg_bind_text(st, "?1", new_status);
    char errbuf[512];
    snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "unknown error");
