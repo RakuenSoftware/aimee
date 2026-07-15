@@ -38,8 +38,6 @@
      "  list             List memories\n"
      "  get              Read a memory by id\n"
      "  read             Assemble current memory context\n"},
-    {"chat", "Start the aimee primary-agent chat", CLIENT_TIER_CORE, 0,
-     "  [message...]     Send one message, or start an interactive chat with no message\n"},
     {"session", "Session history", CLIENT_TIER_ADVANCED, 0,
      "  list             List recent sessions\n"
      "  show             Show one session\n"
@@ -193,8 +191,6 @@
     {"workers", "Server worker-pool status", CLIENT_TIER_ADVANCED, 0, NULL},
     {"repo", "Per-repo cross-repo trust", CLIENT_TIER_ADMIN, 0,
      "  trust            Set per-repo cross-repo trust\n"},
-    {"migrate", "Data migration utility", CLIENT_TIER_ADMIN, 0,
-     "  v2               Run the v2 data migration (long-running)\n"},
     {"cron", "Cron jobs and watchdog runs", CLIENT_TIER_ADVANCED, 0,
      "  list             List configured cron jobs\n"
      "  add <id>         Add or update a cron job\n"

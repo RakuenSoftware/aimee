@@ -808,10 +808,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
     ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_css.c
-    ${AIMEE_SRC_DIR}/cli_tui.c
-    ${AIMEE_SRC_DIR}/cli_tui_opencode_v2b.c
-    ${AIMEE_SRC_DIR}/cli_tui_opencode_v2.c
-    ${AIMEE_SRC_DIR}/cli_tui_misc.c
+    ${AIMEE_SRC_DIR}/cli_chat_stream.c
     ${AIMEE_SRC_DIR}/cli_client.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c

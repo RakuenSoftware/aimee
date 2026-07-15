@@ -5,19 +5,9 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 61
+Total commands: 59
 
 ## Core commands
-
-### `aimee chat`
-
-Start the aimee primary-agent chat.
-
-Subcommands:
-
-```
-  [message...]     Send one message, or start an interactive chat with no message
-```
 
 ### `aimee config`
 
@@ -677,16 +667,6 @@ Subcommands:
 ### `aimee mcp-serve`
 
 MCP stdio bridge to aimee-server.
-
-### `aimee migrate`
-
-Data migration utility.
-
-Subcommands:
-
-```
-  v2               Run the v2 data migration (long-running)
-```
 
 ### `aimee repo`
 

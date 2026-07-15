@@ -924,30 +924,6 @@ static void print_init_run(cJSON *resp)
       printf("  Fix:        %s\n", rem->valuestring);
 }
 
-static void print_storage_migrate(cJSON *resp)
-{
-   cJSON *source = cJSON_GetObjectItemCaseSensitive(resp, "source");
-   cJSON *backup = cJSON_GetObjectItemCaseSensitive(resp, "backup_path");
-   cJSON *tables = cJSON_GetObjectItemCaseSensitive(resp, "tables_found");
-   cJSON *source_rows = cJSON_GetObjectItemCaseSensitive(resp, "source_rows");
-   cJSON *copied = cJSON_GetObjectItemCaseSensitive(resp, "rows_copied");
-   cJSON *skipped = cJSON_GetObjectItemCaseSensitive(resp, "rows_skipped");
-   cJSON *table_errors = cJSON_GetObjectItemCaseSensitive(resp, "table_errors");
-   cJSON *regressions = cJSON_GetObjectItemCaseSensitive(resp, "row_count_regressions");
-
-   printf("Migration complete\n");
-   if (cJSON_IsString(source) && source->valuestring[0])
-      printf("  Source:      %s\n", source->valuestring);
-   printf("  Tables:      %d\n", cJSON_IsNumber(tables) ? tables->valueint : 0);
-   printf("  Source rows: %d\n", cJSON_IsNumber(source_rows) ? source_rows->valueint : 0);
-   printf("  Copied:      %d\n", cJSON_IsNumber(copied) ? copied->valueint : 0);
-   printf("  Skipped:     %d\n", cJSON_IsNumber(skipped) ? skipped->valueint : 0);
-   printf("  Errors:      %d\n", cJSON_IsNumber(table_errors) ? table_errors->valueint : 0);
-   printf("  Regressions: %d\n", cJSON_IsNumber(regressions) ? regressions->valueint : 0);
-   if (cJSON_IsString(backup) && backup->valuestring[0])
-      printf("  Backup:      %s\n", backup->valuestring);
-}
-
 static void print_episode_list(cJSON *resp)
 {
    cJSON *episodes = cJSON_GetObjectItemCaseSensitive(resp, "episodes");
@@ -1169,10 +1145,6 @@ static void print_workspace_list(cJSON *resp)
 void pt_print_init_run(const char *method, cJSON *resp)
 {
    print_init_run(resp);
-}
-void pt_print_migrate_v2(const char *method, cJSON *resp)
-{
-   print_storage_migrate(resp);
 }
 void pt_print_rules_generate(const char *method, cJSON *resp)
 {

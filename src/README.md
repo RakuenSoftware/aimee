@@ -1221,7 +1221,7 @@ methods; the thin CLI maps supported commands to them in `cli_v1_routes.inc`
 | Tools / MCP | `tool.execute`, `mcp.tools_list/audit/recheck/call` |
 | Triggers / cron | `trigger.fire/list/status/cancel`, `cron.list/add/show/history/run/enable/disable/remove` |
 | Providers / models | `provider.list/show/models/test/quota/get/set`, `provider.slot_acquire/release`, `model.list/show/refresh` |
-| Insights / migrate | `insights.overview`, `migrate.v2` |
+| Insights | `insights.overview` |
 
 Request shape: `{"method": "...", "protocol_version": 2, ...params}`. Success:
 `{"status": "ok", ...data}`. Error: `{"status": "error", "error": "...",

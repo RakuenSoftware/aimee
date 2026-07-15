@@ -31,7 +31,6 @@ static const struct
     {"audit.seal", pt_print_audit},
     {"audit.snapshot", pt_print_audit},
     {"init.run", pt_print_init_run},
-    {"migrate.v2", pt_print_migrate_v2},
     {"rules.generate", pt_print_rules_generate},
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},

@@ -328,7 +328,6 @@ static const struct
     {"get-help", NULL, "get_help", "mcp.call", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
     {"git", "verify", "git.verify", "mcp.call", NULL, 900000},
-    {"migrate", "v2", "migrate.v2", NULL, NULL, 900000},
     {"provider", "list", "provider.list", NULL, "providers", 300000},
     {"provider", "show", "provider.show", NULL, NULL, 0},
     {"provider", "models", "provider.models", NULL, "models", 300000},
