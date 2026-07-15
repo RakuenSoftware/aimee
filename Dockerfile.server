@@ -32,7 +32,13 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 ARG AIMEE_VERSION=""
-RUN make -C src ../aimee-server ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+# The CLI ships alongside the server. It is what gives a spawned provider-CLI
+# delegate (the `claude` binary) any access to aimee at all: `aimee mcp serve` is
+# the stdio MCP proxy that forwards tool calls to this server over /v1, and
+# `aimee hooks pre` is the PreToolUse guard. Without the binary in the image a
+# delegate has no aimee tools and no guard can run — it gets a bare shell and its
+# own credentials, which is the opposite of the intent.
+RUN make -C src ../aimee-server ../aimee ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 # --- webchat frontend: build the React SPA into a single index.html ---
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.
@@ -205,6 +211,9 @@ RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --sh
 # when no named volume is mounted; operators can bind/name it for backups.
 VOLUME /var/lib/aimee-workspaces
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
+# See the build stage: delegates reach aimee THROUGH this binary (`aimee mcp serve`
+# as their MCP server, `aimee hooks pre` as their PreToolUse guard).
+COPY --from=build /src/aimee /usr/local/bin/aimee
 
 # Co-located webchat browser UI: the Go service, the single-file React SPA, the
 # PAM stack for browser login, and the bootstrap/launch helpers. webchat shares

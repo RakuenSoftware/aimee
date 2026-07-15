@@ -42,6 +42,20 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                     const char *system_prompt, const char *user_prompt, int max_tokens,
                     double temperature, agent_result_t *out);
 
+/* agent_run_named, but WITH tools. Exists for review panelists: they must route by
+ * NAME (each lens is bound to a seat model) yet still reach aimee, and the two
+ * existing tools-enabled runners select by role only.
+ *
+ * Panelists were tool-less, which is why a diff-only reviewer could not answer
+ * "does anything call this?" or "is this file product?" — questions that decide
+ * whether a change is real. With tools, the role's toolset applies: `review` maps
+ * to `review_indexed` (code_search / find_symbol / search_memory / search_docs),
+ * i.e. the diff plus aimee's own code + memory tooling, and no filesystem or write
+ * tools. write_capable is pinned 0 regardless of the agent's config. */
+int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
+                               const char *system_prompt, const char *user_prompt, int max_tokens,
+                               double temperature, agent_result_t *out);
+
 /* One-shot, TOOL-FREE text generation for UI drafting: selects a single non-CLI
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
  * non-CLI) and runs the plain-completion agent_execute() — no tools, no worktree,

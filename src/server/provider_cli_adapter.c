@@ -3,6 +3,8 @@
 
 #include "aimee.h"
 #include "cJSON.h"
+#include "aimee_home.h"      /* aimee_home() — the delegate's /v1 socket path */
+#include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no strip */
 #include "util.h"
 
 #include <errno.h>
@@ -400,6 +402,20 @@ static void delegate_child_strip_forge_creds(int flag)
    setenv("GIT_TERMINAL_PROMPT", "0", 1);
 }
 
+/* Point the delegate's `aimee` CLI at THIS server, so its MCP proxy
+ * (`aimee mcp serve`, wired in cli_claude.c) has somewhere to forward to. The /v1
+ * Unix socket is the right transport here: it is always served, needs no TCP port
+ * (server_api_http_port defaults to 0/disabled) and no network bearer.
+ *
+ * Never overwrites: an operator who set AIMEE_API_ENDPOINT explicitly means it.
+ * Pre-resolved by the parent — see delegate_child_strip_forge_creds on why the
+ * child does no allocation. */
+static void delegate_child_export_aimee_endpoint(const char *endpoint)
+{
+   if (endpoint && endpoint[0])
+      setenv("AIMEE_API_ENDPOINT", endpoint, 0);
+}
+
 int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
                             int *stdout_fd, pid_t *pid_out)
 {
@@ -407,9 +423,26 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
       return -1;
 
    /* Resolve the dial BEFORE forking (see delegate_child_strip_forge_creds).
-    * Unreadable config reads as enforcing: a guard that fails open is not a guard. */
+    * Unreadable config reads as enforcing: a guard that fails open is not a guard.
+    *
+    * ...but ONLY strip when aimee-server actually holds a forge credential
+    * (operator ruling 2026-07-15). The point of taking the delegate's credentials
+    * away is to push its git through aimee, which runs on the server. If the server
+    * has no credential, aimee's git cannot work either, so stripping would remove
+    * the delegate's only route and leave it nothing — breakage dressed as policy.
+    * No aimee route, no restriction. */
    config_t spawn_cfg;
-   int strip_forge_creds = (config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git;
+   int strip_forge_creds = ((config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git) &&
+                           git_cred_forge_configured(NULL);
+
+   /* Resolve the delegate's aimee endpoint before forking (aimee_home may read/
+    * allocate). See delegate_child_export_aimee_endpoint. */
+   char aimee_endpoint[MAX_PATH_LEN + 32] = "";
+   {
+      const char *home = aimee_home();
+      if (home && home[0])
+         snprintf(aimee_endpoint, sizeof(aimee_endpoint), "unix:%s/aimee-http.sock", home);
+   }
 
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
@@ -456,6 +489,7 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
        * source context from the forking thread's TLS, immune to the parent-side
        * concurrent env clobber. */
       delegate_child_export_context_env();
+      delegate_child_export_aimee_endpoint(aimee_endpoint);
       delegate_child_strip_forge_creds(strip_forge_creds);
       execvp(argv[0], argv);
       _exit(127);

@@ -35,3 +35,14 @@ void git_cred_inject_free_env(char **envp)
 {
    (void)envp;
 }
+
+/* "aimee-server holds no forge credential", consistent with the NULL env above.
+ * For provider_cli_adapter's spawn that means the delegate credential strip does
+ * NOT apply — no aimee git route, no restriction — which is the honest answer for a
+ * test binary that has no vault, and keeps these tests exercising the spawn rather
+ * than a credential policy they never configured. */
+int git_cred_forge_configured(const char *repo_dir)
+{
+   (void)repo_dir;
+   return 0;
+}

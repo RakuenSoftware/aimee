@@ -24,6 +24,22 @@ cJSON *handle_git_reset(cJSON *args);
 cJSON *handle_git_restore(cJSON *args);
 cJSON *handle_git_issue(cJSON *args);
 
+/* Run a git tool by NAME through the full git dispatch path: mirror-cwd remap,
+ * detached-workspace binding, mcp_chdir_git_root (which REFUSES rather than let a
+ * mutating op run against the main repo), the mutating-op context-mismatch guard,
+ * and the handler itself — then unwinds all of it. Returns MCP content blocks
+ * (caller owns), or NULL for an unknown tool.
+ *
+ * Exists so the NATIVE agent surface executes git through the SAME path as an
+ * external MCP client rather than a second implementation that could drift: the
+ * write handlers own the safety rails (branch ownership, the verify gate,
+ * AI-attribution stripping), and those must not depend on which surface called in.
+ *
+ * git_verify is deliberately NOT reachable here — it needs the server ctx/conn the
+ * MCP path supplies, and the native agent has its own `verify` tool. `sid`, when
+ * non-empty, sets the session-id override for the call. */
+cJSON *mcp_git_run_tool(const char *tool, cJSON *args, const char *sid);
+
 /* Track whether the current MCP git operation is running in a worktree. */
 void mcp_git_set_worktree(int val);
 int mcp_git_get_worktree(void);

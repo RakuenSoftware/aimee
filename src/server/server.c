@@ -12,6 +12,11 @@
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "primary_cli_ingestor.h"
 #include "server.h"
+
+#include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
+#include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
+#include "mcp_git.h"         /* mcp_git_run_tool — the native surface's git-write impl */
+#include "wfe_native_gate.h" /* wfe_shell_invokes_git — the shell-git classifier */
 #include "turn_registry.h"
 #include "server_http.h"
 #include "server_tls.h" /* server_http_api_status_report */
@@ -1886,6 +1891,28 @@ static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t 
    return 1;
 }
 
+/* The shell-git gate (agent_tools.h): 1 = refuse this shell command, git belongs to
+ * aimee. Lives here because the decision needs three things from three tiers that
+ * the agent tool surface must not link — the config dial, the command classifier,
+ * and the forge credential.
+ *
+ * Both extra conditions exist to keep the rule from becoming breakage:
+ *  - a forge credential must EXIST, or aimee's own git cannot work either and this
+ *    would take away the delegate's only route rather than redirect it;
+ *  - the caller only reaches here when the git_* tools are registered (server.c
+ *    wires this gate immediately after the provider), so we never forbid the shell
+ *    while the alternative is absent.
+ * An unreadable config reads as ON: a guard that fails open is not a guard. */
+static int server_shell_git_blocked(const char *command)
+{
+   if (!command || !command[0] || !wfe_shell_invokes_git("bash", command))
+      return 0;
+   config_t cfg;
+   if (config_load(&cfg) == 0 && !cfg.require_aimee_git)
+      return 0;
+   return git_cred_forge_configured(NULL);
+}
+
 int server_init(server_ctx_t *ctx, const char *socket_path)
 {
    memset(ctx, 0, sizeof(*ctx));
@@ -2068,6 +2095,20 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * end-to-end server-side. Registration runs nothing on its own — a run begins
     * only when intake creates a work item and the autonomy driver advances it. */
    wfe_autonomy_register();
+   /* Hand the native agent surface aimee's git-write tools. Without this the
+    * builtin set is read-only git, so a delegate's ONLY way to land work is to
+    * shell out to `git` — the thing we then tell it not to do. The tools are
+    * neither advertised nor dispatchable until this runs, which is deliberate:
+    * only aimee-server can honour them (it owns the credential and the MCP git
+    * rails), so a thin client or a unit test is never offered a tool that would
+    * fail on it. */
+   agent_tools_set_git_write_provider(mcp_git_run_tool);
+   /* ...and only THEN forbid the shell route. Registered after the provider, and
+    * only when refusing is honest: the tools we redirect to are now available, and
+    * server_shell_git_blocked additionally requires a forge credential to exist.
+    * A rule whose alternative is missing is breakage, so the alternative is wired
+    * first and the rule hangs off it. */
+   agent_tools_set_shell_git_gate(server_shell_git_blocked);
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();

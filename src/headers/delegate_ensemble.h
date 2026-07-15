@@ -63,9 +63,11 @@ typedef struct
    const char *brief;
    int brief_truncated;
    /* Optional pre-assembled read-only context (aimee memory recall + code-graph
-    * snippets) injected into every panelist prompt. Panelists run with no tools,
-    * so this is the only way they see aimee memory and the code graph. The caller
-    * owns the string for the duration of the run; NULL = no context injected. */
+    * snippets) injected into every panelist prompt — a useful SEED, no longer the
+    * only window: REVIEW-mode panelists now run with aimee's index-only toolset
+    * (`review_indexed`) and can look things up themselves. Drafting panelists are
+    * still tool-less, so for them this remains the only view of memory and the code
+    * graph. The caller owns the string for the duration of the run; NULL = none. */
    const char *context;
    const char **questions;
    int question_count;

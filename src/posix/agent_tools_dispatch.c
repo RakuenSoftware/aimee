@@ -728,6 +728,57 @@ static char *td_git_status(cJSON *args, const char *name, const char *dispatch_c
    return result;
 }
 
+/* The git WRITE tools (commit / push / branch / pr). Rather than reimplement them
+ * for this surface, hand off through the git-write seam to the server's MCP git
+ * dispatch — the same path an external MCP client goes through — so the worktree
+ * refusal, mutating-context guard, branch-ownership check and attribution strip
+ * cannot drift between the two surfaces. The seam (rather than a direct call) keeps
+ * the agent tier from linking the server tier; see agent_tools.h.
+ *
+ * `cwd` is injected from the dispatcher's cwd when the caller did not name a path,
+ * because mcp_chdir_git_root resolves the repo from that arg; without it the
+ * handler would resolve against the daemon's cwd — the bug #1318 fixed on the
+ * verify gate. The handler returns MCP content blocks; the native surface wants a
+ * plain string, so flatten the text blocks. */
+static char *td_git_write(cJSON *args, const char *name, const char *dispatch_cwd,
+                          const char *dispatch_sid, int timeout_ms)
+{
+   (void)timeout_ms;
+   agent_git_write_fn fn = agent_tools_git_write_provider();
+   if (!fn) /* not advertised without a provider, so this is a caller inventing a name */
+      return safe_strdup("error: git tools are not available on this surface");
+
+   cJSON *call = cJSON_Duplicate(args, 1);
+   if (!call)
+      return safe_strdup("error: out of memory");
+   cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(call, "cwd");
+   if (!jcwd && dispatch_cwd && dispatch_cwd[0])
+      cJSON_AddStringToObject(call, "cwd", dispatch_cwd);
+
+   cJSON *content = fn(name, call, dispatch_sid);
+   cJSON_Delete(call);
+   if (!content)
+      return safe_strdup("error: git tool unavailable on this surface");
+
+   dstr_t out;
+   dstr_init(&out);
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, content)
+   {
+      cJSON *text = cJSON_GetObjectItemCaseSensitive(item, "text");
+      if (cJSON_IsString(text) && text->valuestring)
+      {
+         if (out.len)
+            dstr_append_char(&out, '\n');
+         dstr_append_str(&out, text->valuestring);
+      }
+   }
+   cJSON_Delete(content);
+   char *result = safe_strdup(out.len && out.data ? out.data : "(no output)");
+   dstr_free(&out);
+   return result;
+}
+
 static char *td_env_get(cJSON *args, const char *name, const char *dispatch_cwd,
                         const char *dispatch_sid, int timeout_ms)
 {
@@ -1519,6 +1570,39 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
+   /* --- No git/gh in a delegate's shell (require_aimee_git) --- */
+   /* The native agent IS the wfe `implement` delegate, so this is the path that
+    * decides whether the rule means anything at all. The DECISION lives server-side
+    * behind a seam (see agent_tools.h): it needs the config dial, the forge
+    * credential and the command classifier, none of which the agent tier may link.
+    * Unregistered — thin client, unit tests — there is no gate and nothing changes. */
+   {
+      const char *shell_cmd = NULL;
+      if (strcmp(name, "bash") == 0)
+      {
+         cJSON *c = cJSON_GetObjectItem(args, "command");
+         if (cJSON_IsString(c))
+            shell_cmd = c->valuestring;
+      }
+      else if (strcmp(name, "execute_script") == 0)
+      {
+         cJSON *b = cJSON_GetObjectItem(args, "body");
+         if (cJSON_IsString(b))
+            shell_cmd = b->valuestring;
+      }
+      agent_shell_git_gate_fn gate = agent_tools_shell_git_gate();
+      if (shell_cmd && gate && gate(shell_cmd))
+      {
+         cJSON_Delete(args);
+         return safe_strdup(
+             "error: run git through aimee, not a shell — use git_status, git_log, "
+             "git_diff, git_branch, git_commit, git_push or git_pr. They execute on "
+             "aimee-server, which holds the forge credential; this shell has none, so a "
+             "raw git/gh command cannot authenticate anyway. (Operator: "
+             "require_aimee_git: false in aimee.yaml opts out.)");
+      }
+   }
+
    /* --- Guardrail enforcement for ALL tool execution paths --- */
    /* dispatch_sid and cwd are kept in scope so read_file can update read-tracking below. */
    const char *dispatch_sid = session_id();
@@ -1607,6 +1691,9 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_git_diff(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "git_status") == 0)
       result = td_git_status(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "git_commit") == 0 || strcmp(name, "git_push") == 0 ||
+            strcmp(name, "git_branch") == 0 || strcmp(name, "git_pr") == 0)
+      result = td_git_write(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "env_get") == 0)
       result = td_env_get(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "test") == 0)

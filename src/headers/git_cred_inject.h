@@ -73,6 +73,18 @@ int git_cred_inject_resolve_token(const char *principal, const char *remote_url,
                                   const char *repo_dir, const char *preferred_token, char *out,
                                   size_t cap);
 
+/* 1 if aimee-server can itself authenticate to the forge for `repo_dir` (NULL =
+ * "any forge identity at all"), under the same precedence as the resolvers above.
+ * Resolves and immediately wipes; never returns the token.
+ *
+ * This is the predicate the require_aimee_git restriction hangs off (operator
+ * ruling 2026-07-15). That rule says "do not shell out to git/gh — use aimee's
+ * git_* tools, which run on aimee-server". If aimee-server holds no credential,
+ * aimee's tools cannot do git either, so blocking the shell would remove the only
+ * working route rather than redirect it, and strip credentials a delegate needs
+ * with nothing to offer in their place. No aimee route -> no restriction. */
+int git_cred_forge_configured(const char *repo_dir);
+
 /* Free an envp from git_cred_inject_build_env (zeroes the GH_TOKEN entry first). */
 void git_cred_inject_free_env(char **envp);
 
