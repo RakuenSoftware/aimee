@@ -2905,6 +2905,7 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
 $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_ctl.o \
                                        $(OBJDIR)/server/server_pipeline.o $(OBJDIR)/server/server_pipeline_merge.o \
+                                       $(OBJDIR)/server/git_pr_ci_grade.o \
                                        $(OBJDIR)/server/roundtable_pipeline_eval.o \
                                        $(OBJDIR)/server/roundtable_pipeline_chunk.o \
                                        $(OBJDIR)/db1/roundtable_pipeline.o \
