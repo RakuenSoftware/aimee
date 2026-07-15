@@ -15,6 +15,8 @@
 #include "db2_test_shim.h"
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
+#include "../kb/kb_memory_facts.h"
+#include "config.h"
 
 static sqlite3 *open_db(void)
 {
@@ -93,10 +95,13 @@ static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
 
    /* (c) another kind, equally stale: kb_async_jobs is shared, and memory_facts
     *     owns its own claim lifecycle. Reclaiming it from the doc stage would be
-    *     cross-stage theft. */
+    *     cross-stage theft. attempts is at MF_MAX_ATTEMPTS so that when its own
+    *     drain reclaims it below, it lands on the terminal 'failed' branch and
+    *     no follow-on claim can process it — keeping that assertion about the
+    *     reclaim alone. */
    seed(db, "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,claimed_by,"
-            "claimed_at,created_at,updated_at) VALUES (9003,'memory_facts',9003,'p','running',1,"
-            "'kb.curator.drain',datetime('now','-60 minutes'),datetime('now','-60 minutes'),"
+            "claimed_at,created_at,updated_at) VALUES (9003,'memory_facts',9003,'p','running',3,"
+            "'kb.memory.facts',datetime('now','-60 minutes'),datetime('now','-60 minutes'),"
             "datetime('now','-60 minutes'))");
 
    kb_curator_extract_opts_t opts;
@@ -109,6 +114,25 @@ static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
    assert(strcmp(job_status(db, 9002), "running") == 0); /* in-flight untouched */
    assert(strcmp(job_status(db, 9003), "running") == 0); /* other kind untouched */
    printf("  PASS: reclaim_stale_running (orphan reclaimed; in-flight + other kinds untouched)\n");
+}
+
+/* memory_facts shares kb_async_jobs and had the same missing-reclaim gap: its
+ * claim also only selects 'pending', so a wedged LLM call stranded the job
+ * forever. Job 9003 above is the stale memory_facts row the extract_doc reclaim
+ * correctly refused to touch — here its OWN drain must reclaim it, which also
+ * pins the kind scoping from the other side. */
+static void test_reclaim_stale_running_memory_facts(sqlite3 *db)
+{
+   assert(strcmp(job_status(db, 9003), "running") == 0); /* still stale from above */
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.typed_facts_enabled = 1;
+   (void)kb_memory_facts_drain(&cfg, 8);
+
+   assert(strcmp(job_status(db, 9003), "failed") == 0);  /* orphan reclaimed */
+   assert(strcmp(job_status(db, 9002), "running") == 0); /* extract_doc untouched */
+   printf("  PASS: reclaim_stale_running_memory_facts (orphan reclaimed; other kinds untouched)\n");
 }
 
 int main(void)
@@ -150,6 +174,7 @@ int main(void)
    printf("  PASS: queue_docs_all_projects (drain backfill queues indexed docs; disabled=no-op)\n");
 
    test_reclaim_stale_running_extract_doc(db);
+   test_reclaim_stale_running_memory_facts(db);
 
    printf("test_curator_queue: all tests passed\n");
    return 0;

@@ -1646,6 +1646,14 @@ typedef struct config
     * for a --parallel 4 llama-server), since each job is one LLM sidecar
     * call. Clamped to [1,8]. */
    int kb_curator_extract_code_workers;
+   /* Dedicated extract_doc worker threads (kb_curator_extract_docs_workers),
+    * exactly as above but for the doc stage. Default 1.
+    *
+    * Without this, extract_doc has only the shared LLM lane, which spends most
+    * of each pass on the other LLM stages — so docs drain at a small fraction
+    * of the rate a configured extract_code pool achieves even though both are
+    * one sidecar call per job. Clamped to [1,8]. */
+   int kb_curator_extract_docs_workers;
    /* resolve_entities pass: 0 = off (default), 1 = commit proposed `entity`
     * mentions into curator_entity_vectors on the curator drain. */
    int kb_curator_resolve_entities_enabled;

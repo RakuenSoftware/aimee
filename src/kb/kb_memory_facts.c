@@ -23,10 +23,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h> /* strcasecmp */
+#include <time.h>    /* time() — reclaim throttle */
 
 #define MF_ERRBUF       256
 #define MF_LLM_OUT_CAP  8192
 #define MF_MAX_ATTEMPTS 3
+/* A job left in 'running' longer than this lease was orphaned (worker crash/
+ * restart or a wedged LLM call). Mirrors the curator stages' lease. */
+#define MF_STALE_LEASE "-15 minutes"
+/* Reclaim runs at most this often (throttled; the drain calls it per batch). */
+#define MF_RECLAIM_EVERY_S 60
 /* Auto-injected into every turn (ingress_preinject), so precision matters more
  * than recall: only commit facts the model is confident are durable. */
 #define MF_CONF_FLOOR 0.6
@@ -151,6 +157,48 @@ static void mf_mark_retry_or_fail(int64_t job_id, int attempts, const char *erro
    aimee_pg_bind_text(st, "?1", new_status);
    aimee_pg_bind_text(st, "?2", error_msg ? error_msg : "");
    aimee_pg_bind_int64(st, "?3", job_id);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
+/* Reclaim memory_facts jobs orphaned in 'running'. Identical in shape and
+ * rationale to the extract_doc reclaim in kb_curator_extract.c: mf_claim_job
+ * only ever selects status='pending', so a job whose worker crashed or whose
+ * LLM call wedged stays 'running' forever — never retried, and pinning a db2
+ * pool member past its ceiling. Reset rows older than the lease to 'pending',
+ * or to 'failed' once attempts are exhausted so a poison job cannot loop.
+ * attempts is preserved (incremented at claim time).
+ *
+ * Scoped to kind='memory_facts' so it cannot disturb the other stages sharing
+ * kb_async_jobs. Throttled — the drain calls this once per batch. */
+static void mf_reclaim_stale_running(void)
+{
+   static time_t last_run = 0;
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < MF_RECLAIM_EVERY_S)
+      return;
+   last_run = now;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+   char err[MF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "UPDATE kb_async_jobs"
+       " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
+       "     claimed_by = '', claimed_at = '',"
+       "     last_error = CASE WHEN attempts >= ?1"
+       "                       THEN 'stale running lease reclaimed after max attempts'"
+       "                       ELSE last_error END,"
+       "     updated_at = pg_now_text()"
+       " WHERE kind = 'memory_facts' AND status = 'running'"
+       "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_int(st, "?1", MF_MAX_ATTEMPTS);
+   aimee_pg_bind_text(st, "?2", MF_STALE_LEASE);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
 }
@@ -295,6 +343,10 @@ int kb_memory_facts_drain(const config_t *cfg, int batch)
       return 0;
    if (!db2_conn())
       return 0;
+
+   /* Recover jobs orphaned in 'running' before claiming fresh work, so a crash/
+    * restart or a previously-wedged LLM call cannot permanently strand them. */
+   mf_reclaim_stale_running();
 
    int processed = 0;
    for (int i = 0; i < batch; i++)

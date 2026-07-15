@@ -751,11 +751,26 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/tests/test_curator_queue.o \
                                        $(OBJDIR)/kb/kb_curator_queue.o \
                                        $(OBJDIR)/kb/kb_curator_extract.o \
+                                       $(OBJDIR)/kb/kb_memory_facts.o \
                                        $(OBJDIR)/kb/kb_curator_llm.o \
                                        $(OBJDIR)/kb/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/rel_types_store.o \
+                                       $(OBJDIR)/db2/fact_recall.o \
+                                       $(OBJDIR)/db2/fact_ingest.o \
+                                       $(OBJDIR)/db2/fact_lifecycle.o \
+                                       $(OBJDIR)/db2/entity_edges.o \
+                                       $(OBJDIR)/db2/entity_registry.o \
+                                       $(OBJDIR)/db2/ontology_evolution.o \
+                                       $(OBJDIR)/db2/memory_query.o \
+                                       $(OBJDIR)/db2/memory_row_mapper_pg.o \
+                                       $(OBJDIR)/memory_extract_patterns.o \
+                                       $(OBJDIR)/memory_fact_gate.o \
+                                       $(OBJDIR)/memory_pii_gate.o \
+                                       $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/index.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/kb_payload.o \
