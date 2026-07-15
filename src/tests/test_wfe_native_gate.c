@@ -118,18 +118,31 @@ int main(void)
    assert(wfe_shell_invokes_git("Bash", "true; git push"));      /* after a separator */
    assert(wfe_shell_invokes_git("Bash", "make && git push"));    /* && */
    assert(wfe_shell_invokes_git("Bash", "ls | grep x; gh pr list"));
-   assert(wfe_shell_invokes_git("Bash", "bash -lc 'git push'")); /* quoted evasion */
-   assert(wfe_shell_invokes_git("Bash", "{ git push;}"));        /* brace group */
+   assert(wfe_shell_invokes_git("Bash", "{ git push;}"));          /* brace group */
    assert(wfe_shell_invokes_git("Bash", "$(git rev-parse HEAD)")); /* subshell */
+   /* a newline is a command separator, not mere spacing */
+   assert(wfe_shell_invokes_git("Bash", "make build\ngit push"));
+   assert(wfe_shell_invokes_git("Bash", "cd /tmp\ngh pr create"));
 
-   /* NOT invocations: git/gh appears as an argument, not the command. A blunt
-    * substring match would false-positive on all of these. */
+   /* `bash -c '<cmd>'`: the command string is parsed, not treated as data */
+   assert(wfe_shell_invokes_git("Bash", "bash -lc 'git push'"));
+   assert(wfe_shell_invokes_git("Bash", "sh -c \"git push\""));
+   /* quotes are stripped, so a split command name still resolves */
+   assert(wfe_shell_invokes_git("Bash", "gi''t push"));
+
+   /* NOT invocations: git/gh appears as an ARGUMENT, not the command. A blunt
+    * substring match -- or treating every quote as a command separator -- would
+    * false-positive on all of these. */
    assert(!wfe_shell_invokes_git("Bash", "grep git file.txt"));
+   assert(!wfe_shell_invokes_git("Bash", "grep \"git\" file.txt")); /* quoted mention */
    assert(!wfe_shell_invokes_git("Bash", "echo git"));
+   assert(!wfe_shell_invokes_git("Bash", "echo 'git'"));
    assert(!wfe_shell_invokes_git("Bash", "ls .github/workflows"));
    assert(!wfe_shell_invokes_git("Bash", "cat gitlog.txt"));
    assert(!wfe_shell_invokes_git("Bash", "python3 legit.py")); /* substring of a word */
    assert(!wfe_shell_invokes_git("Bash", "make build"));
+   /* a non-shell binary's quoted argument is data, even if it looks like a command */
+   assert(!wfe_shell_invokes_git("Bash", "echo 'git push'"));
 
    /* non-shell tools carry no command; NULL/empty are not invocations */
    assert(!wfe_shell_invokes_git("Read", "git push"));

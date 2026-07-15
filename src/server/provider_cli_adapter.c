@@ -353,17 +353,25 @@ static void provider_cli_terminate_child(pid_t pid)
    (void)waitpid(pid, NULL, 0);
 }
 
-/* Strip every git/forge credential from a delegate child's environment, so a
- * delegate is not merely FORBIDDEN from running git/gh (wfe_shell_invokes_git) but
- * is incapable of authenticating one: the classifier is a string match a determined
- * agent can evade, whereas an absent credential cannot be talked around. git/forge
- * work belongs to aimee's git_* tools, which run in aimee-server where the token is
- * resolved per-call and lives only in process memory.
+/* Remove the git/forge credentials a delegate child would otherwise inherit, so the
+ * no-git rule does not rest on the classifier alone: wfe_shell_invokes_git() is a
+ * string match over a shell line and a determined agent can evade it, whereas a
+ * credential that is not in the environment cannot be talked around. git/forge work
+ * belongs to aimee's git_* tools, which run in aimee-server where the token is
+ * resolved per call and lives only in process memory.
  *
- * Called post-fork, so it must stay allocation-free and syscall-only: `flag` is
- * resolved by the PARENT (config_load reads files and allocates; running it between
- * fork and exec in a threaded process risks a malloc-lock deadlock). setenv/unsetenv
- * may allocate in theory, but the surrounding code already relies on them. */
+ * This is defence in depth, NOT a credential boundary. It removes what we know how
+ * to name; it cannot prove the child has no other path to a token (a key on disk, a
+ * helper we do not enumerate, a credential minted later). Treat it as raising the
+ * cost, not as a guarantee.
+ *
+ * Called post-fork. `flag` is resolved by the PARENT because config_load reads files
+ * and allocates, and running that between fork and exec in a threaded process risks
+ * a malloc-lock deadlock. setenv/unsetenv may themselves allocate, so this is not
+ * strictly async-signal-safe either -- it matches the risk the adjacent
+ * unsetenv()/platform_setenv() calls already take here rather than adding a new one.
+ * The clean fix, if this ever bites, is to build the sanitized envp in the parent
+ * and execve() it. */
 static void delegate_child_strip_forge_creds(int flag)
 {
    if (!flag)
@@ -374,7 +382,12 @@ static void delegate_child_strip_forge_creds(int flag)
    unsetenv("GH_ENTERPRISE_TOKEN");
    unsetenv("GITHUB_ENTERPRISE_TOKEN");
    /* Credential plumbing: the askpass shim, an agent-forwarded SSH key, and any
-    * inherited credential helper reachable via the global/system git config. */
+    * inherited credential helper reachable via the global/system git config.
+    * SSH_AUTH_SOCK is broader than git: dropping it means a delegate cannot use
+    * agent-backed SSH to ANY host, not just the forge. That is intended (a forwarded
+    * agent is a general-purpose credential we do not want in a delegate), but it is
+    * the one strip here that can bite non-git work -- see require_aimee_git in
+    * config.h. */
    unsetenv("GIT_ASKPASS");
    unsetenv("SSH_ASKPASS");
    unsetenv("SSH_AUTH_SOCK");

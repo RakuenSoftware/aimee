@@ -43,8 +43,24 @@ int main(void)
    /* nothing anywhere -> NONE */
    assert(git_pr_ci_grade_json(empty, NULL) == GIT_PR_CI_NONE);
    assert(git_pr_ci_grade_json(NULL, NULL) == GIT_PR_CI_NONE);
-   /* malformed payloads never grade as success */
-   assert(git_pr_ci_grade_json("not json", "also not json") == GIT_PR_CI_NONE);
+
+   /* A payload we cannot read is ERROR, never NONE. NONE means "the forge reported
+    * no CI", which git_pr_ci_permits_merge() lets through -- so it must not be
+    * reachable from "we failed to parse the answer", or a garbled body would merge. */
+   assert(git_pr_ci_grade_json("not json", "also not json") == GIT_PR_CI_ERROR);
+   assert(git_pr_ci_grade_json(empty, "not json") == GIT_PR_CI_ERROR);
+   /* parsed, but not the payload we asked for (e.g. an API error object) */
+   assert(git_pr_ci_grade_json("{\"message\":\"Not Found\"}", NULL) == GIT_PR_CI_ERROR);
+   assert(git_pr_ci_grade_json(empty, "{\"message\":\"Not Found\"}") == GIT_PR_CI_ERROR);
+
+   /* --- the merge ruling: only green, or genuinely no CI at all --- */
+   assert(git_pr_ci_permits_merge(GIT_PR_CI_SUCCESS));
+   assert(git_pr_ci_permits_merge(GIT_PR_CI_NONE)); /* no CI -> nothing to fail */
+   assert(!git_pr_ci_permits_merge(GIT_PR_CI_PENDING));
+   assert(!git_pr_ci_permits_merge(GIT_PR_CI_FAILURE));
+   assert(!git_pr_ci_permits_merge(GIT_PR_CI_ERROR)); /* unknown is never pass */
+   /* end to end: a malformed payload must not reach a merge */
+   assert(!git_pr_ci_permits_merge(git_pr_ci_grade_json("not json", "also not json")));
 
    printf("ok\n");
    return 0;

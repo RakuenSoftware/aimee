@@ -56,10 +56,16 @@ int wfe_native_tool_externalizes(const char *tool_name, const char *command);
 int wfe_native_tool_forbidden(const char *tool_name, const char *command);
 
 /* 1 if this shell command INVOKES `git` or `gh` — as opposed to merely mentioning
- * one. `git push`, `/usr/bin/git push`, `sudo git push` and `bash -lc 'git push'`
- * match; `grep git file` and `echo git` do not (there it is an argument, not the
- * command). Command-prefix words (sudo/env/nohup/...) and VAR=val assignments are
- * looked through.
+ * one. `git push`, `/usr/bin/git push`, `sudo git push`, `VAR=1 git push`,
+ * `make && git push`, a command after a newline, and `bash -lc 'git push'` (the
+ * command string is parsed, not treated as data) all match. `grep "git" file` and
+ * `echo git` do NOT — there the word is an argument. Command-prefix words
+ * (sudo/env/nohup/...), VAR=val assignments, and a wrapper's bare flags are looked
+ * through; quotes are stripped, so `gi''t push` matches too.
+ *
+ * Known limits, deliberately not chased: a wrapper's option ARGUMENT is not modelled
+ * (`env -i git push` matches, `sudo -u bob git push` does not — `bob` reads as the
+ * command); a local script named `git`/`gh` in PATH matches on name alone.
  *
  * Callers gate this on config `require_aimee_git` (default on) and deny: a delegate
  * runs no git/forge command itself; it uses aimee's git_* tools, which execute on

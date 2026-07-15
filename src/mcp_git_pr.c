@@ -307,34 +307,42 @@ cJSON *handle_git_pr(cJSON *args)
       /* CI must be fully green before the merge (operator ruling 2026-07-15). Reuses
        * the same `gh pr checks` read (and its 0/1/8 tri-state) as action=checks, so
        * this stays correct for a detached workspace, where the command is marshalled
-       * to the client that holds the creds. A PR with zero reported checks merges
-       * (nothing to fail); anything pending, failed, or undetermined refuses — the
-       * caller can re-try once checks settle. */
+       * to the client that holds the creds.
+       *
+       * Fails CLOSED on anything it cannot positively classify. In particular the
+       * verdict is taken from gh's EXIT CODE, never inferred from parsed counters:
+       * a zero count means "no rows parsed", which is equally true of genuinely
+       * zero checks and of output we failed to understand (or a NULL from an alloc
+       * failure) — merging on that would be a fail-open. Only gh's own explicit
+       * "no checks reported" is accepted as genuinely zero, which the operator
+       * ruling says may merge (nothing to fail). */
       {
          char ccmd[128];
          snprintf(ccmd, sizeof(ccmd), "gh pr checks %d 2>&1", pr_num);
          int crc = 0;
          char *cout = mcp_git_run(ccmd, &crc);
-         if (crc != 0 && crc != 1 && crc != 8) /* not a checks verdict -> undetermined */
+         const char *why = NULL;
+         if (!cout)
+            why = "could not read CI status (no output)";
+         else if (strstr(cout, "no checks reported"))
+            why = NULL; /* genuinely zero checks -> nothing to fail -> merge */
+         else if (crc == 0)
+            why = NULL; /* gh: every check passed */
+         else if (crc == 8)
+            why = "CI has not finished; re-try once checks settle";
+         else if (crc == 1)
+            why = "CI is not green (at least one check failed)";
+         else
+            why = "could not read CI status";
+         if (why)
          {
-            cJSON *e = mcp_error("error: merge blocked — could not read CI status: %s",
-                                 cout ? cout : "unknown");
+            char msg[320];
+            snprintf(msg, sizeof(msg), "error: merge blocked — %s. A merge requires fully green CI.",
+                     why);
             free(cout);
-            return e;
+            return mcp_text(msg);
          }
-         int total = 0, pending = 0, failed = 0, passed = 0;
-         if (cout)
-            checks_parse_plain_output(cout, &total, &pending, &failed, &passed);
          free(cout);
-         if (failed > 0 || pending > 0)
-         {
-            char why[192];
-            snprintf(why, sizeof(why),
-                     "error: merge blocked — CI is not green (%d failed, %d pending, %d passed of "
-                     "%d). A merge requires fully green CI.",
-                     failed, pending, passed, total);
-            return mcp_text(why);
-         }
       }
 
       char cmd[512];

@@ -196,24 +196,24 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
     * well-ordered workflow. A zero-check PR merges (nothing to fail); an
     * undetermined verdict never does. */
    char cierr[160];
-   switch (git_pr_ci_via_api(NULL, forge_dir(repo), num, cierr, sizeof cierr))
+   git_pr_ci_t ci = git_pr_ci_via_api(NULL, forge_dir(repo), num, cierr, sizeof cierr);
+   if (!git_pr_ci_permits_merge(ci))
    {
-   case GIT_PR_CI_SUCCESS:
-   case GIT_PR_CI_NONE: /* no CI reported for the head commit -> nothing to fail */
-      break;
-   case GIT_PR_CI_PENDING:
-      /* Still running: retry the node rather than park -- the engine loops on
-       * NOT_MERGEABLE, and CI finishing is exactly what we are waiting for. */
-      return WFE_MERGE_NOT_MERGEABLE;
-   case GIT_PR_CI_FAILURE:
-      /* Red CI is definitive: park for a human instead of looping. The ci node owns
-       * the bounded red-CI retry (AIMEE_AUTONOMY_CI_RETRY_MAX); reaching merge with a
-       * red head means the run is out of order, which a human should see. */
-      aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: CI is not green", num);
-      return WFE_MERGE_ERROR;
-   default: /* GIT_PR_CI_ERROR -> undetermined -> never merge */
-      aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: CI status unknown: %s", num,
-                cierr);
+      /* PENDING loops; everything else parks. The two merge seams answer "pending"
+       * differently on purpose, because their retry models differ: here the engine
+       * re-runs the node on NOT_MERGEABLE, so a transient pending resolves itself
+       * with no human involved. server_pipeline_merge has no such loop -- its caller
+       * drives retries via pipeline.advance -- so it parks in *_merge_pending and is
+       * re-checked on the next advance. Both refuse to merge on pending; only the
+       * mechanism for coming back differs.
+       *
+       * Red CI does NOT loop: the ci node owns the bounded red-CI retry
+       * (AIMEE_AUTONOMY_CI_RETRY_MAX), so reaching merge with a red head means the
+       * run is out of order and a human should see it. */
+      if (ci == GIT_PR_CI_PENDING)
+         return WFE_MERGE_NOT_MERGEABLE;
+      aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: CI not green (%s)", num,
+                ci == GIT_PR_CI_FAILURE ? "failed" : cierr);
       return WFE_MERGE_ERROR;
    }
 
