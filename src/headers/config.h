@@ -437,6 +437,20 @@ typedef struct config
     * through git_commit on the server, which supplies its own identity). */
    int require_aimee_git;
 
+   /* Delegate sandbox: run a delegate's shell and file ops INSIDE its own
+    * container instead of in-process in aimee-server (delegate-sandbox proposal).
+    *
+    * DEFAULT OFF, and deliberately so. This moves where every delegate's shell
+    * runs — a delegate whose image lacks the toolchain stops being able to
+    * `verify`, which is not a subtle failure but is a total one. Off, nothing
+    * changes: td_bash falls through to run_cmd exactly as today.
+    *
+    * Enabling it is only half a sandbox on its own: it puts the delegate in a
+    * container but does not yet take its network. The order matters and is the
+    * lesson of PR #1351 — a capability must exist on aimee's side BEFORE the
+    * environment removes it, or the rule is just breakage. */
+   int delegate_sandbox;
+
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a
     * proxied /v1/messages or /v1/chat/completions request, so the served model is

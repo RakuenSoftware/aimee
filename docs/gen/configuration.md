@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (180)
+## CLI-settable keys (181)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -53,6 +53,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
+| `delegate_sandbox` | bool | Run a delegate's shell and file ops INSIDE its own container (via the `docker` delegate backend) instead of in-process in aimee-server. Off (the default) a delegate's `bash`/read/write/list run with aimee-server's filesystem and environment. This is not yet a full sandbox on its own: the container still has a network, so `require_aimee_git` and the credential strip remain the live boundary. The delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an unreachable daemon means every delegate runs on the host (default off). |
 | `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
 | `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |
 | `dogfood_autolabel_repeat_question` | bool | Auto-label repeated-question turns. |

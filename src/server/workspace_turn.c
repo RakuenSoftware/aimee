@@ -11,6 +11,7 @@
 #include "util.h"
 #include "workspace_mirror.h"
 #include "workspace_provider.h"
+#include "workspace_provider_container.h"
 #include "workspace_provider_detached.h"
 #include "workspace_runner_registry.h"
 
@@ -26,6 +27,13 @@ extern char **environ;
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
 static __thread int t_turn_bound;
+/* Same, for a delegate turn bound to its own container. Held separately from
+ * t_turn_detached because this one owns a CONTAINER: unbinding has to release it,
+ * not just drop the pointer, or every delegate turn leaks a container. */
+static __thread ws_container_provider_t t_turn_container;
+static __thread delegate_backend_t *t_turn_container_backend;
+static __thread void *t_turn_container_state;
+static __thread int t_turn_container_hibernate;
 /* For a `mirror` workspace the turn acts directly on a server-side reconstructed
  * worktree (the `shared` provider), so instead of binding a provider we remap
  * the turn's cwd into that worktree and stash the drift line to surface. */
@@ -286,12 +294,75 @@ int workspace_turn_bind_active(const char *cwd)
    return 0; /* cwd not in any registered workspace */
 }
 
+int workspace_turn_bind_container(const char *task_id, const char *image)
+{
+   if (!task_id || !task_id[0])
+      return 0;
+
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.delegate_sandbox)
+      return 0; /* default off: the delegate keeps running in-process, as today */
+
+   delegate_backend_t *b = delegate_backend_lookup("docker");
+   if (!b || !b->acquire)
+   {
+      /* Say so rather than fall through silently. Falling through means the
+       * delegate runs on the host while the operator believes it is sandboxed —
+       * the one outcome this feature exists to prevent, and the shape of every
+       * "enabled but inert" bug we have shipped. */
+      LOG_ERROR("delegate-sandbox",
+                "delegate_sandbox is ON but the docker backend is unavailable; delegate '%s' would "
+                "run on the HOST — refusing to bind, the turn stays in-process and unsandboxed",
+                task_id);
+      return 0;
+   }
+
+   delegate_backend_config_t bcfg = {
+       .image = (image && image[0]) ? image : NULL, .host = NULL, .hibernate_on_exit = 0};
+   void *state = NULL;
+   if (b->acquire(b, task_id, &bcfg, &state) != 0 || !state)
+   {
+      LOG_ERROR("delegate-sandbox",
+                "delegate '%s': could not acquire a container (image=%s); the turn stays "
+                "in-process and unsandboxed",
+                task_id, bcfg.image ? bcfg.image : "<default>");
+      return 0;
+   }
+
+   if (ws_container_provider_init(&t_turn_container, b, state) != 0)
+   {
+      b->release(b, state, 0);
+      return 0;
+   }
+   workspace_provider_set_active(&t_turn_container.base);
+   t_turn_container_backend = b;
+   t_turn_container_state = state;
+   t_turn_container_hibernate = bcfg.hibernate_on_exit;
+   t_turn_bound = 1;
+   LOG_INFO("delegate-sandbox", "delegate '%s': file/exec bound to its container (image=%s)",
+            task_id, bcfg.image ? bcfg.image : "<default>");
+   return 1;
+}
+
 void workspace_turn_unbind_active(void)
 {
    if (t_turn_bound)
    {
       workspace_provider_clear_active(); /* no-op for the mirror path (none bound) */
       t_turn_bound = 0;
+   }
+   /* Release the container AFTER clearing the active pointer: it aliases
+    * &t_turn_container.base, and an op racing a released container is worse than
+    * one that finds no provider. Unconditional — a leaked container outlives the
+    * turn and pins its workspace. */
+   if (t_turn_container_backend && t_turn_container_state)
+   {
+      t_turn_container_backend->release(t_turn_container_backend, t_turn_container_state,
+                                        t_turn_container_hibernate);
+      t_turn_container_backend = NULL;
+      t_turn_container_state = NULL;
+      t_turn_container_hibernate = 0;
    }
    t_turn_cwd[0] = '\0';
    t_turn_drift[0] = '\0';

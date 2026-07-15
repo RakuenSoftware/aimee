@@ -18,6 +18,22 @@
  * pair it with workspace_turn_unbind_active after the turn), 0 otherwise. */
 int workspace_turn_bind_active(const char *cwd);
 
+/* Bind this thread's file/exec tools to a DELEGATE'S OWN CONTAINER for the turn:
+ * acquire a container from the `docker` backend keyed by `task_id`, and route
+ * td_bash / read / write / list through it. `image` may be NULL for the backend's
+ * default. Returns 1 if bound (pair it with workspace_turn_unbind_active, which
+ * also RELEASES the container), 0 otherwise.
+ *
+ * Returns 0 — leaving the turn in-process, exactly as today — when the
+ * `delegate_sandbox` config dial is off (the default), or when the docker backend
+ * is unavailable, or the container cannot be acquired. Those last two are LOGGED at
+ * ERROR: falling back silently would run the delegate on the host while the
+ * operator believes it is sandboxed.
+ *
+ * Unlike workspace_turn_bind_active this is not cwd-driven: a container provider
+ * needs a live container handle, so the caller that owns the delegate decides. */
+int workspace_turn_bind_container(const char *task_id, const char *image);
+
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
 void workspace_turn_unbind_active(void);

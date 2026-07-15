@@ -388,6 +388,10 @@ void ws_provider_free_list(char **entries, int count)
    free(entries);
 }
 
+/* "container" is deliberately absent: a container provider needs a live container
+ * handle, so it is bound per delegate, never named in config. Mapping the name here
+ * would let a workspace ask for `container` and silently get `shared` — the delegate
+ * would run on the host believing it was sandboxed. See WS_PROVIDER_CONTAINER. */
 ws_provider_kind_t ws_provider_kind_from_string(const char *name)
 {
    if (name && strcmp(name, "detached") == 0)
@@ -405,6 +409,11 @@ const char *ws_provider_kind_to_string(ws_provider_kind_t kind)
       return "detached";
    case WS_PROVIDER_MIRROR:
       return "mirror";
+   case WS_PROVIDER_CONTAINER:
+      /* Must be named, even though config can never select it: this string is what
+       * logs and /v1 report, and a container provider reported as "shared" would
+       * describe a sandboxed delegate as running on the host. */
+      return "container";
    default:
       return "shared";
    }

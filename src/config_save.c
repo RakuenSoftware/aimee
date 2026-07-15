@@ -862,6 +862,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "require_aimee_memory", 0);
    if (!cfg->require_aimee_git) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "require_aimee_git", 0);
+   if (cfg->delegate_sandbox) /* default-off: persist only when enabled */
+      cJSON_AddBoolToObject(root, "delegate_sandbox", 1);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */
