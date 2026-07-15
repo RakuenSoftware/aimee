@@ -37,6 +37,8 @@
 #include <sys/wait.h>
 #include <termios.h>
 
+#endif
+
 /* Formerly in the retired frontend's internal header, which went with it. Only
  * this file uses them now, so they live here rather than in a header. */
 #define CHAT_STREAM_PATH_MAX              4096
@@ -49,11 +51,7 @@ typedef struct
    void *userdata;
    int aborted;
 } builtin_chat_stream_control_t;
-#endif
 
-#define CLI_TUI_MOUSE_SCROLL_LINES          3
-#define CLI_TUI_COMPOSER_PAD_TOP            1
-#define CLI_TUI_COMPOSER_PAD_BOTTOM         1
 #define BUILTIN_CHAT_STREAM_IDLE_TIMEOUT_MS -1
 #define BUILTIN_CHAT_SEND_OK                0
 #define BUILTIN_CHAT_SEND_ERROR             1
