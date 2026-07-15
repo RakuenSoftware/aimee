@@ -48,6 +48,50 @@ static void test_full_stack_resolves_union(void)
    printf("  code_roles_resolve_edit_file: ok\n");
 }
 
+/* A coding delegate must resolve the git WRITE tools, and a reviewer must not.
+ *
+ * Registering a tool is not the same as a role being able to call it:
+ * agent_tools_filter_for_role drops anything the role's toolset does not name. A
+ * live delegate reported "there is no git_commit tool in my available toolset"
+ * while the builtin registry carried it and the server had it wired — the tools
+ * were being filtered straight back out here. require_aimee_git tells delegates to
+ * use these instead of a shell, so if this resolution regresses, the rule starts
+ * pointing at tools the delegate cannot see. */
+static void test_git_write_tools_reach_coding_roles_only(void)
+{
+   toolset_registry_t reg;
+   toolset_registry_init(&reg);
+   char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
+   char err[TOOLSET_ERROR_MAX] = "";
+
+   /* code (and full_stack, which the code/refactor/execute roles actually map to) */
+   const char *coding[] = {"code", "full_stack"};
+   for (size_t i = 0; i < sizeof(coding) / sizeof(coding[0]); i++)
+   {
+      int n = toolset_resolve(&reg, coding[i], tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
+      assert(n > 0);
+      assert(has_tool(tools, n, "git_commit"));
+      assert(has_tool(tools, n, "git_push"));
+      assert(has_tool(tools, n, "git_branch"));
+      assert(has_tool(tools, n, "git_pr"));
+      assert(has_tool(tools, n, "git_status")); /* the read-only set still comes too */
+   }
+
+   /* A reviewer reads; it does not commit. `git` (read-only) is inherited by
+    * readonly -> review, so the write set had to be a SEPARATE toolset or every
+    * reviewer would have silently gained push. */
+   const char *readers[] = {"review", "review_indexed", "readonly"};
+   for (size_t i = 0; i < sizeof(readers) / sizeof(readers[0]); i++)
+   {
+      int n = toolset_resolve(&reg, readers[i], tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
+      assert(n > 0);
+      assert(!has_tool(tools, n, "git_commit"));
+      assert(!has_tool(tools, n, "git_push"));
+      assert(!has_tool(tools, n, "git_pr"));
+   }
+   printf("  git_write_tools_reach_coding_roles_only: ok\n");
+}
+
 /* review_indexed gives a reviewer aimee's branch-indexed capabilities and NO
  * filesystem/git tools, so a caller-provided-diff review cannot fall back to
  * reading a worktree it does not have. */
@@ -213,6 +257,7 @@ int main(void)
 {
    printf("test_toolset:\n");
    test_full_stack_resolves_union();
+   test_git_write_tools_reach_coding_roles_only();
    test_review_indexed_excludes_filesystem();
    test_cycle_rejected();
    test_unknown_tool_dropped();
