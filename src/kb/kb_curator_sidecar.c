@@ -95,7 +95,14 @@ void kb_curator_describe_wait_status(int status, int timeout_s, char *errbuf, si
    {
       int code = WEXITSTATUS(status);
       if (timeout_s > 0 && code == 124)
-         snprintf(errbuf, errlen, "sidecar timed out after %ds", timeout_s);
+         /* 124 is timeout(1)'s deadline signal, but it also propagates a wrapped
+          * command's own exit code — so a sidecar that exits 124 itself is
+          * indistinguishable from here. Same honesty as the 128+n case below:
+          * name the likely cause without asserting it as fact. */
+         snprintf(errbuf, errlen,
+                  "sidecar exited 124 (timeout after %ds, or the command itself "
+                  "exited 124)",
+                  timeout_s);
       else if (code > 128)
          /* A shell reports a signal-killed child as 128+n, so 137 is very likely
           * an OOM kill — but a process can also exit(137) of its own accord, and
@@ -159,13 +166,27 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
     * python …`, builtins, operators) — passing it as timeout's own argv would
     * break those and let compound commands escape the bound.
     *
-    * Both cmd and tmppath are shell-QUOTED rather than interpolated raw: the
-    * timeout wrapper means a second shell parses this line, and a command
-    * containing a quote, $ or backtick would otherwise be re-interpreted —
-    * silently changing the meaning of commands that worked under a bare popen. */
-   char qcmd[2176]; /* worst case: every byte of a 512-char command is a quote */
+    * The invariant is that adding the timeout wrapper changes NOTHING about how
+    * the command is interpreted, which takes two things:
+    *
+    *  - QUOTE the script. A second shell parses this line, so a command
+    *    containing a quote, $ or backtick would otherwise be re-parsed (and
+    *    $VARs expanded twice) — commands that worked under the bare popen.
+    *
+    *  - Keep the redirection INSIDE the command's own parse context. The old
+    *    form was `sh -c "<cmd> < tmp"`, where `< tmp` is parsed alongside cmd:
+    *    for `a | b` it binds to b, the last pipeline command. Redirecting the
+    *    wrapper's stdin instead would hand the file to `a` — a silent change in
+    *    meaning. So append the redirection to the script and pass the path as a
+    *    positional ($1) rather than interpolating it: `sh -c '<cmd> < "$1"' sh
+    *    <tmppath>`. $1 is inside single quotes, so only the INNER shell expands
+    *    it, and the path never re-parses. */
+   char script[640];
+   int sn = snprintf(script, sizeof(script), "%s < \"$1\"", cmd);
+   char qscript[2688]; /* worst case: every byte of the script is a quote */
    char qtmp[1040];
-   if (kb_curator_shell_quote(cmd, qcmd, sizeof(qcmd)) != 0 ||
+   if (sn < 0 || (size_t)sn >= sizeof(script) ||
+       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0 ||
        kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
    {
       unlink(tmppath);
@@ -174,9 +195,9 @@ char *kb_curator_sidecar_run(const char *cmd, const char *json_input, int out_ca
       return NULL;
    }
 
-   char full_cmd[3328];
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s < %s", CS_SIDECAR_TIMEOUT_S,
-            qcmd, qtmp);
+   char full_cmd[3840];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s sh %s", CS_SIDECAR_TIMEOUT_S,
+            qscript, qtmp);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)

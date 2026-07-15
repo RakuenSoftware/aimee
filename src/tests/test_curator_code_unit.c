@@ -456,9 +456,12 @@ static void test_describe_wait_status(void)
    assert(strcmp(out, "sidecar exited 0") == 0);
 
    /* (c) timeout(1) reports its wall-clock cap as exit 124 — named only when the
-    *     caller says it wrapped the command, and echoing the cap it was given. */
+    *     caller says it wrapped the command, and echoing the cap it was given.
+    *     Hedged, because timeout also PROPAGATES a command's own exit 124: the
+    *     two are indistinguishable, so the message must not assert either. */
    kb_curator_describe_wait_status(124 << 8, 300, out, sizeof(out));
-   assert(strcmp(out, "sidecar timed out after 300s") == 0);
+   assert(strcmp(out,
+                 "sidecar exited 124 (timeout after 300s, or the command itself exited 124)") == 0);
 
    /* (d) Same status WITHOUT a timeout wrapper is just the command's exit code;
     *     claiming a timeout there would be a lie (kb_curator_sidecar.c does not
@@ -558,6 +561,23 @@ static void test_sidecar_quoting_end_to_end(void)
    assert(out2 != NULL);
    assert(strcmp(out2, "a b") == 0);
    free(out2);
+
+   /* The redirection must stay in the COMMAND's parse context, not the wrapper's.
+    * A pipeline is where the two diverge: under the bare popen the line is
+    * `printf ABC | wc -c < tmp`, so `< tmp` binds to wc (the LAST command) and
+    * wc counts the 2-byte request. Redirecting the timeout wrapper's stdin
+    * instead would feed tmp to printf and leave wc counting printf's 3 bytes —
+    * a silent change of meaning. Asserting 2 pins the bare-popen semantics.
+    *
+    *   bare popen:                  2
+    *   wrapper stdin redirect:      3   <- the bug
+    *   redirect inside, path as $1: 2   <- preserved
+    */
+   char *out3 = kb_curator_sidecar_run("printf ABC | wc -c", "{}", 256, err, sizeof(err));
+   assert(out3 != NULL);
+   long counted = strtol(out3, NULL, 10);
+   assert(counted == 2);
+   free(out3);
 
    printf("  PASS: test_sidecar_quoting_end_to_end\n");
 }

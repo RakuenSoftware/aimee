@@ -418,12 +418,17 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
     * builtins, operators) — passing it as timeout's own argv would break those
     * and let compound commands escape the bound.
     *
-    * cmd and tmppath are shell-QUOTED: the timeout wrapper hands this line to a
-    * second shell, so interpolating them raw would let an embedded quote, $ or
-    * backtick re-parse the command (and expand $VARs twice). */
-   char qcmd[2176]; /* worst case: every byte of a 512-char command is a quote */
+    * The script is shell-QUOTED and the redirection stays inside the command's
+    * own parse context, passing the path as $1 — see kb_curator_sidecar_run for
+    * the full reasoning. Raw interpolation would let an embedded quote/$/backtick
+    * re-parse the command, and redirecting the wrapper's stdin instead of the
+    * command's would hand the file to the wrong end of a pipeline. */
+   char script[640];
+   int sn = snprintf(script, sizeof(script), "%s < \"$1\"", cmd);
+   char qscript[2688]; /* worst case: every byte of the script is a quote */
    char qtmp[1040];
-   if (kb_curator_shell_quote(cmd, qcmd, sizeof(qcmd)) != 0 ||
+   if (sn < 0 || (size_t)sn >= sizeof(script) ||
+       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0 ||
        kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
    {
       unlink(tmppath);
@@ -431,9 +436,9 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
       return NULL;
    }
 
-   char full_cmd[3328];
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s < %s", CCU_SIDECAR_TIMEOUT_S,
-            qcmd, qtmp);
+   char full_cmd[3840];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s sh %s", CCU_SIDECAR_TIMEOUT_S,
+            qscript, qtmp);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)
