@@ -193,6 +193,9 @@ to exist on aimee's side *before* the check that removes it from the delegate.
 - {id: 10, tier: integration, check: "a REVIEW delegate resolves read_file/grep/list_files and can open a file named in the diff — review_indexed's filesystem exclusion exists only because the worktree was unreachable, and must be lifted with the mount, not kept"}
 - {id: 11, tier: deployment, check: "a review delegate's /workspace is mounted READ-ONLY: a write from a reviewer fails at the mount, not at a guard it could be talked out of"}
 - {id: 12, tier: integration, check: "AIMEE_WORKSPACE_NOTE.txt (the 'repository is NOT present' admission) is GONE, not merely stale — if a workspace can still be empty, this proposal has not landed"}
+- {id: 13, tier: integration, check: "ISOLATION: a delegate's writes never reach a tree it shares. Its own worktree mounts rw; a shared tree mounts :ro at the docker mount, not merely behind the write guard. A write-capable delegate with no worktree of its own is left UNSANDBOXED rather than handed a read-only tree it cannot use"}
+- {id: 14, tier: security, check: "the mounted tree is bounded by the operator's REGISTERED workspace roots, canonicalized first. Repository-ness is NOT authorization (`mkdir .git` satisfies it); a root of `/` authorizes nothing"}
+- {id: 15, tier: deployment, check: "a container mounting the caller's real tree runs as the server's uid:gid, so a delegate cannot leave root-owned files in the user's checkout (git would then refuse the tree for dubious ownership)"}
 - {id: 7, tier: hardware, check: "the wfe implement stage completes end-to-end on .254 with the sandbox active, including verify"}
 - {id: 8, tier: integration, check: "with the sandbox active, wfe_shell_invokes_git's documented evasions (base64, subshell, env indirection) reach the forge in NEITHER case — belt-and-braces, not the defence"}
 ```

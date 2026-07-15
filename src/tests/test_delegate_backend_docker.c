@@ -178,6 +178,7 @@ static const char *write_fake_docker_fixture(void)
            "    exit 1\n"
            "    ;;\n"
            "  create)\n"
+           "    printf '%%s\\n' \"$@\" > \"$STATE_DIR/create.argv\"\n"
            "    shift\n"
            "    name=\"\"\n"
            "    while [ $# -gt 0 ]; do\n"
@@ -448,6 +449,196 @@ static void test_build_exec_command_rejects_invalid(void)
    printf("  PASS: test_build_exec_command_rejects_invalid\n");
 }
 
+/* The create argv the fake docker was invoked with (NULL if it never ran).
+ * Needed to assert WHAT gets mounted: the caller's tree, or a scratch dir. */
+static char *read_fake_docker_create_argv(void)
+{
+   char path[256];
+   snprintf(path, sizeof(path), "/tmp/aimee-fake-docker-state-%d/create.argv", (int)getpid());
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return NULL;
+   char *buf = calloc(1, 8192);
+   if (buf)
+      (void)!fread(buf, 1, 8191, f);
+   fclose(f);
+   return buf;
+}
+
+/* cfg.workspace: mount the caller's tree AS the workspace.
+ *
+ * Without it the backend mints an empty scratch dir under $XDG_CACHE_HOME and
+ * mounts THAT — which is exactly why a delegate could not read its own subject:
+ * it opens the file named in its task and finds nothing, then reasons about code
+ * it cannot see. This is the difference between a sandbox and a blindfold. */
+static void test_docker_mounts_caller_workspace(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   /* A real git checkout: the backend refuses to bind-mount anything that is not
+    * one, because the caller derives the path from a session cwd. */
+   char tree[256];
+   snprintf(tree, sizeof(tree), "/tmp/aimee-ws-tree-%d", (int)getpid());
+   mkdir(tree, 0700);
+   char gitdir[300];
+   snprintf(gitdir, sizeof(gitdir), "%s/.git", tree);
+   mkdir(gitdir, 0700);
+
+   delegate_backend_config_t cfg = {0};
+   cfg.workspace = tree;
+   void *state = NULL;
+   assert(b->acquire(b, "task-ws-1", &cfg, &state) == 0);
+   assert(state != NULL);
+   /* The docker create argv must carry `-v <tree>:<workdir>` — the tree itself,
+    * not a scratch dir. The fixture records the argv it was called with. */
+   char *log = read_fake_docker_create_argv();
+   assert(log != NULL);
+   assert(strstr(log, tree) != NULL);
+   /* Must run as the server's uid:gid: root-owned files in the user's checkout
+    * would be unremovable by them and make git refuse the tree entirely. */
+   assert(strstr(log, "--user") != NULL);
+   char uidgid[64];
+   snprintf(uidgid, sizeof(uidgid), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
+   assert(strstr(log, uidgid) != NULL);
+   free(log);
+   b->release(b, state, 0);
+
+   /* read-only mode must reach the docker argv as :ro — the mount is where the
+    * isolation is enforced, not the guard above it. */
+   delegate_backend_config_t rocfg = {0};
+   rocfg.workspace = tree;
+   rocfg.workspace_read_only = 1;
+   void *rostate = NULL;
+   assert(b->acquire(b, "task-ws-ro", &rocfg, &rostate) == 0);
+   char *rolog = read_fake_docker_create_argv();
+   assert(rolog != NULL);
+   assert(strstr(rolog, ":ro") != NULL);
+   free(rolog);
+   b->release(b, rostate, 0);
+
+   char rm[512];
+   snprintf(rm, sizeof(rm), "rm -rf %s", tree);
+   (void)system(rm);
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: docker_mounts_caller_workspace\n");
+}
+
+/* A workspace path that does not exist must be REFUSED, not created.
+ *
+ * The scratch path is ours to mkdir; a caller naming a directory is naming
+ * something it already has. Creating it on their behalf turns a typo into an
+ * empty workspace that looks like it worked — and an empty tree reads to a
+ * delegate as "the code is missing", which is a far worse lie than an error. */
+static void test_docker_refuses_a_missing_workspace(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   char missing[256];
+   snprintf(missing, sizeof(missing), "/tmp/aimee-ws-does-not-exist-%d", (int)getpid());
+   delegate_backend_config_t cfg = {0};
+   cfg.workspace = missing;
+   void *state = NULL;
+   assert(b->acquire(b, "task-ws-2", &cfg, &state) == -1);
+   assert(state == NULL);
+   /* And it must not have created it as a side effect. */
+   struct stat st;
+   assert(stat(missing, &st) != 0);
+
+   /* A regular file is not a tree either. */
+   char afile[256];
+   snprintf(afile, sizeof(afile), "/tmp/aimee-ws-file-%d", (int)getpid());
+   FILE *f = fopen(afile, "w");
+   assert(f != NULL);
+   fputs("x", f);
+   fclose(f);
+   cfg.workspace = afile;
+   assert(b->acquire(b, "task-ws-3", &cfg, &state) == -1);
+   unlink(afile);
+
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: docker_refuses_a_missing_workspace\n");
+}
+
+/* Each of these is a way a delegate could end up reasoning about a tree that is
+ * not the one it was told about — the panel found every one of them. */
+static void test_docker_workspace_validation_refusals(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+   delegate_backend_config_t cfg = {0};
+   void *state = NULL;
+   char base[256];
+   snprintf(base, sizeof(base), "/tmp/aimee-ws-val-%d", (int)getpid());
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", base, base);
+   (void)system(cmd);
+
+   /* Not a git checkout: the caller derives this from a session cwd, so without
+    * the check an unlucky cwd ('/', a secrets dir, the server's own tree) becomes
+    * a read-write bind mount into a delegate container. */
+   char plain[300];
+   snprintf(plain, sizeof(plain), "%s/plain", base);
+   mkdir(plain, 0700);
+   cfg.workspace = plain;
+   assert(b->acquire(b, "task-val-1", &cfg, &state) == -1);
+   assert(state == NULL);
+
+   /* A LINKED worktree (.git is a gitdir POINTER FILE): mounting it alone leaves
+    * git broken inside the container, and broken AFTER the delegate starts work —
+    * looking like a corrupt repo rather than a bad mount. */
+   char wt[300];
+   snprintf(wt, sizeof(wt), "%s/worktree", base);
+   mkdir(wt, 0700);
+   char gitfile[400];
+   snprintf(gitfile, sizeof(gitfile), "%s/.git", wt);
+   FILE *g = fopen(gitfile, "w");
+   assert(g != NULL);
+   fputs("gitdir: /some/host/path/.git/worktrees/x\n", g);
+   fclose(g);
+   cfg.workspace = wt;
+   assert(b->acquire(b, "task-val-2", &cfg, &state) == -1);
+   assert(state == NULL);
+
+   /* A symlink to a valid checkout must not slip past canonicalization: stat()
+    * follows symlinks and so does the daemon, so the mount could land somewhere
+    * the checks never saw. Canonicalized, this one IS a real checkout, so it is
+    * accepted — and the argv must carry the RESOLVED path, not the link. */
+   char realrepo[300], link[300];
+   snprintf(realrepo, sizeof(realrepo), "%s/realrepo", base);
+   mkdir(realrepo, 0700);
+   char rg[400];
+   snprintf(rg, sizeof(rg), "%s/.git", realrepo);
+   mkdir(rg, 0700);
+   snprintf(link, sizeof(link), "%s/link", base);
+   assert(symlink(realrepo, link) == 0);
+   cfg.workspace = link;
+   assert(b->acquire(b, "task-val-3", &cfg, &state) == 0);
+   char *log = read_fake_docker_create_argv();
+   assert(log != NULL);
+   assert(strstr(log, realrepo) != NULL); /* the resolved path */
+   free(log);
+   b->release(b, state, 0);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf %s", base);
+   (void)system(cmd);
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: docker_workspace_validation_refusals\n");
+}
+
 int main(void)
 {
    printf("delegate_backend_docker:\n");
@@ -468,6 +659,9 @@ int main(void)
    test_docker_write_then_read_roundtrip();
    test_docker_path_validation_rejects_escapes();
    test_docker_list_dir_returns_entries();
+   test_docker_mounts_caller_workspace();
+   test_docker_refuses_a_missing_workspace();
+   test_docker_workspace_validation_refusals();
    printf("ok\n");
    return 0;
 }

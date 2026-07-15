@@ -43,6 +43,25 @@ extern "C"
       const char *image;     /* docker image hint, NULL for default */
       const char *host;      /* ssh target host, NULL for local */
       int hibernate_on_exit; /* if 1, release() preserves workspace state */
+      /* Host directory to expose AS the workspace. NULL (the default) keeps the
+       * historical behaviour: the backend mints its own empty scratch dir under
+       * $XDG_CACHE_HOME/aimee/delegate/<task_id>.
+       *
+       * That empty dir is the whole reason a delegate could not read its own
+       * subject. Pointing this at the tree the delegate already has server-side
+       * (its worktree, or the session cwd) gives the container the ENTIRE CURRENT
+       * SOURCE TREE by bind-mount — no copy, no sync, no drift: it IS the tree.
+       *
+       * The backend does NOT create this path; a caller naming a directory that
+       * does not exist is asking to mount something it has not made. */
+      const char *workspace;
+      /* Mount `workspace` READ-ONLY. Required whenever the tree is not the
+       * delegate's own: a delegate's changes must stay inside its container, so a
+       * tree it shares with anything else must be unwritable at the MOUNT — not
+       * merely guarded above it. A guard is a rule; a read-only bind is a property.
+       * Ignored when `workspace` is NULL (the backend's scratch dir is nobody
+       * else's). */
+      int workspace_read_only;
    } delegate_backend_config_t;
 
    /* Result of an `exec` call. `stdout_buf` and `stderr_buf` are
