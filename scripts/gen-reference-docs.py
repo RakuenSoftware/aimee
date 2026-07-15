@@ -325,7 +325,7 @@ SECTION_DESC = {
     "script": "Script-tool allowlist.",
     "search": "Web-search backend (Tavily / SearXNG).",
     "session": "Session / worktree limits.",
-    "skills": "Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects).",
+    "skills": "Skill subsystem (capability, curator, dispatch, eval, review; nested objects).",
     "transport": "Transport tweaks (cache-aware rewrite).",
     "trigger": "Trigger listener (auth, concurrency).",
     "trigger_rules": "Trigger rule definitions (array of objects).",

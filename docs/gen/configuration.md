@@ -260,7 +260,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
 - **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
-- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `manage`, `review`
+- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
 - **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
 - **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
