@@ -22,6 +22,7 @@
 #include "model_registry.h"
 #include "payload_rewrite.h"
 #include "util.h"
+#include "rounds_to_resume.h"
 #include "session_compact.h"
 #include "liveness.h"
 #include "provider_cli_adapter.h"
@@ -676,6 +677,12 @@ native_provider_http:
     * final-response-nudge middleware are not registered — those are
     * delegate-specific.  The while-loop condition (turn < max_t) remains the
     * actual safety net. */
+   /* Post-compaction recovery accounting (see headers/rounds_to_resume.h).
+    * Inactive until a compaction actually happens, so a session that never
+    * compacts never touches it. */
+   rtr_tracker_t rtr;
+   memset(&rtr, 0, sizeof(rtr));
+
    int mw_max_turns = role ? max_t : 0;
    mw_pipeline_t mw_pipeline;
    mw_pipeline_cfgs_t mw_cfgs;
@@ -728,10 +735,16 @@ native_provider_http:
             session_compact_result_t sc_result;
             session_compact(messages, NULL, &sc_result);
             if (sc_result.compacted)
+            {
                aimee_log(LOG_INFO, "agent",
                          "session compacted: %d→%d messages (%d removed, %d repairs)",
                          sc_result.messages_before, sc_result.messages_after,
                          sc_result.messages_removed, sc_result.repairs);
+               /* Arm recovery accounting for the turns after this boundary. The
+                * pre-boundary lookups are only knowable here — session_compact
+                * has just destroyed the messages they came from. */
+               rtr_begin(&rtr, &sc_result);
+            }
             else
             {
                /* Fallback: basic repair + consecutive merge */
@@ -1345,6 +1358,26 @@ native_provider_http:
 
       /* Notify auto-snapshot context of the current turn so file writes can be grouped */
       agent_tools_begin_turn(turn);
+
+      /* Rounds-to-resume accounting: judge what the model ASKED for, before the
+       * tools run — a re-derivation is a re-derivation whether or not it
+       * succeeds. Observation only; nothing here steers the loop. */
+      if (rtr.active)
+      {
+         const char *rtr_names[AGENT_MAX_TOOL_CALLS];
+         const char *rtr_args[AGENT_MAX_TOOL_CALLS];
+         int rtr_n =
+             parsed.call_count < AGENT_MAX_TOOL_CALLS ? parsed.call_count : AGENT_MAX_TOOL_CALLS;
+         for (int i = 0; i < rtr_n; i++)
+         {
+            rtr_names[i] = parsed.calls[i].name;
+            rtr_args[i] = parsed.calls[i].arguments;
+         }
+         if (rtr_observe_turn(&rtr, rtr_names, rtr_args, rtr_n))
+            aimee_log(LOG_INFO, "agent",
+                      "rounds_to_resume=%d rederived_calls=%d basis_sigs=%d basis_dropped=%d",
+                      rtr.rounds_to_resume, rtr.rederived_calls, rtr.sig_count, rtr.sigs_dropped);
+      }
 
       for (int i = 0; i < parsed.call_count; i++)
       {

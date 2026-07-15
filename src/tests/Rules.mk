@@ -353,6 +353,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-backend-docker \
                $(TESTPREFIX)/unit-test-session-compact \
                $(TESTPREFIX)/unit-test-agent-list-handler \
+               $(TESTPREFIX)/unit-test-rounds-to-resume \
                $(TESTPREFIX)/unit-test-session-compact-focused \
                $(TESTPREFIX)/unit-test-compact-prune \
                $(TESTPREFIX)/unit-test-otel \
@@ -892,7 +893,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/tests/test_agent_delegate_root.o $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
                       $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
@@ -907,7 +908,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
 $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
                       $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
@@ -922,7 +923,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
                       $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
@@ -1076,14 +1077,14 @@ $(TESTPREFIX)/unit-test-msg-session-disable: $(OBJDIR)/tests/test_msg_session_di
 
 $(TESTPREFIX)/unit-test-gateway-mutate: $(OBJDIR)/tests/test_gateway_mutate.o \
                      $(OBJDIR)/server/gateway_mutate.o $(OBJDIR)/server/agent_bridge.o \
-                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/tool_call_args.o \
+                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/tool_call_args.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-gateway-mutate-wire: $(OBJDIR)/tests/test_gateway_mutate_wire.o \
                      $(OBJDIR)/server/gateway_mutate_wire.o $(OBJDIR)/server/gateway_mutate.o \
                      $(OBJDIR)/server/msg_session_disable.o $(OBJDIR)/server/gw_mutate_stats.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/session_compact.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o \
                      $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/token_tracker.o \
                      $(OBJDIR)/harness_memory_common.o \
                      $(TEST_CORE_OBJS)
@@ -1174,7 +1175,7 @@ $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
 $(TESTPREFIX)/unit-test-primary-session-adapter: $(OBJDIR)/tests/test_primary_session_adapter.o \
                                $(OBJDIR)/server/primary_session_adapter.o $(OBJDIR)/server/agent_adapter.o \
                                $(OBJDIR)/server/ingress_preinject.o \
-                               $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                               $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                $(OBJDIR)/server/agent_request_shaping.o \
                                $(OBJDIR)/server/context_engine.o \
                                $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -2481,7 +2482,7 @@ $(TESTPREFIX)/unit-test-episode-seal: $(OBJDIR)/tests/test_episode_seal.o $(OBJD
 
 $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
+                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
@@ -2493,7 +2494,7 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_compact_focused.o \
-                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
+                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
@@ -2505,7 +2506,20 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o \
-                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
+                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_request_shaping.o \
+                                          $(OBJDIR)/server/delegate_driver.o \
+                                          $(OBJDIR)/server/delegate_openai.o \
+                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/model_registry.o \
+                                          $(OBJDIR)/server/agent_tools.o \
+                                          $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.o \
+                                          $(OBJDIR)/server/rounds_to_resume.o \
+                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
@@ -3642,7 +3656,7 @@ $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
 
 $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/server/context_engine.o \
-                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
+                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/delegate_driver.o \
@@ -3702,7 +3716,7 @@ $(TESTPREFIX)/unit-test-plugin-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
 $(TESTPREFIX)/unit-test-plugin-loader: $(OBJDIR)/tests/test_plugin_loader.o \
                      $(OBJDIR)/plugin_loader.o $(OBJDIR)/plugin.o $(OBJDIR)/plugin_ctx.o \
                      $(OBJDIR)/memory_provider.o $(OBJDIR)/server/context_engine.o \
-                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
+                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/delegate_driver.o \

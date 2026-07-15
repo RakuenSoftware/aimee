@@ -509,16 +509,22 @@ static uint64_t compact_fnv1a(const char *data)
    return h;
 }
 
+int session_compact_tool_sig(const char *name, const char *args, char *out, size_t out_len)
+{
+   if (!out || out_len == 0 || !compact_tool_is_readonly(name))
+      return 0;
+   snprintf(out, out_len, "%.40s:%016llx", name, (unsigned long long)compact_fnv1a(args));
+   return 1;
+}
+
 /* Record "<name>:<16-hex hash of args>" if read-only and not already present.
  * Deduplicates: the same lookup made twice pre-boundary is one fact, and would
  * otherwise inflate the count. */
 static void add_readonly_sig(session_compact_result_t *out, const char *name, const char *args)
 {
-   if (!compact_tool_is_readonly(name))
-      return;
-
    char sig[SESSION_COMPACT_SIG_LEN];
-   snprintf(sig, sizeof(sig), "%.40s:%016llx", name, (unsigned long long)compact_fnv1a(args));
+   if (!session_compact_tool_sig(name, args, sig, sizeof(sig)))
+      return;
 
    for (int i = 0; i < out->readonly_sig_count; i++)
       if (strcmp(out->readonly_sigs[i], sig) == 0)

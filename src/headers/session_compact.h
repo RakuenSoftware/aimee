@@ -121,6 +121,19 @@ int session_compact_pressure(int prompt_tokens, int completion_tokens, int conte
 int session_compact(struct cJSON *messages, const session_compact_config_t *cfg,
                     session_compact_result_t *out);
 
+/* Compute the read-only signature ("<name>:<16-hex FNV-1a of args>") for a
+ * single tool call.
+ *
+ * Returns 1 and fills `out` if `name` is a tool whose repetition can ONLY mean
+ * the agent lost context (see the list in session_compact.c and why it is not
+ * toolset.c's `readonly` set). Returns 0 and leaves `out` untouched otherwise —
+ * mutating and verifying tools (edit_file, test, bash, verify, ...) are legitimate
+ * to repeat and must never be counted as re-derivation.
+ *
+ * Exposed so the post-boundary comparator computes signatures the same way the
+ * capture does; the tool list and hash live in exactly one place. */
+int session_compact_tool_sig(const char *name, const char *args, char *out, size_t out_len);
+
 /* Produce a structured 11-section summary for a given focus topic without a
  * real messages array.  Builds a minimal synthetic conversation so that
  * ## Active Task is set to `topic`.  All other sections are populated with
