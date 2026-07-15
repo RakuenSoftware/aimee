@@ -751,9 +751,14 @@ static char *td_git_write(cJSON *args, const char *name, const char *dispatch_cw
    cJSON *call = cJSON_Duplicate(args, 1);
    if (!call)
       return safe_strdup("error: out of memory");
-   cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(call, "cwd");
-   if (!jcwd && dispatch_cwd && dispatch_cwd[0])
-      cJSON_AddStringToObject(call, "cwd", dispatch_cwd);
+   /* Fall back to the dispatcher's cwd when the caller named no repo. It must be
+    * `path`, not `cwd`: mcp_chdir_git_root takes args["path"] as its priority-1
+    * candidate and never reads a cwd key, so injecting cwd resolved nothing and the
+    * handler ran wherever the thread happened to be — "fatal: not a git repository"
+    * from a delegate whose worktree was three directories away. */
+   cJSON *jpath = cJSON_GetObjectItemCaseSensitive(call, "path");
+   if (!jpath && dispatch_cwd && dispatch_cwd[0])
+      cJSON_AddStringToObject(call, "path", dispatch_cwd);
 
    cJSON *content = fn(name, call, dispatch_sid);
    cJSON_Delete(call);
