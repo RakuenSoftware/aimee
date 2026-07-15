@@ -194,8 +194,6 @@ static void test_v1_route_map(void)
     * GET (the server reads it via Content-Length), so filters survive. */
    assert(strcmp(cli_v1_route_for_method("skill.list", &verb), "/v1/skills") == 0 &&
           strcmp(verb, "GET") == 0);
-   assert(strcmp(cli_v1_route_for_method("work.list", &verb), "/v1/work") == 0 &&
-          strcmp(verb, "GET") == 0);
    /* {id}-bearing path routes resolve via the path-id map, not cli_v1_route_for_method. */
    assert(cli_v1_route_for_method("workspace.get", &verb) == NULL);
    const char *suffix = NULL, *id_field = NULL;

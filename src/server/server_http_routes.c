@@ -1561,8 +1561,6 @@ static const http_route_t g_v1_routes[] = {
      * exact paths do not collide with the suffixed {id} prefix routes.
      * rules.generate and eval.run are deliberately excluded (LLM/long-running —
      * see docs/v1-op-parity-buildout.md). */
-    {"POST", "/v1/work/add_batch", NULL, RM_EXACT, "work.add_batch", 0, rh_dispatch_op},
-    {"POST", "/v1/work/sync_proposals", NULL, RM_EXACT, "work.sync_proposals", 0, rh_dispatch_op},
     {"POST", "/v1/wm/context", NULL, RM_EXACT, "wm.context", 0, rh_dispatch_op},
     {"POST", "/v1/wm/get", NULL, RM_EXACT, "wm.get", 0, rh_dispatch_op},
     {"POST", "/v1/skills/autostub", NULL, RM_EXACT, "skill.autostub", 0, rh_dispatch_op},
