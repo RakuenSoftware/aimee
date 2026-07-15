@@ -433,7 +433,7 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
     * No aimee route, no restriction. */
    config_t spawn_cfg;
    int strip_forge_creds = ((config_load(&spawn_cfg) != 0) || spawn_cfg.require_aimee_git) &&
-                           git_cred_forge_configured(NULL);
+                           git_cred_forge_configured();
 
    /* Resolve the delegate's aimee endpoint before forking (aimee_home may read/
     * allocate). See delegate_child_export_aimee_endpoint. */

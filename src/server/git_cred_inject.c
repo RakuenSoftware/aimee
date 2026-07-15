@@ -3,6 +3,7 @@
 #include "git_cred_inject.h"
 #include "forge_credentials.h" /* forge_cred_askpass_shim / forge_cred_server_identity */
 #include "git_forge_vault.h"   /* git_forge_vault_token */
+#include "git_host_cred.h"     /* git_host_cred_list — "is git configured at all?" */
 #include "git_host_resolve.h"  /* git_host_resolve_token (per-host vault seam) */
 #include "git_ssh_agent.h"     /* git_ssh_agent_ensure */
 
@@ -198,10 +199,18 @@ int git_cred_inject_resolve_token(const char *principal, const char *remote_url,
    return resolve_token(principal, remote_url, repo_dir, preferred_token, out, cap);
 }
 
-int git_cred_forge_configured(const char *repo_dir)
+int git_cred_forge_configured(void)
 {
+   /* Any per-host vault entry means git is configured, whatever repo is in play.
+    * Host NAMES only — git_host_cred_list never returns tokens, so this asks the
+    * question without materialising a secret. */
+   char hosts[1][GIT_HOST_MAX];
+   if (git_host_cred_list(hosts, 1) > 0)
+      return 1;
+
+   /* Else the server's own identity (a forge App installation / AIMEE_FORGE_TOKEN). */
    char token[GIT_CRED_TOKEN_MAX] = {0};
-   int have = (resolve_token(NULL, NULL, repo_dir, NULL, token, sizeof(token)) == 1 && token[0]);
+   int have = (forge_cred_server_identity(token, sizeof(token), NULL, 0) == 1 && token[0]);
    volatile char *p = (volatile char *)token; /* never let the token outlive the check */
    for (size_t i = 0; i < sizeof(token); i++)
       p[i] = 0;
