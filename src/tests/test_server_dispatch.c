@@ -819,58 +819,6 @@ int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "primary.clear");
 }
-int handle_work_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.add");
-}
-int handle_work_add_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.add_batch");
-}
-int handle_work_claim(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.claim");
-}
-int handle_work_complete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.complete");
-}
-int handle_work_fail(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.fail");
-}
-int handle_work_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.list");
-}
-int handle_work_board(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.board");
-}
-int handle_work_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.cancel");
-}
-int handle_work_release(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.release");
-}
-int handle_work_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.clear");
-}
-int handle_work_gc(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.gc");
-}
-int handle_work_sync_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.sync_proposals");
-}
-int handle_work_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   return stub_handler(conn, "work.stats");
-}
 int handle_attempt_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "attempt.record");

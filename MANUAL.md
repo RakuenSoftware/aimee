@@ -576,7 +576,9 @@ installs and enables service units where supported; otherwise start the server
 with `aimee server start`. Commands are grouped into tiers, **core** (shown by
 `aimee help`), **advanced**, and **admin** (both shown by `aimee help --all`).
 
-Bare `aimee` (or `aimee chat`) launches the interactive primary-agent chat TUI.
+Bare `aimee` prints usage. There is no built-in interactive chat client: talk to
+the primary agent through any OpenAI-compatible front end (see below), the web
+chat, or `aimee acp-serve` from an ACP editor such as Zed.
 
 ---
 
@@ -678,14 +680,6 @@ routes. Use `aimee delegate plan` and `aimee delegate launch` for the currently
 routed work-packet flow.
 
 See [§14](#14-roadmaps-and-the-autonomous-loop).
-
-### 7.7 Work queue, `aimee work`
-
-Inter-session task queue (claim/complete coordination).
-
-- `work add` · `work add-batch [--from-proposals]` · `work claim` · `work complete` · `work fail`.
-- `work list` · `work board [--history ITEM]` · `work stats`.
-- `work cancel` · `work release` · `work clear` · `work gc [--max-age N]` · `work sync-proposals`.
 
 See [§15](#15-the-work-queue).
 
@@ -1049,20 +1043,6 @@ The routed path today is reviewed delegate packet planning plus coordinated jobs
 
 ---
 
-## 15. The work queue
-
-The work queue coordinates tasks across sessions: one session adds items,
-another claims and completes them, with stale-claim garbage collection.
-
-```bash
-aimee work add "Fix flaky test in auth_test.c"
-aimee work add-batch --from-proposals      # seed from accepted proposals
-aimee work claim                            # take the next ready item
-aimee work complete <id>                    # or: work fail <id>
-aimee work board                            # kanban view
-aimee work gc --max-age 24                  # release stale claims
-```
-
 `work sync-proposals` closes items whose underlying proposal has moved;
 `work stats` reports queue health.
 
@@ -1287,7 +1267,7 @@ HTTP API generated from [`api/openapi-v1.yaml`](api/openapi-v1.yaml).
 |------|-------------|-------|
 | Claude Code | Hooks + MCP, or any primary model via the Anthropic ingress | `./install.sh` / `aimee claude-proxy enable` |
 | Codex CLI | Hooks + MCP + local plugin, or any primary model via the Responses ingress | `./install.sh` / `~/.codex/config.toml` |
-| OpenCode | TUI front end (`opencode attach`), any primary model via the OpenAI-compatible ingress | `./install.sh` |
+| OpenCode | Any primary model via the OpenAI-compatible ingress | `./install.sh` |
 | Gemini CLI | Hooks | `./install.sh` |
 | Mistral Vibe | Provider-CLI primary + subscription-plan delegates (incl. `mistral-plan`) | `aimee agent setup mistral-plan` |
 | GitHub Copilot | MCP server | `./install.sh` |
@@ -1366,8 +1346,8 @@ and swaps the model. Switch models with `aimee primary <agent>`.
 
 Tools that speak the OpenAI Chat Completions wire format point at
 `POST /v1/chat/completions` (SSE streaming supported) and run on aimee's primary
-agent the same way. This covers OpenCode (also launchable as a TUI through
-`opencode attach`), VS Code configured with aimee as an OpenAI-compatible model
+agent the same way. This covers OpenCode, VS Code configured with aimee as an
+OpenAI-compatible model
 (see [docs/VSCODE.md](docs/VSCODE.md)), and any custom client. Whatever front end
 you choose, the memory, guardrails, and delegation are identical because they
 live in the shared server and KB, not in the tool.

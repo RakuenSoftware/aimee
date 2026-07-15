@@ -92,9 +92,9 @@ toolset); aimee delegates are the only sub-agent mechanism.
 
 ## Using a persona
 
-- **In the OpenCode TUI:** `/persona <name>` switches the session's persona.
-  `/persona` (no argument) shows a **numbered list** to pick from, reply with a
-  persona's number (and press Enter) to switch to it, or type `/persona <name>`.
+- **From the CLI:** `aimee persona use <name>` switches the session's persona;
+  `aimee persona list` shows the available personas. (The `/persona` slash command
+  lived in the OpenCode TUI bridge, which has been removed.)
   `/engineer`, `/novel`, `/songwriter` are aliases. The persona is stored
   per-session on the server.
 - **In webchat:** the persona is per-session too. The webchat server exposes

@@ -7,6 +7,23 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
+- **Removed: the interactive chat client and `aimee chat`.** Bare `aimee` now
+  prints usage instead of launching a TUI. The OpenCode frontend bridge and the
+  native fallback loop are gone. Reach the primary agent through any
+  OpenAI-compatible front end pointed at `POST /v1/chat/completions` (OpenCode,
+  VS Code, custom clients — unchanged), the web chat, or `aimee acp-serve` from
+  an ACP editor such as Zed. The `/persona` slash command lived in the removed
+  bridge; use `aimee persona use <name>` instead.
+- **Removed: the `aimee work` queue.** `work add|add-batch|claim|complete|fail|
+  list|board|cancel|release|clear|gc|sync-proposals|stats`, the `/v1/work/*`
+  routes, and the `work_list` / `work_board` MCP tools are gone. Existing
+  databases keep their `work_queue` and `work_queue_log` tables and rows —
+  nothing reads them, and the upgrade does not drop user data. Fresh installs
+  never create them.
+- **Removed: `aimee migrate v2`.** The server side was retired some time ago and
+  answers `UNKNOWN_METHOD`; the command could not do anything but fail. The
+  client plumbing is now gone too.
+
 - **Roundtable panels run in parallel**: the workflow `gate.roundtable` now
   dispatches all reviewers concurrently (bounded by the compute-thread ceiling,
   with a per-round deadline so one hung model can't wedge the panel) instead of

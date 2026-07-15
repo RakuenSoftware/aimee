@@ -175,7 +175,7 @@ Agent/provider control commands are exec/control operations, so over the network
 
 ### 2.6 Interactive chat
 
-`aimee chat` and `aimee launch` work against a remote server. When the client is pointed at a remote `/v1` endpoint, it registers your current directory as a **detached workspace** and opens a reverse channel back to it: the agent loop runs on the server, and its file and tool actions reach back into your local working tree over that channel. The client still holds no engine and no database, it renders the session and serves its own tree. Run `aimee chat` from inside the repository you want the agent to work in.
+`aimee acp-serve` and the web chat work against a remote server. When the client is pointed at a remote `/v1` endpoint, it registers your current directory as a **detached workspace** and opens a reverse channel back to it: the agent loop runs on the server, and its file and tool actions reach back into your local working tree over that channel. The client still holds no engine and no database, it renders the session and serves its own tree. Run `aimee chat` from inside the repository you want the agent to work in.
 
 Because `launch`/`chat` are exec/control operations, the server's `aimee.api.remote_writes` must be set to `full` for a remote session (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [2.3](#23-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
 
@@ -257,7 +257,7 @@ Agent/provider control commands are exec/control operations, so over the network
 
 ### 3.6 Interactive chat
 
-`aimee chat` and `aimee launch` work against a remote server. Pointed at a remote `/v1` endpoint, the client registers your current directory as a **detached workspace** and opens a reverse channel: the agent runs on the server while its file and tool actions reach back into your local working tree (the reverse channel is supported on the Windows client). Run `aimee chat` from inside the repository you want the agent to work in.
+`aimee acp-serve` and the web chat work against a remote server. Pointed at a remote `/v1` endpoint, the client registers your current directory as a **detached workspace** and opens a reverse channel: the agent runs on the server while its file and tool actions reach back into your local working tree (the reverse channel is supported on the Windows client). Run `aimee chat` from inside the repository you want the agent to work in.
 
 Because `launch`/`chat` are exec/control operations, the server's `aimee.api.remote_writes` must be `full` for a remote session (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [3.3](#33-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
 
@@ -344,7 +344,7 @@ Agent/provider control over the network requires the server's `remote_writes` to
 
 ### 4.6 Interactive chat
 
-As on the other platforms, `aimee chat` and `aimee launch` work against a remote server: the client registers your current directory as a **detached workspace** and opens a reverse channel, so the agent runs server-side while its file and tool actions act on your local tree. Run `aimee chat` from inside the repository you want the agent to work in, with the server's `aimee.api.remote_writes` set to `full` (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
+As on the other platforms, `aimee acp-serve` and the web chat work against a remote server: the client registers your current directory as a **detached workspace** and opens a reverse channel, so the agent runs server-side while its file and tool actions act on your local tree. Run `aimee chat` from inside the repository you want the agent to work in, with the server's `aimee.api.remote_writes` set to `full` (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 
