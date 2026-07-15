@@ -1,7 +1,10 @@
 /* aimee_ir_metrics.c -- see aimee_ir_metrics.h. Atomic counters, [metric][wire]. */
 #include "aimee_ir_metrics.h"
 
-#define N_WIRE (AIMEE_WIRE_GEMINI + 1)
+/* Sized off the LAST wire value, so adding a protocol widens the table
+ * automatically. (Was AIMEE_WIRE_GEMINI + 1 until the Gemini wire was removed —
+ * Gemini speaks the OpenAI shape, so it needs no protocol of its own.) */
+#define N_WIRE (AIMEE_WIRE_RESPONSES + 1)
 
 static long g_counts[AIMEE_IR_M__COUNT][N_WIRE];
 

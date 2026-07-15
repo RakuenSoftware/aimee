@@ -37,8 +37,10 @@ typedef enum
    AIMEE_WIRE_UNKNOWN = 0,
    AIMEE_WIRE_ANTHROPIC,   /* Anthropic Messages API (/v1/messages) */
    AIMEE_WIRE_OPENAI_CHAT, /* OpenAI Chat Completions (/v1/chat/completions) */
-   AIMEE_WIRE_RESPONSES,   /* OpenAI Responses API (/v1/responses; codex) */
-   AIMEE_WIRE_GEMINI
+   AIMEE_WIRE_RESPONSES    /* OpenAI Responses API (/v1/responses; codex) */
+   /* No GEMINI wire: Gemini is reached through its OpenAI-compatible endpoint, so
+    * it is AIMEE_WIRE_OPENAI_CHAT like any other OpenAI-shaped provider. The IR
+    * never needed a bespoke Gemini protocol. */
 } aimee_wire_t;
 
 /* A content block. Ordered within a message/response; ordering is significant. */
@@ -189,6 +191,30 @@ void aimee_block_free_contents(aimee_block_t *b);
  * ingress_preinject_query_from_messages' per-shape arms (which dropped non-text
  * blocks). Returns the number of chars written (excluding NUL), or 0 if none. */
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
+
+/* ---- response-side accessors (delegate/core stages read these) ----
+ *
+ * The request side has had aimee_ir_last_user_text since slice 0; the response
+ * side had nothing, which is why every consumer still reaches for
+ * parsed_response_t. These are the shape-agnostic reads that replace its
+ * `content` / `is_tool_call` / `calls[]` fields.
+ *
+ * All three iterate blocks and are deliberately type-strict: THINKING is NEVER
+ * treated as answer text, and only TEXT blocks are concatenated. That structural
+ * separation is what removes the need to regex reasoning out of the text at all. */
+
+/* Concatenate the response's TEXT blocks into `buf` (truncating to n). THINKING
+ * blocks are skipped: reasoning is not the answer. Returns chars written
+ * (excluding NUL), 0 if none. */
+size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n);
+
+/* Non-zero if the response carries at least one TOOL_USE block — the IR spelling
+ * of parsed_response_t.is_tool_call. */
+int aimee_ir_response_has_tool_use(const aimee_response_t *r);
+
+/* Concatenate the response's THINKING blocks into `buf`. The reasoning is handed
+ * back rather than discarded, so callers that want to log or audit it can. */
+size_t aimee_ir_response_reasoning(const aimee_response_t *r, char *buf, size_t n);
 
 /* Canonical stop-reason name (stable string for the enum). */
 const char *aimee_stop_reason_name(aimee_stop_reason_t s);

@@ -160,6 +160,83 @@ int main(void)
    assert(aimee_ir_route_decide(AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_RESPONSES, 0) == AIMEE_ROUTE_IR);
    /* unknown protocol -> IR path (safe) */
    assert(aimee_ir_route_decide(AIMEE_WIRE_UNKNOWN, AIMEE_WIRE_ANTHROPIC, 0) == AIMEE_ROUTE_IR);
+   /* --- response accessors: the delegate path's replacement for
+    *     parsed_response_t.content / .is_tool_call ---
+    *
+    * The type-strictness is the whole point. THINKING must never be mistaken for
+    * the answer: the legacy path had to regex <think> out of a flat string, and
+    * got it wrong in several hand-rolled copies. Here reasoning is simply a
+    * different block type, so "the answer" and "the reasoning" cannot be
+    * confused by construction. */
+   {
+      aimee_response_t rsp;
+      memset(&rsp, 0, sizeof rsp);
+      rsp.n_content = 4;
+      rsp.content = mk_blocks(4);
+      rsp.content[0].type = AIMEE_BLK_THINKING;
+      rsp.content[0].text = dup("weighing it up");
+      rsp.content[1].type = AIMEE_BLK_TEXT;
+      rsp.content[2].type = AIMEE_BLK_TEXT;
+      rsp.content[1].text = dup("the ");
+      rsp.content[2].text = dup("answer");
+      rsp.content[3].type = AIMEE_BLK_TOOL_USE;
+      rsp.content[3].tool_name = dup("grep");
+
+      char buf[64];
+      /* TEXT blocks concatenate in order; THINKING and TOOL_USE contribute nothing. */
+      assert(aimee_ir_response_text(&rsp, buf, sizeof buf) == 10);
+      assert(strcmp(buf, "the answer") == 0);
+      /* reasoning is handed back, not destroyed */
+      assert(aimee_ir_response_reasoning(&rsp, buf, sizeof buf) == 14);
+      assert(strcmp(buf, "weighing it up") == 0);
+      /* a TOOL_USE block anywhere means "it asked to call something" */
+      assert(aimee_ir_response_has_tool_use(&rsp) == 1);
+      aimee_response_free(&rsp);
+   }
+
+   /* A tool-only response says nothing: empty text, not the reasoning, not the
+    * tool name. The legacy shape expressed this as content=NULL + is_tool_call=1. */
+   {
+      aimee_response_t rsp;
+      memset(&rsp, 0, sizeof rsp);
+      rsp.n_content = 2;
+      rsp.content = mk_blocks(2);
+      rsp.content[0].type = AIMEE_BLK_THINKING;
+      rsp.content[0].text = dup("hmm");
+      rsp.content[1].type = AIMEE_BLK_TOOL_USE;
+      rsp.content[1].tool_name = dup("read");
+      char buf[32];
+      assert(aimee_ir_response_text(&rsp, buf, sizeof buf) == 0);
+      assert(buf[0] == '\0');
+      assert(aimee_ir_response_has_tool_use(&rsp) == 1);
+      aimee_response_free(&rsp);
+   }
+
+   /* No tool blocks => has_tool_use is 0; and truncation must NUL-terminate
+    * rather than overrun (buf smaller than the text). */
+   {
+      aimee_response_t rsp;
+      memset(&rsp, 0, sizeof rsp);
+      rsp.n_content = 1;
+      rsp.content = mk_blocks(1);
+      rsp.content[0].type = AIMEE_BLK_TEXT;
+      rsp.content[0].text = dup("0123456789");
+      char small[5];
+      assert(aimee_ir_response_text(&rsp, small, sizeof small) == 4);
+      assert(strcmp(small, "0123") == 0); /* truncated, terminated */
+      assert(aimee_ir_response_has_tool_use(&rsp) == 0);
+      aimee_response_free(&rsp);
+   }
+
+   /* NULL-safety, mirroring aimee_ir_last_user_text's contract. */
+   {
+      char buf[8] = "x";
+      assert(aimee_ir_response_text(NULL, buf, sizeof buf) == 0);
+      assert(buf[0] == '\0');
+      assert(aimee_ir_response_reasoning(NULL, buf, sizeof buf) == 0);
+      assert(aimee_ir_response_has_tool_use(NULL) == 0);
+   }
+   printf("response-accessors ok; ");
 
    printf("ok\n");
    return 0;
