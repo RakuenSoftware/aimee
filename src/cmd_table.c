@@ -118,6 +118,8 @@ void cmd_help(app_ctx_t *ctx, int argc, char **argv)
             subs = get_trigger_subcmds();
          else if (strcmp(target, "mcp") == 0)
             subs = get_mcp_subcmds();
+         else if (strcmp(target, "aux") == 0)
+            subs = get_aux_subcmds();
 
          if (subs)
          {

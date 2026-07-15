@@ -164,6 +164,10 @@
      "  list             List trigger runs\n"
      "  status           Show one trigger run\n"
      "  cancel           Cancel a queued trigger run\n"},
+    {"aux", "Auxiliary model routing", CLIENT_TIER_ADVANCED, 0,
+     "  config           Show resolved aux task->provider/model mapping\n"
+     "  test <task> \"<prompt>\"\n"
+     "                   Execute a single auxiliary task call\n"},
     {"cron", "Cron jobs and watchdog runs", CLIENT_TIER_ADVANCED, 0,
      "  list             List configured cron jobs\n"
      "  add <id>         Add or update a cron job\n"
