@@ -1536,7 +1536,14 @@ static cJSON *mcp_native_advert(const char *tool)
    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    pthread_mutex_lock(&lock);
    if (!list)
-      list = mcp_build_tools_list(); /* process-lifetime cache; the list is static */
+      /* FLAT, not the collapsed list: mcp_collapse_families folds index_find_callers
+       * and friends into one multiplexed `index` tool, so a lookup by flat name found
+       * nothing and every code-intelligence tool was silently dropped from the advert
+       * ("has no usable advert; not offered natively") while still resolving in the
+       * toolset. The flat names stay directly callable (mcp_family_demux), so dispatch
+       * was fine and only the advert lied — exactly the silent shape this merge exists
+       * to end. Caught by running a real server, not by CI. */
+      list = mcp_build_tools_list_flat(); /* process-lifetime cache; the list is static */
    cJSON *found = NULL;
    cJSON *item = NULL;
    cJSON_ArrayForEach(item, list)
