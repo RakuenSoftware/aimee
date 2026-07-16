@@ -1,6 +1,9 @@
 /* aimee_ir_shadow.c -- see aimee_ir_shadow.h. */
+#include "aimee.h" /* MAX_PATH_LEN et al: agent_types.h depends on it */
+
 #include "aimee_ir_shadow.h"
 
+#include "agent_protocol.h" /* parsed_response_t (response comparison) */
 #include "aimee_backend.h"
 #include "aimee_frontend.h"
 #include "aimee_ir_metrics.h"
@@ -52,6 +55,123 @@ void aimee_ir_shadow_compare_bodies(const char *ir_body, const char *legacy_body
               (int)frontend, ir_body ? strlen(ir_body) : 0, legacy_body ? strlen(legacy_body) : 0,
               ir_body ? ir_body : "(null)", legacy_body ? legacy_body : "(null)");
    }
+}
+
+/* Whitespace-insensitive text equality: the two parsers may differ only in leading
+ * or trailing trim, which is not a semantic divergence. Both NULL/empty == equal. */
+static int text_equal_trimmed(const char *a, const char *b)
+{
+   if (!a)
+      a = "";
+   if (!b)
+      b = "";
+   while (*a == ' ' || *a == '\n' || *a == '\t' || *a == '\r')
+      a++;
+   while (*b == ' ' || *b == '\n' || *b == '\t' || *b == '\r')
+      b++;
+   size_t la = strlen(a), lb = strlen(b);
+   while (la > 0 &&
+          (a[la - 1] == ' ' || a[la - 1] == '\n' || a[la - 1] == '\t' || a[la - 1] == '\r'))
+      la--;
+   while (lb > 0 &&
+          (b[lb - 1] == ' ' || b[lb - 1] == '\n' || b[lb - 1] == '\t' || b[lb - 1] == '\r'))
+      lb--;
+   return la == lb && memcmp(a, b, la) == 0;
+}
+
+/* Do the IR's TOOL_USE blocks match the legacy calls[] one-for-one: same count,
+ * same names in order, same argument JSON (semantic, via cJSON_Compare)? */
+static int tool_calls_equal(const parsed_response_t *legacy, const aimee_response_t *ir)
+{
+   int ir_n = 0;
+   for (int i = 0; i < ir->n_content; i++)
+      if (ir->content[i].type == AIMEE_BLK_TOOL_USE)
+         ir_n++;
+   if (ir_n != legacy->call_count)
+      return 0;
+
+   int k = 0;
+   for (int i = 0; i < ir->n_content; i++)
+   {
+      const aimee_block_t *b = &ir->content[i];
+      if (b->type != AIMEE_BLK_TOOL_USE)
+         continue;
+      const char *ir_name = b->tool_name ? b->tool_name : "";
+      const char *lg_name = legacy->calls[k].name;
+      if (strcmp(ir_name, lg_name) != 0)
+         return 0;
+      /* Arguments: compare the parsed JSON, not the string form, so key order and
+       * spacing don't read as a divergence. Legacy stores args as a JSON string. */
+      cJSON *lg_args = legacy->calls[k].arguments ? cJSON_Parse(legacy->calls[k].arguments) : NULL;
+      /* Both sides argument-less counts as equal; otherwise a missing side diverges.
+       * cJSON_Compare(x, NULL) is false, so handle the both-NULL case explicitly. */
+      int args_ok = (!b->tool_input && !lg_args) ? 1 : cJSON_Compare(b->tool_input, lg_args, 1);
+      cJSON_Delete(lg_args);
+      if (!args_ok)
+         return 0;
+      k++;
+   }
+   return 1;
+}
+
+void aimee_ir_shadow_compare_response(const struct parsed_response *legacy, const cJSON *resp_json,
+                                      aimee_wire_t wire)
+{
+   if (!shadow_enabled() || !legacy || !resp_json)
+      return;
+
+   aimee_response_t ir;
+   memset(&ir, 0, sizeof(ir));
+   char err[128] = {0};
+   int rc;
+   if (wire == AIMEE_WIRE_ANTHROPIC)
+      rc = anthropic_backend_parse(resp_json, &ir, err, sizeof(err));
+   else if (wire == AIMEE_WIRE_OPENAI_CHAT)
+      rc = openai_backend_parse(resp_json, &ir, err, sizeof(err));
+   else
+      return; /* responses/SSE wire not comparable here -- caller skips it */
+
+   /* A parse failure is itself a divergence: legacy produced a result, the IR could
+    * not. That is exactly the case that must reach zero before we trust the IR. */
+   if (rc != 0)
+   {
+      aimee_ir_metric_inc(AIMEE_IR_M_RESP_MISMATCH, wire);
+      if (g_logged < SHADOW_LOG_CAP)
+      {
+         g_logged++;
+         fprintf(stderr, "aimee_ir_shadow: response parse FAILED in IR (wire=%d): %s\n", (int)wire,
+                 err[0] ? err : "(no detail)");
+      }
+      aimee_response_free(&ir);
+      return;
+   }
+
+   char ir_text[8192];
+   aimee_ir_response_text(&ir, ir_text, sizeof(ir_text));
+   int ir_has_tool = aimee_ir_response_has_tool_use(&ir);
+
+   int same = (legacy->is_tool_call ? 1 : 0) == (ir_has_tool ? 1 : 0) &&
+              tool_calls_equal(legacy, &ir) && text_equal_trimmed(legacy->content, ir_text);
+
+   if (same)
+      aimee_ir_metric_inc(AIMEE_IR_M_RESP_MATCH, wire);
+   else
+   {
+      aimee_ir_metric_inc(AIMEE_IR_M_RESP_MISMATCH, wire);
+      if (g_logged < SHADOW_LOG_CAP)
+      {
+         g_logged++;
+         /* Shape only, no content: which axis diverged and the counts, never the
+          * text or arguments (same roundtable ruling as compare_bodies). */
+         fprintf(stderr,
+                 "aimee_ir_shadow: response mismatch (wire=%d) "
+                 "legacy{tool=%d calls=%d text=%zu} ir{tool=%d calls=%d text=%zu}\n",
+                 (int)wire, legacy->is_tool_call ? 1 : 0, legacy->call_count,
+                 legacy->content ? strlen(legacy->content) : 0, ir_has_tool ? 1 : 0, ir.n_content,
+                 strlen(ir_text));
+      }
+   }
+   aimee_response_free(&ir);
 }
 
 void aimee_ir_shadow_observe_request(const cJSON *req, aimee_wire_t frontend)

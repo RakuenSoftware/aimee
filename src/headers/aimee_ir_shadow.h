@@ -32,6 +32,24 @@ void aimee_ir_shadow_observe_request(const struct cJSON *req, aimee_wire_t front
 void aimee_ir_shadow_compare_bodies(const char *ir_body, const char *legacy_body,
                                     aimee_wire_t frontend);
 
+/* Shadow-compare how the two paths PARSED the same provider response: the legacy
+ * translator's parsed_response_t (`legacy`, the production result) vs what the IR
+ * backend parser makes of the same response JSON (`resp_json`). Parses via the IR
+ * for the given wire, then checks they agree on the answer text and on the set of
+ * tool calls (count + names + argument JSON). Counts ir_resp_match /
+ * ir_resp_mismatch and logs a capped, truncated note.
+ *
+ * This is the response-side twin of compare_bodies: the request shadow proves the
+ * IR sends the provider the same bytes; this proves it reads the reply the same
+ * way. Both are required before the response translators can be retired.
+ *
+ * No-op unless AIMEE_IR_SHADOW is set (the extra parse is real work) or if either
+ * argument is NULL. Never affects the turn -- the legacy result is what runs.
+ * `legacy` is a `parsed_response_t`; forward-declared to keep this header light. */
+struct parsed_response;
+void aimee_ir_shadow_compare_response(const struct parsed_response *legacy,
+                                      const struct cJSON *resp_json, aimee_wire_t wire);
+
 /* 1 when shadow mode is on, so callers can skip building the comparison body. */
 int aimee_ir_shadow_enabled(void);
 
