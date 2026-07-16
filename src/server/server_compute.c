@@ -20,6 +20,7 @@
 #include "token_tracker.h"
 #include "delegate_credential_retry.h"
 #include "delegate_launch.h"
+#include "delegate_sandbox_image.h"
 #include "delegate_source_authority.h"
 #include "agent_source_authority.h" /* TLS source-authority context (race-free in-process) */
 #include "server_coord_dispatcher.h"
@@ -1391,10 +1392,19 @@ void delegate_worker(void *arg)
                 "read-only tree. Running in-process under the write guard",
                 deleg_id, delegate_shared_worktree);
    }
+   /* Resolve the per-project/-workspace/-global sandbox image (pre-baked `image:`
+    * form); NULL falls back to the backend default. Keyed on the mounted worktree,
+    * which is under the delegate's repo/workspace. */
+   char sbx_image[256];
+   const char *sbx_image_arg =
+       (container_ws &&
+        delegate_sandbox_resolve_image(container_ws, sbx_image, sizeof(sbx_image)) == 0)
+           ? sbx_image
+           : NULL;
    int container_bound =
        detached_bound
            ? 0
-           : workspace_turn_bind_container(deleg_id, NULL, container_ws, container_ws_ro);
+           : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,

@@ -270,6 +270,11 @@ typedef struct config
     * Indexed alongside workspaces[]; persisted in the {path,provider,...} object. */
    char workspace_vcs_remote[64][512];
    char workspace_vcs_head[64][64];
+   /* Per-workspace delegate-sandbox image override ("" == none; fall through to the
+    * global delegate_sandbox_image, then the backend default). Indexed alongside
+    * workspaces[]; persisted in the {path,provider,...,sandbox_image} object. The
+    * richer build-from-spec form lives in the repo's .aimee/project.yaml. */
+   char workspace_sandbox_image[64][256];
    int workspace_count;
    char guardrail_mode[16];
    char provider[16];
@@ -450,6 +455,12 @@ typedef struct config
     * lesson of PR #1351 — a capability must exist on aimee's side BEFORE the
     * environment removes it, or the rule is just breakage. */
    int delegate_sandbox;
+
+   /* Global default delegate-sandbox image ("" == the backend default, ubuntu:22.04).
+    * Lowest-precedence image source: a repo's .aimee/project.yaml `sandbox` block and
+    * a per-workspace `sandbox_image` override both win over this. A bare image
+    * reference (used as-is); the build-from-spec form lives in .aimee/project.yaml. */
+   char delegate_sandbox_image[256];
 
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a
