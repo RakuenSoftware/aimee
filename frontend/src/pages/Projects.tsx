@@ -12,6 +12,16 @@ import { groupProjectsByOrg, parseOwnerOnly, repoAlreadyCloned, type CloneKbAnno
 
 const READ_OPS = ['status', 'log', 'diff', 'branch'] as const;
 const REMOTE_OPS = ['fetch', 'pull', 'push'] as const;
+// Hover help for each git op button.
+const OP_HELP: Record<string, string> = {
+  status: 'Show the working-tree status of this project.',
+  log: 'Show recent commit history.',
+  diff: 'Show uncommitted changes.',
+  branch: 'List branches.',
+  fetch: 'Fetch updates from the remote.',
+  pull: 'Pull and merge remote changes.',
+  push: 'Push local commits to the remote.',
+};
 
 async function api(path: string, init?: RequestInit): Promise<Response> {
   return fetch(path, {
@@ -337,7 +347,8 @@ export default function Projects() {
             <input style={{ ...input, flex: 1, minWidth: '120px' }} placeholder="name (optional)"
               value={name} onChange={e => setName(e.target.value)} />
             <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-              disabled={busy || !url.trim()} onClick={connect}>
+              disabled={busy || !url.trim()} onClick={connect}
+              title="Clone the repository, or if you entered an owner/org URL, list its repositories to bulk-clone.">
               {parseOwnerOnly(url) ? 'List repositories' : 'Clone'}
             </button>
           </div>
@@ -354,9 +365,11 @@ export default function Projects() {
                   {orgProvider ? ` · ${orgProvider}` : ''}
                 </div>
                 <button style={{ ...btn, border: 'none', color: '#3a6ea5', padding: 0 }}
+                  title="Select every repository that is not already cloned."
                   onClick={() => setOrgSelected(Object.fromEntries(orgRepos.map(r =>
                     [r.name, !repoAlreadyCloned(r, orgRef.owner, projects, details)])))}>all</button>
                 <button style={{ ...btn, border: 'none', color: '#3a6ea5', padding: 0 }}
+                  title="Deselect all repositories."
                   onClick={() => setOrgSelected({})}>none</button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '220px', overflow: 'auto',
@@ -377,6 +390,7 @@ export default function Projects() {
               <div>
                 <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
                   disabled={busy || orgRepos.filter(r => orgSelected[r.name]).length === 0}
+                  title="Clone the checked repositories as new projects."
                   onClick={cloneOrgSelected}>
                   Clone selected ({orgRepos.filter(r => orgSelected[r.name]).length})
                 </button>
@@ -412,7 +426,8 @@ export default function Projects() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button style={{ ...btn, background: ghConfigured ? '#24292e' : '#888', color: '#fff', borderColor: '#24292e' }}
-              disabled={busy || !!ghCode || !ghConfigured} onClick={startGithub}>Sign in with GitHub</button>
+              disabled={busy || !!ghCode || !ghConfigured} onClick={startGithub}
+              title="Authorize aimee via GitHub device flow and store the token server-side.">Sign in with GitHub</button>
             {ghCode && (
               <span style={{ fontSize: '13px', color: '#444' }}>
                 Go to <a href={ghUri} target="_blank" rel="noreferrer">{ghUri}</a> and enter code{' '}
@@ -432,7 +447,8 @@ export default function Projects() {
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input style={{ ...input, flex: 1, minWidth: '200px' }} placeholder="GitHub OAuth App Client ID (e.g. Iv1.xxxxxxxx)"
                   value={ghClientId} onChange={e => setGhClientId(e.target.value)} />
-                <button style={btn} disabled={busy || !ghClientId.trim()} onClick={saveGhConfig}>Save</button>
+                <button style={btn} disabled={busy || !ghClientId.trim()} onClick={saveGhConfig}
+                  title="Save the GitHub OAuth App Client ID that enables device-flow sign-in.">Save</button>
               </div>
             </div>
           </details>
@@ -443,6 +459,7 @@ export default function Projects() {
                   <span style={{ fontSize: '13px', fontFamily: 'monospace', flex: 1 }}>{h}</span>
                   <span style={{ fontSize: '11px', color: '#2a7' }}>● token set</span>
                   <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy}
+                    title="Delete the stored access token for this git host."
                     onClick={() => removeCred(h)}>remove</button>
                 </div>
               ))}
@@ -454,7 +471,8 @@ export default function Projects() {
             <input style={{ ...input, flex: 2, minWidth: '200px' }} type="password" autoComplete="off"
               placeholder="access token" value={credToken} onChange={e => setCredToken(e.target.value)} />
             <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-              disabled={busy || !credHost.trim() || !credToken.trim()} onClick={addCred}>Save</button>
+              disabled={busy || !credHost.trim() || !credToken.trim()} onClick={addCred}
+              title="Store this access token server-side for the given host.">Save</button>
           </div>
           <details style={{ marginTop: '10px', fontSize: '12px', color: '#aaa' }}>
             <summary style={{ cursor: 'pointer' }}>SSH private key (for git over SSH)</summary>
@@ -468,8 +486,10 @@ export default function Projects() {
                 value={credSSHKey} onChange={e => setCredSSHKey(e.target.value)} />
               <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
                 <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-                  disabled={busy || !credSSHKey.trim()} onClick={addSSHKey}>Save SSH key</button>
+                  disabled={busy || !credSSHKey.trim()} onClick={addSSHKey}
+                  title="Seal this private key in the server vault for git-over-SSH.">Save SSH key</button>
                 <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy}
+                  title="Remove the stored SSH private key from the server vault."
                   onClick={removeSSHKey}>Clear SSH key</button>
               </div>
             </div>
@@ -492,6 +512,7 @@ export default function Projects() {
                     {g.refs.map(p => (
                       <span key={p} style={{ display: 'inline-flex' }}>
                         <button onClick={() => { setSelected(p); setOutput(''); setErr(''); }}
+                          title="Select this project to run git operations on it."
                           style={{ ...btn, background: p === selected ? '#234' : '#fff', color: p === selected ? '#8cf' : '#444',
                                    borderColor: p === selected ? '#456' : '#ccc', borderRadius: '4px 0 0 4px' }}>
                           {p}
@@ -521,13 +542,15 @@ export default function Projects() {
                   value={delTyped} onChange={e => setDelTyped(e.target.value)} />
                 {!delKbDown && (
                   <button style={{ ...btn, background: '#c33', color: '#fff', borderColor: '#a22' }}
-                    disabled={busy || delTyped !== delRef} onClick={() => deleteProject(false)}>Delete</button>
+                    disabled={busy || delTyped !== delRef} onClick={() => deleteProject(false)}
+                    title="Permanently delete the clone and all indexed knowledge for this project.">Delete</button>
                 )}
                 <button style={btn} disabled={busy} onClick={closeDelete}>Cancel</button>
               </div>
               {delKbDown && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                   <button style={btn} disabled={busy || delTyped !== delRef}
+                    title="Retry the delete now that the knowledge service may be back."
                     onClick={() => deleteProject(false)}>Retry</button>
                   <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy || delTyped !== delRef}
                     onClick={() => { if (delForceArmed) deleteProject(true); else setDelForceArmed(true); }}>
@@ -544,20 +567,22 @@ export default function Projects() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
                 {READ_OPS.map(op => (
-                  <button key={op} style={btn} disabled={busy} onClick={() => runOp(op)}>{op}</button>
+                  <button key={op} style={btn} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</button>
                 ))}
                 {REMOTE_OPS.map(op => (
-                  <button key={op} style={{ ...btn, borderColor: '#a96' }} disabled={busy} onClick={() => runOp(op)}>{op}</button>
+                  <button key={op} style={{ ...btn, borderColor: '#a96' }} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</button>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input style={{ ...input, flex: 1, minWidth: '180px' }} placeholder="commit message"
                   value={commitMsg} onChange={e => setCommitMsg(e.target.value)} />
                 <button style={btn} disabled={busy || !commitMsg.trim()}
+                  title="Commit staged changes with the entered message."
                   onClick={() => { runOp('commit', { message: commitMsg }); setCommitMsg(''); }}>commit</button>
                 <input style={{ ...input, width: '140px' }} placeholder="branch"
                   value={branch} onChange={e => setBranch(e.target.value)} />
                 <button style={btn} disabled={busy || !branch.trim()}
+                  title="Switch to (or create) the named branch."
                   onClick={() => runOp('checkout', { branch })}>checkout</button>
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>

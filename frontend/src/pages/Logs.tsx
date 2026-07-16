@@ -136,13 +136,13 @@ export default function Logs() {
             placeholder="filter tool…"
             style={{ ...selectStyle, width: 120 }}
           />
-          <select value={verdict} onChange={e => setVerdict(e.target.value)} style={selectStyle}>
+          <select value={verdict} onChange={e => setVerdict(e.target.value)} style={selectStyle} title="Filter rows to a single guardrail verdict.">
             {['all', 'allow', 'block', 'rewrite', 'approval_required'].map(v => <option key={v} value={v}>{v}</option>)}
           </select>
-          <select value={actor} onChange={e => setActor(e.target.value)} style={selectStyle}>
+          <select value={actor} onChange={e => setActor(e.target.value)} style={selectStyle} title="Filter rows by actor (primary agent or delegate).">
             {['all', 'primary', 'delegate'].map(a => <option key={a} value={a}>{a}</option>)}
           </select>
-          <button onClick={load} style={{ ...selectStyle, cursor: 'pointer' }}>Refresh</button>
+          <button onClick={load} style={{ ...selectStyle, cursor: 'pointer' }} title="Reload the newest page of audit rows.">Refresh</button>
           {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
         </div>
       </div>

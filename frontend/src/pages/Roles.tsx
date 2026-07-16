@@ -153,11 +153,12 @@ export default function Roles() {
                 key={r}
                 onClick={() => openRole(r)}
                 style={{ ...btn, background: roleSel === r ? "#e8eef9" : "#fff" }}
+                title="Open this role to edit its prompt template and turn cap."
               >
                 {r}
               </button>
             ))}
-            <button onClick={newRole} style={{ ...btn, borderStyle: "dashed" }}>
+            <button onClick={newRole} style={{ ...btn, borderStyle: "dashed" }} title="Create a new role, prompting for its name.">
               + New
             </button>
           </div>
@@ -182,10 +183,10 @@ export default function Roles() {
                 }}
               />
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveRole} style={btn}>
+                <button onClick={saveRole} style={btn} title="Save this role's template and turn cap.">
                   Save role
                 </button>
-                <button onClick={deleteRole} style={{ ...btn, color: "#b00" }}>
+                <button onClick={deleteRole} style={{ ...btn, color: "#b00" }} title="Delete this role; built-in roles reset to their default.">
                   Delete
                 </button>
               </div>
