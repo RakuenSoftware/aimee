@@ -21,6 +21,7 @@
 #include "aimee_home.h"
 #include "cJSON.h"
 #include "dstr.h"
+#include "log.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -665,6 +666,15 @@ char *tool_web_read(const char *ref, const char *query, int span, const char *mo
    /* if nothing matched (no query, or no overlap), lead with the top of page */
    if (emitted == 0 && nc > 0)
    {
+      /* Instrumentation (roundtable P5-completion): a query that neither the
+       * literal nor the lexical leg could retrieve is exactly the case the
+       * deferred neural-embedder semantic leg would serve. Logging it turns
+       * "revisit if a concrete need appears" into a measurable signal. */
+      if (nn > 0)
+         aimee_log(LOG_INFO, "web_read",
+                   "no literal/lexical span matched query on %s; semantic (embedder) leg "
+                   "would help — falling back to top-of-page",
+                   url);
       append_untrusted_span(&ds, ref, 1, chunks[0].ptr, chunks[0].len);
       emitted = 1;
    }

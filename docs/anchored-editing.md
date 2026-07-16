@@ -124,9 +124,10 @@ DNS rebinding. Redirects are not followed—they are returned to the caller.
 ## Migration & compatibility
 
 The legacy `old_string` / `new_string` / `replace_all` path on `edit_file` is
-**retained as a deprecated one-release fallback**. It has not been removed.
-Agents that have not adopted anchored edits continue to work, but will not
-benefit from collision safety, drift recovery, or token savings.
+**retained as a deprecated fallback**. It has not been removed. Agents that have
+not adopted anchored edits continue to work, but will not benefit from collision
+safety, drift recovery, or token savings. Every use is logged (`edit_deprecated`)
+so removal can be driven by measured usage.
 
 **Recommended migration path:**
 
@@ -136,7 +137,16 @@ benefit from collision safety, drift recovery, or token savings.
    batches referencing `LINE:HASH` anchors.
 3. For whole-function or whole-type rewrites, prefer `edit_symbol` over
    hand-built `replace_range`—the server resolves the span, avoiding the
-   multi-line anchor fumble observed with smaller models.
+   multi-line anchor fumble observed with smaller models. As a guardrail, an
+   anchored `replace_range`/`delete_range` covering **≥ 8 lines** returns an
+   `advisory` recommending `edit_symbol`.
+
+**When does `old_string` get removed?** Not on a calendar. It is removed only
+when a numeric gate is met — the weakest delegate's whole-function pass@k
+recovers to within 10 pp of `str_replace` (via `edit_symbol`), the agentic gate
+stays green across ≥ 3 runs, `edit_deprecated` telemetry shows negligible
+residual usage, and the request-shape change is documented as a deliberate
+breaking change. See `benchmarks/hashline/RESULTS.md` for the full criteria.
 
 ## Evaluation & status
 

@@ -72,6 +72,10 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "anchor_snapshot.h"
 #include "edit_anchored.h"
 #include "guardrails_blast_radius.h"
+
+/* At/above this many lines, a single anchored replace_range/delete_range rewrite
+ * is advised to use edit_symbol instead (roundtable P5-completion guardrail). */
+#define EDIT_LARGE_SPAN_LINES 8
 #include "lsp.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -435,6 +439,58 @@ char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *
    char *result = tool_write_file(path, res.new_text);
    free(content);
    free(res.new_text);
+
+   /* Deterministic steering guardrail (roundtable, P5 completion): a large
+    * single-span rewrite via a hand-built replace_range is exactly where small
+    * models fumble the multi-line anchors (the MiniMax whole-func regression).
+    * When any op rewrites >= EDIT_LARGE_SPAN_LINES lines, advise edit_symbol,
+    * which resolves the whole span server-side. Advisory only — never blocks. */
+   if (result && strncmp(result, "error:", 6) != 0 &&
+       !strstr(result, "\"status\":\"stale_anchor\""))
+   {
+      int max_span = 0;
+      int ne = cJSON_IsArray(edits) ? cJSON_GetArraySize(edits) : 0;
+      for (int i = 0; i < ne; i++)
+      {
+         cJSON *e = cJSON_GetArrayItem(edits, i);
+         cJSON *op = cJSON_GetObjectItem(e, "op");
+         if (!op || !cJSON_IsString(op) ||
+             (strcmp(op->valuestring, "replace_range") != 0 &&
+              strcmp(op->valuestring, "delete_range") != 0))
+            continue;
+         cJSON *from = cJSON_GetObjectItem(e, "from");
+         cJSON *to = cJSON_GetObjectItem(e, "to");
+         int fo = 0, to_ord = 0;
+         unsigned tag = 0;
+         if (from && cJSON_IsString(from) && to && cJSON_IsString(to) &&
+             anchor_parse(from->valuestring, &fo, &tag) == 0 &&
+             anchor_parse(to->valuestring, &to_ord, &tag) == 0)
+         {
+            int span = to_ord - fo + 1;
+            if (span > max_span)
+               max_span = span;
+         }
+      }
+      if (max_span >= EDIT_LARGE_SPAN_LINES)
+      {
+         cJSON *rj = cJSON_Parse(result);
+         if (rj)
+         {
+            cJSON_AddStringToObject(
+                rj, "advisory",
+                "large multi-line rewrite: for a whole function/type prefer edit_symbol "
+                "(the server resolves the span from the symbol name) over a hand-built "
+                "replace_range — small models anchor multi-line ranges unreliably.");
+            char *aug = cJSON_PrintUnformatted(rj);
+            cJSON_Delete(rj);
+            if (aug)
+            {
+               free(result);
+               result = aug;
+            }
+         }
+      }
+   }
    return result;
 }
 
@@ -699,6 +755,14 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
       }
       else
       {
+         /* Deprecation telemetry (roundtable P5-completion): the old_string
+          * str_replace path is retained as a fallback but slated for removal.
+          * Log each use so the removal decision is driven by measured usage,
+          * not a calendar. */
+         aimee_log(LOG_INFO, "edit_deprecated",
+                   "old_string edit path used on %s; migrate to anchored edits (snapshot_id + "
+                   "edits[]) — this fallback is deprecated and slated for removal",
+                   p->valuestring);
          /* Auto-snapshot: record pre-edit state in the persistent rewind DB */
          auto_snapshot_record(p->valuestring);
          result = tool_edit_file(p->valuestring, o->valuestring, new_str, replace_all);
