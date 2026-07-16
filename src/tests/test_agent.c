@@ -1421,6 +1421,22 @@ static void test_part3_anchored_tools(void)
    cJSON_Delete(fj);
    free(rf);
 
+   /* edit_symbol: whole-function rewrite by name, span resolved server-side */
+   char *es = tool_edit_symbol("add", cfile, "replace_body",
+                               "int add(int a, int b)\n{\n   return a + b + 0;\n}");
+   assert(es);
+   cJSON *ej = parse_json_or_die(es);
+   assert(strcmp(cJSON_GetObjectItem(ej, "status")->valuestring, "ok") == 0);
+   /* identity echo so the agent can confirm the resolved target */
+   assert(cJSON_GetObjectItem(ej, "symbol") != NULL);
+   assert(cJSON_GetObjectItem(ej, "resolved_at") != NULL);
+   cJSON_Delete(ej);
+   free(es);
+   char *chk = tool_read_file(cfile, 0, 0, 1);
+   assert(chk && strstr(chk, "return a + b + 0;") != NULL);
+   assert(strstr(chk, "int main") != NULL); /* main untouched */
+   free(chk);
+
    unlink(cfile);
    rmdir(dir);
 }

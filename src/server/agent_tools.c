@@ -1072,6 +1072,27 @@ static cJSON *tp_read_symbol(void)
    return params;
 }
 
+static cJSON *tp_edit_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "symbol", "string",
+           "Symbol to rewrite. Use a fully-qualified name when the bare name is not unique; if it "
+           "resolves to multiple definitions the server returns candidates rather than guessing.");
+   tp_prop(props, "path", "string",
+           "Optional file to scope the resolve (recommended to disambiguate overloaded names).");
+   tp_prop(props, "op", "string",
+           "Only 'replace_body' (default): replace the symbol's whole "
+           "definition span with 'text'.");
+   tp_prop(props, "text", "string", "The new definition (whole symbol body).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("symbol"));
+   cJSON_AddItemToArray(req, cJSON_CreateString("text"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_run_tests(void)
 {
    cJSON *params = tp_obj();
@@ -1227,6 +1248,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "enclosing file. Pass 'path' to read from a specific file, or omit it to resolve via the "
      "code index.",
      tp_read_symbol, TSURF_ALL},
+    {"edit_symbol",
+     "Rewrite a whole symbol (function/type) by name — the server resolves its definition span and "
+     "swaps it, so you don't reproduce the old body. Overloaded/shadowed names return candidates "
+     "instead of a blind resolve; pass a fully-qualified name or 'path' to disambiguate.",
+     tp_edit_symbol, TSURF_ALL},
     {"run_tests",
      "Run a test command and return a compact result: pass/fail, exit code, and the framework "
      "summary + every failure — the full log is spilled and retrievable via tool_output_get. "

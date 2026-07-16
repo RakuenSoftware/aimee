@@ -896,6 +896,36 @@ static char *td_run_tests(cJSON *args, const char *name, const char *dispatch_cw
    return tool_run_tests(cmd->valuestring, timeout_ms);
 }
 
+static char *td_edit_symbol(cJSON *args, const char *name, const char *dispatch_cwd,
+                            const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)timeout_ms;
+   cJSON *sym = cJSON_GetObjectItem(args, "symbol");
+   cJSON *pth = cJSON_GetObjectItem(args, "path");
+   cJSON *op = cJSON_GetObjectItem(args, "op");
+   cJSON *txt = cJSON_GetObjectItem(args, "text");
+   if (!sym || !cJSON_IsString(sym))
+      return safe_strdup("error: missing 'symbol' parameter");
+   const char *pth_s = (pth && cJSON_IsString(pth)) ? pth->valuestring : NULL;
+   /* guards mirror td_edit_file's anchored path; write-back also re-checks */
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+   if (pth_s && agent_tools_parent_write_guard_blocks(pth_s, dispatch_cwd))
+      return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+   char *result = tool_edit_symbol(sym->valuestring, pth_s,
+                                   (op && cJSON_IsString(op)) ? op->valuestring : NULL,
+                                   (txt && cJSON_IsString(txt)) ? txt->valuestring : NULL);
+   if (result && strncmp(result, "error:", 6) != 0 && pth_s)
+   {
+      char abs_path[MAX_PATH_LEN];
+      normalize_path(pth_s, dispatch_cwd, abs_path, sizeof(abs_path));
+      const char *write_key = delegation_active_id();
+      (void)db1_session_write_path_record(write_key ? write_key : dispatch_sid, abs_path);
+   }
+   return result;
+}
+
 static char *td_git_diff(cJSON *args, const char *name, const char *dispatch_cwd,
                          const char *dispatch_sid, int timeout_ms)
 {
@@ -1945,6 +1975,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_read_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "run_tests") == 0)
       result = td_run_tests(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "edit_symbol") == 0)
+      result = td_edit_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "search_memory") == 0)
       result = td_search_memory(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "web_search") == 0)

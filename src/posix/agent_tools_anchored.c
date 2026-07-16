@@ -14,6 +14,7 @@
 #include "agent_tools_internal.h"
 #include "anchor_snapshot.h"
 #include "code_outline.h"
+#include "edit_anchored.h"
 #include "guardrails.h"
 #include "kb_client.h"
 #include "tool_condense.h"
@@ -223,6 +224,152 @@ char *tool_read_symbol(const char *symbol, const char *path)
    char *out = format_symbol_span(resolved_path, actual_path, data, len, symbol, start, end);
    free(data);
    return out;
+}
+
+/* Build the "ord:HH" anchor for a 1-based line in `data`. */
+static void anchor_token_for(char *data, size_t len, int ord, char out[24])
+{
+   anchor_line_t *lines = NULL;
+   int n = anchor_split_lines(data, len, &lines);
+   char tag[3] = "00";
+   if (lines && ord >= 1 && ord <= n)
+      anchor_short_tag(anchor_line_digest(lines[ord - 1].ptr, lines[ord - 1].len, ord == 1), tag);
+   free(lines);
+   snprintf(out, 24, "%d:%s", ord, tag);
+}
+
+/* Whole-symbol rewrite. Resolve `symbol` (unique or return candidates — never a
+ * blind pick), then replace its definition span via the Part I transactional
+ * engine so the write is anchor-verified. op defaults to "replace_body". */
+char *tool_edit_symbol(const char *symbol, const char *path, const char *op, const char *text)
+{
+   if (!symbol || !symbol[0])
+      return safe_strdup("error: missing 'symbol' parameter");
+   if (op && op[0] && strcmp(op, "replace_body") != 0)
+      return safe_strdup("error: unsupported op (only 'replace_body' is supported)");
+   if (!text)
+      return safe_strdup("error: missing 'text' (the new symbol body)");
+
+   const char *target = NULL;
+   if (path && path[0])
+   {
+      target = path;
+   }
+   else
+   {
+      term_hit_t hits[16];
+      int nh = kb_client_index_find(symbol, hits, 16);
+      if (nh <= 0)
+         return safe_strdup("error: symbol not found in the code index; pass 'path' or a "
+                            "fully-qualified name");
+      if (nh > 1)
+      {
+         dstr_t ds;
+         dstr_init(&ds);
+         dstr_append_str(&ds, "# ambiguous symbol across files; pass 'path' to disambiguate (never "
+                              "a blind resolve)\n");
+         for (int i = 0; i < nh; i++)
+         {
+            char row[MAX_PATH_LEN + 64];
+            snprintf(row, sizeof(row), "- %s:%d [%s]\n", hits[i].file_path, hits[i].line,
+                     hits[i].kind);
+            dstr_append_str(&ds, row);
+         }
+         char *out = dstr_steal(&ds);
+         return out ? out : safe_strdup("error: out of memory");
+      }
+      target = hits[0].file_path;
+   }
+
+   char cwd_path[MAX_PATH_LEN];
+   const char *actual_path = path_in_thread_cwd(target, cwd_path, sizeof(cwd_path));
+   char resolved[MAX_PATH_LEN];
+   const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   if (verr)
+      return safe_strdup(verr);
+
+   char *data = NULL;
+   size_t len = 0;
+   const char *errmsg = NULL;
+   if (read_text_file(actual_path, &data, &len, &errmsg) != 0)
+      return safe_strdup(errmsg);
+
+   definition_t defs[16];
+   int n = code_outline_symbol_defs(data, len, code_outline_ext(actual_path), symbol, defs, 16);
+   if (n == 0)
+   {
+      free(data);
+      return safe_strdup("error: symbol not found in file");
+   }
+   if (n > 1)
+   {
+      /* overloaded/shadowed within one file: return anchored candidates */
+      char *out = format_symbol_candidates(data, len, NULL, defs, n);
+      free(data);
+      return out;
+   }
+
+   int start = defs[0].line;
+   int end = defs[0].line_end > defs[0].line ? defs[0].line_end : defs[0].line;
+
+   /* mint a fresh snapshot and drive the anchored replace_range engine */
+   char snap_id[ANCHOR_SNAPSHOT_ID_MAX];
+   if (anchor_snapshot_create(resolved, data, len, snap_id) != 0)
+   {
+      free(data);
+      return safe_strdup("error: out of memory");
+   }
+   anchor_snapshot_t snap;
+   if (!anchor_snapshot_get_copy(snap_id, &snap))
+   {
+      free(data);
+      return safe_strdup("error: snapshot unavailable");
+   }
+   char from_a[24], to_a[24];
+   anchor_token_for(data, len, start, from_a);
+   anchor_token_for(data, len, end, to_a);
+   cJSON *edits = cJSON_CreateArray();
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "op", "replace_range");
+   cJSON_AddStringToObject(e, "from", from_a);
+   cJSON_AddStringToObject(e, "to", to_a);
+   cJSON_AddStringToObject(e, "text", text);
+   cJSON_AddItemToArray(edits, e);
+
+   edit_anchored_result_t res;
+   int rc = edit_anchored_plan(data, len, &snap, edits, &res);
+   anchor_snapshot_dispose(&snap);
+   cJSON_Delete(edits);
+   if (rc != 0)
+   {
+      char *out = res.reject ? cJSON_PrintUnformatted(res.reject) : NULL;
+      if (res.reject)
+         cJSON_Delete(res.reject);
+      free(data);
+      return out ? out : safe_strdup("error: symbol edit could not be planned");
+   }
+
+   char *write_result = tool_write_file(target, res.new_text);
+   free(res.new_text);
+
+   /* echo the resolved identity so the agent can confirm it edited the intended
+    * definition (parent vs override, etc.) */
+   cJSON *wj = write_result ? cJSON_Parse(write_result) : NULL;
+   if (wj)
+   {
+      cJSON_AddStringToObject(wj, "symbol", symbol);
+      cJSON_AddStringToObject(wj, "resolved_kind", defs[0].kind);
+      char loc[MAX_PATH_LEN + 32];
+      snprintf(loc, sizeof(loc), "%s:%d-%d", actual_path, start, end);
+      cJSON_AddStringToObject(wj, "resolved_at", loc);
+      char *out = cJSON_PrintUnformatted(wj);
+      cJSON_Delete(wj);
+      free(write_result);
+      free(data);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+   free(data);
+   return write_result ? write_result : safe_strdup("error: write failed");
 }
 
 /* Anchored grep: reuse tool_grep's raw "path:line:text" output, then group by
