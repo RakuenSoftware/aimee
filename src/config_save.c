@@ -872,6 +872,11 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "delegate_sandbox", 1);
    if (cfg->delegate_sandbox_image[0])
       cJSON_AddStringToObject(root, "delegate_sandbox_image", cfg->delegate_sandbox_image);
+   /* Persist only when non-default ("proxy"); absence means the default. */
+   if (cfg->delegate_sandbox_package_access[0] &&
+       strcmp(cfg->delegate_sandbox_package_access, "proxy") != 0)
+      cJSON_AddStringToObject(root, "delegate_sandbox_package_access",
+                              cfg->delegate_sandbox_package_access);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */

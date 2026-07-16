@@ -1928,6 +1928,57 @@ int main(void)
       unlink(cpath);
    }
 
+   /* --- delegate_sandbox_package_access: default proxy, round-trip, validation --- */
+   {
+      assert(config_sandbox_package_access_valid("proxy"));
+      assert(config_sandbox_package_access_valid("off"));
+      assert(config_sandbox_package_access_valid("gated"));
+      assert(config_sandbox_package_access_valid("governance"));
+      assert(!config_sandbox_package_access_valid("bogus"));
+      assert(!config_sandbox_package_access_valid(NULL));
+
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      unlink(cpath);
+      platform_setenv("AIMEE_NO_CACHE", "1");
+
+      static config_t def;
+      memset(&def, 0, sizeof(def));
+      assert(config_load(&def) == 0);
+      assert(strcmp(def.delegate_sandbox_package_access, "proxy") == 0); /* default */
+
+      /* Round-trip a non-default value. */
+      snprintf(def.delegate_sandbox_package_access, sizeof(def.delegate_sandbox_package_access),
+               "gated");
+      assert(config_save(&def) == 0);
+      static config_t got;
+      memset(&got, 0, sizeof(got));
+      assert(config_load(&got) == 0);
+      assert(strcmp(got.delegate_sandbox_package_access, "gated") == 0);
+
+      /* An unknown value in the file is ignored — the default stands. (The stderr
+       * warning itself is not captured here; only the default-preserving behavior.) */
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fputs("delegate_sandbox_package_access: nonsense\n", f);
+      fclose(f);
+      static config_t bad;
+      memset(&bad, 0, sizeof(bad));
+      assert(config_load(&bad) == 0);
+      assert(strcmp(bad.delegate_sandbox_package_access, "proxy") == 0);
+
+      /* An explicitly empty value is also invalid -> keep the default. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fputs("delegate_sandbox_package_access: \"\"\n", f);
+      fclose(f);
+      static config_t empty;
+      memset(&empty, 0, sizeof(empty));
+      assert(config_load(&empty) == 0);
+      assert(strcmp(empty.delegate_sandbox_package_access, "proxy") == 0);
+      unlink(cpath);
+   }
+
    if (old_home)
    {
       platform_setenv("HOME", old_home);

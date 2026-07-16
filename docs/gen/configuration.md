@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (182)
+## CLI-settable keys (183)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -55,6 +55,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `default_persona` | string | Persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set (default 'engineer'). |
 | `delegate_graph_context_enabled` | bool | Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off). |
 | `delegate_sandbox` | bool | Run a delegate's shell and file ops INSIDE its own container (via the `docker` delegate backend) instead of in-process in aimee-server. Off (the default) a delegate's `bash`/read/write/list run with aimee-server's filesystem and environment. This is not yet a full sandbox on its own: the container still has a network, so `require_aimee_git` and the credential strip remain the live boundary. The delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an unreachable daemon means every delegate runs on the host (default off). |
+| `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. Only meaningful when `delegate_sandbox` is on. |
 | `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
 | `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |
 | `dogfood_autolabel_repeat_question` | bool | Auto-label repeated-question turns. |

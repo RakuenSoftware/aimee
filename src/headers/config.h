@@ -470,6 +470,16 @@ typedef struct config
     * reference (used as-is); the build-from-spec form lives in .aimee/project.yaml. */
    char delegate_sandbox_image[256];
 
+   /* Runtime package-access policy for a `--network none` delegate sandbox. aimee
+    * always performs the fetch (the delegate never holds an outside socket) and logs
+    * it; this selects HOW MUCH aimee will fetch on the delegate's behalf:
+    *   "proxy"      (default) proxy package-manager fetches to any host
+    *   "off"        no runtime proxy; build-time installs + learned pre-bake only
+    *   "gated"      host-allowlisted registries; off-allowlist -> human approval
+    *   "governance" allowlist from a governance provider; off-allowlist refused
+    * See docs/proposals/pending/delegate-sandbox-image-customization.md. */
+   char delegate_sandbox_package_access[32];
+
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a
     * proxied /v1/messages or /v1/chat/completions request, so the served model is
@@ -2044,6 +2054,9 @@ const char *config_output_dir(void);
 
 /* Effective guardrail mode (defaults to "approve"). */
 const char *config_guardrail_mode(const config_t *cfg);
+
+/* 1 if `s` is a valid delegate_sandbox_package_access mode (proxy/off/gated/governance). */
+int config_sandbox_package_access_valid(const char *s);
 
 /* Resolve the embedding command actually used to embed text. Precedence:
  * a per-call `requested` command (e.g. from a request payload), then the
