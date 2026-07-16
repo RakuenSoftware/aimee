@@ -103,6 +103,15 @@ static const char *deploy_role_mode(const char *backend)
    return "";
 }
 
+/* A GPU-class model tier — one served by the model-less aimee-llm image, which
+ * downloads the tier on first boot. The absence of any GPU tier (cpu, or an unset
+ * tier that resolves to cpu) selects the pre-baked aimee-llm-cpu image instead. */
+static int deploy_tier_is_gpu(const char *tier)
+{
+   return tier &&
+          (strcmp(tier, "small") == 0 || strcmp(tier, "mid") == 0 || strcmp(tier, "large") == 0);
+}
+
 void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
 {
    if (!buf || n == 0)
@@ -123,12 +132,24 @@ void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
    const int any_local =
        strcmp(eb, "local") == 0 || strcmp(rb, "local") == 0 || strcmp(sb, "local") == 0;
 
+   /* The locally-served LLM image depends on the tier. Any GPU tier (small/mid/
+    * large) on a local role selects the model-less aimee-llm image (profile "llm"),
+    * which downloads that tier on first boot and persists it in the /models volume.
+    * A pure-CPU stack (no GPU tier) selects the pre-baked aimee-llm-cpu image
+    * (profile "llm-cpu"), which ships the cpu GGUFs in the image and mounts no
+    * volume — the offline appliance LLM that, with aimee-kb, retires aimee-combined.
+    * The two profiles are mutually exclusive; both answer to the host "aimee-llm". */
+   const int gpu_local = (strcmp(eb, "local") == 0 && deploy_tier_is_gpu(cfg->llm_embed_tier)) ||
+                         (strcmp(rb, "local") == 0 && deploy_tier_is_gpu(cfg->llm_rerank_tier)) ||
+                         (strcmp(sb, "local") == 0 && deploy_tier_is_gpu(cfg->llm_synth_tier));
+
    /* COMPOSE_PROFILES: a remote kb deploys nothing; a local kb runs the "kb"
-    * service, plus "llm" whenever any role is served locally on this host. */
+    * service, plus the LLM profile whenever any role is served locally here. */
    char profiles[64] = "";
    if (!remote_kb)
    {
-      snprintf(profiles, sizeof(profiles), "kb%s", any_local ? ",llm" : "");
+      snprintf(profiles, sizeof(profiles), "kb%s",
+               any_local ? (gpu_local ? ",llm" : ",llm-cpu") : "");
    }
    EMITF("COMPOSE_PROFILES=%s\n", profiles);
 
