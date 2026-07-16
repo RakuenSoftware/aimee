@@ -22,6 +22,13 @@
 #include "util.h"
 
 #include "aimee.h" /* MAX_PATH_LEN */
+#include "aimee_home.h" /* aimee_home() — resolves the server's UDS path */
+
+/* Fixed in-container path for the bind-mounted aimee-server UDS. The delegate's
+ * only outward channel: `--network none` cuts every IP route, and AIMEE_API_ENDPOINT
+ * points the baked-in `aimee` CLI at this socket, so `aimee git_commit`,
+ * `aimee web_search`, `aimee memory ...` reach the server (and nothing else). */
+#define DELEGATE_SOCK_PATH "/run/aimee/aimee-http.sock"
 
 #include <ctype.h>
 #include <errno.h>
@@ -512,22 +519,44 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       if (st->mount_host_tree)
          snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
 
+      /* The aimee-server UDS is the delegate's only outward channel (see the
+       * DELEGATE_SOCK_PATH note). Resolve + bind it; if the server has no socket
+       * yet (should not happen for a running server) we still create the container
+       * so file/exec isolation holds — the delegate just cannot call `aimee`. */
+      char host_sock[MAX_PATH_LEN + 32] = "";
+      char sock_bind[MAX_PATH_LEN + 96] = "";
+      const char *aimee_h = aimee_home();
+      if (aimee_h && aimee_h[0])
+         snprintf(host_sock, sizeof(host_sock), "%s/aimee-http.sock", aimee_h);
+      struct stat sock_st;
+      const int have_sock = host_sock[0] && stat(host_sock, &sock_st) == 0;
+      if (have_sock)
+         snprintf(sock_bind, sizeof(sock_bind), "%s:%s", host_sock, DELEGATE_SOCK_PATH);
+
       /* Sized from the mount array itself: a hand-counted bound silently overflows
-       * the day a fourth mount is added. */
-      const char *create_argv[18 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
+       * the day a fourth mount is added. Fixed slots cover docker/create/--name/
+       * --network/--user/-w/image/sleep + the aimee-socket -v and -e. */
+      const char *create_argv[24 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
       int n = 0;
       create_argv[n++] = "docker";
       create_argv[n++] = "create";
       create_argv[n++] = "--name";
       create_argv[n++] = st->container_name;
-      /* Sandbox slice 6: no IP network at all. The delegate has no egress — web
-       * tools (web_search) run SERVER-side, and every file/exec op is marshalled in
-       * over `docker exec`, so nothing legitimate needs the container's network.
-       * `--network none` removes lateral movement and data-exfil paths in one flag.
-       * INVARIANT: never add a docker-socket bind (/var/run/docker.sock) below — it
-       * would hand the delegate root-equivalent control of the host daemon. */
+      /* No IP network: the container's only reachable peer is aimee-server, over the
+       * bound UDS below. Removes lateral movement and data-exfil in one flag.
+       * INVARIANT: never bind the docker socket (/var/run/docker.sock) — that would
+       * hand the delegate root-equivalent control of the host daemon. */
       create_argv[n++] = "--network";
       create_argv[n++] = "none";
+      if (have_sock)
+      {
+         /* The one permitted channel out: aimee-server's UDS, with the in-container
+          * `aimee` CLI pointed at it. Auth is filesystem-permission on the socket. */
+         create_argv[n++] = "-v";
+         create_argv[n++] = sock_bind;
+         create_argv[n++] = "-e";
+         create_argv[n++] = "AIMEE_API_ENDPOINT=unix:" DELEGATE_SOCK_PATH;
+      }
       if (userflag[0])
       {
          create_argv[n++] = "--user";

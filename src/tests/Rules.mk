@@ -3581,6 +3581,7 @@ $(TESTPREFIX)/unit-test-delegate-backend-ssh: $(OBJDIR)/tests/test_delegate_back
 $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_backend_docker.o \
                      $(OBJDIR)/server/delegate_backend.o \
                      $(OBJDIR)/server/delegate_backend_docker.o $(OBJDIR)/log.o \
+                     $(OBJDIR)/aimee_home.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
