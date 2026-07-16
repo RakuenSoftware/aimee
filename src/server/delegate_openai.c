@@ -94,7 +94,10 @@ static cJSON *openai_build_request(const agent_t *agent, cJSON *messages, cJSON 
 static void openai_parse_response(cJSON *root, const char *body, parsed_response_t *out)
 {
    (void)body;
-   agent_parse_response_openai(root, out);
+   /* IR is the sole parser for the openai wire; on parse failure it leaves *out
+    * zeroed (an empty response), the same as an unparseable reply. No XML rescue on
+    * the driver path (rescue_mode < 0), matching the legacy hook. */
+   agent_ir_parse_json_response(root, 0 /*openai*/, -1, NULL, out);
 }
 
 static cJSON *openai_build_tools(void)
@@ -145,8 +148,10 @@ static cJSON *chatgpt_build_request(const agent_t *agent, cJSON *messages, cJSON
 
 static void chatgpt_parse_response(cJSON *root, const char *body, parsed_response_t *out)
 {
-   agent_parse_response_responses(body, out);
    (void)root;
+   /* IR is the sole parser for the responses/SSE (codex) wire. Extracts the response
+    * object from the stream and parses it via the IR; zeroed *out on failure. */
+   agent_ir_parse_responses(body, -1, NULL, out);
 }
 
 static cJSON *chatgpt_build_tools(void)
@@ -236,7 +241,8 @@ static cJSON *anthropic_build_request(const agent_t *agent, cJSON *messages, cJS
 static void anthropic_parse_response(cJSON *root, const char *body, parsed_response_t *out)
 {
    (void)body;
-   agent_parse_response_anthropic(root, out);
+   /* IR is the sole parser for the anthropic wire; zeroed *out on failure. */
+   agent_ir_parse_json_response(root, 1 /*anthropic*/, -1, NULL, out);
 }
 
 static cJSON *anthropic_build_tools(void)
