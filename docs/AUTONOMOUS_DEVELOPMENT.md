@@ -104,9 +104,13 @@ with a `security` lens before `pr.open` adds a mandatory security review.
 `implement` is where "the primary manages, delegates do the work" is concrete:
 
 1. **Split.** The plan is decomposed into independent, file/module-scoped units.
-2. **Dispatch.** Each unit goes to an `engineer` delegate that runs **with tools
-   pinned to the work item's own git worktree**, it edits files in place, and
-   the change is committed on the work-item branch.
+2. **Dispatch.** Each unit is enqueued as a delegate task onto the **coord
+   queue**. The engine does not spawn the delegate or manipulate git during
+   dispatch; a background coord dispatcher claims each task and runs it
+   through the shared delegate path, which provides agent routing, per-provider
+   concurrency limits, credential leasing, a parent-write guard, and an
+   isolated worktree whose diff it applies back into the work item's checkout.
+   The commit happens at `freeze`, not per unit.
 3. **Verify, as hard as possible.** Verification runs through the engine's gates
    and delegates, never the primary's own hands, in ascending cost:
    - mechanical, the build compiles, targeted tests/lint pass (`gate.ci`);
@@ -254,7 +258,8 @@ Scope of the current implementation (the design allows for more):
 | `POST /v1/dev/submit` (`rh_dev_submit`) | intake, the only entry; creates an autonomous work item, seeds the proposal, notifies the scheduler |
 | autonomy scheduler (`wfe_scheduler`) | server-owned thread driving active autonomous work items via `wfe_autonomy_run` |
 | workflow engine (`wfe_*`) | block-composed lifecycle, gates, durable state + audit (`lifecycle_*` tables) |
-| live delegate provider (`wfe_live_delegate`) | the engine→delegate bridge: runs a block's role as a tool-using agent in the work-item worktree, then commits. (It uses the same in-process delegate execution as `aimee delegate`/`/v1/delegate/run`, but is invoked *by the engine* per block rather than by a user.) |
+| coord queue + dispatcher (`coord_jobs`, `coord_job_tasks`) | durable delegate-dispatch queue; a background coord dispatcher claims tasks and runs them through the shared delegate path — agent routing, per-provider concurrency limits, credential leasing, parent-write guard, and an isolated worktree whose diff is applied back |
+| live delegate provider (`wfe_live_delegate`) | the engine→delegate bridge: enqueues one coord-queue task per producing block rather than running delegates in-process (in `implement`, one task per split unit). The block's delegate role is derived from whether the block names a captured artifact: blocks that do (`author`, `understand`, `split`, `review`) run READ-only, and WFE persists the delegate reply as that artifact; worktree-mutating blocks (`implement`, `decompose`, `tdd`, `document`) run WRITE, and the shared delegate path isolates the worktree and applies the resulting diff back under the parent-write guard. `freeze` owns the commit. |
 | autonomy driver (`wfe_autonomy`) | advances machine gates, parks at human gates, never forges approval |
 | turn registry / server-owned turns | a run survives client disconnect (the foundation) |
 
