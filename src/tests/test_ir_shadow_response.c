@@ -213,6 +213,40 @@ int main(void)
       printf("  PASS: off unless AIMEE_IR_SHADOW is set\n");
    }
 
+   /* compare_bodies is SEMANTIC (parsed JSON), not byte-exact: two provider bodies
+    * with the same fields in a different key ORDER are a MATCH -- the provider sees
+    * identical requests, and requiring byte-identical serialization would flag
+    * legitimate ordering differences between the IR and legacy builders. */
+   {
+      aimee_ir_metrics_reset();
+      const char *ir_body = "{\"model\":\"m\",\"max_tokens\":16,\"messages\":[]}";
+      const char *legacy_body = "{\"model\":\"m\",\"messages\":[],\"max_tokens\":16}";
+      aimee_ir_shadow_compare_bodies(ir_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MATCH) == 1);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MISMATCH) == 0);
+      printf("  PASS: reordered keys are a body MATCH (semantic, not byte-exact)\n");
+   }
+
+   /* But a genuine divergence -- a field one side has and the other omits (exactly
+    * the temperature-default gap the shadow caught) -- is still a MISMATCH. */
+   {
+      aimee_ir_metrics_reset();
+      const char *ir_body = "{\"model\":\"m\",\"max_tokens\":16}";
+      const char *legacy_body = "{\"model\":\"m\",\"max_tokens\":16,\"temperature\":1.0}";
+      aimee_ir_shadow_compare_bodies(ir_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MISMATCH) == 1);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MATCH) == 0);
+      printf("  PASS: a missing/extra field is still a body MISMATCH\n");
+   }
+
+   /* A NULL body (the IR could not build it) is a divergence, not a skip. */
+   {
+      aimee_ir_metrics_reset();
+      aimee_ir_shadow_compare_bodies(NULL, "{\"model\":\"m\"}", AIMEE_WIRE_ANTHROPIC);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_BODY_MISMATCH) == 1);
+      printf("  PASS: a NULL body counts as a mismatch\n");
+   }
+
    printf("ir-shadow-response: ok\n");
    return 0;
 }

@@ -88,6 +88,16 @@ int main(void)
        * NULL-check but corrupt the conversation. */
       cJSON *msgs = cJSON_GetObjectItem(j, "messages");
       assert(cJSON_IsArray(msgs) && cJSON_GetArraySize(msgs) >= 1);
+      /* temperature must ALWAYS be emitted: legacy injects it at build time
+       * (defaulting an absent value to 1.0), so the IR must too or the provider
+       * bodies diverge -- the shadow caught exactly this. The client value wins when
+       * present (one corpus shape sends 0.2); the rest get the 1.0 default. So the
+       * invariant is "present and numeric", and specifically 1.0 unless the shape
+       * set its own. */
+      cJSON *temp = cJSON_GetObjectItem(j, "temperature");
+      assert(temp && cJSON_IsNumber(temp));
+      cJSON *sent = cJSON_GetObjectItem(req, "temperature");
+      assert(temp->valuedouble == (cJSON_IsNumber(sent) ? sent->valuedouble : 1.0));
 
       cJSON_Delete(j);
       free(ir);
