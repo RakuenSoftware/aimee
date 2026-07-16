@@ -796,7 +796,6 @@ void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
    cJSON *stop = cJSON_GetObjectItem(root, "stop_reason");
    if (stop && cJSON_IsString(stop) && stop->valuestring)
       snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", stop->valuestring);
-   int has_tool_use = (stop && cJSON_IsString(stop) && strcmp(stop->valuestring, "tool_use") == 0);
 
    cJSON *content = cJSON_GetObjectItem(root, "content");
    if (!content || !cJSON_IsArray(content))
@@ -832,11 +831,16 @@ void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
             call->arguments = strdup("{}");
          out->call_count++;
       }
-      else if (strcmp(type->valuestring, "text") == 0 && !has_tool_use)
+      else if (strcmp(type->valuestring, "text") == 0)
       {
+         /* Preserve text even when the turn also makes a tool call: an Anthropic
+          * assistant response can carry both prose and a tool_use, and gating this
+          * on !has_tool_use DROPPED that text -- a real bug the canonical IR does
+          * not have (the shadow caught it as an ir_resp mismatch on live traffic).
+          * append_text concatenates multiple text blocks, matching the IR. */
          cJSON *text = cJSON_GetObjectItem(block, "text");
          if (text && cJSON_IsString(text))
-            out->content = strdup(text->valuestring);
+            append_text(&out->content, text->valuestring);
       }
    }
 

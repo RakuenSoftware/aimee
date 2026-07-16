@@ -89,6 +89,27 @@ int main(void)
       printf("  PASS: divergent text counts a mismatch\n");
    }
 
+   /* 2b. A response longer than the old fixed 8 KB text buffer must still MATCH:
+    * the buffer used to truncate the IR text and every long response was a false
+    * mismatch (legacy full-length vs IR text cut at the cap). */
+   {
+      aimee_ir_metrics_reset();
+      size_t big = 20000;
+      char *longtext = malloc(big + 1);
+      memset(longtext, 'a', big);
+      longtext[big] = '\0';
+      parsed_response_t lg;
+      memset(&lg, 0, sizeof(lg));
+      lg.content = strdup(longtext);
+      cJSON *r = text_resp(longtext);
+      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_ANTHROPIC);
+      assert(match() == 1 && mism() == 0);
+      cJSON_Delete(r);
+      free(lg.content);
+      free(longtext);
+      printf("  PASS: a >8KB response text is a match (no truncation false-positive)\n");
+   }
+
    /* 3. Whitespace-only difference is NOT a divergence. */
    {
       aimee_ir_metrics_reset();
