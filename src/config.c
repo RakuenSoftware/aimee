@@ -306,6 +306,7 @@ static const config_schema_entry_t config_schema[] = {
     {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
     {"gateway_pin_model", SCHEMA_BOOL, 0},
     {"css_style_graph_enabled", SCHEMA_BOOL, 0},
+    {"wfe_live_forge_enabled", SCHEMA_BOOL, 0},
     {"client_integrations_enabled", SCHEMA_BOOL, 0},
     {"audit_action_enabled", SCHEMA_BOOL, 0},
     {"audit_worm_enabled", SCHEMA_BOOL, 0},
