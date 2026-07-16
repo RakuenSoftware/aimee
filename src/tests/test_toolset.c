@@ -139,10 +139,14 @@ static void test_native_tool_unknown_toolset_is_not_invented(void)
    printf("  native_tool_unknown_toolset_is_not_invented: ok\n");
 }
 
-/* review_indexed gives a reviewer aimee's branch-indexed capabilities and NO
- * filesystem/git tools, so a caller-provided-diff review cannot fall back to
- * reading a worktree it does not have. */
-static void test_review_indexed_excludes_filesystem(void)
+/* review_indexed carries aimee's branch-indexed capabilities plus the read-only
+ * worktree tools (read_file/list_files/grep). Slice 7: those reads are
+ * REACHABILITY-GATED in agent_tools_tool_allowed_for_role (granted only when the
+ * active provider can see the review worktree — see test_review_read_reachability_gate
+ * in test_toolset_thread_scope), not excluded from the toolset. The toolset itself
+ * must still NEVER carry write/exec or git tools: a reviewer must not edit what it
+ * judges, and a caller-provided-diff review keeps no worktree-mutating power. */
+static void test_review_indexed_read_tools_gated_no_write(void)
 {
    toolset_registry_t reg;
    toolset_registry_init(&reg);
@@ -153,11 +157,16 @@ static void test_review_indexed_excludes_filesystem(void)
    assert(has_tool(tools, n, "code_search"));
    assert(has_tool(tools, n, "find_symbol"));
    assert(has_tool(tools, n, "search_memory"));
-   assert(!has_tool(tools, n, "read_file"));
-   assert(!has_tool(tools, n, "list_files"));
-   assert(!has_tool(tools, n, "grep"));
+   /* Read-only worktree tools ARE carried now (agent-layer reachability-gated). */
+   assert(has_tool(tools, n, "read_file"));
+   assert(has_tool(tools, n, "list_files"));
+   assert(has_tool(tools, n, "grep"));
+   /* Never write/exec/git — the must-not-edit invariant lives in the toolset. */
+   assert(!has_tool(tools, n, "write_file"));
+   assert(!has_tool(tools, n, "edit_file"));
+   assert(!has_tool(tools, n, "bash"));
    assert(!has_tool(tools, n, "git_diff"));
-   printf("  review_indexed_excludes_filesystem: ok\n");
+   printf("  review_indexed_read_tools_gated_no_write: ok\n");
 }
 
 static void test_cycle_rejected(void)
@@ -229,8 +238,10 @@ static void test_delegate_role_toolset(void)
    char err[TOOLSET_ERROR_MAX] = "";
    int n = toolset_resolve(&reg, toolset_for_delegate_role("review"), tools, TOOLSET_MAX_TOOLS, err,
                            sizeof(err));
-   /* review is index-only now: branch-index nav tools, no filesystem tools */
-   assert(!has_tool(tools, n, "read_file"));
+   /* review carries branch-index nav tools plus the read-only worktree tools
+    * (reachability-gated at the agent layer, slice 7); never write/exec. */
+   assert(has_tool(tools, n, "read_file"));
+   assert(!has_tool(tools, n, "write_file") && !has_tool(tools, n, "bash"));
    assert(has_tool(tools, n, "find_symbol") && has_tool(tools, n, "search_memory"));
    n = toolset_resolve(&reg, toolset_for_delegate_role("validate"), tools, TOOLSET_MAX_TOOLS, err,
                        sizeof(err));
@@ -306,7 +317,7 @@ int main(void)
    test_full_stack_resolves_union();
    test_git_write_tools_reach_coding_roles_only();
    test_find_callers_reaches_reviewers_and_coders();
-   test_review_indexed_excludes_filesystem();
+   test_review_indexed_read_tools_gated_no_write();
    test_cycle_rejected();
    test_unknown_tool_dropped();
    test_core_edit_flows_to_include();

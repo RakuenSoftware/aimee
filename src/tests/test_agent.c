@@ -421,15 +421,18 @@ static void test_current_code_only_role_tool_policy(void)
    cJSON *tools = build_tools_array();
    assert(tools_array_has_name(tools, "read_file") && tools_array_has_name(tools, "find_symbol"));
    agent_tools_filter_for_role(tools, "review");
-   /* review now uses the index-only toolset (review_indexed): the branch-index nav
-    * tools survive the filter, the filesystem/shell tools do not (the change under
-    * review reaches it as a diff in the prompt). */
+   /* review uses review_indexed: the branch-index nav tools plus the read-only
+    * worktree tools survive the filter. The read tools are reachability-gated
+    * (slice 7); the default provider here is SHARED (reachable), so they are
+    * granted. Shell/write tools are never in the toolset. */
    assert(tools_array_has_name(tools, "find_symbol") &&
           tools_array_has_name(tools, "search_memory"));
-   assert(!tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "bash"));
+   assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "bash"));
    assert(agent_tools_tool_allowed_for_role("review", "find_symbol") == 1);
    assert(agent_tools_tool_allowed_for_role("review", "search_docs") == 1);
-   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 0);
+   /* read_file granted under the reachable (SHARED) default; denied only on a
+    * DETACHED remote seat — see test_review_read_reachability_gate. */
+   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 1);
    assert(agent_tools_tool_allowed_for_role("review", "create_note") == 0);
    /* diagnose stays on the current_code toolset (no index tools). */
    assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);

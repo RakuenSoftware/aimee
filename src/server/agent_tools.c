@@ -4,6 +4,7 @@
 #include "agent_tools.h"
 #include "agent_exec.h"
 #include "workspace.h"
+#include "workspace_provider.h"
 #include "computer_use.h"
 #include "config.h"
 #include "diff.h"
@@ -421,6 +422,26 @@ int agent_tools_role_current_code_only(const char *role)
           strcmp(role, "inspect") == 0;
 }
 
+/* The three read-only worktree tools review_indexed carries under slice 7. Kept as
+ * an explicit allowlist so the reachability grant below can never widen to a write
+ * or exec tool. */
+static int is_review_read_tool(const char *name)
+{
+   return name && (strcmp(name, "read_file") == 0 || strcmp(name, "list_files") == 0 ||
+                   strcmp(name, "grep") == 0);
+}
+
+/* A review panelist's read tools resolve through workspace_provider_active(). The
+ * review worktree is reachable through every provider EXCEPT a DETACHED remote
+ * seat, whose read_all marshals to the serving client's filesystem rather than the
+ * review's tree. SHARED (server worktree), CONTAINER (:ro sandbox mount), and MIRROR
+ * (server-side reconstructed worktree) all present the right tree. */
+static int review_worktree_reachable(void)
+{
+   const workspace_provider_t *ws = workspace_provider_active();
+   return !ws || ws->kind != WS_PROVIDER_DETACHED;
+}
+
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
 {
    if (!tool_name || !tool_name[0])
@@ -441,10 +462,25 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
       int n = toolset_resolve_effective(toolset_name, tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
       if (n >= 0)
       {
+         int in_set = 0;
          for (int i = 0; i < n; i++)
             if (strcmp(tools[i], tool_name) == 0)
-               return 1;
-         return 0;
+            {
+               in_set = 1;
+               break;
+            }
+         if (!in_set)
+            return 0;
+         /* Slice 7 (reviewers): review_indexed carries the read-only worktree tools
+          * (read_file/list_files/grep), but they resolve through
+          * workspace_provider_active(). Grant them ONLY when the worktree is
+          * reachable — a DETACHED remote seat's read marshals to the serving
+          * client's fs, not the review's tree, so deny there. review_indexed never
+          * carries write_file/edit_file/bash, so a reviewer still cannot edit. */
+         if (is_review_read_tool(tool_name) && strcmp(toolset_name, "review_indexed") == 0 &&
+             !review_worktree_reachable())
+            return 0;
+         return 1;
       }
       LOG_WARN("toolset", "failed to resolve toolset '%s': %s", toolset_name,
                err[0] ? err : "unknown error");
@@ -503,7 +539,13 @@ static const char *tool_def_name(cJSON *tool)
 
 void agent_tools_filter_for_role(cJSON *tools, const char *role)
 {
-   const char *toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
+   /* This turn's toolset first (thread-local, panel-safe per #1374), then the
+    * single-process CLI's env channel — matching agent_tools_tool_allowed_for_role
+    * so what we advertise and what we enforce never disagree (e.g. a panel sets its
+    * toolset thread-locally, not via the env). */
+   const char *toolset_name = agent_tools_active_toolset();
+   if (!toolset_name || !toolset_name[0])
+      toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
