@@ -116,7 +116,18 @@ credentials live in the server's **sealed vault**; see
   transcripts and build progress dropped), with the full output spilled for lossless
   recovery. Fail-open and byte-identical when off. Toggle it in the web Settings page. See
   [features/tool-output-condensation.md](features/tool-output-condensation.md).
-- **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a single
+- **Retired: the `aimee-combined` all-in-one appliance image.** The single image
+  that bundled `aimee-server` + `aimee-kb` + a CPU LLM (models baked in) is gone —
+  `Dockerfile.combined`, `compose.combined.yaml`, and `combined-entrypoint.sh` are
+  removed. Use the **split stack** instead: `docker compose -f deploy/compose/aimee.yaml up -d`
+  brings up `aimee-server` + `aimee-kb` + a CPU `aimee-llm` + Postgres in one command
+  (add `-f deploy/compose/aimee.gpu.yaml` for a GPU synth tier). The self-deploying
+  server is unchanged — the setup wizard still provisions `aimee-kb` + a CPU
+  `aimee-llm` on demand over the mounted Docker socket. The pure-CPU appliance LLM
+  is now the pre-baked **`aimee-llm-cpu`** image (cpu-tier GGUFs baked in; serves
+  offline with no first-boot download and no `/models` volume). See
+  [QUICKSTART.md](QUICKSTART.md).
+- **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a
   **model-less** image whose **tier** is chosen at runtime via `AIMEE_LLM_TIER` — the models
   download on first boot into a `/models` volume, so there is nothing baked and no per-tier
   image to pull. `cpu` runs retrieval on any host (~6.5 GB download), `small` a Gemma 4 12B
