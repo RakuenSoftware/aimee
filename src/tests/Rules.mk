@@ -1057,6 +1057,11 @@ $(TESTPREFIX)/unit-test-server-memory-benchmark: \
 $(TESTPREFIX)/unit-test-config: $(OBJDIR)/tests/test_config.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-delegate-sandbox-image
+$(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
+                      $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/guardrails_tdd.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-roundtable-preset: $(OBJDIR)/tests/test_roundtable_preset.o $(OBJDIR)/roundtable_preset.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

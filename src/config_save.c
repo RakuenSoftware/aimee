@@ -807,15 +807,21 @@ int config_save(const config_t *cfg)
    for (int i = 0; i < cfg->workspace_count; i++)
    {
       const char *prov = cfg->workspace_providers[i];
-      if (prov[0] && strcmp(prov, "shared") != 0)
+      int prov_nondefault = prov[0] && strcmp(prov, "shared") != 0;
+      /* Promote to a {path, ...} object for ANY non-default field, so a
+       * sandbox_image override on an otherwise-shared workspace is not dropped. */
+      if (prov_nondefault || cfg->workspace_sandbox_image[i][0])
       {
          cJSON *entry = cJSON_CreateObject();
          cJSON_AddStringToObject(entry, "path", cfg->workspaces[i]);
-         cJSON_AddStringToObject(entry, "provider", prov);
+         if (prov_nondefault)
+            cJSON_AddStringToObject(entry, "provider", prov);
          if (cfg->workspace_vcs_remote[i][0])
             cJSON_AddStringToObject(entry, "remote", cfg->workspace_vcs_remote[i]);
          if (cfg->workspace_vcs_head[i][0])
             cJSON_AddStringToObject(entry, "head", cfg->workspace_vcs_head[i]);
+         if (cfg->workspace_sandbox_image[i][0])
+            cJSON_AddStringToObject(entry, "sandbox_image", cfg->workspace_sandbox_image[i]);
          cJSON_AddItemToArray(ws, entry);
       }
       else
@@ -864,6 +870,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "require_aimee_git", 0);
    if (cfg->delegate_sandbox) /* default-off: persist only when enabled */
       cJSON_AddBoolToObject(root, "delegate_sandbox", 1);
+   if (cfg->delegate_sandbox_image[0])
+      cJSON_AddStringToObject(root, "delegate_sandbox_image", cfg->delegate_sandbox_image);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */

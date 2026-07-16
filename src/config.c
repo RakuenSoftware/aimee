@@ -327,6 +327,7 @@ static const config_schema_entry_t config_schema[] = {
     {"require_aimee_memory", SCHEMA_BOOL, 0},
     {"require_aimee_git", SCHEMA_BOOL, 0},
     {"delegate_sandbox", SCHEMA_BOOL, 0},
+    {"delegate_sandbox_image", SCHEMA_STRING, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
@@ -1225,6 +1226,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
    if (cJSON_IsBool(item))
       cfg->delegate_sandbox = cJSON_IsTrue(item);
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_image");
+   if (cJSON_IsString(item) && item->valuestring[0])
+      snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s",
+               item->valuestring);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
    if (cJSON_IsBool(item))
@@ -1402,6 +1407,7 @@ int config_load_file(config_t *cfg)
          const char *prov_str = NULL;
          const char *remote_str = NULL;
          const char *head_str = NULL;
+         const char *sandbox_image_str = NULL;
          if (cJSON_IsString(el))
             path_str = el->valuestring;
          else if (cJSON_IsObject(el))
@@ -1410,6 +1416,7 @@ int config_load_file(config_t *cfg)
             cJSON *pr = cJSON_GetObjectItemCaseSensitive(el, "provider");
             cJSON *rm = cJSON_GetObjectItemCaseSensitive(el, "remote");
             cJSON *hd = cJSON_GetObjectItemCaseSensitive(el, "head");
+            cJSON *si = cJSON_GetObjectItemCaseSensitive(el, "sandbox_image");
             if (cJSON_IsString(p))
                path_str = p->valuestring;
             if (cJSON_IsString(pr))
@@ -1418,6 +1425,8 @@ int config_load_file(config_t *cfg)
                remote_str = rm->valuestring;
             if (cJSON_IsString(hd))
                head_str = hd->valuestring;
+            if (cJSON_IsString(si))
+               sandbox_image_str = si->valuestring;
          }
          if (path_str && path_str[0])
          {
@@ -1458,6 +1467,11 @@ int config_load_file(config_t *cfg)
                         head_str);
             else
                cfg->workspace_vcs_head[i][0] = '\0';
+            if (sandbox_image_str && sandbox_image_str[0])
+               snprintf(cfg->workspace_sandbox_image[i], sizeof(cfg->workspace_sandbox_image[i]),
+                        "%s", sandbox_image_str);
+            else
+               cfg->workspace_sandbox_image[i][0] = '\0';
             i++;
          }
       }
