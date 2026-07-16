@@ -514,12 +514,20 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
 
       /* Sized from the mount array itself: a hand-counted bound silently overflows
        * the day a fourth mount is added. */
-      const char *create_argv[16 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
+      const char *create_argv[18 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
       int n = 0;
       create_argv[n++] = "docker";
       create_argv[n++] = "create";
       create_argv[n++] = "--name";
       create_argv[n++] = st->container_name;
+      /* Sandbox slice 6: no IP network at all. The delegate has no egress — web
+       * tools (web_search) run SERVER-side, and every file/exec op is marshalled in
+       * over `docker exec`, so nothing legitimate needs the container's network.
+       * `--network none` removes lateral movement and data-exfil paths in one flag.
+       * INVARIANT: never add a docker-socket bind (/var/run/docker.sock) below — it
+       * would hand the delegate root-equivalent control of the host daemon. */
+      create_argv[n++] = "--network";
+      create_argv[n++] = "none";
       if (userflag[0])
       {
          create_argv[n++] = "--user";
