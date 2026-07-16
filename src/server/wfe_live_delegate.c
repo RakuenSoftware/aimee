@@ -110,7 +110,7 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
    }
 
    const char *persona = (role && role[0]) ? role : "engineer";
-   int job_id = db1_coord_job_create(0, 1);
+   int job_id = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
    if (job_id <= 0)
    {
       if (err && errlen)
@@ -246,7 +246,7 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
     * write role, so the shared path's write-capable gate blocks any file edit at
     * the tool layer — the read-only property is enforced by the delegate system,
     * not by a WFE-side hard-reset. WFE just reads the verdict. */
-   int job_id = db1_coord_job_create(0, 1);
+   int job_id = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
    if (job_id <= 0)
    {
       snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"could not create coord job\"}");

@@ -25,6 +25,12 @@ extern "C"
 #define DB1_COORD_MAX_TASKS    64
 #define DB1_COORD_DEFAULT_PAR  3
 
+/* Sentinel plan_id for an AD-HOC coord job — one the workflow engine enqueues to
+ * orchestrate a single delegate with no execution-plan decomposition behind it.
+ * db1_coord_job_create accepts this in place of a real (>0) plan_id; every other
+ * non-positive value stays rejected, so an accidental 0 is still an error. */
+#define WFE_COORD_PLAN_ID (-1)
+
    typedef struct
    {
       int id;
