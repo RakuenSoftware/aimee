@@ -96,6 +96,11 @@ jobs:
           # Multi-arch: upstream llama.cpp ships x64 + arm64 Vulkan tarballs, mapped
           # from TARGETARCH in the Dockerfile. NGL is set at deploy.
           - { name: aimee-llm, dockerfile: Dockerfile.aimee-llm }
+          # The PRE-BAKED cpu variant: same Dockerfile, AIMEE_LLM_BAKE_TIER=cpu runs
+          # the supervisor at BUILD time so the cpu-tier GGUFs (embed+rerank+synth)
+          # ship in the image — serves offline with no first-boot download. This is
+          # the pure-CPU appliance LLM that replaces aimee-combined's bundled models.
+          - { name: aimee-llm-cpu, dockerfile: Dockerfile.aimee-llm, extra_args: "AIMEE_LLM_BAKE_TIER=cpu" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -123,7 +128,7 @@ jobs:
       # code-server + the llama.cpp runtime — a large transient build footprint.
       # Reclaim the preinstalled toolchains to keep it within a stock runner.
       - name: Free disk space (combined leg)
-        if: matrix.image.name == 'aimee-combined'
+        if: matrix.image.name == 'aimee-combined' || matrix.image.name == 'aimee-llm-cpu'
         run: |
           echo "before:"; df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -154,8 +159,8 @@ jobs:
           # not the layer cache; the combined image pre-bakes its cpu-tier GGUFs.
           # aimee-llm is model-less (no baked GGUFs) so it is small and cached like
           # the C images.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-combined' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-combined' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-combined' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-combined' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
@@ -189,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-combined, aimee-embedder, aimee-embedder-4b, aimee-llm, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-combined, aimee-embedder, aimee-embedder-4b, aimee-llm, aimee-llm-cpu, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
