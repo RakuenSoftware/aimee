@@ -2420,8 +2420,19 @@ int main(void)
    snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-agent-home-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmp_home) != NULL);
    assert(platform_setenv("HOME", tmp_home) == 0);
+   /* AIMEE_HOME OVERRIDES HOME in aimee_home(), so sandboxing HOME alone is a
+    * no-op anywhere AIMEE_HOME is set - which is every deployed server (the
+    * appliance runs with AIMEE_HOME=/var/lib/aimee). Tests below write to and
+    * unlink() agent_config_path(); without this line they destroy the
+    * operator's real agents.json. Set it before any config or agent call. */
+   assert(platform_setenv("AIMEE_HOME", tmp_home) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
    assert(config_output_dir()[0] != '\0');
+
+   /* Guard the sandbox itself: if agent_config_path() ever resolves outside the
+    * temp home, this suite is about to eat real operator config. Fail loudly
+    * here rather than silently deleting it. */
+   assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
    test_tool_surface_single_source();
    test_agent_name_valid();
