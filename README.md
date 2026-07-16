@@ -45,9 +45,9 @@ Run the services in Docker, install the `aimee` CLI on each machine.
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 
-# Simplest: the all-in-one CPU appliance — server + kb + llm + Postgres in one
-# stack, with a short setup wizard (add an agent, connect GitHub, pick workspaces).
-docker compose -f compose.combined.yaml up -d
+# Simplest: the split stack in one command — server + kb + llm + Postgres, all on
+# CPU, with a short setup wizard (add an agent, connect GitHub, pick workspaces).
+docker compose -f deploy/compose/aimee.yaml up -d
 
 # Or deploy just aimee-server and let the wizard's Deploy step bring up aimee-kb,
 # the LLM, and Postgres (CPU or GPU; mounts the host Docker socket to launch them):

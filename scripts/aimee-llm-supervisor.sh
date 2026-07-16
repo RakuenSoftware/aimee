@@ -268,9 +268,10 @@ resolve_one() { # ROLE MODE localurl
 }
 
 # DOWNLOAD-ONLY mode (build-time pre-bake): fetch the resolved tiers' models into
-# $MODELS_DIR and exit without launching anything. Dockerfile.combined uses this
-# to bake the cpu tier into the image, keeping the tier table here as the single
-# source of truth instead of duplicating model URLs in the Dockerfile.
+# $MODELS_DIR and exit without launching anything. Dockerfile.aimee-llm uses this
+# (AIMEE_LLM_BAKE_TIER) to bake the cpu tier into the aimee-llm-cpu image, keeping
+# the tier table here as the single source of truth instead of duplicating model
+# URLs in the Dockerfile.
 if [ "${AIMEE_LLM_DOWNLOAD_ONLY:-0}" = "1" ]; then
   download_models || { echo "aimee-llm: pre-bake download failed" >&2; exit 1; }
   exit 0
