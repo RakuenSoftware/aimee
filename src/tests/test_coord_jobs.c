@@ -115,15 +115,25 @@ static void test_add_and_list_tasks(void)
    int job_id = db1_coord_job_create(plan_id, 3);
    assert(job_id > 0);
 
-   int t1 = db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
-   int t3 = db1_coord_job_add_task(job_id, 0, "[\"src/baz.c\"]", "", "", "");
+   int t1 =
+       db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "code", "do it", "/wt", "architect");
+   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
+   int t3 = db1_coord_job_add_task(job_id, 0, "[\"src/baz.c\"]", "", "", "", "engineer");
    assert(t1 > 0 && t2 > 0 && t3 > 0);
 
    db1_coord_task_t tasks[10];
    int count = db1_coord_job_list_tasks(job_id, tasks, 10);
    assert(count == 3);
    assert(strcmp(tasks[0].status, "pending") == 0);
+
+   /* The persona named at enqueue must round-trip through the dispatch read — this
+    * is what lets the workflow engine (or the coord planner) pick a per-task
+    * delegate identity instead of the dispatcher forcing 'engineer'. */
+   char role[64] = "", prompt[64] = "", files[128] = "", cwd[64] = "", persona[64] = "";
+   assert(db1_coord_task_get_dispatch(t1, role, sizeof role, prompt, sizeof prompt, files,
+                                      sizeof files, cwd, sizeof cwd, persona, sizeof persona) == 0);
+   assert(strcmp(persona, "architect") == 0);
+   assert(strcmp(role, "code") == 0);
 
    db1_coord_job_t job;
    db1_coord_job_get(job_id, &job);
@@ -142,8 +152,8 @@ static void test_claim_no_conflict(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    db1_coord_task_t task;
    int tid = db1_coord_job_claim_next(job_id, "delegate-1", &task);
@@ -177,9 +187,9 @@ static void test_file_conflict(void)
    int job_id = db1_coord_job_create(plan_id, 3);
 
    /* Two tasks touch the same file */
-   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/bar.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/independent.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/bar.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/independent.c\"]", "", "", "", "engineer");
 
    /* Claim first task */
    db1_coord_task_t task1;
@@ -211,7 +221,7 @@ static void test_has_file_conflict(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    /* Claim it */
    db1_coord_task_t task;
@@ -235,8 +245,8 @@ static void test_complete_task(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    /* Claim and complete first task */
    db1_coord_task_t task;
@@ -276,8 +286,8 @@ static void test_fail_task(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    /* Claim and fail first task */
    db1_coord_task_t task;
@@ -313,7 +323,7 @@ static void test_release_claim(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    /* Claim then release */
    db1_coord_task_t task;
@@ -339,7 +349,7 @@ static void test_bounded_preempt_release(void)
 
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    db1_coord_task_t task;
    int tid = db1_coord_job_claim_next(job_id, "delegate-1", &task);
@@ -368,8 +378,8 @@ static void test_cancel_job(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    /* Claim one task */
    db1_coord_task_t task;
@@ -402,9 +412,9 @@ static void test_max_concurrent(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 2); /* max 2 concurrent */
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/a.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/b.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/c.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/a.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/b.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/c.c\"]", "", "", "", "engineer");
 
    /* Claim two tasks (at max) */
    db1_coord_task_t t1, t2;
@@ -450,7 +460,7 @@ static void test_invalid_ops(void)
 
    /* Invalid IDs */
    assert(db1_coord_job_create(-1, 3) == -1);
-   assert(db1_coord_job_add_task(-1, 0, "[]", "", "", "") == -1);
+   assert(db1_coord_job_add_task(-1, 0, "[]", "", "", "", "engineer") == -1);
 
    db1_coord_task_t t;
    assert(db1_coord_job_claim_next(-1, "x", &t) == -1);
@@ -479,9 +489,9 @@ static void test_empty_files(void)
    int job_id = db1_coord_job_create(plan_id, 3);
 
    /* Tasks with empty file lists should never conflict */
-   db1_coord_job_add_task(job_id, 0, "[]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, NULL, "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, NULL, "", "", "", "engineer");
 
    db1_coord_task_t t1, t2, t3;
    assert(db1_coord_job_claim_next(job_id, "d1", &t1) > 0);
@@ -500,8 +510,8 @@ static void test_delegate_economics_report_from_coord_job(void)
 
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 2);
-   int t1 = db1_coord_job_add_task(job_id, 0, "[\"src/free_a.c\"]", "", "", "");
-   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/free_b.c\"]", "", "", "");
+   int t1 = db1_coord_job_add_task(job_id, 0, "[\"src/free_a.c\"]", "", "", "", "engineer");
+   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/free_b.c\"]", "", "", "", "engineer");
    assert(t1 > 0 && t2 > 0);
 
    db1_coord_task_t task;
