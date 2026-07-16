@@ -10,6 +10,7 @@
 #include "edit_anchored.h"
 #include "dstr.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,9 +130,37 @@ static const char *parse_op(cJSON *e, int idx, anchored_op_t *op)
    return NULL;
 }
 
+/* If a line begins with an echoed display anchor — "<ordinal>:<hex>| " that a
+ * model copied verbatim from the anchored read — return the byte length of that
+ * prefix so append_block can drop it. The display tag is never part of the
+ * file's content, so stripping it recovers an edit that would otherwise inject
+ * the prefix into the source. Returns 0 when the line does not start with one
+ * (the common case — clean edits are untouched). */
+static size_t anchor_prefix_len(const char *s, size_t len)
+{
+   size_t i = 0;
+   if (i >= len || !isdigit((unsigned char)s[i]))
+      return 0;
+   while (i < len && isdigit((unsigned char)s[i]))
+      i++;
+   if (i >= len || s[i] != ':')
+      return 0;
+   i++;
+   size_t hexstart = i;
+   while (i < len && isxdigit((unsigned char)s[i]))
+      i++;
+   if (i == hexstart || i >= len || s[i] != '|')
+      return 0;
+   i++;
+   if (i < len && s[i] == ' ')
+      i++;
+   return i;
+}
+
 /* Append `text` as logical lines each terminated by `eol` (internal \r\n / \n
  * normalized to `eol`). A no-final-newline file is honored by a single global
- * strip after the whole file is built, not here. */
+ * strip after the whole file is built, not here. An echoed "LINE:HASH| " prefix
+ * on any line is dropped (model robustness — the tag is display-only). */
 static void append_block(dstr_t *out, const char *text, const char *eol)
 {
    size_t len = strlen(text);
@@ -150,7 +179,8 @@ static void append_block(dstr_t *out, const char *text, const char *eol)
          size_t clen = i - start;
          if (clen > 0 && text[start + clen - 1] == '\r')
             clen--;
-         dstr_append(out, text + start, clen);
+         size_t skip = anchor_prefix_len(text + start, clen);
+         dstr_append(out, text + start + skip, clen - skip);
          dstr_append_str(out, eol);
          if (i == len)
             break;

@@ -256,6 +256,67 @@ int main(void)
       anchor_snapshot_dispose(&snap);
    }
 
+   /* --- model robustness: an echoed "LINE:HASH| " prefix in text is stripped --- */
+   {
+      const char *body = "one\ntwo\nthree\n";
+      anchor_snapshot_t snap;
+      snap_of(body, &snap);
+      char a2[24];
+      anchor_of(body, 2, a2);
+      cJSON *edits = cJSON_CreateArray();
+      /* model copies the display prefix into text (the failure seen live) */
+      cJSON_AddItemToArray(edits, edit_replace(a2, "2:f1| TWO"));
+      edit_anchored_result_t res;
+      int rc = edit_anchored_plan(body, strlen(body), &snap, edits, &res);
+      assert(rc == 0);
+      assert(strcmp(res.new_text, "one\nTWO\nthree\n") == 0); /* prefix dropped */
+      free(res.new_text);
+      cJSON_Delete(edits);
+      anchor_snapshot_dispose(&snap);
+   }
+
+   /* --- multi-line replacement with a prefix echoed on every line --- */
+   {
+      const char *body = "a\nb\nc\nd\n";
+      anchor_snapshot_t snap;
+      snap_of(body, &snap);
+      char a2[24], a3[24];
+      anchor_of(body, 2, a2);
+      anchor_of(body, 3, a3);
+      cJSON *edits = cJSON_CreateArray();
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddStringToObject(e, "op", "replace_range");
+      cJSON_AddStringToObject(e, "from", a2);
+      cJSON_AddStringToObject(e, "to", a3);
+      cJSON_AddStringToObject(e, "text", "2:aa| B2\n3:bb| C2");
+      cJSON_AddItemToArray(edits, e);
+      edit_anchored_result_t res;
+      int rc = edit_anchored_plan(body, strlen(body), &snap, edits, &res);
+      assert(rc == 0);
+      assert(strcmp(res.new_text, "a\nB2\nC2\nd\n") == 0);
+      free(res.new_text);
+      cJSON_Delete(edits);
+      anchor_snapshot_dispose(&snap);
+   }
+
+   /* --- a legitimate line that merely contains a colon is NOT mangled --- */
+   {
+      const char *body = "x\ny\n";
+      anchor_snapshot_t snap;
+      snap_of(body, &snap);
+      char a1[24];
+      anchor_of(body, 1, a1);
+      cJSON *edits = cJSON_CreateArray();
+      cJSON_AddItemToArray(edits, edit_replace(a1, "label: value")); /* not an anchor prefix */
+      edit_anchored_result_t res;
+      int rc = edit_anchored_plan(body, strlen(body), &snap, edits, &res);
+      assert(rc == 0);
+      assert(strcmp(res.new_text, "label: value\ny\n") == 0);
+      free(res.new_text);
+      cJSON_Delete(edits);
+      anchor_snapshot_dispose(&snap);
+   }
+
    printf("ok\n");
    return 0;
 }

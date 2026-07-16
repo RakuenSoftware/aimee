@@ -37,10 +37,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import sys
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# TLS context + bearer for the endpoint, populated from CLI args in main().
+_TLS_CTX: Optional[ssl.SSLContext] = None
+_BEARER: Optional[str] = None
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_FIXTURES = ROOT / "benchmarks" / "hashline" / "fixtures.json"
@@ -144,10 +149,10 @@ def model_edit(fx: Dict[str, Any], protocol: str, endpoint: str, model: str) -> 
         }
     ).encode()
     req = urllib.request.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
-    key = os.environ.get("AIMEE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    key = _BEARER or os.environ.get("AIMEE_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if key:
         req.add_header("Authorization", f"Bearer {key}")
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=120, context=_TLS_CTX) as r:
         resp = json.loads(r.read())
     content = resp["choices"][0]["message"]["content"]
     out_tokens = resp.get("usage", {}).get("completion_tokens")
@@ -221,8 +226,24 @@ def run(models: List[str], endpoint: Optional[str], runs: int, fixtures: List[Di
                         edit = oracle_edit(fx, proto)
                     else:
                         assert endpoint
-                        edit = model_edit(fx, proto, endpoint, model)
+                        # tolerate a transient endpoint error: retry once, then
+                        # count the attempt as a non-pass rather than aborting the
+                        # whole roster on one flaky call.
+                        edit = None
+                        for attempt in range(2):
+                            try:
+                                edit = model_edit(fx, proto, endpoint, model)
+                                break
+                            except Exception as ex:
+                                if attempt == 1:
+                                    print(f"    [{model}/{proto}/{fx['name']}] call failed: {ex}",
+                                          file=sys.stderr)
+                                    edit = {}
                     s = score_fixture(fx, proto, edit)
+                    if os.environ.get("HLDEBUG"):
+                        raw = {k: v for k, v in edit.items() if k != "_out_tokens"}
+                        print(f"    [{model}/{proto}/{fx['name']}] pass={s['passed']} "
+                              f"note={s['note']} edit={json.dumps(raw)[:160]}", file=sys.stderr)
                     a = agg[proto]
                     a["pass"] += int(s["passed"])
                     a["safe"] += int(s["safe"])
@@ -257,11 +278,21 @@ def main() -> int:
     ap.add_argument("--model", action="append", default=[], help="model id (repeatable)")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--mock", action="store_true", help="offline self-check with a perfect oracle model")
+    ap.add_argument("--token", help="bearer token (else $AIMEE_API_KEY / $OPENAI_API_KEY)")
+    ap.add_argument("--cacert", type=Path, help="CA bundle for the endpoint's TLS cert")
+    ap.add_argument("--insecure", action="store_true", help="skip TLS verification (self-signed appliance)")
     args = ap.parse_args()
 
     if not args.mock and not args.endpoint:
         print("error: pass --mock (offline) or --endpoint URL --model NAME (live)", file=sys.stderr)
         return 2
+
+    global _TLS_CTX, _BEARER
+    _BEARER = args.token
+    if args.insecure:
+        _TLS_CTX = ssl._create_unverified_context()
+    elif args.cacert:
+        _TLS_CTX = ssl.create_default_context(cafile=str(args.cacert))
     fixtures = load_fixtures(args.fixtures)
     return run(args.model, args.endpoint, args.runs, fixtures, args.mock)
 

@@ -748,8 +748,11 @@ static cJSON *tp_edit_file(void)
           "{op:\"insert_after\", at:\"LINE:HASH\", text} | "
           "{op:\"delete_range\", from:\"LINE:HASH\", to:\"LINE:HASH\"}. "
           "Anchors are the 'LINE:HASH' tokens read_file printed; the server owns all offset "
-          "arithmetic. On drift the call returns status:\"stale_anchor\" with re-anchored context "
-          "and a fresh snapshot_id.");
+          "arithmetic. IMPORTANT: 'text' is the raw replacement content only — do NOT include the "
+          "'LINE:HASH| ' display prefix in it. Example: to change line shown as '12:a3|   return "
+          "1;' send {op:\"replace\", at:\"12:a3\", text:\"  return 2;\"}. On drift the call "
+          "returns "
+          "status:\"stale_anchor\" with re-anchored context and a fresh snapshot_id.");
       cJSON *items = cJSON_CreateObject();
       cJSON_AddStringToObject(items, "type", "object");
       cJSON_AddItemToObject(edits, "items", items);
