@@ -205,6 +205,14 @@ int main(void)
       assert(se != NULL);
       const char *sock = env_val(se, "SSH_AUTH_SOCK", &n);
       assert(n == 1 && sock && sock[0] == '/'); /* agent socket present */
+      /* a TOFU SSH command rides alongside so an SSH remote uses the agent key
+       * and doesn't stall on a first-time host key; known_hosts is pinned to a
+       * per-principal file (beside the agent socket) so accept-new's first-use
+       * trust never bleeds through the shared ~/.ssh/known_hosts to other tenants */
+      const char *sshcmd = env_val(se, "GIT_SSH_COMMAND", &n);
+      assert(n == 1 && sshcmd && strstr(sshcmd, "StrictHostKeyChecking=accept-new"));
+      assert(strstr(sshcmd, "UserKnownHostsFile=") && strstr(sshcmd, "/known_hosts"));
+      assert(strstr(sshcmd, rt)); /* the pinned path is inside THIS principal's runtime dir */
       /* the HTTPS token is still injected alongside */
       assert(env_val(se, "GH_TOKEN", &n) && n == 1);
       git_cred_inject_free_env(se);

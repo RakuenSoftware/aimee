@@ -1,14 +1,20 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Panel } from '@rakuensoftware/smoothgui';
+import ConnectHosts from '../setup/ConnectHosts';
 import { useSessions } from '../SessionContext';
 import { groupProjectsByOrg, parseOwnerOnly, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type OwnerRef, type ProjectDetail, type ProjectDeleteResponse } from '../setup/ownerUrl';
 
-/* Git projects (webchat-git WP-F2). Lists the user's cloned repos, connects a
- * new one, and runs per-project git ops — all via /api/git/* (the server forwards
- * to /v1/workspace/* with the user's webuser: identity; creds live only in the
- * sealed vault). The connect field also accepts an owner/org URL (e.g.
- * github.com/RakuenSoftware): it then enumerates the owner's repositories and
- * bulk-clones the selected ones, mirroring the wizard's Workspaces step. */
+/* Git projects (webchat-git WP-F2). The page is focused on managing repos: it
+ * lists the user's cloned projects, connects new ones, and runs per-project git
+ * ops — all via /api/git/* (the server forwards to /v1/workspace/* with the
+ * user's webuser: identity; creds live only in the sealed vault). The connect
+ * field also accepts an owner/org URL (e.g. github.com/RakuenSoftware): it then
+ * enumerates the owner's repositories and bulk-clones the selected ones,
+ * mirroring the wizard's Workspaces step.
+ *
+ * Connecting a git ACCOUNT (OAuth / token / SSH key) is a one-click launch of
+ * the shared wizard flow (ConnectHosts) in a modal — the same UI as onboarding,
+ * so there is a single source of truth for host auth rather than a duplicate. */
 
 const READ_OPS = ['status', 'log', 'diff', 'branch'] as const;
 const REMOTE_OPS = ['fetch', 'pull', 'push'] as const;
@@ -41,6 +47,15 @@ const btn: React.CSSProperties = {
 const input: React.CSSProperties = {
   padding: '6px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px',
 };
+const modalBackdrop: React.CSSProperties = {
+  position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,10,18,0.55)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+};
+const modalCard: React.CSSProperties = {
+  width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: '#fff',
+  borderRadius: '12px', border: '1px solid #dde', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+  padding: '20px 22px', fontFamily: 'system-ui', color: '#233',
+};
 
 export default function Projects() {
   const { active } = useSessions();
@@ -57,13 +72,8 @@ export default function Projects() {
   const [prTitle, setPrTitle] = useState('');
   const [branch, setBranch] = useState('');
   const [hosts, setHosts] = useState<string[]>([]);
-  const [credHost, setCredHost] = useState('');
-  const [credToken, setCredToken] = useState('');
-  const [credSSHKey, setCredSSHKey] = useState('');
-  const [ghCode, setGhCode] = useState('');
-  const [ghUri, setGhUri] = useState('');
-  const [ghConfigured, setGhConfigured] = useState(false);
-  const [ghClientId, setGhClientId] = useState('');
+  // The "Connect git account" modal — runs the shared wizard auth flow.
+  const [connectOpen, setConnectOpen] = useState(false);
   // Owner/org bulk-clone (URL parsed as an owner with no repo segment).
   const [orgRef, setOrgRef] = useState<OwnerRef | null>(null);
   const [orgRepos, setOrgRepos] = useState<{ name: string; clone_url: string; private?: boolean }[]>([]);
@@ -80,27 +90,6 @@ export default function Projects() {
   const [delKbDown, setDelKbDown] = useState(false);
   const [delForceArmed, setDelForceArmed] = useState(false);
   const [notice, setNotice] = useState('');
-
-  const loadGhConfig = useCallback(async () => {
-    try {
-      const r = await api('/api/git/oauth/github/config', { method: 'GET' });
-      const d = await r.json();
-      if (r.ok) { setGhConfigured(!!d.configured); setGhClientId(d.client_id || ''); }
-    } catch { /* leave unconfigured */ }
-  }, []);
-
-  async function saveGhConfig() {
-    if (!ghClientId.trim()) return;
-    setBusy(true); setErr('');
-    try {
-      const r = await api('/api/git/oauth/github/config', {
-        method: 'POST', body: JSON.stringify({ client_id: ghClientId.trim() }),
-      });
-      const d = await r.json();
-      if (!r.ok) setErr(d.error || 'could not save client ID');
-      else await loadGhConfig();
-    } finally { setBusy(false); }
-  }
 
   const loadHosts = useCallback(async () => {
     try {
@@ -125,73 +114,15 @@ export default function Projects() {
     }
   }, []);
 
-  useEffect(() => { loadProjects(); loadHosts(); loadGhConfig(); }, [loadProjects, loadHosts, loadGhConfig]);
+  useEffect(() => { loadProjects(); loadHosts(); }, [loadProjects, loadHosts]);
 
-  // GitHub device-flow: once a user code is shown, poll until the user authorizes.
+  // Close the Connect-account modal on Escape (works regardless of focus).
   useEffect(() => {
-    if (!ghCode) return;
-    let alive = true;
-    const id = setInterval(async () => {
-      try {
-        const r = await api('/api/git/oauth/github/poll', { method: 'POST' });
-        const d = await r.json();
-        if (!alive) return;
-        if (d.status === 'done') { setGhCode(''); setGhUri(''); await loadHosts(); }
-        else if (d.status === 'error') { setGhCode(''); setGhUri(''); setErr(d.error || 'GitHub sign-in failed'); }
-      } catch { /* transient; keep polling */ }
-    }, 5000);
-    return () => { alive = false; clearInterval(id); };
-  }, [ghCode, loadHosts]);
-
-  async function startGithub() {
-    setErr('');
-    try {
-      const r = await api('/api/git/oauth/github/start', { method: 'POST' });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error || 'GitHub sign-in unavailable'); return; }
-      setGhCode(d.user_code || ''); setGhUri(d.verification_uri || 'https://github.com/login/device');
-    } catch { setErr('aimee-server unavailable'); }
-  }
-
-  async function addCred() {
-    if (!credHost.trim() || !credToken.trim()) return;
-    setBusy(true); setErr('');
-    try {
-      const r = await api('/api/git/credentials', {
-        method: 'POST',
-        body: JSON.stringify({ host: credHost.trim(), token: credToken.trim() }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error || 'could not save credential'); }
-      else { setCredHost(''); setCredToken(''); await loadHosts(); }
-    } finally { setBusy(false); }
-  }
-
-  async function addSSHKey() {
-    if (!credSSHKey.trim()) return;
-    setBusy(true); setErr('');
-    try {
-      const r = await api('/api/git/sshkey', {
-        method: 'POST',
-        body: JSON.stringify({ ssh_key: credSSHKey }),
-      });
-      const d = await r.json().catch(() => ({}));
-      // Always drop the key from component state once it has left the browser —
-      // never leave private-key material sitting in React state / the textarea.
-      setCredSSHKey('');
-      if (!r.ok) { setErr(d.error || 'could not save SSH key'); }
-      else { setErr('SSH key saved'); }
-    } finally { setBusy(false); }
-  }
-
-  async function removeSSHKey() {
-    setBusy(true); setErr('');
-    try {
-      const r = await api('/api/git/sshkey', { method: 'DELETE' });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); setErr(d.error || 'could not clear SSH key'); }
-      else { setCredSSHKey(''); setErr('SSH key cleared'); }
-    } finally { setBusy(false); }
-  }
+    if (!connectOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setConnectOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [connectOpen]);
 
   async function removeCred(host: string) {
     setBusy(true); setErr('');
@@ -421,37 +352,14 @@ export default function Projects() {
 
       <Panel title="Git accounts" count={hosts.length}>
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ color: '#888', fontSize: '12px' }}>
-            Access tokens aimee-server uses to reach each git host (one per host, any provider). Tokens are stored server-side and never shown again.
-          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <button style={{ ...btn, background: ghConfigured ? '#24292e' : '#888', color: '#fff', borderColor: '#24292e' }}
-              disabled={busy || !!ghCode || !ghConfigured} onClick={startGithub}
-              title="Authorize aimee via GitHub device flow and store the token server-side.">Sign in with GitHub</button>
-            {ghCode && (
-              <span style={{ fontSize: '13px', color: '#444' }}>
-                Go to <a href={ghUri} target="_blank" rel="noreferrer">{ghUri}</a> and enter code{' '}
-                <code style={{ background: '#eee', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>{ghCode}</code>
-                <span style={{ color: '#888' }}> — waiting…</span>
-              </span>
-            )}
+            <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+              title="Connect a git account (OAuth, access token, or SSH key) via the setup wizard."
+              onClick={() => setConnectOpen(true)}>+ Connect git account</button>
+            <span style={{ color: '#888', fontSize: '12px' }}>
+              OAuth sign-in, an access token, or an SSH key — stored server-side, never shown again.
+            </span>
           </div>
-          <details style={{ fontSize: '12px', color: '#666' }} open={!ghConfigured}>
-            <summary style={{ cursor: 'pointer' }}>
-              GitHub OAuth App {ghConfigured ? '(configured ✓ — click to change)' : '— set this to enable the button'}
-            </summary>
-            <div style={{ marginTop: '6px' }}>
-              <div style={{ marginBottom: '4px' }}>
-                Create a GitHub OAuth App (<a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">github.com/settings/developers</a> → New OAuth App → enable <b>Device flow</b>), then paste its <b>Client ID</b> here:
-              </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <input style={{ ...input, flex: 1, minWidth: '200px' }} placeholder="GitHub OAuth App Client ID (e.g. Iv1.xxxxxxxx)"
-                  value={ghClientId} onChange={e => setGhClientId(e.target.value)} />
-                <button style={btn} disabled={busy || !ghClientId.trim()} onClick={saveGhConfig}
-                  title="Save the GitHub OAuth App Client ID that enables device-flow sign-in.">Save</button>
-              </div>
-            </div>
-          </details>
           {hosts.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {hosts.map(h => (
@@ -465,35 +373,6 @@ export default function Projects() {
               ))}
             </div>
           )}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <input style={{ ...input, flex: 1, minWidth: '160px' }} placeholder="host (e.g. github.com, gitea.you.com)"
-              value={credHost} onChange={e => setCredHost(e.target.value)} />
-            <input style={{ ...input, flex: 2, minWidth: '200px' }} type="password" autoComplete="off"
-              placeholder="access token" value={credToken} onChange={e => setCredToken(e.target.value)} />
-            <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-              disabled={busy || !credHost.trim() || !credToken.trim()} onClick={addCred}
-              title="Store this access token server-side for the given host.">Save</button>
-          </div>
-          <details style={{ marginTop: '10px', fontSize: '12px', color: '#aaa' }}>
-            <summary style={{ cursor: 'pointer' }}>SSH private key (for git over SSH)</summary>
-            <div style={{ marginTop: '6px' }}>
-              <div style={{ marginBottom: '6px' }}>
-                Paste an <b>unencrypted</b> OpenSSH/PEM private key (no passphrase). It is sealed
-                server-side in your encrypted vault and never shown again — no vault unlock needed.
-              </div>
-              <textarea style={{ ...input, width: '100%', minHeight: '110px', fontFamily: 'monospace' }}
-                placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----'}
-                value={credSSHKey} onChange={e => setCredSSHKey(e.target.value)} />
-              <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
-                <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-                  disabled={busy || !credSSHKey.trim()} onClick={addSSHKey}
-                  title="Seal this private key in the server vault for git-over-SSH.">Save SSH key</button>
-                <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy}
-                  title="Remove the stored SSH private key from the server vault."
-                  onClick={removeSSHKey}>Clear SSH key</button>
-              </div>
-            </div>
-          </details>
         </div>
       </Panel>
 
@@ -607,6 +486,24 @@ export default function Projects() {
           {busy && <div style={{ color: '#888', fontSize: '12px' }}>working…</div>}
         </div>
       </Panel>
+
+      {/* Connect a git account: the shared wizard auth flow, one click away. */}
+      {connectOpen && (
+        <div style={modalBackdrop} onClick={() => setConnectOpen(false)}>
+          <div style={modalCard} role="dialog" aria-modal="true" aria-label="Connect git account" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <strong style={{ fontSize: '17px' }}>Connect a git account</strong>
+              <button aria-label="Close" title="Close" onClick={() => setConnectOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#9aa', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}>×</button>
+            </div>
+            <ConnectHosts
+              doneLabel="Done"
+              onDone={() => setConnectOpen(false)}
+              onHostsChanged={() => { loadHosts(); }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

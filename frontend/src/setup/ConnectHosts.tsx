@@ -2,19 +2,31 @@ import { useCallback, useEffect, useState } from 'react';
 
 /* Wizard — Connection (git hosts). Authenticate aimee-server to the git hosts it
  * will clone from, so the next step (Workspaces & projects) can enumerate + clone
- * private repos. Three ways in, all via the /api/git/* routes (which forward to
- * aimee-server's sealed vault — tokens/keys are write-only, never read back):
+ * private repos. The user first PICKS one auth method, then sees only that
+ * method's fields (avoids the "which of these three do I fill in?" confusion).
+ * All three go via the /api/git/* routes (which forward to aimee-server's sealed
+ * vault — tokens/keys are write-only, never read back):
  *
  *  • OAuth device flow — GitHub, GitLab, or Gitea/Forgejo (needs an OAuth App
  *    client ID for the chosen provider/host; the client ID is public).
- *  • Per-host access token — any host/provider (incl. Bitbucket).
- *  • SSH private key — for git over SSH.
+ *  • Per-host access token — any host/provider (incl. Bitbucket over HTTPS).
+ *  • SSH private key — for git over SSH (the only way in for a host that offers
+ *    SSH-key access only; add the repo by its SSH URL, git@host:owner/repo.git).
  *
  * Optional step: public repos clone without any of this. GitHub uses its dedicated
  * /api/git/oauth/github/* routes; GitLab/Gitea use the generic
  * /api/git/oauth/device/* routes with a {provider, host} selector. */
 
 type OAuthProvider = 'github' | 'gitlab' | 'gitea';
+
+// Which credential the user is setting up. They pick one; only its fields show.
+type AuthMethod = 'oauth' | 'token' | 'ssh';
+
+const METHODS: { id: AuthMethod; label: string; hint: string }[] = [
+  { id: 'oauth', label: 'OAuth sign-in', hint: 'Sign in to GitHub, GitLab, or Gitea/Forgejo.' },
+  { id: 'token', label: 'Access token', hint: 'An HTTPS access token for any host (incl. Bitbucket).' },
+  { id: 'ssh', label: 'SSH key', hint: 'A private key for git over SSH (git@host:owner/repo.git).' },
+];
 
 interface ProviderMeta {
   label: string;
@@ -84,11 +96,14 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export interface ConnectHostsProps {
-  /** Continue to the next wizard step. */
+  /** Continue to the next wizard step (or close the modal when reused stand-alone). */
   onDone: () => void;
   /** Called whenever the connected-host set changes, with the new count (lets the
    * wizard refresh its readiness/summary without a reload). */
   onHostsChanged?: (count: number) => void;
+  /** Label for the done button. Defaults to the wizard's Continue wording; a
+   * stand-alone host (e.g. the Projects modal) passes e.g. "Done". */
+  doneLabel?: string;
 }
 
 interface Pending {
@@ -98,11 +113,14 @@ interface Pending {
   host: string;
 }
 
-export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsProps) {
+export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: ConnectHostsProps) {
   const [hosts, setHosts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+
+  // The auth method the user has chosen; only this method's fields are shown.
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('oauth');
 
   const [credHost, setCredHost] = useState('');
   const [credToken, setCredToken] = useState('');
@@ -362,6 +380,21 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
     }
   }
 
+  async function removeSSHKey() {
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const r = await api('/api/git/sshkey', { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      setSshKey('');
+      if (!r.ok) setErr(d.error || 'could not clear SSH key');
+      else setMsg('SSH key cleared.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
       <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
@@ -370,7 +403,29 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
         and never shown again.
       </div>
 
+      {/* Auth-method picker: choose one, then only its fields are shown. */}
+      <div style={{ display: 'grid', gap: 6 }}>
+        <div role="tablist" aria-label="Authentication method" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {METHODS.map((m) => (
+            <button key={m.id} role="tab" aria-selected={authMethod === m.id}
+              style={authMethod === m.id ? methodTabActive : methodTab}
+              onClick={() => {
+                // Drop any sensitive material typed into the method we're leaving —
+                // don't keep a private key / token sitting in state behind a hidden tab.
+                setAuthMethod(m.id); setErr(''); setMsg(''); setPending(null);
+                setSshKey(''); setCredToken('');
+              }}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11.5, color: '#778' }}>
+          {METHODS.find((m) => m.id === authMethod)?.hint}
+        </div>
+      </div>
+
       {/* OAuth device flow */}
+      {authMethod === 'oauth' && (
       <section style={{ display: 'grid', gap: 8 }}>
         <div style={sectionTitle}>Sign in with OAuth</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -426,8 +481,10 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
           </div>
         </details>
       </section>
+      )}
 
       {/* Per-host access token */}
+      {authMethod === 'token' && (
       <section style={{ display: 'grid', gap: 8 }}>
         <div style={sectionTitle}>Access token</div>
         <div style={{ fontSize: 11.5, color: '#778' }}>
@@ -453,30 +510,34 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
           </div>
         )}
       </section>
+      )}
 
       {/* SSH key */}
-      <details style={{ fontSize: 12, color: '#666' }}>
-        <summary style={{ cursor: 'pointer' }}>SSH private key (for git over SSH)</summary>
-        <div style={{ marginTop: 6 }}>
-          <div style={{ marginBottom: 6 }}>
-            Paste an <b>unencrypted</b> OpenSSH/PEM private key (no passphrase). It is sealed
-            server-side in your encrypted vault and never shown again.
-          </div>
-          <textarea style={{ ...input, width: '100%', minHeight: 100, fontFamily: 'monospace' }}
-            placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----'}
-            value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
-          <div style={{ marginTop: 6 }}>
-            <button style={ghostBtn} disabled={busy || !sshKey.trim()} onClick={addSSHKey}>Save SSH key</button>
-          </div>
+      {authMethod === 'ssh' && (
+      <section style={{ display: 'grid', gap: 8 }}>
+        <div style={sectionTitle}>SSH private key</div>
+        <div style={{ fontSize: 11.5, color: '#778' }}>
+          Paste an <b>unencrypted</b> OpenSSH/PEM private key (no passphrase). It is sealed
+          server-side in your encrypted vault and never shown again. Add the repo by its{' '}
+          <b>SSH URL</b> (<code>git@host:owner/repo.git</code>) so this key is used.
         </div>
-      </details>
+        <textarea style={{ ...input, width: '100%', minHeight: 100, fontFamily: 'monospace' }}
+          placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----'}
+          value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button style={ghostBtn} disabled={busy || !sshKey.trim()} onClick={addSSHKey}>Save SSH key</button>
+          <button style={{ ...ghostBtn, borderColor: '#d99', color: '#c33' }} disabled={busy}
+            onClick={removeSSHKey}>Clear SSH key</button>
+        </div>
+      </section>
+      )}
 
       {err && <div style={{ fontSize: 12.5, color: '#c62828' }}>{err}</div>}
       {msg && <div style={{ fontSize: 12.5, color: '#2c8f56' }}>{msg}</div>}
 
       <div>
         <button style={primaryBtn} onClick={onDone}>
-          {hosts.length > 0 ? 'Continue' : 'Continue without connecting'}
+          {doneLabel ?? (hosts.length > 0 ? 'Continue' : 'Continue without connecting')}
         </button>
       </div>
     </div>
@@ -495,4 +556,11 @@ const primaryBtn: React.CSSProperties = {
 const ghostBtn: React.CSSProperties = {
   padding: '6px 12px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',
   color: '#446', cursor: 'pointer', fontSize: 13,
+};
+const methodTab: React.CSSProperties = {
+  padding: '6px 14px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',
+  color: '#446', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+};
+const methodTabActive: React.CSSProperties = {
+  ...methodTab, background: '#2c8f56', borderColor: '#2c6', color: '#fff',
 };

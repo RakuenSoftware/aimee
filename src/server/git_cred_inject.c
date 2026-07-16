@@ -6,6 +6,7 @@
 #include "git_host_cred.h"     /* git_host_cred_list — "is git configured at all?" */
 #include "git_host_resolve.h"  /* git_host_resolve_token (per-host vault seam) */
 #include "git_ssh_agent.h"     /* git_ssh_agent_ensure */
+#include "util.h"              /* GIT_AGENT_SSH_COMMAND */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +25,9 @@ static int is_key(const char *entry, const char *key)
 
 /* Build the git child env: a copy of `parent` with the credential-carrying keys
  * we manage dropped, plus GH_TOKEN/GIT_ASKPASS/GIT_TERMINAL_PROMPT (when a token
- * is given) and SSH_AUTH_SOCK (when a sock is given). Returns NULL on OOM. */
+ * is given) and SSH_AUTH_SOCK + GIT_SSH_COMMAND (when a sock is given, so an SSH
+ * remote uses the agent key with a non-interactive TOFU host-key policy).
+ * Returns NULL on OOM. */
 /* token_fd_target >= 0 selects FD MODE: advertise AIMEE_GIT_TOKEN_FD=<target>
  * (the askpass reads the token from that inherited fd) and do NOT put the secret
  * in the env. token_fd_target < 0 is LEGACY ENV MODE: GH_TOKEN=<token>. In both
@@ -36,7 +39,8 @@ static char **build_env(char *const *parent, const char *token, const char *shim
    if (parent)
       while (parent[pc])
          pc++;
-   char **out = calloc(pc + 5, sizeof(char *)); /* +token-key,ASKPASS,PROMPT,SSH_AUTH_SOCK,NULL */
+   /* +token-key,ASKPASS,PROMPT,SSH_AUTH_SOCK,GIT_SSH_COMMAND,NULL */
+   char **out = calloc(pc + 6, sizeof(char *));
    if (!out)
       return NULL;
    size_t o = 0;
@@ -44,7 +48,8 @@ static char **build_env(char *const *parent, const char *token, const char *shim
    {
       if (is_key(parent[i], "GH_TOKEN") || is_key(parent[i], "GITHUB_TOKEN") ||
           is_key(parent[i], "GIT_ASKPASS") || is_key(parent[i], "GIT_TERMINAL_PROMPT") ||
-          is_key(parent[i], "SSH_AUTH_SOCK") || is_key(parent[i], "AIMEE_GIT_TOKEN_FD"))
+          is_key(parent[i], "SSH_AUTH_SOCK") || is_key(parent[i], "GIT_SSH_COMMAND") ||
+          is_key(parent[i], "AIMEE_GIT_TOKEN_FD"))
          continue;
       out[o] = strdup(parent[i]);
       if (!out[o++])
@@ -69,12 +74,52 @@ static char **build_env(char *const *parent, const char *token, const char *shim
       if (!(out[o++] = strdup("GIT_TERMINAL_PROMPT=0")))
          goto oom;
    }
+   /* Wire the ssh-agent env only if we can also pin UserKnownHostsFile to this
+    * principal's own known_hosts (beside the agent socket, in its tmpfs runtime
+    * dir) — so accept-new's first-use trust is scoped to this principal and never
+    * bleeds through the OS account's shared ~/.ssh/known_hosts to other tenants.
+    *
+    * If we CANNOT derive that per-principal path (a malformed socket with no
+    * directory component, or an implausibly long path that truncates), we add
+    * NEITHER SSH_AUTH_SOCK nor GIT_SSH_COMMAND: better to fall back to no-SSH
+    * (the caller then normalizes to HTTPS) than to run accept-new against the
+    * shared known_hosts, which is exactly the cross-tenant bleed this avoids.
+    *
+    * git runs GIT_SSH_COMMAND through the shell, so the spliced path must be
+    * shell-safe: `<base>/webusers/<name>/known_hosts` where <base> is a
+    * server-controlled runtime dir and <name> is charset-restricted to
+    * [A-Za-z0-9._-] (ws_scope_name_valid) — no whitespace/metacharacters from
+    * any untrusted input can appear. */
    if (sock && sock[0])
    {
-      char sb[2300];
-      snprintf(sb, sizeof(sb), "SSH_AUTH_SOCK=%s", sock);
-      if (!(out[o++] = strdup(sb)))
-         goto oom;
+      /* Derive <dir>/known_hosts from the <dir>/ssh-agent.sock socket path. */
+      char kh[2300];
+      char cmd[3200];
+      int ok_kh = 0, cn = -1;
+      if ((size_t)snprintf(kh, sizeof(kh), "%s", sock) < sizeof(kh))
+      {
+         char *slash = strrchr(kh, '/');
+         if (slash)
+         {
+            int hn = snprintf(slash + 1, sizeof(kh) - (size_t)(slash + 1 - kh), "known_hosts");
+            if (hn > 0 && (size_t)(slash + 1 - kh) + (size_t)hn < sizeof(kh))
+            {
+               cn = snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s -o UserKnownHostsFile=%s",
+                             GIT_AGENT_SSH_COMMAND, kh);
+               ok_kh = (cn > 0 && (size_t)cn < sizeof(cmd));
+            }
+         }
+      }
+      if (ok_kh)
+      {
+         char sb[2300];
+         snprintf(sb, sizeof(sb), "SSH_AUTH_SOCK=%s", sock);
+         if (!(out[o++] = strdup(sb)))
+            goto oom;
+         if (!(out[o++] = strdup(cmd)))
+            goto oom;
+      }
+      /* else: fail closed — no ssh-agent env, so the SSH path isn't taken. */
    }
    out[o] = NULL;
    return out;

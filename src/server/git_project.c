@@ -14,7 +14,7 @@
 #include "kb_client.h"       /* kb purge/finalize/cancel wrappers (slice 2) */
 #include "log.h"
 #include "util.h"            /* safe_exec_capture_env */
-#include "util_url.h"        /* util_url_normalize (ssh/scp/git -> https) */
+#include "util_url.h"        /* util_url_normalize / util_url_is_ssh */
 #include "workspace_scope.h" /* ws_scope_* */
 #include "ws_registry.h"     /* lifecycle lock + key registry */
 
@@ -311,6 +311,16 @@ static int is_published_project_at(int dirfd, const char *name)
    return has_git;
 }
 
+/* True if `envp` carries an SSH_AUTH_SOCK entry — i.e. git_cred_inject wired up
+ * the user's in-memory ssh-agent because they have a vaulted SSH key. */
+static int env_has_ssh_sock(char *const *envp)
+{
+   for (int i = 0; envp && envp[i]; i++)
+      if (strncmp(envp[i], "SSH_AUTH_SOCK=", 14) == 0)
+         return 1;
+   return 0;
+}
+
 int git_project_clone(const char *principal, const char *url, const char *name, const char *org_in,
                       const char *token, char *out_path, size_t path_cap, char *out_ref,
                       size_t ref_cap, char *err, size_t errlen)
@@ -561,11 +571,26 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       int token_fd = -1;
       char **envp =
           git_cred_inject_build_env_for_repo(principal, url, NULL, token, environ, &token_fd);
-      /* Clone over HTTPS, never SSH: our credential model is per-host HTTPS
-       * tokens (+ OAuth), and a non-interactive server has no seeded
-       * known_hosts. Normalize ssh://, git@host:path, git:// to https. */
-      char *clone_url_norm = util_url_normalize(url);
-      const char *clone_url = clone_url_norm ? clone_url_norm : url;
+      /* Clone over SSH when the user gave an SSH URL and we loaded their vaulted
+       * key (the env then carries SSH_AUTH_SOCK + a TOFU GIT_SSH_COMMAND): honor
+       * the SSH URL so key auth is actually used — the only way in for a host
+       * that offers SSH-key access only (e.g. a corporate Bitbucket). Otherwise
+       * clone over HTTPS: our default credential model is per-host HTTPS tokens
+       * (+ OAuth), and normalizing ssh://, git@host:path, git:// to https lets a
+       * public or token-authed repo still clone. */
+      char *clone_url_norm = NULL;
+      const char *clone_url;
+      int ssh_clone = 0;
+      if (util_url_is_ssh(url) && env_has_ssh_sock(envp))
+      {
+         clone_url = url;
+         ssh_clone = 1;
+      }
+      else
+      {
+         clone_url_norm = util_url_normalize(url);
+         clone_url = clone_url_norm ? clone_url_norm : url;
+      }
       /* Destination pinned by fd: the child chdirs to /proc/self/fd/<tmpfd>
        * (pre-exec, while the fd is still open) and clones into ".", so git
        * never resolves an attacker-influencable path string. */
@@ -573,9 +598,14 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       snprintf(cwd, sizeof(cwd), "/proc/self/fd/%d", tmpfd);
       const char *argv[] = {"git", "clone", "--", clone_url, ".", NULL};
       char *out = NULL;
-      int rc = safe_exec_capture_cwd_env_fd_timeout(argv, cwd, envp ? envp : environ, &out, 1 << 16,
-                                                    300000, token_fd,
-                                                    token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+      /* Defense in depth: an SSH clone authenticates via the agent, so the HTTPS
+       * token memfd has no business in that child — git only consults GIT_ASKPASS
+       * on the HTTP(S) transport. Don't inherit the token fd on the SSH path (the
+       * real fd is still closed below); the HTTPS path passes it as before. */
+      int child_token_fd = ssh_clone ? -1 : token_fd;
+      int rc = safe_exec_capture_cwd_env_fd_timeout(
+          argv, cwd, envp ? envp : environ, &out, 1 << 16, 300000, child_token_fd,
+          child_token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       if (token_fd >= 0)
          close(token_fd);
       free(clone_url_norm);
