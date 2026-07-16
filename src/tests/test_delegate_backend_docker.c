@@ -229,6 +229,21 @@ static int fake_container_exists(const char *container_name)
    return stat(p, &s) == 0;
 }
 
+/* Did the last `docker create` argv (captured by the fixture) contain `needle`? */
+static int create_argv_has(const char *needle)
+{
+   char p[512];
+   snprintf(p, sizeof(p), "/tmp/aimee-fake-docker-state-%d/create.argv", (int)getpid());
+   FILE *f = fopen(p, "r");
+   if (!f)
+      return 0;
+   char buf[8192];
+   size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+   fclose(f);
+   buf[got] = '\0';
+   return strstr(buf, needle) != NULL;
+}
+
 static void test_acquire_creates_and_starts_container(void)
 {
    delegate_backend_reset_for_test();
@@ -245,6 +260,11 @@ static void test_acquire_creates_and_starts_container(void)
    /* The fixture's "create" handler should have touched the .exists
     * flag for the canonical container name. */
    assert(fake_container_exists("aimee-delegate-task-acq-1"));
+
+   /* Sandbox slice 6: the container is created with no IP network, and the docker
+    * socket is NEVER bind-mounted in (that would be host-root for the delegate). */
+   assert(create_argv_has("--network") && create_argv_has("none"));
+   assert(!create_argv_has("docker.sock"));
 
    /* release(hibernate=0) → docker rm -f → flag removed. */
    b->release(b, state, 0);
