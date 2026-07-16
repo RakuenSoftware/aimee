@@ -2011,11 +2011,11 @@ static void delegate_sandbox_log_posture(void)
       if (nl)
          *nl = '\0';
    }
-   aimee_log(LOG_WARN, "delegate-sandbox",
-             "ARMED: delegate file/exec will bind to a per-delegate container (docker server %s). "
-             "NOTE this is not yet the full seal: the container still has a network and this does "
-             "not take it away, so the shell-git gate and the credential strip remain the live "
-             "boundary",
+   aimee_log(LOG_INFO, "delegate-sandbox",
+             "ARMED: delegate file/exec binds to a per-delegate container (docker server %s), "
+             "created with --network none — no IP egress; its only outward channel is the "
+             "bind-mounted aimee-server UDS (aimee_home/aimee-http.sock). The shell-git gate and "
+             "credential strip remain complementary boundaries within that container.",
              (ver && ver[0]) ? ver : "?");
    free(ver);
 }
