@@ -9,6 +9,7 @@
 #include <sqlite3.h>
 #include "aimee.h"
 #include "mcp_git.h"
+#include "workspace_provider.h"
 #include "git_verify.h"
 #include "cJSON.h"
 #include "db_schema.h"
@@ -442,6 +443,59 @@ static void test_git_commit_skips_sensitive(void)
    cJSON_Delete(args);
 
    teardown_git_repo();
+}
+
+/* A CONTAINER-sandboxed delegate runs `--network none` on a minimal image with no
+ * git binary and no forge credential, so aimee's git tooling must execute on the
+ * SERVER against the path-identity bind-mounted worktree — never route into the
+ * container. Regression for the delegate-sandbox E2E where every git_* call died
+ * with "git: command not found" because mcp_git_run dispatched through the container
+ * provider's exec_shell. The spy mimics that no-git failure: if git were still
+ * routed into the container the commit would fail and the spy would be hit. */
+static int g_container_shell_spy_called;
+static char *container_shell_spy(const workspace_provider_t *p, const char *cmd, int *exit_code)
+{
+   (void)p;
+   (void)cmd;
+   g_container_shell_spy_called = 1;
+   if (exit_code)
+      *exit_code = 127; /* as if `git` were absent from the sandbox image */
+   return strdup("bash: git: command not found\n");
+}
+
+static void test_git_container_provider_runs_on_server(void)
+{
+   setup_git_repo();
+   system("git checkout -q -b test-sandbox");
+
+   FILE *fp = fopen("sbx.txt", "w");
+   fputs("sandbox\n", fp);
+   fclose(fp);
+   system("git add sbx.txt");
+
+   workspace_provider_t container;
+   memset(&container, 0, sizeof(container));
+   container.kind = WS_PROVIDER_CONTAINER;
+   container.exec_shell = container_shell_spy;
+   workspace_provider_set_active(&container);
+   g_container_shell_spy_called = 0;
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "message", "sandbox commit");
+   cJSON *resp = handle_git_commit(args);
+   workspace_provider_clear_active();
+
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* git ran on the server (the commit really landed), NOT through the container
+    * spy — so a no-git sandbox image no longer blocks a delegate's commit. */
+   assert(g_container_shell_spy_called == 0);
+   assert(strstr(text, "committed") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+   printf("  PASS: test_git_container_provider_runs_on_server\n");
 }
 
 /* --- Test handle_git_push in non-git directory --- */
@@ -2256,6 +2310,7 @@ int main(void)
    test_git_commit_missing_message();
    test_git_commit_success();
    test_git_commit_skips_sensitive();
+   test_git_container_provider_runs_on_server();
    test_git_push_requires_branch();
    test_git_branch_missing_action();
    test_git_branch_create_and_list();

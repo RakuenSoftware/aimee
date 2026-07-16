@@ -39,9 +39,11 @@ int mcp_git_get_worktree(void)
    return s_in_worktree;
 }
 
-/* Route a git/gh shell command-line through the turn's active workspace
- * provider. `shared` is a passthrough to run_cmd (identical to today); a
- * `detached` workspace marshals the command to its filesystem authority. */
+/* Route a git/gh shell command-line to where aimee's git rails live. SHARED and
+ * CONTAINER both run server-side (run_cmd) — a container-sandboxed delegate has no
+ * git and no creds, so its git must run on the server against the path-identity
+ * bind-mounted worktree; only a `detached` workspace marshals to its client-held
+ * filesystem authority. See mcp_git_run for the rationale. */
 /* The registered workspace root containing `cwd`, copied into out[outsz].
  * Returns 0 on a match, -1 otherwise. */
 static int forge_workspace_for_cwd(const char *cwd, char *out, size_t outsz)
@@ -69,17 +71,28 @@ char *mcp_git_run(const char *cmd, int *exit_code)
 {
    const workspace_provider_t *ws = workspace_provider_active();
 
-   /* Credential injection: when the server runs git LOCALLY (shared provider) for
-    * a turn whose cwd is inside a registered workspace, run the command under an
-    * execve environment carrying GH_TOKEN + the GIT_ASKPASS shim so
-    * clone/fetch/push/PR authenticate — never on the command line or disk. The
-    * token is resolved through the one shared vault-first policy: a client-handed
+   /* aimee's git tooling is TRUSTED server code and must run where the forge
+    * credential, the network and the git rails live: on aimee-server — NOT inside a
+    * delegate's sandbox. A CONTAINER-sandboxed delegate runs `--network none` on a
+    * minimal image with no git binary and no credential, so routing git into it
+    * would (a) fail outright — `git: command not found` — and (b) be wrong: push/PR
+    * need the network the sandbox deliberately removes, and running git there would
+    * push the forge credential into the sandbox this design exists to keep it out of.
+    * The delegate's worktree is bind-mounted path-identically, so the server sees the
+    * delegate's edits at the same path. Run git on the server for SHARED and
+    * CONTAINER alike; only a DETACHED workspace (the client holds both the filesystem
+    * and its own creds) marshals git to the client and stays on the provider path. */
+   int run_on_server = (ws->kind == WS_PROVIDER_SHARED || ws->kind == WS_PROVIDER_CONTAINER);
+   const workspace_provider_t *exec_ws = run_on_server ? workspace_provider_shared() : ws;
+
+   /* Credential injection: for a server-run command whose cwd is inside a registered
+    * workspace, run under an execve environment carrying GH_TOKEN + the GIT_ASKPASS
+    * shim so clone/fetch/push/PR authenticate — never on the command line or disk.
+    * The token is resolved through the one shared vault-first policy: a client-handed
     * per-workspace broker token (§4) wins, else the per-host vault token for the
-    * checkout's `origin`, else the server's own forge identity (§6); no token →
-    * fall through to ambient creds (co-located dev's own gh/SSH). A `detached`
-    * workspace marshals git to the client, which holds its own creds, so it stays
-    * on the provider path. */
-   if (ws->kind == WS_PROVIDER_SHARED)
+    * checkout's `origin`, else the server's own forge identity (§6); no token → fall
+    * through to ambient creds (co-located dev's own gh/SSH). */
+   if (run_on_server)
    {
       const char *cwd = run_cmd_get_cwd();
       char wsid[MAX_PATH_LEN];
@@ -107,7 +120,7 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          }
       }
    }
-   return ws->exec_shell(ws, cmd, exit_code);
+   return exec_ws->exec_shell(exec_ws, cmd, exit_code);
 }
 
 static void trim_trailing_newline(char *s)
