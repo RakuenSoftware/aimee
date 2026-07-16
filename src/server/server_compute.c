@@ -1192,8 +1192,9 @@ void delegate_worker(void *arg)
       char drift_err[512];
       const char *drift_root =
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
-      int drift_rc = delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, NULL,
-                                                     drift_root, drift_err, sizeof(drift_err));
+      int drift_rc =
+          delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, NULL, drift_root,
+                                          is_write_role, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift guard (pre-flight): %s", drift_err);
@@ -1427,9 +1428,10 @@ void delegate_worker(void *arg)
       for (int i = 0; i < named_path_count; i++)
          path_ptrs[i] = named_paths[i];
       char drift_err[512];
-      int drift_rc = delegate_check_named_file_drift(
-          path_ptrs, named_path_count, prompt, result.response,
-          delegate_worktree_path[0] ? delegate_worktree_path : NULL, drift_err, sizeof(drift_err));
+      int drift_rc =
+          delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, result.response,
+                                          delegate_worktree_path[0] ? delegate_worktree_path : NULL,
+                                          is_write_role, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift (post-run): %s", drift_err);

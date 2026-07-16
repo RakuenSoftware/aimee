@@ -644,14 +644,24 @@ static int drift_path_is_external(const char *path, const char *wt_path)
 }
 
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
-                                    const char *response, const char *wt_path, char *errbuf,
-                                    size_t errbuf_size)
+                                    const char *response, const char *wt_path, int role_is_write,
+                                    char *errbuf, size_t errbuf_size)
 {
    if (!paths || path_count <= 0)
       return 0;
 
    if (errbuf && errbuf_size > 0)
       errbuf[0] = '\0';
+
+   /* The delegate ROLE is the authoritative write-intent signal: only a
+    * write-capable role can be expected to CREATE a named file, so only it can
+    * hard-drift on one that is missing. A read/analysis delegate (WFE's
+    * understand/split/review, the judge) produces its artifact from its reply and
+    * modifies nothing, so a repo-relative path scraped out of reference content
+    * threaded into its prompt must never fail it. The prompt heuristic stays as a
+    * NARROWING override so an explicit "do not edit" still disables the hard-fail
+    * for a write role. */
+   int writes_allowed = role_is_write && delegate_prompt_allows_writes(prompt);
 
    int hard_drift = 0;
    int soft_drift = 0;
@@ -688,7 +698,7 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
             if (drift_path_is_external(path, wt_path))
                continue;
 
-            if (!delegate_prompt_allows_writes(prompt))
+            if (!writes_allowed)
                continue;
 
             const char *ibase = strrchr(path, '/');
@@ -753,7 +763,7 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
          }
          else
          {
-            if (!delegate_prompt_allows_writes(prompt))
+            if (!writes_allowed)
             {
                if (!soft_drift && errbuf && errbuf_size > 0)
                   snprintf(errbuf, errbuf_size,
@@ -789,7 +799,7 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
          }
          else
          {
-            if (!delegate_prompt_allows_writes(prompt))
+            if (!writes_allowed)
             {
                if (!soft_drift && errbuf && errbuf_size > 0)
                   snprintf(errbuf, errbuf_size,
