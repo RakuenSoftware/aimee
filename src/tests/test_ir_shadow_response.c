@@ -268,6 +268,54 @@ int main(void)
       printf("  PASS: a NULL body counts as a mismatch\n");
    }
 
+   /* Responses/codex wire (AIMEE_WIRE_RESPONSES): the caller hands the response
+    * OBJECT extracted from the SSE. A message with output_text matches legacy text. */
+   {
+      aimee_ir_metrics_reset();
+      cJSON *r = cJSON_CreateObject();
+      cJSON *output = cJSON_AddArrayToObject(r, "output");
+      cJSON *msg = cJSON_CreateObject();
+      cJSON_AddStringToObject(msg, "type", "message");
+      cJSON *content = cJSON_AddArrayToObject(msg, "content");
+      cJSON *part = cJSON_CreateObject();
+      cJSON_AddStringToObject(part, "type", "output_text");
+      cJSON_AddStringToObject(part, "text", "hello there");
+      cJSON_AddItemToArray(content, part);
+      cJSON_AddItemToArray(output, msg);
+      parsed_response_t lg;
+      memset(&lg, 0, sizeof(lg));
+      lg.content = strdup("hello there");
+      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_RESPONSES);
+      assert(match() == 1 && mism() == 0);
+      cJSON_Delete(r);
+      free(lg.content);
+      printf("  PASS: responses/codex wire text matches (parity extended to SSE wire)\n");
+   }
+
+   /* Responses wire, function_call: name + args must agree with the legacy call. */
+   {
+      aimee_ir_metrics_reset();
+      cJSON *r = cJSON_CreateObject();
+      cJSON *output = cJSON_AddArrayToObject(r, "output");
+      cJSON *fc = cJSON_CreateObject();
+      cJSON_AddStringToObject(fc, "type", "function_call");
+      cJSON_AddStringToObject(fc, "name", "bash");
+      cJSON_AddStringToObject(fc, "arguments", "{\"cmd\":\"ls\"}");
+      cJSON_AddStringToObject(fc, "call_id", "c1");
+      cJSON_AddItemToArray(output, fc);
+      parsed_response_t lg;
+      memset(&lg, 0, sizeof(lg));
+      lg.is_tool_call = 1;
+      lg.call_count = 1;
+      strncpy(lg.calls[0].name, "bash", sizeof(lg.calls[0].name) - 1);
+      lg.calls[0].arguments = strdup("{\"cmd\":\"ls\"}");
+      aimee_ir_shadow_compare_response(&lg, r, AIMEE_WIRE_RESPONSES);
+      assert(match() == 1 && mism() == 0);
+      cJSON_Delete(r);
+      free(lg.calls[0].arguments);
+      printf("  PASS: responses/codex wire function_call matches\n");
+   }
+
    printf("ir-shadow-response: ok\n");
    return 0;
 }

@@ -769,6 +769,33 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
    else
       cJSON_Delete(collected_output);
 }
+
+/* Extract the Responses (codex) "response object" -- the one carrying the `output`
+ * item array -- from an SSE body, so the IR responses_backend_parse (and the response
+ * shadow) can consume the same shape the JSON wires do. Prefers the response.completed
+ * event's payload; falls back to parsing the whole body as a single JSON object
+ * (non-streaming). Returns a new cJSON the caller owns, or NULL. */
+cJSON *agent_responses_sse_response_object(const char *body)
+{
+   if (!body)
+      return NULL;
+   parsed_response_t scratch;
+   memset(&scratch, 0, sizeof(scratch));
+   cJSON *collected = cJSON_CreateArray();
+   char *delta_text = NULL, *done_text = NULL, *part_text = NULL;
+   cJSON *completed = NULL;
+   responses_parse_sse_events(body, &scratch, collected, &delta_text, &done_text, &part_text,
+                              &completed);
+   free(delta_text);
+   free(done_text);
+   free(part_text);
+   agent_free_parsed_response(&scratch);
+   cJSON_Delete(collected);
+   if (completed)
+      return completed; /* the response object (has `output` + `usage`) */
+   return cJSON_Parse(body);
+}
+
 void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
 {
    memset(out, 0, sizeof(*out));

@@ -140,8 +140,13 @@ void aimee_ir_shadow_compare_response(const struct parsed_response *legacy, cons
       rc = anthropic_backend_parse(resp_json, &ir, err, sizeof(err));
    else if (wire == AIMEE_WIRE_OPENAI_CHAT)
       rc = openai_backend_parse(resp_json, &ir, err, sizeof(err));
+   else if (wire == AIMEE_WIRE_RESPONSES)
+      /* Responses (codex) is SSE, not JSON, so the caller must hand us the response
+       * OBJECT it extracted from the stream (the response.completed event's payload);
+       * responses_backend_parse then reads its `output` items, same as legacy pass 2. */
+      rc = responses_backend_parse(resp_json, &ir, err, sizeof(err));
    else
-      return; /* responses/SSE wire not comparable here -- caller skips it */
+      return; /* unknown wire */
 
    /* A parse failure is itself a divergence: legacy produced a result, the IR could
     * not. That is exactly the case that must reach zero before we trust the IR. */
