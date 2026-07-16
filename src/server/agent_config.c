@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <time.h>
+#include "log.h"
+#include <fcntl.h>
 #include <unistd.h>
 
 int agent_name_valid(const char *name)
@@ -1004,6 +1006,45 @@ int agent_load_config(agent_config_t *cfg)
    return 0;
 }
 
+/* Count the agents in the on-disk agents.json WITHOUT the cache — the cache can be
+ * stale or empty, and this guards against destroying the real file. Returns the
+ * count, or -1 if the file is absent or unparseable (i.e. "nothing to protect"). */
+static int agent_config_existing_agent_count(void)
+{
+   FILE *f = fopen(agent_config_path(), "r");
+   if (!f)
+      return -1;
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return -1;
+   }
+   long sz = ftell(f);
+   if (sz <= 0 || sz > 8 * 1024 * 1024)
+   {
+      fclose(f);
+      return -1;
+   }
+   rewind(f);
+   char *buf = malloc((size_t)sz + 1);
+   if (!buf)
+   {
+      fclose(f);
+      return -1;
+   }
+   size_t rd = fread(buf, 1, (size_t)sz, f);
+   fclose(f);
+   buf[rd] = '\0';
+   cJSON *root = cJSON_Parse(buf);
+   free(buf);
+   if (!root)
+      return -1;
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "agents");
+   int n = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : -1;
+   cJSON_Delete(root);
+   return n;
+}
+
 int agent_save_config(const agent_config_t *cfg)
 {
    cJSON *root = cJSON_CreateObject();
@@ -1200,21 +1241,68 @@ int agent_save_config(const agent_config_t *cfg)
    if (!json)
       return -1;
 
+   /* Never overwrite a populated agents.json with an empty registry. A zero-agent
+    * save is legitimate ONLY on a fresh install (no existing file, or an existing
+    * file that already has none) — never as a silent wipe of configured agents.
+    * This is the agents.json-deletion guard: whatever the trigger (a load that
+    * came back empty, a caller with a zeroed cfg), the destruction stops here, and
+    * it stops LOUDLY so the next occurrence is diagnosable rather than invisible. */
+   if (cfg->agent_count == 0)
+   {
+      int existing = agent_config_existing_agent_count();
+      if (existing > 0)
+      {
+         aimee_log(LOG_ERROR, "agent-config",
+                   "REFUSING to overwrite %d configured agent(s) in %s with an empty registry. "
+                   "An empty save is only valid on a fresh install; this is the deletion guard. "
+                   "If a wipe is truly intended, remove the file first.",
+                   existing, agent_config_path());
+         free(json);
+         return -1;
+      }
+   }
+
    /* Ensure directory exists */
    char dir[MAX_PATH_LEN];
    snprintf(dir, sizeof(dir), "%s", config_default_dir());
    platform_mkdir_p(dir, 0700);
 
-   FILE *f = fopen(agent_config_path(), "w");
-   if (!f)
+   /* Write atomically: a temp file, fsync, then rename over the target. rename(2)
+    * is atomic on a POSIX filesystem, so an interrupted or failed write can NEVER
+    * leave a truncated or empty agents.json — the previous file survives untouched.
+    * The old fopen(path, "w") truncated the real file to zero the instant it
+    * opened, before a single byte was written; any hiccup then destroyed it, which
+    * on a tiered/networked home is exactly how it went missing. */
+   char tmp[MAX_PATH_LEN];
+   if ((size_t)snprintf(tmp, sizeof(tmp), "%s.tmp.%d", agent_config_path(), (int)getpid()) >=
+       sizeof(tmp))
    {
       free(json);
       return -1;
    }
-   fputs(json, f);
-   fputc('\n', f);
-   fclose(f);
-   /* Restrict permissions (contains API keys and auth tokens) */
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+   if (fd < 0)
+   {
+      free(json);
+      return -1;
+   }
+   size_t jlen = strlen(json);
+   int ok = (write(fd, json, jlen) == (ssize_t)jlen) && (write(fd, "\n", 1) == 1);
+   /* fsync before rename: a rename can otherwise be durable while the data it
+    * points at is not, leaving an empty file after a crash — the very failure this
+    * guards against. */
+   if (ok && fsync(fd) != 0)
+      ok = 0;
+   if (close(fd) != 0)
+      ok = 0;
+   if (!ok || rename(tmp, agent_config_path()) != 0)
+   {
+      unlink(tmp); /* leave the existing agents.json intact */
+      aimee_log(LOG_ERROR, "agent-config", "atomic write of %s failed; existing file left intact",
+                agent_config_path());
+      free(json);
+      return -1;
+   }
    chmod(agent_config_path(), 0600);
    {
       struct stat st;

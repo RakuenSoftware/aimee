@@ -2482,6 +2482,66 @@ static void test_agent_config_cache_detects_same_mtime_rewrite(void)
    printf("  PASS: test_agent_config_cache_detects_same_mtime_rewrite\n");
 }
 
+/* The agents.json deletion guard: agent_save_config must never destroy a populated
+ * file, and its write must be atomic. This pins the two ways the file used to go
+ * missing on the live server — an empty registry overwriting it, and a truncating
+ * fopen("w") that a failed/interrupted write left at zero bytes. */
+static void test_agent_config_deletion_guard(void)
+{
+   char home[MAX_PATH_LEN];
+   snprintf(home, sizeof(home), "%s/aimee-guard-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(home) != NULL);
+   setenv("HOME", home, 1);
+   unsetenv("AIMEE_HOME");
+   assert(platform_mkdir_p(config_default_dir(), 0700) == 0 ||
+          access(config_default_dir(), F_OK) == 0);
+
+   /* Seed a populated registry (2 agents). */
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "alpha");
+   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
+   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "beta");
+   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
+   assert(agent_save_config(&cfg) == 0);
+
+   agent_config_t chk;
+   assert(agent_load_config(&chk) == 0 && chk.agent_count == 2);
+
+   /* (1) An EMPTY registry must be REFUSED over the populated file, and the file
+    * must survive untouched. This is the guard proper. */
+   {
+      agent_config_t empty;
+      memset(&empty, 0, sizeof(empty));
+      assert(agent_save_config(&empty) != 0);
+      agent_config_t after;
+      assert(agent_load_config(&after) == 0);
+      assert(after.agent_count == 2); /* NOT wiped */
+   }
+
+   /* (2) A zero-agent save IS allowed with no existing file (fresh install). */
+   {
+      unlink(agent_config_path());
+      agent_config_t empty;
+      memset(&empty, 0, sizeof(empty));
+      assert(agent_save_config(&empty) == 0);
+   }
+
+   /* (3) Atomic write leaves no <path>.tmp.* behind on success. */
+   {
+      assert(agent_save_config(&cfg) == 0);
+      char cmd[MAX_PATH_LEN + 64];
+      snprintf(cmd, sizeof(cmd), "ls %s.tmp.* >/dev/null 2>&1", agent_config_path());
+      assert(system(cmd) != 0);
+   }
+
+   char rm[MAX_PATH_LEN + 16];
+   snprintf(rm, sizeof(rm), "rm -rf %s", home);
+   (void)system(rm);
+   printf("  PASS: agent_config_deletion_guard\n");
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -2523,6 +2583,7 @@ int main(void)
    test_tools_enabled_capability_default();
    test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
+   test_agent_config_deletion_guard();
    test_local_synth_not_masked_by_tmux_codex();
    test_provider_cli_shell_exec_uses_argv_not_shell();
    test_provider_cli_shell_timeout_covers_prompt_write();
