@@ -688,16 +688,41 @@ static cJSON *tp_edit_file(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "path", "string",
            "File path to edit. Prefer paths relative to the current workspace directory.");
-   tp_prop(props, "old_string", "string",
-           "Exact existing text to replace (must be unique unless replace_all).");
-   tp_prop(props, "new_string", "string", "Replacement text.");
+   /* Anchored (primary) path. */
+   tp_prop(props, "snapshot_id", "string",
+           "The snapshot id from the read_file that produced the anchors below. Required for "
+           "anchored edits.");
+   {
+      cJSON *edits = cJSON_CreateObject();
+      cJSON_AddStringToObject(edits, "type", "array");
+      cJSON_AddStringToObject(
+          edits, "description",
+          "Anchored edits applied atomically against snapshot_id. Each item is one of: "
+          "{op:\"replace\", at:\"LINE:HASH\", text} | "
+          "{op:\"replace_range\", from:\"LINE:HASH\", to:\"LINE:HASH\", text} | "
+          "{op:\"insert_after\", at:\"LINE:HASH\", text} | "
+          "{op:\"delete_range\", from:\"LINE:HASH\", to:\"LINE:HASH\"}. "
+          "Anchors are the 'LINE:HASH' tokens read_file printed; the server owns all offset "
+          "arithmetic. On drift the call returns status:\"stale_anchor\" with re-anchored context "
+          "and a fresh snapshot_id.");
+      cJSON *items = cJSON_CreateObject();
+      cJSON_AddStringToObject(items, "type", "object");
+      cJSON_AddItemToObject(edits, "items", items);
+      cJSON_AddItemToObject(props, "edits", edits);
+   }
+   tp_prop(props, "dry_run", "boolean",
+           "Preview only: return the unified diff and structural blast radius without writing.");
+   /* Legacy (deprecated) string-replace path, retained for one release. */
+   tp_prop(
+       props, "old_string", "string",
+       "Deprecated fallback. Exact existing text to replace (unique unless replace_all). Prefer "
+       "snapshot_id + edits[].");
+   tp_prop(props, "new_string", "string", "Replacement text (with old_string).");
    tp_prop(props, "replace_all", "boolean",
-           "Replace every occurrence instead of requiring uniqueness.");
+           "Replace every occurrence instead of requiring uniqueness (with old_string).");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("old_string"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("new_string"));
    cJSON_AddItemToObject(params, "required", req);
    return params;
 }
@@ -1073,10 +1098,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_tool_output_get, TSURF_ALL},
     {"write_file", "Write content to a file (overwrites).", tp_write_file, TSURF_ALL},
     {"edit_file",
-     "Make a surgical edit to an existing file by replacing old_string with new_string. "
-     "Prefer this over write_file when changing part of a file — you do not need to "
-     "reproduce the whole file. old_string must match the file exactly (including "
-     "whitespace/indentation) and be unique unless replace_all is true.",
+     "Edit an existing file. Preferred: anchored edits — pass the snapshot_id from read_file "
+     "plus edits[] citing 'LINE:HASH' anchors ({op:replace|replace_range|insert_after|"
+     "delete_range}); the batch is verified against the snapshot and applied atomically, so you "
+     "never re-emit surrounding text and the server owns all offset math. dry_run:true previews "
+     "the diff + blast radius. Legacy fallback: old_string/new_string/replace_all string-replace.",
      tp_edit_file, TSURF_ALL},
     {"list_files", "List files in a directory, optionally matching a glob pattern.", tp_list_files,
      TSURF_ALL},

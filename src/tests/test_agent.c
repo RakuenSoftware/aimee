@@ -13,6 +13,7 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tools.h"
+#include "anchor_snapshot.h"
 #include "workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
@@ -1231,6 +1232,132 @@ static void test_tool_edit_file(void)
    readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nB\nGAMMA\nB\n") == 0);
    free(readback);
+
+   unlink(tmppath);
+}
+
+/* Pull "snapshot=<id>" out of an anchored read_file header line. */
+static char *anchored_snapshot_id(const char *read_out, char *buf, size_t buflen)
+{
+   const char *m = strstr(read_out, "snapshot=");
+   if (!m)
+      return NULL;
+   m += strlen("snapshot=");
+   size_t i = 0;
+   while (m[i] && m[i] != ' ' && m[i] != '\n' && i + 1 < buflen)
+   {
+      buf[i] = m[i];
+      i++;
+   }
+   buf[i] = '\0';
+   return buf;
+}
+
+static cJSON *mk_replace(const char *anchor, const char *text)
+{
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "op", "replace");
+   cJSON_AddStringToObject(e, "at", anchor);
+   cJSON_AddStringToObject(e, "text", text);
+   return e;
+}
+
+/* Find the "N:HH" anchor for 1-based ordinal `ord` in an anchored read_file
+ * output (a line beginning "N:HH| "). */
+static char *anchored_line_token(const char *read_out, int ord, char *buf, size_t buflen)
+{
+   char needle[16];
+   snprintf(needle, sizeof(needle), "\n%d:", ord);
+   const char *m = strstr(read_out, needle);
+   if (!m)
+      return NULL;
+   m++; /* skip the leading newline */
+   size_t i = 0;
+   while (m[i] && m[i] != '|' && m[i] != ' ' && i + 1 < buflen)
+   {
+      buf[i] = m[i];
+      i++;
+   }
+   buf[i] = '\0';
+   return buf;
+}
+
+static void test_tool_edit_file_anchored(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_test_anchored_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   close(fd);
+
+   char *w = tool_write_file(tmppath, "one\ntwo\nthree\nfour\n");
+   assert(w);
+   free(w);
+
+   /* anchored read mints a snapshot */
+   char *rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   char sid[ANCHOR_SNAPSHOT_ID_MAX];
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)) && sid[0] == 's');
+   char a2[24], a3[24];
+   assert(anchored_line_token(rd, 2, a2, sizeof(a2)));
+   assert(anchored_line_token(rd, 3, a3, sizeof(a3)));
+   free(rd);
+
+   /* dry_run previews without writing */
+   cJSON *dedits = cJSON_CreateArray();
+   cJSON_AddItemToArray(dedits, mk_replace(a2, "TWO"));
+   char *edits_json = cJSON_PrintUnformatted(dedits);
+   (void)edits_json;
+   char *dry = tool_edit_file_anchored(tmppath, sid, dedits, 1);
+   assert(dry);
+   cJSON *dj = parse_json_or_die(dry);
+   assert(strcmp(cJSON_GetObjectItem(dj, "status")->valuestring, "dry_run") == 0);
+   cJSON_Delete(dj);
+   free(dry);
+   free(edits_json);
+   cJSON_Delete(dedits);
+   char *rb = tool_read_file(tmppath, 0, 0, 1);
+   assert(rb && strcmp(rb, "one\ntwo\nthree\nfour\n") == 0); /* unchanged by dry_run */
+   free(rb);
+
+   /* commit a two-op batch */
+   cJSON *edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(edits, mk_replace(a2, "TWO"));
+   cJSON_AddItemToArray(edits, mk_replace(a3, "THREE"));
+   char *res = tool_edit_file_anchored(tmppath, sid, edits, 0);
+   assert(res && strncmp(res, "error:", 6) != 0);
+   cJSON *rj = parse_json_or_die(res);
+   assert(strcmp(cJSON_GetObjectItem(rj, "status")->valuestring, "ok") == 0);
+   cJSON_Delete(rj);
+   free(res);
+   cJSON_Delete(edits);
+   rb = tool_read_file(tmppath, 0, 0, 1);
+   assert(rb && strcmp(rb, "one\nTWO\nTHREE\nfour\n") == 0);
+   free(rb);
+
+   /* the old snapshot is now stale: the file moved under it */
+   cJSON *stale_edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(stale_edits, mk_replace(a2, "again"));
+   char *stale = tool_edit_file_anchored(tmppath, sid, stale_edits, 0);
+   assert(stale);
+   cJSON *sj = parse_json_or_die(stale);
+   assert(strcmp(cJSON_GetObjectItem(sj, "status")->valuestring, "stale_anchor") == 0);
+   /* rejection carries a fresh snapshot_id to retry against */
+   assert(cJSON_GetObjectItem(sj, "snapshot_id") != NULL);
+   cJSON_Delete(sj);
+   free(stale);
+   cJSON_Delete(stale_edits);
+
+   /* unknown snapshot id -> snapshot_expired, file untouched */
+   cJSON *exp_edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(exp_edits, mk_replace("2:aa", "z"));
+   char *exp = tool_edit_file_anchored(tmppath, "sdeadbeef00000000", exp_edits, 0);
+   assert(exp);
+   cJSON *ej = parse_json_or_die(exp);
+   assert(strcmp(cJSON_GetObjectItem(ej, "status")->valuestring, "snapshot_expired") == 0);
+   cJSON_Delete(ej);
+   free(exp);
+   cJSON_Delete(exp_edits);
 
    unlink(tmppath);
 }
@@ -2612,6 +2739,7 @@ int main(void)
    test_tool_read_file();
    test_tool_write_file();
    test_tool_edit_file();
+   test_tool_edit_file_anchored();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();

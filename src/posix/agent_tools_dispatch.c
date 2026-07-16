@@ -69,6 +69,9 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "workspace.h"
 #include "diff.h"
 #include "dstr.h"
+#include "anchor_snapshot.h"
+#include "edit_anchored.h"
+#include "guardrails_blast_radius.h"
 #include "lsp.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -321,6 +324,120 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
    return result;
 }
 
+/* Anchored, transactional edit: verify each cited anchor against its read
+ * snapshot, apply the whole batch atomically (bottom-first, server owns
+ * offsets), and write back preserving unchanged bytes. On drift returns a
+ * structured stale_anchor payload carrying a fresh snapshot + re-anchored
+ * context; the model retries without a blind re-read. dry_run previews the
+ * unified diff + structural blast radius without writing. */
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *edits, int dry_run)
+{
+   if (!path || !path[0])
+      return safe_strdup("error: missing 'path' parameter");
+   if (!snapshot_id || !snapshot_id[0])
+      return safe_strdup("error: missing 'snapshot_id'; read the file first to obtain one");
+
+   char cwd_path[MAX_PATH_LEN];
+   const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
+
+   const workspace_provider_t *ws = workspace_provider_active();
+   ws_stat_t st;
+   ws->stat(ws, actual_path, &st);
+   if (!st.exists)
+   {
+      char errbuf[512];
+      snprintf(errbuf, sizeof(errbuf), "error: cannot open %s", actual_path);
+      return safe_strdup(errbuf);
+   }
+   if (st.size >= 8 * 1024 * 1024)
+      return safe_strdup("error: file too large to edit (limit 8MB); use write_file instead");
+
+   char *content = NULL;
+   size_t rd = 0;
+   if (ws->read_all(ws, actual_path, &content, &rd) != 0)
+   {
+      char errbuf[512];
+      snprintf(errbuf, sizeof(errbuf), "error: cannot open %s", actual_path);
+      return safe_strdup(errbuf);
+   }
+
+   anchor_snapshot_t snap;
+   if (!anchor_snapshot_get_copy(snapshot_id, &snap))
+   {
+      free(content);
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "status", "snapshot_expired");
+      cJSON_AddStringToObject(o, "path", actual_path);
+      cJSON_AddStringToObject(o, "hint",
+                              "snapshot_id unknown or evicted; re-read the file to mint a fresh "
+                              "snapshot, then retry the edits against it");
+      char *out = cJSON_PrintUnformatted(o);
+      cJSON_Delete(o);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   edit_anchored_result_t res;
+   int rc = edit_anchored_plan(content, rd, &snap, edits, &res);
+   anchor_snapshot_dispose(&snap);
+
+   if (rc != 0)
+   {
+      /* rejection: mint a fresh snapshot over the current bytes so the model can
+       * retry immediately against valid anchors */
+      char fresh[ANCHOR_SNAPSHOT_ID_MAX];
+      char resolved[MAX_PATH_LEN];
+      const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+      if (!verr && anchor_snapshot_create(resolved, content, rd, fresh) == 0)
+         cJSON_AddStringToObject(res.reject, "snapshot_id", fresh);
+      cJSON_AddStringToObject(res.reject, "path", actual_path);
+      char *out = cJSON_PrintUnformatted(res.reject);
+      cJSON_Delete(res.reject);
+      free(content);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   if (dry_run)
+   {
+      cJSON *payload = cJSON_CreateObject();
+      cJSON_AddStringToObject(payload, "status", "dry_run");
+      cJSON_AddStringToObject(payload, "path", actual_path);
+      diff_result_t dr;
+      if (diff_compute(content, res.new_text, &dr) == 0)
+      {
+         char *summary = diff_format_summary(&dr);
+         char *unified = diff_format_unified(content, res.new_text, &dr);
+         cJSON_AddStringToObject(payload, "summary", summary ? summary : "no change");
+         cJSON_AddItemToObject(payload, "diff", diff_result_to_json(&dr));
+         if (unified && unified[0])
+            cJSON_AddStringToObject(payload, "unified_diff", unified);
+         free(summary);
+         free(unified);
+      }
+      /* structural blast radius (fail-open: skipped when the code index/sidecar
+       * is unavailable) */
+      char abs_path[MAX_PATH_LEN];
+      normalize_path(path, cwd_path, abs_path, sizeof(abs_path));
+      blast_radius_t br;
+      char blast[1024];
+      if (guardrails_blast_radius_for_abs_path(abs_path, &br) == 0 &&
+          blast_radius_advisory_format(&br, abs_path, BR_ADVISORY_HUB_THRESHOLD, blast,
+                                       sizeof(blast)))
+         cJSON_AddStringToObject(payload, "blast_radius", blast);
+      char *out = cJSON_PrintUnformatted(payload);
+      cJSON_Delete(payload);
+      free(content);
+      free(res.new_text);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   /* commit: route write-back through the guarded tool_write_file (read-only /
+    * parent-worktree guards + structured diff payload) */
+   char *result = tool_write_file(path, res.new_text);
+   free(content);
+   free(res.new_text);
+   return result;
+}
+
 /* Delegation conversation: request input from parent agent.
  * delegation_request_input is provided by server_compute.c when running as delegate.
  * Default stub returns NULL; the server overrides this at link time. */
@@ -463,10 +580,50 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
    cJSON *o = cJSON_GetObjectItem(args, "old_string");
    cJSON *nw = cJSON_GetObjectItem(args, "new_string");
    cJSON *ra = cJSON_GetObjectItem(args, "replace_all");
+   cJSON *snap = cJSON_GetObjectItem(args, "snapshot_id");
+   cJSON *edits = cJSON_GetObjectItem(args, "edits");
    if (!p || !cJSON_IsString(p))
+   {
       result = safe_strdup("error: missing 'path' parameter");
+   }
+   /* Anchored path (primary): snapshot_id + edits[]. Guards are enforced here up
+    * front and again in tool_write_file's write-back. */
+   else if ((snap && cJSON_IsString(snap)) || (edits && cJSON_IsArray(edits)))
+   {
+      cJSON *drj = cJSON_GetObjectItem(args, "dry_run");
+      int dry_run = (drj && cJSON_IsBool(drj)) ? cJSON_IsTrue(drj) : 0;
+      if (!dry_run && agent_tools_readonly_delegate_blocks())
+         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+      else if (!dry_run && agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
+         result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+      else if (!dry_run && agent_tools_session_isolation_blocks(p->valuestring, dispatch_cwd))
+         result = safe_strdup("error: write blocked: require_session_worktree is enabled and this "
+                              "target is outside an aimee-managed worktree (.aimee/worktrees/...)");
+      else
+      {
+         if (!dry_run)
+            auto_snapshot_record(p->valuestring);
+         const char *snap_id = (snap && cJSON_IsString(snap)) ? snap->valuestring : NULL;
+         result = tool_edit_file_anchored(p->valuestring, snap_id, edits, dry_run);
+      }
+      /* record the write for stale-read tracking on a successful, non-dry commit */
+      if (!dry_run && result && strncmp(result, "error:", 6) != 0 &&
+          !strstr(result, "\"status\":\"stale_anchor\"") &&
+          !strstr(result, "\"status\":\"snapshot_expired\"") &&
+          !strstr(result, "\"status\":\"invalid_edit\"") &&
+          !strstr(result, "\"status\":\"conflicting_edits\""))
+      {
+         char abs_path[MAX_PATH_LEN];
+         normalize_path(p->valuestring, dispatch_cwd, abs_path, sizeof(abs_path));
+         const char *write_key = delegation_active_id();
+         (void)db1_session_write_path_record(write_key ? write_key : dispatch_sid, abs_path);
+      }
+      return result;
+   }
    else if (!o || !cJSON_IsString(o))
-      result = safe_strdup("error: missing 'old_string' parameter");
+   {
+      result = safe_strdup("error: missing 'old_string' parameter (or use snapshot_id + edits[])");
+   }
    else
    {
       const char *new_str = (nw && cJSON_IsString(nw)) ? nw->valuestring : "";

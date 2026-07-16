@@ -3,6 +3,7 @@
 
 #include "agent_protocol.h"
 #include "agent_types.h"
+#include "cJSON.h"
 #include <stdint.h>
 
 /* Tool execution (Unix only) */
@@ -21,6 +22,13 @@ char *tool_write_file(const char *path, const char *content);
  * tool_write_file on success, or an "error: ..." string. */
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
+/* Anchored transactional edit: apply `edits` (JSON array of {op,at/from/to,text})
+ * against the read snapshot `snapshot_id`, verifying each anchor's full digest
+ * before an atomic write-back. Returns the tool_write_file diff payload on
+ * success, a structured stale_anchor/conflict payload (carrying a fresh
+ * snapshot_id) on rejection, or a dry_run preview (unified diff + blast radius)
+ * when dry_run is non-zero. */
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *edits, int dry_run);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_verify(const char *check_type, const char *target, const char *expected);
 char *tool_git_log(const char *repo_path, int count);

@@ -495,6 +495,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/yaml.c
     ${AIMEE_SRC_DIR}/diff.c
     ${AIMEE_SRC_DIR}/anchor_snapshot.c
+    ${AIMEE_SRC_DIR}/edit_anchored.c
     ${AIMEE_SRC_DIR}/sse_parser.c
     ${AIMEE_SRC_DIR}/aimee_home.c
     ${AIMEE_SRC_DIR}/shared/kb_paths.c
