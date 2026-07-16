@@ -23,6 +23,37 @@
 
 ARG LLAMA_TAG=b9775
 
+# One Dockerfile, two published images — a reduction in responsibility over the
+# old aimee-combined, which baked the cpu models inside the all-in-one appliance.
+#   AIMEE_LLM_BAKE_TIER=""    -> model-less: downloads its tier at first boot (GPU)
+#   AIMEE_LLM_BAKE_TIER=cpu   -> the cpu tier's GGUFs baked in: serves offline, no
+#                               multi-GB first-boot pull (the pure-CPU appliance LLM)
+# The bake runs the SAME supervisor as the runtime download, so the tier table has
+# exactly one home. Empty is the default, so the plain aimee-llm image is byte-for-
+# byte the behaviour it has today.
+ARG AIMEE_LLM_BAKE_TIER=
+
+# ---- optional model bake (build time) ----------------------------------------
+# Runs the supervisor's own download logic (AIMEE_LLM_DOWNLOAD_ONLY=1) so a tier's
+# GGUFs + their .ready markers are baked in. When AIMEE_LLM_BAKE_TIER is empty this
+# stage produces an EMPTY /models, and the runtime COPY below is a no-op — the
+# image stays model-less. No llama.cpp here: download-only needs only wget.
+FROM debian:bookworm-slim AS models-bake
+ARG AIMEE_LLM_BAKE_TIER
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/aimee-llm-supervisor.sh /tmp/supervisor.sh
+# mkdir FIRST so /models exists as a real directory even with no bake — otherwise
+# `COPY --from=models-bake /models/` fails with "/models: not found" on an empty path.
+RUN chmod +x /tmp/supervisor.sh && mkdir -p /models \
+    && if [ -n "${AIMEE_LLM_BAKE_TIER}" ]; then \
+         echo "baking aimee-llm tier '${AIMEE_LLM_BAKE_TIER}' at build time"; \
+         AIMEE_LLM_DOWNLOAD_ONLY=1 AIMEE_LLM_TIER="${AIMEE_LLM_BAKE_TIER}" \
+           AIMEE_LLM_MODELS_DIR=/models /tmp/supervisor.sh; \
+       else \
+         echo "no AIMEE_LLM_BAKE_TIER — model-less image; models download at first boot"; \
+       fi
+
 # ---- runtime — Vulkan llama.cpp + the gateway (no models, no torch) ----------
 # Base is Debian TRIXIE (Mesa 25.x): its RADV exposes VK_KHR_cooperative_matrix on
 # RDNA3 (gfx1100), so the prebuilt llama.cpp Vulkan binary uses the 7900 XTX WMMA
@@ -58,6 +89,11 @@ COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
 # downstream `COPY --from=aimee-llm /models/` fails with "/models: not found".
 # The explicit mkdir gives it a layer.
 RUN chmod +x /opt/aimee/supervisor.sh && mkdir -p /models
+# Seed /models from the bake stage: empty for the plain (download) image, the
+# cpu-tier GGUFs + .ready markers for aimee-llm-cpu. A named volume mounted here is
+# populated from this image content on first start, so the pre-baked image serves
+# offline while the plain image still downloads into the volume as before.
+COPY --from=models-bake /models/ /models/
 
 # Persistent model cache: the supervisor downloads the tier's GGUFs here on first
 # boot. Mount a volume so restarts (and tier switches) don't re-pull multi-GB models.
