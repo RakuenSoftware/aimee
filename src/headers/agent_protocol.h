@@ -85,7 +85,7 @@ struct cJSON *agent_responses_sse_response_object(const char *body);
 void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
 
 /* Parse a provider JSON response through the canonical IR and bridge it into a
- * parsed_response_t (the default response path; see aimee_ir_response_path_enabled).
+ * parsed_response_t (the sole response parser for the JSON wires).
  * `anthropic` selects the anthropic vs openai backend parser. `rescue_mode` gates the
  * XML tool-call rescue the parser owns: <0 skips it, 0 rescues dialect calls but not
  * bare prose JSON, 1 also rescues bare JSON. `*n_rescued` (if non-NULL) receives how

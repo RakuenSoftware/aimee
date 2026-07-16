@@ -23,16 +23,12 @@ __attribute__((weak)) void aimee_ir_shadow_compare_response(const struct parsed_
 
 /* --- IR response-path symbols wired into agent_runtime.c ------------------
  * Weak so the minimal-link agent tests that don't exercise the IR response path
- * resolve without the whole backend/IR chain. aimee_ir_response_path_enabled() ->
- * 0 keeps those tests on the legacy parser, so the parse stubs below are never
- * CALLED -- they exist only to satisfy the link. Real objects win when linked. */
+ * resolve without the whole backend/IR chain. The backend parse stubs return -1
+ * (IR "could not parse"), which leaves the delegate turn loop with an empty parsed
+ * response -- fine for tests that don't assert on it. Real objects win when linked. */
 #include "aimee_backend.h"
 #include "aimee_ir.h"
 
-__attribute__((weak)) int aimee_ir_response_path_enabled(void)
-{
-   return 0;
-}
 __attribute__((weak)) int anthropic_backend_parse(const struct cJSON *resp, aimee_response_t *out,
                                                   char *err, size_t errn)
 {
