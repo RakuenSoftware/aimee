@@ -1,0 +1,37 @@
+{
+  "description": "Part I hashline eval corpus. Mirrors src/tests/test_hashline_gate.c. Each fixture is one edit task; the model must produce the edit under both the str_replace and hashline tool schemas. pass@1 = the resulting file equals `expected`.",
+  "fixtures": [
+    {"name": "unique-line", "category": "single",
+     "initial": "alpha\nbeta\ngamma\n", "target_line": 2, "end_line": 2,
+     "new_text": "BETA", "expected": "alpha\nBETA\ngamma\n",
+     "note": "baseline single-line edit; both protocols should succeed"},
+    {"name": "duplicate-line", "category": "collision",
+     "initial": "x\nsame\ny\nsame\nz\n", "target_line": 4, "end_line": 4,
+     "new_text": "SAME4", "expected": "x\nsame\ny\nSAME4\nz\n",
+     "note": "identical lines: str_replace old_string is non-unique (occurs 2x)"},
+    {"name": "whitespace-recall", "category": "recall",
+     "initial": "func() {\n    return 1;\n}\n", "target_line": 2, "end_line": 2,
+     "new_text": "    return 2;", "expected": "func() {\n    return 2;\n}\n",
+     "note": "model must recall exact indentation for str_replace; anchor does not"},
+    {"name": "middle-of-many", "category": "single",
+     "initial": "l1\nl2\nl3\nl4\nl5\nl6\n", "target_line": 4, "end_line": 4,
+     "new_text": "L4", "expected": "l1\nl2\nl3\nL4\nl5\nl6\n",
+     "note": "edit deep in a file"},
+    {"name": "whole-function", "category": "rewrite",
+     "initial": "int f(int x)\n{\n    int t = x;\n    t = t * 2;\n    t = t + 1;\n    return t;\n}\n",
+     "target_line": 1, "end_line": 7,
+     "new_text": "int f(int x)\n{\n    return x * 2 + 1;\n}",
+     "expected": "int f(int x)\n{\n    return x * 2 + 1;\n}\n",
+     "note": "whole-symbol rewrite: str_replace must echo the entire old body"},
+    {"name": "stale-drift", "category": "drift",
+     "initial": "one\ntwo\nthree\n", "target_line": 2, "end_line": 2,
+     "new_text": "TWO", "expected": "one\ntwo\nthree\n",
+     "drift_to": "one\nCHANGED\nthree\nfour\n",
+     "note": "file changes between read and edit; hashline must reject (not blind-apply)"}
+  ],
+  "gate": {
+    "pass_at_1": "hashline >= str_replace on every model; strictly better on local/open-weight delegates",
+    "net_token_delta": "report per-model total token delta (anchored-read overhead minus edit-block savings); require net-negative overall and never worse than +2% on any single model",
+    "safety": "no fixture may be silently mis-applied by hashline; drift must produce stale_anchor"
+  }
+}
