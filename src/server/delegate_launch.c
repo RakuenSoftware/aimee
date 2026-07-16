@@ -462,7 +462,7 @@ int delegate_launch_coord_job(cJSON *plan, int max_concurrent, const char *cwd,
       char *prompt = packet_build_prompt(packet);
 
       int step_id = step_idx < stored.step_count ? stored.steps[step_idx].id : 0;
-      if (db1_coord_job_add_task(job_id, step_id, files_json, role, prompt, cwd) > 0)
+      if (db1_coord_job_add_task(job_id, step_id, files_json, role, prompt, cwd, "engineer") > 0)
          added++;
       free(files_json);
       free(prompt);

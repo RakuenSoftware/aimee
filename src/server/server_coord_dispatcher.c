@@ -21,7 +21,8 @@
 /* Build a delegate request from a claimed coord task and submit it to a delegate
  * worker. Lives here (its only caller) rather than in server_compute.c. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
-                                       const char *prompt, const char *files_json, const char *cwd)
+                                       const char *prompt, const char *files_json, const char *cwd,
+                                       const char *persona)
 {
    if (!ctx || task_id <= 0 || !prompt || !prompt[0])
       return -1;
@@ -30,10 +31,10 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
       return -1;
    cJSON_AddStringToObject(req, "role", role && role[0] ? role : "execute");
    cJSON_AddStringToObject(req, "prompt", prompt);
-   /* Coordination work packets run under the engineer persona (required for
-    * every delegate). A per-packet persona could be threaded through the plan
-    * and coord-task schema in future. */
-   cJSON_AddStringToObject(req, "persona", "engineer");
+   /* Persona (the delegate's identity, required for every delegate) is carried on
+    * the coord task now — the orchestrator that enqueued it (coord planner or the
+    * workflow engine) named it. Default to engineer for legacy rows. */
+   cJSON_AddStringToObject(req, "persona", (persona && persona[0]) ? persona : "engineer");
    cJSON_AddTrueToObject(req, "handoff_json");
    if (files_json && files_json[0])
       cJSON_AddStringToObject(req, "files", files_json);
@@ -107,8 +108,10 @@ static int dispatcher_sweep(void)
          char prompt[COORD_PROMPT_MAX] = "";
          char files[COORD_FILES_MAX] = "";
          char cwd[COORD_CWD_MAX] = "";
+         char persona[COORD_ROLE_MAX] = "";
          if (db1_coord_task_get_dispatch(task_id, role, sizeof(role), prompt, sizeof(prompt), files,
-                                         sizeof(files), cwd, sizeof(cwd)) != 0)
+                                         sizeof(files), cwd, sizeof(cwd), persona,
+                                         sizeof(persona)) != 0)
          {
             db1_coord_job_fail_task(task_id, "dispatcher could not read task dispatch fields");
             continue;
@@ -122,7 +125,8 @@ static int dispatcher_sweep(void)
             continue;
          }
 
-         if (server_compute_dispatch_coord_task(g_ctx, task_id, role, prompt, files, cwd) != 0)
+         if (server_compute_dispatch_coord_task(g_ctx, task_id, role, prompt, files, cwd,
+                                                persona) != 0)
          {
             /* Pool full — release the claim and retry next sweep. */
             db1_coord_job_release_task(task_id);

@@ -32,6 +32,11 @@ static void db1_run_migrations(sqlite3 *db)
        "ALTER TABLE eval_results ADD COLUMN hardware_profile TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE eval_results ADD COLUMN seed INTEGER NOT NULL DEFAULT 0",
        "ALTER TABLE coord_job_tasks ADD COLUMN preempt_requeues INTEGER NOT NULL DEFAULT 0",
+       /* Per-task delegate persona (engineer/architect/reviewer/...). The coord
+        * queue is the single delegate-dispatch queue; carrying persona lets any
+        * orchestrator (coord OR the workflow engine) name the delegate identity
+        * per task instead of the dispatcher hardcoding 'engineer'. */
+       "ALTER TABLE coord_job_tasks ADD COLUMN persona TEXT NOT NULL DEFAULT 'engineer'",
        /* Gateway ambient-presence: track which platform/channel originated a session */
        "ALTER TABLE server_sessions ADD COLUMN source TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE server_sessions ADD COLUMN chat_key TEXT NOT NULL DEFAULT ''",

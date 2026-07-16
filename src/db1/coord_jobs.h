@@ -56,7 +56,7 @@ extern "C"
 
    int db1_coord_job_create(int plan_id, int max_concurrent);
    int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role,
-                              const char *prompt, const char *cwd);
+                              const char *prompt, const char *cwd, const char *persona);
    int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out);
    int db1_coord_job_complete_task(int task_id, const char *result);
    int db1_coord_job_fail_task(int task_id, const char *error);
@@ -70,11 +70,12 @@ extern "C"
    int db1_coord_job_list_recent(db1_coord_job_t *out, int max);
    /* List IDs of coord jobs with pending or running tasks (needs dispatch work). */
    int db1_coord_job_list_active_ids(int *out_ids, int max);
-   /* Read the dispatch fields (role, prompt, files, cwd) for a single task. Returns 0 on success.
-    */
+   /* Read the dispatch fields (role, prompt, files, cwd, persona) for a single task.
+    * Returns 0 on success. */
    int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out,
                                    size_t prompt_cap, char *files_out, size_t files_cap,
-                                   char *cwd_out, size_t cwd_cap);
+                                   char *cwd_out, size_t cwd_cap, char *persona_out,
+                                   size_t persona_cap);
 
 #ifdef __cplusplus
 }

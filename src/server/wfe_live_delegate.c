@@ -25,6 +25,7 @@
 #include "agent_tools.h"
 #include "agent_types.h"
 #include "cJSON.h"
+#include "coord_jobs.h"
 #include "delegate_role.h"
 #include "persona.h"
 #include "provider_catalog.h"
@@ -43,131 +44,99 @@
 #include <string.h>
 #include <time.h>
 
-static void chomp(char *s)
+/* Block (busy-poll) until a single-task coord job reaches a terminal state, then
+ * hand back the delegate's result text. WFE runs on the autonomy scheduler
+ * thread; the coord DISPATCHER runs the task on its own thread through the shared
+ * delegate path, so this only waits — it never executes the delegate. Returns 0
+ * and fills result_out on 'done'; -1 (+err) on 'failed'/'cancelled'/timeout. */
+static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t result_cap,
+                               char *err, size_t errlen)
 {
-   if (!s)
-      return;
-   size_t n = strlen(s);
-   while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
-      s[--n] = '\0';
+   (void)task_id;              /* the job holds exactly one task */
+   const int max_polls = 1600; /* 1600 * 750ms ~= 20 min, matching the delegate timeout ceiling */
+   for (int i = 0; i < max_polls; i++)
+   {
+      db1_coord_task_t task;
+      memset(&task, 0, sizeof task);
+      if (db1_coord_job_list_tasks(job_id, &task, 1) >= 1)
+      {
+         if (strcmp(task.status, "done") == 0)
+         {
+            if (result_out && result_cap)
+               snprintf(result_out, result_cap, "%s", task.result);
+            return 0;
+         }
+         if (strcmp(task.status, "failed") == 0 || strcmp(task.status, "cancelled") == 0)
+         {
+            if (err && errlen)
+               snprintf(err, errlen, "wfe delegate task %s: %s", task.status,
+                        task.error[0] ? task.error : "no detail");
+            return -1;
+         }
+      }
+      struct timespec ts = {0, 750L * 1000L * 1000L};
+      nanosleep(&ts, NULL);
+   }
+   if (err && errlen)
+      snprintf(err, errlen, "wfe delegate task timed out");
+   return -1;
 }
 
-/* Run `git -C workdir <args...>`, discard output. Returns the exec rc. */
-static int git_run(const char *workdir, const char *const extra[], int extra_n)
-{
-   const char *argv[16];
-   int argc = 0;
-   argv[argc++] = "git";
-   argv[argc++] = "-C";
-   argv[argc++] = workdir;
-   for (int i = 0; i < extra_n && argc < 15; i++)
-      argv[argc++] = extra[i];
-   argv[argc] = NULL;
-   char *out = NULL;
-   int rc = safe_exec_capture(argv, &out, 1 << 16);
-   free(out);
-   return rc;
-}
-
-/* wfe_resolve_delegate + the $random selector live in wfe_delegate_resolve.c
- * (self-contained, unit-tested). */
-
-/* The live delegate run. Contract per wfe_delegate_provider_t. */
+/* The live delegate run. Contract per wfe_delegate_provider_t.
+ *
+ * WFE ORCHESTRATES delegates; it does not run them. This enqueues ONE delegate
+ * task onto the coord queue — aimee's single delegate-dispatch queue — and waits
+ * for the coord dispatcher to run it through the shared delegate path. That path
+ * owns everything WFE must not: agent routing, the per-model/provider concurrency
+ * limit (registered max_parallel), credential leasing/retry, the parent-write
+ * guard, and the isolated worktree whose diff it applies back into `workdir`
+ * (container-ready — WFE never assumes a local process or a shared checkout).
+ * WFE holds no server_ctx, spawns no delegate, and runs no git: `freeze` owns the
+ * commit, so out_commit_sha is left empty here. The block's `role` arg is the
+ * delegate PERSONA (architect/engineer/...); a producing delegate routes on a
+ * WRITE role so the delegate system isolates + applies its changes. */
 static int wfe_live_delegate_run(const char *workdir, const char *role, const char *delegate,
                                  const char *prompt, const char *artifact_path,
                                  char out_commit_sha[64], char *err, size_t errlen)
 {
+   (void)delegate; /* agent selection is the delegate system's routing decision */
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
-   if (!workdir || !workdir[0] || !prompt || !prompt[0] ||
-       ((!role || !role[0]) && (!delegate || !delegate[0])))
+   if (!workdir || !workdir[0] || !prompt || !prompt[0])
    {
       if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: missing workdir/prompt and role+delegate");
+         snprintf(err, errlen, "wfe live delegate: missing workdir/prompt");
       return -1;
    }
 
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof(acfg));
-   if (agent_load_config(&acfg) != 0)
-   {
-      if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: agent config load failed");
-      return -1;
-   }
-
-   /* Resolve the step's delegate: a specific name -> itself; "" and "$random"
-    * -> a uniformly random ENABLED roster agent (an unnamed delegate means "any
-    * agent", so successive dispatches assort across the roster instead of
-    * pinning to one). Fail fast rather than leak the sentinel downstream. */
-   char agent_name[MAX_AGENT_NAME] = "";
-   if (wfe_resolve_delegate(delegate, &acfg, agent_name, sizeof agent_name) != 0)
-   {
-      if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: no enabled agent in the roster");
-      return -1;
-   }
-
-   /* The producing blocks pass a PERSONA (engineer / architect / ...) — the
-    * delegate's IDENTITY — in this slot, NOT an agent routing role. (It was
-    * historically misused as a role, so no agent matched — author/implement
-    * looped forever.) Compose the persona's identity + principles as the system
-    * prompt, and route by a ROLE the persona is allowed to use that an eligible
-    * agent can serve. */
    const char *persona = (role && role[0]) ? role : "engineer";
-   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-
-   /* Run WITH TOOLS, pinned to the work-item worktree, so file edits land there.
-    * The resolve above always yields a concrete agent name, so dispatch is
-    * uniformly by name; an unroutable pick fails here and the block's retry
-    * loop re-rolls a different agent. */
-   run_cmd_set_cwd(workdir);
-
-   /* Reset the process-global write guards before the delegate runs. These are
-    * set per-run ONLY by the primary chat path (server_compute.c, which sets
-    * them unconditionally precisely "so a pooled worker thread never inherits a
-    * prior delegate's capability"). A wfe delegate runs on a pooled worker
-    * thread and this path never touched them, so it inherited whatever a prior
-    * run left: a primary session's parent-write guard whose read-only root
-    * encloses THIS worktree (native writes rejected as "parent worktree is
-    * read-only"), or a prior read-only delegate's capability=0 (all native file
-    * writes rejected). Either way a producing delegate that edits via file tools
-    * committed an EMPTY tree — a no-op round — while bash-writers happened to
-    * slip past the same guard, so convergence silently depended on each model's
-    * tool preferences. A producing wfe delegate is write-capable and its
-    * worktree (pinned as cwd above) is the write boundary; clear the stale guard.
-    * clear() also restores write-capability. */
-   agent_tools_parent_write_guard_clear();
-   agent_result_t res;
-   memset(&res, 0, sizeof(res));
-   int rc;
-   agent_t *ag = agent_find(&acfg, agent_name);
-   if (!ag)
+   int job_id = db1_coord_job_create(0, 1);
+   if (job_id <= 0)
    {
-      run_cmd_set_cwd(NULL);
-      free(sys_prompt);
       if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: unknown delegate '%s'", agent_name);
+         snprintf(err, errlen, "wfe live delegate: could not create coord job");
       return -1;
    }
-   rc = agent_execute_with_tools(ag, &acfg.network, sys_prompt ? sys_prompt : "", prompt,
-                                 AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
-   run_cmd_set_cwd(NULL);
-   free(sys_prompt);
-
-   if (rc != 0)
+   /* Write role ("code") so the shared path runs the delegate in an isolated
+    * worktree and applies its diff back into `workdir`. cwd = the work-item
+    * worktree; persona names the delegate identity. */
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", "code", prompt, workdir, persona);
+   if (task_id <= 0)
    {
+      db1_coord_job_cancel(job_id);
       if (err && errlen)
-         snprintf(err, errlen, "%s", res.error[0] ? res.error : "delegate run failed");
-      free(res.response);
+         snprintf(err, errlen, "wfe live delegate: could not enqueue coord task");
       return -1;
    }
 
-   /* Text-artifact blocks (e.g. author.proposal/plan): if the agent produced a
-    * response and did not itself write the artifact file, persist the response so
-    * the following gate has content to act on. Code blocks edit files via tools
-    * and usually leave artifact_path NULL. */
-   if (artifact_path && artifact_path[0] && res.response && res.response[0])
+   char result[DB1_COORD_RESULT_LEN] = "";
+   if (wfe_coord_task_wait(job_id, task_id, result, sizeof result, err, errlen) != 0)
+      return -1;
+
+   /* Text-artifact blocks (author.proposal/plan): persist the delegate's reply as
+    * the artifact if it did not itself write the file, so the next gate has
+    * content. Pure orchestration glue — not delegate execution. */
+   if (artifact_path && artifact_path[0] && result[0])
    {
       long existing = -1;
       FILE *rf = fopen(artifact_path, "rb");
@@ -182,61 +151,10 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
          FILE *wf = fopen(artifact_path, "wb");
          if (wf)
          {
-            fwrite(res.response, 1, strlen(res.response), wf);
+            fwrite(result, 1, strlen(result), wf);
             fclose(wf);
          }
       }
-   }
-   /* Keep the reply's head for the no-op diagnostic below (res.response is
-    * freed here). */
-   char reply_head[224] = "(empty)";
-   if (res.response && res.response[0])
-      snprintf(reply_head, sizeof reply_head, "%.200s", res.response);
-   free(res.response);
-
-   /* Stage + commit whatever the delegate changed in the worktree. A commit with
-    * nothing staged is a harmless no-op (rc ignored); out_commit_sha is then just
-    * the unchanged HEAD. Commit with the host's CONFIGURED git identity (the same
-    * creds aimee pushes with) rather than a synthetic bot identity: a bot author
-    * makes a downstream squash-merge inject a `Co-authored-by:` trailer, which the
-    * standing directive forbids. No `-c user.name/user.email` override, and no
-    * co-authorship trailer. */
-   char pre_head[64] = "";
-   {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         chomp(o);
-         snprintf(pre_head, sizeof pre_head, "%s", o);
-      }
-      free(o);
-   }
-   {
-      const char *add[] = {"add", "-A"};
-      (void)git_run(workdir, add, 2);
-      const char *commit[] = {"commit", "--no-verify", "-m", "aimee: autonomous delegate change"};
-      (void)git_run(workdir, commit, 4);
-   }
-   {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         chomp(o);
-         if (out_commit_sha)
-            snprintf(out_commit_sha, 64, "%s", o);
-         /* Diagnostic: a producing delegate that edited NOTHING is the top
-          * silent failure mode of the autonomous loop (rounds spin on an
-          * unchanged tree). Surface WHICH agent replied without editing and
-          * the head of what it said instead, so the cause (tool bridge down,
-          * refusal, advice-only reply) is triageable from the server log. */
-         if (pre_head[0] && strcmp(pre_head, o) == 0)
-            aimee_log(LOG_WARN, "wfe-delegate",
-                      "no-op run: agent '%s' made no edits in %s; reply head: %s",
-                      agent_name[0] ? agent_name : "(role-routed)", workdir, reply_head);
-      }
-      free(o);
    }
    return 0;
 }
@@ -324,83 +242,36 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
           "false} if the change is sound, or {\"refuted\": true, \"reason\": \"<why>\"} if it "
           "is flawed.");
 
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof(acfg));
-   if (agent_load_config(&acfg) != 0)
-      return -1;
-   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-   persona_t pinfo;
-   memset(&pinfo, 0, sizeof pinfo);
-   persona_load(NULL, persona, &pinfo);
-
-   /* Read-only enforcement (defense in depth): capture the pre-judge HEAD so we can
-    * hard-reset the worktree afterwards — the judge is instructed not to edit, but we
-    * do not rely on instruction-following; any edit it makes is discarded. */
-   char pre_head[64] = "";
+   /* Enqueue a READ-ONLY delegate task on the coord queue. role "review" is not a
+    * write role, so the shared path's write-capable gate blocks any file edit at
+    * the tool layer — the read-only property is enforced by the delegate system,
+    * not by a WFE-side hard-reset. WFE just reads the verdict. */
+   int job_id = db1_coord_job_create(0, 1);
+   if (job_id <= 0)
    {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         chomp(o);
-         snprintf(pre_head, sizeof pre_head, "%s", o);
-      }
-      free(o);
+      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"could not create coord job\"}");
+      return 0; /* fail-closed verdict */
+   }
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", "review", prompt, workdir, persona);
+   if (task_id <= 0)
+   {
+      db1_coord_job_cancel(job_id);
+      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"could not enqueue coord task\"}");
+      return 0;
    }
 
-   run_cmd_set_cwd(workdir);
-   agent_result_t res;
-   memset(&res, 0, sizeof(res));
-   agent_t *chosen = NULL;
-   const char *chosen_role = NULL;
-   int best_tier = 0;
-   for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
-   {
-      const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
-      for (int ai = 0; ai < acfg.agent_count; ai++)
-      {
-         agent_t *ag = &acfg.agents[ai];
-         if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
-             !agent_is_available_for_routing(ag))
-            continue;
-         if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-            continue;
-         if (!chosen || ag->cost_tier < best_tier)
-         {
-            chosen = ag;
-            chosen_role = r;
-            best_tier = ag->cost_tier;
-         }
-      }
-   }
-   int rc = -1;
-   if (chosen)
-      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
-                                             sys_prompt ? sys_prompt : "", prompt,
-                                             AGENT_DEFAULT_MAX_TOKENS, 0.2, &res);
-   run_cmd_set_cwd(NULL);
-   free(sys_prompt);
-   persona_free(&pinfo);
-
-   /* Discard anything the judge changed: hard-reset to the pre-judge HEAD + clean
-    * untracked. This makes the read-only property enforced, not merely requested. */
-   if (pre_head[0])
-   {
-      const char *reset[] = {"reset", "--hard", pre_head};
-      (void)git_run(workdir, reset, 3);
-      const char *clean[] = {"clean", "-fd"};
-      (void)git_run(workdir, clean, 2);
-   }
+   char result[DB1_COORD_RESULT_LEN] = "";
+   int ok = wfe_coord_task_wait(job_id, task_id, result, sizeof result, NULL, 0);
 
    int refuted = 1; /* fail-closed default */
-   if (rc == 0 && res.response && res.response[0])
+   if (ok == 0 && result[0])
    {
       /* Parse ONLY the LAST non-empty line as the verdict JSON (the delegate is told
        * to emit exactly one JSON line at the end). A substring scan of the whole
        * response would false-ACCEPT on a skeptic's reasoning that quotes
        * {"refuted": false}. Accept only on an explicit boolean refuted:false; anything
        * that doesn't parse to that is REFUTED (fail closed). */
-      const char *r = res.response;
+      const char *r = result;
       size_t len = strlen(r);
       while (len > 0 &&
              (r[len - 1] == '\n' || r[len - 1] == '\r' || r[len - 1] == ' ' || r[len - 1] == '\t'))
@@ -424,11 +295,7 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
          }
       }
    }
-   free(res.response);
-   if (rc != 0 && !chosen)
-      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"no judge agent available\"}");
-   else
-      snprintf(out_verdict, n, "{\"refuted\":%s}", refuted ? "true" : "false");
+   snprintf(out_verdict, n, "{\"refuted\":%s}", refuted ? "true" : "false");
    return 0; /* a verdict was produced (even a fail-closed one) */
 }
 

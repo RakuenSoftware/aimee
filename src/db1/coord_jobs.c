@@ -87,7 +87,7 @@ int db1_coord_job_create(int plan_id, int max_concurrent)
 }
 
 int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role,
-                           const char *prompt, const char *cwd)
+                           const char *prompt, const char *cwd, const char *persona)
 {
    if (job_id <= 0)
       return -1;
@@ -97,8 +97,8 @@ int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, cons
 
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
-       "INSERT INTO coord_job_tasks (job_id, step_id, files, role, prompt, cwd)"
-       " VALUES (?, ?, ?, ?, ?, ?)";
+       "INSERT INTO coord_job_tasks (job_id, step_id, files, role, prompt, cwd, persona)"
+       " VALUES (?, ?, ?, ?, ?, ?, ?)";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, job_id);
@@ -110,6 +110,7 @@ int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, cons
    sqlite3_bind_text(stmt, 4, (role && role[0]) ? role : "execute", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 5, prompt ? prompt : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 6, cwd ? cwd : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 7, (persona && persona[0]) ? persona : "engineer", -1, SQLITE_TRANSIENT);
    int rc = sqlite3_step(stmt);
    int task_id = (rc == SQLITE_DONE) ? (int)sqlite3_last_insert_rowid(db) : -1;
    sqlite3_finalize(stmt);
@@ -560,7 +561,7 @@ int db1_coord_job_list_active_ids(int *out_ids, int max)
 
 int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out,
                                 size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out,
-                                size_t cwd_cap)
+                                size_t cwd_cap, char *persona_out, size_t persona_cap)
 {
    if (task_id <= 0)
       return -1;
@@ -569,7 +570,8 @@ int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, ch
       return -1;
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "SELECT role, prompt, files, cwd FROM coord_job_tasks WHERE id = ?";
+   static const char *sql =
+       "SELECT role, prompt, files, cwd, persona FROM coord_job_tasks WHERE id = ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, task_id);
@@ -584,6 +586,8 @@ int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, ch
          db1_copy_col_text(files_out, files_cap, stmt, 2);
       if (cwd_out && cwd_cap > 0)
          db1_copy_col_text(cwd_out, cwd_cap, stmt, 3);
+      if (persona_out && persona_cap > 0)
+         db1_copy_col_text(persona_out, persona_cap, stmt, 4);
       rc = 0;
    }
    sqlite3_finalize(stmt);

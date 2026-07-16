@@ -96,7 +96,8 @@ void compute_ctx_free(compute_ctx_t *cctx);
 int tool_execute_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx);
 /* Dispatch a coord task as a background delegate worker. Returns 0 on success, -1 on failure. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
-                                       const char *prompt, const char *files_json, const char *cwd);
+                                       const char *prompt, const char *files_json, const char *cwd,
+                                       const char *persona);
 /* Delegate worker thread entry point — non-static so skill_jobs.c can reference it. */
 void delegate_worker(void *arg);
 
