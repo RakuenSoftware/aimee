@@ -351,7 +351,7 @@ int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *c
  * "Host key verification failed". accept-new is trust-on-first-use — it records
  * the host key on first contact and verifies it strictly thereafter (unlike
  * StrictHostKeyChecking=no, which never verifies). */
-#define GIT_AGENT_SSH_COMMAND \
+#define GIT_AGENT_SSH_COMMAND                                                                      \
    "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new"
 
 /* Wall-clock cap (ms) for an internal git network op. Generous enough not to

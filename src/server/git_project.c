@@ -603,9 +603,9 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
        * on the HTTP(S) transport. Don't inherit the token fd on the SSH path (the
        * real fd is still closed below); the HTTPS path passes it as before. */
       int child_token_fd = ssh_clone ? -1 : token_fd;
-      int rc = safe_exec_capture_cwd_env_fd_timeout(argv, cwd, envp ? envp : environ, &out, 1 << 16,
-                                                    300000, child_token_fd,
-                                                    child_token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+      int rc = safe_exec_capture_cwd_env_fd_timeout(
+          argv, cwd, envp ? envp : environ, &out, 1 << 16, 300000, child_token_fd,
+          child_token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       if (token_fd >= 0)
          close(token_fd);
       free(clone_url_norm);
