@@ -79,7 +79,8 @@ cJSON *agent_build_openai_assistant_message_from_calls(parsed_response_t *parsed
  * response held the calls as prose and cannot replay them: anthropic drops it (as
  * legacy did) and openai rebuilds it from the recovered calls.
  *
- * Returns 0 on success; -1 if the IR could not parse (caller falls back to legacy). */
+ * Returns 0 on success; -1 if the IR could not parse (caller yields an empty
+ * response -- the legacy translators are gone). */
 static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out);
 
 int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,

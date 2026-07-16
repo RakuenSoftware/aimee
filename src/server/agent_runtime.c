@@ -799,7 +799,9 @@ static int parse_error(cJSON *root, agent_result_t *out)
 static void parse_response_openai(cJSON *root, agent_result_t *out)
 {
    parsed_response_t parsed;
-   agent_parse_response_openai(root, &parsed);
+   /* IR is the sole parser for the openai wire (zeroed *parsed on failure). This
+    * simple-completion runtime has no tool loop, so no XML rescue (rescue_mode < 0). */
+   agent_ir_parse_json_response(root, 0 /*openai*/, -1, NULL, &parsed);
 
    out->prompt_tokens = parsed.prompt_tokens;
    out->completion_tokens = parsed.completion_tokens;

@@ -7,6 +7,7 @@
 #include "aimee_backend.h"
 
 #include "cJSON.h"
+#include "util.h" /* text_split_reasoning_prefix, strip_llm_private_scaffold */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,6 +181,76 @@ static aimee_stop_reason_t finish_to_stop(const char *f)
    return AIMEE_STOP_UNKNOWN;
 }
 
+/* Append `len` bytes of `src` to the malloc'd string *dst. Returns 0 on success. */
+static int sappend(char **dst, const char *src, size_t len)
+{
+   if (!src || len == 0)
+      return 0;
+   size_t old = *dst ? strlen(*dst) : 0;
+   char *g = realloc(*dst, old + len + 1);
+   if (!g)
+      return -1;
+   memcpy(g + old, src, len);
+   g[old + len] = '\0';
+   *dst = g;
+   return 0;
+}
+
+/* Grow out->content by one block; return the new zeroed block or NULL on OOM. */
+static aimee_block_t *ob_grow(aimee_response_t *out)
+{
+   void *p = realloc(out->content, (size_t)(out->n_content + 1) * sizeof(aimee_block_t));
+   if (!p)
+      return NULL;
+   out->content = p;
+   aimee_block_t *b = &out->content[out->n_content++];
+   memset(b, 0, sizeof(*b));
+   return b;
+}
+
+/* Split an OpenAI message `content` value into answer text and reasoning text.
+ * A plain string is all answer. In a content-parts array, text / output_text parts
+ * are answer; thinking / reasoning parts (their nested text) are reasoning. Both
+ * outputs are accumulated (caller frees). */
+static void openai_content_split(const cJSON *content, char **answer, char **reasoning)
+{
+   if (!content)
+      return;
+   if (cJSON_IsString(content))
+   {
+      sappend(answer, content->valuestring, strlen(content->valuestring));
+      return;
+   }
+   if (!cJSON_IsArray(content))
+      return;
+   const cJSON *part = NULL;
+   cJSON_ArrayForEach(part, content)
+   {
+      if (cJSON_IsString(part))
+      {
+         sappend(answer, part->valuestring, strlen(part->valuestring));
+         continue;
+      }
+      const char *t = ostr(part, "type");
+      if (!t)
+         continue;
+      if (strcmp(t, "text") == 0 || strcmp(t, "output_text") == 0)
+      {
+         const char *tx = ostr(part, "text");
+         if (tx)
+            sappend(answer, tx, strlen(tx));
+      }
+      else if (strcmp(t, "thinking") == 0 || strcmp(t, "reasoning") == 0)
+      {
+         const cJSON *th = cJSON_GetObjectItemCaseSensitive((cJSON *)part, "thinking");
+         if (!th)
+            th = cJSON_GetObjectItemCaseSensitive((cJSON *)part, "reasoning");
+         /* nested value's text goes to reasoning */
+         openai_content_split(th, reasoning, reasoning);
+      }
+   }
+}
+
 int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, size_t errn)
 {
    if (out)
@@ -205,41 +276,95 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
    if (msg)
    {
       out->role = dupstr(ostr(msg, "role"));
-      /* one text block (if content) + one tool_use block per tool_call */
-      const char *content = ostr(msg, "content");
-      const cJSON *calls = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "tool_calls");
-      int ncalls = (calls && cJSON_IsArray(calls)) ? cJSON_GetArraySize((cJSON *)calls) : 0;
-      int nblocks = (content && content[0] ? 1 : 0) + ncalls;
-      if (nblocks > 0)
+
+      /* Text response: split answer vs reasoning. Reasoning models on this wire embed
+       * their chain-of-thought in the content (content-parts thinking items, an inline
+       * <think>...</think> prefix, or a separate reasoning_content field). We STORE it
+       * as a THINKING block (excluded from the content accessor) rather than discard
+       * it, and keep the answer as a TEXT block. */
+      char *answer = NULL, *reasoning = NULL;
+      openai_content_split(cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "content"), &answer,
+                           &reasoning);
+
+      const cJSON *rc = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "reasoning_content");
+      if (rc)
       {
-         out->content = calloc((size_t)nblocks, sizeof(aimee_block_t));
-         if (!out->content)
+         /* qwen3 etc.: when content is empty the actual output is in reasoning_content;
+          * otherwise it is separate reasoning. */
+         if (!answer || !answer[0])
          {
+            free(answer);
+            answer = NULL;
+            openai_content_split(rc, &answer, &answer);
+         }
+         else
+            openai_content_split(rc, &reasoning, &reasoning);
+      }
+
+      if (answer)
+      {
+         const char *rp = NULL;
+         size_t rlen = 0;
+         const char *ans = text_split_reasoning_prefix(answer, &rp, &rlen);
+         if (rlen > 0)
+            sappend(&reasoning, rp, rlen); /* store the <think> prefix */
+         /* Drop leaked private scaffold from the answer (malformed prose, not a clean
+          * reasoning block; the helper returns only the cleaned text). */
+         char *cleaned = strip_llm_private_scaffold(ans);
+         free(answer);
+         answer = cleaned;
+      }
+
+      if (reasoning && reasoning[0])
+      {
+         aimee_block_t *b = ob_grow(out);
+         if (!b)
+         {
+            free(answer);
+            free(reasoning);
             aimee_response_free(out);
             return -1;
          }
-         int bi = 0;
-         if (content && content[0])
-         {
-            out->content[bi].type = AIMEE_BLK_TEXT;
-            out->content[bi].text = dupstr(content);
-            bi++;
-         }
-         const cJSON *c = NULL;
-         if (calls)
-            cJSON_ArrayForEach(c, calls)
-            {
-               aimee_block_t *b = &out->content[bi++];
-               b->type = AIMEE_BLK_TOOL_USE;
-               b->raw = cJSON_Duplicate(c, 1);
-               b->tool_id = dupstr(ostr(c, "id"));
-               const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)c, "function");
-               b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
-               const char *args = fn ? ostr(fn, "arguments") : NULL;
-               b->tool_input = args ? cJSON_Parse(args) : NULL;
-            }
-         out->n_content = bi;
+         b->type = AIMEE_BLK_THINKING;
+         b->text = reasoning;
+         reasoning = NULL;
       }
+      free(reasoning);
+
+      if (answer && answer[0])
+      {
+         aimee_block_t *b = ob_grow(out);
+         if (!b)
+         {
+            free(answer);
+            aimee_response_free(out);
+            return -1;
+         }
+         b->type = AIMEE_BLK_TEXT;
+         b->text = answer;
+         answer = NULL;
+      }
+      free(answer);
+
+      const cJSON *calls = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "tool_calls");
+      const cJSON *c = NULL;
+      if (calls && cJSON_IsArray(calls))
+         cJSON_ArrayForEach(c, calls)
+         {
+            aimee_block_t *b = ob_grow(out);
+            if (!b)
+            {
+               aimee_response_free(out);
+               return -1;
+            }
+            b->type = AIMEE_BLK_TOOL_USE;
+            b->raw = cJSON_Duplicate(c, 1);
+            b->tool_id = dupstr(ostr(c, "id"));
+            const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)c, "function");
+            b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
+            const char *args = fn ? ostr(fn, "arguments") : NULL;
+            b->tool_input = args ? cJSON_Parse(args) : NULL;
+         }
    }
 
    const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");

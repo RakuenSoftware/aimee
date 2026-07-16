@@ -22,7 +22,7 @@ void test_responses_parser_keeps_all_output_text_parts(void)
        "data: {\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":22}}}\n\n";
 
    parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
+   agent_ir_parse_responses(body, -1, NULL, &parsed);
    assert(parsed.content != NULL);
    assert(strcmp(parsed.content, "I did not deploy this to `192.168.0.83`.") == 0);
    assert(parsed.prompt_tokens == 11);
@@ -42,7 +42,7 @@ void test_responses_parser_accumulates_output_text_deltas(void)
        "\r\n\r\n";
 
    parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
+   agent_ir_parse_responses(body, -1, NULL, &parsed);
    assert(parsed.content != NULL);
    assert(strcmp(parsed.content,
                  "The useful model fact here is that Qwen3.6 keeps scaling KV cache with context "
@@ -194,7 +194,7 @@ void test_responses_parser_uses_output_text_done(void)
        "{\"response\":{\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":8}}}\n\n";
 
    parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
+   agent_ir_parse_responses(body, -1, NULL, &parsed);
    assert(parsed.content != NULL);
    assert(strcmp(parsed.content,
                  "One caveat: the endpoint I could reach at `192.168.1.103:8080`.") == 0);
@@ -221,7 +221,7 @@ void test_responses_parser_separates_message_items(void)
        "\n\n";
 
    parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
+   agent_ir_parse_responses(body, -1, NULL, &parsed);
    assert(parsed.content != NULL);
    assert(strcmp(parsed.content, "PR.\n\nGitHub") == 0);
    assert(parsed.prompt_tokens == 9);

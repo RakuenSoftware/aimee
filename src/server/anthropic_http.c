@@ -525,7 +525,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
       if (driver && driver->parse_response)
          driver->parse_response(provider_resp, response, &parsed);
       else
-         agent_parse_response_openai(provider_resp, &parsed);
+         /* No driver: default to the openai wire, parsed through the IR (zeroed
+          * *parsed on failure), matching the driver hooks. */
+         agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
 
       /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
        * the model emitted despite the request-side strip, before the audit row
@@ -992,7 +994,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                if (driver && driver->parse_response)
                   driver->parse_response(provider_resp, buf_resp, &parsed);
                else
-                  agent_parse_response_openai(provider_resp, &parsed);
+                  /* No driver: default to the openai wire via the IR. */
+                  agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
                gateway_policy_police_parsed_response(&parsed);
                emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
                /* Cost accounting (mirror the buffered path). */
