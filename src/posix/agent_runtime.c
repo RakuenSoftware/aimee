@@ -5,6 +5,7 @@
 /* posix/agent.c: POSIX implementation of agent_execute_with_tools. */
 #include "aimee.h"
 #include "agent.h"
+#include "aimee_ir_shadow.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
@@ -1096,6 +1097,16 @@ native_provider_http:
                agent_parse_response_anthropic(root, &parsed);
             else
                agent_parse_response_openai(root, &parsed);
+            /* Shadow (response side): parse the SAME response JSON through the IR
+             * backend parser and record whether it agrees with the legacy result.
+             * Off unless AIMEE_IR_SHADOW is set; never changes the turn -- the
+             * legacy `parsed` is what runs. This is the response-side twin of the
+             * request-body shadow, and the evidence that must show parity before
+             * the response translators can be retired. Only anthropic/openai are
+             * comparable here; the responses/SSE wire above is not JSON. */
+            if (aimee_ir_shadow_enabled())
+               aimee_ir_shadow_compare_response(
+                   &parsed, root, anthropic ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT);
             cJSON_Delete(root);
          }
          else

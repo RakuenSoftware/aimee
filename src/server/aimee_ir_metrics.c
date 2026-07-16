@@ -68,6 +68,10 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
       return "ir_body_match";
    case AIMEE_IR_M_RESCUE_RECOVERIES:
       return "ir_rescue_recoveries";
+   case AIMEE_IR_M_RESP_MISMATCH:
+      return "ir_resp_mismatch";
+   case AIMEE_IR_M_RESP_MATCH:
+      return "ir_resp_match";
    case AIMEE_IR_M__COUNT:
    default:
       return "unknown";

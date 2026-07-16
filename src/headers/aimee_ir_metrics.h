@@ -33,6 +33,14 @@ typedef enum
    /* Shadow: IR and legacy produced byte-identical provider bodies. */
    AIMEE_IR_M_BODY_MATCH,
    AIMEE_IR_M_RESCUE_RECOVERIES,
+   /* Shadow (response side): the IR backend parser and the legacy translator
+    * disagreed about the SAME provider response -- different text, or a different
+    * set of tool calls. This is the response-side twin of BODY_MISMATCH and the
+    * gate for retiring the response translators: the request-side shadow proves the
+    * IR sends the same bytes, this proves it reads the reply the same way. */
+   AIMEE_IR_M_RESP_MISMATCH,
+   /* Shadow (response side): IR and legacy parsed the response identically. */
+   AIMEE_IR_M_RESP_MATCH,
    AIMEE_IR_M__COUNT
 } aimee_ir_metric_t;
 
