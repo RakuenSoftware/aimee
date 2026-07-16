@@ -823,24 +823,24 @@ static void config_set_defaults(config_t *cfg)
    cfg->skills_capability_autostub = 0;
    cfg->skills_eval_gate_enabled = 0;
    cfg->skills_eval_threshold = 0.01;
-   cfg->css_style_graph_enabled = 1; /* default-on: the indexer builds the CSS style
-                                        graph so the read-only css signals/report work
-                                        out of the box (set false to opt out) */
-   cfg->wfe_live_forge_enabled = 1;  /* default-ON (operator ruling 2026-07-13,
-                                        restoring the plan's default): the live forge
-                                        registers at standup; set false to opt out.
-                                        The merge-target rail still bounds every op --
-                                        PRs open-only against the resolved trunk,
-                                        merges only to the unprotected autonomous
-                                        base -- and each op re-checks flag + rail. */
+   cfg->css_style_graph_enabled = 1;     /* default-on: the indexer builds the CSS style
+                                            graph so the read-only css signals/report work
+                                            out of the box (set false to opt out) */
+   cfg->wfe_live_forge_enabled = 1;      /* default-ON (operator ruling 2026-07-13,
+                                            restoring the plan's default): the live forge
+                                            registers at standup; set false to opt out.
+                                            The merge-target rail still bounds every op --
+                                            PRs open-only against the resolved trunk,
+                                            merges only to the unprotected autonomous
+                                            base -- and each op re-checks flag + rail. */
    cfg->client_integrations_enabled = 1; /* default-ON: aimee auto-registers into
                                             detected AI-tool user configs. Set false
                                             (or export AIMEE_NO_CLIENT_INTEGRATIONS)
                                             to keep aimee out of global tool configs
                                             and wire a single project by hand. */
-   cfg->audit_action_enabled = 1;    /* default-ON: the trajectory_export reader (S3)
-                                        shipped, so the passive per-action audit row
-                                        is on by default; set false to opt out */
+   cfg->audit_action_enabled = 1;        /* default-ON: the trajectory_export reader (S3)
+                                            shipped, so the passive per-action audit row
+                                            is on by default; set false to opt out */
    snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty

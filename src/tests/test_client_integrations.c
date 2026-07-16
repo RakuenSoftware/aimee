@@ -1024,9 +1024,9 @@ static void test_write_text_file_no_op(void)
 
 static void test_client_integrations_optout_gate(void)
 {
-   /* Hermetic config: point AIMEE_HOME at an empty temp dir so config_load()
-    * yields defaults (client_integrations_enabled == 1), and disable the config
-    * cache so each call re-reads the on-disk state below. */
+   /* Hermetic config: point AIMEE_HOME at an empty temp dir so the gate reads
+    * an aimee.yaml under our control (absent -> default client_integrations
+    * ON). */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-ci-optout-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmpdir) != NULL);
@@ -1039,7 +1039,6 @@ static void test_client_integrations_optout_gate(void)
       snprintf(old_home, sizeof(old_home), "%s", prev_home);
 
    platform_setenv("AIMEE_HOME", tmpdir);
-   platform_setenv("AIMEE_NO_CACHE", "1");
    platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
 
    /* Default config, no env override -> integrations allowed. */
@@ -1076,7 +1075,6 @@ static void test_client_integrations_optout_gate(void)
    /* Restore AIMEE_HOME (best-effort) and neutralize the opt-out env so later
     * code in this process sees a clean state. */
    platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
-   platform_setenv("AIMEE_NO_CACHE", "0");
    if (old_home[0])
       platform_setenv("AIMEE_HOME", old_home);
 

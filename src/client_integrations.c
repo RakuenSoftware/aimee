@@ -1,6 +1,7 @@
 #include "client_constants.h"
 #include "client_integrations.h"
-#include "config.h"
+#include "aimee_home.h"
+#include "yaml.h"
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
@@ -1444,20 +1445,69 @@ static void ensure_copilot_integration(const char *home)
    cJSON_Delete(root);
 }
 
+/* Read a single top-level boolean from aimee.yaml, returning default_val when
+ * the file is absent/unparseable or the key is missing. client_integrations.c
+ * links into the thin, DB-free CLI client, which excludes config.c (and thus
+ * config_load), so we read the key directly with the lightweight yaml + cJSON
+ * primitives the thin client does link, from the same path config_load uses
+ * (aimee_home()/aimee.yaml). */
+static int client_config_bool(const char *key, int default_val)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return default_val;
+
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return default_val;
+   fseek(fp, 0, SEEK_END);
+   long sz = ftell(fp);
+   fseek(fp, 0, SEEK_SET);
+   if (sz < 0 || sz >= (long)(1 << 20))
+   {
+      fclose(fp);
+      return default_val;
+   }
+   char *buf = malloc((size_t)sz + 1);
+   if (!buf)
+   {
+      fclose(fp);
+      return default_val;
+   }
+   size_t n = fread(buf, 1, (size_t)sz, fp);
+   fclose(fp);
+   buf[n] = '\0';
+
+   cJSON *root = yaml_parse(buf);
+   free(buf);
+
+   int val = default_val;
+   if (cJSON_IsObject(root))
+   {
+      cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+      if (cJSON_IsBool(item))
+         val = cJSON_IsTrue(item);
+   }
+   if (root)
+      cJSON_Delete(root);
+   return val;
+}
+
 /* Whether aimee is allowed to auto-register itself into external AI-tool user
  * configs. The env var AIMEE_NO_CLIENT_INTEGRATIONS overrides the persisted
  * config: any non-empty value other than "0"/"false" forces the integrations
  * off for this run (useful for CI or a one-off install). Otherwise the
- * default-ON client_integrations_enabled config field decides. */
+ * default-ON client_integrations_enabled config key decides. */
 static int client_integrations_allowed(void)
 {
    const char *env = getenv("AIMEE_NO_CLIENT_INTEGRATIONS");
    if (env && env[0] && strcmp(env, "0") != 0 && strcmp(env, "false") != 0)
       return 0;
 
-   config_t cfg;
-   config_load(&cfg);
-   return cfg.client_integrations_enabled ? 1 : 0;
+   return client_config_bool("client_integrations_enabled", 1);
 }
 
 void ensure_client_integrations(void)
