@@ -22,7 +22,7 @@
  * worker. Lives here (its only caller) rather than in server_compute.c. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
                                        const char *prompt, const char *files_json, const char *cwd,
-                                       const char *persona)
+                                       const char *persona, int require_handoff)
 {
    if (!ctx || task_id <= 0 || !prompt || !prompt[0])
       return -1;
@@ -35,7 +35,13 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
     * the coord task now — the orchestrator that enqueued it (coord planner or the
     * workflow engine) named it. Default to engineer for legacy rows. */
    cJSON_AddStringToObject(req, "persona", (persona && persona[0]) ? persona : "engineer");
-   cJSON_AddTrueToObject(req, "handoff_json");
+   /* The structured delegate_result_v1 handoff is the patch-COORDINATOR's contract
+    * (plan-based jobs aggregate structured results). WFE's ad-hoc jobs don't use
+    * it — the delegate produces free-form output (a plan, a review verdict, code)
+    * that WFE reads raw from the task result — so requiring a handoff would fail
+    * every WFE task with "invalid delegate handoff". The caller decides. */
+   if (require_handoff)
+      cJSON_AddTrueToObject(req, "handoff_json");
    if (files_json && files_json[0])
       cJSON_AddStringToObject(req, "files", files_json);
    if (cwd && cwd[0])
@@ -125,8 +131,12 @@ static int dispatcher_sweep(void)
             continue;
          }
 
-         if (server_compute_dispatch_coord_task(g_ctx, task_id, role, prompt, files, cwd,
-                                                persona) != 0)
+         /* Plan-based coord jobs use the structured handoff contract; an ad-hoc
+          * WFE job (WFE_COORD_PLAN_ID) does not — its delegate returns free-form
+          * output that the workflow engine reads raw. */
+         int require_handoff = (job.plan_id != WFE_COORD_PLAN_ID);
+         if (server_compute_dispatch_coord_task(g_ctx, task_id, role, prompt, files, cwd, persona,
+                                                require_handoff) != 0)
          {
             /* Pool full — release the claim and retry next sweep. */
             db1_coord_job_release_task(task_id);
