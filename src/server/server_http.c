@@ -33,6 +33,7 @@
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "shadow_mirror.h"        /* generic shadow-traffic mirror */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1676,6 +1677,20 @@ void handle_conn(int fd, int is_tcp)
          body[already] = '\0';
          body_len = already;
       }
+   }
+
+   /* Shadow-traffic mirror: fire-and-forget a copy of every completion request to
+    * a configured peer aimee before we serve it, so a build under test can be
+    * validated against live traffic without being deployed here. No-op unless a
+    * peer is configured. The X-Aimee-Shadow header on an INBOUND request means we
+    * are the peer receiving a mirror -- do not re-mirror (loop guard). Placed
+    * after the body is read and before dispatch so it covers both the streaming
+    * and buffered completion paths, and it never blocks or alters the real turn. */
+   if (strcmp(method, "POST") == 0 && shadow_mirror_is_mirrorable_path(path))
+   {
+      char shadow_hdr[8] = "";
+      int inbound_is_shadow = http_header(buf, "X-Aimee-Shadow", shadow_hdr, sizeof shadow_hdr);
+      shadow_mirror_dispatch(path, body, body_len, inbound_is_shadow);
    }
 
    /* Native streaming chat over HTTP — hands off to the async chat worker, which

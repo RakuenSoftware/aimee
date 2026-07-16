@@ -75,6 +75,10 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          if (cJSON_IsString(item) && item->valuestring)
             strncpy(cfg->server_api_client_transport, item->valuestring,
                     sizeof(cfg->server_api_client_transport) - 1);
+
+         /* No shadow_publish knob here on purpose: shadow publishing is armed at
+          * runtime (POST /v1/shadow/enable) and never persisted, so it cannot
+          * survive a reboot. See shadow_mirror.c. */
       }
    }
 

@@ -3274,6 +3274,62 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /shadow/enable:
+    post:
+      summary: Arm shadow-traffic publishing (runtime-only; resets to off on restart)
+      description: >-
+        Operator-only (CAP_SHADOW_ADMIN, full-trust). Arms the shadow-traffic
+        mirror so subscribers receive a copy of each completion request. In-memory
+        only: never persisted, so a restart always boots disarmed.
+      responses:
+        "200":
+          description: Armed
+  /shadow/disable:
+    post:
+      summary: Disarm shadow-traffic publishing and forget all subscribers
+      description: Operator-only (CAP_SHADOW_ADMIN, full-trust). Hard stop.
+      responses:
+        "200":
+          description: Disarmed
+  /shadow/subscribe:
+    post:
+      summary: Register a subscriber to receive mirrored completion traffic
+      description: >-
+        Operator-only (CAP_SHADOW_ADMIN, full-trust). The caller's real /v1
+        ingress (`url`) receives a fire-and-forget copy of each completion request,
+        tagged X-Aimee-Shadow, authenticated with the supplied `bearer`. Refused
+        while publishing is disarmed. Idempotent by url.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, description: Subscriber's /v1 base URL }
+                bearer: { type: string, description: Bearer presented to the subscriber }
+      responses:
+        "200":
+          description: Subscribed
+        "403":
+          description: Shadow publishing is disarmed
+  /shadow/unsubscribe:
+    post:
+      summary: Remove a shadow-traffic subscriber
+      description: Operator-only (CAP_SHADOW_ADMIN, full-trust).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string }
+      responses:
+        "200":
+          description: Unsubscribed (or absent)
   /chat/completions:
     post:
       summary: Create a chat completion

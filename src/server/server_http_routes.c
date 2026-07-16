@@ -6,6 +6,7 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http.h"
+#include "shadow_mirror.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -489,6 +490,68 @@ static int rh_messages(const route_req_t *rq, char *resp, int cap)
 static int rh_count_tokens(const route_req_t *rq, char *resp, int cap)
 {
    return route_completion(g_count_tokens_handler, rq->body, resp, cap);
+}
+
+/* POST /v1/shadow/enable -- arm shadow publishing at RUNTIME. Always boots
+ * disarmed and this never persists, so it cannot survive a restart: a reboot
+ * always comes up with shadow publishing OFF. CAP_SHADOW_ADMIN (full-trust). */
+static int rh_shadow_enable(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   shadow_mirror_set_armed(1);
+   snprintf(resp, cap,
+            "{\"status\":\"armed\",\"note\":\"runtime-only; resets to off on restart\"}");
+   return 200;
+}
+
+/* POST /v1/shadow/disable -- disarm and forget all subscribers. */
+static int rh_shadow_disable(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   shadow_mirror_set_armed(0);
+   snprintf(resp, cap, "{\"status\":\"disarmed\"}");
+   return 200;
+}
+
+/* POST /v1/shadow/subscribe {"url":"<base>","bearer":"<tok>"} -- register this
+ * caller's REAL ingress to receive a copy of every completion request. Gated by
+ * CAP_SHADOW_ADMIN (full-trust only) AND the shadow_publish_enabled master switch;
+ * a subscriber sees all prompt/response content, so both gates must be open. */
+static int rh_shadow_subscribe(const route_req_t *rq, char *resp, int cap)
+{
+   if (!shadow_mirror_publish_enabled())
+   {
+      snprintf(resp, cap, "{\"error\":\"shadow publishing disabled\"}");
+      return 403;
+   }
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *ju = body ? cJSON_GetObjectItemCaseSensitive(body, "url") : NULL;
+   const cJSON *jb = body ? cJSON_GetObjectItemCaseSensitive(body, "bearer") : NULL;
+   const char *url = (ju && cJSON_IsString(ju)) ? ju->valuestring : NULL;
+   const char *bearer = (jb && cJSON_IsString(jb)) ? jb->valuestring : NULL;
+   int rc = shadow_mirror_subscribe(url, bearer);
+   cJSON_Delete(body);
+   if (rc != 0)
+   {
+      snprintf(resp, cap, "{\"error\":\"subscribe failed (missing url or table full)\"}");
+      return 400;
+   }
+   snprintf(resp, cap, "{\"status\":\"subscribed\",\"subscribers\":%d}",
+            shadow_mirror_subscriber_count());
+   return 200;
+}
+
+/* POST /v1/shadow/unsubscribe {"url":"<base>"} -- remove a subscriber. */
+static int rh_shadow_unsubscribe(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *ju = body ? cJSON_GetObjectItemCaseSensitive(body, "url") : NULL;
+   const char *url = (ju && cJSON_IsString(ju)) ? ju->valuestring : NULL;
+   int rc = shadow_mirror_unsubscribe(url);
+   cJSON_Delete(body);
+   snprintf(resp, cap, "{\"status\":\"%s\",\"subscribers\":%d}",
+            rc == 0 ? "unsubscribed" : "absent", shadow_mirror_subscriber_count());
+   return 200;
 }
 
 /* ── server-hosted Claude PTY session (terminal forwarding) ────────────────
@@ -1625,6 +1688,13 @@ static const http_route_t g_v1_routes[] = {
      * still drives the capability gate + conformance scan for it). */
     {"POST", "/v1/messages", NULL, RM_EXACT, "chat.send_stream", 0, rh_messages},
     {"POST", "/v1/messages/count_tokens", NULL, RM_EXACT, NULL, CAP_CHAT, rh_count_tokens},
+    /* Shadow-traffic control (operator-only; CAP_SHADOW_ADMIN = full-trust). Arming
+     * is runtime-only and never persists -- a reboot always boots disarmed. */
+    {"POST", "/v1/shadow/enable", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN, rh_shadow_enable},
+    {"POST", "/v1/shadow/disable", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN, rh_shadow_disable},
+    {"POST", "/v1/shadow/subscribe", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN, rh_shadow_subscribe},
+    {"POST", "/v1/shadow/unsubscribe", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN,
+     rh_shadow_unsubscribe},
     /* Streaming chat over HTTP: dispatched by handle_conn; row exists for the
      * capability gate + conformance scan. */
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
