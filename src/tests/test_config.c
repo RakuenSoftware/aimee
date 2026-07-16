@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1869,6 +1870,61 @@ int main(void)
 
       char cpath[512];
       snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      unlink(cpath);
+   }
+
+   /* --- cache identity: a same-mtime in-place rewrite must NOT serve stale ---
+    * The load cache used to key on path+mtime alone, so an in-place rewrite that
+    * landed with an equal (or clock-skewed) mtime kept serving the pre-rewrite
+    * snapshot forever. This is exactly the shape of `aimee workspace add` on the
+    * tiered appliance filesystem: the file grows a `workspaces:` block but the
+    * stale empty-workspaces cache is served and a later config_save re-serialises
+    * it back to nothing. Size + inode in the cache key make it detectable. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+
+      /* First state: short body. Load with caching on to populate the cache. */
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: db2://a\n");
+      fclose(f);
+      platform_unsetenv("AIMEE_NO_CACHE");
+
+      static config_t cfg1;
+      memset(&cfg1, 0, sizeof(cfg1));
+      assert(config_load(&cfg1) == 0);
+      assert(strcmp(cfg1.db2_url, "db2://a") == 0);
+
+      /* Capture the exact mtime the cache just recorded. */
+      struct stat st0;
+      assert(stat(cpath, &st0) == 0);
+
+      /* Rewrite in place with a longer, different body (a size change, like an
+       * appended workspaces block), then force the mtime back to the cached one
+       * so path+mtime alone would still count as a hit. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: db2://a-much-longer-different-value\n");
+      fclose(f);
+      struct timespec mt0;
+#if defined(__APPLE__)
+      mt0 = st0.st_mtimespec;
+#else
+      mt0 = st0.st_mtim;
+#endif
+      struct timespec times[2];
+      times[0] = mt0; /* atime — value irrelevant */
+      times[1] = mt0; /* mtime — force the collision */
+      assert(utimensat(AT_FDCWD, cpath, times, 0) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      assert(config_load(&cfg2) == 0);
+      /* With the mtime-only cache this returned the stale "db2://a". */
+      assert(strcmp(cfg2.db2_url, "db2://a-much-longer-different-value") == 0);
+
+      platform_setenv("AIMEE_NO_CACHE", "1");
       unlink(cpath);
    }
 

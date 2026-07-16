@@ -1332,6 +1332,8 @@ int config_save(const config_t *cfg)
       {
          memcpy(&g_config_cache, cfg, sizeof(g_config_cache));
          g_config_mtime = AIMEE_STAT_MTIM(st);
+         g_config_size = st.st_size;
+         g_config_ino = st.st_ino;
          snprintf(g_config_cache_path, sizeof(g_config_cache_path), "%s", path);
          g_config_cached = 1;
       }
