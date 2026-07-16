@@ -49,8 +49,27 @@ it with no network.
 - `image: <ref>` — use a pre-baked image as-is (no build).
 - `from: <base>` + `packages: [gcc, make, …]` — aimee generates a Dockerfile
   (`FROM <base>` + a single `apt-get install` layer) and builds it. Covers the
-  common case in one line.
-- `dockerfile: <path>` — build a project-provided Dockerfile (escape hatch).
+  common case in one line. **`packages:` is an apt shortcut** — it installs *system*
+  packages on a Debian/Ubuntu base (including the language runtimes themselves:
+  `nodejs`, `npm`, `python3`, `cargo`, `golang`). On a non-apt base (alpine, etc.),
+  or for ecosystem dependencies, use `dockerfile:`.
+- `dockerfile: <path>` — build a project-provided Dockerfile (escape hatch): any
+  base, any package manager, and **ecosystem dependencies baked at build time** —
+  `RUN npm ci`, `RUN pip install -r requirements.txt`, `RUN cargo fetch`. Build time
+  has network, so these work directly.
+
+### Where each package manager runs (apt / npm / pip / cargo / …)
+
+Two distinct network contexts, and the answer differs by which one:
+
+- **The tool binary** (`node`/`npm`/`python3`/`cargo`): a *system* package → apt
+  `packages:` (or the base image already has it).
+- **Ecosystem dependencies at BUILD time** (network available): a `dockerfile:`
+  `RUN npm ci` / `pip install` / `cargo build` bakes them into the image.
+- **Ecosystem installs at RUNTIME** (the model runs `npm install` mid-task, inside
+  the `--network none` sandbox): these have no network and are the job of the
+  **package proxy (below)**, which must therefore be **multi-ecosystem** — the apt
+  mirror, the npm registry, PyPI, crates.io — not apt-only.
 
 ### Build + cache
 
@@ -91,46 +110,87 @@ reason image customization is currently moot (the toolchain the model uses is th
 the active provider for `CONTAINER`, exactly as the file tools do. Only after this
 does the container's own toolchain matter.
 
-## Package access without network: aimee as the package proxy + cache
+## Package access: config-selected, aimee always the mediator
 
-The sandbox stays `--network none`; its only channel is the bound aimee socket. Yet
-agents legitimately need `apt`/`npm`/`pip`/`cargo` to install a toolchain. Rather
-than pre-bake everything, **route package managers through aimee**: point `apt`,
-`npm`, `pip`, etc. inside the container at aimee as their mirror/proxy (over the
-bound channel — a loopback shim forwarding to the UDS, or an aimee-served proxy
-endpoint). aimee (which has network) fetches upstream, **caches the artifacts**, and
-serves them back. The delegate installs what it needs; the network boundary is
-never crossed by the delegate itself — only by aimee, in the same way git and web
-search already work.
+Agents need `apt`/`npm`/`pip`/`cargo`. The one invariant across every mode: the
+delegate container is `--network none` and never holds a socket to the outside —
+**aimee performs every fetch** and logs it (the delegate reaches aimee only over its
+bound channel, exactly like git and web-search). What differs by config is *how much*
+aimee is willing to fetch on the delegate's behalf. That spectrum runs from a full
+proxy (the shipping default, for out-of-the-box functionality) to strictly airtight.
+
+Two building blocks underlie the tighter modes:
+
+- **Build-time installs (network in an isolated layer).** apt/npm/pip/cargo can run at
+  `docker build` time (Phase 3) and be baked; the running delegate then needs no
+  fetch at all.
+- **Learned pre-bake.** A package a delegate needed is recorded and baked into the
+  next build, so even the `off` mode converges to "everything already present."
+
+### The runtime package-access policy is chosen BY CONFIG
+
+A single config key — `delegate_sandbox_package_access` — selects the runtime
+behaviour, so each operator picks their own point on the security/convenience curve.
+Four modes:
+
+- **`proxy` (default).** aimee proxies package-manager fetches to any host. This is
+  the shipping default: it makes runtime installs "just work" out of the box. It IS a
+  deliberate weakening — egress-via-aimee — accepted as the default for functionality;
+  the delegate still holds no socket to the outside (aimee performs every fetch) and
+  every fetch is logged, but it is not host-restricted. Operators who want a tighter
+  posture select one of the modes below.
+- **`off`.** No runtime proxy. Build-time installs + learned pre-bake only; the
+  running sandbox is strictly `--network none`. The airtight posture, by config.
+- **`gated`.** Host-allowlisted, registry-only proxy (deb mirror, `registry.npmjs.org`,
+  `pypi.org`, `crates.io`, …); every fetch audited. **Off-allowlist pauses for human
+  approval, routed to the primary session** — aimee forwards the authorization request
+  over the delegate↔serving-session mailbox using the same approval-gate pattern as
+  `computer_use`'s "off-allowlist … requires approval." Approve → host added to the
+  (session or persistent) allowlist and the fetch proceeds; deny → refused.
+- **`governance`.** The allowlist is supplied by a **governance provider** (an org
+  policy source), not by interactive per-request approval. Off-allowlist is simply
+  refused — governance, not the local operator or a live human, decides what a
+  delegate may reach. This is the enterprise-policy hook for future governance work.
+
+In every mode aimee performs the fetch (the delegate never holds a socket to the
+outside) and every fetch is logged. `proxy` ships as the default for out-of-the-box
+functionality; `off`/`gated`/`governance` are the config paths to a tighter boundary.
 
 ## Learned toolchain: customization from observed usage
 
-Because every package install flows through aimee's proxy+cache, aimee **records
-what each project actually routed and cached**. That observed set *is* the project's
-toolchain. So image customization is largely **learned**, not authored:
+aimee **records what each project actually needed** and feeds it back into the
+build, so customization is largely **learned**, not authored. The signal comes from
+three places, none of which require runtime egress:
 
-- First runs: the delegate `apt install`s what it needs; aimee proxies + caches +
-  records it against the project.
-- Later runs: aimee can **pre-bake the learned package set** into the project's
-  `aimee-sbx:<hash>` image (build with network, run `--network none`), so the tools
-  are present immediately and installs become cache hits.
+- **Observed missing-package / failed-install signals (default).** When a delegate
+  runs `apt install X` / `npm i Y` at runtime and it fails for lack of network, aimee
+  captures the *intent* (the package name) and records it against the project.
+- **The declared spec** in `.aimee/project.yaml` (an override / seed).
+- **The opt-in proxy's audited fetches** (when enabled), which are already recorded.
 
-The declared `.aimee/project.yaml` / aimee.yaml `sandbox` spec from the section
-above is then an **optional override / seed**, not a requirement — the common path
-is that aimee figures the toolchain out from real usage.
+Next build: aimee **pre-bakes the learned package set** into the project's
+`aimee-sbx:<hash>` image (build with network, run `--network none`), so the tools are
+present immediately — closing the loop without any runtime network. A failed runtime
+install thus becomes "rebuild with this added," not "proxy it through."
 
 ## Phasing
 
 1. **Sandbox-escape fix (prerequisite):** route `bash`/`execute_script`/`verify`
    command-run/background-process tools into the container for `WS_PROVIDER_CONTAINER`.
-   The sandbox now actually contains code execution.
+   The sandbox now actually contains code execution. *(done)*
 2. **Image resolution (declared):** parse the `sandbox` block at all three scopes;
-   resolve `image:`; wire it through `workspace_turn_bind_container` (replace the
-   `NULL` at `server_compute.c:1396`). Named pre-baked images work end-to-end.
+   resolve `image:`; wire it through `workspace_turn_bind_container`. *(done)*
 3. **Build-from-spec:** `from`+`packages`/`dockerfile`; content-hash tag; build lock.
-4. **Package proxy + cache:** aimee serves `apt`/`npm`/`pip` fetches over the bound
-   channel and caches artifacts; container package managers are pointed at it.
-5. **Learned toolchain:** record proxied/cached package sets per project; optionally
+   *(done)*
+4. **Learned toolchain (build-time loop, runtime stays airtight):** capture
+   missing-package / failed-install intent at runtime; record per project; pre-bake
+   the learned set into the next build. NO runtime proxy.
+5. **Config-selectable runtime package-access proxy:** the `delegate_sandbox_package_access`
+   modes — `off` (default), `proxy`, `gated` (allowlist + human approval via the
+   primary session), `governance` (governance-provided allowlist). aimee always
+   performs the fetch and logs it; `off` ships as the default.
+6. **Cache management (renumbered):** record proxied/cached package sets per project;
+   optionally
    pre-bake them into the project image. Declared spec becomes an override/seed.
 6. **Cache management:** prune policy + `aimee delegate sandbox build/list/gc` CLI.
 
