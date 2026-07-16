@@ -210,16 +210,16 @@ def run_task(fx: Dict[str, Any], proto: str, model: str, endpoint: Optional[str]
     snap_id = "s01"
     anchored, snap_digests = render_anchored(initial, snap_id)
 
+    tgt = fx["target_line"]
+    end = fx.get("end_line", tgt)
+    region = f"line {tgt}" if end <= tgt else f"lines {tgt}-{end}"
+    goal = f"Replace {region} with exactly this content:\n<<<\n{fx['new_text']}\n>>>"
     if proto == "str_replace":
         messages = [{"role": "system", "content": SR_SYS},
-                    {"role": "user", "content": f"File:\n---\n{initial}---\nRewrite line "
-                                                 f"{fx['target_line']} so the file becomes exactly the "
-                                                 f"intended result. New content for that region: "
-                                                 f"{fx['new_text']!r}"}]
+                    {"role": "user", "content": f"File:\n---\n{initial}---\n{goal}"}]
     else:
         messages = [{"role": "system", "content": HL_SYS},
-                    {"role": "user", "content": f"{anchored}\n\nRewrite line {fx['target_line']} "
-                                                 f"to: {fx['new_text']!r}"}]
+                    {"role": "user", "content": f"{anchored}\n\n{goal}"}]
 
     tokens = 0.0
     for turn in range(1, max_turns + 1):
