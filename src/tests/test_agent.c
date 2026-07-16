@@ -1362,6 +1362,69 @@ static void test_tool_edit_file_anchored(void)
    unlink(tmppath);
 }
 
+static void test_part3_anchored_tools(void)
+{
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/aimee_p3_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(dir) != NULL);
+   char cfile[600];
+   snprintf(cfile, sizeof(cfile), "%s/sample.c", dir);
+   const char *src = "#include <stdio.h>\n"
+                     "int add(int a, int b)\n"
+                     "{\n"
+                     "   return a + b;\n"
+                     "}\n"
+                     "int main(void)\n"
+                     "{\n"
+                     "   return add(1, 2);\n"
+                     "}\n";
+   char *w = tool_write_file(cfile, src);
+   assert(w);
+   free(w);
+
+   /* outline: symbol skeleton with a snapshot + anchors */
+   char *outline = tool_read_outline(cfile);
+   assert(outline);
+   assert(strstr(outline, "snapshot=s") != NULL);
+   assert(strstr(outline, "add") != NULL && strstr(outline, "main") != NULL);
+   free(outline);
+
+   /* read_symbol: just the def span, anchored + headed */
+   char *sym = tool_read_symbol("add", cfile);
+   assert(sym);
+   assert(strstr(sym, "# add") != NULL);
+   assert(strstr(sym, "| int add(int a, int b)") != NULL);
+   assert(strstr(sym, "| int main") == NULL); /* only the add span */
+   free(sym);
+
+   /* grep anchored: hits become editable anchors under a per-file snapshot */
+   char *g = tool_grep_anchored(dir, "return", 50);
+   assert(g);
+   assert(strstr(g, "snapshot=s") != NULL);
+   assert(strstr(g, "|") != NULL);
+   free(g);
+
+   /* run_tests: structured pass/fail with counts+failures, full log spilled */
+   char *rt = tool_run_tests("printf 'ok\\n'; exit 0", 10000);
+   assert(rt);
+   cJSON *rj = parse_json_or_die(rt);
+   assert(strcmp(cJSON_GetObjectItem(rj, "status")->valuestring, "passed") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(rj, "passed")));
+   cJSON_Delete(rj);
+   free(rt);
+
+   char *rf = tool_run_tests("echo boom; exit 1", 10000);
+   assert(rf);
+   cJSON *fj = parse_json_or_die(rf);
+   assert(strcmp(cJSON_GetObjectItem(fj, "status")->valuestring, "failed") == 0);
+   assert(!cJSON_IsTrue(cJSON_GetObjectItem(fj, "passed")));
+   cJSON_Delete(fj);
+   free(rf);
+
+   unlink(cfile);
+   rmdir(dir);
+}
+
 static void test_parent_write_guard_blocks_parent_writes(void)
 {
    char root[512];
@@ -2740,6 +2803,7 @@ int main(void)
    test_tool_write_file();
    test_tool_edit_file();
    test_tool_edit_file_anchored();
+   test_part3_anchored_tools();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();

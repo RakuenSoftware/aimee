@@ -33,6 +33,11 @@ char *tool_list_files(const char *path, const char *pattern);
 char *tool_verify(const char *check_type, const char *target, const char *expected);
 char *tool_git_log(const char *repo_path, int count);
 char *tool_grep(const char *path, const char *pattern, int max_results);
+/* Part III anchored/agent-shaped tools (posix/agent_tools_anchored.c). */
+char *tool_read_outline(const char *path);
+char *tool_read_symbol(const char *symbol, const char *path);
+char *tool_grep_anchored(const char *path, const char *pattern, int max_results);
+char *tool_run_tests(const char *command, int timeout_ms);
 char *tool_git_diff(const char *repo_path, const char *ref);
 char *tool_git_status(const char *repo_path);
 char *tool_env_get(const char *name);

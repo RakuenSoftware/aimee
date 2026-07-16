@@ -255,7 +255,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c posix/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c posix/agent_tools_dispatch.c posix/td_search_render.c posix/sandbox.c
+        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c posix/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c posix/agent_tools_dispatch.c posix/agent_tools_anchored.c posix/td_search_render.c posix/sandbox.c
 else
     PLATFORM_BASIC_SRCS = \
         posix/platform_ipc.c posix/platform_path.c posix/platform_process.c \
@@ -271,7 +271,7 @@ else
         posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
-        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c posix/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c posix/agent_tools_dispatch.c posix/td_search_render.c posix/sandbox.c
+        posix/agent_runtime.c posix/agent_ir_parse.c posix/agent_max_turns.c posix/agent_runtime_messages.c posix/agent_runtime_support.c posix/agent_runtime_tmux.c posix/agent_bridge.c posix/agent_tools.c posix/workspace_provider.c posix/agent_source_authority.c posix/agent_tools_dispatch.c posix/agent_tools_anchored.c posix/td_search_render.c posix/sandbox.c
 endif
 
 PLATFORM_SRCS       = $(PLATFORM_BASIC_SRCS) $(PLATFORM_EXTRA_SRCS) $(PLATFORM_AGENT_SRCS)
@@ -288,7 +288,7 @@ MCP_GIT_SRCS = mcp_git_query.c mcp_git_write.c mcp_git_branch.c mcp_git_pr.c git
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
-CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.c config_learning.c config_memory.c config_charter.c config_trigger.c config_kb_maintenance.c config_kb_curator.c config_server_api.c config_skills.c config_save.c config_mode.c config_fields.c toolset.c util.c util_url.c forge_credentials.c forge_app_token.c workspace_mirror.c report_enrichment.c audit_action.c audit_worm.c audit_worm_chain.c audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c yaml.c diff.c anchor_snapshot.c edit_anchored.c sse_parser.c \
+CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.c config_learning.c config_memory.c config_charter.c config_trigger.c config_kb_maintenance.c config_kb_curator.c config_server_api.c config_skills.c config_save.c config_mode.c config_fields.c toolset.c util.c util_url.c forge_credentials.c forge_app_token.c workspace_mirror.c report_enrichment.c audit_action.c audit_worm.c audit_worm_chain.c audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             compact.c coord_closet.c fold_budget.c context_fold.c context_reduce.c tool_condense.c fold_register.c fold_recall.c task_rail.c episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c mcp_tools.c mcp_tool_profile.c mcp_tools_extended.c mcp_skill_tools.c mcp_tools_gateway.c events.c \

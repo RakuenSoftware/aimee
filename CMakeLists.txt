@@ -168,6 +168,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
+        ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
@@ -225,6 +226,7 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
+        ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
@@ -496,6 +498,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/diff.c
     ${AIMEE_SRC_DIR}/anchor_snapshot.c
     ${AIMEE_SRC_DIR}/edit_anchored.c
+    ${AIMEE_SRC_DIR}/code_outline.c
     ${AIMEE_SRC_DIR}/sse_parser.c
     ${AIMEE_SRC_DIR}/aimee_home.c
     ${AIMEE_SRC_DIR}/shared/kb_paths.c

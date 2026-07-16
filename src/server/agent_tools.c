@@ -647,6 +647,9 @@ static cJSON *tp_read_file(void)
            "Return raw bytes with no line anchors (for grep pipelines / binary sniffing). "
            "Default false: each line is prefixed 'LINE:HASH| ' and a snapshot id is minted so "
            "edit_file can edit by anchor without re-emitting the text.");
+   tp_prop(props, "mode", "string",
+           "'outline' returns the tree-sitter symbol skeleton (signatures + LINE:HASH anchors, no "
+           "bodies) — one cheap call to map a large file, then read/edit one span by anchor.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -776,6 +779,10 @@ static cJSON *tp_grep(void)
    tp_prop(props, "path", "string", "Directory or file to search in");
    tp_prop(props, "pattern", "string", "Pattern to search for (basic regex)");
    tp_prop(props, "max_results", "integer", "Max results (default 50)");
+   tp_prop(props, "anchored", "boolean",
+           "Return each hit as a ready edit anchor ('line:HASH| text') grouped under a "
+           "'path  snapshot=...' header, so a match can be edited via edit_file with no "
+           "intervening read. Default false (plain file:line:text).");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -1048,6 +1055,36 @@ static cJSON *tp_find_symbol(void)
    return params;
 }
 
+static cJSON *tp_read_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "symbol", "string",
+           "Symbol name whose definition span to fetch (e.g. a function "
+           "or type name).");
+   tp_prop(props, "path", "string",
+           "Optional file to search. Omit to resolve via the code index (which may return "
+           "candidates to disambiguate).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("symbol"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_run_tests(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "command", "string",
+           "The test command to run (e.g. 'pytest -q', 'cargo test', 'make unit-tests').");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("command"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_search_memory(void)
 {
    cJSON *params = tp_obj();
@@ -1185,6 +1222,16 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "indexed codebase. Returns file:line matches. Prefer this over grep for finding where "
      "something is defined or which header to include.",
      tp_find_symbol, TSURF_ALL},
+    {"read_symbol",
+     "Fetch just a symbol's definition span (anchored, editable) instead of reading the whole "
+     "enclosing file. Pass 'path' to read from a specific file, or omit it to resolve via the "
+     "code index.",
+     tp_read_symbol, TSURF_ALL},
+    {"run_tests",
+     "Run a test command and return a compact result: pass/fail, exit code, and the framework "
+     "summary + every failure — the full log is spilled and retrievable via tool_output_get. "
+     "Prefer this over bash for tests so a green suite costs a line.",
+     tp_run_tests, TSURF_ALL},
     {"search_memory",
      "Search aimee's knowledge base for stored facts, prior decisions, and project context. "
      "Use before starting any task to check for relevant prior work or constraints.",

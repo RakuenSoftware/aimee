@@ -552,10 +552,14 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
       cJSON *off = cJSON_GetObjectItem(args, "offset");
       cJSON *lim = cJSON_GetObjectItem(args, "limit");
       cJSON *rawj = cJSON_GetObjectItem(args, "raw");
+      cJSON *modej = cJSON_GetObjectItem(args, "mode");
       int offset = (off && cJSON_IsNumber(off)) ? off->valueint : 0;
       int limit = (lim && cJSON_IsNumber(lim)) ? lim->valueint : 0;
       int raw = (rawj && cJSON_IsBool(rawj)) ? cJSON_IsTrue(rawj) : 0;
-      result = tool_read_file(p->valuestring, offset, limit, raw);
+      if (modej && cJSON_IsString(modej) && strcmp(modej->valuestring, "outline") == 0)
+         result = tool_read_outline(p->valuestring);
+      else
+         result = tool_read_file(p->valuestring, offset, limit, raw);
 
       /* Record the read in the session state for read-before-write tracking. */
       if (result && strncmp(result, "error:", 6) != 0)
@@ -851,13 +855,45 @@ static char *td_grep(cJSON *args, const char *name, const char *dispatch_cwd,
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *pat = cJSON_GetObjectItem(args, "pattern");
    cJSON *mx = cJSON_GetObjectItem(args, "max_results");
+   cJSON *anc = cJSON_GetObjectItem(args, "anchored");
+   int anchored = (anc && cJSON_IsBool(anc)) ? cJSON_IsTrue(anc) : 0;
    if (!p || !cJSON_IsString(p) || !pat || !cJSON_IsString(pat))
       result = safe_strdup("error: missing 'path' or 'pattern' parameter");
+   else if (anchored)
+      result = tool_grep_anchored(p->valuestring, pat->valuestring,
+                                  (mx && cJSON_IsNumber(mx)) ? mx->valueint : 50);
    else
       result = tool_grep(p->valuestring, pat->valuestring,
                          (mx && cJSON_IsNumber(mx)) ? mx->valueint : 50);
 
    return result;
+}
+
+static char *td_read_symbol(cJSON *args, const char *name, const char *dispatch_cwd,
+                            const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   (void)timeout_ms;
+   cJSON *sym = cJSON_GetObjectItem(args, "symbol");
+   cJSON *pth = cJSON_GetObjectItem(args, "path");
+   if (!sym || !cJSON_IsString(sym))
+      return safe_strdup("error: missing 'symbol' parameter");
+   return tool_read_symbol(sym->valuestring,
+                           (pth && cJSON_IsString(pth)) ? pth->valuestring : NULL);
+}
+
+static char *td_run_tests(cJSON *args, const char *name, const char *dispatch_cwd,
+                          const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   cJSON *cmd = cJSON_GetObjectItem(args, "command");
+   if (!cmd || !cJSON_IsString(cmd))
+      return safe_strdup("error: missing 'command' parameter");
+   return tool_run_tests(cmd->valuestring, timeout_ms);
 }
 
 static char *td_git_diff(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -1905,6 +1941,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_code_search(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "find_symbol") == 0)
       result = td_find_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "read_symbol") == 0)
+      result = td_read_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "run_tests") == 0)
+      result = td_run_tests(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "search_memory") == 0)
       result = td_search_memory(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "web_search") == 0)
