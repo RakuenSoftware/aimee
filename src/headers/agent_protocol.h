@@ -75,14 +75,10 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
 
 /* --- Response parsers --- */
 
-void agent_parse_response_openai(struct cJSON *root, parsed_response_t *out);
-void agent_parse_response_responses(const char *body, parsed_response_t *out);
-
 /* Extract the Responses (codex) response object (the one with the `output` array)
  * from an SSE body, so the IR responses_backend_parse can consume it. Returns a new
  * cJSON the caller owns, or NULL. */
 struct cJSON *agent_responses_sse_response_object(const char *body);
-void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
 
 /* Parse a provider JSON response through the canonical IR and bridge it into a
  * parsed_response_t (the sole response parser for the JSON wires).
@@ -90,7 +86,7 @@ void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
  * XML tool-call rescue the parser owns: <0 skips it, 0 rescues dialect calls but not
  * bare prose JSON, 1 also rescues bare JSON. `*n_rescued` (if non-NULL) receives how
  * many calls the rescue recovered. Returns 0 on success, -1 if the IR could not parse
- * (caller falls back to the legacy translators). */
+ * (the caller yields an empty response -- the legacy translators are gone). */
 int agent_ir_parse_json_response(struct cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
                                  parsed_response_t *out);
 

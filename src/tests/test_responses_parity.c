@@ -1,13 +1,12 @@
-/* test_responses_parity.c -- deterministic differential proof that the IR responses
- * parser (agent_ir_parse_responses, stage 2 of the legacy-parser removal) produces the
- * SAME parsed_response_t as the legacy agent_parse_response_responses on identical codex
- * SSE bytes: content, tool calls, and token usage. This replaces live-traffic sampling
- * as the codex-wire parity check.
+/* test_responses_parity.c -- golden tests for the IR responses parser
+ * (agent_ir_parse_responses, the sole parser for the responses/SSE codex wire).
+ * Originally a legacy-vs-IR differential; the legacy agent_parse_response_responses
+ * has since been deleted, so this pins the IR output against known-good values across
+ * the shapes codex emits: reasoning-only, message output_text, delta-streamed text
+ * (the fold path), function_call, and a mixed reasoning+message turn.
  *
- * Own binary (not folded into unit-test-agent) on purpose: it links the minimal real
- * object set -- agent_bridge.o (legacy parser + SSE extractor) + agent_ir_parse.o + the
- * IR backend chain, no weak stubs -- so both parsers run for real with no link-order
- * ambiguity. */
+ * Own binary with the minimal real object set (agent_bridge.o for the SSE extractor +
+ * agent_ir_parse.o + the IR backend chain, no weak stubs) so the parser runs for real. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,88 +23,84 @@ struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
    return NULL;
 }
 
-/* Feed identical SSE bytes to both parsers; assert they agree on the fields the turn
- * loop consumes. */
-static void agree(const char *label, const char *body)
+/* Parse `body` via the IR and assert the fields the turn loop consumes. want_content is
+ * compared as empty when NULL. want_call (or NULL) is the single expected tool name. */
+static void expect(const char *label, const char *body, const char *want_content,
+                   const char *want_call)
 {
-   parsed_response_t lg, ir;
-   agent_parse_response_responses(body, &lg);
-   int rc = agent_ir_parse_responses(body, -1, NULL, &ir);
+   parsed_response_t p;
+   int rc = agent_ir_parse_responses(body, -1, NULL, &p);
    assert(rc == 0);
 
-   const char *lc = lg.content ? lg.content : "";
-   const char *ic = ir.content ? ir.content : "";
-   assert(strcmp(lc, ic) == 0);
-   assert((lg.is_tool_call ? 1 : 0) == (ir.is_tool_call ? 1 : 0));
-   assert(lg.call_count == ir.call_count);
-   for (int i = 0; i < lg.call_count; i++)
+   const char *got = p.content ? p.content : "";
+   assert(strcmp(got, want_content ? want_content : "") == 0);
+   if (want_call)
    {
-      assert(strcmp(lg.calls[i].name, ir.calls[i].name) == 0);
-      assert(strcmp(lg.calls[i].id, ir.calls[i].id) == 0);
+      assert(p.is_tool_call == 1 && p.call_count == 1);
+      assert(strcmp(p.calls[0].name, want_call) == 0);
    }
-   assert(lg.prompt_tokens == ir.prompt_tokens);
-   assert(lg.completion_tokens == ir.completion_tokens);
-   printf("  PASS: %s (content_len=%zu tool=%d calls=%d)\n", label, strlen(ic), ir.is_tool_call,
-          ir.call_count);
-   agent_free_parsed_response(&lg);
-   agent_free_parsed_response(&ir);
+   else
+   {
+      assert(p.is_tool_call == 0 && p.call_count == 0);
+   }
+   printf("  PASS: %s (content_len=%zu tool=%d)\n", label, strlen(got), p.is_tool_call);
+   agent_free_parsed_response(&p);
 }
 
 int main(void)
 {
    printf("responses-parity:\n");
 
-   /* reasoning-only final turn: BOTH parsers yield empty content (legacy ignores
-    * reasoning items; the IR routes them to THINKING, excluded from content). This is
-    * the "no content in final response" case seen on live codex -- identical model
-    * behavior under both parsers, NOT an IR regression. */
-   agree("reasoning-only -> empty content",
-         "event: response.output_item.done\r\n"
-         "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"let me think\"}}\r\n\r\n"
-         "event: response.completed\r\n"
-         "data: {\"response\":{\"output\":[{\"type\":\"reasoning\","
-         "\"summary\":\"let me "
-         "think\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":6}}}\r\n\r\n");
+   /* reasoning-only final turn -> empty content (reasoning routes to a THINKING block,
+    * excluded from content). This is the "no content in final response" case: codex
+    * model behavior, faithfully represented, not a parse failure. */
+   expect("reasoning-only -> empty content",
+          "event: response.output_item.done\r\n"
+          "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"let me think\"}}\r\n\r\n"
+          "event: response.completed\r\n"
+          "data: {\"response\":{\"output\":[{\"type\":\"reasoning\",\"summary\":\"let me "
+          "think\"}],\"usage\":{\"input_tokens\":5,\"output_tokens\":6}}}\r\n\r\n",
+          NULL, NULL);
 
-   /* plain text via a message output_text item */
-   agree("message output_text",
-         "event: response.output_item.done\r\n"
-         "data: {\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\","
-         "\"text\":\"all done\"}]}}\r\n\r\n"
-         "event: response.completed\r\n"
-         "data: {\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":"
-         "\"output_text\",\"text\":\"all done\"}]}],\"usage\":{\"input_tokens\":3,"
-         "\"output_tokens\":4}}}\r\n\r\n");
+   expect("message output_text",
+          "event: response.output_item.done\r\n"
+          "data: {\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\","
+          "\"text\":\"all done\"}]}}\r\n\r\n"
+          "event: response.completed\r\n"
+          "data: {\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":"
+          "\"output_text\",\"text\":\"all done\"}]}],\"usage\":{\"input_tokens\":3,"
+          "\"output_tokens\":4}}}\r\n\r\n",
+          "all done", NULL);
 
-   /* text streamed via deltas with an empty completed output (the fold path) */
-   agree("delta-streamed text (fold)",
-         "event: response.output_text.delta\r\n"
-         "data: {\"delta\":\"streamed answer\"}\r\n\r\n"
-         "event: response.completed\r\n"
-         "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":1,"
-         "\"output_tokens\":2}}}\r\n\r\n");
+   expect("delta-streamed text (fold)",
+          "event: response.output_text.delta\r\n"
+          "data: {\"delta\":\"streamed answer\"}\r\n\r\n"
+          "event: response.completed\r\n"
+          "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":1,"
+          "\"output_tokens\":2}}}\r\n\r\n",
+          "streamed answer", NULL);
 
-   /* a function_call (tool use), streamed as an output_item.done then completed */
-   agree("function_call",
-         "event: response.output_item.done\r\n"
-         "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"c9\",\"name\":\"bash\","
-         "\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}}\r\n\r\n"
-         "event: response.completed\r\n"
-         "data: {\"response\":{\"output\":[{\"type\":\"function_call\",\"call_id\":\"c9\","
-         "\"name\":\"bash\",\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}],"
-         "\"usage\":{\"input_tokens\":7,\"output_tokens\":8}}}\r\n\r\n");
+   expect("function_call",
+          "event: response.output_item.done\r\n"
+          "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"c9\",\"name\":\"bash\","
+          "\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}}\r\n\r\n"
+          "event: response.completed\r\n"
+          "data: {\"response\":{\"output\":[{\"type\":\"function_call\",\"call_id\":\"c9\","
+          "\"name\":\"bash\",\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}],"
+          "\"usage\":{\"input_tokens\":7,\"output_tokens\":8}}}\r\n\r\n",
+          "", "bash");
 
-   /* reasoning followed by a text message (mixed final turn) */
-   agree("reasoning + message text",
-         "event: response.output_item.done\r\n"
-         "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"hmm\"}}\r\n\r\n"
-         "event: response.output_item.done\r\n"
-         "data: {\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\","
-         "\"text\":\"result 42\"}]}}\r\n\r\n"
-         "event: response.completed\r\n"
-         "data: {\"response\":{\"output\":[{\"type\":\"reasoning\",\"summary\":\"hmm\"},"
-         "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"result 42\"}]}],"
-         "\"usage\":{\"input_tokens\":9,\"output_tokens\":10}}}\r\n\r\n");
+   expect("reasoning + message text",
+          "event: response.output_item.done\r\n"
+          "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"hmm\"}}\r\n\r\n"
+          "event: response.output_item.done\r\n"
+          "data: {\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\","
+          "\"text\":\"result 42\"}]}}\r\n\r\n"
+          "event: response.completed\r\n"
+          "data: {\"response\":{\"output\":[{\"type\":\"reasoning\",\"summary\":\"hmm\"},"
+          "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"result 42\"}]}],"
+          "\"usage\":{\"input_tokens\":9,\"output_tokens\":10}}}\r\n\r\n",
+          "result 42", NULL);
 
    printf("responses-parity: ok\n");
    return 0;
