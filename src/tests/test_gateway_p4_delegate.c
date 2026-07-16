@@ -198,10 +198,13 @@ static void test_model_untouched(void)
 /* shape derivation maps each provider flag set to the right shape. */
 static void test_shape_derivation(void)
 {
-   assert(gateway_delegate_tool_shape(1, 0, 0) == GW_TOOL_SHAPE_NAMED);           /* anthropic */
-   assert(gateway_delegate_tool_shape(0, 1, 0) == GW_TOOL_SHAPE_NAMED);           /* responses */
-   assert(gateway_delegate_tool_shape(0, 0, 1) == GW_TOOL_SHAPE_UNSUPPORTED);     /* gemini */
-   assert(gateway_delegate_tool_shape(0, 0, 0) == GW_TOOL_SHAPE_FUNCTION_NESTED); /* openai chat */
+   assert(gateway_delegate_tool_shape(1, 0) == GW_TOOL_SHAPE_NAMED);           /* anthropic */
+   assert(gateway_delegate_tool_shape(0, 1) == GW_TOOL_SHAPE_NAMED);           /* responses */
+   assert(gateway_delegate_tool_shape(0, 0) == GW_TOOL_SHAPE_FUNCTION_NESTED); /* openai */
+   /* The gemini arm (-> GW_TOOL_SHAPE_UNSUPPORTED) is gone with the Gemini
+    * provider: functionDeclarations was the only shape that could not name a tool
+    * at tool.name, and Gemini is now reached over the OpenAI shape like anything
+    * else. */
    PASS("shape_derivation");
 }
 

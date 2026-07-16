@@ -29,6 +29,7 @@
 #include "gw_stage_memory.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
+#include "aimee_ir_metrics.h"
 #include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
 #include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
@@ -383,11 +384,15 @@ static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driv
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+             0 /* buffered ingress: never ask the upstream to stream */);
       if (!prov_body)
+      {
+         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                          jo_num(req, "temperature", 1.0), 0);
+      }
    }
    return prov_body;
 }
@@ -884,14 +889,43 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        * case); legacy fallback on failure / flag off. For codex the reply is
        * fetched buffered + replayed as Anthropic SSE below, so no IR-delta stream
        * translation is needed here. */
+      /* Whether we ask the UPSTREAM to stream is decided by how we will read its
+       * reply, NOT by what the client asked for. When the buffered replay below
+       * takes over (prevent-subagents, or a /responses wire), we fetch the reply to
+       * completion; asking for SSE there and then cJSON_Parse'ing it is exactly the
+       * "primary provider returned an unparseable reply" bug. /responses is the
+       * exception: codex requires stream=true and its replay parses the raw SSE
+       * text, so it keeps the flag. */
+      int buffered_replay = gateway_prevent_subagents_enabled() || responses_wire;
+      int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), upstream_stream);
+      /* Shadow: build what LEGACY would have sent for this same request and compare
+       * byte-for-byte. This is the evidence that retires the translators — proving
+       * the IR sends the provider the same bytes, not merely that it "worked". Off
+       * unless AIMEE_IR_SHADOW is set: the extra build is real work. */
+      if (prov_body && aimee_ir_shadow_enabled())
+      {
+         char *legacy_body =
+             build_provider_body(driver, ag, messages, tools, system_text,
+                                 agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                 jo_num(req, "temperature", 1.0), upstream_stream);
+         aimee_ir_shadow_compare_bodies(prov_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
+         free(legacy_body);
+      }
       if (!prov_body)
+      {
+         /* Served by the LEGACY translator. Counted at the call site, not inside the
+          * IR builder: the *_FAIL counters record that a stage failed, this records
+          * that a real request was answered by legacy. Deleting the translators is
+          * gated on this reading 0 over a live window. */
+         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), 1);
+                                         jo_num(req, "temperature", 1.0), upstream_stream);
+      }
    }
 
    /* P2c streaming: when gateway_prevent_subagents is ON, or the primary

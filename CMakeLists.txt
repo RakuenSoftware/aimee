@@ -174,7 +174,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_shell_claude.c
         ${AIMEE_SRC_DIR}/posix/agent_shell_claude_pty.c
         ${AIMEE_SRC_DIR}/posix/agent_shell_codex.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_gemini.c
+
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/posix/cmd_infra.c
@@ -231,7 +231,7 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_shell_claude.c
         ${AIMEE_SRC_DIR}/posix/agent_shell_claude_pty.c
         ${AIMEE_SRC_DIR}/posix/agent_shell_codex.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_gemini.c
+
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/posix/cmd_infra.c
@@ -665,7 +665,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
-    ${AIMEE_SRC_DIR}/server/cli_gemini.c
+
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/cli_acp.c
     ${AIMEE_SRC_DIR}/server/session_compact.c
@@ -677,13 +677,13 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/delegate_backend_docker.c
     ${AIMEE_SRC_DIR}/server/delegate_driver.c
     ${AIMEE_SRC_DIR}/server/delegate_openai.c
-    ${AIMEE_SRC_DIR}/server/delegate_gemini.c
+
     ${AIMEE_SRC_DIR}/server/delegate_xml_fallback.c
     ${AIMEE_SRC_DIR}/server/model_provider.c
     ${AIMEE_SRC_DIR}/server/openrouter_profile.c
     ${AIMEE_SRC_DIR}/server/openai_profile.c
     ${AIMEE_SRC_DIR}/server/anthropic_profile.c
-    ${AIMEE_SRC_DIR}/server/gemini_profile.c
+
     ${AIMEE_SRC_DIR}/server/ollama_profile.c
     ${AIMEE_SRC_DIR}/server/llama_native_profile.c
     ${AIMEE_SRC_DIR}/server/mistral_profile.c

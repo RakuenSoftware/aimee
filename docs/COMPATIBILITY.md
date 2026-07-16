@@ -16,7 +16,6 @@ These are the primary AI coding tools that aimee integrates with for memory inje
 | Claude Code | `SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd` | Anthropic Messages, `POST /v1/messages` | 1.x | Full | Full hook coverage; `aimee claude-proxy enable` reroutes to any primary model. |
 | Codex CLI | `PreToolUse`, `PostToolUse`, `SessionStart`, local plugin, MCP | OpenAI Responses, `POST /v1/responses` | 1.x | Full | Hooks + MCP; `~/.codex/config.toml` model provider runs any primary model, incl. the function-call tool loop. |
 | OpenCode | OpenAI-compatible front end | OpenAI-compatible, `POST /v1/chat/completions` | 2.x | Full | Front end onto aimee's primary model over the OpenAI-compatible ingress. |
-| Gemini CLI | `BeforeTool`, `AfterTool`, `SessionStart` | Provider CLI | 2.x | Full | Uses Gemini CLI hook model rather than Claude-style hook names. |
 | Mistral Vibe-compatible Mistral | native HTTP adapter using Vibe-compatible defaults | Provider CLI | 2.9.6 source-compatible defaults | Expected | Used by Aimee's built-in primary chat and `mistral-plan` delegate route without launching `vibe`. |
 
 ## Platform Support
@@ -65,21 +64,20 @@ sqlite3 :memory: "SELECT fts5();" 2>&1 | grep -q "wrong number" && echo "FTS5 av
 
 ## Delegate Providers
 
-These are the API providers that delegate agents can connect to for task offloading. Codex, Gemini, and Mistral can also use the same provider layer through primary-session adapters; other primary-agent integrations happen through hooks, MCP, or remaining provider CLI routes.
+These are the API providers that delegate agents can connect to for task offloading. Codex and Mistral can also use the same provider layer through primary-session adapters; other primary-agent integrations happen through hooks, MCP, or remaining provider CLI routes.
 
 | Provider | API format | Authentication | Models tested | Notes |
 |---|---|---|---|---|
 | OpenAI | `/chat/completions` | Bearer token | `gpt-4o`, `gpt-4o-mini` | OpenAI-compatible chat completions support. |
 | ChatGPT (Codex) | `/backend-api/codex/responses` | OAuth device flow | `gpt-5.4`, `gpt-5.4-mini` | Uses Codex-specific backend API format. |
 | Anthropic | `/v1/messages` | `x-api-key` header | `claude-sonnet-4-6`, `claude-haiku-4-5` | Native Anthropic messages API support. |
-| Google (Gemini) | `/v1beta/models/{model}:generateContent` or `/v1beta/openai` | API key header or bearer token | `gemini-2.5-flash`, `gemini-2.5-flash-lite` | Native `gemini-cli` compatibility routes use GenerateContent without launching the Gemini CLI. |
 | Mistral AI | `/v1/chat/completions` | Bearer token | `mistral-large-latest`, `mistral-small-latest`, `mistral-vibe-cli-latest` | Direct HTTP provider profile; `mistral-plan` uses Vibe-compatible defaults without launching Vibe. |
 | Ollama | `/v1/chat/completions` | None | `llama3.2`, any local model | Local provider with no built-in auth requirement. |
 | Groq | `/openai/v1` | Bearer token | `llama-3.3-70b-versatile` | OpenAI-compatible API variant. |
 
 Provider-CLI delegates can also route through installed CLIs. `aimee agent setup
-codex-cli` creates the legacy Codex CLI route. `aimee agent setup gemini-cli`,
-`mistral-cli`, and `mistral-plan` create provider-CLI-compatible entries that
+codex-cli` creates the legacy Codex CLI route. `aimee agent setup mistral-cli`
+and `mistral-plan` create provider-CLI-compatible entries that
 bridge to native HTTP adapters instead of launching provider binaries.
 
 ## MCP Protocol
@@ -110,7 +108,6 @@ hooks call the thin client, which reaches the configured `aimee-server`.
 | Client | Detection method | Hook config path | MCP config path | Registration status |
 |---|---|---|---|---|
 | Claude Code | `~/.claude/` directory or `claude` in PATH | `~/.claude/settings.json` | `~/.claude/settings.json` | Implemented |
-| Gemini CLI | `~/.gemini/` directory or `gemini` in PATH | `~/.gemini/settings.json` | `~/.gemini/settings.json` | Implemented |
 | Codex CLI | `~/.codex/` directory or `codex` in PATH | `~/.codex/hooks.json` | `~/.codex/mcp-config.json` | Implemented |
 | GitHub Copilot | `~/.copilot/` directory or `copilot` in PATH | `~/.copilot/config.json` | `~/.copilot/mcp-config.json` | Implemented |
 | Claude Desktop | Config directory exists at OS-specific path | N/A (MCP only) | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/Claude/claude_desktop_config.json` (Linux) | Implemented |
@@ -121,7 +118,6 @@ hooks call the thin client, which reaches the configured `aimee-server`.
 | Client | Session start | Pre-tool | Post-tool | Matched tools |
 |---|---|---|---|---|
 | Claude Code | `SessionStart` | `PreToolUse` | `PostToolUse` | Pre: `Edit\|Write\|MultiEdit\|Bash\|Read\|Glob\|Grep`; Post: `Edit\|Write\|MultiEdit` |
-| Gemini CLI | `SessionStart` | `BeforeTool` | `AfterTool` | Pre: `write_file\|replace\|shell`; Post: `write_file\|replace` |
 | Codex CLI | `SessionStart` | `PreToolUse` | `PostToolUse` | Pre: `Bash`; Post: `Bash` |
 | GitHub Copilot | `SessionStart` | `PreToolUse` | `PostToolUse` | Pre: `Bash\|Edit\|Write`; Post: `Edit\|Write` |
 | Claude Desktop | n/a | n/a | n/a | MCP only; no hook events |

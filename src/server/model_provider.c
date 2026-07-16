@@ -13,7 +13,6 @@ static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 /* Forward declarations for built-in profiles */
 extern model_provider_t openai_provider;
 extern model_provider_t anthropic_provider;
-extern model_provider_t gemini_provider;
 extern model_provider_t ollama_provider;
 extern model_provider_t llama_native_provider;
 extern model_provider_t openrouter_provider;
@@ -24,7 +23,6 @@ static void register_builtins(void)
 {
    model_provider_register(&openai_provider);
    model_provider_register(&anthropic_provider);
-   model_provider_register(&gemini_provider);
    model_provider_register(&ollama_provider);
    model_provider_register(&llama_native_provider);
    model_provider_register(&openrouter_provider);

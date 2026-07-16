@@ -1,6 +1,7 @@
 /* server_state.c: server handlers for memory, index, rules, working memory, dashboard, workspace */
 #include "server_state_internal.h"
 #include "aimee.h"
+#include "aimee_ir_metrics.h"
 #include "server.h"
 #include "dashboard.h"
 #include "render.h"               /* decision_to_json + db2_decision_log_list */
@@ -1447,6 +1448,20 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddItemToObject(resp, "vector", status);
       free(json_str);
    }
+   /* Canonical-IR shadow counters. The refactor's roundtable (Q6) required these to
+    * "detect parity drift in shadow before flipping the flag" — but until now
+    * aimee_ir_metric_get had NO callers, so they were incremented and never read.
+    * Write-only metrics cannot gate a rollout: without this, an IR-build failure
+    * silently falls back to the legacy translator and nothing can measure how often.
+    * Totals across wires; ir_path vs the *_fail counters is the fallback rate. */
+   {
+      cJSON *ir = cJSON_AddObjectToObject(resp, "ir");
+      if (ir)
+         for (int m = 0; m < AIMEE_IR_M__COUNT; m++)
+            cJSON_AddNumberToObject(ir, aimee_ir_metric_name((aimee_ir_metric_t)m),
+                                    (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
+   }
+
    return send_and_free(conn, resp);
 }
 

@@ -91,8 +91,8 @@ and tool execution.
 Direct Codex and Mistral primary sessions use server-side structured
 conversation state; explicit legacy routes such as `codex-cli` still use the
 provider CLI path. Claude delegates run the installed `claude` CLI in tmux,
-while `gemini-cli`, `mistral-cli`, and `mistral-plan` bridge to native HTTP
-adapters behind provider-CLI-compatible config.
+while `mistral-cli` and `mistral-plan` bridge to native HTTP adapters behind
+provider-CLI-compatible config.
 
 ### Delegation
 

@@ -22,7 +22,7 @@ int main(void)
    assert(req);
 
    /* Responses (codex) backend: model overridden, max_tokens override applied */
-   char *rbody = aimee_ir_build_provider_body(req, "chatgpt", "gpt-5.5-codex", 200);
+   char *rbody = aimee_ir_build_provider_body(req, "chatgpt", "gpt-5.5-codex", 200, 1);
    assert(rbody);
    cJSON *rj = cJSON_Parse(rbody);
    assert(rj);
@@ -39,7 +39,7 @@ int main(void)
    free(rbody);
 
    /* OpenAI backend: model overridden, no max_tokens override -> IR's 100 kept */
-   char *obody = aimee_ir_build_provider_body(req, "openai", "some-openai-model", 0);
+   char *obody = aimee_ir_build_provider_body(req, "openai", "some-openai-model", 0, 1);
    assert(obody);
    cJSON *oj = cJSON_Parse(obody);
    assert(oj);
@@ -54,8 +54,30 @@ int main(void)
    cJSON_Delete(oj);
    free(obody);
 
+   /* want_stream is the CALLER's decision, not the client's. The request fixture has
+    * stream:true, but a buffered-replay caller must be able to ask the upstream for a
+    * whole JSON reply — inheriting the client's flag is what made that path request
+    * SSE and then parse it as JSON ("unparseable reply"). */
+   {
+      char *nb = aimee_ir_build_provider_body(req, "openai", "m", 0, 0);
+      assert(nb);
+      cJSON *nj = cJSON_Parse(nb);
+      assert(nj);
+      assert(cJSON_GetObjectItem(nj, "stream") == NULL); /* not merely false: absent */
+      cJSON_Delete(nj);
+      free(nb);
+
+      char *sb = aimee_ir_build_provider_body(req, "openai", "m", 0, 1);
+      assert(sb);
+      cJSON *sj = cJSON_Parse(sb);
+      assert(sj);
+      assert(cJSON_IsTrue(cJSON_GetObjectItem(sj, "stream")));
+      cJSON_Delete(sj);
+      free(sb);
+   }
+
    /* bad request -> NULL (caller falls back to legacy) */
-   assert(aimee_ir_build_provider_body(NULL, "openai", "m", 0) == NULL);
+   assert(aimee_ir_build_provider_body(NULL, "openai", "m", 0, 1) == NULL);
    cJSON_Delete(req);
 
    /* aimee_ir_responses_to_chat: a Responses body -> chat components via the IR

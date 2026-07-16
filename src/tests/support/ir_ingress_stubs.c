@@ -134,13 +134,23 @@ __attribute__((weak)) int anthropic_delta_emit(const void *d, void *st, const ch
 
 __attribute__((weak)) char *aimee_ir_build_provider_body(const void *req, const char *driver_name,
                                                          const char *agent_model,
-                                                         int max_tokens_override)
+                                                         int max_tokens_override, int want_stream)
 {
    (void)req;
    (void)driver_name;
    (void)agent_model;
    (void)max_tokens_override;
+   (void)want_stream;
    return NULL;
+}
+
+/* IR observability counters. The ingress increments these on the legacy-fallback and
+ * shadow-compare paths; the minimal-link tests don't link the metrics table, so the
+ * counter is inert here. Real aimee_ir_metrics.o wins when linked. */
+__attribute__((weak)) void aimee_ir_metric_inc(int metric, int frontend)
+{
+   (void)metric;
+   (void)frontend;
 }
 
 __attribute__((weak)) int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,

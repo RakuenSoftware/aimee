@@ -277,3 +277,57 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *name)
       return AIMEE_STOP_ERROR;
    return AIMEE_STOP_UNKNOWN;
 }
+
+/* --- response-side accessors (see aimee_ir.h) --- */
+
+/* Shared block-text concatenator: appends every block of `want` type, truncating
+ * at n-1. Factored because text/reasoning differ only in the type they select --
+ * and keeping one copy means the truncation rule cannot drift between them. */
+static size_t ir_concat_blocks(const aimee_block_t *blocks, int n_blocks, aimee_block_type_t want,
+                               char *buf, size_t n)
+{
+   size_t used = 0;
+   for (int i = 0; i < n_blocks && used + 1 < n; i++)
+   {
+      const aimee_block_t *b = &blocks[i];
+      if (b->type != want || !b->text)
+         continue;
+      size_t l = strlen(b->text);
+      if (l > n - 1 - used)
+         l = n - 1 - used;
+      memcpy(buf + used, b->text, l);
+      used += l;
+   }
+   buf[used] = '\0';
+   return used;
+}
+
+size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n)
+{
+   if (buf && n)
+      buf[0] = '\0';
+   if (!r || !buf || !n)
+      return 0;
+   /* TEXT only. A response whose blocks are all TOOL_USE yields empty, which is
+    * correct -- it said nothing, it asked to call something. */
+   return ir_concat_blocks(r->content, r->n_content, AIMEE_BLK_TEXT, buf, n);
+}
+
+size_t aimee_ir_response_reasoning(const aimee_response_t *r, char *buf, size_t n)
+{
+   if (buf && n)
+      buf[0] = '\0';
+   if (!r || !buf || !n)
+      return 0;
+   return ir_concat_blocks(r->content, r->n_content, AIMEE_BLK_THINKING, buf, n);
+}
+
+int aimee_ir_response_has_tool_use(const aimee_response_t *r)
+{
+   if (!r)
+      return 0;
+   for (int i = 0; i < r->n_content; i++)
+      if (r->content[i].type == AIMEE_BLK_TOOL_USE)
+         return 1;
+   return 0;
+}

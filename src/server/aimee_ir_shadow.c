@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Cap the mismatch/failure log so a systematic bug can't flood server.log. */
 static int g_logged;
@@ -17,6 +18,40 @@ static int shadow_enabled(void)
 {
    const char *v = getenv("AIMEE_IR_SHADOW");
    return v && v[0] && v[0] != '0';
+}
+
+int aimee_ir_shadow_enabled(void)
+{
+   return shadow_enabled();
+}
+
+void aimee_ir_shadow_compare_bodies(const char *ir_body, const char *legacy_body,
+                                    aimee_wire_t frontend)
+{
+   if (!shadow_enabled())
+      return;
+   /* A NULL on either side is a divergence, not a skip: "the IR could not build it"
+    * is exactly the case that forces a legacy fallback in production. */
+   if (ir_body && legacy_body && strcmp(ir_body, legacy_body) == 0)
+   {
+      aimee_ir_metric_inc(AIMEE_IR_M_BODY_MATCH, frontend);
+      return;
+   }
+   aimee_ir_metric_inc(AIMEE_IR_M_BODY_MISMATCH, frontend);
+   if (g_logged < SHADOW_LOG_CAP)
+   {
+      g_logged++;
+      /* Truncated on purpose: bodies carry user content, and the roundtable ruling
+       * on this refactor was explicit that no raw request bytes may reach the log.
+       * The lengths + a short prefix are enough to identify WHICH field diverged;
+       * reproduce the full diff offline from the shape, not from production logs. */
+      fprintf(stderr,
+              "aimee_ir_shadow: provider-body mismatch (wire=%d) ir_len=%zu legacy_len=%zu\n"
+              "  ir[0:80]     =%.80s\n"
+              "  legacy[0:80] =%.80s\n",
+              (int)frontend, ir_body ? strlen(ir_body) : 0, legacy_body ? strlen(legacy_body) : 0,
+              ir_body ? ir_body : "(null)", legacy_body ? legacy_body : "(null)");
+   }
 }
 
 void aimee_ir_shadow_observe_request(const cJSON *req, aimee_wire_t frontend)

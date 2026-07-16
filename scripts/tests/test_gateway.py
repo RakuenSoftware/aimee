@@ -120,12 +120,29 @@ class Synth(unittest.TestCase):
     def setUp(self):
         self.gw = _gw()
 
-    def test_streaming_unsupported_400(self):
-        self.gw.SYNTH_URL = "http://x"
+    def test_stream_relays_sse_verbatim(self):
+        """stream:true is proxied, not rejected. Was a typed 400
+        ("streaming_unsupported"), which made the gateway unusable as an OpenAI-chat
+        backend for any streaming client."""
+        self.gw.STUB = True
+        out = []
+        n = self.gw.do_synth_stream({"messages": [], "stream": True}, out.append)
+        body = b"".join(out)
+        # SSE framing survives verbatim: data: lines and a terminal [DONE]
+        self.assertTrue(body.startswith(b"data: "))
+        self.assertIn(b"[DONE]", body)
+        self.assertEqual(n, len(body))  # the audit byte count is the relayed length
+
+    def test_stream_unconfigured_503_before_any_bytes(self):
+        """The typed error must be raised BEFORE relaying starts — once the SSE status
+        line is committed a JSON error can no longer be sent."""
+        self.gw.STUB = False
+        self.gw.SYNTH_URL = ""
+        wrote = []
         with self.assertRaises(self.gw.GatewayError) as e:
-            self.gw.do_synth({"messages": [], "stream": True})
-        self.assertEqual(e.exception.status, 400)
-        self.assertEqual(e.exception.body["error"]["code"], "streaming_unsupported")
+            self.gw.do_synth_stream({"messages": [], "stream": True}, wrote.append)
+        self.assertEqual(e.exception.status, 503)
+        self.assertEqual(wrote, [])  # nothing was written
 
     def test_unconfigured_503(self):
         self.gw.SYNTH_URL = ""

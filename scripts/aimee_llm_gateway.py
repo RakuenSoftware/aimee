@@ -406,14 +406,13 @@ def _handle_device_lost():
 def do_synth(body):
     """Proxy a /v1/chat/completions request to the configured synth upstream
     (AIMEE_LLM_SYNTH_URL — a local baked llama-server, or a forwarded/external base).
-    Streaming is disabled in the first release: `stream:true` -> a typed 400 the client
-    can branch on. A circuit breaker (§4) opens on repeated upstream errors -> typed 503."""
+    A circuit breaker (§4) opens on repeated upstream errors -> typed 503.
+
+    `stream:true` is proxied verbatim: see do_synth_stream. It used to return a typed
+    400 ("disabled in this release"), which made this gateway unusable as an
+    OpenAI-chat backend for anything that streams."""
     if not isinstance(body, dict):
         raise GatewayError(400, "bad_request", "chat/completions expects a JSON object")
-    if body.get("stream"):
-        raise GatewayError(
-            400, "streaming_unsupported",
-            "streaming is disabled in this release; set stream=false")
     if STUB:
         return {
             "id": "stub", "object": "chat.completion", "model": "aimee-llm-stub",
@@ -434,6 +433,61 @@ def do_synth(body):
         raise
     _synth_breaker.record(True)
     return out
+
+
+
+def do_synth_stream(body, write):
+    """Proxy a streaming /v1/chat/completions to the synth upstream, relaying the SSE
+    bytes VERBATIM via `write`.
+
+    Verbatim matters: the caller is an OpenAI-chat client and the upstream already
+    speaks OpenAI-chat SSE, so re-encoding here would only add a place for the two to
+    disagree. The gateway's job is auth + breaker + audit, not translation.
+
+    Returns the number of body bytes relayed (for the metadata-only audit). Raises
+    GatewayError before any bytes are written so the caller can still send a typed
+    error; once relaying starts the status line is already committed."""
+    if not isinstance(body, dict):
+        raise GatewayError(400, "bad_request", "chat/completions expects a JSON object")
+    if STUB:
+        # Deterministic two-chunk stream so CI can exercise the path with no upstream.
+        chunks = [
+            b'data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"stub"}}]}\n\n',
+            b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+            b'data: [DONE]\n\n',
+        ]
+        n = 0
+        for c in chunks:
+            write(c)
+            n += len(c)
+        return n
+    if not SYNTH_URL:
+        raise GatewayError(503, "synth_unconfigured", "AIMEE_LLM_SYNTH_URL is not set")
+    if not _synth_breaker.allow():
+        raise GatewayError(503, "provider_unavailable", "synth upstream circuit is open")
+
+    req = urllib.request.Request(
+        f"{SYNTH_URL}/v1/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    total = 0
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            while True:
+                chunk = r.read(4096)
+                if not chunk:
+                    break
+                write(chunk)
+                total += len(chunk)
+    except Exception as exc:
+        _synth_breaker.record(False)
+        if _is_synth_device_lost(exc):
+            _handle_device_lost()
+        raise
+    _synth_breaker.record(True)
+    return total
 
 
 def role_state(base, configured=True):
@@ -487,6 +541,15 @@ def build_server():
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_sse_head(self):
+            """SSE headers. Sent BEFORE the first relayed byte; after this the status is
+            committed, so upstream failures can no longer become a typed JSON error."""
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("cache-control", "no-cache")
+            self.send_header("connection", "close")
+            self.end_headers()
+
         def do_GET(self):
             path = self.path.rstrip("/")
             if path == "/health":
@@ -535,11 +598,25 @@ def build_server():
                 elif path == "/rerank":
                     self._send(200, do_rerank(json.loads(raw or b"[]")))
                 elif path == "/v1/chat/completions":
-                    out = do_synth(json.loads(raw or b"{}"))
-                    # §4 audit: metadata-only (scope/outcome/bytes), never content/creds.
-                    audit("chat", scope, "ok", bytes_in=len(raw),
-                          bytes_out=len(json.dumps(out)))
-                    self._send(200, out)
+                    req_body = json.loads(raw or b"{}")
+                    if isinstance(req_body, dict) and req_body.get("stream"):
+                        started = []
+
+                        def _w(b):
+                            if not started:
+                                self._send_sse_head()
+                                started.append(True)
+                            self.wfile.write(b)
+                            self.wfile.flush()
+
+                        n_out = do_synth_stream(req_body, _w)
+                        audit("chat", scope, "ok", bytes_in=len(raw), bytes_out=n_out)
+                    else:
+                        out = do_synth(req_body)
+                        # §4 audit: metadata-only (scope/outcome/bytes), never content/completions
+                        audit("chat", scope, "ok", bytes_in=len(raw),
+                              bytes_out=len(json.dumps(out)))
+                        self._send(200, out)
                 else:
                     self._send(404, {"error": "not found"})
             except GatewayError as ge:

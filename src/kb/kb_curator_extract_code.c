@@ -71,6 +71,8 @@ static int ccu_claim_job(ccu_job_t *out)
                             " WHERE id=("
                             "   SELECT id FROM kb_code_unit_jobs"
                             "   WHERE status='pending'"
+                            /* Skip jobs still serving their retry backoff. */
+                            "     AND (next_attempt_at='' OR next_attempt_at<=?1)"
                             "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                             " )"
                             " RETURNING id, project, file_path, symbol, kind, line, attempts";
@@ -79,6 +81,9 @@ static int ccu_claim_job(ccu_job_t *out)
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
+   char now_text[32];
+   kb_curator_now_text(now_text, sizeof(now_text));
+   aimee_pg_bind_text(st, "?1", now_text);
 
    int found = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -127,11 +132,15 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
                                           "UPDATE kb_code_unit_jobs"
-                                          " SET status=?1, last_error=?2, updated_at=pg_now_text()"
+                                          " SET status=?1, last_error=?2, next_attempt_at=?4,"
+                                          " updated_at=pg_now_text()"
                                           " WHERE id=?3",
                                           err, sizeof(err));
    if (!st)
       return;
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?4", next_at);
    aimee_pg_bind_text(st, "?1", new_status);
    char errbuf[512];
    snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "unknown error");

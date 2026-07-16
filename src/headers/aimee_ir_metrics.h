@@ -20,6 +20,19 @@ typedef enum
    AIMEE_IR_M_CACHE_CONTROL_LOST, /* a cache_control marker was dropped in round-trip (BUG) */
    AIMEE_IR_M_PASSTHROUGH,        /* same-protocol raw-passthrough fast-path taken */
    AIMEE_IR_M_IR_PATH,            /* full parse->IR->build path taken */
+   /* The IR build returned NULL and the caller USED the legacy translator. This is
+    * the rollout gate: the legacy translators cannot be deleted until this reads 0
+    * over a real observation window. The *_FAIL counters say a stage failed;
+    * this says a request was actually SERVED BY LEGACY. */
+   AIMEE_IR_M_LEGACY_FALLBACK,
+   /* Shadow: the IR-built provider body differed from what the legacy translator
+    * would have sent for the SAME request. This is the direct evidence for
+    * retiring the translators: 0 mismatches over real traffic means the IR is a
+    * faithful replacement, not merely "it worked". */
+   AIMEE_IR_M_BODY_MISMATCH,
+   /* Shadow: IR and legacy produced byte-identical provider bodies. */
+   AIMEE_IR_M_BODY_MATCH,
+   AIMEE_IR_M_RESCUE_RECOVERIES,
    AIMEE_IR_M__COUNT
 } aimee_ir_metric_t;
 

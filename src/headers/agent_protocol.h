@@ -79,7 +79,6 @@ void agent_parse_response_openai(struct cJSON *root, parsed_response_t *out);
 void agent_parse_response_responses(const char *body, parsed_response_t *out);
 void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
 /* Parse a Gemini generateContent response. Tracks cachedContentTokenCount as cache_read_tokens. */
-void agent_parse_response_gemini(struct cJSON *root, parsed_response_t *out);
 void agent_free_parsed_response(parsed_response_t *p);
 
 /* --- Message utilities --- */

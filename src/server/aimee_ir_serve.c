@@ -37,7 +37,8 @@ int aimee_ir_stream_relay_enabled(void)
 }
 
 char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
-                                   const char *agent_model, int max_tokens_override)
+                                   const char *agent_model, int max_tokens_override,
+                                   int want_stream)
 {
    aimee_request_t ir;
    char err[128];
@@ -57,6 +58,11 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
       ir.max_tokens = max_tokens_override;
       ir.has_max_tokens = 1;
    }
+   /* The upstream stream flag is the CALLER's decision, not the client's: a caller
+    * that streams to the client may still want the upstream reply buffered so it can
+    * police + replay it. Inheriting ir.stream from the request is what made the
+    * buffered-replay path ask for SSE and then parse it as JSON. */
+   ir.stream = want_stream ? 1 : 0;
 
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
    cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);

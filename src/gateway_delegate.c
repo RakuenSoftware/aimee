@@ -11,10 +11,8 @@
 #include "gateway_policy.h"
 #include "log.h"
 
-gw_tool_shape_t gateway_delegate_tool_shape(int anthropic, int chatgpt, int gemini)
+gw_tool_shape_t gateway_delegate_tool_shape(int anthropic, int chatgpt)
 {
-   if (gemini)
-      return GW_TOOL_SHAPE_UNSUPPORTED; /* functionDeclarations: name not at tool.name */
    if (anthropic || chatgpt)
       return GW_TOOL_SHAPE_NAMED;        /* anthropic + /responses both carry a flat tool.name */
    return GW_TOOL_SHAPE_FUNCTION_NESTED; /* openai /chat/completions */

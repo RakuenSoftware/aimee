@@ -1,11 +1,10 @@
-/* test_agent_http.c: unit tests for Gemini prompt-cache lifecycle functions
+/* test_agent_http.c: unit tests for the agent HTTP request/response shapes
+ * (OpenAI chat, Anthropic messages, Responses) and the model registry.
  *
- * Tests cover:
- *   - gemini_prompt_cache_attach: request mutation (add cachedContent, remove systemInstruction)
- *   - gemini_prompt_cache_create: graceful failure with invalid/empty inputs
- *   - agent_build_request_gemini: request shape with and without a cache name
- *   - agent_parse_response_gemini: cache hit token tracking via cachedContentTokenCount
- */
+ * Was originally the Gemini prompt-cache suite; Gemini is reached through its
+ * OpenAI-compatible endpoint now, so the bespoke Gemini paths and their tests are
+ * gone. A `google/gemini-*` entry survives in the OpenRouter model-list case —
+ * that is a MODEL served over the OpenAI shape, not a Gemini protocol. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,221 +24,6 @@ static cJSON *parse_json_or_die(const char *json)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
    return root;
-}
-
-/* ----------------------------------------------------------------
- * gemini_prompt_cache_attach
- * ---------------------------------------------------------------- */
-
-static void test_cache_attach_adds_field(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "systemInstruction", "be helpful");
-   cJSON_AddStringToObject(req, "model", "gemini-1.5-pro");
-
-   gemini_prompt_cache_attach(req, "cachedContents/abc123");
-
-   /* cachedContent field should be present */
-   cJSON *cc = cJSON_GetObjectItem(req, "cachedContent");
-   assert(cc != NULL);
-   assert(cJSON_IsString(cc));
-   assert(strcmp(cc->valuestring, "cachedContents/abc123") == 0);
-
-   /* systemInstruction must be removed (it lives in the cache) */
-   assert(cJSON_GetObjectItem(req, "systemInstruction") == NULL);
-
-   cJSON_Delete(req);
-   printf("cache_attach_adds_field OK\n");
-}
-
-static void test_cache_attach_noop_on_empty_name(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "systemInstruction", "be helpful");
-
-   gemini_prompt_cache_attach(req, "");
-
-   /* No cachedContent should be added */
-   assert(cJSON_GetObjectItem(req, "cachedContent") == NULL);
-
-   /* systemInstruction should remain (cache name was empty) */
-   cJSON *si = cJSON_GetObjectItem(req, "systemInstruction");
-   assert(si != NULL);
-
-   cJSON_Delete(req);
-   printf("cache_attach_noop_on_empty_name OK\n");
-}
-
-static void test_cache_attach_noop_on_null(void)
-{
-   /* Must not crash */
-   gemini_prompt_cache_attach(NULL, "cachedContents/abc");
-   gemini_prompt_cache_attach(NULL, NULL);
-
-   cJSON *req = cJSON_CreateObject();
-   gemini_prompt_cache_attach(req, NULL);
-   assert(cJSON_GetObjectItem(req, "cachedContent") == NULL);
-   cJSON_Delete(req);
-
-   printf("cache_attach_noop_on_null OK\n");
-}
-
-/* ----------------------------------------------------------------
- * gemini_prompt_cache_create — failure path (no network needed)
- * ---------------------------------------------------------------- */
-
-static void test_cache_create_rejects_empty_inputs(void)
-{
-   char name[256];
-
-   /* Empty model → -1, name stays empty */
-   int rc = gemini_prompt_cache_create(NULL, "Bearer tok", "", "system prompt", 1000, name,
-                                       sizeof(name));
-   assert(rc == -1);
-   assert(name[0] == '\0');
-
-   /* Empty system prompt → -1 */
-   rc = gemini_prompt_cache_create(NULL, "Bearer tok", "gemini-1.5-pro", "", 1000, name,
-                                   sizeof(name));
-   assert(rc == -1);
-   assert(name[0] == '\0');
-
-   printf("cache_create_rejects_empty_inputs OK\n");
-}
-
-/* ----------------------------------------------------------------
- * agent_build_request_gemini
- * ---------------------------------------------------------------- */
-
-static void test_build_request_gemini_uncached(void)
-{
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.model, sizeof(agent.model), "gemini-1.5-pro");
-
-   cJSON *messages = cJSON_CreateArray();
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", "hello");
-   cJSON_AddItemToArray(messages, user);
-
-   cJSON *req = agent_build_request_gemini(&agent, messages, NULL, "be helpful", 1024, 0.0, NULL);
-   assert(req != NULL);
-
-   /* systemInstruction must be present when no cache */
-   cJSON *si = cJSON_GetObjectItem(req, "systemInstruction");
-   assert(si != NULL);
-
-   /* cachedContent must NOT be present */
-   assert(cJSON_GetObjectItem(req, "cachedContent") == NULL);
-
-   /* contents array must be present */
-   cJSON *contents = cJSON_GetObjectItem(req, "contents");
-   assert(contents != NULL);
-   assert(cJSON_IsArray(contents));
-   assert(cJSON_GetArraySize(contents) == 1);
-
-   cJSON_Delete(req);
-   cJSON_Delete(messages);
-   printf("build_request_gemini_uncached OK\n");
-}
-
-static void test_build_request_gemini_cached(void)
-{
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.model, sizeof(agent.model), "gemini-1.5-pro");
-
-   cJSON *messages = cJSON_CreateArray();
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", "hello");
-   cJSON_AddItemToArray(messages, user);
-
-   cJSON *req = agent_build_request_gemini(&agent, messages, NULL, "be helpful", 1024, 0.0,
-                                           "cachedContents/xyz789");
-   assert(req != NULL);
-
-   /* systemInstruction must NOT be present (it lives in the cache) */
-   assert(cJSON_GetObjectItem(req, "systemInstruction") == NULL);
-
-   /* cachedContent must reference the provided cache name */
-   cJSON *cc = cJSON_GetObjectItem(req, "cachedContent");
-   assert(cc != NULL);
-   assert(cJSON_IsString(cc));
-   assert(strcmp(cc->valuestring, "cachedContents/xyz789") == 0);
-
-   cJSON_Delete(req);
-   cJSON_Delete(messages);
-   printf("build_request_gemini_cached OK\n");
-}
-
-static void test_build_request_gemini_tool_result_conversion(void)
-{
-   /* Verify that role=tool messages are converted to Gemini functionResponse parts */
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.model, sizeof(agent.model), "gemini-1.5-pro");
-
-   cJSON *messages = cJSON_CreateArray();
-
-   /* User turn */
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", "what is 2+2?");
-   cJSON_AddItemToArray(messages, user);
-
-   /* Assistant tool call (stored in assistant-with-parts Gemini style) */
-   cJSON *asst = cJSON_CreateObject();
-   cJSON_AddStringToObject(asst, "role", "assistant");
-   cJSON *asst_parts = cJSON_CreateArray();
-   cJSON *fc_part = cJSON_CreateObject();
-   cJSON *fc = cJSON_CreateObject();
-   cJSON_AddStringToObject(fc, "name", "calculate");
-   cJSON *args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "expression", "2+2");
-   cJSON_AddItemToObject(fc, "args", args);
-   cJSON_AddItemToObject(fc_part, "functionCall", fc);
-   cJSON_AddItemToArray(asst_parts, fc_part);
-   cJSON_AddItemToObject(asst, "parts", asst_parts);
-   cJSON_AddItemToArray(messages, asst);
-
-   /* Tool result (OpenAI format with tool_call_id = function name for Gemini) */
-   cJSON *tool_result = cJSON_CreateObject();
-   cJSON_AddStringToObject(tool_result, "role", "tool");
-   cJSON_AddStringToObject(tool_result, "tool_call_id", "calculate");
-   cJSON_AddStringToObject(tool_result, "content", "4");
-   cJSON_AddItemToArray(messages, tool_result);
-
-   cJSON *req = agent_build_request_gemini(&agent, messages, NULL, NULL, 0, 0.0, NULL);
-   assert(req != NULL);
-
-   cJSON *contents = cJSON_GetObjectItem(req, "contents");
-   assert(contents != NULL);
-   /* Should have 3 turns: user, model (function call), user (function response) */
-   assert(cJSON_GetArraySize(contents) == 3);
-
-   /* Last item should be role=user with functionResponse part */
-   cJSON *last = cJSON_GetArrayItem(contents, 2);
-   cJSON *last_role = cJSON_GetObjectItem(last, "role");
-   assert(last_role != NULL);
-   assert(strcmp(last_role->valuestring, "user") == 0);
-
-   cJSON *last_parts = cJSON_GetObjectItem(last, "parts");
-   assert(last_parts != NULL);
-   assert(cJSON_GetArraySize(last_parts) == 1);
-
-   cJSON *fr_part = cJSON_GetArrayItem(last_parts, 0);
-   cJSON *func_resp = cJSON_GetObjectItem(fr_part, "functionResponse");
-   assert(func_resp != NULL);
-
-   cJSON *fn_name = cJSON_GetObjectItem(func_resp, "name");
-   assert(fn_name != NULL);
-   assert(strcmp(fn_name->valuestring, "calculate") == 0);
-
-   cJSON_Delete(req);
-   cJSON_Delete(messages);
-   printf("build_request_gemini_tool_result_conversion OK\n");
 }
 
 static cJSON *make_dummy_tool(void)
@@ -999,131 +783,6 @@ static void test_parse_response_openai_discards_private_scaffold_without_final(v
 }
 
 /* ----------------------------------------------------------------
- * agent_parse_response_gemini — cache hit token tracking
- * ---------------------------------------------------------------- */
-
-static void test_parse_response_gemini_cache_hit(void)
-{
-   /* Simulate a Gemini response that includes cachedContentTokenCount */
-   const char *json = "{"
-                      "  \"candidates\": [{"
-                      "    \"content\": {"
-                      "      \"role\": \"model\","
-                      "      \"parts\": [{\"text\": \"The answer is 4.\"}]"
-                      "    },"
-                      "    \"finishReason\": \"STOP\""
-                      "  }],"
-                      "  \"usageMetadata\": {"
-                      "    \"promptTokenCount\": 500,"
-                      "    \"candidatesTokenCount\": 10,"
-                      "    \"cachedContentTokenCount\": 450"
-                      "  }"
-                      "}";
-
-   cJSON *root = cJSON_Parse(json);
-   assert(root != NULL);
-
-   parsed_response_t out;
-   agent_parse_response_gemini(root, &out);
-
-   assert(out.prompt_tokens == 500);
-   assert(out.completion_tokens == 10);
-   /* cachedContentTokenCount should appear as cache_read_tokens */
-   assert(out.cache_read_tokens == 450);
-   assert(out.cache_write_tokens == 0);
-   assert(out.content != NULL);
-   assert(strstr(out.content, "answer is 4") != NULL);
-   assert(out.is_tool_call == 0);
-
-   agent_free_parsed_response(&out);
-   cJSON_Delete(root);
-   printf("parse_response_gemini_cache_hit OK\n");
-}
-
-static void test_parse_response_gemini_no_cache(void)
-{
-   /* Normal response without caching */
-   const char *json = "{"
-                      "  \"candidates\": [{"
-                      "    \"content\": {"
-                      "      \"role\": \"model\","
-                      "      \"parts\": [{\"text\": \"Hello!\"}]"
-                      "    }"
-                      "  }],"
-                      "  \"usageMetadata\": {"
-                      "    \"promptTokenCount\": 100,"
-                      "    \"candidatesTokenCount\": 5"
-                      "  }"
-                      "}";
-
-   cJSON *root = cJSON_Parse(json);
-   assert(root != NULL);
-
-   parsed_response_t out;
-   agent_parse_response_gemini(root, &out);
-
-   assert(out.prompt_tokens == 100);
-   assert(out.completion_tokens == 5);
-   assert(out.cache_read_tokens == 0);
-   assert(out.cache_write_tokens == 0);
-
-   agent_free_parsed_response(&out);
-   cJSON_Delete(root);
-   printf("parse_response_gemini_no_cache OK\n");
-}
-
-static void test_parse_response_gemini_tool_call(void)
-{
-   /* Gemini response with a function call */
-   const char *json = "{"
-                      "  \"candidates\": [{"
-                      "    \"content\": {"
-                      "      \"role\": \"model\","
-                      "      \"parts\": [{"
-                      "        \"functionCall\": {"
-                      "          \"name\": \"bash\","
-                      "          \"args\": {\"command\": \"ls\"}"
-                      "        }"
-                      "      }]"
-                      "    }"
-                      "  }],"
-                      "  \"usageMetadata\": {"
-                      "    \"promptTokenCount\": 200,"
-                      "    \"candidatesTokenCount\": 20"
-                      "  }"
-                      "}";
-
-   cJSON *root = cJSON_Parse(json);
-   assert(root != NULL);
-
-   parsed_response_t out;
-   agent_parse_response_gemini(root, &out);
-
-   assert(out.is_tool_call == 1);
-   assert(out.call_count == 1);
-   assert(strcmp(out.calls[0].name, "bash") == 0);
-   /* id must equal name for Gemini (used as tool_call_id in tool result messages) */
-   assert(strcmp(out.calls[0].id, "bash") == 0);
-   assert(out.calls[0].arguments != NULL);
-   assert(strstr(out.calls[0].arguments, "ls") != NULL);
-   assert(out.assistant_message != NULL);
-
-   agent_free_parsed_response(&out);
-   cJSON_Delete(root);
-   printf("parse_response_gemini_tool_call OK\n");
-}
-
-static void test_parse_response_gemini_null_root(void)
-{
-   parsed_response_t out;
-   agent_parse_response_gemini(NULL, &out);
-   assert(out.prompt_tokens == 0);
-   assert(out.is_tool_call == 0);
-   assert(out.content == NULL);
-   printf("parse_response_gemini_null_root OK\n");
-}
-
-/* ----------------------------------------------------------------
  * OpenAI-compatible request shaping
  * ---------------------------------------------------------------- */
 
@@ -1237,23 +896,6 @@ static void test_provider_network_error_mentions_local_http_init(void)
  * driver capabilities
  * ---------------------------------------------------------------- */
 
-static void test_gemini_driver_has_prompt_cache_cap(void)
-{
-   delegate_drivers_init();
-   const delegate_driver_t *d = delegate_driver_get("gemini");
-   assert(d != NULL);
-
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.model, sizeof(agent.model), "gemini-1.5-pro");
-
-   driver_caps_t caps;
-   delegate_get_caps(d, &agent, &caps);
-   assert(caps.capability_flags & DRIVER_CAP_PROMPT_CACHE);
-
-   printf("gemini_driver_has_prompt_cache_cap OK\n");
-}
-
 static void test_minimax_driver_has_own_caps(void)
 {
    delegate_drivers_init();
@@ -1296,16 +938,6 @@ int main(void)
    printf("test_agent_http: ");
 
    test_connect_timeout_caps_below_request_budget();
-
-   test_cache_attach_adds_field();
-   test_cache_attach_noop_on_empty_name();
-   test_cache_attach_noop_on_null();
-
-   test_cache_create_rejects_empty_inputs();
-
-   test_build_request_gemini_uncached();
-   test_build_request_gemini_cached();
-   test_build_request_gemini_tool_result_conversion();
    test_build_request_openai_omits_empty_tools();
    test_openai_request_strips_private_message_fields();
    test_build_request_openai_qwen_profile();
@@ -1338,16 +970,9 @@ int main(void)
    test_parse_response_openai_strips_self_correction_scaffold();
    test_parse_response_openai_discards_private_scaffold_without_final();
 
-   test_parse_response_gemini_cache_hit();
-   test_parse_response_gemini_no_cache();
-   test_parse_response_gemini_tool_call();
-   test_parse_response_gemini_null_root();
-
    test_openai_request_llama_compat_options();
    test_openai_request_omits_empty_tools();
    test_provider_network_error_mentions_local_http_init();
-
-   test_gemini_driver_has_prompt_cache_cap();
    test_minimax_driver_has_own_caps();
 
    printf("all tests passed\n");
