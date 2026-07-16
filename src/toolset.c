@@ -54,11 +54,17 @@ static const builtin_toolset_t BUILTINS[] = {
       "list_background_processes", NULL}},
     {"review", {"readonly", NULL}, {"record_attempt", NULL}},
     /* Index-only review: the reviewer works from the caller-provided diff (in the
-     * prompt) plus aimee's branch-indexed capabilities — NO filesystem/git tools,
-     * which point at a worktree a remote delegate cannot reach. */
+     * prompt) plus aimee's branch-indexed capabilities. It also carries the
+     * read-only worktree tools (read_file/list_files/grep) so a panelist can open
+     * the file a diff is in — but those are REACHABILITY-GATED in
+     * agent_tools_tool_allowed_for_role: granted only when the active workspace
+     * provider can see the review worktree (SHARED/CONTAINER/MIRROR), and withheld
+     * on a DETACHED remote seat whose read would hit the client's fs instead. It
+     * never gains write_file/edit_file/bash: a reviewer must not edit what it judges. */
     {"review_indexed",
      {NULL},
-     {"code_search", "find_symbol", "search_memory", "search_docs", "record_attempt", NULL}},
+     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory",
+      "search_docs", "record_attempt", NULL}},
     {"script_rpc",
      {NULL},
      {"read_file", "list_files", "grep", "git_status", "git_log", "git_diff", "code_search",

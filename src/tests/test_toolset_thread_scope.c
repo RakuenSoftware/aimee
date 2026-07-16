@@ -15,6 +15,7 @@
  * thread-local, which is the whole point of writing them. */
 #include "aimee.h"
 #include "agent_tools.h"
+#include "workspace_provider.h"
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -99,11 +100,53 @@ static void test_override_does_not_leak_across_threads(void)
    printf("  PASS: override_does_not_leak_across_threads\n");
 }
 
+/* Slice 7: review_indexed carries the read-only worktree tools, but only when the
+ * active workspace provider can actually see the review worktree. A DETACHED remote
+ * seat's read marshals to the serving client's fs, so the read tools must be denied
+ * there — while the index-only tools stay, and write/exec are never granted. */
+static void test_review_read_reachability_gate(void)
+{
+   agent_tools_set_active_toolset("review_indexed");
+
+   /* No provider bound == SHARED default (server worktree): reachable -> read OK. */
+   workspace_provider_set_active(NULL);
+   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 1);
+   assert(agent_tools_tool_allowed_for_role("review", "grep") == 1);
+   assert(agent_tools_tool_allowed_for_role("review", "list_files") == 1);
+   /* Index-only tools always allowed; a reviewer must never gain write/exec. */
+   assert(agent_tools_tool_allowed_for_role("review", "code_search") == 1);
+   assert(agent_tools_tool_allowed_for_role("review", "write_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("review", "edit_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("review", "bash") == 0);
+
+   /* CONTAINER (:ro sandbox mount) sees the review tree -> read OK. */
+   workspace_provider_t container = {0};
+   container.kind = WS_PROVIDER_CONTAINER;
+   workspace_provider_set_active(&container);
+   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 1);
+
+   /* DETACHED remote seat: read_all marshals to the client fs, not the review
+    * tree -> the read tools are DENIED; index-only tools still work. */
+   workspace_provider_t detached = {0};
+   detached.kind = WS_PROVIDER_DETACHED;
+   workspace_provider_set_active(&detached);
+   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("review", "grep") == 0);
+   assert(agent_tools_tool_allowed_for_role("review", "list_files") == 0);
+   assert(agent_tools_tool_allowed_for_role("review", "code_search") == 1);
+   assert(agent_tools_tool_allowed_for_role("review", "write_file") == 0);
+
+   workspace_provider_set_active(NULL);
+   agent_tools_set_active_toolset(NULL);
+   printf("  PASS: review_read_reachability_gate\n");
+}
+
 int main(void)
 {
    printf("test_toolset_thread_scope:\n");
    test_active_toolset_is_per_thread();
    test_override_does_not_leak_across_threads();
+   test_review_read_reachability_gate();
    printf("All toolset_thread_scope tests passed.\n");
    return 0;
 }
