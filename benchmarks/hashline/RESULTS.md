@@ -151,3 +151,46 @@ whole-func dip; addressing whole-symbol edits via `edit_symbol` before removing
 `old_string` is the prudent sequence. Note the roster excludes the very smallest
 local models (the population the proposal predicts gains most) — `kimi-k2.7-code`
 was unavailable throughout (provider billing quota exhausted, not a code fault).
+
+---
+
+## P5 completion — roundtable-defined removal gate (not a calendar)
+
+A review roundtable (`benchmarks/hashline/roundtable-p5-review.md`) endorsed
+deferring both `old_string` removal and the neural semantic leg, but required the
+deferral be **measurable**, not calendar-based. That guidance is now implemented:
+
+**Guardrails / telemetry shipped (this change):**
+- **edit_symbol steering (deterministic):** an anchored `replace_range` /
+  `delete_range` covering ≥ 8 lines now returns an `advisory` recommending
+  `edit_symbol` (server-resolved span) — directly targeting the whole-func
+  regression where small models fumble hand-built multi-line ranges. Advisory
+  only; never blocks.
+- **old_string usage telemetry:** every legacy `old_string` edit logs an
+  `edit_deprecated` line, so removal is driven by measured usage, not a date.
+- **semantic-leg signal:** `web_read` logs a `web_read` line whenever a query
+  that neither the literal nor lexical leg could retrieve falls back to
+  top-of-page — the measurable "concrete need" for the embedder leg.
+
+**Numeric removal gate for `old_string` (P5).** Remove the deprecated path only
+when ALL hold:
+1. MiniMax-M3 (or the weakest available delegate) whole-function pass@k on the
+   mutation corpus recovers to **within 10 pp of str_replace** (currently 53% vs
+   87% — a 34 pp gap) with whole-symbol edits routed through `edit_symbol`. The
+   10 pp band is roughly the observed run-to-run variance on this corpus (pass@k
+   moved 74%↔68% across runs on some models), i.e. "not distinguishable from
+   parity"; tighten it if variance shrinks with a larger corpus;
+2. the agentic gate stays green (pass@k ≥ str_replace AND net token-negative)
+   across ≥ 3 runs on the full delegate roster;
+3. `edit_deprecated` telemetry shows residual `old_string` usage **< 1% of edit
+   calls** over a representative CI/eval window from aimee's own agents;
+4. migration docs cover the request-shape change (treated as a deliberate
+   breaking API change, not an automatic bump).
+
+Until (1)–(4) hold, `old_string` stays. This makes the deferral falsifiable and
+data-driven, per the roundtable.
+
+**Semantic leg revisit trigger.** Build the neural leg only when the `web_read`
+zero-retrieval telemetry shows a material rate of literal+lexical misses on real
+queries. If built, treat the embedder as an untrusted egress dependency
+(bounded payload/time, same pinning posture as web_read's HTTP leg).
