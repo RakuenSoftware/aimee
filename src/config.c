@@ -330,6 +330,7 @@ static const config_schema_entry_t config_schema[] = {
     {"require_aimee_git", SCHEMA_BOOL, 0},
     {"delegate_sandbox", SCHEMA_BOOL, 0},
     {"delegate_sandbox_image", SCHEMA_STRING, 0},
+    {"delegate_sandbox_package_access", SCHEMA_STRING, 0}, /* valid: proxy|off|gated|governance */
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
@@ -554,6 +555,12 @@ void config_kb_curator_defaults(config_t *cfg);
 /* Defined in config_skills.c. */
 int config_parse_skills(config_t *cfg, const cJSON *root);
 void config_computer_use_defaults(config_t *cfg);
+
+int config_sandbox_package_access_valid(const char *s)
+{
+   return s && (strcmp(s, "proxy") == 0 || strcmp(s, "off") == 0 || strcmp(s, "gated") == 0 ||
+                strcmp(s, "governance") == 0);
+}
 int config_parse_computer_use(config_t *cfg, const cJSON *root);
 
 static void config_set_defaults(config_t *cfg)
@@ -563,6 +570,8 @@ static void config_set_defaults(config_t *cfg)
    /* Defaults */
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
    snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", MODE_APPROVE);
+   snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
+            "proxy");
    snprintf(cfg->provider, sizeof(cfg->provider), "claude");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */
    cfg->coord_closet_enabled =
@@ -1241,6 +1250,15 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s",
                item->valuestring);
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_package_access");
+   if (cJSON_IsString(item) && config_sandbox_package_access_valid(item->valuestring))
+      snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
+               "%s", item->valuestring);
+   else if (cJSON_IsString(item)) /* present but not a valid mode (incl. "") — warn, keep default */
+      fprintf(stderr,
+              "aimee: config warning: delegate_sandbox_package_access: unknown value \"%s\" — "
+              "keeping default \"proxy\" (valid: proxy, off, gated, governance)\n",
+              item->valuestring);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
    if (cJSON_IsBool(item))

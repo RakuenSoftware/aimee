@@ -178,6 +178,13 @@ CFG_KEY_DESC = {
     "delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The "
     "server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an "
     "unreachable daemon means every delegate runs on the host (default off).",
+    "delegate_sandbox_package_access": "Runtime package-access policy for a `--network none` "
+    "delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside "
+    "socket); this selects how much: `proxy` (default) proxies package-manager fetches to any "
+    "host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy "
+    "(build-time installs + learned pre-bake only); `gated` host-allowlisted registries, "
+    "off-allowlist requires human approval; `governance` allowlist from a governance provider, "
+    "off-allowlist refused. Only meaningful when `delegate_sandbox` is on.",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
