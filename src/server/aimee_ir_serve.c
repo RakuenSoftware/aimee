@@ -58,6 +58,17 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
       ir.max_tokens = max_tokens_override;
       ir.has_max_tokens = 1;
    }
+   /* Match the legacy ingress, which defaults an absent temperature to 1.0 and
+    * always emits it (build_provider_body is fed jo_num(req, "temperature", 1.0)).
+    * Applied at BUILD time, like legacy -- not in the frontend parse, so the IR
+    * request itself stays protocol-neutral (an Anthropic-parsed and OpenAI-parsed
+    * copy of the same request remain equal). Without it the IR omits temperature
+    * when the client sends none, diverging from the legacy provider body. */
+   if (!ir.has_temperature)
+   {
+      ir.temperature = 1.0;
+      ir.has_temperature = 1;
+   }
    /* The upstream stream flag is the CALLER's decision, not the client's: a caller
     * that streams to the client may still want the upstream reply buffered so it can
     * police + replay it. Inheriting ir.stream from the request is what made the
