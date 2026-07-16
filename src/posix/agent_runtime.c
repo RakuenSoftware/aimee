@@ -370,46 +370,6 @@ static const char *default_exec_instructions =
     "- If you encounter an error, try to diagnose and fix it.\n"
     "- Do not ask for confirmation. Execute the task directly.\n";
 
-static cJSON *build_openai_assistant_message_from_xml_calls(parsed_response_t *parsed)
-{
-   cJSON *asst = cJSON_CreateObject();
-   cJSON *tool_calls = cJSON_CreateArray();
-   if (!asst || !tool_calls)
-   {
-      cJSON_Delete(asst);
-      cJSON_Delete(tool_calls);
-      return NULL;
-   }
-
-   cJSON_AddStringToObject(asst, "role", "assistant");
-   cJSON_AddNullToObject(asst, "content");
-   cJSON_AddItemToObject(asst, "tool_calls", tool_calls);
-
-   for (int i = 0; i < parsed->call_count; i++)
-   {
-      parsed_tool_call_t *call = &parsed->calls[i];
-      if (!call->id[0])
-         snprintf(call->id, sizeof(call->id), "xml_call_%d", i + 1);
-
-      cJSON *tc = cJSON_CreateObject();
-      cJSON *fn = cJSON_CreateObject();
-      if (!tc || !fn)
-      {
-         cJSON_Delete(tc);
-         cJSON_Delete(fn);
-         continue;
-      }
-      cJSON_AddStringToObject(tc, "id", call->id);
-      cJSON_AddStringToObject(tc, "type", "function");
-      cJSON_AddStringToObject(fn, "name", call->name);
-      cJSON_AddStringToObject(fn, "arguments", call->arguments ? call->arguments : "{}");
-      cJSON_AddItemToObject(tc, "function", fn);
-      cJSON_AddItemToArray(tool_calls, tc);
-   }
-
-   return asst;
-}
-
 int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
                               const char *system_prompt, const char *user_prompt, int max_tokens,
                               double temperature, agent_result_t *out);
@@ -1101,6 +1061,16 @@ native_provider_http:
 
       /* Parse response */
       parsed_response_t parsed;
+      /* XML tool-call rescue gate (models without native function-calling embed
+       * <tool_call> blocks in text). Computed up front because the IR parser now
+       * OWNS the rescue: rescue_mode<0 disables it, 0 rescues dialect calls, 1 also
+       * rescues bare JSON. ir_primary/n_rescued carry the parse outcome down to the
+       * rescue-policy step below. */
+      int rescue_enabled = !fb_agent.ablation.configured || fb_agent.ablation.rescue;
+      int allow_json_rescue = rescue_enabled ? agent_allows_json_content_rescue(&fb_agent) : 0;
+      int rescue_mode = rescue_enabled ? allow_json_rescue : -1;
+      int ir_primary = 0;
+      int n_rescued = 0;
       if (chatgpt)
       {
          agent_parse_response_responses(response_body, &parsed);
@@ -1113,9 +1083,11 @@ native_provider_http:
             aimee_wire_t rwire = anthropic ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
             /* IR is now the primary response parser for the JSON wires (default ON;
              * AIMEE_IR_RESPONSE_PATH=0 forces legacy). The legacy translators remain
-             * the automatic fallback if the IR cannot parse. */
-            int ir_primary = aimee_ir_response_path_enabled() &&
-                             agent_ir_parse_json_response(root, anthropic, &parsed) == 0;
+             * the automatic fallback if the IR cannot parse. The IR path also owns the
+             * XML rescue (via rescue_mode); the legacy fallback keeps its own below. */
+            ir_primary = aimee_ir_response_path_enabled() &&
+                         agent_ir_parse_json_response(root, anthropic, rescue_mode, &n_rescued,
+                                                      &parsed) == 0;
             if (!ir_primary)
             {
                if (anthropic)
@@ -1172,12 +1144,52 @@ native_provider_http:
       out->cache_write_tokens += parsed.cache_write_tokens;
       out->cache_read_tokens += parsed.cache_read_tokens;
 
-      /* XML tool-call fallback: models without native function-calling support
-       * may embed <tool_call>...</tool_call> blocks in their text response. */
-      int rescue_enabled = !fb_agent.ablation.configured || fb_agent.ablation.rescue;
-      int allow_json_rescue = rescue_enabled ? agent_allows_json_content_rescue(&fb_agent) : 0;
-      if (rescue_enabled && !parsed.is_tool_call && parsed.content &&
-          delegate_rescue_has_tool_calls_with_json(parsed.content, allow_json_rescue))
+      /* XML tool-call rescue: models without native function-calling embed
+       * <tool_call>...</tool_call> blocks in their text. When the IR was primary it
+       * ALREADY rescued -- the parser owns it now (aimee_ir_rescue_tool_calls) -- so
+       * parsed already carries any recovered calls and n_rescued reports the count.
+       * The legacy path (chatgpt wire + any IR fallback) keeps its own post-parse
+       * rescue in the else branch. */
+      if (ir_primary)
+      {
+         /* A FINAL text-only turn that smuggled a tool call (rescued from prose) is a
+          * policy violation: it should have answered, not called a tool. Detected via
+          * n_rescued instead of re-scanning the text. */
+         if (final_text_only_turn && n_rescued > 0)
+         {
+            const char *attempted_tool = (parsed.call_count > 0 && parsed.calls[0].name[0])
+                                             ? parsed.calls[0].name
+                                             : "XML tool_call block";
+            /* If the smuggled call was actually the respond tool, it IS a final
+             * answer -- strip it and finish successfully. */
+            if (inject_respond_tool && agent_tools_strip_delegate_respond(&parsed) == 1 &&
+                parsed.content && !liveness_is_degenerate_response(parsed.content))
+            {
+               agent_session_append_final_message(messages, parsed.content);
+               out->response = parsed.content;
+               parsed.content = NULL;
+               out->rescue_recoveries++;
+               out->success = 1;
+               agent_free_parsed_response(&parsed);
+               break;
+            }
+            if (agent_session_retry_final_tool_violation(messages, attempted_tool, &turn, &max_t,
+                                                         initial_max_t, &final_tool_retry_count,
+                                                         out->error, sizeof(out->error)))
+            {
+               agent_free_parsed_response(&parsed);
+               continue;
+            }
+            finish_final_tool_violation(out, agent, attempted_tool, parsed.content, last_tool_name,
+                                        last_tool_result, total_calls);
+            agent_free_parsed_response(&parsed);
+            break;
+         }
+         if (n_rescued > 0)
+            out->rescue_recoveries++;
+      }
+      else if (rescue_enabled && !parsed.is_tool_call && parsed.content &&
+               delegate_rescue_has_tool_calls_with_json(parsed.content, allow_json_rescue))
       {
          if (final_text_only_turn)
          {
@@ -1235,7 +1247,7 @@ native_provider_http:
                parsed.assistant_message = NULL;
             }
             if (!chatgpt && !anthropic)
-               parsed.assistant_message = build_openai_assistant_message_from_xml_calls(&parsed);
+               parsed.assistant_message = agent_build_openai_assistant_message_from_calls(&parsed);
             out->rescue_recoveries++;
          }
       }
@@ -1245,7 +1257,7 @@ native_provider_http:
       {
          if (parsed.assistant_message)
             cJSON_Delete(parsed.assistant_message);
-         parsed.assistant_message = build_openai_assistant_message_from_xml_calls(&parsed);
+         parsed.assistant_message = agent_build_openai_assistant_message_from_calls(&parsed);
       }
 
       if (final_text_only_turn && parsed.is_tool_call)

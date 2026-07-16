@@ -15,6 +15,15 @@
 
 /* Local copy of agent_free_parsed_response (agent_bridge.c) so the test stays
  * self-contained rather than linking the whole legacy bridge. Same semantics. */
+/* Stub the tool registry: the dialect rescue consults it only on bare-JSON/bracket
+ * paths, which these explicit <tool_call> cases do not hit -- same pattern as
+ * test_delegate_xml_fallback.c. */
+struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
+{
+   (void)tool_name;
+   return NULL;
+}
+
 void agent_free_parsed_response(parsed_response_t *p)
 {
    if (!p)
@@ -42,7 +51,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       parsed_response_t p;
-      int rc = agent_ir_parse_json_response(root, 1 /*anthropic*/, &p);
+      int rc = agent_ir_parse_json_response(root, 1 /*anthropic*/, -1, NULL, &p);
       assert(rc == 0);
       assert(p.is_tool_call == 1);
       assert(p.call_count == 1 && strcmp(p.calls[0].name, "bash") == 0);
@@ -73,7 +82,7 @@ int main(void)
       cJSON *root = cJSON_Parse(resp);
       assert(root);
       parsed_response_t p;
-      int rc = agent_ir_parse_json_response(root, 0 /*openai*/, &p);
+      int rc = agent_ir_parse_json_response(root, 0 /*openai*/, -1, NULL, &p);
       assert(rc == 0);
       assert(p.is_tool_call == 1 && p.call_count == 1);
       assert(strcmp(p.calls[0].name, "grep") == 0);
@@ -92,7 +101,7 @@ int main(void)
                          "{\"type\":\"text\",\"text\":\"done\"}]}";
       cJSON *root = cJSON_Parse(resp);
       parsed_response_t p;
-      assert(agent_ir_parse_json_response(root, 1, &p) == 0);
+      assert(agent_ir_parse_json_response(root, 1, -1, NULL, &p) == 0);
       assert(p.is_tool_call == 0 && p.content && strcmp(p.content, "done") == 0);
       assert(p.assistant_message == NULL);
       agent_free_parsed_response(&p);
@@ -104,9 +113,49 @@ int main(void)
    {
       cJSON *root = cJSON_CreateArray(); /* not an object; backend parse fails */
       parsed_response_t p;
-      assert(agent_ir_parse_json_response(root, 1, &p) == -1);
+      assert(agent_ir_parse_json_response(root, 1, -1, NULL, &p) == -1);
       cJSON_Delete(root);
       printf("  PASS: unparseable response returns -1 (legacy fallback)\n");
+   }
+
+   /* 5. XML rescue OWNED by the parser: a response with no native tool call but an
+    * embedded <tool_call> in text is rescued into a real tool call, n_rescued
+    * reports it, and (for openai) assistant_message is rebuilt from the call. */
+   {
+      const char *resp =
+          "{\"model\":\"m\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":"
+          "\"sure\\n<tool_call><name>bash</name><arguments>{\\\"cmd\\\":\\\"ls\\\"}</arguments>"
+          "</tool_call>\"}}]}";
+      cJSON *root = cJSON_Parse(resp);
+      assert(root);
+      parsed_response_t p;
+      int nr = -1;
+      /* rescue_mode 0 = rescue dialect calls */
+      assert(agent_ir_parse_json_response(root, 0, 0, &nr, &p) == 0);
+      assert(nr == 1);             /* one call rescued */
+      assert(p.is_tool_call == 1); /* now a tool call */
+      assert(p.call_count == 1 && strcmp(p.calls[0].name, "bash") == 0);
+      /* openai rescued turn: assistant_message rebuilt from the call (has tool_calls) */
+      assert(p.assistant_message && cJSON_GetObjectItem(p.assistant_message, "tool_calls"));
+      agent_free_parsed_response(&p);
+      cJSON_Delete(root);
+      printf("  PASS: parser owns XML rescue (text -> tool call, n_rescued reported)\n");
+   }
+
+   /* 6. rescue_mode < 0 disables the rescue: the same embedded <tool_call> stays as
+    * text, not a tool call. */
+   {
+      const char *resp =
+          "{\"model\":\"m\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":"
+          "\"<tool_call><name>bash</name><arguments>{}</arguments></tool_call>\"}}]}";
+      cJSON *root = cJSON_Parse(resp);
+      parsed_response_t p;
+      int nr = -1;
+      assert(agent_ir_parse_json_response(root, 0, -1 /*no rescue*/, &nr, &p) == 0);
+      assert(nr == 0 && p.is_tool_call == 0);
+      agent_free_parsed_response(&p);
+      cJSON_Delete(root);
+      printf("  PASS: rescue_mode<0 leaves embedded calls as text\n");
    }
 
    printf("agent-ir-parse: ok\n");
