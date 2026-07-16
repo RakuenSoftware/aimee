@@ -22,21 +22,6 @@ int aimee_ir_path_enabled(void)
    return 1;
 }
 
-int aimee_ir_response_path_enabled(void)
-{
-   /* DEFAULT-ON: the IR backend parsers are now the primary way a delegate turn's
-    * provider RESPONSE is parsed (proven live on .254 -- 191/191 response-parity
-    * matches across the anthropic + openai wires, 0 mismatches, after the legacy
-    * text-on-tool_use bug was fixed). An explicit setting wins; the legacy
-    * agent_parse_response_* translators remain as the automatic fallback on any IR
-    * parse failure, and still serve the responses/SSE (codex) wire, which the
-    * response shadow does not cover. Set AIMEE_IR_RESPONSE_PATH=0 to force legacy. */
-   const char *v = getenv("AIMEE_IR_RESPONSE_PATH");
-   if (v && v[0])
-      return v[0] != '0';
-   return 1;
-}
-
 int aimee_ir_stream_relay_enabled(void)
 {
    /* DEFAULT-OFF, gated SEPARATELY from AIMEE_IR_PATH (roundtable Q6: gate
