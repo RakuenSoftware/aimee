@@ -149,6 +149,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-ir \
                $(TESTPREFIX)/unit-test-ir-legacy-parity \
                $(TESTPREFIX)/unit-test-aimee-ir-rescue \
+               $(TESTPREFIX)/unit-test-agent-ir-parse \
                $(TESTPREFIX)/unit-test-ir-shadow-response \
                $(TESTPREFIX)/unit-test-shadow-mirror \
                $(TESTPREFIX)/unit-test-aimee-ir-metrics \
@@ -4230,4 +4231,14 @@ $(TESTPREFIX)/unit-test-ir-shadow-response: $(OBJDIR)/tests/test_ir_shadow_respo
 $(TESTPREFIX)/unit-test-shadow-mirror: $(OBJDIR)/tests/test_shadow_mirror.o \
                                        $(OBJDIR)/server/shadow_mirror.o \
                                        $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/tests/test_agent_ir_parse.o \
+                                        $(OBJDIR)/posix/agent_ir_parse.o \
+                                        $(OBJDIR)/server/aimee_backend_anthropic.o \
+                                        $(OBJDIR)/server/aimee_backend_openai.o \
+                                        $(OBJDIR)/server/aimee_ir.o \
+                                        $(OBJDIR)/server/aimee_ir_metrics.o \
+                                        $(OBJDIR)/server/tool_call_args.o \
+                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

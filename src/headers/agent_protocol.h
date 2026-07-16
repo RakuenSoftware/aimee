@@ -78,6 +78,12 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
 void agent_parse_response_openai(struct cJSON *root, parsed_response_t *out);
 void agent_parse_response_responses(const char *body, parsed_response_t *out);
 void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
+
+/* Parse a provider JSON response through the canonical IR and bridge it into a
+ * parsed_response_t (the default response path; see aimee_ir_response_path_enabled).
+ * `anthropic` selects the anthropic vs openai backend parser. Returns 0 on success,
+ * -1 if the IR could not parse (caller falls back to the legacy translators). */
+int agent_ir_parse_json_response(struct cJSON *root, int anthropic, parsed_response_t *out);
 /* Parse a Gemini generateContent response. Tracks cachedContentTokenCount as cache_read_tokens. */
 void agent_free_parsed_response(parsed_response_t *p);
 

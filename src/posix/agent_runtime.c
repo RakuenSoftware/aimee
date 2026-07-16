@@ -6,6 +6,10 @@
 #include "aimee.h"
 #include "agent.h"
 #include "aimee_ir_shadow.h"
+#include "aimee_backend.h"  /* anthropic_backend_parse / openai_backend_parse */
+#include "aimee_ir.h"       /* aimee_response_t + block accessors */
+#include "aimee_ir_serve.h" /* aimee_ir_response_path_enabled */
+#include "tool_call_args.h" /* assistant_message arg normalize/sanitize */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
@@ -1106,20 +1110,40 @@ native_provider_http:
          cJSON *root = cJSON_Parse(response_body);
          if (root)
          {
-            if (anthropic)
-               agent_parse_response_anthropic(root, &parsed);
-            else
-               agent_parse_response_openai(root, &parsed);
-            /* Shadow (response side): parse the SAME response JSON through the IR
-             * backend parser and record whether it agrees with the legacy result.
-             * Off unless AIMEE_IR_SHADOW is set; never changes the turn -- the
-             * legacy `parsed` is what runs. This is the response-side twin of the
-             * request-body shadow, and the evidence that must show parity before
-             * the response translators can be retired. Only anthropic/openai are
-             * comparable here; the responses/SSE wire above is not JSON. */
+            aimee_wire_t rwire = anthropic ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
+            /* IR is now the primary response parser for the JSON wires (default ON;
+             * AIMEE_IR_RESPONSE_PATH=0 forces legacy). The legacy translators remain
+             * the automatic fallback if the IR cannot parse. */
+            int ir_primary = aimee_ir_response_path_enabled() &&
+                             agent_ir_parse_json_response(root, anthropic, &parsed) == 0;
+            if (!ir_primary)
+            {
+               if (anthropic)
+                  agent_parse_response_anthropic(root, &parsed);
+               else
+                  agent_parse_response_openai(root, &parsed);
+            }
+            /* Shadow (response side): keep comparing LEGACY vs IR even now that IR is
+             * primary -- run the legacy parse into a throwaway and compare, so the
+             * parity signal stays meaningful (not IR-vs-IR). Off unless
+             * AIMEE_IR_SHADOW is set; never changes the turn. When IR is NOT primary,
+             * `parsed` already holds the legacy result and is compared directly. */
             if (aimee_ir_shadow_enabled())
-               aimee_ir_shadow_compare_response(
-                   &parsed, root, anthropic ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT);
+            {
+               if (ir_primary)
+               {
+                  parsed_response_t legacy_p;
+                  memset(&legacy_p, 0, sizeof(legacy_p));
+                  if (anthropic)
+                     agent_parse_response_anthropic(root, &legacy_p);
+                  else
+                     agent_parse_response_openai(root, &legacy_p);
+                  aimee_ir_shadow_compare_response(&legacy_p, root, rwire);
+                  agent_free_parsed_response(&legacy_p);
+               }
+               else
+                  aimee_ir_shadow_compare_response(&parsed, root, rwire);
+            }
             cJSON_Delete(root);
          }
          else
