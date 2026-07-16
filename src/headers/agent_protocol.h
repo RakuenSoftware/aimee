@@ -94,6 +94,16 @@ void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
 int agent_ir_parse_json_response(struct cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
                                  parsed_response_t *out);
 
+/* Parse a Responses/SSE (codex) reply through the canonical IR and bridge it into a
+ * parsed_response_t. Extracts the response object from the SSE `body` (via
+ * agent_responses_sse_response_object), parses it with responses_backend_parse, and
+ * owns the XML rescue (rescue_mode: <0 skips; 0 dialect calls; 1 also bare JSON;
+ * *n_rescued receives the count). assistant_message for multi-turn replay is the
+ * response's output-item array (function_call items carry call_id). Returns 0 on
+ * success, -1 if the IR could not parse. */
+int agent_ir_parse_responses(const char *body, int rescue_mode, int *n_rescued,
+                             parsed_response_t *out);
+
 /* Build an OpenAI assistant message ({role, content:null, tool_calls}) from parsed
  * calls -- used to make a replayable turn after an XML tool-call rescue. */
 struct cJSON *agent_build_openai_assistant_message_from_calls(parsed_response_t *parsed);

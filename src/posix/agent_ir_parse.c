@@ -80,6 +80,8 @@ cJSON *agent_build_openai_assistant_message_from_calls(parsed_response_t *parsed
  * legacy did) and openai rebuilds it from the recovered calls.
  *
  * Returns 0 on success; -1 if the IR could not parse (caller falls back to legacy). */
+static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out);
+
 int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
                                  parsed_response_t *out)
 {
@@ -107,42 +109,8 @@ int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, in
    if (n_rescued)
       *n_rescued = rescued;
 
-   if (ir.model)
-      snprintf(out->model, sizeof(out->model), "%s", ir.model);
-   if (ir.raw_stop_reason)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", ir.raw_stop_reason);
-   out->prompt_tokens = (int)ir.usage_in;
-   out->completion_tokens = (int)ir.usage_out;
-   out->cache_write_tokens = (int)ir.usage_cache_write;
-   out->cache_read_tokens = (int)ir.usage_cache_read;
-
-   /* content: concatenated TEXT blocks (THINKING is excluded by the IR accessor). */
-   size_t need = 1;
-   for (int i = 0; i < ir.n_content; i++)
-      if (ir.content[i].type == AIMEE_BLK_TEXT && ir.content[i].text)
-         need += strlen(ir.content[i].text);
-   if (need > 1)
-   {
-      out->content = malloc(need);
-      if (out->content)
-         aimee_ir_response_text(&ir, out->content, need);
-   }
-
-   /* tool calls: id / name / arguments (arguments as a JSON string, like legacy). */
-   for (int i = 0; i < ir.n_content && out->call_count < AGENT_MAX_TOOL_CALLS; i++)
-   {
-      const aimee_block_t *b = &ir.content[i];
-      if (b->type != AIMEE_BLK_TOOL_USE)
-         continue;
-      out->is_tool_call = 1;
-      parsed_tool_call_t *c = &out->calls[out->call_count++];
-      if (b->tool_id)
-         snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
-      if (b->tool_name)
-         snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
-      char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
-      c->arguments = args ? args : strdup("{}");
-   }
+   /* model, stop reason, usage, TEXT content, and TOOL_USE calls (shared bridge). */
+   ir_bridge_common(&ir, out);
 
    /* assistant_message for multi-turn replay. When a rescue fired the raw response
     * carried the calls as prose, so it cannot be replayed: anthropic drops it (as
@@ -179,5 +147,94 @@ int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, in
    }
 
    aimee_response_free(&ir);
+   return 0;
+}
+
+/* Shared bridge from a parsed IR response into parsed_response_t: model, stop reason,
+ * usage, concatenated TEXT content, and TOOL_USE calls. assistant_message is left to
+ * the caller (it is wire-specific). */
+static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out)
+{
+   if (ir->model)
+      snprintf(out->model, sizeof(out->model), "%s", ir->model);
+   if (ir->raw_stop_reason)
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", ir->raw_stop_reason);
+   out->prompt_tokens = (int)ir->usage_in;
+   out->completion_tokens = (int)ir->usage_out;
+   out->cache_write_tokens = (int)ir->usage_cache_write;
+   out->cache_read_tokens = (int)ir->usage_cache_read;
+
+   size_t need = 1;
+   for (int i = 0; i < ir->n_content; i++)
+      if (ir->content[i].type == AIMEE_BLK_TEXT && ir->content[i].text)
+         need += strlen(ir->content[i].text);
+   if (need > 1)
+   {
+      out->content = malloc(need);
+      if (out->content)
+         aimee_ir_response_text(ir, out->content, need);
+   }
+
+   for (int i = 0; i < ir->n_content && out->call_count < AGENT_MAX_TOOL_CALLS; i++)
+   {
+      const aimee_block_t *b = &ir->content[i];
+      if (b->type != AIMEE_BLK_TOOL_USE)
+         continue;
+      out->is_tool_call = 1;
+      parsed_tool_call_t *c = &out->calls[out->call_count++];
+      if (b->tool_id)
+         snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
+      if (b->tool_name)
+         snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
+      char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
+      c->arguments = args ? args : strdup("{}");
+   }
+}
+
+int agent_ir_parse_responses(const char *body, int rescue_mode, int *n_rescued,
+                             parsed_response_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   if (n_rescued)
+      *n_rescued = 0;
+
+   /* The responses wire is SSE, not a single JSON object: extract the response object
+    * (output items + usage) the same way the shadow does, then parse it via the IR. */
+   cJSON *robj = agent_responses_sse_response_object(body);
+   if (!robj)
+      return -1;
+
+   aimee_response_t ir;
+   memset(&ir, 0, sizeof(ir));
+   char err[128] = "";
+   if (responses_backend_parse(robj, &ir, err, sizeof err) != 0)
+   {
+      aimee_response_free(&ir);
+      cJSON_Delete(robj);
+      return -1;
+   }
+
+   int rescued = 0;
+   if (rescue_mode >= 0)
+      rescued = aimee_ir_rescue_tool_calls(&ir, rescue_mode);
+   if (n_rescued)
+      *n_rescued = rescued;
+
+   ir_bridge_common(&ir, out);
+
+   /* assistant_message for multi-turn replay is the output-item array itself: the
+    * turn loop appends the function_call items (matched by call_id) to the next
+    * request's `input`. Matches the legacy parser's collected_output. When a rescue
+    * fired, the calls came from prose (not native output items), so it cannot replay
+    * -- leave it NULL, as the anthropic rescue path does. */
+   if (out->is_tool_call && rescued == 0)
+   {
+      cJSON *output = cJSON_GetObjectItemCaseSensitive(robj, "output");
+      if (output && cJSON_IsArray(output))
+         out->assistant_message = cJSON_Duplicate(output, 1);
+   }
+
+   aimee_response_free(&ir);
+   cJSON_Delete(robj);
    return 0;
 }
