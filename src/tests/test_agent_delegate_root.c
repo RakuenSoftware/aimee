@@ -82,6 +82,61 @@ void test_parent_write_guard_readonly_pipeline(void)
    printf("  PASS: test_parent_write_guard_readonly_pipeline\n");
 }
 
+/* Regression: a wfe delegate runs on a pooled worker thread and inherits the
+ * process-global parent-write guard left by a PRIOR run (only the primary chat
+ * path sets it per-run). If that stale guard's read-only root encloses the
+ * delegate's OWN worktree while its write root points at a DIFFERENT worktree, a
+ * native write_file into the delegate's worktree is wrongly rejected as "parent
+ * read-only" — the implement delegate commits an empty tree (a no-op round).
+ * wfe_live_delegate_run now clears the guard before running; this pins the
+ * clear-unblocks-the-write behavior the fix relies on. */
+void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void)
+{
+   char root[512];
+   snprintf(root, sizeof(root), "%s/aimee_stale_guard_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+
+   /* Two sibling worktrees under a common read-only root, exactly the shape a
+    * prior primary session (pinned to worktree A) leaves behind when a wfe
+    * delegate then runs in worktree B. */
+   char wt_a[512], wt_b[512];
+   snprintf(wt_a, sizeof(wt_a), "%s/.aimee/worktrees/sessionA/main", root);
+   snprintf(wt_b, sizeof(wt_b), "%s/.aimee/worktrees/wfeB/main", root);
+   assert(platform_mkdir_p(wt_a, 0700) == 0 || access(wt_a, F_OK) == 0);
+   assert(platform_mkdir_p(wt_b, 0700) == 0 || access(wt_b, F_OK) == 0);
+
+   /* Stale guard from the prior session: read-only root = the common parent,
+    * write root = worktree A. */
+   agent_tools_parent_write_guard_set(root, wt_a);
+
+   /* The wfe delegate, running in worktree B, tries to write there. Under the
+    * stale guard this is blocked (B is under the ro root but not under A). */
+   run_cmd_set_cwd(wt_b);
+   char *blocked = tool_write_file("new_impl.txt", "codex output\n");
+   run_cmd_set_cwd(NULL);
+   assert(blocked != NULL);
+   assert(strstr(blocked, "blocked") != NULL); /* rejected as parent read-only */
+   assert(access("/dev/null", F_OK) == 0);     /* sanity: fs reachable */
+   char wrote_path[600];
+   snprintf(wrote_path, sizeof(wrote_path), "%s/new_impl.txt", wt_b);
+   assert(access(wrote_path, F_OK) != 0); /* nothing landed */
+   free(blocked);
+
+   /* The fix: clear the stale guard (also restores write capability). */
+   agent_tools_parent_write_guard_clear();
+
+   run_cmd_set_cwd(wt_b);
+   char *ok = tool_write_file("new_impl.txt", "codex output\n");
+   run_cmd_set_cwd(NULL);
+   assert(ok != NULL);
+   assert(strstr(ok, "blocked") == NULL); /* now allowed */
+   assert(access(wrote_path, F_OK) == 0); /* the write landed in worktree B */
+
+   free(ok);
+   platform_test_rmrf(root);
+   printf("  PASS: test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks\n");
+}
+
 void test_parent_write_guard_readonly_large_find(void)
 {
    char root[512];

@@ -22,6 +22,7 @@
 
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "agent_tools.h"
 #include "agent_types.h"
 #include "cJSON.h"
 #include "delegate_role.h"
@@ -121,6 +122,22 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
     * uniformly by name; an unroutable pick fails here and the block's retry
     * loop re-rolls a different agent. */
    run_cmd_set_cwd(workdir);
+
+   /* Reset the process-global write guards before the delegate runs. These are
+    * set per-run ONLY by the primary chat path (server_compute.c, which sets
+    * them unconditionally precisely "so a pooled worker thread never inherits a
+    * prior delegate's capability"). A wfe delegate runs on a pooled worker
+    * thread and this path never touched them, so it inherited whatever a prior
+    * run left: a primary session's parent-write guard whose read-only root
+    * encloses THIS worktree (native writes rejected as "parent worktree is
+    * read-only"), or a prior read-only delegate's capability=0 (all native file
+    * writes rejected). Either way a producing delegate that edits via file tools
+    * committed an EMPTY tree — a no-op round — while bash-writers happened to
+    * slip past the same guard, so convergence silently depended on each model's
+    * tool preferences. A producing wfe delegate is write-capable and its
+    * worktree (pinned as cwd above) is the write boundary; clear the stale guard.
+    * clear() also restores write-capability. */
+   agent_tools_parent_write_guard_clear();
    agent_result_t res;
    memset(&res, 0, sizeof(res));
    int rc;

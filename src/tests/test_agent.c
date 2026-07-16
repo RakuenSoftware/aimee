@@ -49,6 +49,7 @@ int agent_execute_cli_shell_driver(const agent_t *agent, const char *driver_name
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_delegate_bash_cancel_kills_running_tool(void);
 void test_parent_write_guard_readonly_pipeline(void);
+void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
 void test_parent_write_guard_readonly_large_find(void);
 void test_parent_write_guard_allows_mkdir_in_delegate_worktree(void);
 void test_parent_write_guard_allows_workspace_file_ops(void);
@@ -2601,6 +2602,7 @@ int main(void)
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();
+   test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks();
    test_parent_write_guard_allows_mkdir_in_delegate_worktree();
    test_parent_write_guard_allows_workspace_file_ops();
    test_parent_write_guard_allows_workspace_chain();
