@@ -115,3 +115,39 @@ retiring `old_string` a wider confirmation is warranted — more delegates
 (incl. the smallest local models), several runs to bound variance, and a look at
 the MiniMax whole-func dip — but the direction is now clearly positive, not the
 negative the small corpus suggested.
+
+---
+
+## CONFIRMATION — 3 delegates × 3 runs
+
+Wider run to bound variance and test the MiniMax whole-func dip. Same 19-task
+realistic corpus, max 4 turns.
+
+| model         | str pass@k | hl pass@k | str tok | hl tok | gate |
+|---------------|-----------:|----------:|--------:|-------:|:----:|
+| mimo-v2.5-pro |    70%     |    96%    |   416   |  350   | PASS |
+| MiniMax-M3    |    72%     |    86%    |   314   |   98   | PASS |
+| codex         |   100%     |   100%    |   313   |   62   | PASS |
+
+**Gate PASSES on all three delegates.** Findings that held up across 3 runs:
+- **collision is the consistent, decisive win** — str_replace pass@k 33–40% (100%
+  only for codex), hashline 100% everywhere, at ~5–15× fewer tokens.
+- **token savings are large and consistent** even where str_replace also succeeds
+  (codex: hashline 62 vs 313 tok — 5× fewer — at identical 100% pass@k).
+- **the MiniMax whole-func regression is real, not noise** (pass@k 87% → 53%
+  across 3 runs): the smaller model fumbles multi-line anchored ranges. This is
+  the one place hashline loses on success rate, and it points at a concrete
+  follow-up — whole-symbol edits likely want `edit_symbol` (which resolves the
+  span server-side) rather than a hand-built `replace_range`, and/or a few-shot
+  range example in the schema.
+- **drift** recovered well (67–93% → 93–100%) thanks to the re-anchor loop;
+  content-preserving insertions still slightly favor str_replace on cost.
+
+### P5 verdict
+The Part I ship criterion is met on the available delegates: hashline ≥
+str_replace pass@k and net token-negative on every model, strictly better on the
+open-weight delegates (mimo, MiniMax). The remaining reservation is the MiniMax
+whole-func dip; addressing whole-symbol edits via `edit_symbol` before removing
+`old_string` is the prudent sequence. Note the roster excludes the very smallest
+local models (the population the proposal predicts gains most) — `kimi-k2.7-code`
+was unavailable throughout (provider billing quota exhausted, not a code fault).
