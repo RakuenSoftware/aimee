@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "aimee_home.h"
 #include "delegate_backend_docker.h"
 
 /* Forward decls — definitions live further down with the rest of the
@@ -252,6 +253,19 @@ static void test_acquire_creates_and_starts_container(void)
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
 
+   /* Slice 6: the backend binds aimee-server's UDS only when it exists on disk.
+    * Point aimee_home at a temp dir and plant a socket file there so the create
+    * argv includes the socket channel. (stat() only checks existence — a plain
+    * file stands in for the UDS.) */
+   char tmphome[] = "/tmp/aimee-deleg-sock-XXXXXX";
+   char sockpath[512] = "";
+   assert(mkdtemp(tmphome) != NULL);
+   setenv("AIMEE_HOME", tmphome, 1);
+   snprintf(sockpath, sizeof(sockpath), "%s/aimee-http.sock", tmphome);
+   FILE *sf = fopen(sockpath, "w");
+   assert(sf != NULL);
+   fclose(sf);
+
    delegate_backend_config_t cfg = {0};
    cfg.image = "ubuntu:22.04";
    void *state = NULL;
@@ -265,6 +279,13 @@ static void test_acquire_creates_and_starts_container(void)
     * socket is NEVER bind-mounted in (that would be host-root for the delegate). */
    assert(create_argv_has("--network") && create_argv_has("none"));
    assert(!create_argv_has("docker.sock"));
+   /* The delegate's ONE outward channel: aimee-server's UDS is bound in and the
+    * in-container `aimee` CLI is pointed at it (so `aimee git_commit` etc. work). */
+   assert(create_argv_has("aimee-http.sock"));
+   assert(create_argv_has("AIMEE_API_ENDPOINT=unix:/run/aimee/aimee-http.sock"));
+   unlink(sockpath);
+   unsetenv("AIMEE_HOME");
+   rmdir(tmphome);
 
    /* release(hibernate=0) → docker rm -f → flag removed. */
    b->release(b, state, 0);
