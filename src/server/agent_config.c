@@ -454,6 +454,15 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
  * caller's buffer first and only then publishes under the lock. */
 static agent_config_t g_agent_config_cache;
 static struct timespec g_agent_config_mtime;
+/* mtime alone is not a safe cache key. It is not monotonic and not always
+ * distinct: a rewritten agents.json can land with a timestamp equal to (or
+ * older than) the cached one, and the cache then serves stale content forever.
+ * Observed live on the tiered appliance filesystem, where a freshly installed
+ * agents.json arrived with an mtime ~9h in the past and /v1/agents kept failing
+ * until the file was touched. Size and inode are free from the same stat() and
+ * make an in-place rewrite detectable. */
+static off_t g_agent_config_size;
+static ino_t g_agent_config_ino;
 static int g_agent_config_cached;
 static pthread_mutex_t g_agent_config_cache_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -479,6 +488,24 @@ static int agent_config_mtime_eq(const struct timespec *a, const struct timespec
    return a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec;
 }
 
+/* A cache hit requires the file to look identical on every cheap axis stat()
+ * gives us: same mtime, same size, same inode. mtime alone is spoofable by a
+ * same-timestamp rewrite (see g_agent_config_size). */
+static int agent_config_stat_eq(const struct stat *st)
+{
+   struct timespec mt = agent_config_stat_mtime(st);
+   return agent_config_mtime_eq(&mt, &g_agent_config_mtime) && st->st_size == g_agent_config_size &&
+          st->st_ino == g_agent_config_ino;
+}
+
+/* Record the identity of the file whose parsed contents are now cached. */
+static void agent_config_stat_remember(const struct stat *st)
+{
+   g_agent_config_mtime = agent_config_stat_mtime(st);
+   g_agent_config_size = st->st_size;
+   g_agent_config_ino = st->st_ino;
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -491,9 +518,8 @@ int agent_load_config(agent_config_t *cfg)
       struct stat st;
       if (stat(path, &st) == 0)
       {
-         struct timespec mt = agent_config_stat_mtime(&st);
          pthread_mutex_lock(&g_agent_config_cache_lock);
-         int hit = g_agent_config_cached && agent_config_mtime_eq(&mt, &g_agent_config_mtime);
+         int hit = g_agent_config_cached && agent_config_stat_eq(&st);
          if (hit)
             memcpy(cfg, &g_agent_config_cache, sizeof(*cfg));
          pthread_mutex_unlock(&g_agent_config_cache_lock);
@@ -969,7 +995,7 @@ int agent_load_config(agent_config_t *cfg)
       {
          pthread_mutex_lock(&g_agent_config_cache_lock);
          memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
-         g_agent_config_mtime = agent_config_stat_mtime(&st);
+         agent_config_stat_remember(&st);
          g_agent_config_cached = 1;
          pthread_mutex_unlock(&g_agent_config_cache_lock);
       }
@@ -1196,7 +1222,7 @@ int agent_save_config(const agent_config_t *cfg)
       {
          pthread_mutex_lock(&g_agent_config_cache_lock);
          memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
-         g_agent_config_mtime = agent_config_stat_mtime(&st);
+         agent_config_stat_remember(&st);
          g_agent_config_cached = 1;
          pthread_mutex_unlock(&g_agent_config_cache_lock);
       }

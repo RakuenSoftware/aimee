@@ -2414,6 +2414,74 @@ static void test_session_isolation_guard(void)
    printf("session_isolation guard (Layer 2) OK\n");
 }
 
+/* A rewritten agents.json whose mtime did not advance must still be seen.
+ * mtime alone is not a safe cache key: it is neither monotonic nor guaranteed
+ * distinct across a rewrite. Observed live on the appliance's tiered
+ * filesystem, where a reinstalled agents.json landed with an mtime ~9h in the
+ * past and every /v1/agents request kept failing (502) and /v1/agent/list kept
+ * returning an empty array until the file was touched. Size+inode come free
+ * from the same stat() and make the rewrite detectable. */
+static void test_agent_config_cache_detects_same_mtime_rewrite(void)
+{
+   struct stat st;
+   const char *path = agent_config_path();
+
+   /* The suite runs with AIMEE_NO_CACHE=1, which disables the cache path
+    * entirely. This test is ABOUT that path, so turn caching back on for the
+    * duration -- otherwise it passes without exercising anything. */
+   unsetenv("AIMEE_NO_CACHE");
+
+   {
+      FILE *f = fopen(path, "w");
+      assert(f != NULL);
+      fputs("{\"agents\":[{\"name\":\"before\",\"provider\":\"anthropic\","
+            "\"model\":\"m\",\"roles\":[\"code\"]}]}\n",
+            f);
+      fclose(f);
+   }
+
+   agent_config_t first;
+   assert(agent_load_config(&first) == 0);
+   assert(first.agent_count == 1);
+   assert(agent_find(&first, "before") != NULL);
+   assert(stat(path, &st) == 0);
+   struct timespec pinned = st.st_mtim;
+
+   /* Rewrite with different content, then pin the mtime back to what the cache
+    * already saw -- the exact situation a coarse/non-monotonic filesystem
+    * produces on its own. */
+   {
+      FILE *f = fopen(path, "w");
+      assert(f != NULL);
+      fputs("{\"agents\":[{\"name\":\"after_one\",\"provider\":\"anthropic\","
+            "\"model\":\"m\",\"roles\":[\"code\"]},"
+            "{\"name\":\"after_two\",\"provider\":\"anthropic\","
+            "\"model\":\"m\",\"roles\":[\"code\"]}]}\n",
+            f);
+      fclose(f);
+   }
+   {
+      struct timespec times[2];
+      times[0] = pinned; /* atime */
+      times[1] = pinned; /* mtime: rewind to the cached value */
+      assert(utimensat(AT_FDCWD, path, times, 0) == 0);
+      assert(stat(path, &st) == 0);
+      assert(st.st_mtim.tv_sec == pinned.tv_sec && st.st_mtim.tv_nsec == pinned.tv_nsec);
+   }
+
+   /* The cache must NOT hand back the stale single-agent config. */
+   agent_config_t second;
+   assert(agent_load_config(&second) == 0);
+   assert(second.agent_count == 2);
+   assert(agent_find(&second, "after_one") != NULL);
+   assert(agent_find(&second, "after_two") != NULL);
+   assert(agent_find(&second, "before") == NULL);
+
+   unlink(path);
+   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0); /* restore suite default */
+   printf("  PASS: test_agent_config_cache_detects_same_mtime_rewrite\n");
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -2453,6 +2521,7 @@ int main(void)
    test_request_creds_snapshot_carries_vault_principal();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
+   test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
    test_local_synth_not_masked_by_tmux_codex();
    test_provider_cli_shell_exec_uses_argv_not_shell();
