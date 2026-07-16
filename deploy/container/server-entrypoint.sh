@@ -120,6 +120,29 @@ webchat_start
 # or fails the server start, and runs as the same 'aimee' user that owns the
 # install prefix ($AIMEE_HOME/.npm-global). The lazy install on first setup still
 # covers it if this hasn't finished yet.
+# Delegate sandbox: when the host Docker socket is bind-mounted in (so aimee-server
+# can spawn per-delegate containers), grant the unprivileged 'aimee' user the
+# socket's group. runuser re-initialises supplementary groups from /etc/group via
+# initgroups(), so a container `--group-add <gid>` is dropped for the server child
+# unless 'aimee' is actually a member in /etc/group. Without this the docker backend
+# is INERT and delegates silently run on the HOST (see the delegate-sandbox posture
+# log). Root here; the runuser calls below then pick the group up.
+for _dsock in /var/run/docker.sock /run/docker.sock; do
+    [ -S "$_dsock" ] || continue
+    _dgid=$(stat -c %g "$_dsock" 2>/dev/null) || continue
+    { [ -n "$_dgid" ] && [ "$_dgid" != 0 ]; } || continue
+    _dgrp=$(getent group "$_dgid" | cut -d: -f1)
+    if [ -z "$_dgrp" ]; then
+        _dgrp=dockerhost
+        groupadd -g "$_dgid" "$_dgrp" 2>/dev/null || true
+    fi
+    if ! id -nG aimee 2>/dev/null | tr ' ' '\n' | grep -qx "$_dgrp"; then
+        usermod -aG "$_dgrp" aimee 2>/dev/null || true
+    fi
+    log "delegate sandbox: granted 'aimee' the docker socket group ($_dgrp/$_dgid)"
+    break
+done
+
 log "pre-warming server-hosted OAuth CLIs (background)"
 runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
