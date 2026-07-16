@@ -1131,6 +1131,7 @@ cli-v1-routes-check:
 # `aimee help <cmd>` cannot answer "Unknown command" for a command that works.
 cli-help-coverage-check:
 	@python3 ../scripts/check-cli-help-coverage.py
+	@python3 ../scripts/check-schema-alter-order.py
 
 # CI gate: every kb /v1/intelligence/* route is surfaced to the thin client via
 # an aimee-server dispatch handler (or explicitly marked kb-direct), so no kb
