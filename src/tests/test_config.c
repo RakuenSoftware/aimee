@@ -2212,6 +2212,26 @@ int main(void)
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
 
+      /* Local kb; all roles local at the CPU tier => the pre-baked llm-cpu profile
+       * (aimee-llm-cpu image), NOT the download "llm" profile. Same aimee-llm URL. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
+      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "cpu");
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
+      snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") == NULL); /* not the GPU profile */
+      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
+
+      /* A local role with an unset tier resolves to cpu, so it also takes llm-cpu. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
+
       /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
       memset(&cfg, 0, sizeof(cfg));
       snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "remote");
