@@ -511,8 +511,8 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
    {
       dstr_t c;
       dstr_init(&c);
-      const char *cwd = (wd && cJSON_IsString(wd) && wd->valuestring[0]) ? wd->valuestring
-                                                                         : run_cmd_get_cwd();
+      const char *cwd =
+          (wd && cJSON_IsString(wd) && wd->valuestring[0]) ? wd->valuestring : run_cmd_get_cwd();
       if (cwd && cwd[0])
       {
          dstr_append_str(&c, "cd '");
