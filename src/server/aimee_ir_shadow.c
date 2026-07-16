@@ -158,8 +158,21 @@ void aimee_ir_shadow_compare_response(const struct parsed_response *legacy, cons
       return;
    }
 
-   char ir_text[8192];
-   aimee_ir_response_text(&ir, ir_text, sizeof(ir_text));
+   /* Size the buffer to the full concatenated TEXT rather than a fixed 8 KB: a
+    * fixed buffer truncated the IR text on long responses and every response longer
+    * than the buffer was a FALSE mismatch (legacy content full-length vs IR text cut
+    * at the cap). Sum the TEXT blocks and allocate exactly. */
+   size_t ir_text_cap = 1;
+   for (int i = 0; i < ir.n_content; i++)
+      if (ir.content[i].type == AIMEE_BLK_TEXT && ir.content[i].text)
+         ir_text_cap += strlen(ir.content[i].text);
+   char *ir_text = malloc(ir_text_cap);
+   if (!ir_text)
+   {
+      aimee_response_free(&ir);
+      return;
+   }
+   aimee_ir_response_text(&ir, ir_text, ir_text_cap);
    int ir_has_tool = aimee_ir_response_has_tool_use(&ir);
 
    int same = (legacy->is_tool_call ? 1 : 0) == (ir_has_tool ? 1 : 0) &&
@@ -183,6 +196,7 @@ void aimee_ir_shadow_compare_response(const struct parsed_response *legacy, cons
                  strlen(ir_text));
       }
    }
+   free(ir_text);
    aimee_response_free(&ir);
 }
 

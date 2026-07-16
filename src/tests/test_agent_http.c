@@ -476,6 +476,30 @@ static void test_parse_response_captures_provider_model(void)
    printf("parse_response_captures_provider_model OK\n");
 }
 
+/* Regression: an Anthropic response can carry BOTH text and a tool_use in the same
+ * turn (prose, then a tool call). The legacy parser used to drop the text whenever
+ * stop_reason was tool_use -- a real bug the canonical IR did not have, which the
+ * shadow flagged as ir_resp mismatches on live traffic. The text must survive
+ * alongside the tool call. */
+static void test_parse_response_keeps_text_with_tool_use(void)
+{
+   const char *ant =
+       "{\"model\":\"m\",\"stop_reason\":\"tool_use\",\"content\":["
+       "{\"type\":\"text\",\"text\":\"Let me check that.\"},"
+       "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"grep\",\"input\":{\"q\":\"x\"}}]}";
+   cJSON *root = cJSON_Parse(ant);
+   assert(root != NULL);
+   parsed_response_t p;
+   memset(&p, 0, sizeof(p));
+   agent_parse_response_anthropic(root, &p);
+   assert(p.is_tool_call == 1);
+   assert(p.call_count == 1 && strcmp(p.calls[0].name, "grep") == 0);
+   assert(p.content && strcmp(p.content, "Let me check that.") == 0); /* text NOT dropped */
+   agent_free_parsed_response(&p);
+   cJSON_Delete(root);
+   printf("parse_response_keeps_text_with_tool_use OK\n");
+}
+
 static void test_delegate_rescue_parses_mistral_bracket(void)
 {
    parsed_response_t parsed;
@@ -956,6 +980,7 @@ int main(void)
    test_agent_config_recommended_sampling_roundtrip();
    test_parse_response_openai_sanitizes_invalid_tool_arguments();
    test_parse_response_captures_provider_model();
+   test_parse_response_keeps_text_with_tool_use();
    test_delegate_rescue_parses_mistral_bracket();
    test_delegate_rescue_parses_fenced_json();
    test_delegate_rescue_detects_invoke_markup();
