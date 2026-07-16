@@ -171,9 +171,10 @@ credentials live in the server's **sealed vault**; see
   `ssh://…` or `git@host:owner/repo.git` URL (e.g. a corporate Bitbucket) now
   actually uses that key, instead of being silently rewritten to HTTPS. git runs
   with `GIT_SSH_COMMAND` forcing `BatchMode=yes, ConnectTimeout=5,
-  StrictHostKeyChecking=accept-new`: trust-on-first-use appends the remote's
-  **public** host key to `~/.ssh/known_hosts` on first contact (and verifies it
-  strictly thereafter); the private key still never leaves the in-memory
+  StrictHostKeyChecking=accept-new`: trust-on-first-use records the remote's
+  **public** host key on first contact (and verifies it strictly thereafter) in
+  a **per-principal** `known_hosts` under the sealed tmpfs runtime dir, not the
+  shared `~/.ssh/known_hosts`; the private key still never leaves the in-memory
   ssh-agent. The setup wizard's Connection step now picks **one** auth method
   (OAuth sign-in / access token / SSH key) and shows only that method's fields,
   and the Projects page's duplicated inline auth UI is replaced with a single

@@ -81,8 +81,28 @@ static char **build_env(char *const *parent, const char *token, const char *shim
       if (!(out[o++] = strdup(sb)))
          goto oom;
       /* Force the non-interactive TOFU SSH command so an SSH remote authenticates
-       * with the agent key and doesn't stall on a first-time host key. */
-      if (!(out[o++] = strdup("GIT_SSH_COMMAND=" GIT_AGENT_SSH_COMMAND)))
+       * with the agent key and doesn't stall on a first-time host key. Pin
+       * UserKnownHostsFile to a file beside the agent socket, in this principal's
+       * own tmpfs runtime dir — so accept-new's first-use trust is scoped to this
+       * principal and never bleeds through the OS account's shared
+       * ~/.ssh/known_hosts to other tenants. */
+      char kh[2300];
+      snprintf(kh, sizeof(kh), "%s", sock);
+      char *slash = strrchr(kh, '/');
+      char cmd[3200];
+      if (slash)
+      {
+         snprintf(slash + 1, sizeof(kh) - (size_t)(slash + 1 - kh), "known_hosts");
+         snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s -o UserKnownHostsFile=%s",
+                  GIT_AGENT_SSH_COMMAND, kh);
+      }
+      else
+      {
+         /* No directory component (shouldn't happen for a runtime-dir socket) —
+          * fall back to the bare command rather than a malformed -o path. */
+         snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s", GIT_AGENT_SSH_COMMAND);
+      }
+      if (!(out[o++] = strdup(cmd)))
          goto oom;
    }
    out[o] = NULL;

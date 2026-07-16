@@ -180,6 +180,10 @@ static void test_is_ssh(void)
    assert(util_url_is_ssh("relative/path") == 0);
    /* A ':' with no '@' before it is not scp-like (e.g. a host:port with scheme). */
    assert(util_url_is_ssh("host:1234/path") == 0);
+   /* Scheme match is case-insensitive; git:// stays non-SSH regardless of case. */
+   assert(util_url_is_ssh("SSH://git@github.com/o/r") == 1);
+   assert(util_url_is_ssh("Ssh://git@github.com/o/r.git") == 1);
+   assert(util_url_is_ssh("GIT://github.com/o/r") == 0);
    assert(util_url_is_ssh("") == 0);
    assert(util_url_is_ssh(NULL) == 0);
    PASS("is_ssh");

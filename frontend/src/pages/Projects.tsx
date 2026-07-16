@@ -116,6 +116,14 @@ export default function Projects() {
 
   useEffect(() => { loadProjects(); loadHosts(); }, [loadProjects, loadHosts]);
 
+  // Close the Connect-account modal on Escape (works regardless of focus).
+  useEffect(() => {
+    if (!connectOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setConnectOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [connectOpen]);
+
   async function removeCred(host: string) {
     setBusy(true); setErr('');
     try {
@@ -482,7 +490,7 @@ export default function Projects() {
       {/* Connect a git account: the shared wizard auth flow, one click away. */}
       {connectOpen && (
         <div style={modalBackdrop} onClick={() => setConnectOpen(false)}>
-          <div style={modalCard} role="dialog" aria-label="Connect git account" onClick={e => e.stopPropagation()}>
+          <div style={modalCard} role="dialog" aria-modal="true" aria-label="Connect git account" onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
               <strong style={{ fontSize: '17px' }}>Connect a git account</strong>
               <button aria-label="Close" title="Close" onClick={() => setConnectOpen(false)}

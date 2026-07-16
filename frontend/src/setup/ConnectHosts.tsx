@@ -380,6 +380,21 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
     }
   }
 
+  async function removeSSHKey() {
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const r = await api('/api/git/sshkey', { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      setSshKey('');
+      if (!r.ok) setErr(d.error || 'could not clear SSH key');
+      else setMsg('SSH key cleared.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
       <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
@@ -394,7 +409,12 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
           {METHODS.map((m) => (
             <button key={m.id} role="tab" aria-selected={authMethod === m.id}
               style={authMethod === m.id ? methodTabActive : methodTab}
-              onClick={() => { setAuthMethod(m.id); setErr(''); setMsg(''); setPending(null); }}>
+              onClick={() => {
+                // Drop any sensitive material typed into the method we're leaving —
+                // don't keep a private key / token sitting in state behind a hidden tab.
+                setAuthMethod(m.id); setErr(''); setMsg(''); setPending(null);
+                setSshKey(''); setCredToken('');
+              }}>
               {m.label}
             </button>
           ))}
@@ -504,8 +524,10 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
         <textarea style={{ ...input, width: '100%', minHeight: 100, fontFamily: 'monospace' }}
           placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----'}
           value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
-        <div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={ghostBtn} disabled={busy || !sshKey.trim()} onClick={addSSHKey}>Save SSH key</button>
+          <button style={{ ...ghostBtn, borderColor: '#d99', color: '#c33' }} disabled={busy}
+            onClick={removeSSHKey}>Clear SSH key</button>
         </div>
       </section>
       )}
