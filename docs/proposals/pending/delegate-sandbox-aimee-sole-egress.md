@@ -6,7 +6,7 @@
   should be no network communication with the delegate containers except for
   aimee server."
 - **Depends on:** PR #1352 (delegates have aimee's git tools), and
-  [hashline edit + lean websearch](proposal-hashline-edit-and-lean-websearch.md)
+  [hashline edit + lean websearch](../done/proposal-hashline-edit-and-lean-websearch.md)
   Part II (aimee's own `web_search` / `web_read` with a hardened egress policy).
 
 ## Thesis
@@ -100,7 +100,7 @@ whether the agent can see its own subject.
 | File ops through `docker exec` (read/write/list, b64-wrapped) | same |
 | The `/v1` Unix socket the sandbox talks to | `server_http.c` — always served, no TCP port needed |
 | Delegates reaching aimee: `git_commit` / `git_push` / `git_pr` server-side; `aimee mcp serve` as the CLI delegate's MCP server; `AIMEE_API_ENDPOINT=unix:…/aimee-http.sock` | PR #1352 |
-| Hardened server-side egress (http/https only, resolved-IP deny-list, per-hop redirect re-validation, connection pinned to the validated IP) | [lean websearch](proposal-hashline-edit-and-lean-websearch.md) Part II |
+| Hardened server-side egress (http/https only, resolved-IP deny-list, per-hop redirect re-validation, connection pinned to the validated IP) | [lean websearch](../done/proposal-hashline-edit-and-lean-websearch.md) Part II |
 
 PR #1352 is load-bearing here, not merely adjacent: a credential-less delegate in a
 network-less box **could not commit at all** before it. The tools had to exist

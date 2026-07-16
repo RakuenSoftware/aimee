@@ -1,6 +1,31 @@
 # Proposal: Hashline edit core + a token-lean websearch
 
-- **State:** proposed (pending — not started)
+- **State:** done (implemented; P5 `old_string` removal deferred pending the eval-gate roster run)
+
+> **Implementation note (shipped).** P1–P4 landed on branch
+> `worktree-hashline-edit-lean-websearch`:
+> - **P1** `anchor_snapshot` — composite `(ordinal, digest)` anchors, canonicalization
+>   (CRLF/BOM/trailing-ws), immutable TTL/LRU snapshot store; `read_file` emits
+>   `LINE:HASH| ` + a `snapshot_id`, `raw:true` opts out.
+> - **P2** `edit_anchored` — transactional `edits[]`
+>   (replace/replace_range/insert_after/delete_range) verified against the snapshot's
+>   full digest, applied atomically, structured `stale_anchor` re-anchor payload,
+>   `dry_run` diff + blast preview; `old_string` kept as the deprecated fallback.
+> - **P3** `read_file mode:"outline"`, `read_symbol`, `grep anchored:true`, structured
+>   `run_tests` (summary + failures, full log spilled).
+> - **P4** `edit_symbol` (FQN + disambiguation) and `web_read` (extractive
+>   literal+lexical spans, `mode:"full"`/`span=N`, untrusted-fenced) behind an
+>   SSRF-safe egress path (resolve-once → IP deny-list → **connection pinned to the
+>   validated IP**, no redirect-follow).
+>
+> Two deliberate deviations from the letter of the spec, both documented in the
+> commits: (a) the `web_read` **semantic (neural embedder) leg is deferred** — the
+> in-process path ships the *mandatory* literal leg + a lexical term-overlap leg,
+> which fully satisfies the blocking literal-recall requirement without the
+> out-of-process embedder; (b) `web_read` **does not follow redirects** (returned to
+> the caller) rather than following-with-revalidation — strictly safer for egress.
+> The eval harness (fixture replay across the model roster) and P5 removal of
+> `old_string` remain as the gated follow-ups.
 - **Charter roles:** Rewrite / Extract / Rank-Fuse / Enforce / Gate-Promote
 - **Prompted by:** ["The Harness Problem"](https://blog.can.ac/2026/02/12/the-harness-problem/) (can.ac, 2026-02-12)
 
