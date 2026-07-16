@@ -64,7 +64,13 @@ static void fill_task(db1_coord_task_t *out, sqlite3_stmt *stmt)
 
 int db1_coord_job_create(int plan_id, int max_concurrent)
 {
-   if (plan_id <= 0)
+   /* A real plan_id (>0) ties the job to an execution plan. WFE_COORD_PLAN_ID is
+    * the one sanctioned exception: an AD-HOC coord job the workflow engine
+    * enqueues to orchestrate a single delegate with no plan-IR decomposition
+    * (the task flow claim->dispatch->complete runs on job_id alone; plan_id is
+    * only metadata). Everything else — 0, other negatives — stays invalid, so an
+    * accidental 0 from a plan-based caller is still caught. */
+   if (plan_id <= 0 && plan_id != WFE_COORD_PLAN_ID)
       return -1;
    if (max_concurrent <= 0)
       max_concurrent = DB1_COORD_DEFAULT_PAR;

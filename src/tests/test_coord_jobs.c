@@ -105,6 +105,33 @@ static void test_job_create(void)
    printf("  PASS: test_job_create\n");
 }
 
+/* --- Test: ad-hoc job (WFE_COORD_PLAN_ID) vs. accidental plan_id 0 --- */
+
+static void test_adhoc_job_create(void)
+{
+   sqlite3 *db = setup();
+
+   /* The workflow engine enqueues plan-less delegate jobs with the sentinel. */
+   int adhoc = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
+   assert(adhoc > 0);
+   db1_coord_job_t job;
+   assert(db1_coord_job_get(adhoc, &job) == 0);
+   assert(job.plan_id == WFE_COORD_PLAN_ID);
+
+   /* An ad-hoc job still drives real tasks + dispatch on job_id alone. */
+   int tid = db1_coord_job_add_task(adhoc, 0, "[]", "code", "do it", "/wt", "architect");
+   assert(tid > 0);
+
+   /* But an accidental plan_id 0 (or other non-positive) is still rejected — the
+    * sentinel is the ONLY exception, so plan-based callers can't slip a bad id
+    * through unnoticed. */
+   assert(db1_coord_job_create(0, 1) < 0);
+   assert(db1_coord_job_create(-2, 1) < 0);
+
+   teardown(db);
+   printf("  PASS: test_adhoc_job_create\n");
+}
+
 /* --- Test: add tasks and list them --- */
 
 static void test_add_and_list_tasks(void)
@@ -458,8 +485,11 @@ static void test_invalid_ops(void)
 {
    sqlite3 *db = setup();
 
-   /* Invalid IDs */
-   assert(db1_coord_job_create(-1, 3) == -1);
+   /* Invalid IDs. plan_id 0 and other negatives are rejected; -1 is the
+    * WFE_COORD_PLAN_ID sentinel (a valid ad-hoc job) and is covered by
+    * test_adhoc_job_create, not here. */
+   assert(db1_coord_job_create(0, 3) == -1);
+   assert(db1_coord_job_create(-5, 3) == -1);
    assert(db1_coord_job_add_task(-1, 0, "[]", "", "", "", "engineer") == -1);
 
    db1_coord_task_t t;
@@ -554,6 +584,7 @@ int main(void)
 {
    printf("test_coord_jobs:\n");
    test_job_create();
+   test_adhoc_job_create();
    test_add_and_list_tasks();
    test_claim_no_conflict();
    test_file_conflict();
