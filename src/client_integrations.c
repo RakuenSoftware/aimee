@@ -1,5 +1,6 @@
 #include "client_constants.h"
 #include "client_integrations.h"
+#include "config.h"
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
@@ -1443,8 +1444,27 @@ static void ensure_copilot_integration(const char *home)
    cJSON_Delete(root);
 }
 
+/* Whether aimee is allowed to auto-register itself into external AI-tool user
+ * configs. The env var AIMEE_NO_CLIENT_INTEGRATIONS overrides the persisted
+ * config: any non-empty value other than "0"/"false" forces the integrations
+ * off for this run (useful for CI or a one-off install). Otherwise the
+ * default-ON client_integrations_enabled config field decides. */
+static int client_integrations_allowed(void)
+{
+   const char *env = getenv("AIMEE_NO_CLIENT_INTEGRATIONS");
+   if (env && env[0] && strcmp(env, "0") != 0 && strcmp(env, "false") != 0)
+      return 0;
+
+   config_t cfg;
+   config_load(&cfg);
+   return cfg.client_integrations_enabled ? 1 : 0;
+}
+
 void ensure_client_integrations(void)
 {
+   if (!client_integrations_allowed())
+      return;
+
    const char *home = platform_home_dir();
    if (!home || !home[0])
       return;

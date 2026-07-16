@@ -127,6 +127,8 @@ const config_field_t config_fields[] = {
      CFG_BOOL},
     {"wfe_live_forge_enabled", offsetof(config_t, wfe_live_forge_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"client_integrations_enabled", offsetof(config_t, client_integrations_enabled), sizeof(int), 0,
+     CFG_BOOL},
     {"audit_action_enabled", offsetof(config_t, audit_action_enabled), sizeof(int), 0, CFG_BOOL},
     {"audit_worm_enabled", offsetof(config_t, audit_worm_enabled), sizeof(int), 0, CFG_BOOL},
     {"css_render_command", offsetof(config_t, css_render_command),

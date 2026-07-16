@@ -588,6 +588,7 @@ fi
 # Source configure-hooks.sh so CONFIGURED and REFRESHED are available for the summary below
 CONFIGURED=0
 REFRESHED=0
+CLIENT_INTEGRATIONS_SKIPPED=0
 # shellcheck source=configure-hooks.sh
 source "$SCRIPT_DIR/configure-hooks.sh"
 
@@ -595,7 +596,10 @@ source "$SCRIPT_DIR/configure-hooks.sh"
 
 TOTAL_ACTIVE=$((CONFIGURED + REFRESHED))
 echo ""
-if [ "$TOTAL_ACTIVE" -eq 0 ]; then
+if [ "$CLIENT_INTEGRATIONS_SKIPPED" -eq 1 ]; then
+    bold "aimee installed (AI-tool integration skipped: AIMEE_NO_CLIENT_INTEGRATIONS set)."
+    echo "aimee will not register itself into any tool's global config. Wire it into a single project manually."
+elif [ "$TOTAL_ACTIVE" -eq 0 ]; then
     warn "No AI coding tools detected (checked for Claude Code, Claude Desktop, Gemini CLI, Codex CLI, GitHub Copilot, VS Code)."
     warn "Install one of them, then re-run this script."
 else

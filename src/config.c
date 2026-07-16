@@ -306,6 +306,7 @@ static const config_schema_entry_t config_schema[] = {
     {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
     {"gateway_pin_model", SCHEMA_BOOL, 0},
     {"css_style_graph_enabled", SCHEMA_BOOL, 0},
+    {"client_integrations_enabled", SCHEMA_BOOL, 0},
     {"audit_action_enabled", SCHEMA_BOOL, 0},
     {"audit_worm_enabled", SCHEMA_BOOL, 0},
     {"css_render_command", SCHEMA_STRING, 0},
@@ -832,6 +833,11 @@ static void config_set_defaults(config_t *cfg)
                                         PRs open-only against the resolved trunk,
                                         merges only to the unprotected autonomous
                                         base -- and each op re-checks flag + rail. */
+   cfg->client_integrations_enabled = 1; /* default-ON: aimee auto-registers into
+                                            detected AI-tool user configs. Set false
+                                            (or export AIMEE_NO_CLIENT_INTEGRATIONS)
+                                            to keep aimee out of global tool configs
+                                            and wire a single project by hand. */
    cfg->audit_action_enabled = 1;    /* default-ON: the trajectory_export reader (S3)
                                         shipped, so the passive per-action audit row
                                         is on by default; set false to opt out */
@@ -1173,6 +1179,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "wfe_live_forge_enabled");
    if (cJSON_IsBool(item))
       cfg->wfe_live_forge_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "client_integrations_enabled");
+   if (cJSON_IsBool(item))
+      cfg->client_integrations_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "audit_action_enabled");
    if (cJSON_IsBool(item))
