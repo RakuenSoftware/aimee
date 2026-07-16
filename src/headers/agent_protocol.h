@@ -77,6 +77,11 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
 
 void agent_parse_response_openai(struct cJSON *root, parsed_response_t *out);
 void agent_parse_response_responses(const char *body, parsed_response_t *out);
+
+/* Extract the Responses (codex) response object (the one with the `output` array)
+ * from an SSE body, so the IR responses_backend_parse can consume it. Returns a new
+ * cJSON the caller owns, or NULL. */
+struct cJSON *agent_responses_sse_response_object(const char *body);
 void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
 
 /* Parse a provider JSON response through the canonical IR and bridge it into a

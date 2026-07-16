@@ -1074,6 +1074,20 @@ native_provider_http:
       if (chatgpt)
       {
          agent_parse_response_responses(response_body, &parsed);
+         /* Shadow: extend parity to the responses/SSE (codex) wire -- the one wire the
+          * response shadow did not cover. Extract the response object from the stream
+          * and compare the IR's parse of it against the legacy SSE parse. The codex
+          * parser is UNCHANGED (still legacy); this only measures. Off unless
+          * AIMEE_IR_SHADOW is set; never touches the turn. */
+         if (aimee_ir_shadow_enabled())
+         {
+            cJSON *robj = agent_responses_sse_response_object(response_body);
+            if (robj)
+            {
+               aimee_ir_shadow_compare_response(&parsed, robj, AIMEE_WIRE_RESPONSES);
+               cJSON_Delete(robj);
+            }
+         }
       }
       else
       {
