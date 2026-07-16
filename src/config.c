@@ -226,6 +226,8 @@ const char *config_default_db1_path(void)
  * after a write; defined below. */
 config_t g_config_cache;
 struct timespec g_config_mtime;
+off_t g_config_size;
+ino_t g_config_ino;
 char g_config_cache_path[MAX_PATH_LEN];
 int g_config_cached;
 
@@ -949,14 +951,19 @@ int config_load_file(config_t *cfg)
 
    const char *path = config_default_path();
 
-   /* Return cached config if mtime unchanged and caching enabled */
+   /* Return cached config only if the file looks identical on every cheap axis
+    * stat() gives us: same mtime, size and inode. mtime alone is spoofable by a
+    * same-timestamp (or clock-skewed) rewrite — observed on the tiered appliance
+    * filesystem, where an in-place `aimee workspace add` rewrite kept serving the
+    * stale (empty-workspaces) snapshot, which config_save then re-serialised. */
    if (!getenv("AIMEE_NO_CACHE") && g_config_cached)
    {
       struct stat st;
       if (stat(path, &st) == 0)
       {
          struct timespec mt = AIMEE_STAT_MTIM(st);
-         if (strcmp(g_config_cache_path, path) == 0 && timespec_eq(&mt, &g_config_mtime))
+         if (strcmp(g_config_cache_path, path) == 0 && timespec_eq(&mt, &g_config_mtime) &&
+             st.st_size == g_config_size && st.st_ino == g_config_ino)
          {
             memcpy(cfg, &g_config_cache, sizeof(*cfg));
             return 0;
@@ -1609,6 +1616,8 @@ int config_load_file(config_t *cfg)
       {
          memcpy(&g_config_cache, cfg, sizeof(g_config_cache));
          g_config_mtime = AIMEE_STAT_MTIM(st);
+         g_config_size = st.st_size;
+         g_config_ino = st.st_ino;
          snprintf(g_config_cache_path, sizeof(g_config_cache_path), "%s", path);
          g_config_cached = 1;
       }

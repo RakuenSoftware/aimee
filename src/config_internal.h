@@ -23,10 +23,15 @@
  * Defined in config.c alongside the parser. */
 const char *config_mcp_transport_to_string(config_mcp_transport_t transport);
 
-/* mtime-keyed load cache, shared so config_save can stamp freshly-saved
- * values and short-circuit the next config_load() call. */
+/* File-identity-keyed load cache, shared so config_save can stamp freshly-saved
+ * values and short-circuit the next config_load() call. Keyed on mtime + size +
+ * inode: mtime alone is spoofable by a same-timestamp (or clock-skewed) rewrite,
+ * which the tiered appliance filesystem produces in practice — see the agents.json
+ * fix in #1372. */
 extern config_t g_config_cache;
 extern struct timespec g_config_mtime;
+extern off_t g_config_size;
+extern ino_t g_config_ino;
 extern char g_config_cache_path[MAX_PATH_LEN];
 extern int g_config_cached;
 
