@@ -213,6 +213,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-diff \
                $(TESTPREFIX)/unit-test-anchor-snapshot \
                $(TESTPREFIX)/unit-test-edit-anchored \
+               $(TESTPREFIX)/unit-test-hashline-gate \
                $(TESTPREFIX)/unit-test-workspace-provider \
                $(TESTPREFIX)/unit-test-workspace-handle \
                $(TESTPREFIX)/unit-test-forge-credentials \
@@ -4254,4 +4255,16 @@ $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/tests/test_agent_ir_parse.o \
                                         $(OBJDIR)/server/aimee_ir_metrics.o \
                                         $(OBJDIR)/server/tool_call_args.o \
                                         $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OBJDIR)/server/agent_cli_shell.o \
+                      $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                      $(OBJDIR)/server/tool_call_args.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
+                      $(OBJDIR)/server/delegate_openai.o $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
+                      $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
+                      $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
+                      $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
