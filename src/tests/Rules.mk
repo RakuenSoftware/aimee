@@ -152,6 +152,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-ir-legacy-parity \
                $(TESTPREFIX)/unit-test-aimee-ir-rescue \
                $(TESTPREFIX)/unit-test-agent-ir-parse \
+               $(TESTPREFIX)/unit-test-responses-parity \
                $(TESTPREFIX)/unit-test-ir-shadow-response \
                $(TESTPREFIX)/unit-test-shadow-mirror \
                $(TESTPREFIX)/unit-test-aimee-ir-metrics \
@@ -4271,4 +4272,21 @@ $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OB
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Differential parity: legacy agent_parse_response_responses vs IR agent_ir_parse_responses
+# on identical codex SSE bytes. Links agent_bridge.o (legacy parser + SSE extractor) with
+# the full IR backend chain and NO weak stubs, so both parsers run for real.
+$(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.o \
+                                          $(OBJDIR)/server/agent_bridge.o \
+                                          $(OBJDIR)/posix/agent_ir_parse.o \
+                                          $(OBJDIR)/server/aimee_backend_responses.o \
+                                          $(OBJDIR)/server/aimee_backend_anthropic.o \
+                                          $(OBJDIR)/server/aimee_backend_openai.o \
+                                          $(OBJDIR)/server/aimee_ir.o \
+                                          $(OBJDIR)/server/aimee_ir_rescue.o \
+                                          $(OBJDIR)/server/aimee_ir_metrics.o \
+                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/server/tool_call_args.o \
+                                          $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
