@@ -6,6 +6,7 @@
 #include "git_host_cred.h"     /* git_host_cred_list — "is git configured at all?" */
 #include "git_host_resolve.h"  /* git_host_resolve_token (per-host vault seam) */
 #include "git_ssh_agent.h"     /* git_ssh_agent_ensure */
+#include "util.h"              /* GIT_AGENT_SSH_COMMAND */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +25,9 @@ static int is_key(const char *entry, const char *key)
 
 /* Build the git child env: a copy of `parent` with the credential-carrying keys
  * we manage dropped, plus GH_TOKEN/GIT_ASKPASS/GIT_TERMINAL_PROMPT (when a token
- * is given) and SSH_AUTH_SOCK (when a sock is given). Returns NULL on OOM. */
+ * is given) and SSH_AUTH_SOCK + GIT_SSH_COMMAND (when a sock is given, so an SSH
+ * remote uses the agent key with a non-interactive TOFU host-key policy).
+ * Returns NULL on OOM. */
 /* token_fd_target >= 0 selects FD MODE: advertise AIMEE_GIT_TOKEN_FD=<target>
  * (the askpass reads the token from that inherited fd) and do NOT put the secret
  * in the env. token_fd_target < 0 is LEGACY ENV MODE: GH_TOKEN=<token>. In both
@@ -36,7 +39,8 @@ static char **build_env(char *const *parent, const char *token, const char *shim
    if (parent)
       while (parent[pc])
          pc++;
-   char **out = calloc(pc + 5, sizeof(char *)); /* +token-key,ASKPASS,PROMPT,SSH_AUTH_SOCK,NULL */
+   /* +token-key,ASKPASS,PROMPT,SSH_AUTH_SOCK,GIT_SSH_COMMAND,NULL */
+   char **out = calloc(pc + 6, sizeof(char *));
    if (!out)
       return NULL;
    size_t o = 0;
@@ -44,7 +48,8 @@ static char **build_env(char *const *parent, const char *token, const char *shim
    {
       if (is_key(parent[i], "GH_TOKEN") || is_key(parent[i], "GITHUB_TOKEN") ||
           is_key(parent[i], "GIT_ASKPASS") || is_key(parent[i], "GIT_TERMINAL_PROMPT") ||
-          is_key(parent[i], "SSH_AUTH_SOCK") || is_key(parent[i], "AIMEE_GIT_TOKEN_FD"))
+          is_key(parent[i], "SSH_AUTH_SOCK") || is_key(parent[i], "GIT_SSH_COMMAND") ||
+          is_key(parent[i], "AIMEE_GIT_TOKEN_FD"))
          continue;
       out[o] = strdup(parent[i]);
       if (!out[o++])
@@ -74,6 +79,10 @@ static char **build_env(char *const *parent, const char *token, const char *shim
       char sb[2300];
       snprintf(sb, sizeof(sb), "SSH_AUTH_SOCK=%s", sock);
       if (!(out[o++] = strdup(sb)))
+         goto oom;
+      /* Force the non-interactive TOFU SSH command so an SSH remote authenticates
+       * with the agent key and doesn't stall on a first-time host key. */
+      if (!(out[o++] = strdup("GIT_SSH_COMMAND=" GIT_AGENT_SSH_COMMAND)))
          goto oom;
    }
    out[o] = NULL;

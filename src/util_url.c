@@ -41,6 +41,27 @@ static int scheme_recognized(const char *url, size_t len)
           (len == 3 && strncasecmp(url, "git", 3) == 0);
 }
 
+int util_url_is_ssh(const char *url)
+{
+   if (!url || !*url)
+      return 0;
+
+   const char *proto = strstr(url, "://");
+   if (proto)
+   {
+      size_t scheme_len = (size_t)(proto - url);
+      /* Only ssh:// authenticates with a key; git:// is anonymous. */
+      return scheme_len == 3 && strncasecmp(url, "ssh", 3) == 0;
+   }
+
+   /* scp-like: user@host:path — an '@' must precede the first ':'. */
+   const char *colon = strchr(url, ':');
+   if (!colon)
+      return 0;
+   const char *at = memchr(url, '@', (size_t)(colon - url));
+   return at != NULL && at > url;
+}
+
 char *util_url_normalize(const char *url)
 {
    if (!url || !*url)

@@ -165,6 +165,26 @@ static void test_host_case_classifier(void)
    PASS("host_case_classifier");
 }
 
+static void test_is_ssh(void)
+{
+   /* SSH transports (key auth): ssh:// and scp-like user@host:path. */
+   assert(util_url_is_ssh("git@bitbucket.org:team/repo.git") == 1);
+   assert(util_url_is_ssh("ssh://git@github.com/o/r.git") == 1);
+   assert(util_url_is_ssh("ssh://git@ssh.dev.azure.com:22/v3/o/p/r") == 1);
+   assert(util_url_is_ssh("user@host.example:some/deep/path") == 1);
+   /* Not SSH: https/http, git:// (anonymous, no key/host key), local paths. */
+   assert(util_url_is_ssh("https://github.com/o/r.git") == 0);
+   assert(util_url_is_ssh("http://host/o/r") == 0);
+   assert(util_url_is_ssh("git://github.com/o/r.git") == 0);
+   assert(util_url_is_ssh("/srv/repos/local.git") == 0);
+   assert(util_url_is_ssh("relative/path") == 0);
+   /* A ':' with no '@' before it is not scp-like (e.g. a host:port with scheme). */
+   assert(util_url_is_ssh("host:1234/path") == 0);
+   assert(util_url_is_ssh("") == 0);
+   assert(util_url_is_ssh(NULL) == 0);
+   PASS("is_ssh");
+}
+
 int main(void)
 {
    printf("Running util_url tests\n");
@@ -174,6 +194,7 @@ int main(void)
    test_invalid_inputs();
    test_workspace_parent();
    test_host_case_classifier();
+   test_is_ssh();
    printf("All util_url tests passed.\n");
    return 0;
 }

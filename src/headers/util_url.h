@@ -49,6 +49,19 @@ extern "C"
     */
    char *util_url_workspace_parent(const char *project_url);
 
+   /* Report whether `url` names an SSH transport that authenticates with a key.
+    *
+    * Returns 1 for:
+    *   - ssh://[user@]host[:port]/path
+    *   - scp-like  user@host:path   (no "://", '@' before the ':')
+    * Returns 0 for http(s)://, git:// (anonymous, unauthenticated — no host key
+    * or key auth), local paths, and anything util_url can't parse as SSH.
+    *
+    * Used to decide whether a saved SSH key should drive the clone (honor the
+    * SSH URL) rather than rewriting it to HTTPS. Returns 0 on NULL/empty input.
+    */
+   int util_url_is_ssh(const char *url);
+
    /* Report whether a host uses case-insensitive routing for path segments.
     *
     * Known-insensitive: github.com, gitlab.com, bitbucket.org, and their

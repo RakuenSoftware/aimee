@@ -205,6 +205,10 @@ int main(void)
       assert(se != NULL);
       const char *sock = env_val(se, "SSH_AUTH_SOCK", &n);
       assert(n == 1 && sock && sock[0] == '/'); /* agent socket present */
+      /* a TOFU SSH command rides alongside so an SSH remote uses the agent key
+       * and doesn't stall on a first-time host key */
+      const char *sshcmd = env_val(se, "GIT_SSH_COMMAND", &n);
+      assert(n == 1 && sshcmd && strstr(sshcmd, "StrictHostKeyChecking=accept-new"));
       /* the HTTPS token is still injected alongside */
       assert(env_val(se, "GH_TOKEN", &n) && n == 1);
       git_cred_inject_free_env(se);

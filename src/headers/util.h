@@ -344,6 +344,16 @@ int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *c
 #define GIT_SAFE_SSH_COMMAND "ssh -o BatchMode=yes -o ConnectTimeout=5"
 #define GIT_SAFE_ENV         "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='" GIT_SAFE_SSH_COMMAND "' "
 
+/* SSH command for a git op that authenticates with a webuser's vaulted SSH key
+ * (via the in-memory ssh-agent). Same non-interactive/timeout policy as above,
+ * plus StrictHostKeyChecking=accept-new: a non-interactive server has no seeded
+ * known_hosts, so a first-time host (e.g. bitbucket.org) would otherwise die on
+ * "Host key verification failed". accept-new is trust-on-first-use — it records
+ * the host key on first contact and verifies it strictly thereafter (unlike
+ * StrictHostKeyChecking=no, which never verifies). */
+#define GIT_AGENT_SSH_COMMAND \
+   "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new"
+
 /* Wall-clock cap (ms) for an internal git network op. Generous enough not to
  * kill a slow-but-working fetch, short enough that a stalled remote can never
  * freeze a session start. */
