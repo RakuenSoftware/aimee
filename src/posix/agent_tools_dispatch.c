@@ -434,9 +434,11 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
    {
       cJSON *off = cJSON_GetObjectItem(args, "offset");
       cJSON *lim = cJSON_GetObjectItem(args, "limit");
+      cJSON *rawj = cJSON_GetObjectItem(args, "raw");
       int offset = (off && cJSON_IsNumber(off)) ? off->valueint : 0;
       int limit = (lim && cJSON_IsNumber(lim)) ? lim->valueint : 0;
-      result = tool_read_file(p->valuestring, offset, limit);
+      int raw = (rawj && cJSON_IsBool(rawj)) ? cJSON_IsTrue(rawj) : 0;
+      result = tool_read_file(p->valuestring, offset, limit, raw);
 
       /* Record the read in the session state for read-before-write tracking. */
       if (result && strncmp(result, "error:", 6) != 0)

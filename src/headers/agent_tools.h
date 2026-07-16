@@ -9,7 +9,11 @@
 char *tool_bash(const char *command, int timeout_ms);
 char *tool_execute_script(const char *language, const char *body, int timeout_secs,
                           const char *workdir, const char *env_json);
-char *tool_read_file(const char *path, int offset, int limit);
+/* Read a file. When raw==0, each line is prefixed with a "LINE:HASH| " anchor
+ * and an immutable read snapshot is minted (its id echoed in a header line) so
+ * edit_file can edit by anchor. raw==1 restores the un-anchored byte output for
+ * grep pipelines / binary sniffing. */
+char *tool_read_file(const char *path, int offset, int limit, int raw);
 char *tool_write_file(const char *path, const char *content);
 /* Surgical edit: replace old_string with new_string in an existing file.
  * old_string must occur exactly once unless replace_all is non-zero (then all

@@ -35,7 +35,7 @@ void test_responses_parser_separates_message_items(void);
 
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
-char *tool_read_file(const char *path, int offset, int limit);
+char *tool_read_file(const char *path, int offset, int limit, int raw);
 char *tool_write_file(const char *path, const char *content);
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
@@ -1086,25 +1086,25 @@ static void test_tool_read_file(void)
    close(fd);
 
    /* Read entire file */
-   char *result = tool_read_file(tmppath, 0, 0);
+   char *result = tool_read_file(tmppath, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, content) == 0);
    free(result);
 
    /* Read with offset */
-   result = tool_read_file(tmppath, 1, 0);
+   result = tool_read_file(tmppath, 1, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "line2\nline3\nline4\n") == 0);
    free(result);
 
    /* Read with limit */
-   result = tool_read_file(tmppath, 0, 2);
+   result = tool_read_file(tmppath, 0, 2, 1);
    assert(result != NULL);
    assert(strcmp(result, "line1\nline2\n") == 0);
    free(result);
 
    /* Nonexistent path */
-   result = tool_read_file("/nonexistent/path/file.txt", 0, 0);
+   result = tool_read_file("/nonexistent/path/file.txt", 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error: cannot open") != NULL);
    free(result);
@@ -1113,10 +1113,23 @@ static void test_tool_read_file(void)
    assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
    assert(write(fd, binary_content, sizeof(binary_content)) == (ssize_t)sizeof(binary_content));
    close(fd);
-   result = tool_read_file(tmppath, 0, 0);
+   result = tool_read_file(tmppath, 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error: binary file omitted") != NULL);
    assert(memchr(result, 0x7f, strlen(result)) == NULL);
+   free(result);
+
+   /* Anchored mode (default): lines prefixed LINE:HASH| and a snapshot header. */
+   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   assert(write(fd, content, strlen(content)) == (ssize_t)strlen(content));
+   close(fd);
+   result = tool_read_file(tmppath, 0, 0, 0);
+   assert(result != NULL);
+   assert(strstr(result, "snapshot=s") != NULL);
+   assert(strstr(result, "| line1") != NULL);
+   assert(strstr(result, "| line4") != NULL);
+   /* an anchor of the shape "N:HH| " must be present */
+   assert(strstr(result, "1:") != NULL);
    free(result);
 
    unlink(tmppath);
@@ -1145,7 +1158,7 @@ static void test_tool_write_file(void)
    free(result);
 
    /* Verify contents */
-   char *readback = tool_read_file(tmppath, 0, 0);
+   char *readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback != NULL);
    assert(strcmp(readback, "hello world") == 0);
    free(readback);
@@ -1194,7 +1207,7 @@ static void test_tool_edit_file(void)
    assert(status && strcmp(status->valuestring, "ok") == 0);
    cJSON_Delete(json);
    free(result);
-   char *readback = tool_read_file(tmppath, 0, 0);
+   char *readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nbeta\nGAMMA\nbeta\n") == 0);
    free(readback);
 
@@ -1207,7 +1220,7 @@ static void test_tool_edit_file(void)
    result = tool_edit_file(tmppath, "beta", "B", 0);
    assert(result != NULL && strncmp(result, "error:", 6) == 0);
    free(result);
-   readback = tool_read_file(tmppath, 0, 0);
+   readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nbeta\nGAMMA\nbeta\n") == 0);
    free(readback);
 
@@ -1215,7 +1228,7 @@ static void test_tool_edit_file(void)
    result = tool_edit_file(tmppath, "beta", "B", 1);
    assert(result != NULL && strncmp(result, "error:", 6) != 0);
    free(result);
-   readback = tool_read_file(tmppath, 0, 0);
+   readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nB\nGAMMA\nB\n") == 0);
    free(readback);
 
@@ -1268,7 +1281,7 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strstr(result, "parent worktree is read-only") != NULL);
    free(result);
 
-   result = tool_read_file(parent_file, 0, 0);
+   result = tool_read_file(parent_file, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "original") == 0);
    free(result);
@@ -1298,7 +1311,7 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strstr(result, "error:") == NULL);
    free(result);
 
-   result = tool_read_file(worktree_file, 0, 0);
+   result = tool_read_file(worktree_file, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "allowed") == 0);
    free(result);
@@ -2036,7 +2049,7 @@ static void test_parse_openai_tool_calls(void)
 static void test_path_traversal_rejected(void)
 {
    /* read_file with traversal should be rejected */
-   char *result = tool_read_file("/tmp/../etc/shadow", 0, 0);
+   char *result = tool_read_file("/tmp/../etc/shadow", 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error:") != NULL);
    free(result);
@@ -2068,7 +2081,7 @@ static void test_sensitive_path_rejected(void)
    if (home)
    {
       snprintf(ssh_path, sizeof(ssh_path), "%s/.ssh/id_rsa", home);
-      char *result = tool_read_file(ssh_path, 0, 0);
+      char *result = tool_read_file(ssh_path, 0, 0, 1);
       assert(result != NULL);
       /* Should be rejected as sensitive or fail to open */
       assert(strstr(result, "error:") != NULL || strstr(result, "denied") != NULL);
@@ -2089,7 +2102,7 @@ static void test_symlink_escape_rejected(void)
    /* Create symlink to a sensitive path */
    if (symlink("/etc/shadow", link_path) == 0)
    {
-      char *result = tool_read_file(link_path, 0, 0);
+      char *result = tool_read_file(link_path, 0, 0, 1);
       assert(result != NULL);
       /* Should be blocked by the realpath-based check */
       assert(strstr(result, "error:") != NULL || strstr(result, "denied") != NULL);

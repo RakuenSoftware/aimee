@@ -21,6 +21,7 @@
 #include "workspace.h"
 #include "workspace_provider.h"
 #include "diff.h"
+#include "anchor_snapshot.h"
 #include "dstr.h"
 #include "lsp.h"
 #include "cJSON.h"
@@ -1128,7 +1129,7 @@ static int tool_file_looks_binary(FILE *f)
    return binary;
 }
 
-char *tool_read_file(const char *path, int offset, int limit)
+char *tool_read_file(const char *path, int offset, int limit, int raw)
 {
    char *resolved_proposal = NULL;
    const char *actual_path = path;
@@ -1186,6 +1187,42 @@ char *tool_read_file(const char *path, int offset, int limit)
       free(file_data);
       return safe_strdup(err_msg);
    }
+
+   /* Anchored read (default): mint an immutable snapshot over the WHOLE file so
+    * an edit can verify any ordinal, then format the requested window with
+    * "LINE:HASH| " prefixes. raw==1 falls through to the un-anchored byte loop
+    * below (grep pipelines, round-trips that must not carry anchors). */
+   if (!raw)
+   {
+      fclose(f);
+      size_t cap = agent_tool_output_cap();
+      char snap_id[ANCHOR_SNAPSHOT_ID_MAX];
+      if (anchor_snapshot_create(resolved, file_data, file_len, snap_id) != 0)
+         snap_id[0] = '\0';
+      char *formatted =
+          anchor_format_read(file_data, file_len, offset, limit, snap_id[0] ? snap_id : NULL);
+      free(file_data);
+      if (!formatted)
+         return safe_strdup("error: out of memory");
+      if (strlen(formatted) > cap)
+      {
+         /* keep the leading, whole lines that fit; drop a partial tail */
+         size_t cut = cap;
+         while (cut > 0 && formatted[cut] != '\n')
+            cut--;
+         formatted[cut > 0 ? cut + 1 : cap] = '\0';
+         char *trunc = malloc(strlen(formatted) + 96);
+         if (trunc)
+         {
+            sprintf(trunc, "%s[truncated at %zu bytes; re-read with offset/limit for more]\n",
+                    formatted, cap);
+            free(formatted);
+            formatted = trunc;
+         }
+      }
+      return formatted;
+   }
+
    size_t cap = agent_tool_output_cap();
    char *buf = malloc(cap + 1);
    if (!buf)

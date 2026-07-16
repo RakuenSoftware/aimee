@@ -643,6 +643,10 @@ static cJSON *tp_read_file(void)
            "File path. Prefer paths relative to the current workspace directory.");
    tp_prop(props, "offset", "integer", "Line offset to start reading from");
    tp_prop(props, "limit", "integer", "Maximum number of lines to read");
+   tp_prop(props, "raw", "boolean",
+           "Return raw bytes with no line anchors (for grep pipelines / binary sniffing). "
+           "Default false: each line is prefixed 'LINE:HASH| ' and a snapshot id is minted so "
+           "edit_file can edit by anchor without re-emitting the text.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -1057,7 +1061,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "Run a bounded Python or Bash script with a scrubbed environment. Returns JSON with "
      "stdout, stderr, exit_code, duration_ms, and truncation flags.",
      tp_execute_script, TSURF_CHAT},
-    {"read_file", "Read a file and return its contents.", tp_read_file, TSURF_ALL},
+    {"read_file",
+     "Read a file. By default each line is prefixed with a stable 'LINE:HASH| ' anchor and a "
+     "snapshot id is minted: edit_file can then edit lines by anchor without you re-emitting "
+     "their text. Pass raw:true for un-anchored bytes.",
+     tp_read_file, TSURF_ALL},
     {"tool_output_get",
      "Retrieve the full, unfiltered output that aimee condensed. Pass the ref from a "
      "'[output condensed by aimee ... ref \"tc-...\"]' pointer to get the complete original "
