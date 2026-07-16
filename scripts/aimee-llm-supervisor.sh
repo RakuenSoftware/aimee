@@ -34,11 +34,12 @@ MODELS_DIR="${AIMEE_LLM_MODELS_DIR:-/models}"
 RERANK_ASSET_BASE="${AIMEE_LLM_RERANK_ASSET_BASE:-https://github.com/RakuenSoftware/aimee/releases/download/rerank-artifacts-v1}"
 # Synth context window. The synth GGUF (gemma) trains to 256K, but a hardcoded
 # --ctx-size 8192 wasted that: large code symbols / doc chunks overran 8K and the
-# server returned HTTP 400, failing extraction entirely. Default to a 16GB-VRAM-
-# safe 32K (4x the old cap, covers real source files); raise it on bigger cards
-# via AIMEE_LLM_SYNTH_CTX (e.g. 131072 for 128K). KV cache scales with context, so
-# size it to the card. Embed/rerank inputs are small — they keep the 8K default.
-SYNTH_CTX="${AIMEE_LLM_SYNTH_CTX:-32768}"
+# server returned HTTP 400, failing extraction entirely. The synth context defaults
+# PER TIER (synth_coords sets TIER_CTX; SYNTH_CTX is resolved from it once the tier
+# is known): cpu/small 32K, mid 256K (2 slots ×128K), large 1024K (4 slots ×256K).
+# KV cache scales with context and lives in VRAM under -ngl, so each tier's total is
+# sized to its target card. AIMEE_LLM_SYNTH_CTX overrides per deploy (e.g. a 24GB
+# card runs mid at 280000 = 4×70K). Embed/rerank inputs are small — they keep 8K.
 
 # ---- per-role tier -> model coordinates -------------------------------------
 # Each role's tier is chosen independently via AIMEE_LLM_<ROLE>_TIER, falling back
@@ -74,26 +75,26 @@ synth_coords() {
     cpu)
       SYNTH_REPO="ggml-org/gemma-4-E4B-it-GGUF"; SYNTH_FILE="gemma-4-E4B-it-Q4_K_M.gguf"
       SYNTH_REVISION="main"; SYNTH_SHA256=""
-      TIER_FA="off"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; SYNTH_NGL=0
+      TIER_FA="off"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; TIER_CTX="32768"; SYNTH_NGL=0
       ;;
     small)
       SYNTH_REPO="unsloth/gemma-4-12B-it-qat-GGUF"; SYNTH_FILE="gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
       SYNTH_REVISION="9586f3257bc62bd179767241c7ec0f66bc2a314a"
       SYNTH_SHA256="cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165"
-      TIER_FA="on"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; SYNTH_NGL="$NGL"
+      TIER_FA="on"; TIER_MOE="0"; TIER_N_CPU_MOE="0"; TIER_SLOTS="1"; TIER_CTX="32768"; SYNTH_NGL="$NGL"
       ;;
     mid)
       SYNTH_REPO="unsloth/gemma-4-26B-A4B-it-qat-GGUF"; SYNTH_FILE="gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
       SYNTH_REVISION="02749a7b272109255a4c559a80894d3d9777574c"
       SYNTH_SHA256="dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e"
-      TIER_FA="on"; TIER_MOE="1"; TIER_N_CPU_MOE="0"; TIER_SLOTS="2"; SYNTH_NGL="$NGL"
+      TIER_FA="on"; TIER_MOE="1"; TIER_N_CPU_MOE="0"; TIER_SLOTS="2"; TIER_CTX="256000"; SYNTH_NGL="$NGL"
       ;;
     large)
-      # Byte-identical to mid EXCEPT SLOTS=4 (24GB→32GB card headroom).
+      # Byte-identical to mid EXCEPT SLOTS=4 + a 1024K ctx (24GB→32GB card headroom).
       SYNTH_REPO="unsloth/gemma-4-26B-A4B-it-qat-GGUF"; SYNTH_FILE="gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
       SYNTH_REVISION="02749a7b272109255a4c559a80894d3d9777574c"
       SYNTH_SHA256="dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e"
-      TIER_FA="on"; TIER_MOE="1"; TIER_N_CPU_MOE="0"; TIER_SLOTS="4"; SYNTH_NGL="$NGL"
+      TIER_FA="on"; TIER_MOE="1"; TIER_N_CPU_MOE="0"; TIER_SLOTS="4"; TIER_CTX="1024000"; SYNTH_NGL="$NGL"
       ;;
     *) echo "aimee-llm: invalid AIMEE_LLM_SYNTH_TIER='$SYNTH_TIER' (cpu, small, mid, large)" >&2; exit 1 ;;
   esac
@@ -102,6 +103,10 @@ synth_coords() {
 embed_coords
 rerank_coords
 synth_coords
+
+# Synth context: an explicit AIMEE_LLM_SYNTH_CTX wins; otherwise the tier default
+# (TIER_CTX) set in synth_coords. Resolved here so the tier is already known.
+SYNTH_CTX="${AIMEE_LLM_SYNTH_CTX:-$TIER_CTX}"
 
 # ---- per-role backend mode (local | external | off) -------------------------
 # Each LLM role is independently local (a baked llama-server), external (the
@@ -137,6 +142,13 @@ MOE="${AIMEE_LLM_SYNTH_MOE:-$TIER_MOE}"
 MOE_LAYERS="${AIMEE_LLM_SYNTH_MOE_LAYERS:-40}"
 N_CPU_MOE="${AIMEE_LLM_SYNTH_N_CPU_MOE:-$TIER_N_CPU_MOE}"
 SLOTS="${AIMEE_LLM_SYNTH_SLOTS:-$TIER_SLOTS}"
+# Host-RAM prompt-cache cap (MiB). llama-server's default is 8192 (8 GiB) of
+# ANONYMOUS host RAM for its server-side prompt/checkpoint cache — independent of
+# the KV cache, which lives in VRAM under -ngl. On a modest appliance (e.g. a 16 GB
+# box also hosting postgres + kb + server) that 8 GiB default triggers a host OOM
+# that kills a postgres backend. Cap it low by default; operators with RAM to spare
+# can raise AIMEE_LLM_SYNTH_CACHE_RAM. The embedder already runs --cache-ram 0.
+SYNTH_CACHE_RAM="${AIMEE_LLM_SYNTH_CACHE_RAM:-2048}"
 
 # Gateway-facing model identity (all current tiers share the qwen3 embedder id +
 # last-token pooling — the gateway reads these for /health + the drift guard).
@@ -283,7 +295,8 @@ case "${AIMEE_LLM_STUB:-}" in
     # synth MODEL + its runtime profile come from the synth tier above; explicit
     # AIMEE_LLM_SYNTH_* envs still override per deploy.
     if [ "$SYNTH_MODE" = "local" ] && [ -f "$SYNTH_D/synth.gguf" ]; then
-      synth_args=(-ngl "$SYNTH_NGL" -m "$SYNTH_D/synth.gguf" --ctx-size "$SYNTH_CTX" --jinja --parallel "$SLOTS")
+      synth_args=(-ngl "$SYNTH_NGL" -m "$SYNTH_D/synth.gguf" --ctx-size "$SYNTH_CTX" --jinja \
+        --parallel "$SLOTS" --cache-ram "$SYNTH_CACHE_RAM")
       # Flash-attention + quantized KV (K8V4 by default). NOTE: quantized V-cache
       # REQUIRES fa (llama.cpp refuses otherwise), so a healthy start proves fa on.
       if [ "$FA" = "on" ]; then
