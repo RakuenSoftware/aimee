@@ -2,6 +2,7 @@
 #include "server_state_internal.h"
 #include "aimee.h"
 #include "aimee_ir_metrics.h"
+#include "shadow_mirror.h"
 #include "server.h"
 #include "dashboard.h"
 #include "render.h"               /* decision_to_json + db2_decision_log_list */
@@ -1460,6 +1461,20 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          for (int m = 0; m < AIMEE_IR_M__COUNT; m++)
             cJSON_AddNumberToObject(ir, aimee_ir_metric_name((aimee_ir_metric_t)m),
                                     (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
+   }
+
+   /* Shadow-traffic mirror: sent vs dropped-at-cap. Dropped is not a failure (the
+    * mirror is best-effort) but it must be visible — a high drop rate means the
+    * in-flight cap is throttling coverage, not that parity is clean. */
+   {
+      cJSON *sm = cJSON_AddObjectToObject(resp, "shadow_mirror");
+      if (sm)
+      {
+         cJSON_AddNumberToObject(sm, "subscribers", (double)shadow_mirror_subscriber_count());
+         cJSON_AddNumberToObject(sm, "sent", (double)shadow_mirror_sent_count());
+         cJSON_AddNumberToObject(sm, "dropped", (double)shadow_mirror_dropped_count());
+         cJSON_AddNumberToObject(sm, "pruned", (double)shadow_mirror_pruned_count());
+      }
    }
 
    return send_and_free(conn, resp);

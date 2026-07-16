@@ -1402,6 +1402,11 @@ typedef struct config
     * Parsed from aimee.api.client_transport; empty ⇒ the "socket" default. */
    char server_api_client_transport[16];
 
+   /* Shadow-traffic publishing has NO persistent enable knob on purpose: it is
+    * armed at RUNTIME via POST /v1/shadow/enable and always boots DISARMED, so an
+    * operator cannot enable it, reboot, and have live-traffic tapping silently
+    * persist. See shadow_mirror.c. */
+
    /* Bayesian promotion-threshold calibration (intelligence.calibrate.*).
     * calibration_enabled: 0 = off (default), 1 = shadow mode (write profiles,
     *   gate ignores them), 2 = A/B mode (20% of promotion decisions routed through

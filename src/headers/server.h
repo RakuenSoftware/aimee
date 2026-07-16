@@ -80,8 +80,14 @@ typedef struct cJSON cJSON;
  * authenticated/delegate bearer cannot drive a human gate. */
 #define CAP_WORKFLOW_ADMIN (1u << 16)
 
+/* Operator-level: register/unregister shadow-traffic subscribers (a subscriber
+ * receives a copy of every completion request, i.e. all prompt/response content).
+ * Deliberately OUTSIDE CAPS_AUTHENTICATED (full-trust / UDS / remote_writes=full
+ * only), so a mere authenticated bearer cannot tap live traffic. */
+#define CAP_SHADOW_ADMIN (1u << 17)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x1FFFFu
+#define CAPS_ALL 0x3FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
