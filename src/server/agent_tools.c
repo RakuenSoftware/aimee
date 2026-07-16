@@ -685,6 +685,13 @@ static cJSON *tp_read_file(void)
            "File path. Prefer paths relative to the current workspace directory.");
    tp_prop(props, "offset", "integer", "Line offset to start reading from");
    tp_prop(props, "limit", "integer", "Maximum number of lines to read");
+   tp_prop(props, "raw", "boolean",
+           "Return raw bytes with no line anchors (for grep pipelines / binary sniffing). "
+           "Default false: each line is prefixed 'LINE:HASH| ' and a snapshot id is minted so "
+           "edit_file can edit by anchor without re-emitting the text.");
+   tp_prop(props, "mode", "string",
+           "'outline' returns the tree-sitter symbol skeleton (signatures + LINE:HASH anchors, no "
+           "bodies) — one cheap call to map a large file, then read/edit one span by anchor.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -726,16 +733,41 @@ static cJSON *tp_edit_file(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "path", "string",
            "File path to edit. Prefer paths relative to the current workspace directory.");
-   tp_prop(props, "old_string", "string",
-           "Exact existing text to replace (must be unique unless replace_all).");
-   tp_prop(props, "new_string", "string", "Replacement text.");
+   /* Anchored (primary) path. */
+   tp_prop(props, "snapshot_id", "string",
+           "The snapshot id from the read_file that produced the anchors below. Required for "
+           "anchored edits.");
+   {
+      cJSON *edits = cJSON_CreateObject();
+      cJSON_AddStringToObject(edits, "type", "array");
+      cJSON_AddStringToObject(
+          edits, "description",
+          "Anchored edits applied atomically against snapshot_id. Each item is one of: "
+          "{op:\"replace\", at:\"LINE:HASH\", text} | "
+          "{op:\"replace_range\", from:\"LINE:HASH\", to:\"LINE:HASH\", text} | "
+          "{op:\"insert_after\", at:\"LINE:HASH\", text} | "
+          "{op:\"delete_range\", from:\"LINE:HASH\", to:\"LINE:HASH\"}. "
+          "Anchors are the 'LINE:HASH' tokens read_file printed; the server owns all offset "
+          "arithmetic. On drift the call returns status:\"stale_anchor\" with re-anchored context "
+          "and a fresh snapshot_id.");
+      cJSON *items = cJSON_CreateObject();
+      cJSON_AddStringToObject(items, "type", "object");
+      cJSON_AddItemToObject(edits, "items", items);
+      cJSON_AddItemToObject(props, "edits", edits);
+   }
+   tp_prop(props, "dry_run", "boolean",
+           "Preview only: return the unified diff and structural blast radius without writing.");
+   /* Legacy (deprecated) string-replace path, retained for one release. */
+   tp_prop(
+       props, "old_string", "string",
+       "Deprecated fallback. Exact existing text to replace (unique unless replace_all). Prefer "
+       "snapshot_id + edits[].");
+   tp_prop(props, "new_string", "string", "Replacement text (with old_string).");
    tp_prop(props, "replace_all", "boolean",
-           "Replace every occurrence instead of requiring uniqueness.");
+           "Replace every occurrence instead of requiring uniqueness (with old_string).");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("old_string"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("new_string"));
    cJSON_AddItemToObject(params, "required", req);
    return params;
 }
@@ -789,6 +821,10 @@ static cJSON *tp_grep(void)
    tp_prop(props, "path", "string", "Directory or file to search in");
    tp_prop(props, "pattern", "string", "Pattern to search for (basic regex)");
    tp_prop(props, "max_results", "integer", "Max results (default 50)");
+   tp_prop(props, "anchored", "boolean",
+           "Return each hit as a ready edit anchor ('line:HASH| text') grouped under a "
+           "'path  snapshot=...' header, so a match can be edited via edit_file with no "
+           "intervening read. Default false (plain file:line:text).");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -963,6 +999,26 @@ static cJSON *tp_web_search(void)
    return params;
 }
 
+static cJSON *tp_web_read(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "ref", "string",
+           "A web_search handle (e.g. 'r2') or a raw http(s) URL. The page is fetched once "
+           "server-side (egress-guarded) and only the query-relevant spans are returned.");
+   tp_prop(props, "query", "string",
+           "What to extract. Exact API names / error strings / versions in the query are "
+           "guaranteed into the result (literal leg) above topical spans.");
+   tp_prop(props, "span", "integer", "Return exactly span N (1-based) instead of ranking.");
+   tp_prop(props, "mode", "string",
+           "'full' spills the entire stripped page by ref (retrieve with tool_output_get).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("ref"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_create_note(void)
 {
    cJSON *params = tp_obj();
@@ -1061,6 +1117,57 @@ static cJSON *tp_find_symbol(void)
    return params;
 }
 
+static cJSON *tp_read_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "symbol", "string",
+           "Symbol name whose definition span to fetch (e.g. a function "
+           "or type name).");
+   tp_prop(props, "path", "string",
+           "Optional file to search. Omit to resolve via the code index (which may return "
+           "candidates to disambiguate).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("symbol"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_edit_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "symbol", "string",
+           "Symbol to rewrite. Use a fully-qualified name when the bare name is not unique; if it "
+           "resolves to multiple definitions the server returns candidates rather than guessing.");
+   tp_prop(props, "path", "string",
+           "Optional file to scope the resolve (recommended to disambiguate overloaded names).");
+   tp_prop(props, "op", "string",
+           "Only 'replace_body' (default): replace the symbol's whole "
+           "definition span with 'text'.");
+   tp_prop(props, "text", "string", "The new definition (whole symbol body).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("symbol"));
+   cJSON_AddItemToArray(req, cJSON_CreateString("text"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_run_tests(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "command", "string",
+           "The test command to run (e.g. 'pytest -q', 'cargo test', 'make unit-tests').");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("command"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_search_memory(void)
 {
    cJSON *params = tp_obj();
@@ -1099,7 +1206,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "Run a bounded Python or Bash script with a scrubbed environment. Returns JSON with "
      "stdout, stderr, exit_code, duration_ms, and truncation flags.",
      tp_execute_script, TSURF_CHAT},
-    {"read_file", "Read a file and return its contents.", tp_read_file, TSURF_ALL},
+    {"read_file",
+     "Read a file. By default each line is prefixed with a stable 'LINE:HASH| ' anchor and a "
+     "snapshot id is minted: edit_file can then edit lines by anchor without you re-emitting "
+     "their text. Pass raw:true for un-anchored bytes.",
+     tp_read_file, TSURF_ALL},
     {"tool_output_get",
      "Retrieve the full, unfiltered output that aimee condensed. Pass the ref from a "
      "'[output condensed by aimee ... ref \"tc-...\"]' pointer to get the complete original "
@@ -1107,10 +1218,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_tool_output_get, TSURF_ALL},
     {"write_file", "Write content to a file (overwrites).", tp_write_file, TSURF_ALL},
     {"edit_file",
-     "Make a surgical edit to an existing file by replacing old_string with new_string. "
-     "Prefer this over write_file when changing part of a file — you do not need to "
-     "reproduce the whole file. old_string must match the file exactly (including "
-     "whitespace/indentation) and be unique unless replace_all is true.",
+     "Edit an existing file. Preferred: anchored edits — pass the snapshot_id from read_file "
+     "plus edits[] citing 'LINE:HASH' anchors ({op:replace|replace_range|insert_after|"
+     "delete_range}); the batch is verified against the snapshot and applied atomically, so you "
+     "never re-emit surrounding text and the server owns all offset math. dry_run:true previews "
+     "the diff + blast radius. Legacy fallback: old_string/new_string/replace_all string-replace.",
      tp_edit_file, TSURF_ALL},
     {"list_files", "List files in a directory, optionally matching a glob pattern.", tp_list_files,
      TSURF_ALL},
@@ -1152,8 +1264,15 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_code_search, TSURF_CHAT},
     {"web_search",
      "Search the web for current documentation, error messages, or API "
-     "references. Returns titles, URLs, and snippets for the top results.",
+     "references. Returns titles, URLs, and snippets for the top results, which web_read can then "
+     "read by handle (r1..rN) without re-emitting a URL.",
      tp_web_search, TSURF_ALL},
+    {"web_read",
+     "Read a web page token-lean: fetches once server-side and returns only the query-relevant "
+     "spans (exact API/error/version needles guaranteed in), cited by id and fenced as untrusted. "
+     "Accepts a web_search handle ('r2') or a raw http(s) URL. Prefer this over curl-ing a page "
+     "into context; span=N / mode=\"full\" recover anything the ranker dropped.",
+     tp_web_read, TSURF_ALL},
     {"create_note",
      "Create or append to an investigation note. Notes capture findings, hypotheses, "
      "and reasoning during debugging. If a note with the same title already exists, "
@@ -1193,6 +1312,21 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "indexed codebase. Returns file:line matches. Prefer this over grep for finding where "
      "something is defined or which header to include.",
      tp_find_symbol, TSURF_ALL},
+    {"read_symbol",
+     "Fetch just a symbol's definition span (anchored, editable) instead of reading the whole "
+     "enclosing file. Pass 'path' to read from a specific file, or omit it to resolve via the "
+     "code index.",
+     tp_read_symbol, TSURF_ALL},
+    {"edit_symbol",
+     "Rewrite a whole symbol (function/type) by name — the server resolves its definition span and "
+     "swaps it, so you don't reproduce the old body. Overloaded/shadowed names return candidates "
+     "instead of a blind resolve; pass a fully-qualified name or 'path' to disambiguate.",
+     tp_edit_symbol, TSURF_ALL},
+    {"run_tests",
+     "Run a test command and return a compact result: pass/fail, exit code, and the framework "
+     "summary + every failure — the full log is spilled and retrievable via tool_output_get. "
+     "Prefer this over bash for tests so a green suite costs a line.",
+     tp_run_tests, TSURF_ALL},
     {"search_memory",
      "Search aimee's knowledge base for stored facts, prior decisions, and project context. "
      "Use before starting any task to check for relevant prior work or constraints.",

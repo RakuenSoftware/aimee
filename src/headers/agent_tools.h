@@ -3,13 +3,18 @@
 
 #include "agent_protocol.h"
 #include "agent_types.h"
+#include "cJSON.h"
 #include <stdint.h>
 
 /* Tool execution (Unix only) */
 char *tool_bash(const char *command, int timeout_ms);
 char *tool_execute_script(const char *language, const char *body, int timeout_secs,
                           const char *workdir, const char *env_json);
-char *tool_read_file(const char *path, int offset, int limit);
+/* Read a file. When raw==0, each line is prefixed with a "LINE:HASH| " anchor
+ * and an immutable read snapshot is minted (its id echoed in a header line) so
+ * edit_file can edit by anchor. raw==1 restores the un-anchored byte output for
+ * grep pipelines / binary sniffing. */
+char *tool_read_file(const char *path, int offset, int limit, int raw);
 char *tool_write_file(const char *path, const char *content);
 /* Surgical edit: replace old_string with new_string in an existing file.
  * old_string must occur exactly once unless replace_all is non-zero (then all
@@ -17,10 +22,30 @@ char *tool_write_file(const char *path, const char *content);
  * tool_write_file on success, or an "error: ..." string. */
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
+/* Anchored transactional edit: apply `edits` (JSON array of {op,at/from/to,text})
+ * against the read snapshot `snapshot_id`, verifying each anchor's full digest
+ * before an atomic write-back. Returns the tool_write_file diff payload on
+ * success, a structured stale_anchor/conflict payload (carrying a fresh
+ * snapshot_id) on rejection, or a dry_run preview (unified diff + blast radius)
+ * when dry_run is non-zero. */
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *edits, int dry_run);
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_verify(const char *check_type, const char *target, const char *expected);
 char *tool_git_log(const char *repo_path, int count);
 char *tool_grep(const char *path, const char *pattern, int max_results);
+/* Part III anchored/agent-shaped tools (posix/agent_tools_anchored.c). */
+char *tool_read_outline(const char *path);
+char *tool_read_symbol(const char *symbol, const char *path);
+char *tool_edit_symbol(const char *symbol, const char *path, const char *op, const char *text);
+char *tool_grep_anchored(const char *path, const char *pattern, int max_results);
+char *tool_run_tests(const char *command, int timeout_ms);
+/* Token-lean extractive page reading (posix/web_read.c). ref = a search handle
+ * ("r2") or a raw http(s) URL. query drives literal+lexical span extraction;
+ * span>0 pulls one span; mode="full" spills the whole page by ref. */
+char *tool_web_read(const char *ref, const char *query, int span, const char *mode);
+/* Register rN->URL handles from a web_search result block (so web_read can take
+ * "r2"). */
+void web_handle_register_from_search(const char *search_output);
 char *tool_git_diff(const char *repo_path, const char *ref);
 char *tool_git_status(const char *repo_path);
 char *tool_env_get(const char *name);

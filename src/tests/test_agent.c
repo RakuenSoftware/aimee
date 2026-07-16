@@ -13,6 +13,10 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tools.h"
+#include "anchor_snapshot.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include "workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
@@ -35,7 +39,7 @@ void test_responses_parser_separates_message_items(void);
 
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
-char *tool_read_file(const char *path, int offset, int limit);
+char *tool_read_file(const char *path, int offset, int limit, int raw);
 char *tool_write_file(const char *path, const char *content);
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
@@ -1089,25 +1093,25 @@ static void test_tool_read_file(void)
    close(fd);
 
    /* Read entire file */
-   char *result = tool_read_file(tmppath, 0, 0);
+   char *result = tool_read_file(tmppath, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, content) == 0);
    free(result);
 
    /* Read with offset */
-   result = tool_read_file(tmppath, 1, 0);
+   result = tool_read_file(tmppath, 1, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "line2\nline3\nline4\n") == 0);
    free(result);
 
    /* Read with limit */
-   result = tool_read_file(tmppath, 0, 2);
+   result = tool_read_file(tmppath, 0, 2, 1);
    assert(result != NULL);
    assert(strcmp(result, "line1\nline2\n") == 0);
    free(result);
 
    /* Nonexistent path */
-   result = tool_read_file("/nonexistent/path/file.txt", 0, 0);
+   result = tool_read_file("/nonexistent/path/file.txt", 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error: cannot open") != NULL);
    free(result);
@@ -1116,10 +1120,23 @@ static void test_tool_read_file(void)
    assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
    assert(write(fd, binary_content, sizeof(binary_content)) == (ssize_t)sizeof(binary_content));
    close(fd);
-   result = tool_read_file(tmppath, 0, 0);
+   result = tool_read_file(tmppath, 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error: binary file omitted") != NULL);
    assert(memchr(result, 0x7f, strlen(result)) == NULL);
+   free(result);
+
+   /* Anchored mode (default): lines prefixed LINE:HASH| and a snapshot header. */
+   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   assert(write(fd, content, strlen(content)) == (ssize_t)strlen(content));
+   close(fd);
+   result = tool_read_file(tmppath, 0, 0, 0);
+   assert(result != NULL);
+   assert(strstr(result, "snapshot=s") != NULL);
+   assert(strstr(result, "| line1") != NULL);
+   assert(strstr(result, "| line4") != NULL);
+   /* an anchor of the shape "N:HH| " must be present */
+   assert(strstr(result, "1:") != NULL);
    free(result);
 
    unlink(tmppath);
@@ -1148,7 +1165,7 @@ static void test_tool_write_file(void)
    free(result);
 
    /* Verify contents */
-   char *readback = tool_read_file(tmppath, 0, 0);
+   char *readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback != NULL);
    assert(strcmp(readback, "hello world") == 0);
    free(readback);
@@ -1197,7 +1214,7 @@ static void test_tool_edit_file(void)
    assert(status && strcmp(status->valuestring, "ok") == 0);
    cJSON_Delete(json);
    free(result);
-   char *readback = tool_read_file(tmppath, 0, 0);
+   char *readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nbeta\nGAMMA\nbeta\n") == 0);
    free(readback);
 
@@ -1210,7 +1227,7 @@ static void test_tool_edit_file(void)
    result = tool_edit_file(tmppath, "beta", "B", 0);
    assert(result != NULL && strncmp(result, "error:", 6) == 0);
    free(result);
-   readback = tool_read_file(tmppath, 0, 0);
+   readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nbeta\nGAMMA\nbeta\n") == 0);
    free(readback);
 
@@ -1218,11 +1235,272 @@ static void test_tool_edit_file(void)
    result = tool_edit_file(tmppath, "beta", "B", 1);
    assert(result != NULL && strncmp(result, "error:", 6) != 0);
    free(result);
-   readback = tool_read_file(tmppath, 0, 0);
+   readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nB\nGAMMA\nB\n") == 0);
    free(readback);
 
    unlink(tmppath);
+}
+
+/* Pull "snapshot=<id>" out of an anchored read_file header line. */
+static char *anchored_snapshot_id(const char *read_out, char *buf, size_t buflen)
+{
+   const char *m = strstr(read_out, "snapshot=");
+   if (!m)
+      return NULL;
+   m += strlen("snapshot=");
+   size_t i = 0;
+   while (m[i] && m[i] != ' ' && m[i] != '\n' && i + 1 < buflen)
+   {
+      buf[i] = m[i];
+      i++;
+   }
+   buf[i] = '\0';
+   return buf;
+}
+
+static cJSON *mk_replace(const char *anchor, const char *text)
+{
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "op", "replace");
+   cJSON_AddStringToObject(e, "at", anchor);
+   cJSON_AddStringToObject(e, "text", text);
+   return e;
+}
+
+/* Find the "N:HH" anchor for 1-based ordinal `ord` in an anchored read_file
+ * output (a line beginning "N:HH| "). */
+static char *anchored_line_token(const char *read_out, int ord, char *buf, size_t buflen)
+{
+   char needle[16];
+   snprintf(needle, sizeof(needle), "\n%d:", ord);
+   const char *m = strstr(read_out, needle);
+   if (!m)
+      return NULL;
+   m++; /* skip the leading newline */
+   size_t i = 0;
+   while (m[i] && m[i] != '|' && m[i] != ' ' && i + 1 < buflen)
+   {
+      buf[i] = m[i];
+      i++;
+   }
+   buf[i] = '\0';
+   return buf;
+}
+
+static void test_tool_edit_file_anchored(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_test_anchored_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   close(fd);
+
+   char *w = tool_write_file(tmppath, "one\ntwo\nthree\nfour\n");
+   assert(w);
+   free(w);
+
+   /* anchored read mints a snapshot */
+   char *rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   char sid[ANCHOR_SNAPSHOT_ID_MAX];
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)) && sid[0] == 's');
+   char a2[24], a3[24];
+   assert(anchored_line_token(rd, 2, a2, sizeof(a2)));
+   assert(anchored_line_token(rd, 3, a3, sizeof(a3)));
+   free(rd);
+
+   /* dry_run previews without writing */
+   cJSON *dedits = cJSON_CreateArray();
+   cJSON_AddItemToArray(dedits, mk_replace(a2, "TWO"));
+   char *edits_json = cJSON_PrintUnformatted(dedits);
+   (void)edits_json;
+   char *dry = tool_edit_file_anchored(tmppath, sid, dedits, 1);
+   assert(dry);
+   cJSON *dj = parse_json_or_die(dry);
+   assert(strcmp(cJSON_GetObjectItem(dj, "status")->valuestring, "dry_run") == 0);
+   cJSON_Delete(dj);
+   free(dry);
+   free(edits_json);
+   cJSON_Delete(dedits);
+   char *rb = tool_read_file(tmppath, 0, 0, 1);
+   assert(rb && strcmp(rb, "one\ntwo\nthree\nfour\n") == 0); /* unchanged by dry_run */
+   free(rb);
+
+   /* commit a two-op batch */
+   cJSON *edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(edits, mk_replace(a2, "TWO"));
+   cJSON_AddItemToArray(edits, mk_replace(a3, "THREE"));
+   char *res = tool_edit_file_anchored(tmppath, sid, edits, 0);
+   assert(res && strncmp(res, "error:", 6) != 0);
+   cJSON *rj = parse_json_or_die(res);
+   assert(strcmp(cJSON_GetObjectItem(rj, "status")->valuestring, "ok") == 0);
+   cJSON_Delete(rj);
+   free(res);
+   cJSON_Delete(edits);
+   rb = tool_read_file(tmppath, 0, 0, 1);
+   assert(rb && strcmp(rb, "one\nTWO\nTHREE\nfour\n") == 0);
+   free(rb);
+
+   /* the old snapshot is now stale: the file moved under it */
+   cJSON *stale_edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(stale_edits, mk_replace(a2, "again"));
+   char *stale = tool_edit_file_anchored(tmppath, sid, stale_edits, 0);
+   assert(stale);
+   cJSON *sj = parse_json_or_die(stale);
+   assert(strcmp(cJSON_GetObjectItem(sj, "status")->valuestring, "stale_anchor") == 0);
+   /* rejection carries a fresh snapshot_id to retry against */
+   assert(cJSON_GetObjectItem(sj, "snapshot_id") != NULL);
+   cJSON_Delete(sj);
+   free(stale);
+   cJSON_Delete(stale_edits);
+
+   /* unknown snapshot id -> snapshot_expired, file untouched */
+   cJSON *exp_edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(exp_edits, mk_replace("2:aa", "z"));
+   char *exp = tool_edit_file_anchored(tmppath, "sdeadbeef00000000", exp_edits, 0);
+   assert(exp);
+   cJSON *ej = parse_json_or_die(exp);
+   assert(strcmp(cJSON_GetObjectItem(ej, "status")->valuestring, "snapshot_expired") == 0);
+   cJSON_Delete(ej);
+   free(exp);
+   cJSON_Delete(exp_edits);
+
+   unlink(tmppath);
+}
+
+static void test_part3_anchored_tools(void)
+{
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/aimee_p3_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(dir) != NULL);
+   char cfile[600];
+   snprintf(cfile, sizeof(cfile), "%s/sample.c", dir);
+   const char *src = "#include <stdio.h>\n"
+                     "int add(int a, int b)\n"
+                     "{\n"
+                     "   return a + b;\n"
+                     "}\n"
+                     "int main(void)\n"
+                     "{\n"
+                     "   return add(1, 2);\n"
+                     "}\n";
+   char *w = tool_write_file(cfile, src);
+   assert(w);
+   free(w);
+
+   /* outline: symbol skeleton with a snapshot + anchors */
+   char *outline = tool_read_outline(cfile);
+   assert(outline);
+   assert(strstr(outline, "snapshot=s") != NULL);
+   assert(strstr(outline, "add") != NULL && strstr(outline, "main") != NULL);
+   free(outline);
+
+   /* read_symbol: just the def span, anchored + headed */
+   char *sym = tool_read_symbol("add", cfile);
+   assert(sym);
+   assert(strstr(sym, "# add") != NULL);
+   assert(strstr(sym, "| int add(int a, int b)") != NULL);
+   assert(strstr(sym, "| int main") == NULL); /* only the add span */
+   free(sym);
+
+   /* grep anchored: hits become editable anchors under a per-file snapshot */
+   char *g = tool_grep_anchored(dir, "return", 50);
+   assert(g);
+   assert(strstr(g, "snapshot=s") != NULL);
+   assert(strstr(g, "|") != NULL);
+   free(g);
+
+   /* run_tests: structured pass/fail with counts+failures, full log spilled */
+   char *rt = tool_run_tests("printf 'ok\\n'; exit 0", 10000);
+   assert(rt);
+   cJSON *rj = parse_json_or_die(rt);
+   assert(strcmp(cJSON_GetObjectItem(rj, "status")->valuestring, "passed") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(rj, "passed")));
+   cJSON_Delete(rj);
+   free(rt);
+
+   char *rf = tool_run_tests("echo boom; exit 1", 10000);
+   assert(rf);
+   cJSON *fj = parse_json_or_die(rf);
+   assert(strcmp(cJSON_GetObjectItem(fj, "status")->valuestring, "failed") == 0);
+   assert(!cJSON_IsTrue(cJSON_GetObjectItem(fj, "passed")));
+   cJSON_Delete(fj);
+   free(rf);
+
+   /* edit_symbol: whole-function rewrite by name, span resolved server-side */
+   char *es = tool_edit_symbol("add", cfile, "replace_body",
+                               "int add(int a, int b)\n{\n   return a + b + 0;\n}");
+   assert(es);
+   cJSON *ej = parse_json_or_die(es);
+   assert(strcmp(cJSON_GetObjectItem(ej, "status")->valuestring, "ok") == 0);
+   /* identity echo so the agent can confirm the resolved target */
+   assert(cJSON_GetObjectItem(ej, "symbol") != NULL);
+   assert(cJSON_GetObjectItem(ej, "resolved_at") != NULL);
+   cJSON_Delete(ej);
+   free(es);
+   char *chk = tool_read_file(cfile, 0, 0, 1);
+   assert(chk && strstr(chk, "return a + b + 0;") != NULL);
+   assert(strstr(chk, "int main") != NULL); /* main untouched */
+   free(chk);
+
+   unlink(cfile);
+   rmdir(dir);
+}
+
+/* web_read.c exports this SSRF classifier. */
+int web_egress_addr_blocked(const struct sockaddr *sa);
+
+static int v4_blocked(const char *ip)
+{
+   struct sockaddr_in sa = {0};
+   sa.sin_family = AF_INET;
+   assert(inet_pton(AF_INET, ip, &sa.sin_addr) == 1);
+   return web_egress_addr_blocked((struct sockaddr *)&sa);
+}
+
+static int v6_blocked(const char *ip)
+{
+   struct sockaddr_in6 sa = {0};
+   sa.sin6_family = AF_INET6;
+   assert(inet_pton(AF_INET6, ip, &sa.sin6_addr) == 1);
+   return web_egress_addr_blocked((struct sockaddr *)&sa);
+}
+
+static void test_web_read_ssrf(void)
+{
+   /* private / reserved / metadata addresses are blocked */
+   assert(v4_blocked("127.0.0.1"));
+   assert(v4_blocked("10.1.2.3"));
+   assert(v4_blocked("172.16.5.4"));
+   assert(v4_blocked("192.168.0.1"));
+   assert(v4_blocked("169.254.169.254")); /* cloud metadata */
+   assert(v4_blocked("100.64.0.1"));      /* CGNAT */
+   assert(v4_blocked("0.0.0.0"));
+   assert(v4_blocked("224.0.0.1"));
+   /* public addresses are allowed */
+   assert(!v4_blocked("8.8.8.8"));
+   assert(!v4_blocked("93.184.216.34"));
+   /* IPv6 */
+   assert(v6_blocked("::1"));
+   assert(v6_blocked("fe80::1"));
+   assert(v6_blocked("fc00::1"));
+   assert(v6_blocked("::ffff:127.0.0.1")); /* mapped loopback */
+   assert(!v6_blocked("2001:4860:4860::8888"));
+
+   /* end-to-end: the tool refuses non-http schemes and private targets without
+    * any network egress */
+   char *r = tool_web_read("ftp://example.com/x", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("http://127.0.0.1:1/", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("http://169.254.169.254/latest/meta-data/", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("not-a-url", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
 }
 
 static void test_parent_write_guard_blocks_parent_writes(void)
@@ -1271,7 +1549,7 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strstr(result, "parent worktree is read-only") != NULL);
    free(result);
 
-   result = tool_read_file(parent_file, 0, 0);
+   result = tool_read_file(parent_file, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "original") == 0);
    free(result);
@@ -1301,7 +1579,7 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strstr(result, "error:") == NULL);
    free(result);
 
-   result = tool_read_file(worktree_file, 0, 0);
+   result = tool_read_file(worktree_file, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "allowed") == 0);
    free(result);
@@ -2039,7 +2317,7 @@ static void test_parse_openai_tool_calls(void)
 static void test_path_traversal_rejected(void)
 {
    /* read_file with traversal should be rejected */
-   char *result = tool_read_file("/tmp/../etc/shadow", 0, 0);
+   char *result = tool_read_file("/tmp/../etc/shadow", 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error:") != NULL);
    free(result);
@@ -2071,7 +2349,7 @@ static void test_sensitive_path_rejected(void)
    if (home)
    {
       snprintf(ssh_path, sizeof(ssh_path), "%s/.ssh/id_rsa", home);
-      char *result = tool_read_file(ssh_path, 0, 0);
+      char *result = tool_read_file(ssh_path, 0, 0, 1);
       assert(result != NULL);
       /* Should be rejected as sensitive or fail to open */
       assert(strstr(result, "error:") != NULL || strstr(result, "denied") != NULL);
@@ -2092,7 +2370,7 @@ static void test_symlink_escape_rejected(void)
    /* Create symlink to a sensitive path */
    if (symlink("/etc/shadow", link_path) == 0)
    {
-      char *result = tool_read_file(link_path, 0, 0);
+      char *result = tool_read_file(link_path, 0, 0, 1);
       assert(result != NULL);
       /* Should be blocked by the realpath-based check */
       assert(strstr(result, "error:") != NULL || strstr(result, "denied") != NULL);
@@ -2602,6 +2880,9 @@ int main(void)
    test_tool_read_file();
    test_tool_write_file();
    test_tool_edit_file();
+   test_tool_edit_file_anchored();
+   test_part3_anchored_tools();
+   test_web_read_ssrf();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();
