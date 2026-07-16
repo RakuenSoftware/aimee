@@ -9,6 +9,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "agent_protocol.h"
+#include "cJSON.h"
 
 void test_responses_parser_keeps_all_output_text_parts(void)
 {
@@ -49,6 +50,85 @@ void test_responses_parser_accumulates_output_text_deltas(void)
    assert(parsed.prompt_tokens == 5);
    assert(parsed.completion_tokens == 6);
    agent_free_parsed_response(&parsed);
+}
+
+/* Walk a Responses object's output[] for the first non-empty message output_text.
+ * Returns a borrowed pointer into `resp`, or NULL. */
+static const char *first_output_text(struct cJSON *resp)
+{
+   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   struct cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (!type || !cJSON_IsString(type) || strcmp(type->valuestring, "message") != 0)
+         continue;
+      struct cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
+      struct cJSON *part = NULL;
+      cJSON_ArrayForEach(part, content)
+      {
+         struct cJSON *pt = cJSON_GetObjectItemCaseSensitive(part, "type");
+         struct cJSON *tx = cJSON_GetObjectItemCaseSensitive(part, "text");
+         if (pt && cJSON_IsString(pt) && strcmp(pt->valuestring, "output_text") == 0 && tx &&
+             cJSON_IsString(tx) && tx->valuestring[0])
+            return tx->valuestring;
+      }
+   }
+   return NULL;
+}
+
+/* Codex streams the answer as output_text deltas and its response.completed event
+ * carries "output":[] (empty). The response OBJECT the IR/shadow consume must still
+ * carry the text, so agent_responses_sse_response_object folds the SSE-aggregated
+ * text back into output[] -- otherwise responses_backend_parse sees zero text while
+ * the legacy parser recovered it (the live wire=3 shadow mismatch). */
+void test_responses_object_folds_in_delta_text(void)
+{
+   const char *body =
+       "event: response.output_text.delta\r\n"
+       "data: {\"delta\":\"deployed to \"}\r\n\r\n"
+       "event: response.output_text.delta\r\n"
+       "data: {\"delta\":\"192.168.1.254\"}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":6}}}"
+       "\r\n\r\n";
+
+   struct cJSON *resp = agent_responses_sse_response_object(body);
+   assert(resp != NULL);
+   const char *txt = first_output_text(resp);
+   assert(txt != NULL);
+   assert(strcmp(txt, "deployed to 192.168.1.254") == 0);
+   cJSON_Delete(resp);
+}
+
+/* Guard against double-injection: when the completed object ALREADY carries the
+ * message text (non-codex responses that repeat it in output[]), the extractor must
+ * leave a single output_text -- not append a duplicate. */
+void test_responses_object_keeps_existing_text(void)
+{
+   const char *body =
+       "event: response.output_text.delta\r\n"
+       "data: {\"delta\":\"hello there\"}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[{\"type\":\"message\",\"content\":["
+       "{\"type\":\"output_text\",\"text\":\"hello there\"}]}],"
+       "\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\r\n\r\n";
+
+   struct cJSON *resp = agent_responses_sse_response_object(body);
+   assert(resp != NULL);
+   struct cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   int message_items = 0;
+   struct cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      struct cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "message") == 0)
+         message_items++;
+   }
+   assert(message_items == 1); /* not duplicated */
+   const char *txt = first_output_text(resp);
+   assert(txt != NULL && strcmp(txt, "hello there") == 0);
+   cJSON_Delete(resp);
 }
 
 void test_responses_parser_uses_output_text_done(void)

@@ -770,11 +770,45 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
       cJSON_Delete(collected_output);
 }
 
+/* 1 if `resp`'s output array already carries a non-empty output_text part. */
+static int responses_object_has_output_text(cJSON *resp)
+{
+   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   if (!cJSON_IsArray(output))
+      return 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
+   {
+      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (!type || !cJSON_IsString(type) || strcmp(type->valuestring, "message") != 0)
+         continue;
+      cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
+      cJSON *part = NULL;
+      if (cJSON_IsArray(content))
+         cJSON_ArrayForEach(part, content)
+         {
+            cJSON *pt = cJSON_GetObjectItemCaseSensitive(part, "type");
+            cJSON *tx = cJSON_GetObjectItemCaseSensitive(part, "text");
+            if (pt && cJSON_IsString(pt) && strcmp(pt->valuestring, "output_text") == 0 && tx &&
+                cJSON_IsString(tx) && tx->valuestring[0])
+               return 1;
+         }
+   }
+   return 0;
+}
+
 /* Extract the Responses (codex) "response object" -- the one carrying the `output`
  * item array -- from an SSE body, so the IR responses_backend_parse (and the response
  * shadow) can consume the same shape the JSON wires do. Prefers the response.completed
  * event's payload; falls back to parsing the whole body as a single JSON object
- * (non-streaming). Returns a new cJSON the caller owns, or NULL. */
+ * (non-streaming).
+ *
+ * Codex streams the answer text as output_text deltas and its completed event's
+ * message body is often EMPTY, so responses_backend_parse would see no text (while the
+ * legacy parser recovered it from the deltas). Fold the SSE-aggregated text -- the
+ * same text legacy uses, captured in the scratch parse below -- back into the object's
+ * output when the completed message lacks it, so the object is self-contained. Returns
+ * a new cJSON the caller owns, or NULL. */
 cJSON *agent_responses_sse_response_object(const char *body)
 {
    if (!body)
@@ -786,14 +820,34 @@ cJSON *agent_responses_sse_response_object(const char *body)
    cJSON *completed = NULL;
    responses_parse_sse_events(body, &scratch, collected, &delta_text, &done_text, &part_text,
                               &completed);
-   free(delta_text);
-   free(done_text);
-   free(part_text);
-   agent_free_parsed_response(&scratch);
+   /* Fold the streamed text into scratch.content the same way the legacy parser does
+    * (output_item.done text, else content_part.done, else the output_text deltas --
+    * longest wins). These helpers consume the passed-in strings. */
+   responses_take_longer_content(&scratch, &part_text);
+   responses_take_longer_content(&scratch, &done_text);
+   responses_take_longer_content(&scratch, &delta_text);
    cJSON_Delete(collected);
-   if (completed)
-      return completed; /* the response object (has `output` + `usage`) */
-   return cJSON_Parse(body);
+
+   cJSON *resp = completed ? completed : cJSON_Parse(body);
+   if (resp && scratch.content && scratch.content[0] && !responses_object_has_output_text(resp))
+   {
+      cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+      if (!cJSON_IsArray(output))
+         output = cJSON_AddArrayToObject(resp, "output");
+      if (cJSON_IsArray(output))
+      {
+         cJSON *msg = cJSON_CreateObject();
+         cJSON_AddStringToObject(msg, "type", "message");
+         cJSON *content = cJSON_AddArrayToObject(msg, "content");
+         cJSON *part = cJSON_CreateObject();
+         cJSON_AddStringToObject(part, "type", "output_text");
+         cJSON_AddStringToObject(part, "text", scratch.content);
+         cJSON_AddItemToArray(content, part);
+         cJSON_AddItemToArray(output, msg);
+      }
+   }
+   agent_free_parsed_response(&scratch);
+   return resp;
 }
 
 void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
