@@ -96,11 +96,14 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export interface ConnectHostsProps {
-  /** Continue to the next wizard step. */
+  /** Continue to the next wizard step (or close the modal when reused stand-alone). */
   onDone: () => void;
   /** Called whenever the connected-host set changes, with the new count (lets the
    * wizard refresh its readiness/summary without a reload). */
   onHostsChanged?: (count: number) => void;
+  /** Label for the done button. Defaults to the wizard's Continue wording; a
+   * stand-alone host (e.g. the Projects modal) passes e.g. "Done". */
+  doneLabel?: string;
 }
 
 interface Pending {
@@ -110,7 +113,7 @@ interface Pending {
   host: string;
 }
 
-export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsProps) {
+export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: ConnectHostsProps) {
   const [hosts, setHosts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -512,7 +515,7 @@ export default function ConnectHosts({ onDone, onHostsChanged }: ConnectHostsPro
 
       <div>
         <button style={primaryBtn} onClick={onDone}>
-          {hosts.length > 0 ? 'Continue' : 'Continue without connecting'}
+          {doneLabel ?? (hosts.length > 0 ? 'Continue' : 'Continue without connecting')}
         </button>
       </div>
     </div>
