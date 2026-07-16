@@ -81,6 +81,16 @@ static void print_rules_delete(cJSON *resp)
 
 static void print_agent_list(cJSON *resp)
 {
+   /* A server-side load failure now comes back as status:error (not a fake
+    * empty roster). Surface it as an error, not as "No agents configured" —
+    * the two are different problems and only one is fixed by adding an agent. */
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   {
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      printf("error: %s\n", cJSON_IsString(msg) ? msg->valuestring : "agent list failed");
+      return;
+   }
    cJSON *agents = cJSON_GetObjectItemCaseSensitive(resp, "agents");
    if (!cJSON_IsArray(agents) || cJSON_GetArraySize(agents) == 0)
    {
