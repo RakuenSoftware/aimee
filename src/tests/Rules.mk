@@ -1058,7 +1058,8 @@ $(TESTPREFIX)/unit-test-config: $(OBJDIR)/tests/test_config.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
-                      $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/guardrails_tdd.o $(TEST_CORE_OBJS)
+                      $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/guardrails_tdd.o \
+                      $(OBJDIR)/harness_memory_common.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-roundtable-preset: $(OBJDIR)/tests/test_roundtable_preset.o $(OBJDIR)/roundtable_preset.o $(TEST_CORE_OBJS)
@@ -1383,7 +1384,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/server/presence.o $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/agent_cancel_stub.o $(OBJDIR)/delivery_target.o \
-                               $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/server/workspace_provider_detached.o \
+                               $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/server/workspace_provider_detached.o \
                                $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                                $(OBJDIR)/workspace_mirror.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o \
                                $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o

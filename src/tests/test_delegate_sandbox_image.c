@@ -96,6 +96,42 @@ int main(void)
       assert(out[0] == '\0');
    }
 
+   /* --- pure: Dockerfile generation from from+packages --- */
+   {
+      char df[4096];
+      const char *pkgs[] = {"gcc", "make", "libssl-dev"};
+      assert(delegate_sandbox_dockerfile_from_packages("ubuntu:22.04", pkgs, 3, df, sizeof(df)) ==
+             0);
+      assert(strstr(df, "FROM ubuntu:22.04\n") == df);
+      assert(strstr(df, "apt-get install -y --no-install-recommends gcc make libssl-dev") != NULL);
+
+      /* zero packages -> just FROM */
+      assert(delegate_sandbox_dockerfile_from_packages("alpine:3", NULL, 0, df, sizeof(df)) == 0);
+      assert(strcmp(df, "FROM alpine:3\n") == 0);
+
+      /* injection-y package name is rejected (no shell metacharacters reach RUN) */
+      const char *bad[] = {"gcc; rm -rf /"};
+      assert(delegate_sandbox_dockerfile_from_packages("ubuntu:22.04", bad, 1, df, sizeof(df)) ==
+             -1);
+      const char *bad2[] = {"$(whoami)"};
+      assert(delegate_sandbox_dockerfile_from_packages("ubuntu:22.04", bad2, 1, df, sizeof(df)) ==
+             -1);
+      /* empty base rejected */
+      assert(delegate_sandbox_dockerfile_from_packages("", pkgs, 1, df, sizeof(df)) == -1);
+   }
+
+   /* --- pure: content tag is deterministic + well-formed --- */
+   {
+      char t1[64], t2[64], t3[64];
+      delegate_sandbox_content_tag("FROM ubuntu:22.04\n", t1, sizeof(t1));
+      delegate_sandbox_content_tag("FROM ubuntu:22.04\n", t2, sizeof(t2));
+      delegate_sandbox_content_tag("FROM alpine:3\n", t3, sizeof(t3));
+      assert(strcmp(t1, t2) == 0); /* same content -> same tag (reuse) */
+      assert(strcmp(t1, t3) != 0); /* different content -> different tag */
+      assert(strncmp(t1, "aimee-sbx:", 10) == 0);
+      assert(strlen(t1) == 10 + 12); /* prefix + 12 hex */
+   }
+
    printf("all tests passed\n");
    return 0;
 }
