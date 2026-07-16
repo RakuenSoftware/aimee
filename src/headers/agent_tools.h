@@ -39,6 +39,13 @@ char *tool_read_symbol(const char *symbol, const char *path);
 char *tool_edit_symbol(const char *symbol, const char *path, const char *op, const char *text);
 char *tool_grep_anchored(const char *path, const char *pattern, int max_results);
 char *tool_run_tests(const char *command, int timeout_ms);
+/* Token-lean extractive page reading (posix/web_read.c). ref = a search handle
+ * ("r2") or a raw http(s) URL. query drives literal+lexical span extraction;
+ * span>0 pulls one span; mode="full" spills the whole page by ref. */
+char *tool_web_read(const char *ref, const char *query, int span, const char *mode);
+/* Register rN->URL handles from a web_search result block (so web_read can take
+ * "r2"). */
+void web_handle_register_from_search(const char *search_output);
 char *tool_git_diff(const char *repo_path, const char *ref);
 char *tool_git_status(const char *repo_path);
 char *tool_env_get(const char *name);

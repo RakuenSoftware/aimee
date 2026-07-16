@@ -61,6 +61,10 @@ typedef struct
    char path[2048];
    int port;
    int use_ssl;
+   /* SSRF pinning: when non-empty, the connection is made to this exact
+    * pre-validated numeric IP (no DNS re-resolution), while TLS SNI and the
+    * Host header still use `host`. Closes the DNS-rebinding TOCTOU. */
+   char pinned_ip[64];
 } parsed_url_t;
 
 static int parse_url(const char *url, parsed_url_t *out)
@@ -193,6 +197,56 @@ static int connect_with_timeout(const char *host, int port, int timeout_ms)
    return fd;
 }
 
+/* Connect to a pre-validated NUMERIC IP (no DNS lookup). Used by the SSRF-safe
+ * fetch path so the socket lands on exactly the address the egress policy
+ * validated, not a fresh resolution that a hostile resolver could rebind. */
+static int connect_pinned(const char *ip, int port, int timeout_ms)
+{
+   char port_str[16];
+   snprintf(port_str, sizeof(port_str), "%d", port);
+   struct addrinfo hints = {0}, *res = NULL;
+   hints.ai_family = AF_UNSPEC;
+   hints.ai_socktype = SOCK_STREAM;
+   hints.ai_flags = AI_NUMERICHOST; /* never resolve — ip is already numeric */
+   if (getaddrinfo(ip, port_str, &hints, &res) != 0 || !res)
+      return -1;
+
+   int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+   if (fd < 0)
+   {
+      freeaddrinfo(res);
+      return -1;
+   }
+   int flags = fcntl(fd, F_GETFL, 0);
+   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+   int rc = connect(fd, res->ai_addr, res->ai_addrlen);
+   freeaddrinfo(res);
+   if (rc < 0 && errno != EINPROGRESS)
+   {
+      close(fd);
+      return -1;
+   }
+   if (rc < 0)
+   {
+      struct pollfd pfd = {fd, POLLOUT, 0};
+      if (poll(&pfd, 1, agent_http_effective_connect_timeout_ms(timeout_ms)) <= 0)
+      {
+         close(fd);
+         return -1;
+      }
+      int err = 0;
+      socklen_t errlen = sizeof(err);
+      getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
+      if (err)
+      {
+         close(fd);
+         return -1;
+      }
+   }
+   fcntl(fd, F_SETFL, flags);
+   return fd;
+}
+
 /* Send HTTP CONNECT to establish a tunnel through `proxy_host:proxy_port` to
  * `target_host:target_port`.  The fd must already be connected to the proxy.
  * Returns 0 on success (proxy returned "200"), -1 on failure. */
@@ -269,9 +323,26 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
    int rcv_ms = timeout_ms > 0 ? (timeout_ms < 30000 ? timeout_ms : 30000) : 0;
 
    const proxy_bootstrap_t *pb = proxy_get();
-   int use_proxy = pb && pb->has_proxy && url->use_ssl && proxy_should_use(pb, url->host);
+   /* A pinned (SSRF-validated) fetch connects directly to the checked IP and
+    * bypasses any forward proxy — the egress decision was made on that IP. */
+   int use_proxy =
+       !url->pinned_ip[0] && pb && pb->has_proxy && url->use_ssl && proxy_should_use(pb, url->host);
 
-   if (use_proxy)
+   if (url->pinned_ip[0])
+   {
+      conn->fd = connect_pinned(url->pinned_ip, url->port, timeout_ms);
+      if (conn->fd < 0)
+         return -1;
+      if (rcv_ms > 0)
+      {
+         struct timeval tv;
+         tv.tv_sec = rcv_ms / 1000;
+         tv.tv_usec = (rcv_ms % 1000) * 1000;
+         setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+         setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      }
+   }
+   else if (use_proxy)
    {
       /* Connect to the proxy, then tunnel to the target via CONNECT */
       conn->fd = connect_with_timeout(pb->https_proxy.host, pb->https_proxy.port, timeout_ms);
@@ -1049,6 +1120,39 @@ stream_done:
 }
 
 /* ---- Public API ---- */
+
+/* SSRF-safe GET: connect to `pinned_ip` (a numeric IP the caller already
+ * validated against the egress deny-list) while keeping Host/SNI = the URL host.
+ * No DNS re-resolution, so a rebinding resolver cannot swap in a private IP
+ * between check and connect. */
+int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,
+                          char **response_buf, int timeout_ms)
+{
+   *response_buf = NULL;
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+   if (pinned_ip && pinned_ip[0])
+      snprintf(pu.pinned_ip, sizeof(pu.pinned_ip), "%s", pinned_ip);
+
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+      return -1;
+   if (send_request(&conn, "GET", &pu, NULL, NULL, extra_headers, "aimee/1.0", NULL, 0) < 0)
+   {
+      conn_close(&conn);
+      return -1;
+   }
+   size_t resp_len = 0;
+   int status = http_read_response(&conn, response_buf, &resp_len);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+   }
+   return status;
+}
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
 {

@@ -957,6 +957,26 @@ static cJSON *tp_web_search(void)
    return params;
 }
 
+static cJSON *tp_web_read(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "ref", "string",
+           "A web_search handle (e.g. 'r2') or a raw http(s) URL. The page is fetched once "
+           "server-side (egress-guarded) and only the query-relevant spans are returned.");
+   tp_prop(props, "query", "string",
+           "What to extract. Exact API names / error strings / versions in the query are "
+           "guaranteed into the result (literal leg) above topical spans.");
+   tp_prop(props, "span", "integer", "Return exactly span N (1-based) instead of ranking.");
+   tp_prop(props, "mode", "string",
+           "'full' spills the entire stripped page by ref (retrieve with tool_output_get).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("ref"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_create_note(void)
 {
    cJSON *params = tp_obj();
@@ -1202,8 +1222,15 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_code_search, TSURF_CHAT},
     {"web_search",
      "Search the web for current documentation, error messages, or API "
-     "references. Returns titles, URLs, and snippets for the top results.",
+     "references. Returns titles, URLs, and snippets for the top results, which web_read can then "
+     "read by handle (r1..rN) without re-emitting a URL.",
      tp_web_search, TSURF_ALL},
+    {"web_read",
+     "Read a web page token-lean: fetches once server-side and returns only the query-relevant "
+     "spans (exact API/error/version needles guaranteed in), cited by id and fenced as untrusted. "
+     "Accepts a web_search handle ('r2') or a raw http(s) URL. Prefer this over curl-ing a page "
+     "into context; span=N / mode=\"full\" recover anything the ranker dropped.",
+     tp_web_read, TSURF_ALL},
     {"create_note",
      "Create or append to an investigation note. Notes capture findings, hypotheses, "
      "and reasoning during debugging. If a note with the same title already exists, "

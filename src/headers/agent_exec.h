@@ -324,6 +324,10 @@ static inline int agent_http_effective_connect_timeout_ms(int request_timeout_ms
 }
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms);
+/* SSRF-safe GET: connect to the caller-validated numeric `pinned_ip` (no DNS
+ * re-resolution) with Host/SNI still taken from the URL host. */
+int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,
+                          char **response_buf, int timeout_ms);
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers);
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,

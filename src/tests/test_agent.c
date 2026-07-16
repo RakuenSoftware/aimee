@@ -14,6 +14,9 @@
 #include "agent_config.h"
 #include "agent_tools.h"
 #include "anchor_snapshot.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include "workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
@@ -1441,6 +1444,62 @@ static void test_part3_anchored_tools(void)
    rmdir(dir);
 }
 
+/* web_read.c exports this SSRF classifier. */
+int web_egress_addr_blocked(const struct sockaddr *sa);
+
+static int v4_blocked(const char *ip)
+{
+   struct sockaddr_in sa = {0};
+   sa.sin_family = AF_INET;
+   assert(inet_pton(AF_INET, ip, &sa.sin_addr) == 1);
+   return web_egress_addr_blocked((struct sockaddr *)&sa);
+}
+
+static int v6_blocked(const char *ip)
+{
+   struct sockaddr_in6 sa = {0};
+   sa.sin6_family = AF_INET6;
+   assert(inet_pton(AF_INET6, ip, &sa.sin6_addr) == 1);
+   return web_egress_addr_blocked((struct sockaddr *)&sa);
+}
+
+static void test_web_read_ssrf(void)
+{
+   /* private / reserved / metadata addresses are blocked */
+   assert(v4_blocked("127.0.0.1"));
+   assert(v4_blocked("10.1.2.3"));
+   assert(v4_blocked("172.16.5.4"));
+   assert(v4_blocked("192.168.0.1"));
+   assert(v4_blocked("169.254.169.254")); /* cloud metadata */
+   assert(v4_blocked("100.64.0.1"));      /* CGNAT */
+   assert(v4_blocked("0.0.0.0"));
+   assert(v4_blocked("224.0.0.1"));
+   /* public addresses are allowed */
+   assert(!v4_blocked("8.8.8.8"));
+   assert(!v4_blocked("93.184.216.34"));
+   /* IPv6 */
+   assert(v6_blocked("::1"));
+   assert(v6_blocked("fe80::1"));
+   assert(v6_blocked("fc00::1"));
+   assert(v6_blocked("::ffff:127.0.0.1")); /* mapped loopback */
+   assert(!v6_blocked("2001:4860:4860::8888"));
+
+   /* end-to-end: the tool refuses non-http schemes and private targets without
+    * any network egress */
+   char *r = tool_web_read("ftp://example.com/x", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("http://127.0.0.1:1/", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("http://169.254.169.254/latest/meta-data/", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("not-a-url", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+}
+
 static void test_parent_write_guard_blocks_parent_writes(void)
 {
    char root[512];
@@ -2820,6 +2879,7 @@ int main(void)
    test_tool_edit_file();
    test_tool_edit_file_anchored();
    test_part3_anchored_tools();
+   test_web_read_ssrf();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();

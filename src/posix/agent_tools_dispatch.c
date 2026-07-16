@@ -1152,9 +1152,33 @@ static char *td_web_search(cJSON *args, const char *name, const char *dispatch_c
    if (!q || !cJSON_IsString(q))
       result = safe_strdup("error: missing 'query' parameter");
    else
+   {
       result = web_search(q->valuestring, (mx && cJSON_IsNumber(mx)) ? mx->valueint : 5);
+      /* register the result URLs as rN handles so web_read can take "r2" */
+      if (result && strncmp(result, "error:", 6) != 0)
+         web_handle_register_from_search(result);
+   }
 
    return result;
+}
+
+static char *td_web_read(cJSON *args, const char *name, const char *dispatch_cwd,
+                         const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   (void)timeout_ms;
+   cJSON *ref = cJSON_GetObjectItem(args, "ref");
+   cJSON *query = cJSON_GetObjectItem(args, "query");
+   cJSON *span = cJSON_GetObjectItem(args, "span");
+   cJSON *mode = cJSON_GetObjectItem(args, "mode");
+   if (!ref || !cJSON_IsString(ref))
+      return safe_strdup("error: missing 'ref' parameter (a search handle or raw URL)");
+   return tool_web_read(ref->valuestring,
+                        (query && cJSON_IsString(query)) ? query->valuestring : NULL,
+                        (span && cJSON_IsNumber(span)) ? span->valueint : 0,
+                        (mode && cJSON_IsString(mode)) ? mode->valuestring : NULL);
 }
 
 static char *td_create_note(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -1981,6 +2005,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_search_memory(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "web_search") == 0)
       result = td_web_search(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "web_read") == 0)
+      result = td_web_read(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "create_note") == 0)
       result = td_create_note(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "list_notes") == 0)
