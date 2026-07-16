@@ -3156,7 +3156,10 @@ export default function Chat() {
         {/* The project is set in ONE place — the session ProjectPicker at the top
             of the chat (bound to the active session). No per-prompt project
             selector here. */}
-        <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+        <span
+          style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
+          title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
+        >
           Prompt:
         </span>
         <Tabs
@@ -3178,6 +3181,7 @@ export default function Chat() {
             <select
               value={activeSkill}
               onChange={e => changeSkill(e.target.value)}
+              title="Load a packaged skill for this session — its instructions steer how Aimee handles the turn. None runs the default behaviour."
               style={{
                 fontSize: '11px', fontFamily: 'system-ui',
                 background: activeSkill ? tokens.primary : tokens.surface,

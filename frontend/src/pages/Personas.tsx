@@ -185,14 +185,18 @@ export default function Personas() {
                 {p.builtin ? " ·" : ""}
               </button>
             ))}
-            <button onClick={newPersona} style={{ ...btn, borderStyle: "dashed" }}>
+            <button
+              onClick={newPersona}
+              style={{ ...btn, borderStyle: "dashed" }}
+              title="Create a new persona from scratch"
+            >
               + New
             </button>
           </div>
 
           {form && (
             <div style={{ display: "grid", gap: 8 }}>
-              <div>
+              <div title="The persona’s identifier (alphanumeric, - or _). Built-in personas can’t be renamed.">
                 <label style={lbl}>name</label>
                 <input
                   style={{ ...ta, fontFamily: "system-ui" }}
@@ -201,7 +205,7 @@ export default function Personas() {
                   onChange={(e) => upd({ name: e.target.value })}
                 />
               </div>
-              <div>
+              <div title="Short summary shown when picking this persona in Chat and the roundtable.">
                 <label style={lbl}>description</label>
                 <input
                   style={{ ...ta, fontFamily: "system-ui" }}
@@ -209,7 +213,7 @@ export default function Personas() {
                   onChange={(e) => upd({ description: e.target.value })}
                 />
               </div>
-              <div>
+              <div title="Which roles (routing keys) this persona may delegate to. “all” matches any role. Roles are edited on the Roles tab.">
                 <label style={lbl}>roles (routing key — click to toggle; edit roles on the Roles tab)</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {roleOptions.map((r) => {
@@ -232,7 +236,7 @@ export default function Personas() {
                   })}
                 </div>
               </div>
-              <div>
+              <div title="How much delegates may do on this persona’s behalf: full = read + write tools, readonly = read-only tools, none = no delegates.">
                 <label style={lbl}>delegate policy</label>
                 <select
                   style={{ ...ta, fontFamily: "system-ui" }}
@@ -244,23 +248,27 @@ export default function Personas() {
                   <option value="none">none</option>
                 </select>
               </div>
-              <div>
+              <div title="The system prompt that defines this identity — injected at the top of the persona’s context.">
                 <label style={lbl}>persona (system prompt)</label>
                 <textarea rows={5} style={ta} value={form.persona || ""} onChange={(e) => upd({ persona: e.target.value })} />
               </div>
-              <div>
+              <div title="Engineering principles appended to the persona’s guidance for every turn.">
                 <label style={lbl}>principles</label>
                 <textarea rows={4} style={ta} value={form.principles || ""} onChange={(e) => upd({ principles: e.target.value })} />
               </div>
-              <div>
+              <div title="Short session hints added when a session starts under this persona.">
                 <label style={lbl}>brief (session hints)</label>
                 <textarea rows={3} style={ta} value={form.brief || ""} onChange={(e) => upd({ brief: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={savePersona} style={btn}>
+                <button onClick={savePersona} style={btn} title="Write this persona to config.">
                   Save persona
                 </button>
-                <button onClick={deletePersona} style={{ ...btn, color: "#b00" }}>
+                <button
+                  onClick={deletePersona}
+                  style={{ ...btn, color: "#b00" }}
+                  title="Delete this persona. Built-ins reset to their default instead of disappearing."
+                >
                   Delete
                 </button>
                 {form.builtin && <Badge label="built-in" variant="neutral" />}

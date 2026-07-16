@@ -672,7 +672,7 @@ export default function EditWorkflows() {
         }}
       >
         <Panel title="Workflows" count={defs.length}>
-          <button onClick={newDef} style={btn}>
+          <button onClick={newDef} style={btn} title="Create a new workflow definition and open it in the editor.">
             + New
           </button>
           <div style={{ marginTop: 6 }}>
@@ -680,6 +680,7 @@ export default function EditWorkflows() {
               <div
                 key={d.name}
                 onClick={() => openDef(d.name)}
+                title="Open this workflow definition for editing."
                 style={{
                   ...row,
                   fontWeight: graph?.name === d.name ? 600 : 400,
@@ -695,7 +696,7 @@ export default function EditWorkflows() {
           </div>
         </Panel>
         <Panel title="Blocks" count={blocks.length}>
-          <button onClick={newBlock} style={btn}>
+          <button onClick={newBlock} style={btn} title="Create a new custom delegate block.">
             + New
           </button>
           <div style={{ marginTop: 6 }}>
@@ -732,7 +733,7 @@ export default function EditWorkflows() {
         {editBlock && (
           <Panel title={editBlock.isNew ? "New custom block" : `Edit block: ${editBlock.name}`}>
             <div style={{ display: "grid", gap: 6 }}>
-              <label style={lbl}>
+              <label style={lbl} title="Identifier for this custom block (letters, digits, - _ .); fixed once created.">
                 name
                 <input
                   style={{ ...inp, width: "100%" }}
@@ -741,7 +742,7 @@ export default function EditWorkflows() {
                   onChange={(e) => setEditBlock({ ...editBlock, name: e.target.value })}
                 />
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Artifact type this block takes as input.">
                 consumes
                 <select
                   style={{ ...inp, width: "100%" }}
@@ -755,7 +756,7 @@ export default function EditWorkflows() {
                   ))}
                 </select>
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Artifact type this block emits (branch, or none).">
                 produces
                 <select
                   style={{ ...inp, width: "100%" }}
@@ -766,7 +767,7 @@ export default function EditWorkflows() {
                   <option value="none">none</option>
                 </select>
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Persona the delegate runs as when this block executes.">
                 persona
                 <input
                   style={{ ...inp, width: "100%" }}
@@ -775,7 +776,7 @@ export default function EditWorkflows() {
                   onChange={(e) => setEditBlock({ ...editBlock, persona: e.target.value })}
                 />
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Instructions given to the delegate each time this block runs.">
                 prompt
                 <textarea
                   style={{ ...inp, width: "100%", minHeight: 80, fontFamily: "ui-monospace, monospace" }}
@@ -784,10 +785,14 @@ export default function EditWorkflows() {
                 />
               </label>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button onClick={saveBlock} style={btn}>
+                <button onClick={saveBlock} style={btn} title="Save this custom block definition.">
                   Save
                 </button>
-                <button onClick={deleteBlock} style={{ ...btn, color: "#b00" }}>
+                <button
+                  onClick={deleteBlock}
+                  style={{ ...btn, color: "#b00" }}
+                  title={editBlock.isNew ? "Discard this new block." : "Delete this custom block."}
+                >
                   {editBlock.isNew ? "Cancel" : "Delete"}
                 </button>
                 {blockStatus && <span style={{ fontSize: 12, color: "#b00" }}>{blockStatus}</span>}
@@ -814,13 +819,14 @@ export default function EditWorkflows() {
           {version && (
             <Badge label={`v ${version.slice(0, 8)}`} variant="neutral" />
           )}
-          <button onClick={validate} disabled={!graph} style={btn}>
+          <button onClick={validate} disabled={!graph} style={btn} title="Check the current workflow for errors without saving.">
             Validate
           </button>
           <button
             onClick={save}
             disabled={!graph}
             style={{ ...btn, background: "#2563eb", color: "#fff" }}
+            title="Save the workflow definition (fails if the on-disk version changed)."
           >
             Save
           </button>
@@ -1282,6 +1288,7 @@ function NodeInspector({
             list="wf-persona-opts"
             value={p.persona}
             placeholder="persona"
+            title="Persona this step's agent runs as."
             onChange={(e) => setPart(i, "persona", e.target.value)}
             style={{ ...inp, flex: 1, minWidth: 0 }}
           />
@@ -1289,6 +1296,7 @@ function NodeInspector({
             list="wf-delegate-opts"
             value={p.delegate}
             placeholder="delegate"
+            title="Delegate that carries out this step ($random picks one at run time)."
             onChange={(e) => setPart(i, "delegate", e.target.value)}
             style={{ ...inp, flex: 1, minWidth: 0 }}
           />
@@ -1301,10 +1309,10 @@ function NodeInspector({
       ))}
       {isMulti && (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={addPart} style={btnSmall}>
+          <button onClick={addPart} style={btnSmall} title="Add another persona/delegate to the review panel.">
             + participant
           </button>
-          <label style={{ ...lbl, margin: 0 }}>
+          <label style={{ ...lbl, margin: 0 }} title="How many panelists must pass; blank means all.">
             quorum&nbsp;
             <input
               type="number"
@@ -1405,6 +1413,7 @@ function NodeInspector({
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <select
               value={childWorkflowName(node)}
+              title="Workflow each fan-out packet runs."
               onChange={(e) => {
                 const v = e.target.value;
                 mutate((g) => ({
@@ -1447,21 +1456,24 @@ function NodeInspector({
           onClick={setStart}
           disabled={graph.start === node.id}
           style={btn}
+          title="Make this node the workflow's start node."
         >
           {graph.start === node.id ? "start node ✓" : "set as start"}
         </button>
       </div>
 
-      <label style={lbl}>Inputs</label>
+      <label style={lbl} title="Named outputs from other nodes fed into this step.">Inputs</label>
       {node.in.map((b, i) => (
         <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
           <input
             value={b.input}
+            title="Name this step refers to the input by."
             onChange={(e) => setBinding(i, "input", e.target.value)}
             style={{ ...inp, width: 60 }}
           />
           <select
             value={b.producer}
+            title="Which upstream node supplies this input."
             onChange={(e) => setBinding(i, "producer", e.target.value)}
             style={inp}
           >
@@ -1472,12 +1484,12 @@ function NodeInspector({
               </option>
             ))}
           </select>
-          <button onClick={() => delBinding(i)} style={btnSmall}>
+          <button onClick={() => delBinding(i)} style={btnSmall} title="Remove this input binding.">
             ×
           </button>
         </div>
       ))}
-      <button onClick={addBinding} style={btnSmall}>
+      <button onClick={addBinding} style={btnSmall} title="Add an input binding from another node's output.">
         + input
       </button>
 
@@ -1486,6 +1498,7 @@ function NodeInspector({
           <label style={lbl}>{edge}</label>
           <select
             value={node[edge] || ""}
+            title="Node to go to on this transition."
             onChange={(e) => setEdge(edge, e.target.value)}
             style={{ ...inp, width: "100%" }}
           >
@@ -1510,6 +1523,7 @@ function NodeInspector({
             }
           }}
           style={btnSmall}
+          title="Show/hide the raw params JSON editor."
         >
           {showAdv ? "▾ Advanced (raw params)" : "▸ Advanced (raw params)"}
         </button>
@@ -1540,6 +1554,7 @@ function NodeInspector({
       <button
         onClick={onDelete}
         style={{ ...btn, marginTop: 10, color: "#c00", borderColor: "#e0a0a0" }}
+        title="Remove this node from the workflow."
       >
         Delete node
       </button>

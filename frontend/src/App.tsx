@@ -228,6 +228,7 @@ export default function App() {
               <NavLink
                 key={it.route}
                 to={it.route}
+                title={it.hint}
                 style={({ isActive }) => ({
                   display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6,
                   fontSize: 14, textDecoration: 'none',

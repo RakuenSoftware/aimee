@@ -413,12 +413,13 @@ export default function WorkflowActions() {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <strong style={{ fontSize: 16 }}>Workflows</strong>
           <Badge label={`${items.length}`} variant="neutral" />
-          <button onClick={refreshList} style={btn}>
+          <button onClick={refreshList} style={btn} title="Reload the proposal list.">
             Refresh
           </button>
         </div>
         <button
           onClick={startNew}
+          title="Start composing a new proposal to submit."
           style={{
             ...btn,
             width: "100%",
@@ -430,7 +431,10 @@ export default function WorkflowActions() {
         >
           + New proposal
         </button>
-        <label style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}>
+        <label
+          style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}
+          title="Show every run across all users, not just your own."
+        >
           <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
           Show all (operator)
         </label>
@@ -449,6 +453,7 @@ export default function WorkflowActions() {
               <div
                 key={it.id}
                 onClick={() => openProposal(it.id)}
+                title="Open this run to see its status and history."
                 style={{
                   padding: "8px 8px",
                   borderRadius: 6,
@@ -506,12 +511,12 @@ export default function WorkflowActions() {
                 (below) rather than resume. */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "4px 0 10px" }}>
               {canResume && (
-                <button onClick={() => void doLifecycle("resume")} disabled={acting} style={btn}>
+                <button onClick={() => void doLifecycle("resume")} disabled={acting} style={btn} title="Resume this paused run.">
                   ▶ Start
                 </button>
               )}
               {canPause && (
-                <button onClick={() => void doLifecycle("pause")} disabled={acting} style={btn}>
+                <button onClick={() => void doLifecycle("pause")} disabled={acting} style={btn} title="Pause this active run.">
                   ⏸ Pause
                 </button>
               )}
@@ -520,6 +525,7 @@ export default function WorkflowActions() {
                   onClick={() => void doLifecycle("stop")}
                   disabled={acting}
                   style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
+                  title="Abandon this run; it cannot be resumed."
                 >
                   ⏹ Stop
                 </button>
@@ -528,6 +534,7 @@ export default function WorkflowActions() {
                 onClick={() => void doLifecycle("delete")}
                 disabled={acting}
                 style={{ ...btn, background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3", marginLeft: "auto" }}
+                title="Permanently delete this run, its history, and proposal file."
               >
                 🗑 Delete
               </button>
@@ -537,12 +544,13 @@ export default function WorkflowActions() {
             {canDecide && (
               <Panel title={`Human gate · ${detail.stage}`}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button onClick={() => void decideGate("approve")} style={btn}>
+                  <button onClick={() => void decideGate("approve")} style={btn} title="Approve this gate and resume the run.">
                     Approve
                   </button>
                   <button
                     onClick={() => void decideGate("reject")}
                     style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
+                    title="Reject at this gate."
                   >
                     Reject
                   </button>
@@ -710,6 +718,7 @@ function Composer({
             onChange={(e) => update({ workflow: e.target.value })}
             style={inp}
             disabled={busy}
+            title="Workflow to run this proposal through end-to-end."
           >
             {workflows.map((w) => (
               <option key={w} value={w}>
@@ -756,10 +765,11 @@ function Composer({
                 setPreview(null);
               }}
               style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+              title="Replace the proposal body with this generated draft."
             >
               Use this draft
             </button>
-            <button onClick={() => setPreview(null)} style={btn}>
+            <button onClick={() => setPreview(null)} style={btn} title="Discard this draft preview and keep your current body.">
               Discard
             </button>
             <span style={{ fontSize: 11, color: "#888" }}>Replaces the body above.</span>
@@ -776,13 +786,24 @@ function Composer({
           onClick={onSubmit}
           disabled={busy}
           style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+          title="Submit the proposal and start the selected workflow."
         >
           {submitting ? "Submitting…" : `Submit → run "${draft.workflow || "build"}"`}
         </button>
-        <button onClick={() => void generate()} disabled={busy} style={btn}>
+        <button
+          onClick={() => void generate()}
+          disabled={busy}
+          style={btn}
+          title="Generate a proposal draft from your title and notes (shown as a preview to accept)."
+        >
           {drafting ? "Drafting…" : "✨ Draft with a delegate"}
         </button>
-        <button onClick={() => (browsing ? setBrowsing(false) : openBrowser())} disabled={busy} style={btn}>
+        <button
+          onClick={() => (browsing ? setBrowsing(false) : openBrowser())}
+          disabled={busy}
+          style={btn}
+          title="Browse the project checkout and load a .md file as the proposal."
+        >
           {browsing ? "Close browser" : "📂 Load from project"}
         </button>
         {submitMsg && <span style={{ fontSize: 12, color: "#c00" }}>{submitMsg}</span>}

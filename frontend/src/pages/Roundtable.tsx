@@ -283,14 +283,14 @@ export default function Roundtable() {
                 {p.active ? " ★" : ""}
               </button>
             ))}
-            <button onClick={newPreset} style={{ ...btn, borderStyle: "dashed" }}>
+            <button onClick={newPreset} style={{ ...btn, borderStyle: "dashed" }} title="Create a new roundtable preset, prompting for its name.">
               + New
             </button>
           </div>
 
           {form && (
             <div>
-              <label style={lbl}>Description</label>
+              <label style={lbl} title="A short note describing what this panel is for.">Description</label>
               <input
                 style={input}
                 value={form.description}
@@ -315,6 +315,7 @@ export default function Roundtable() {
                     list={modelList}
                     style={{ ...input, flex: 1, ...(isRandom ? { color: "#0a58ca", fontStyle: "italic" } : {}) }}
                     placeholder="model / agent (e.g. codex)"
+                    title="Model or agent for this seat; type a value or pick a configured agent."
                     value={isRandom ? "Random — any review-capable" : seat.model}
                     readOnly={isRandom}
                     onChange={(e) => setSeat(i, { model: e.target.value })}
@@ -330,6 +331,7 @@ export default function Roundtable() {
                     list={personaList}
                     style={{ ...input, flex: 1 }}
                     placeholder="persona (blank = engine default)"
+                    title="Persona this seat reviews as; blank uses the engine default."
                     value={seat.persona}
                     onChange={(e) => setSeat(i, { persona: e.target.value })}
                   />
@@ -343,13 +345,13 @@ export default function Roundtable() {
                 </div>
                 );
               })}
-              <button onClick={addSeat} style={{ ...btn, borderStyle: "dashed", marginBottom: 8 }}>
+              <button onClick={addSeat} style={{ ...btn, borderStyle: "dashed", marginBottom: 8 }} title="Add another model/persona seat to the panel.">
                 + Add seat
               </button>
 
               {/* Aggregator + guards. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div style={{ flex: "1 1 240px" }}>
+                <div style={{ flex: "1 1 240px" }} title="Model that synthesizes the panel's outputs; blank uses the engine default.">
                   <label style={lbl}>Aggregator (synthesis model)</label>
                   <input
                     list={modelList}
@@ -359,11 +361,11 @@ export default function Roundtable() {
                     placeholder="blank = engine default"
                   />
                 </div>
-                <div>
+                <div title="Minimum number of seats that must succeed for the round to count.">
                   <label style={lbl}>Min successful</label>
                   {numField(form.min_successful, (n) => patch({ min_successful: n }), 1)}
                 </div>
-                <div>
+                <div title="Per-round cost ceiling in USD; 0 means no limit.">
                   <label style={lbl}>Max cost (USD, 0 = none)</label>
                   {numField(form.max_cost_usd, (n) => patch({ max_cost_usd: n }))}
                 </div>
@@ -371,19 +373,19 @@ export default function Roundtable() {
 
               {/* Loop knobs. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div>
+                <div title="Maximum number of review/revise rounds.">
                   <label style={lbl}>Max rounds</label>
                   {numField(form.max_rounds, (n) => patch({ max_rounds: n }))}
                 </div>
-                <div>
+                <div title="Agreement level required to stop looping early.">
                   <label style={lbl}>Converge threshold</label>
                   {numField(form.converge_threshold, (n) => patch({ converge_threshold: n }))}
                 </div>
-                <div>
+                <div title="Overall time budget for the roundtable in milliseconds.">
                   <label style={lbl}>Deadline (ms)</label>
                   {numField(form.deadline_ms, (n) => patch({ deadline_ms: n }))}
                 </div>
-                <div>
+                <div title="Whether seats run in parallel or one after another.">
                   <label style={lbl}>Turns</label>
                   <select
                     style={{ ...input, width: 140 }}
@@ -400,6 +402,7 @@ export default function Roundtable() {
               <button
                 onClick={() => setShowAdvanced((v) => !v)}
                 style={{ ...btn, marginTop: 12, background: "#f5f5f5" }}
+                title="Show or hide the authoring-pipeline settings."
               >
                 {showAdvanced ? "▾" : "▸"} Advanced — authoring pipeline
               </button>
@@ -410,7 +413,7 @@ export default function Roundtable() {
                     backstops). Leave at defaults unless you run authoring pipelines.
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-                    <div style={{ flex: "1 1 220px" }}>
+                    <div style={{ flex: "1 1 220px" }} title="Condition that marks an authoring pass complete.">
                       <label style={lbl}>Done bar</label>
                       <select
                         style={input}
@@ -424,35 +427,35 @@ export default function Roundtable() {
                         </option>
                       </select>
                     </div>
-                    <div>
+                    <div title="Maximum authoring passes; 0 means unlimited.">
                       <label style={lbl}>Max passes (0 = ∞)</label>
                       {numField(form.pipeline.max_passes, (n) => patchPipeline({ max_passes: n }))}
                     </div>
-                    <div>
+                    <div title="Maximum revise attempts within a single pass.">
                       <label style={lbl}>Attempts / pass</label>
                       {numField(form.pipeline.max_attempts_per_pass, (n) =>
                         patchPipeline({ max_attempts_per_pass: n }), 1)}
                     </div>
-                    <div>
+                    <div title="Cost ceiling for one authoring phase in USD.">
                       <label style={lbl}>Per-phase cost (USD)</label>
                       {numField(form.pipeline.max_cost_usd, (n) => patchPipeline({ max_cost_usd: n }))}
                     </div>
-                    <div>
+                    <div title="Cost ceiling for the whole authoring run in USD.">
                       <label style={lbl}>Total cost (USD)</label>
                       {numField(form.pipeline.max_total_cost_usd, (n) =>
                         patchPipeline({ max_total_cost_usd: n }))}
                     </div>
-                    <div>
+                    <div title="How long a review gate stays valid, in hours; 0 means none.">
                       <label style={lbl}>Gate TTL (h, 0 = none)</label>
                       {numField(form.pipeline.gate_ttl_h, (n) => patchPipeline({ gate_ttl_h: n }))}
                     </div>
-                    <div>
+                    <div title="Assumed token count when a document's context size is unknown.">
                       <label style={lbl}>Unknown ctx tokens</label>
                       {numField(form.pipeline.unknown_context_tokens, (n) =>
                         patchPipeline({ unknown_context_tokens: n }))}
                     </div>
                   </div>
-                  <label style={{ ...lbl, marginTop: 8 }}>
+                  <label style={{ ...lbl, marginTop: 8 }} title="When a gate is parked, free its active slot for other work.">
                     <input
                       type="checkbox"
                       checked={form.pipeline.parked_releases_slot}
@@ -464,13 +467,13 @@ export default function Roundtable() {
               )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                <button onClick={save} style={btn}>
+                <button onClick={save} style={btn} title="Save this preset's settings.">
                   Save preset
                 </button>
-                <button onClick={makeActive} style={{ ...btn, background: "#e8f7e8", fontWeight: 600 }}>
+                <button onClick={makeActive} style={{ ...btn, background: "#e8f7e8", fontWeight: 600 }} title="Save this preset and make it the active default roundtable.">
                   Save &amp; set as default
                 </button>
-                <button onClick={del} style={{ ...btn, color: "#b00" }}>
+                <button onClick={del} style={{ ...btn, color: "#b00" }} title="Delete this roundtable preset.">
                   Delete
                 </button>
               </div>

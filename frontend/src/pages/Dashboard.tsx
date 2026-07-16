@@ -1005,7 +1005,8 @@ function CustomizePopover({ layout, setLayout, onClose }: {
           const p = PANELS.find(x => x.id === id)!;
           const on = enabled.has(id);
           return (
-            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 4 }}>
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 4 }}
+              title="Show or hide this panel on the dashboard.">
               <input type="checkbox" checked={on} onChange={() => toggle(id)} />
               <span style={{ flex: 1, fontSize: 13, color: on ? '#333' : '#999' }}>{p.title}</span>
               {on && (
@@ -1018,7 +1019,7 @@ function CustomizePopover({ layout, setLayout, onClose }: {
           );
         })}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 6px 2px' }}>
-          <button onClick={() => setLayout(defaultLayout())} style={ctrlBtn}>Reset</button>
+          <button onClick={() => setLayout(defaultLayout())} style={ctrlBtn} title="Restore the default set and order of panels.">Reset</button>
           <button onClick={onClose} style={ctrlBtn}>Done</button>
         </div>
       </div>
@@ -1068,8 +1069,8 @@ export default function Dashboard() {
         display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
       }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: '#555' }}>Dashboard</span>
-        <button onClick={load} style={ctrlBtn}>Refresh</button>
-        <button onClick={() => setCustomizing(v => !v)} style={{ ...ctrlBtn, marginLeft: 'auto' }}>⚙ Customize</button>
+        <button onClick={load} style={ctrlBtn} title="Reload all dashboard data from the server.">Refresh</button>
+        <button onClick={() => setCustomizing(v => !v)} style={{ ...ctrlBtn, marginLeft: 'auto' }} title="Choose which panels are shown and reorder them.">⚙ Customize</button>
         {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
       </div>
 
