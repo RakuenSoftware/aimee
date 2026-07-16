@@ -180,6 +180,10 @@ static void test_is_ssh(void)
    assert(util_url_is_ssh("relative/path") == 0);
    /* A ':' with no '@' before it is not scp-like (e.g. a host:port with scheme). */
    assert(util_url_is_ssh("host:1234/path") == 0);
+   /* scp-like needs a non-empty host between '@' and ':' (reject empty host). */
+   assert(util_url_is_ssh("foo@:bar") == 0);
+   assert(util_url_is_ssh("a@:p") == 0);
+   assert(util_url_is_ssh("@host:path") == 0); /* empty user */
    /* Scheme match is case-insensitive; git:// stays non-SSH regardless of case. */
    assert(util_url_is_ssh("SSH://git@github.com/o/r") == 1);
    assert(util_url_is_ssh("Ssh://git@github.com/o/r.git") == 1);

@@ -54,12 +54,13 @@ int util_url_is_ssh(const char *url)
       return scheme_len == 3 && strncasecmp(url, "ssh", 3) == 0;
    }
 
-   /* scp-like: user@host:path — an '@' must precede the first ':'. */
+   /* scp-like: user@host:path — an '@' must precede the first ':', with a
+    * non-empty user before '@' and a non-empty host between '@' and ':'. */
    const char *colon = strchr(url, ':');
    if (!colon)
       return 0;
    const char *at = memchr(url, '@', (size_t)(colon - url));
-   return at != NULL && at > url;
+   return at != NULL && at > url && colon > at + 1;
 }
 
 char *util_url_normalize(const char *url)

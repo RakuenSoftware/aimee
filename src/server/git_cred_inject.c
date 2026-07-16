@@ -74,49 +74,52 @@ static char **build_env(char *const *parent, const char *token, const char *shim
       if (!(out[o++] = strdup("GIT_TERMINAL_PROMPT=0")))
          goto oom;
    }
+   /* Wire the ssh-agent env only if we can also pin UserKnownHostsFile to this
+    * principal's own known_hosts (beside the agent socket, in its tmpfs runtime
+    * dir) — so accept-new's first-use trust is scoped to this principal and never
+    * bleeds through the OS account's shared ~/.ssh/known_hosts to other tenants.
+    *
+    * If we CANNOT derive that per-principal path (a malformed socket with no
+    * directory component, or an implausibly long path that truncates), we add
+    * NEITHER SSH_AUTH_SOCK nor GIT_SSH_COMMAND: better to fall back to no-SSH
+    * (the caller then normalizes to HTTPS) than to run accept-new against the
+    * shared known_hosts, which is exactly the cross-tenant bleed this avoids.
+    *
+    * git runs GIT_SSH_COMMAND through the shell, so the spliced path must be
+    * shell-safe: `<base>/webusers/<name>/known_hosts` where <base> is a
+    * server-controlled runtime dir and <name> is charset-restricted to
+    * [A-Za-z0-9._-] (ws_scope_name_valid) — no whitespace/metacharacters from
+    * any untrusted input can appear. */
    if (sock && sock[0])
    {
-      char sb[2300];
-      snprintf(sb, sizeof(sb), "SSH_AUTH_SOCK=%s", sock);
-      if (!(out[o++] = strdup(sb)))
-         goto oom;
-      /* Force the non-interactive TOFU SSH command so an SSH remote authenticates
-       * with the agent key and doesn't stall on a first-time host key. Pin
-       * UserKnownHostsFile to a file beside the agent socket, in this principal's
-       * own tmpfs runtime dir — so accept-new's first-use trust is scoped to this
-       * principal and never bleeds through the OS account's shared
-       * ~/.ssh/known_hosts to other tenants.
-       *
-       * git runs GIT_SSH_COMMAND through the shell, so the spliced path must be
-       * shell-safe: it is `<base>/webusers/<name>/known_hosts` where <base> is a
-       * server-controlled runtime dir and <name> is charset-restricted to
-       * [A-Za-z0-9._-] (ws_scope_name_valid) — no whitespace/metacharacters from
-       * any untrusted input can appear. We still fail closed on truncation
-       * (below) rather than emit a malformed/truncated -o path. */
+      /* Derive <dir>/known_hosts from the <dir>/ssh-agent.sock socket path. */
       char kh[2300];
-      snprintf(kh, sizeof(kh), "%s", sock);
-      char *slash = strrchr(kh, '/');
       char cmd[3200];
-      int cn;
-      if (slash)
+      int ok_kh = 0, cn = -1;
+      if ((size_t)snprintf(kh, sizeof(kh), "%s", sock) < sizeof(kh))
       {
-         snprintf(slash + 1, sizeof(kh) - (size_t)(slash + 1 - kh), "known_hosts");
-         cn = snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s -o UserKnownHostsFile=%s",
-                       GIT_AGENT_SSH_COMMAND, kh);
+         char *slash = strrchr(kh, '/');
+         if (slash)
+         {
+            int hn = snprintf(slash + 1, sizeof(kh) - (size_t)(slash + 1 - kh), "known_hosts");
+            if (hn > 0 && (size_t)(slash + 1 - kh) + (size_t)hn < sizeof(kh))
+            {
+               cn = snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s -o UserKnownHostsFile=%s",
+                             GIT_AGENT_SSH_COMMAND, kh);
+               ok_kh = (cn > 0 && (size_t)cn < sizeof(cmd));
+            }
+         }
       }
-      else
+      if (ok_kh)
       {
-         /* No directory component (shouldn't happen for a runtime-dir socket) —
-          * fall back to the bare command rather than a malformed -o path. */
-         cn = snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s", GIT_AGENT_SSH_COMMAND);
+         char sb[2300];
+         snprintf(sb, sizeof(sb), "SSH_AUTH_SOCK=%s", sock);
+         if (!(out[o++] = strdup(sb)))
+            goto oom;
+         if (!(out[o++] = strdup(cmd)))
+            goto oom;
       }
-      /* Truncation (an implausibly long runtime path) would leave GIT_SSH_COMMAND
-       * pointing at the wrong known_hosts and silently weaken TOFU — fail closed
-       * to the bare TOFU command (agent still used; per-principal file dropped). */
-      if (cn < 0 || (size_t)cn >= sizeof(cmd))
-         snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s", GIT_AGENT_SSH_COMMAND);
-      if (!(out[o++] = strdup(cmd)))
-         goto oom;
+      /* else: fail closed — no ssh-agent env, so the SSH path isn't taken. */
    }
    out[o] = NULL;
    return out;
