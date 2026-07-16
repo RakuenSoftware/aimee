@@ -456,3 +456,81 @@ void test_detached_dead_channel_reports_clear_error(void)
    free(result);
    printf("  PASS: test_detached_dead_channel_reports_clear_error\n");
 }
+
+/* A CONTAINER-sandboxed delegate must run its shell/script INSIDE the container via
+ * the provider's exec_shell — NOT as a local fork on the aimee-server host, which
+ * would execute the model's arbitrary command on the host (its filesystem, its
+ * network) and escape the `--network none` sandbox. The file tools already route in;
+ * bash/execute_script were the hole. The spy stands in for the container: if either
+ * tool still forked locally, the spy would never be called. */
+static int g_sbx_exec_called;
+static char *g_sbx_exec_cmd;
+static char *sandbox_capture_exec_shell(const workspace_provider_t *p, const char *cmd,
+                                        int *exit_code)
+{
+   (void)p;
+   g_sbx_exec_called = 1;
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = cmd ? strdup(cmd) : NULL;
+   if (exit_code)
+      *exit_code = 0;
+   return strdup("SANDBOX-STDOUT-MARKER");
+}
+
+void test_container_bash_runs_in_sandbox(void)
+{
+   workspace_provider_t mock;
+   memset(&mock, 0, sizeof(mock));
+   mock.kind = WS_PROVIDER_CONTAINER;
+   mock.exec_shell = sandbox_capture_exec_shell;
+   workspace_provider_set_active(&mock);
+   g_sbx_exec_called = 0;
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+
+   char *result = tool_bash("echo hi", 5000);
+   workspace_provider_clear_active();
+
+   /* Routed INTO the container (spy hit), carrying our command. */
+   assert(g_sbx_exec_called == 1);
+   assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
+   cJSON *j = cJSON_Parse(result);
+   assert(j);
+   cJSON *so = cJSON_GetObjectItem(j, "stdout");
+   assert(so && cJSON_IsString(so) && strstr(so->valuestring, "SANDBOX-STDOUT-MARKER"));
+   cJSON_Delete(j);
+   free(result);
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+   printf("  PASS: test_container_bash_runs_in_sandbox\n");
+}
+
+void test_container_execute_script_runs_in_sandbox(void)
+{
+   workspace_provider_t mock;
+   memset(&mock, 0, sizeof(mock));
+   mock.kind = WS_PROVIDER_CONTAINER;
+   mock.exec_shell = sandbox_capture_exec_shell;
+   workspace_provider_set_active(&mock);
+   g_sbx_exec_called = 0;
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+
+   char *result =
+       dispatch_tool_call("execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\"}", 5000);
+   workspace_provider_clear_active();
+
+   assert(g_sbx_exec_called == 1);
+   assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
+   /* Fed over a quoted heredoc so the body needs no escaping. */
+   assert(strstr(g_sbx_exec_cmd, "AIMEE_SCRIPT_EOF"));
+   cJSON *j = cJSON_Parse(result);
+   assert(j);
+   cJSON *so = cJSON_GetObjectItem(j, "stdout");
+   assert(so && cJSON_IsString(so) && strstr(so->valuestring, "SANDBOX-STDOUT-MARKER"));
+   cJSON_Delete(j);
+   free(result);
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+   printf("  PASS: test_container_execute_script_runs_in_sandbox\n");
+}
