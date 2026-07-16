@@ -460,8 +460,14 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
    agent_config_t cfg;
+   /* A load FAILURE is not an empty roster. The old code memset the config to
+    * zero and returned {"status":"ok","agents":[]}, which is indistinguishable
+    * from a config that genuinely has no agents — so a missing/unreadable/stale
+    * agents.json silently looked like "no agents configured" to every caller
+    * (it did, on the appliance). Report the failure; reserve the empty array for
+    * a config that really loaded and really has zero agents. */
    if (agent_load_config(&cfg) != 0)
-      memset(&cfg, 0, sizeof(cfg));
+      return server_send_error(conn, "failed to load agent configuration", NULL);
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < cfg.agent_count; i++)
