@@ -85,23 +85,36 @@ static char **build_env(char *const *parent, const char *token, const char *shim
        * UserKnownHostsFile to a file beside the agent socket, in this principal's
        * own tmpfs runtime dir — so accept-new's first-use trust is scoped to this
        * principal and never bleeds through the OS account's shared
-       * ~/.ssh/known_hosts to other tenants. */
+       * ~/.ssh/known_hosts to other tenants.
+       *
+       * git runs GIT_SSH_COMMAND through the shell, so the spliced path must be
+       * shell-safe: it is `<base>/webusers/<name>/known_hosts` where <base> is a
+       * server-controlled runtime dir and <name> is charset-restricted to
+       * [A-Za-z0-9._-] (ws_scope_name_valid) — no whitespace/metacharacters from
+       * any untrusted input can appear. We still fail closed on truncation
+       * (below) rather than emit a malformed/truncated -o path. */
       char kh[2300];
       snprintf(kh, sizeof(kh), "%s", sock);
       char *slash = strrchr(kh, '/');
       char cmd[3200];
+      int cn;
       if (slash)
       {
          snprintf(slash + 1, sizeof(kh) - (size_t)(slash + 1 - kh), "known_hosts");
-         snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s -o UserKnownHostsFile=%s",
-                  GIT_AGENT_SSH_COMMAND, kh);
+         cn = snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s -o UserKnownHostsFile=%s",
+                       GIT_AGENT_SSH_COMMAND, kh);
       }
       else
       {
          /* No directory component (shouldn't happen for a runtime-dir socket) —
           * fall back to the bare command rather than a malformed -o path. */
-         snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s", GIT_AGENT_SSH_COMMAND);
+         cn = snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s", GIT_AGENT_SSH_COMMAND);
       }
+      /* Truncation (an implausibly long runtime path) would leave GIT_SSH_COMMAND
+       * pointing at the wrong known_hosts and silently weaken TOFU — fail closed
+       * to the bare TOFU command (agent still used; per-principal file dropped). */
+      if (cn < 0 || (size_t)cn >= sizeof(cmd))
+         snprintf(cmd, sizeof(cmd), "GIT_SSH_COMMAND=%s", GIT_AGENT_SSH_COMMAND);
       if (!(out[o++] = strdup(cmd)))
          goto oom;
    }

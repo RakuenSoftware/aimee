@@ -580,9 +580,11 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
        * public or token-authed repo still clone. */
       char *clone_url_norm = NULL;
       const char *clone_url;
+      int ssh_clone = 0;
       if (util_url_is_ssh(url) && env_has_ssh_sock(envp))
       {
          clone_url = url;
+         ssh_clone = 1;
       }
       else
       {
@@ -596,9 +598,14 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       snprintf(cwd, sizeof(cwd), "/proc/self/fd/%d", tmpfd);
       const char *argv[] = {"git", "clone", "--", clone_url, ".", NULL};
       char *out = NULL;
+      /* Defense in depth: an SSH clone authenticates via the agent, so the HTTPS
+       * token memfd has no business in that child — git only consults GIT_ASKPASS
+       * on the HTTP(S) transport. Don't inherit the token fd on the SSH path (the
+       * real fd is still closed below); the HTTPS path passes it as before. */
+      int child_token_fd = ssh_clone ? -1 : token_fd;
       int rc = safe_exec_capture_cwd_env_fd_timeout(argv, cwd, envp ? envp : environ, &out, 1 << 16,
-                                                    300000, token_fd,
-                                                    token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+                                                    300000, child_token_fd,
+                                                    child_token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       if (token_fd >= 0)
          close(token_fd);
       free(clone_url_norm);
