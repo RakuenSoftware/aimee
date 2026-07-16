@@ -108,8 +108,8 @@ static const char *deploy_role_mode(const char *backend)
  * tier that resolves to cpu) selects the pre-baked aimee-llm-cpu image instead. */
 static int deploy_tier_is_gpu(const char *tier)
 {
-   return tier && (strcmp(tier, "small") == 0 || strcmp(tier, "mid") == 0 ||
-                   strcmp(tier, "large") == 0);
+   return tier &&
+          (strcmp(tier, "small") == 0 || strcmp(tier, "mid") == 0 || strcmp(tier, "large") == 0);
 }
 
 void config_emit_deploy_env(const config_t *cfg, char *buf, size_t n)
