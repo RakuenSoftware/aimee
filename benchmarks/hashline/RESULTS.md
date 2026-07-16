@@ -63,3 +63,55 @@ A realistic corpus, generated from a real repo checkout:
 
 Until that run is green, `old_string` stays. The deterministic gate and the fair
 agentic harness are both in place to run it.
+
+---
+
+## UPDATE — realistic corpus (decisive)
+
+The negative above was on the tiny hand corpus **and** used a wrong gate criterion
+(it required hashline to use *fewer turns*, penalising the safe drift re-anchor).
+Both are fixed: `tools/hashline_corpus_gen.py` mutates real repo files into 19
+verifiable tasks across collision / deep-indent / whole-func / drift, and the gate
+now uses the proposal's actual criterion — **pass@k ≥ str_replace AND net
+token-negative** (turns informational).
+
+Live, .254 delegates, 19-task realistic corpus, max 4 turns:
+
+| model         | proto       | pass@1 | pass@k | turns | out-tok |
+|---------------|-------------|-------:|-------:|------:|--------:|
+| mimo-v2.5-pro | str_replace |   63%  |   79%  | 1.37  |   627   |
+| mimo-v2.5-pro | hashline    |   74%  |  100%  | 1.32  |   202   |
+| MiniMax-M3    | str_replace |   53%  |   58%  | 2.32  |   276   |
+| MiniMax-M3    | hashline    |   58%  |   89%  | 1.74  |    99   |
+
+**Gate: PASS on both delegates** — hashline solves far more tasks at ~3× fewer
+output tokens.
+
+Per-category pass@k (str→hl) and mean tokens (str→hl):
+
+| category    | mimo pass@k | mimo tok  | MiniMax pass@k | MiniMax tok |
+|-------------|-------------|-----------|----------------|-------------|
+| collision   | 60% → 100%  | 1287 → 125| 0% → 100%      | 450 → 44    |
+| deep-indent | 50% → 100%  | 61 → 118  | 100% → 100%    | 106 → 47    |
+| whole-func  | 100% → 100% | 404 → 148 | 80% → 60%      | 331 → 193   |
+| drift       | 100% → 100% | 643 → 400 | 60% → 100%     | 183 → 104   |
+
+Reading it honestly:
+- **collision is the decisive win** — the regime the proposal targets and the
+  tiny corpus could not reach. str_replace fails 0–40% of these and spends ~10×
+  the tokens; hashline lands them all.
+- **whole-func / deep-indent / drift** mostly favor hashline on tokens at
+  equal-or-better pass@k, with one real dip: MiniMax's whole-func pass@k fell to
+  60% vs 80% (a small model fumbling a multi-line anchored range — the same class
+  the prefix-strip hardening addresses, and a candidate for further schema help).
+- **drift held up** better than feared (hashline's re-anchor recovers), though on
+  a pure content-preserving insertion str_replace is naturally robust.
+
+### P5 implication
+This is the first evidence that meets the proposal's ship criterion (hashline ≥
+str_replace pass@1/pass@k, net token-negative, strictly better on the
+open-weight/local delegates). It is 2 delegates × 1 run × 19 tasks, so before
+retiring `old_string` a wider confirmation is warranted — more delegates
+(incl. the smallest local models), several runs to bound variance, and a look at
+the MiniMax whole-func dip — but the direction is now clearly positive, not the
+negative the small corpus suggested.
