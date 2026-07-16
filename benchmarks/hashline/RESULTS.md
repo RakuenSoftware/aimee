@@ -176,11 +176,14 @@ deferral be **measurable**, not calendar-based. That guidance is now implemented
 when ALL hold:
 1. MiniMax-M3 (or the weakest available delegate) whole-function pass@k on the
    mutation corpus recovers to **within 10 pp of str_replace** (currently 53% vs
-   87% — a 34 pp gap) with whole-symbol edits routed through `edit_symbol`;
+   87% — a 34 pp gap) with whole-symbol edits routed through `edit_symbol`. The
+   10 pp band is roughly the observed run-to-run variance on this corpus (pass@k
+   moved 74%↔68% across runs on some models), i.e. "not distinguishable from
+   parity"; tighten it if variance shrinks with a larger corpus;
 2. the agentic gate stays green (pass@k ≥ str_replace AND net token-negative)
    across ≥ 3 runs on the full delegate roster;
-3. `edit_deprecated` telemetry shows negligible residual `old_string` usage from
-   aimee's own agents;
+3. `edit_deprecated` telemetry shows residual `old_string` usage **< 1% of edit
+   calls** over a representative CI/eval window from aimee's own agents;
 4. migration docs cover the request-shape change (treated as a deliberate
    breaking API change, not an automatic bump).
 

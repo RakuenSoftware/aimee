@@ -669,7 +669,9 @@ char *tool_web_read(const char *ref, const char *query, int span, const char *mo
       /* Instrumentation (roundtable P5-completion): a query that neither the
        * literal nor the lexical leg could retrieve is exactly the case the
        * deferred neural-embedder semantic leg would serve. Logging it turns
-       * "revisit if a concrete need appears" into a measurable signal. */
+       * "revisit if a concrete need appears" into a measurable signal. Metadata
+       * only — the URL (already known to the fetcher), never the raw query text
+       * or page content, both of which may be sensitive/untrusted. */
       if (nn > 0)
          aimee_log(LOG_INFO, "web_read",
                    "no literal/lexical span matched query on %s; semantic (embedder) leg "

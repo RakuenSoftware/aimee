@@ -86,6 +86,10 @@ prior read plus an `edits[]` batch. Each edit specifies:
   file keeps that property.
 - **Display-tag stripping.** If a model echoes the `LINE:HASH| ` display prefix
   into `text`, the server strips it—the tag is display-only.
+- **Steering advisory (additive, optional).** On a successful commit, the
+  response may include an extra optional string field `advisory` when an op
+  rewrote a large span (see Migration). It never changes the edit outcome and is
+  absent for ordinary edits; consumers should treat it as an optional field.
 
 ## Adjacent tools
 

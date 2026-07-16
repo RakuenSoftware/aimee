@@ -1412,7 +1412,62 @@ static void test_anchored_large_span_advisory(void)
    free(res);
    cJSON_Delete(edits);
 
+   /* boundary: a 7-line span (2..8) is BELOW the threshold -> no advisory.
+    * Restore the 10-line file first (the edit above shrank it). */
+   char *wb = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(wb);
+   free(wb);
+   rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
+   char b2[24], b8[24];
+   assert(anchored_line_token(rd, 2, b2, sizeof(b2)));
+   assert(anchored_line_token(rd, 8, b8, sizeof(b8)));
+   free(rd);
+   cJSON *e7 = cJSON_CreateArray();
+   cJSON *r7 = cJSON_CreateObject();
+   cJSON_AddStringToObject(r7, "op", "replace_range");
+   cJSON_AddStringToObject(r7, "from", b2);
+   cJSON_AddStringToObject(r7, "to", b8);
+   cJSON_AddStringToObject(r7, "text", "Y");
+   cJSON_AddItemToArray(e7, r7);
+   char *res7 = tool_edit_file_anchored(tmppath, sid, e7, 0);
+   assert(res7 && strncmp(res7, "error:", 6) != 0);
+   cJSON *rj7 = parse_json_or_die(res7);
+   assert(cJSON_GetObjectItem(rj7, "advisory") == NULL); /* 7 < 8 */
+   cJSON_Delete(rj7);
+   free(res7);
+   cJSON_Delete(e7);
+
+   /* delete_range spanning >= 8 lines also carries the advisory */
+   char *w2 = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(w2);
+   free(w2);
+   rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
+   char d2[24], d9[24];
+   assert(anchored_line_token(rd, 2, d2, sizeof(d2)));
+   assert(anchored_line_token(rd, 9, d9, sizeof(d9)));
+   free(rd);
+   cJSON *ed = cJSON_CreateArray();
+   cJSON *rd_op = cJSON_CreateObject();
+   cJSON_AddStringToObject(rd_op, "op", "delete_range");
+   cJSON_AddStringToObject(rd_op, "from", d2);
+   cJSON_AddStringToObject(rd_op, "to", d9);
+   cJSON_AddItemToArray(ed, rd_op);
+   char *resd = tool_edit_file_anchored(tmppath, sid, ed, 0);
+   assert(resd && strncmp(resd, "error:", 6) != 0);
+   cJSON *rjd = parse_json_or_die(resd);
+   assert(cJSON_GetObjectItem(rjd, "advisory") != NULL);
+   cJSON_Delete(rjd);
+   free(resd);
+   cJSON_Delete(ed);
+
    /* a small single-line replace must NOT carry the advisory */
+   char *w3 = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(w3);
+   free(w3);
    rd = tool_read_file(tmppath, 0, 0, 0);
    assert(rd);
    assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
