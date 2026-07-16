@@ -442,6 +442,7 @@ corresponding `config_*.c` module.
 | `ecomode` | bool | Reduced-resource mode. |
 | `lsp_servers` | array | Language servers to launch for diagnostics. |
 | `mcp` / `mcp_clients` | object/array | MCP server transport and downstream MCP clients. |
+| `client_integrations_enabled` | bool | Auto-register aimee's MCP server + hooks into external AI-tool configs (Claude Code, Gemini, Copilot, Codex) on each run (default `true`; set `false` to opt out). See [§25](#25-integrations). |
 | `computer_use` | object | Computer-use tool settings. |
 | `transport` | object | Server transport (socket/TCP) settings. |
 | `otel` | object | OpenTelemetry export. |
@@ -1281,6 +1282,15 @@ context because everything lives in the shared server/KB, not in the tool. Direc
 Codex and Mistral primary sessions use server-side structured conversation state;
 explicit legacy routes (e.g. `codex-cli`) still use the provider CLI.
 
+**Opting out of auto-registration.** To stop aimee from writing itself into
+external tool configs, set `aimee config set client_integrations_enabled false`
+or export `AIMEE_NO_CLIENT_INTEGRATIONS=1` (the env var overrides the config key
+and is also honored by `install.sh` / `configure-hooks.sh`). Registration then
+becomes a no-op across all tools (Claude Code, Gemini, Copilot, Codex). This does
+not affect per-project `.mcp.json`: running `aimee setup` in a project directory
+still wires aimee into that single project, so you can confine aimee to one
+project instead of registering it globally.
+
 ### Claude Code on any primary model (Anthropic ingress)
 
 aimee-server exposes the Anthropic Messages API at `POST /v1/messages` (with
@@ -1639,6 +1649,7 @@ platform support in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 | `AIMEE_SESSION_ID` | Bind the current process to a session id. |
 | `AIMEE_SESSION_START_VERBOSE` | Include broad diagnostic sections in the session brief. |
 | `AIMEE_HOOK_CLIENT` | Identify the calling tool to the hook layer. |
+| `AIMEE_NO_CLIENT_INTEGRATIONS` | If set to any value other than `0`/`false`, aimee skips auto-registering itself into external AI-tool configs. Overrides `client_integrations_enabled` (forces off only); honored by the aimee binary and by `install.sh` / `configure-hooks.sh`. |
 | `AIMEE_MCP_CWD` | Working directory for the MCP bridge. |
 | `AIMEE_ACTIVE_TOOLSET` / `AIMEE_TOOLSETS_CONFIG` | Select / locate the active toolset. |
 | `AIMEE_GUARDRAILS_PATH` | Override guardrail policy path. |

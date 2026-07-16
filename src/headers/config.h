@@ -329,6 +329,14 @@ typedef struct config
     * merge-target rail: PRs open-only against the resolved trunk, merges only
     * to the unprotected autonomous base. Set false to opt out. */
    int wfe_live_forge_enabled;
+   /* client_integrations_enabled: gate (default 1, ON) for the automatic
+    * registration of aimee into external AI-tool user configs — the Claude Code
+    * MCP server/hooks/env/commands in ~/.claude, plus Gemini/Copilot/Codex. When
+    * OFF, ensure_client_integrations() is a no-op so aimee never writes itself
+    * into a tool's global config; wire aimee into a single project manually
+    * instead. The env var AIMEE_NO_CLIENT_INTEGRATIONS overrides this at runtime.
+    * Set false to opt out. */
+   int client_integrations_enabled;
    /* audit_action_enabled: emit a per-tool-call governed-action row (kind=
     * tool_action) to audit.log from pre_tool_check. Default-ON (the
     * trajectory_export reader shipped, so the rows are consumable); audit is
