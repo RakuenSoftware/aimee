@@ -163,6 +163,11 @@ files are reported as `SKIP`; steps without `paths:` still run. A step may set
 `AIMEE_VERIFY_CHANGED_FILES_FILE`, `AIMEE_VERIFY_BASELINE_REF`, and
 `AIMEE_VERIFY_CHANGED_ALL`.
 
+`.aimee/project.yaml` also accepts a `sandbox:` block that declares the Docker
+image a sandboxed delegate runs in for this repo — a pre-baked `image:`, a
+`from:`+`packages:` build, or a `dockerfile:`. See
+[Delegate Sandbox](DELEGATE_SANDBOX.md).
+
 ---
 
 ## Build & Test

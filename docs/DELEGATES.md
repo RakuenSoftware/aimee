@@ -276,6 +276,11 @@ inspection-only tasks. Only write-capable delegates get isolated sibling
 delegate worktrees; branch-specific delegate checkouts are therefore a
 write-delegate feature, not a read-only review mechanism.
 
+A delegate with its own worktree can also be sandboxed: with `delegate_sandbox`
+enabled it runs its file and shell tools inside a network-none container, and
+you control the image it uses per project. See
+[Delegate Sandbox](DELEGATE_SANDBOX.md).
+
 File contents use a stricter authority order. Current source wins over derived
 index snippets: source packets from `--files`, `--context-file`,
 `--context-dir`, preloaded symbol context, and `read_file` from the delegate

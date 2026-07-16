@@ -86,6 +86,7 @@ aimee status
 | [Code intelligence](docs/CODE_INTELLIGENCE.md) | Symbol/call graph, cross-repo deps, blast radius. |
 | [Workflows](docs/WORKFLOWS.md) | The dev-lifecycle workflow engine and authoring. |
 | [Security Model](docs/SECURITY.md) | Threat model, trust boundaries, capability system. |
+| [Delegate Sandbox](docs/DELEGATE_SANDBOX.md) | Running delegates in a network-none container and customizing its image. |
 | [Compatibility](docs/COMPATIBILITY.md) | Supported OS, shell, and provider matrix. |
 | [Feature Status](docs/STATUS.md) | Implementation status of all features. |
 
