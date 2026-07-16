@@ -36,6 +36,8 @@ void test_responses_parser_keeps_all_output_text_parts(void);
 void test_responses_parser_accumulates_output_text_deltas(void);
 void test_responses_object_folds_in_delta_text(void);
 void test_responses_object_keeps_existing_text(void);
+void test_ir_parse_responses_tool_call(void);
+void test_ir_parse_responses_text_only(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
 
@@ -2876,6 +2878,8 @@ int main(void)
    test_responses_parser_accumulates_output_text_deltas();
    test_responses_object_folds_in_delta_text();
    test_responses_object_keeps_existing_text();
+   test_ir_parse_responses_tool_call();
+   test_ir_parse_responses_text_only();
    test_responses_parser_uses_output_text_done();
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();

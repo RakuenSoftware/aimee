@@ -130,6 +130,57 @@ void test_responses_object_keeps_existing_text(void)
    cJSON_Delete(resp);
 }
 
+/* agent_ir_parse_responses: the IR-backed parser for the responses/SSE (codex) wire.
+ * A native function_call becomes a tool call, and assistant_message is the output-item
+ * array (function_call items carry call_id) that the turn loop replays into the next
+ * request's `input`. */
+void test_ir_parse_responses_tool_call(void)
+{
+   const char *body =
+       "event: response.output_item.done\r\n"
+       "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"bash\","
+       "\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\","
+       "\"name\":\"bash\",\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}],"
+       "\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}}\r\n\r\n";
+
+   parsed_response_t p;
+   int rc = agent_ir_parse_responses(body, -1, NULL, &p);
+   assert(rc == 0);
+   assert(p.is_tool_call == 1);
+   assert(p.call_count == 1);
+   assert(strcmp(p.calls[0].name, "bash") == 0);
+   assert(strcmp(p.calls[0].id, "call_1") == 0);
+   /* assistant_message is the output array; the turn loop matches function_call items
+    * by call_id, so the id must be present and equal. */
+   assert(p.assistant_message != NULL && cJSON_IsArray(p.assistant_message));
+   cJSON *item = cJSON_GetArrayItem(p.assistant_message, 0);
+   cJSON *cid = cJSON_GetObjectItemCaseSensitive(item, "call_id");
+   assert(cid && cJSON_IsString(cid) && strcmp(cid->valuestring, "call_1") == 0);
+   agent_free_parsed_response(&p);
+}
+
+/* Text-only codex reply: no tool call, no assistant_message, usage bridged. */
+void test_ir_parse_responses_text_only(void)
+{
+   const char *body =
+       "event: response.output_text.delta\r\n"
+       "data: {\"delta\":\"hello world\"}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}"
+       "\r\n\r\n";
+
+   parsed_response_t p;
+   int rc = agent_ir_parse_responses(body, -1, NULL, &p);
+   assert(rc == 0);
+   assert(p.is_tool_call == 0);
+   assert(p.content && strcmp(p.content, "hello world") == 0);
+   assert(p.assistant_message == NULL);
+   assert(p.prompt_tokens == 1 && p.completion_tokens == 2);
+   agent_free_parsed_response(&p);
+}
+
 void test_responses_parser_uses_output_text_done(void)
 {
    const char *body =

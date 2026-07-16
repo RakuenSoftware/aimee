@@ -47,6 +47,21 @@ __attribute__((weak)) int openai_backend_parse(const struct cJSON *resp, aimee_r
    (void)errn;
    return -1;
 }
+__attribute__((weak)) int responses_backend_parse(const struct cJSON *resp, aimee_response_t *out,
+                                                  char *err, size_t errn)
+{
+   (void)resp;
+   (void)out;
+   (void)err;
+   (void)errn;
+   return -1;
+}
+__attribute__((weak)) int aimee_ir_rescue_tool_calls(aimee_response_t *r, int allow_json)
+{
+   (void)r;
+   (void)allow_json;
+   return 0;
+}
 __attribute__((weak)) size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n)
 {
    (void)r;
