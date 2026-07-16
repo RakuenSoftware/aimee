@@ -34,6 +34,8 @@ void test_tools_enabled_capability_default(void);
  * 2000-line hard limit); called from main() below. */
 void test_responses_parser_keeps_all_output_text_parts(void);
 void test_responses_parser_accumulates_output_text_deltas(void);
+void test_responses_object_folds_in_delta_text(void);
+void test_responses_object_keeps_existing_text(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
 
@@ -2872,6 +2874,8 @@ int main(void)
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();
+   test_responses_object_folds_in_delta_text();
+   test_responses_object_keeps_existing_text();
    test_responses_parser_uses_output_text_done();
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
