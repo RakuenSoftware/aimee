@@ -205,7 +205,7 @@ static void test_preflight_nonexistent_no_create_intent(void)
    char errbuf[512] = {0};
    const char *paths[] = {"src/nonexistent.c"};
    int rc = delegate_check_named_file_drift(paths, 1, "Edit src/nonexistent.c to fix the bug.",
-                                            NULL, NULL, errbuf, sizeof(errbuf));
+                                            NULL, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == -1);
    assert(strstr(errbuf, "nonexistent.c") != NULL);
    assert(strstr(errbuf, "create intent") != NULL);
@@ -218,7 +218,7 @@ static void test_preflight_nonexistent_with_create_intent(void)
    const char *paths[] = {"src/newfile.c"};
    int rc =
        delegate_check_named_file_drift(paths, 1, "Create a new file src/newfile.c with the module.",
-                                       NULL, NULL, errbuf, sizeof(errbuf));
+                                       NULL, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == 0);
    printf("  preflight_nonexistent_with_create_intent: ok\n");
 }
@@ -229,7 +229,7 @@ static void test_preflight_readonly_missing_file_as_context(void)
    const char *paths[] = {"src/newfile.c"};
    int rc = delegate_check_named_file_drift(paths, 1,
                                             "Read-only review of src/newfile.c. Do not edit files.",
-                                            NULL, NULL, errbuf, sizeof(errbuf));
+                                            NULL, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == 0);
    printf("  preflight_readonly_missing_file_as_context: ok\n");
 }
@@ -249,7 +249,7 @@ static void test_preflight_existing_file_no_error(void)
    const char *paths[] = {full_path};
    int rc =
        delegate_check_named_file_drift(paths, 1, "Edit the config parser to handle edge cases.",
-                                       NULL, NULL, errbuf, sizeof(errbuf));
+                                       NULL, NULL, 1, errbuf, sizeof(errbuf));
    /* Existing file: pre-flight passes regardless */
    assert(rc == 0);
    cleanup_tmpdir();
@@ -267,8 +267,8 @@ static void test_preflight_relative_existing_file_with_base(void)
    char errbuf[512] = {0};
    const char *paths[] = {"isolated/context.c"};
    int rc = delegate_check_named_file_drift(
-       paths, 1, "Read isolated/context.c and summarize it without edits.", NULL, g_tmpdir, errbuf,
-       sizeof(errbuf));
+       paths, 1, "Read isolated/context.c and summarize it without edits.", NULL, g_tmpdir, 1,
+       errbuf, sizeof(errbuf));
    assert(rc == 0);
    cleanup_tmpdir();
    printf("  preflight_relative_existing_file_with_base: ok\n");
@@ -291,7 +291,7 @@ static void test_preflight_remote_scp_path_skipped(void)
 
    char errbuf[512] = {0};
    const char *paths[] = {extracted[0]};
-   int rc = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
+   int rc = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee", 1,
                                             errbuf, sizeof(errbuf));
    assert(rc == 0);
    assert(errbuf[0] == '\0');
@@ -304,9 +304,9 @@ static void test_preflight_absolute_outside_worktree_skipped(void)
     * file, not an in-repo create target — pre-flight must not hard-fail. */
    char errbuf[512] = {0};
    const char *paths[] = {"/mnt/media/other/thing.c"};
-   int rc = delegate_check_named_file_drift(paths, 1,
-                                            "Update /mnt/media/other/thing.c on the remote host.",
-                                            NULL, "/home/virant/dev/aimee", errbuf, sizeof(errbuf));
+   int rc = delegate_check_named_file_drift(
+       paths, 1, "Update /mnt/media/other/thing.c on the remote host.", NULL,
+       "/home/virant/dev/aimee", 1, errbuf, sizeof(errbuf));
    assert(rc == 0);
    printf("  preflight_absolute_outside_worktree_skipped: ok\n");
 }
@@ -318,11 +318,38 @@ static void test_preflight_relative_under_worktree_still_fails(void)
     * the guard for real in-repo targets. */
    char errbuf[512] = {0};
    const char *paths[] = {"src/nonexistent_xyz.c"};
-   int rc = delegate_check_named_file_drift(paths, 1, "Edit src/nonexistent_xyz.c to fix the bug.",
-                                            NULL, "/home/virant/dev/aimee", errbuf, sizeof(errbuf));
+   int rc =
+       delegate_check_named_file_drift(paths, 1, "Edit src/nonexistent_xyz.c to fix the bug.", NULL,
+                                       "/home/virant/dev/aimee", 1, errbuf, sizeof(errbuf));
    assert(rc == -1);
    assert(strstr(errbuf, "create intent") != NULL);
    printf("  preflight_relative_under_worktree_still_fails: ok\n");
+}
+
+static void test_read_role_scraped_path_no_hard_drift(void)
+{
+   /* WFE regression: a read/analysis delegate (understand/split/review) threads a
+    * reference doc into its prompt whose markdown links get scraped as named
+    * paths. It produces its artifact from its reply and creates no files, so a
+    * missing scraped path must NEVER hard-fail it — the role, not the prompt's
+    * write-y wording, is the authoritative gate. The SAME inputs under a write
+    * role still hard-fail (proving the gate is what changed). An edit-verb prompt
+    * with no create intent isolates the gate: a write role hard-drifts on the
+    * missing path, a read role does not. */
+   const char *prompt = "Edit done/full-autonomous-development.md to revise the plan.";
+   const char *paths[] = {"done/full-autonomous-development.md"};
+
+   char errbuf[512] = {0};
+   int rc_read = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
+                                                 0 /* read role */, errbuf, sizeof(errbuf));
+   assert(rc_read == 0);
+   assert(errbuf[0] == '\0');
+
+   errbuf[0] = '\0';
+   int rc_write = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
+                                                  1 /* write role */, errbuf, sizeof(errbuf));
+   assert(rc_write == -1);
+   printf("  read_role_scraped_path_no_hard_drift: ok\n");
 }
 
 /* ---- delegate_prompt_allows_writes ---- */
@@ -461,7 +488,8 @@ static void test_postrun_path_in_response(void)
 
    char errbuf[512] = {0};
    const char *paths[] = {full_path};
-   int rc = delegate_check_named_file_drift(paths, 1, NULL, response, NULL, errbuf, sizeof(errbuf));
+   int rc =
+       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == 0);
    cleanup_tmpdir();
    printf("  postrun_path_in_response: ok\n");
@@ -482,7 +510,8 @@ static void test_postrun_path_absent_hard_drift(void)
 
    char errbuf[512] = {0};
    const char *paths[] = {full_path};
-   int rc = delegate_check_named_file_drift(paths, 1, NULL, response, NULL, errbuf, sizeof(errbuf));
+   int rc =
+       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == -1);
    assert(strstr(errbuf, "drift") != NULL || strstr(errbuf, "not found") != NULL);
    cleanup_tmpdir();
@@ -506,7 +535,7 @@ static void test_postrun_readonly_path_absent_soft_drift(void)
    char errbuf[512] = {0};
    const char *paths[] = {full_path};
    int rc =
-       delegate_check_named_file_drift(paths, 1, prompt, response, NULL, errbuf, sizeof(errbuf));
+       delegate_check_named_file_drift(paths, 1, prompt, response, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == 1);
    assert(strstr(errbuf, "read-only context") != NULL);
    cleanup_tmpdir();
@@ -529,7 +558,8 @@ static void test_postrun_basename_only_soft_drift(void)
 
    char errbuf[512] = {0};
    const char *paths[] = {full_path};
-   int rc = delegate_check_named_file_drift(paths, 1, NULL, response, NULL, errbuf, sizeof(errbuf));
+   int rc =
+       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == 1); /* soft drift — only basename matched */
    assert(strstr(errbuf, "ambiguous") != NULL || strstr(errbuf, "basename") != NULL);
    cleanup_tmpdir();
@@ -542,7 +572,8 @@ static void test_postrun_nonexistent_skipped(void)
    const char *response = "I completed the task without touching that file.";
    char errbuf[512] = {0};
    const char *paths[] = {"/tmp/definitely_nonexistent_file_xyz.c"};
-   int rc = delegate_check_named_file_drift(paths, 1, NULL, response, NULL, errbuf, sizeof(errbuf));
+   int rc =
+       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
    assert(rc == 0);
    printf("  postrun_nonexistent_skipped: ok\n");
 }
@@ -566,7 +597,7 @@ static void test_postrun_wt_readonly_missing_file_soft_drift(void)
    const char *response = "No blocking findings.";
    char errbuf[512] = {0};
    const char *paths[] = {missing_path};
-   int rc = delegate_check_named_file_drift(paths, 1, prompt, response, g_tmpdir, errbuf,
+   int rc = delegate_check_named_file_drift(paths, 1, prompt, response, g_tmpdir, 1, errbuf,
                                             sizeof(errbuf));
    assert(rc == 1);
    assert(strstr(errbuf, "read-only context") != NULL);
@@ -606,8 +637,8 @@ static void test_postrun_wt_context_file_soft_drift(void)
    const char *response = "Created src/new_module.c with the requested functionality.";
    char errbuf[512] = {0};
    const char *paths[] = {full_path};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, NULL, response, g_tmpdir, errbuf, sizeof(errbuf));
+   int rc = delegate_check_named_file_drift(paths, 1, NULL, response, g_tmpdir, 1, errbuf,
+                                            sizeof(errbuf));
    /* context file not in git diff, exists on disk → soft drift, not hard */
    assert(rc == 1);
    assert(strstr(errbuf, "context") != NULL || strstr(errbuf, "not modified") != NULL);
@@ -619,8 +650,9 @@ static void test_null_inputs(void)
 {
    char errbuf[512] = {0};
    assert(delegate_extract_named_paths(NULL, NULL, 0) == 0);
-   assert(delegate_check_named_file_drift(NULL, 0, NULL, NULL, NULL, errbuf, sizeof(errbuf)) == 0);
-   assert(delegate_check_named_file_drift(NULL, 5, "prompt", "response", NULL, errbuf,
+   assert(delegate_check_named_file_drift(NULL, 0, NULL, NULL, NULL, 1, errbuf, sizeof(errbuf)) ==
+          0);
+   assert(delegate_check_named_file_drift(NULL, 5, "prompt", "response", NULL, 1, errbuf,
                                           sizeof(errbuf)) == 0);
    printf("  null_inputs: ok\n");
 }
@@ -659,6 +691,7 @@ int main(void)
    test_preflight_remote_scp_path_skipped();
    test_preflight_absolute_outside_worktree_skipped();
    test_preflight_relative_under_worktree_still_fails();
+   test_read_role_scraped_path_no_hard_drift();
    test_prompt_write_intent();
    test_validation_bundle_identifies_source_worktree();
    test_validation_bundle_keeps_large_diff_handlers();

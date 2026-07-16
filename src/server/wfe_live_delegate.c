@@ -93,8 +93,8 @@ static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t
  * (container-ready — WFE never assumes a local process or a shared checkout).
  * WFE holds no server_ctx, spawns no delegate, and runs no git: `freeze` owns the
  * commit, so out_commit_sha is left empty here. The block's `role` arg is the
- * delegate PERSONA (architect/engineer/...); a producing delegate routes on a
- * WRITE role so the delegate system isolates + applies its changes. */
+ * delegate PERSONA (architect/engineer/...); the delegate ROLE (read vs write) is
+ * derived from whether the block named a captured artifact_path — see below. */
 static int wfe_live_delegate_run(const char *workdir, const char *role, const char *delegate,
                                  const char *prompt, const char *artifact_path,
                                  char out_commit_sha[64], char *err, size_t errlen)
@@ -110,6 +110,19 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
    }
 
    const char *persona = (role && role[0]) ? role : "engineer";
+   /* Produce-via-reply vs worktree-mutating, keyed on whether the block named a
+    * captured artifact_path:
+    *   - artifact_path set (author/understand/split/review): the delegate's OUTPUT
+    *     is its reply, which WFE persists below. A READ role ("review"): it
+    *     modifies no files, so the shared path's named-file drift guard never
+    *     hard-fails it on a repo-relative path quoted in the reference content
+    *     threaded into its prompt.
+    *   - artifact_path NULL (implement/decompose/tdd/document): the delegate
+    *     MUTATES the worktree. A WRITE role ("code") so the delegate system
+    *     isolates its checkout and applies the diff back into `workdir`.
+    * cwd = the work-item worktree; persona names the delegate identity. */
+   int produce_via_reply = (artifact_path && artifact_path[0]);
+   const char *delegate_role = produce_via_reply ? "review" : "code";
    int job_id = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
    if (job_id <= 0)
    {
@@ -117,10 +130,7 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
          snprintf(err, errlen, "wfe live delegate: could not create coord job");
       return -1;
    }
-   /* Write role ("code") so the shared path runs the delegate in an isolated
-    * worktree and applies its diff back into `workdir`. cwd = the work-item
-    * worktree; persona names the delegate identity. */
-   int task_id = db1_coord_job_add_task(job_id, 0, "[]", "code", prompt, workdir, persona);
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", delegate_role, prompt, workdir, persona);
    if (task_id <= 0)
    {
       db1_coord_job_cancel(job_id);
