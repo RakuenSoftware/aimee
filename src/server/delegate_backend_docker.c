@@ -21,7 +21,7 @@
 #include "delegate_backend_docker.h"
 #include "util.h"
 
-#include "aimee.h" /* MAX_PATH_LEN */
+#include "aimee.h"      /* MAX_PATH_LEN */
 #include "aimee_home.h" /* aimee_home() — resolves the server's UDS path */
 
 /* Fixed in-container path for the bind-mounted aimee-server UDS. The delegate's
