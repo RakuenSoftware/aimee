@@ -265,7 +265,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
 - **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
-- **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`
+- **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
 - **`worktree_gc`** — `enabled`, `max_age_days`
 
 ## Other top-level config-file keys (3)
