@@ -470,7 +470,22 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-curator-fixtures \
                $(TESTPREFIX)/unit-test-substrate-fixtures
 unit-tests: $(BINARY) $(TEST_TARGETS)
-	@jobs="$(TEST_RUN_JOBS)"; \
+	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
+	@# own environment defaults to $$th/.config/aimee, never the developer's real
+	@# ~/.config/aimee — the dir a running aimee-server reads agents.json, config
+	@# and the vault from. The suite and a server share it whenever AIMEE_HOME is
+	@# unset, so an unisolated test could read or overwrite live state. (No current
+	@# test was proven to do so — a full run under isolation writes nothing there —
+	@# but "none does today" is luck, not a boundary.)
+	@#
+	@# HOME only, NOT AIMEE_HOME: aimee_home() checks AIMEE_HOME before HOME, so
+	@# exporting AIMEE_HOME would OVERRIDE the many tests that set HOME themselves
+	@# to steer the config dir (e.g. test_session_brief). Exporting HOME leaves the
+	@# default safe while a test's own setenv still wins inside its process.
+	@th="$$(mktemp -d /tmp/aimee-unit-home.XXXXXX)"; \
+	export HOME="$$th"; unset AIMEE_HOME; \
+	trap 'rm -rf "$$th"' EXIT; \
+	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
 	  for t in $(TEST_TARGETS); do \
 	    log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; \
