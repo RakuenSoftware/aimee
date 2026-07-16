@@ -71,8 +71,17 @@ environment:
 - **SSH keys** are loaded into a per-user **in-memory `ssh-agent`** (`memfd`,
   `RLIMIT_CORE=0`, `DUMPABLE=0`, key buffer zeroed after load); git uses it via
   `SSH_AUTH_SOCK`. The agent socket lives under a **tmpfs-mandatory**,
-  fail-closed per-principal runtime dir (`webuser_runtime.c`); nothing touches
-  `~/.ssh`.
+  fail-closed per-principal runtime dir (`webuser_runtime.c`). The private key
+  **never touches disk** — only the agent's memory holds it. Because the server
+  has no seeded `known_hosts`, every SSH git op also forces
+  `GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new"`:
+  `BatchMode` keeps it non-interactive (no TTY, no password prompts), and
+  `accept-new` is **trust-on-first-use** — on first contact with a new host
+  (e.g. `bitbucket.org`) SSH appends the remote's **public** host key to
+  `~/.ssh/known_hosts` and verifies it strictly thereafter, so a first-time
+  connection that would otherwise die on "Host key verification failed"
+  succeeds. (`git://` remotes stay anonymous and are unaffected; only real SSH
+  transports — `ssh://…` or scp-like `git@host:owner/repo.git` — use the agent.)
 
 ## Cross-tenant isolation
 
