@@ -64,6 +64,8 @@ void test_parent_write_guard_allows_workspace_file_ops(void);
 void test_parent_write_guard_allows_workspace_chain(void);
 void test_parent_write_guard_allows_readonly_printf(void);
 void test_detached_dead_channel_reports_clear_error(void);
+void test_container_bash_runs_in_sandbox(void);
+void test_container_execute_script_runs_in_sandbox(void);
 void otel_init(const char *endpoint, const char *service_name, const char *session)
 {
    (void)endpoint;
@@ -2900,6 +2902,8 @@ int main(void)
    test_parent_write_guard_allows_workspace_chain();
    test_parent_write_guard_allows_readonly_printf();
    test_detached_dead_channel_reports_clear_error();
+   test_container_bash_runs_in_sandbox();
+   test_container_execute_script_runs_in_sandbox();
    test_parent_write_guard_shell_uses_delegate_cwd_in_git_parent();
    test_tool_list_files();
    test_tool_grep_excludes_heavy_dirs();

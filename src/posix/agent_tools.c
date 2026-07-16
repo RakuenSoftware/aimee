@@ -738,6 +738,53 @@ char *tool_bash(const char *command, int timeout_ms)
       return res ? res : safe_strdup("{}");
    }
 
+   /* Sandboxed (CONTAINER) delegate: run the shell INSIDE the container via the
+    * provider's exec_shell (docker exec), NOT as a local fork on the aimee-server
+    * host. The local fork below would execute the model's arbitrary command on the
+    * host — with the host's filesystem and network — escaping the `--network none`
+    * sandbox entirely (the file tools already route into the container; bash/script
+    * were the hole). Run in the delegate's worktree: it is bind-mounted
+    * path-identically, so the same absolute path is valid inside the container. */
+   if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
+   {
+      const char *cwd = run_cmd_get_cwd();
+      char *wrapped = NULL;
+      if (cwd && cwd[0])
+      {
+         dstr_t w;
+         dstr_init(&w);
+         dstr_append_str(&w, "cd '");
+         for (const char *c = cwd; *c; c++)
+         {
+            if (*c == '\'')
+               dstr_append_str(&w, "'\\''");
+            else
+               dstr_append_char(&w, *c);
+         }
+         dstr_append_str(&w, "' && ");
+         dstr_append_str(&w, command);
+         wrapped = w.data ? safe_strdup(w.data) : NULL;
+         dstr_free(&w);
+      }
+      int exit_code = -1;
+      char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
+      free(wrapped);
+      /* exit_code == -1 with no capture means docker exec could not run the command
+       * at all (transport failure) — distinct from a real command that exits 0 with
+       * empty output, which the container provider returns as NULL out / exit 0. */
+      if (exit_code == -1 && !out)
+         return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run "
+                            "the command in the delegate container\",\"exit_code\":-1}");
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stderr", "");
+      cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      free(out);
+      char *res = cJSON_PrintUnformatted(r);
+      cJSON_Delete(r);
+      return res ? res : safe_strdup("{}");
+   }
+
    int stdout_pipe[2], stderr_pipe[2];
    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");

@@ -493,8 +493,60 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
    if (!lang || !cJSON_IsString(lang) || !body || !cJSON_IsString(body))
    {
       result = safe_strdup("error: missing 'language' or 'body' parameter");
+      free(env_json);
+      return result;
    }
-   else
+
+   /* Sandboxed (CONTAINER) delegate: run the script INSIDE the container via the
+    * provider's exec_shell, NOT as tool_execute_script's local fork on the
+    * aimee-server host — the host fork would run the model's arbitrary script on the
+    * host (its filesystem, its network), escaping the `--network none` sandbox that
+    * the file tools already respect. We deliberately forgo the host script-RPC stub
+    * bridge here: a sandboxed script must not reach back into the aimee-server
+    * process, and the delegate already has aimee's tools at the agent-loop layer. The
+    * body is fed over a quoted heredoc so its contents need no escaping; the
+    * container cwd is the bind-mounted (path-identical) worktree. */
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
+   {
+      dstr_t c;
+      dstr_init(&c);
+      const char *cwd =
+          (wd && cJSON_IsString(wd) && wd->valuestring[0]) ? wd->valuestring : run_cmd_get_cwd();
+      if (cwd && cwd[0])
+      {
+         dstr_append_str(&c, "cd '");
+         for (const char *p = cwd; *p; p++)
+         {
+            if (*p == '\'')
+               dstr_append_str(&c, "'\\''");
+            else
+               dstr_append_char(&c, *p);
+         }
+         dstr_append_str(&c, "' && ");
+      }
+      dstr_append_str(&c, strcmp(lang->valuestring, "python") == 0
+                              ? "python3 - <<'AIMEE_SCRIPT_EOF'\n"
+                              : "bash -s <<'AIMEE_SCRIPT_EOF'\n");
+      dstr_append_str(&c, body->valuestring);
+      dstr_append_str(&c, "\nAIMEE_SCRIPT_EOF\n");
+      int exit_code = -1;
+      char *out = c.data ? ws->exec_shell(ws, c.data, &exit_code) : NULL;
+      dstr_free(&c);
+      free(env_json);
+      if (exit_code == -1 && !out)
+         return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run the "
+                            "script in the delegate container\",\"exit_code\":-1}");
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stderr", "");
+      cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      free(out);
+      char *res = cJSON_PrintUnformatted(r);
+      cJSON_Delete(r);
+      return res ? res : safe_strdup("{}");
+   }
+
    {
       int secs = (tout && cJSON_IsNumber(tout)) ? tout->valueint : 120;
       const char *dir = (wd && cJSON_IsString(wd)) ? wd->valuestring : NULL;
