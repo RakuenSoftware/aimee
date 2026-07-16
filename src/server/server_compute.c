@@ -1281,11 +1281,13 @@ void delegate_worker(void *arg)
    }
 
    int rc;
-   const char *saved_toolset_env = getenv("AIMEE_ACTIVE_TOOLSET");
-   char saved_toolset_buf[128] = "";
-   if (saved_toolset_env && saved_toolset_env[0])
-      snprintf(saved_toolset_buf, sizeof(saved_toolset_buf), "%s", saved_toolset_env);
-   platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
+   /* Thread-local, not the process env: delegate turns run on POOLED worker threads
+    * and overlap by design (session_threads defaults above 1; panels fan out through
+    * agent_run_parallel). The old save/restore around a process-wide setenv looked
+    * scoped but was not — a concurrent delegate's value decided what this one could
+    * call, so a reviewer could resolve a coder's toolset. That is the boundary
+    * agent_tools_filter_for_role exists to enforce. */
+   agent_tools_set_active_toolset(toolset_override);
    /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
    int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
    /* A background/durable delegate has no live client connection to serve a
@@ -1497,7 +1499,9 @@ void delegate_worker(void *arg)
                   handoff_validation.error[0] ? handoff_validation.error : "validation failed");
       }
    }
-   platform_setenv("AIMEE_ACTIVE_TOOLSET", saved_toolset_buf);
+   /* Clear unconditionally: this thread is going back to the pool, and a leftover
+    * override would silently re-scope the NEXT delegate's tools. */
+   agent_tools_set_active_toolset(NULL);
    /* Reset the read-only gate unconditionally so the next user of this pooled
     * worker thread is not left in a prior delegate's (possibly read-only) state. */
    agent_tools_write_capable_set(1);

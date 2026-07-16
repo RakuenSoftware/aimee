@@ -57,6 +57,34 @@ _Thread_local static char g_parent_write_root[MAX_PATH_LEN] = {0};
  * delegation from the delegate's write policy; reset on guard clear. */
 _Thread_local static int g_write_capable = 1;
 
+/* The toolset THIS THREAD's turn resolves against, overriding the role.
+ *
+ * Thread-local for the same reason g_write_capable above is: delegate turns run on
+ * POOLED worker threads and overlap by design (session_threads defaults above 1,
+ * and review panels fan out through agent_run_parallel). This was the process-wide
+ * AIMEE_ACTIVE_TOOLSET env var, set per turn with a save/restore bracket that made
+ * it LOOK scoped. Measured: with 4 concurrent turns, 3 of 4 resolved the LAST
+ * writer's toolset — a reviewer could hold a coder's tools, which is the boundary
+ * agent_tools_tool_allowed_for_role exists to enforce.
+ *
+ * Lives here, beside its reader, rather than in the dispatch TU: the state and the
+ * code that resolves against it belong together. The env var is still honoured (it
+ * is how the single-process CLI passes --toolset); this takes precedence. */
+_Thread_local static char g_active_toolset[128];
+
+void agent_tools_set_active_toolset(const char *toolset)
+{
+   if (toolset && toolset[0])
+      snprintf(g_active_toolset, sizeof(g_active_toolset), "%s", toolset);
+   else
+      g_active_toolset[0] = '\0';
+}
+
+const char *agent_tools_active_toolset(void)
+{
+   return g_active_toolset[0] ? g_active_toolset : NULL;
+}
+
 static int agent_tools_path_under_root(const char *path, const char *root)
 {
    if (!path || !path[0] || !root || !root[0])
@@ -398,7 +426,12 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    if (!tool_name || !tool_name[0])
       return 0;
 
-   const char *toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
+   /* This thread's turn first: the env var is process-wide, so on a pooled worker a
+    * concurrent delegate's value would otherwise decide what THIS one may call. The
+    * env var stays as the single-process CLI's --toolset channel. */
+   const char *toolset_name = agent_tools_active_toolset();
+   if (!toolset_name || !toolset_name[0])
+      toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
       toolset_name = toolset_for_delegate_role(role);
    if (toolset_name && toolset_name[0])
