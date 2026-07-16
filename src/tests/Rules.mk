@@ -1580,7 +1580,8 @@ $(TESTPREFIX)/unit-test-aimee-backend: $(OBJDIR)/tests/test_aimee_backend.o \
                                       $(OBJDIR)/server/aimee_backend_responses.o \
                                       $(OBJDIR)/server/aimee_frontend_anthropic.o \
                                       $(OBJDIR)/server/aimee_frontend_openai.o \
-                                      $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o
+                                      $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
+                                      $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Slice 3: IR shadow observer (pure — cJSON only).
@@ -3365,6 +3366,9 @@ $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o 
 
 $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
+                                $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/server/aimee_backend_openai.o \
+                                $(OBJDIR)/server/aimee_backend_anthropic.o $(OBJDIR)/server/aimee_ir.o \
+                                $(OBJDIR)/server/aimee_ir_rescue.o $(OBJDIR)/server/aimee_ir_metrics.o \
                                 $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/server/delegate_driver.o \

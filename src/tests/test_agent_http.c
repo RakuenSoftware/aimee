@@ -432,7 +432,7 @@ static void test_parse_response_openai_sanitizes_invalid_tool_arguments(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 1);
    assert(out.call_count == 1);
@@ -460,7 +460,7 @@ static void test_parse_response_captures_provider_model(void)
    cJSON *root = cJSON_Parse(oai);
    assert(root != NULL);
    parsed_response_t p;
-   agent_parse_response_openai(root, &p);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &p);
    assert(strcmp(p.model, "gpt-4o-2024-11-20") == 0);
    agent_free_parsed_response(&p);
    cJSON_Delete(root);
@@ -469,7 +469,7 @@ static void test_parse_response_captures_provider_model(void)
                      "\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}";
    root = cJSON_Parse(ant);
    assert(root != NULL);
-   agent_parse_response_anthropic(root, &p);
+   agent_ir_parse_json_response(root, 1, -1, NULL, &p);
    assert(strcmp(p.model, "claude-3-5-sonnet-20241022") == 0);
    agent_free_parsed_response(&p);
    cJSON_Delete(root);
@@ -491,7 +491,7 @@ static void test_parse_response_keeps_text_with_tool_use(void)
    assert(root != NULL);
    parsed_response_t p;
    memset(&p, 0, sizeof(p));
-   agent_parse_response_anthropic(root, &p);
+   agent_ir_parse_json_response(root, 1, -1, NULL, &p);
    assert(p.is_tool_call == 1);
    assert(p.call_count == 1 && strcmp(p.calls[0].name, "grep") == 0);
    assert(p.content && strcmp(p.content, "Let me check that.") == 0); /* text NOT dropped */
@@ -653,7 +653,7 @@ static void test_parse_response_openai_mistral_content_array(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 0);
    assert(out.content != NULL);
@@ -680,7 +680,7 @@ static void test_parse_response_openai_stray_think_close(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 0);
    assert(out.content != NULL);
@@ -708,7 +708,7 @@ static void test_parse_response_openai_strips_thinking_block(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 0);
    assert(out.content != NULL);
@@ -738,7 +738,7 @@ static void test_parse_response_openai_strips_thinking_process_scaffold(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 0);
    assert(out.content != NULL);
@@ -767,7 +767,7 @@ static void test_parse_response_openai_strips_self_correction_scaffold(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 0);
    assert(out.content != NULL);
@@ -795,11 +795,12 @@ static void test_parse_response_openai_discards_private_scaffold_without_final(v
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_parse_response_openai(root, &out);
+   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
 
    assert(out.is_tool_call == 0);
-   assert(out.content != NULL);
-   assert(strcmp(out.content, "") == 0);
+   /* All scaffold, no final answer -> empty content. The IR represents "no text" as
+    * NULL content (legacy used an empty string); both are empty downstream. */
+   assert(out.content == NULL || out.content[0] == '\0');
 
    agent_free_parsed_response(&out);
    cJSON_Delete(root);

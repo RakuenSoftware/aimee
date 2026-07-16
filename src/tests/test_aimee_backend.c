@@ -125,6 +125,54 @@ int main(void)
    aimee_response_free(&oresp);
    cJSON_Delete(orj);
 
+   /* Reasoning models on the openai wire embed chain-of-thought inline. The IR STORES
+    * it as a THINKING block (not discarded) and keeps the answer as TEXT; the content
+    * accessor excludes THINKING so callers see only the answer. */
+   const char *OTHINK =
+       "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\","
+       "\"content\":\"<think>hidden reasoning</think>the answer\"}}]}";
+   cJSON *otj = cJSON_Parse(OTHINK);
+   aimee_response_t othink;
+   assert(openai_backend_parse(otj, &othink, err, sizeof err) == 0);
+   int n_think = 0, n_text = 0;
+   for (int i = 0; i < othink.n_content; i++)
+   {
+      if (othink.content[i].type == AIMEE_BLK_THINKING)
+      {
+         n_think++;
+         assert(strcmp(othink.content[i].text, "hidden reasoning") == 0); /* STORED */
+      }
+      if (othink.content[i].type == AIMEE_BLK_TEXT)
+      {
+         n_text++;
+         assert(strcmp(othink.content[i].text, "the answer") == 0);
+      }
+   }
+   assert(n_think == 1 && n_text == 1);
+   char buf[64];
+   aimee_ir_response_text(&othink, buf, sizeof buf);
+   assert(strcmp(buf, "the answer") == 0); /* accessor excludes THINKING */
+   aimee_response_free(&othink);
+   cJSON_Delete(otj);
+
+   /* Content-parts array (mistral): text parts -> answer, thinking parts -> stored. */
+   const char *OARR =
+       "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\","
+       "\"content\":[{\"type\":\"thinking\",\"thinking\":[{\"type\":\"text\",\"text\":\"why\"}]},"
+       "{\"type\":\"text\",\"text\":\"final\"}]}}]}";
+   cJSON *oaj = cJSON_Parse(OARR);
+   aimee_response_t oarr;
+   assert(openai_backend_parse(oaj, &oarr, err, sizeof err) == 0);
+   aimee_ir_response_text(&oarr, buf, sizeof buf);
+   assert(strcmp(buf, "final") == 0);
+   int arr_think = 0;
+   for (int i = 0; i < oarr.n_content; i++)
+      if (oarr.content[i].type == AIMEE_BLK_THINKING)
+         arr_think++;
+   assert(arr_think == 1); /* thinking part stored, not dropped */
+   aimee_response_free(&oarr);
+   cJSON_Delete(oaj);
+
    /* --- (5) Responses (codex) backend: Anthropic IR -> Responses request; a
     *         Responses response (message + function_call output items) -> IR. --- */
    aimee_request_t cir;
