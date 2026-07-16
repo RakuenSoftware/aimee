@@ -64,6 +64,16 @@ void agent_tools_sanitize_for_agent(struct cJSON *tools, const agent_t *agent);
 
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
 void agent_tools_set_dispatch_role(const char *role);
+
+/* The toolset THIS THREAD's turn resolves against, overriding the role. Thread-local
+ * because delegate turns run on pooled worker threads and overlap: the process-wide
+ * AIMEE_ACTIVE_TOOLSET env var this replaces was set per turn with a save/restore
+ * bracket, which looked scoped while a concurrent delegate's setenv changed what
+ * this one resolved — a reviewer could resolve a coder's toolset. The env var is
+ * still honoured (it is how the single-process CLI passes --toolset); this takes
+ * precedence. Set NULL/"" to clear. */
+void agent_tools_set_active_toolset(const char *toolset);
+const char *agent_tools_active_toolset(void);
 const char *agent_tools_dispatch_role(void);
 
 /* Git-write seam (git_commit / git_push / git_branch / git_pr).

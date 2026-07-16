@@ -333,6 +333,17 @@ void agent_tools_write_capable_set(int capable)
 {
    (void)capable;
 }
+/* Per-turn toolset override. Stubbed alongside the write guard because this test
+ * links server_compute without the agent-tools TU; the real one is thread-local
+ * (see agent_tools.c) precisely because delegate turns overlap on pooled threads. */
+void agent_tools_set_active_toolset(const char *toolset)
+{
+   (void)toolset;
+}
+const char *agent_tools_active_toolset(void)
+{
+   return NULL;
+}
 int agent_tools_readonly_delegate_blocks(void)
 {
    return 0;
