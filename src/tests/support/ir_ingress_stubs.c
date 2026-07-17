@@ -217,3 +217,13 @@ __attribute__((weak)) void aimee_response_free(void *r)
 {
    (void)r;
 }
+
+/* Response seam Slice 2: the plain anthropic_http shape test #includes anthropic_http.c
+ * (which now calls gw_response_run_governance) but links no policing graph. Inert weak
+ * stub -> no policing, which the shape test does not exercise. The p2c tests link the real
+ * gw_stage_governance.o + gateway_policy.o, so the strong symbol wins there. */
+__attribute__((weak)) int gw_response_run_governance(void *parsed)
+{
+   (void)parsed;
+   return 0;
+}

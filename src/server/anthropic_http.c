@@ -29,6 +29,7 @@
 #include "gateway_pipeline.h"
 #include "gw_stage_memory.h"
 #include "gw_stage_registry.h"
+#include "gw_stage_governance.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include "aimee_ir_metrics.h"
@@ -626,7 +627,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
        * no-ops at the default config). Drop count is plumbed through to the
        * same pipeline-runner total the request-side strip already emits; a
        * future P2b audit pass surfaces both at once. */
-      gateway_policy_police_parsed_response(&parsed);
+      gw_response_run_governance(&parsed);
 
       /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
        * proxy (no agent_log_call), so record this turn's spend, billed against
@@ -1055,7 +1056,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                free(buf_resp);
                goto cleanup;
             }
-            gateway_policy_police_parsed_response(&parsed);
+            gw_response_run_governance(&parsed);
             emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
             /* Cost accounting (mirror the buffered path). */
             if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
@@ -1086,7 +1087,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                 * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
                aimee_ir_shadow_compare_response(&parsed, provider_resp,
                                                 shadow_provider_wire(driver));
-               gateway_policy_police_parsed_response(&parsed);
+               gw_response_run_governance(&parsed);
                emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
                /* Cost accounting (mirror the buffered path). */
                if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
