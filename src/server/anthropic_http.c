@@ -32,6 +32,7 @@
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include "aimee_ir_metrics.h"
 #include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
+#include "aimee_backend.h"   /* Slice 3: openai_backend_parse (IR response path) */
 #include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
@@ -555,12 +556,33 @@ static int messages_buffered(const char *body, char *resp, int cap)
    memset(&parsed, 0, sizeof(parsed));
    if (provider_resp)
    {
-      if (driver && driver->parse_response)
-         driver->parse_response(provider_resp, response, &parsed);
-      else
-         /* No driver: default to the openai wire, parsed through the IR (zeroed
-          * *parsed on failure), matching the driver hooks. */
-         agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+      /* Slice 3 (canonical-IR): OPENAI-WIRE response parse via the IR when
+       * AIMEE_IR_RESP_PATH is on (default-off, ships dark). provider-JSON ->
+       * openai_backend_parse -> IR -> transitional adapter -> parsed_response_t, so
+       * the existing emit + policing are unchanged. Anthropic stays on legacy
+       * (per-wire ruling); legacy fallback on any IR-parse failure. */
+      int used_ir_resp = 0;
+      if (aimee_ir_resp_path_enabled() && !driver_is_anthropic(driver))
+      {
+         aimee_response_t ir_resp;
+         char ir_err[128];
+         memset(&ir_resp, 0, sizeof(ir_resp));
+         if (openai_backend_parse(provider_resp, &ir_resp, ir_err, sizeof(ir_err)) == 0)
+         {
+            aimee_ir_response_to_parsed(&ir_resp, &parsed);
+            used_ir_resp = 1;
+         }
+         aimee_response_free(&ir_resp);
+      }
+      if (!used_ir_resp)
+      {
+         if (driver && driver->parse_response)
+            driver->parse_response(provider_resp, response, &parsed);
+         else
+            /* No driver: default to the openai wire, parsed through the IR (zeroed
+             * *parsed on failure), matching the driver hooks. */
+            agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+      }
 
       /* Slice 2 (canonical-IR): shadow-compare the legacy parse against the IR
        * response parse -> RESP_MATCH / RESP_MISMATCH on GET /v1/dashboard/metrics.
@@ -1031,11 +1053,29 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
             cJSON *provider_resp = cJSON_Parse(buf_resp);
             if (provider_resp)
             {
-               if (driver && driver->parse_response)
-                  driver->parse_response(provider_resp, buf_resp, &parsed);
-               else
-                  /* No driver: default to the openai wire via the IR. */
-                  agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+               /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag);
+                * legacy fallback on failure. Anthropic stays on legacy. */
+               int used_ir_resp = 0;
+               if (aimee_ir_resp_path_enabled() && !driver_is_anthropic(driver))
+               {
+                  aimee_response_t ir_resp;
+                  char ir_err[128];
+                  memset(&ir_resp, 0, sizeof(ir_resp));
+                  if (openai_backend_parse(provider_resp, &ir_resp, ir_err, sizeof(ir_err)) == 0)
+                  {
+                     aimee_ir_response_to_parsed(&ir_resp, &parsed);
+                     used_ir_resp = 1;
+                  }
+                  aimee_response_free(&ir_resp);
+               }
+               if (!used_ir_resp)
+               {
+                  if (driver && driver->parse_response)
+                     driver->parse_response(provider_resp, buf_resp, &parsed);
+                  else
+                     /* No driver: default to the openai wire via the IR. */
+                     agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+               }
                /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
                 * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
                aimee_ir_shadow_compare_response(&parsed, provider_resp,

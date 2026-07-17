@@ -8,6 +8,8 @@
 
 #include <stddef.h>
 
+#include "aimee_ir.h" /* aimee_response_t */
+
 struct cJSON;
 
 /* Build the provider request body from `req` (an Anthropic Messages request) via
@@ -54,5 +56,15 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
 struct cJSON *aimee_ir_build_from_chat(const char *agent_model, const struct cJSON *messages,
                                        const struct cJSON *tools, const char *system,
                                        const char *driver_name);
+
+
+/* Slice 3 gate (AIMEE_IR_RESP_PATH env, DEFAULT-OFF): route the OPENAI-WIRE buffered
+ * response parse through the IR. Per-wire; anthropic + responses stay on legacy. */
+int aimee_ir_resp_path_enabled(void);
+
+struct parsed_response;
+/* TRANSITIONAL: IR response -> legacy parsed_response_t (see .c). Remove once emit +
+ * police are IR-native. */
+void aimee_ir_response_to_parsed(const aimee_response_t *r, struct parsed_response *out);
 
 #endif /* DEC_AIMEE_IR_SERVE_H */
