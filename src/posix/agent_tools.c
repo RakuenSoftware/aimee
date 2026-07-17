@@ -19,6 +19,7 @@
 #include "kb_client.h"
 #include "mcp_client_registry.h"
 #include "workspace.h"
+#include "sandbox_learned.h"
 #include "workspace_provider.h"
 #include "diff.h"
 #include "anchor_snapshot.h"
@@ -769,6 +770,11 @@ char *tool_bash(const char *command, int timeout_ms)
       int exit_code = -1;
       char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
       free(wrapped);
+      /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
+       * failed/typo'd/nonexistent install is never recorded (and can't poison later
+       * image builds). Best-effort, cheap pre-filtered inside observe(). */
+      if (exit_code == 0)
+         sandbox_learned_observe(cwd, command);
       /* exit_code == -1 with no capture means docker exec could not run the command
        * at all (transport failure) — distinct from a real command that exits 0 with
        * empty output, which the container provider returns as NULL out / exit 0. */

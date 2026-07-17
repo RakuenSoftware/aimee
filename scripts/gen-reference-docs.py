@@ -192,6 +192,13 @@ CFG_KEY_DESC = {
     "mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated "
     "in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker "
     "being unavailable, or a failed acquire.",
+    "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
+    "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
+    "records them per project (git root), and pre-bakes the learned set into that project's next "
+    "sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or "
+    "synthesizing one (FROM the resolved base + the learned packages) when none is declared. "
+    "Best-effort: a learned build that fails falls back to the un-augmented image. The first "
+    "delegate turn after a new package is learned pays a one-time image build.",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",

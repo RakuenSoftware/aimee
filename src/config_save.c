@@ -877,6 +877,8 @@ int config_save(const config_t *cfg)
                               cfg->delegate_sandbox_package_access);
    if (cfg->delegate_sandbox_require_isolation) /* default off: persist only the opt-in */
       cJSON_AddBoolToObject(root, "delegate_sandbox_require_isolation", 1);
+   if (!cfg->delegate_sandbox_learn_packages) /* default on: persist only the opt-out */
+      cJSON_AddBoolToObject(root, "delegate_sandbox_learn_packages", 0);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */

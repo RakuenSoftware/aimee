@@ -9,6 +9,7 @@
 #include "log.h"
 #include "tool_condense.h"
 #include "tool_args_coerce.h"
+#include "sandbox_learned.h"
 #include "workspace_provider.h"
 
 /* delegation_active_id is provided by server_compute.c at link time;
@@ -589,6 +590,9 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       int exit_code = -1;
       char *out = c.data ? ws->exec_shell(ws, c.data, &exit_code) : NULL;
       dstr_free(&c);
+      /* Learned toolchain: record apt-install intent only after a successful run. */
+      if (exit_code == 0)
+         sandbox_learned_observe(cwd, body->valuestring);
       free(env_json);
       if (exit_code == -1 && !out)
          return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run the "
