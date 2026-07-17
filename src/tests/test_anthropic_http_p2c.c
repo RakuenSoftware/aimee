@@ -35,6 +35,26 @@ const char *agent_request_auth_error(void)
    return NULL;
 }
 
+/* The ingress now enforces the per-agent concurrency slot; stub it so tests can
+ * drive the at-limit path (g_slot_acquire_ok=0) and observe release balance. */
+static int g_slot_acquire_ok = 1;
+static int g_slot_acquired = 0;
+static int g_slot_released = 0;
+int provider_catalog_concurrent_acquire(const char *agent_name, int max_parallel)
+{
+   (void)agent_name;
+   (void)max_parallel;
+   if (!g_slot_acquire_ok)
+      return 0;
+   g_slot_acquired++;
+   return 1;
+}
+void provider_catalog_concurrent_release(const char *agent_name)
+{
+   (void)agent_name;
+   g_slot_released++;
+}
+
 #define PASS(name) printf("  PASS: %s\n", (name))
 
 static const delegate_driver_t *g_driver;
@@ -70,6 +90,9 @@ static void reset_capture(void)
    g_prevent = 0;
    g_tool_uses_json = NULL;
    g_upstream_stop_reason = NULL;
+   g_slot_acquire_ok = 1;
+   g_slot_acquired = 0;
+   g_slot_released = 0;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -543,8 +566,51 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    PASS("messages_buffered_responses_wire_parses_sse");
 }
 
+/* The /v1 buffered ingress enforces the per-agent concurrency slot (the same cap
+ * delegates use). When the slot is saturated it must back-pressure with 429 +
+ * rate_limit_error rather than open another upstream socket, and it must NOT leak
+ * a slot (acquire failed -> no release). On the happy path the slot is acquired
+ * once and released once (balanced). */
+static void test_messages_buffered_concurrency_slot(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   char resp[8192];
+   cJSON *sent;
+
+   /* At limit: acquire fails -> 429, and no upstream call / no release leak. */
+   reset_capture();
+   g_driver = &driver;
+   g_slot_acquire_ok = 0;
+   assert(messages_buffered("{\"model\":\"x\",\"max_tokens\":8,"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 429);
+   sent = parse(resp);
+   assert(sent != NULL);
+   {
+      const cJSON *err = obj(sent, "error");
+      const cJSON *type = obj(err, "type");
+      const cJSON *code = obj(err, "code");
+      assert(cJSON_IsString(type) && strcmp(type->valuestring, "rate_limit_error") == 0);
+      assert(cJSON_IsNumber(code) && code->valueint == 1011); /* AIMEE_ERR_CONCURRENCY_LIMIT */
+   }
+   assert(g_last_body == NULL); /* never reached the upstream */
+   assert(g_slot_released == 0);
+   cJSON_Delete(sent);
+
+   /* Happy path: slot acquired once and released once (balanced, no leak). */
+   reset_capture();
+   g_driver = &driver;
+   assert(messages_buffered("{\"model\":\"x\",\"max_tokens\":8,"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 200);
+   assert(g_slot_acquired == 1 && g_slot_released == 1);
+   reset_capture();
+   PASS("messages_buffered_concurrency_slot");
+}
+
 int main(void)
 {
+   test_messages_buffered_concurrency_slot();
    test_messages_buffered_responses_wire_parses_sse();
    test_messages_buffered_anthropic_police_drops_subagent_tool_use();
    test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use();

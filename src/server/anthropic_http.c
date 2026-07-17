@@ -37,6 +37,7 @@
 #include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "log.h"
+#include "provider_catalog.h" /* per-agent concurrency slots — the same cap delegates use */
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
@@ -459,6 +460,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    const delegate_driver_t *driver;
    parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
    int status, http_status, rc;
+   int slot_held = 0;
    const char *model;
    gw_mutate_ctx_t gwmc;
    gw_mutate_ctx_init(&gwmc);
@@ -532,6 +534,26 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * cJSON_Parse can't read, so the buffered reply came back empty. Keyed off the
     * resolved upstream shape (like the streaming path), not the provider label. */
    int responses_wire = strstr(url, "/responses") != NULL;
+
+   /* Enforce the agent's max_parallel here too — this /v1 ingress is a separate
+    * path from the delegate runtime (agent_runtime.c), so without this the cap is
+    * delegate-only and concurrent ingress requests open unbounded upstream sockets
+    * (overloading a provider whose real limit is small, e.g. MiniMax's few
+    * sessions -> 429). Acquire the SAME per-agent slot delegates use; on
+    * saturation return 429 + Retry-After (aimee back-pressure) instead of piling
+    * onto the provider. Released on every exit via `slot_held` at cleanup. */
+   if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
+   {
+      char msg[160];
+      snprintf(msg, sizeof(msg),
+               "primary agent '%s' at concurrency limit (max_parallel=%d) [aimee_err=%s]", ag->name,
+               ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));
+      g_response_retry_after = 1; /* ask the client to retry in ~1s */
+      status = write_error(resp, cap, 429, "rate_limit_error", msg, AIMEE_ERR_CONCURRENCY_LIMIT);
+      goto cleanup;
+   }
+   slot_held = 1;
+
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
    else
@@ -648,6 +670,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
    agent_free_parsed_response(&parsed);
 
 cleanup:
+   if (slot_held)
+      provider_catalog_concurrent_release(ag->name);
    gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
@@ -895,6 +919,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    prov_stream_ctx_t pc;
    int input_est;
    int responses_wire = 0;
+   int slot_held = 0;
    gw_mutate_ctx_t gwmc;
    gw_mutate_ctx_init(&gwmc);
 
@@ -959,6 +984,26 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * provider label, so Codex aliases that still resolve to /responses stay in
     * the buffered replay path too. */
    responses_wire = strstr(url, "/responses") != NULL;
+
+   /* Enforce the agent's max_parallel on the ingress too (see the buffered path):
+    * without it, concurrent /v1 streams open unbounded upstream sockets and 429 a
+    * small-limit provider. Acquire the same per-agent slot delegates use; on
+    * saturation emit a rate_limit_error SSE frame (the stream's back-pressure
+    * signal) instead of overloading the provider. Released via `slot_held`. */
+   if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
+   {
+      char err[224];
+      snprintf(err, sizeof(err),
+               "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"primary "
+               "agent '%s' at concurrency limit (max_parallel=%d) [aimee_err=%s]\",\"code\":%d}}",
+               ag->name, ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT),
+               AIMEE_ERR_CONCURRENCY_LIMIT);
+      if (emit)
+         emit(ctx, "error", err);
+      goto cleanup;
+   }
+   slot_held = 1;
+
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
    else
@@ -1284,6 +1329,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    anthropic_stream_free(xl);
 
 cleanup:
+   if (slot_held)
+      provider_catalog_concurrent_release(ag->name);
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    free(system_text);

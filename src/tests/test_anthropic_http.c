@@ -31,6 +31,19 @@ const char *agent_request_auth_error(void)
    return NULL;
 }
 
+/* The ingress now enforces the per-agent concurrency slot; stub it (always
+ * acquires) so this minimal link builds. */
+int provider_catalog_concurrent_acquire(const char *agent_name, int max_parallel)
+{
+   (void)agent_name;
+   (void)max_parallel;
+   return 1;
+}
+void provider_catalog_concurrent_release(const char *agent_name)
+{
+   (void)agent_name;
+}
+
 #define PASS(name) printf("  PASS: %s\n", (name))
 
 static const delegate_driver_t *g_driver;
