@@ -987,8 +987,14 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    };
    gw_stage_t stages[6];
    int nstages = gw_stage_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 6);
-   if (nstages >= 0)
-      gw_pipeline_run_request(&gr, stages, (size_t)nstages);
+   if (nstages < 0)
+   {
+      /* Misconfigured stage catalog: fail closed (like the anthropic ingress) rather
+       * than run a partial/empty pipeline that skips tool policing + routing. */
+      cJSON_Delete(gw_raw);
+      return -1;
+   }
+   gw_pipeline_run_request(&gr, stages, (size_t)nstages);
 
    cJSON *rawi = cJSON_GetObjectItemCaseSensitive(gw_raw, "instructions");
    const char *eff_system = rawi && rawi->valuestring ? rawi->valuestring : system_prompt;

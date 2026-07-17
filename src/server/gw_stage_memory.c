@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <strings.h> /* strcasecmp */
 #include <string.h>
 
 /* The Anthropic arm: build the <aimee-context> envelope from this turn's query
@@ -159,6 +160,12 @@ char *gw_memory_system_prompt(const char *query)
 
 int gw_stage_memory_enabled(void)
 {
+   /* Default-ON: memory injection runs unless AIMEE_STAGE_MEMORY is an explicit
+    * disable token. Full-token match (not first-byte) so "false"/"no" disable but
+    * "foo"/"nope" do not. */
    const char *v = getenv("AIMEE_STAGE_MEMORY");
-   return !(v && (v[0] == '0' || v[0] == 'f' || v[0] == 'F' || v[0] == 'n' || v[0] == 'N'));
+   if (!v || !v[0])
+      return 1;
+   return !(strcasecmp(v, "0") == 0 || strcasecmp(v, "off") == 0 || strcasecmp(v, "false") == 0 ||
+            strcasecmp(v, "no") == 0);
 }
