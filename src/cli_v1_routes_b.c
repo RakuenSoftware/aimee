@@ -1345,6 +1345,10 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_delegate_launch(argc, argv);
    if (strcmp(method, "delegate.status") == 0)
       return marshal_delegate_status(argc, argv);
+   if (strcmp(method, "delegate.sandbox_list") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "delegate.sandbox_gc") == 0)
+      return marshal_delegate_sandbox_gc(argc, argv);
    if (strcmp(method, "jobs.list") == 0)
       return marshal_jobs_list(argc, argv);
    if (strcmp(method, "jobs.status") == 0 || strcmp(method, "jobs.logs") == 0 ||

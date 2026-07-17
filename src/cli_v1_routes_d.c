@@ -624,6 +624,8 @@ static const struct
     {"delegate.launch", "POST", "/v1/delegate/launch"},
     {"delegate.log", "GET", "/v1/delegate/log"},
     {"delegate.reply", "POST", "/v1/delegate/reply"},
+    {"delegate.sandbox_gc", "POST", "/v1/delegate/sandbox/gc"},
+    {"delegate.sandbox_list", "GET", "/v1/delegate/sandbox/images"},
     {"delegate.status", "POST", "/v1/delegate/status"},
     {"demotion.check", "GET", "/v1/demotion/check"},
     {"dogfood.report", "GET", "/v1/dogfood/report"},
