@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Badge } from '@rakuensoftware/smoothgui';
+import { Badge, Modal, EmptyState } from '@rakuensoftware/smoothgui';
 import type { BadgeVariant } from '@rakuensoftware/smoothgui';
 
 /* All fields of an audit row, in display order, for the detail modal. */
@@ -65,14 +65,6 @@ export default function Logs() {
   const [actor, setActor] = useState('all');
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<AuditRow | null>(null);
-
-  // Close the detail modal on Escape.
-  useEffect(() => {
-    if (!selected) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selected]);
 
   // Paginated fetch (most-recent first). offset=0 replaces; offset>0 appends the
   // next older page. The audit ledger can be very large, so it is never loaded in
@@ -150,9 +142,11 @@ export default function Logs() {
       {/* Table (scrolls) */}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {filtered.length === 0 ? (
-          <div style={{ padding: 16, color: '#aaa', fontSize: 13 }}>
-            {loading ? 'Loading…' : 'No audit rows'}
-          </div>
+          loading ? (
+            <div style={{ padding: 16, color: '#aaa', fontSize: 13 }}>Loading…</div>
+          ) : (
+            <EmptyState message="No audit rows" inline />
+          )
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -196,49 +190,27 @@ export default function Logs() {
         )}
       </div>
 
+      {/* `open` is constant true: the surrounding `selected &&` already gates
+          mount/unmount, so Modal is only rendered when there is a row to show. */}
       {selected && (
-        <div
-          onClick={() => setSelected(null)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 30, background: 'rgba(0,0,0,0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-          }}
+        <Modal
+          open
+          onClose={() => setSelected(null)}
+          title="Audit entry"
+          headerExtra={<Badge label={esc(selected.verdict)} variant={verdictVariant(selected.verdict)} />}
         >
-          <div
-            onClick={ev => ev.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: 8, maxWidth: 560, width: '100%',
-              maxHeight: '80vh', overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-            }}
-          >
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
-              borderBottom: '1px solid #eee', position: 'sticky', top: 0, background: '#fff',
-            }}>
-              <strong style={{ fontSize: 14 }}>Audit entry</strong>
-              <Badge label={esc(selected.verdict)} variant={verdictVariant(selected.verdict)} />
-              <button
-                onClick={() => setSelected(null)}
-                style={{ ...selectStyle, cursor: 'pointer', marginLeft: 'auto' }}
-              >
-                Close
-              </button>
-            </div>
-            <div style={{ padding: '8px 16px 16px' }}>
-              {DETAIL_FIELDS.map(f => {
-                const v = selected[f.key];
-                return (
-                  <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #f4f4f4' }}>
-                    <span style={{ width: 130, flexShrink: 0, color: '#888', fontSize: 12 }}>{f.label}</span>
-                    <span style={{ fontSize: 13, fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>
-                      {v == null || v === '' ? <span style={{ color: '#bbb' }}>—</span> : String(v)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+          {DETAIL_FIELDS.map(f => {
+            const v = selected[f.key];
+            return (
+              <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #f4f4f4' }}>
+                <span style={{ width: 130, flexShrink: 0, color: '#888', fontSize: 12 }}>{f.label}</span>
+                <span style={{ fontSize: 13, fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>
+                  {v == null || v === '' ? <span style={{ color: '#bbb' }}>—</span> : String(v)}
+                </span>
+              </div>
+            );
+          })}
+        </Modal>
       )}
     </div>
   );
