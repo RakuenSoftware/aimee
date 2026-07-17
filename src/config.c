@@ -332,6 +332,7 @@ static const config_schema_entry_t config_schema[] = {
     {"delegate_sandbox_image", SCHEMA_STRING, 0},
     {"delegate_sandbox_package_access", SCHEMA_STRING, 0}, /* valid: proxy|off|gated|governance */
     {"delegate_sandbox_require_isolation", SCHEMA_BOOL, 0},
+    {"delegate_sandbox_learn_packages", SCHEMA_BOOL, 0},
     {"guardrails", SCHEMA_OBJECT, 0},
     {"toolsets", SCHEMA_OBJECT, 0},
     {"script", SCHEMA_OBJECT, 0},
@@ -574,7 +575,8 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
    cfg->delegate_sandbox_require_isolation =
-       0; /* default OFF: breach degrades loudly, not fatally */
+       0;                                    /* default OFF: breach degrades loudly, not fatally */
+   cfg->delegate_sandbox_learn_packages = 1; /* default ON: learn + pre-bake the toolchain */
    snprintf(cfg->provider, sizeof(cfg->provider), "claude");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */
    cfg->coord_closet_enabled =
@@ -1266,6 +1268,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_require_isolation");
    if (cJSON_IsBool(item))
       cfg->delegate_sandbox_require_isolation = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_learn_packages");
+   if (cJSON_IsBool(item))
+      cfg->delegate_sandbox_learn_packages = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
    if (cJSON_IsBool(item))

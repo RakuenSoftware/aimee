@@ -19,6 +19,7 @@
 #include "kb_client.h"
 #include "mcp_client_registry.h"
 #include "workspace.h"
+#include "sandbox_learned.h"
 #include "workspace_provider.h"
 #include "diff.h"
 #include "anchor_snapshot.h"
@@ -748,6 +749,9 @@ char *tool_bash(const char *command, int timeout_ms)
    if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
    {
       const char *cwd = run_cmd_get_cwd();
+      /* Learned toolchain: capture any apt-install intent so the next build of this
+       * project's sandbox image pre-bakes it. Best-effort, cheap pre-filtered. */
+      sandbox_learned_observe(cwd, command);
       char *wrapped = NULL;
       if (cwd && cwd[0])
       {

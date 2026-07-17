@@ -9,6 +9,7 @@
 #include "log.h"
 #include "tool_condense.h"
 #include "tool_args_coerce.h"
+#include "sandbox_learned.h"
 #include "workspace_provider.h"
 
 /* delegation_active_id is provided by server_compute.c at link time;
@@ -569,6 +570,8 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       dstr_init(&c);
       const char *cwd =
           (wd && cJSON_IsString(wd) && wd->valuestring[0]) ? wd->valuestring : run_cmd_get_cwd();
+      /* Learned toolchain: capture apt-install intent from the script body. */
+      sandbox_learned_observe(cwd, body->valuestring);
       if (cwd && cwd[0])
       {
          dstr_append_str(&c, "cd '");

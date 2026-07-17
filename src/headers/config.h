@@ -495,6 +495,17 @@ typedef struct config
     * isolation. */
    int delegate_sandbox_require_isolation;
 
+   /* delegate_sandbox_learn_packages: the "learned toolchain" (default 1, ON). When on,
+    * aimee captures the apt packages a delegate installs inside its `--network none`
+    * sandbox and records them per-project (git root), then pre-bakes the learned set into
+    * that project's next sandbox image build — augmenting a declared .aimee/project.yaml
+    * `from`+`packages` spec, or SYNTHESIZING one (FROM the resolved base + the learned
+    * packages) when the project declares none. The tools are then present immediately with
+    * no runtime fetch. Best-effort: a learned build that fails to build falls back to the
+    * un-augmented image (the runtime package-access path still covers the delegate). Note
+    * the first delegate turn after a new package is learned pays a one-time image build. */
+   int delegate_sandbox_learn_packages;
+
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a
     * proxied /v1/messages or /v1/chat/completions request, so the served model is

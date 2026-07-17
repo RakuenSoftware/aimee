@@ -21,6 +21,7 @@
 #include "config.h"
 #include "guardrails.h"            /* git_repo_root */
 #include "harness_memory_common.h" /* hmem_sha256_hex, HMEM_HASH_HEX_LEN */
+#include "sandbox_learned.h"       /* sandbox_learned_load — pre-bake the learned toolchain */
 #include "util.h"                  /* safe_strdup, safe_exec_capture_* */
 #include "yaml.h"                  /* yaml_parse */
 
@@ -34,6 +35,7 @@
 
 #define PROJECT_YAML_MAX        (1u << 20) /* 1 MiB; a contract file is tiny */
 #define SBX_TAG_MAX             64
+#define SBX_DEFAULT_BASE        "ubuntu:22.04" /* matches the docker backend default base */
 #define DOCKERFILE_MAX          8192
 #define DOCKER_BUILD_TIMEOUT_MS (10 * 60 * 1000) /* apt installs can be slow */
 
@@ -599,6 +601,34 @@ static int cwd_under_root(const char *cwd, const char *ws)
    return len > 0 && strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\0');
 }
 
+/* Layer the project's learned apt toolchain onto `base`, building
+ * `FROM <base> RUN apt-get install -y <learned>` and writing the derived image tag
+ * to out[cap]. Returns 0 if a derived image was built (out = derived tag), or -1 if
+ * there is nothing to overlay OR the derived build failed — in which case the caller
+ * falls back to `base` (best-effort: the runtime package-access path still covers the
+ * delegate, so a bad learned package must never strand it). */
+static int apply_learned_overlay(const char *cwd, const char *base, char *out, size_t cap)
+{
+   char git_root[MAX_PATH_LEN];
+   if (git_repo_root(cwd, git_root, sizeof(git_root)) != 0)
+      return -1;
+   char pk[SBX_LEARN_MAX][SBX_PKG_MAX];
+   int n = sandbox_learned_load(git_root, pk, SBX_LEARN_MAX);
+   if (n <= 0)
+      return -1;
+   const char *argv[SBX_LEARN_MAX];
+   for (int i = 0; i < n; i++)
+      argv[i] = pk[i];
+   char df[DOCKERFILE_MAX];
+   if (delegate_sandbox_dockerfile_from_packages(base, argv, n, df, sizeof(df)) != 0)
+      return -1;
+   char tag[SBX_TAG_MAX];
+   if (ensure_built(df, tag, sizeof(tag)) != 0)
+      return -1; /* build failed -> caller uses base */
+   snprintf(out, cap, "%s", tag);
+   return 0;
+}
+
 int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
 {
    if (!out || cap == 0)
@@ -607,34 +637,48 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
    if (!cwd || !cwd[0])
       return -1;
 
+   char base[256] = "";
+   int have_base = 0;
+   /* Whether the learned toolchain may layer on top. False for an explicitly declared
+    * project.yaml `image:`/`dockerfile:` (respect the author's exact image); true for a
+    * `from`+`packages` build (augment it) and for the generic workspace/global/default
+    * scopes (synthesize when the project declared no spec). */
+   int overlay_ok = 1;
+
    /* 1. Repo contract: <git-root>/.aimee/project.yaml `sandbox` (image | build). */
    {
       char repo_root[MAX_PATH_LEN];
       sandbox_spec_t spec;
       if (project_yaml_sandbox_spec(cwd, repo_root, sizeof(repo_root), &spec) == 0)
       {
-         int rc = -1;
          if (spec.image[0])
          {
-            snprintf(out, cap, "%s", spec.image);
-            rc = 0;
+            snprintf(base, sizeof(base), "%s", spec.image);
+            have_base = 1;
+            overlay_ok = 0; /* explicit image: use exactly as authored */
          }
          else if (spec.packages_df)
          {
-            rc = ensure_built(spec.packages_df, out, cap);
+            char tag[SBX_TAG_MAX];
+            if (ensure_built(spec.packages_df, tag, sizeof(tag)) == 0)
+            {
+               snprintf(base, sizeof(base), "%s", tag);
+               have_base = 1; /* from+packages: learned may augment on top */
+            }
          }
          else if (spec.dockerfile[0])
          {
+            overlay_ok = 0; /* explicit Dockerfile: respect it, even if it fails to build */
             char *df = read_dockerfile(repo_root, spec.dockerfile);
-            if (df)
+            char tag[SBX_TAG_MAX];
+            if (df && ensure_built(df, tag, sizeof(tag)) == 0)
             {
-               rc = ensure_built(df, out, cap);
-               free(df);
+               snprintf(base, sizeof(base), "%s", tag);
+               have_base = 1;
             }
+            free(df);
          }
          sandbox_spec_free(&spec);
-         if (rc == 0)
-            return 0;
          /* A declared-but-unbuildable spec falls through to the lower scopes rather
           * than silently dropping the delegate to the default image with no signal;
           * the build failure is surfaced by docker's own logs. */
@@ -643,37 +687,63 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
 
    config_t cfg;
    if (config_load(&cfg) != 0)
+   {
+      if (have_base)
+      {
+         snprintf(out, cap, "%s", base);
+         return 0;
+      }
       return -1;
+   }
 
    /* 2. Per-workspace override (image ref only) — longest matching root wins. */
-   int best = -1;
-   size_t best_len = 0;
-   for (int i = 0; i < cfg.workspace_count; i++)
+   if (!have_base)
    {
-      if (!cfg.workspace_sandbox_image[i][0])
-         continue;
-      if (cwd_under_root(cwd, cfg.workspaces[i]))
+      int best = -1;
+      size_t best_len = 0;
+      for (int i = 0; i < cfg.workspace_count; i++)
       {
-         size_t len = strlen(cfg.workspaces[i]);
-         if (len > best_len)
+         if (!cfg.workspace_sandbox_image[i][0])
+            continue;
+         if (cwd_under_root(cwd, cfg.workspaces[i]))
          {
-            best = i;
-            best_len = len;
+            size_t len = strlen(cfg.workspaces[i]);
+            if (len > best_len)
+            {
+               best = i;
+               best_len = len;
+            }
          }
       }
-   }
-   if (best >= 0)
-   {
-      snprintf(out, cap, "%s", cfg.workspace_sandbox_image[best]);
-      return 0;
+      if (best >= 0)
+      {
+         snprintf(base, sizeof(base), "%s", cfg.workspace_sandbox_image[best]);
+         have_base = 1;
+      }
    }
 
    /* 3. Global default (image ref only). */
-   if (cfg.delegate_sandbox_image[0])
+   if (!have_base && cfg.delegate_sandbox_image[0])
    {
-      snprintf(out, cap, "%s", cfg.delegate_sandbox_image);
-      return 0;
+      snprintf(base, sizeof(base), "%s", cfg.delegate_sandbox_image);
+      have_base = 1;
    }
 
+   /* 4. Learned toolchain: layer the project's captured apt packages onto the base
+    * (synthesizing FROM the backend default when no base was resolved). Best-effort —
+    * a failed derived build falls back to the base image below. */
+   if (cfg.delegate_sandbox_learn_packages && overlay_ok)
+   {
+      const char *overlay_base = have_base ? base : SBX_DEFAULT_BASE;
+      if (apply_learned_overlay(cwd, overlay_base, out, cap) == 0)
+         return 0;
+   }
+
+   /* 5. The resolved base, or none (the backend applies its own default). */
+   if (have_base)
+   {
+      snprintf(out, cap, "%s", base);
+      return 0;
+   }
    return -1;
 }
