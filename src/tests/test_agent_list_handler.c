@@ -130,11 +130,12 @@ static void test_populated_config_lists_agents(void)
 static void test_primary_only_round_trips(void)
 {
    set_home_empty();
-   write_agents("{\"agents\":["
-                "{\"name\":\"claude\",\"provider\":\"claude\",\"backend\":\"tmux-cli\","
-                "\"cli_kind\":\"claude\",\"primary_only\":true,\"roles\":[\"code\"]},"
-                "{\"name\":\"minimax\",\"provider\":\"anthropic\",\"model\":\"m\",\"roles\":[\"all\"]}"
-                "]}\n");
+   write_agents(
+       "{\"agents\":["
+       "{\"name\":\"claude\",\"provider\":\"claude\",\"backend\":\"tmux-cli\","
+       "\"cli_kind\":\"claude\",\"primary_only\":true,\"roles\":[\"code\"]},"
+       "{\"name\":\"minimax\",\"provider\":\"anthropic\",\"model\":\"m\",\"roles\":[\"all\"]}"
+       "]}\n");
    reset_capture();
 
    assert(handle_agent_list(NULL, NULL, NULL) == 0);
