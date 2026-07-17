@@ -45,6 +45,7 @@
 #include "agent_config.h"
 #include "provider_catalog.h"
 #include "delegate_credentials.h"
+#include "delegate_sandbox_image.h"
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
@@ -434,6 +435,58 @@ static int handle_delegate_backend_list(server_ctx_t *ctx, server_conn_t *conn, 
    if (!arr)
       arr = cJSON_CreateArray(); /* never embed NULL — empty array on alloc fail */
    cJSON_AddItemToObject(resp, "backends", arr);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
+/* delegate.sandbox_list: enumerate build-from-spec images (tag prefix aimee-sbx:)
+ * with created-time and in-use flags. Server-side because the docker daemon is
+ * server-side; the CLI just renders the array. */
+static int handle_delegate_sandbox_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   char *json = delegate_sandbox_images_json();
+   if (!json)
+      return server_send_error(conn, "delegate.sandbox_list: docker daemon unreachable", NULL);
+   cJSON *arr = cJSON_Parse(json);
+   free(json);
+   if (!arr)
+      arr = cJSON_CreateArray(); /* never embed NULL */
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddItemToObject(resp, "images", arr);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
+/* delegate.sandbox_gc: prune build-from-spec images that are not referenced by any
+ * container and older than max_age_days (default 7), always keeping the `keep` most
+ * recent (default 3). dry_run reports what would go without removing. */
+static int handle_delegate_sandbox_gc(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   long max_age_days = 7;
+   cJSON *jdays = cJSON_GetObjectItemCaseSensitive(req, "max_age_days");
+   if (cJSON_IsNumber(jdays) && jdays->valuedouble >= 0)
+      max_age_days = (long)jdays->valuedouble;
+   int keep = 3;
+   cJSON *jkeep = cJSON_GetObjectItemCaseSensitive(req, "keep");
+   if (cJSON_IsNumber(jkeep) && jkeep->valuedouble >= 0)
+      keep = (int)jkeep->valuedouble;
+   int dry_run = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "dry_run")) ? 1 : 0;
+
+   char *report = NULL;
+   if (delegate_sandbox_gc(max_age_days * 86400L, keep, dry_run, &report) != 0)
+   {
+      free(report);
+      return server_send_error(conn, "delegate.sandbox_gc: docker daemon unreachable", NULL);
+   }
+   cJSON *resp = report ? cJSON_Parse(report) : NULL;
+   free(report);
+   if (!resp)
+      resp = cJSON_CreateObject(); /* report carries removed/kept/dry_run/images */
+   cJSON_AddNumberToObject(resp, "max_age_days", (double)max_age_days);
+   cJSON_AddNumberToObject(resp, "keep", keep);
    cJSON_AddStringToObject(resp, "status", "ok");
    return server_send_ok(conn, resp);
 }
@@ -1336,6 +1389,8 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"worktree.gc", handle_worktree_gc},
     {"delegate.backend_list", handle_delegate_backend_list},
     {"delegate.backend_exec", handle_delegate_backend_exec},
+    {"delegate.sandbox_list", handle_delegate_sandbox_list},
+    {"delegate.sandbox_gc", handle_delegate_sandbox_gc},
     {"provider.slot_acquire", handle_provider_slot_acquire},
     {"provider.slot_release", handle_provider_slot_release},
     {"provider.list", handle_provider_list},

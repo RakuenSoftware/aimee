@@ -122,6 +122,8 @@ const method_policy_t method_registry[] = {
     {"delegate.log", CAP_DELEGATE, "delegation episode log"},
     {"delegate.backend_list", CAP_DELEGATE, "list delegate execution backends"},
     {"delegate.backend_exec", CAP_DELEGATE, "execute through a delegate backend"},
+    {"delegate.sandbox_list", CAP_DELEGATE, "list delegate sandbox images"},
+    {"delegate.sandbox_gc", CAP_DELEGATE, "prune delegate sandbox images"},
     {"episode.list", CAP_DELEGATE, "list delegation episodes"},
     {"agent.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},

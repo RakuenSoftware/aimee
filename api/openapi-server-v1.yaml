@@ -1950,6 +1950,15 @@ paths:
       summary: Status of a delegate job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
+  /delegate/sandbox/images:
+    get:
+      summary: List build-from-spec sandbox images (aimee-sbx:*) with created time, size, and in-use flag
+      responses: { "200": { description: Sandbox image list, content: { application/json: { schema: { type: object } } } } }
+  /delegate/sandbox/gc:
+    post:
+      summary: Prune sandbox images not referenced by any container and older than max_age_days (keeps the most recent)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: GC report, content: { application/json: { schema: { type: object } } } } }
   /vault/unlock:
     post:
       summary: "Unlock the credential vault (uid root key over UDS, or webuser login password under server.token)"

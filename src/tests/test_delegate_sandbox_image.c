@@ -132,6 +132,77 @@ int main(void)
       assert(strlen(t1) == 10 + 12); /* prefix + 12 hex */
    }
 
+   /* --- pure: CreatedAt -> UTC epoch (the gc age signal) --- */
+   {
+      long long e = 0;
+      /* 1970-01-01 00:00:00 UTC is epoch 0. */
+      assert(delegate_sandbox_parse_created_epoch("1970-01-01 00:00:00 +0000 UTC", &e) == 0);
+      assert(e == 0);
+      /* 2000-01-01 00:00:00 UTC = 946684800. */
+      assert(delegate_sandbox_parse_created_epoch("2000-01-01 00:00:00 +0000 UTC", &e) == 0);
+      assert(e == 946684800LL);
+      /* 2026-07-15 12:34:56 UTC = 1784118896. */
+      assert(delegate_sandbox_parse_created_epoch("2026-07-15 12:34:56 +0000 UTC", &e) == 0);
+      assert(e == 1784118896LL);
+      /* A +02:00 wall-clock is 2h EARLIER in UTC than the same digits at +0000. */
+      long long z = 0, plus = 0;
+      assert(delegate_sandbox_parse_created_epoch("2026-07-15 12:34:56 +0000 UTC", &z) == 0);
+      assert(delegate_sandbox_parse_created_epoch("2026-07-15 12:34:56 +0200 CEST", &plus) == 0);
+      assert(plus == z - 2 * 3600);
+      /* A -05:00 wall-clock is 5h LATER in UTC. */
+      long long minus = 0;
+      assert(delegate_sandbox_parse_created_epoch("2026-07-15 12:34:56 -0500 EST", &minus) == 0);
+      assert(minus == z + 5 * 3600);
+      /* Missing offset still parses (treated as UTC). */
+      assert(delegate_sandbox_parse_created_epoch("2026-07-15 12:34:56", &e) == 0);
+      assert(e == 1784118896LL);
+      /* Garbage / NULL rejected. */
+      assert(delegate_sandbox_parse_created_epoch("not-a-date", &e) == -1);
+      assert(delegate_sandbox_parse_created_epoch(NULL, &e) == -1);
+      assert(delegate_sandbox_parse_created_epoch("2026-13-01 00:00:00 +0000 UTC", &e) == -1);
+   }
+
+   /* --- pure: gc keep/remove decision --- */
+   {
+      const long long now = 1784118896LL; /* 2026-07-15 12:34:56 UTC */
+      const long week = 7 * 24 * 3600;    /* max_age_secs */
+      const char *r = NULL;
+
+      /* in-use is never removed, even when old and unprotected. */
+      assert(delegate_sandbox_gc_should_remove(1, 99, 0, now - 30 * week, now, week, &r) == 0);
+      assert(strcmp(r, "in-use") == 0);
+
+      /* the keep_min most-recent (index < keep_min) are protected regardless of age. */
+      assert(delegate_sandbox_gc_should_remove(0, 0, 3, now - 30 * week, now, week, &r) == 0);
+      assert(strcmp(r, "kept-recent") == 0);
+      assert(delegate_sandbox_gc_should_remove(0, 2, 3, now - 30 * week, now, week, &r) == 0);
+      assert(strcmp(r, "kept-recent") == 0);
+
+      /* beyond keep_min but younger than max_age -> kept. */
+      assert(delegate_sandbox_gc_should_remove(0, 5, 3, now - 3600, now, week, &r) == 0);
+      assert(strcmp(r, "within-max-age") == 0);
+
+      /* beyond keep_min and older than max_age -> removed. */
+      assert(delegate_sandbox_gc_should_remove(0, 5, 3, now - 30 * week, now, week, &r) == 1);
+      assert(strcmp(r, "aged-out") == 0);
+
+      /* exactly at the boundary (age == max_age) is removed (< is the keep test). */
+      assert(delegate_sandbox_gc_should_remove(0, 5, 3, now - week, now, week, &r) == 1);
+      assert(strcmp(r, "aged-out") == 0);
+
+      /* unknown created time (0) is treated as old enough to remove. */
+      assert(delegate_sandbox_gc_should_remove(0, 5, 3, 0, now, week, &r) == 1);
+      assert(strcmp(r, "aged-out") == 0);
+
+      /* max_age 0 ("any age") removes everything not in use / not kept-recent. */
+      assert(delegate_sandbox_gc_should_remove(0, 5, 3, now - 1, now, 0, &r) == 1);
+      assert(strcmp(r, "aged-out") == 0);
+
+      /* keep_min 0 protects nothing by recency. */
+      assert(delegate_sandbox_gc_should_remove(0, 0, 0, now - 30 * week, now, week, &r) == 1);
+      assert(strcmp(r, "aged-out") == 0);
+   }
+
    printf("all tests passed\n");
    return 0;
 }

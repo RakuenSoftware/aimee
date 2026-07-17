@@ -231,6 +231,8 @@ static const struct
     {"delegate", "--list-roles", "agent.list", NULL, "agents", 0},
     {"delegate", "log", "delegate.log", NULL, "episodes", 0},
     {"delegate", "history", "delegate.log", NULL, "episodes", 0},
+    {"delegate", "sandbox list", "delegate.sandbox_list", NULL, "images", 0},
+    {"delegate", "sandbox gc", "delegate.sandbox_gc", NULL, NULL, 60000},
     /* MoA ensemble aggregate: positional[0] is the PROMPT (not a role). Async —
      * forwards to POST /v1/delegate/aggregate and polls GET /v1/runs/{id}. This
      * specific route is what makes `aimee delegate aggregate "<prompt>"` reach the
@@ -1302,6 +1304,33 @@ cJSON *marshal_worktree_gc(int argc, char **argv)
    cJSON_AddNumberToObject(req, "max_age_days", days);
    if (rpc_get(&opts, "force"))
       cJSON_AddTrueToObject(req, "force");
+   if (rpc_get(&opts, "dry-run"))
+      cJSON_AddTrueToObject(req, "dry_run");
+   return req;
+}
+
+cJSON *marshal_delegate_sandbox_gc(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"dry-run", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("delegate.sandbox_gc");
+
+   /* Age floor in days (default 7). 0 means "any age" — prune everything not in use
+    * beyond the keep-recent floor. */
+   int days = rpc_get_int(&opts, "days", 7);
+   if (days < 0)
+      days = 0;
+   if (days > 3650)
+      days = 3650;
+   cJSON_AddNumberToObject(req, "max_age_days", days);
+
+   int keep = rpc_get_int(&opts, "keep", 3);
+   if (keep < 0)
+      keep = 0;
+   cJSON_AddNumberToObject(req, "keep", keep);
+
    if (rpc_get(&opts, "dry-run"))
       cJSON_AddTrueToObject(req, "dry_run");
    return req;

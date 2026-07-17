@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PROJECT_YAML_MAX        (1u << 20) /* 1 MiB; a contract file is tiny */
@@ -179,6 +180,288 @@ static int ensure_built(const char *dockerfile_text, char *out, size_t cap)
    if (!ok)
       return -1;
    snprintf(out, cap, "%s", tag);
+   return 0;
+}
+
+/* --- cache management (list + gc of aimee-sbx:* images) --- */
+
+/* Parse a `docker image ls` CreatedAt field ("2026-07-15 12:34:56 +0000 UTC")
+ * into a UTC epoch. Docker always emits the local-daemon time with an explicit
+ * offset; we read the wall-clock fields and the numeric offset and normalise to
+ * UTC ourselves (no timegm/strptime, so no feature-macro or TZ dependence).
+ * Returns 0 on success, -1 if the leading "Y-M-D H:M:S" does not parse. Pure. */
+int delegate_sandbox_parse_created_epoch(const char *created, long long *out)
+{
+   if (!created || !out)
+      return -1;
+   int y, mo, d, h, mi, s;
+   char sign = '+';
+   int oh = 0, om = 0;
+   int fields =
+       sscanf(created, "%d-%d-%d %d:%d:%d %c%2d%2d", &y, &mo, &d, &h, &mi, &s, &sign, &oh, &om);
+   if (fields < 6)
+      return -1;
+   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 ||
+       s > 60)
+      return -1;
+   /* days from 1970-01-01 to y-mo-d (proleptic Gregorian), via a civil-days algorithm. */
+   int yy = (mo <= 2) ? y - 1 : y;
+   int era = (yy >= 0 ? yy : yy - 399) / 400;
+   unsigned yoe = (unsigned)(yy - era * 400);
+   unsigned doy = (unsigned)((153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+   unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+   long long days = (long long)era * 146097 + (long long)doe - 719468;
+   long long epoch = days * 86400 + h * 3600 + mi * 60 + s;
+   if (fields >= 7)
+   {
+      long long off = (long long)oh * 3600 + (long long)om * 60;
+      epoch += (sign == '-') ? off : -off; /* subtract the offset to reach UTC */
+   }
+   *out = epoch;
+   return 0;
+}
+
+#define SBX_IMG_MAX 512
+
+typedef struct
+{
+   char tag[128];
+   char id[80];
+   char created[48];
+   char size[32];
+   long long created_epoch;
+   int in_use;
+} sbx_img_t;
+
+/* True when a container (running or stopped) references image ref `ref`. `used`
+ * is the newline-joined `docker ps -a` image column. Matches a whole line only,
+ * so "aimee-sbx:ab" never matches "aimee-sbx:abcd". Pure. */
+static int sbx_ref_in_use(const char *ref, const char *used)
+{
+   if (!ref || !*ref || !used)
+      return 0;
+   size_t rlen = strlen(ref);
+   const char *p = used;
+   while (*p)
+   {
+      const char *nl = strchr(p, '\n');
+      size_t len = nl ? (size_t)(nl - p) : strlen(p);
+      if (len == rlen && memcmp(p, ref, rlen) == 0)
+         return 1;
+      if (!nl)
+         break;
+      p = nl + 1;
+   }
+   return 0;
+}
+
+static int sbx_epoch_desc(const void *a, const void *b)
+{
+   long long ea = ((const sbx_img_t *)a)->created_epoch;
+   long long eb = ((const sbx_img_t *)b)->created_epoch;
+   return (eb > ea) - (eb < ea); /* most-recent first */
+}
+
+/* Enumerate every aimee-sbx:* image, newest first, marking in-use. Returns the
+ * count (>=0) into *n and 0, or -1 if the docker daemon is unreachable. */
+static int sbx_collect(sbx_img_t *imgs, int cap, int *n)
+{
+   *n = 0;
+   const char *ls[] = {resolve_docker_bin(),
+                       "image",
+                       "ls",
+                       "--filter",
+                       "reference=aimee-sbx:*",
+                       "--format",
+                       "{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}\t{{.Size}}",
+                       NULL};
+   char *out = NULL;
+   if (safe_exec_capture(ls, &out, 1 << 20) != 0)
+   {
+      free(out);
+      return -1;
+   }
+
+   char *used = NULL;
+   const char *ps[] = {resolve_docker_bin(), "ps", "-a", "--format", "{{.Image}}", NULL};
+   /* If `ps` fails while `ls` succeeded we cannot tell what is referenced: mark every
+    * image in-use so gc removes nothing (fail-safe), while list still enumerates. */
+   int ps_ok = (safe_exec_capture(ps, &used, 1 << 20) == 0);
+
+   char *save = NULL;
+   /* out may be NULL (command succeeded, no images) — strtok_r must not touch it. */
+   for (char *line = out ? strtok_r(out, "\n", &save) : NULL; line && *n < cap;
+        line = strtok_r(NULL, "\n", &save))
+   {
+      char *f_id = line;
+      char *f_tag = strchr(f_id, '\t');
+      if (!f_tag)
+         continue;
+      *f_tag++ = '\0';
+      char *f_created = strchr(f_tag, '\t');
+      if (!f_created)
+         continue;
+      *f_created++ = '\0';
+      char *f_size = strchr(f_created, '\t');
+      if (f_size)
+         *f_size++ = '\0';
+
+      sbx_img_t *im = &imgs[*n];
+      memset(im, 0, sizeof(*im));
+      snprintf(im->id, sizeof(im->id), "%s", f_id);
+      snprintf(im->tag, sizeof(im->tag), "%s", f_tag);
+      snprintf(im->created, sizeof(im->created), "%s", f_created);
+      snprintf(im->size, sizeof(im->size), "%s", f_size ? f_size : "");
+      im->created_epoch = 0;
+      delegate_sandbox_parse_created_epoch(im->created, &im->created_epoch);
+      im->in_use = !ps_ok || sbx_ref_in_use(im->tag, used) || sbx_ref_in_use(im->id, used);
+      (*n)++;
+   }
+   free(out);
+   free(used);
+   qsort(imgs, (size_t)*n, sizeof(imgs[0]), sbx_epoch_desc);
+   return 0;
+}
+
+char *delegate_sandbox_images_json(void)
+{
+   sbx_img_t *imgs = calloc(SBX_IMG_MAX, sizeof(*imgs));
+   if (!imgs)
+      return NULL;
+   int n = 0;
+   if (sbx_collect(imgs, SBX_IMG_MAX, &n) != 0)
+   {
+      free(imgs);
+      return NULL;
+   }
+   cJSON *arr = cJSON_CreateArray();
+   for (int i = 0; arr && i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "tag", imgs[i].tag);
+      cJSON_AddStringToObject(o, "id", imgs[i].id);
+      cJSON_AddStringToObject(o, "created", imgs[i].created);
+      cJSON_AddStringToObject(o, "size", imgs[i].size);
+      cJSON_AddBoolToObject(o, "in_use", imgs[i].in_use ? 1 : 0);
+      cJSON_AddItemToArray(arr, o);
+   }
+   free(imgs);
+   char *s = arr ? cJSON_PrintUnformatted(arr) : NULL;
+   cJSON_Delete(arr);
+   if (s)
+      return s;
+   char *empty = malloc(3); /* never embed NULL — hand back an empty array */
+   if (empty)
+      memcpy(empty, "[]", 3);
+   return empty;
+}
+
+/* Remove image `tag`. Held under g_build_lock so a removal cannot interleave with
+ * ensure_built's exists-then-build on the same content-hash tag. The lock is taken
+ * per-call, not across the whole gc sweep, so concurrent builds stall for one rm at
+ * a time. This does NOT close the wider window: ensure_built releases the lock before
+ * the delegate's `docker run`, so a reused-but-aged image can still be removed between
+ * build and run — the turn then fails cleanly ("no such image") and the next turn
+ * rebuilds it (content-addressed, cheap). Freshly built images are immune (they are
+ * within-max-age). Returns 0 on success. */
+static int docker_image_rm(const char *tag)
+{
+   const char *argv[] = {resolve_docker_bin(), "image", "rm", tag, NULL};
+   char *out = NULL;
+   pthread_mutex_lock(&g_build_lock);
+   int rc = safe_exec_capture(argv, &out, 4096);
+   pthread_mutex_unlock(&g_build_lock);
+   free(out);
+   return rc;
+}
+
+int delegate_sandbox_gc_should_remove(int in_use, int index, int keep_min, long long created_epoch,
+                                      long long now, long max_age_secs, const char **reason_out)
+{
+   const char *reason;
+   int remove = 0;
+   if (in_use)
+      reason = "in-use";
+   else if (index < keep_min)
+      reason = "kept-recent";
+   else if (created_epoch > 0 && (now - created_epoch) < max_age_secs)
+      reason = "within-max-age";
+   else
+   {
+      remove = 1;
+      reason = "aged-out";
+   }
+   if (reason_out)
+      *reason_out = reason;
+   return remove;
+}
+
+int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **report_json_out)
+{
+   if (report_json_out)
+      *report_json_out = NULL;
+   if (keep_min < 0)
+      keep_min = 0;
+   if (max_age_secs < 0)
+      max_age_secs = 0;
+
+   sbx_img_t *imgs = calloc(SBX_IMG_MAX, sizeof(*imgs));
+   if (!imgs)
+      return -1;
+   int n = 0;
+   if (sbx_collect(imgs, SBX_IMG_MAX, &n) != 0)
+   {
+      free(imgs);
+      return -1;
+   }
+
+   long long now = (long long)time(NULL);
+   int removed = 0, kept = 0;
+   cJSON *arr = cJSON_CreateArray();
+
+   /* imgs is newest-first; index < keep_min is a protected recent image. */
+   for (int i = 0; i < n; i++)
+   {
+      const char *reason;
+      int remove = delegate_sandbox_gc_should_remove(
+          imgs[i].in_use, i, keep_min, imgs[i].created_epoch, now, max_age_secs, &reason);
+
+      if (remove && !dry_run && docker_image_rm(imgs[i].tag) != 0)
+      {
+         remove = 0; /* rm failed (e.g. raced into use); report as kept. */
+         reason = "rm-failed";
+      }
+      if (remove)
+         removed++;
+      else
+         kept++;
+
+      if (arr)
+      {
+         cJSON *o = cJSON_CreateObject();
+         cJSON_AddStringToObject(o, "tag", imgs[i].tag);
+         cJSON_AddStringToObject(o, "size", imgs[i].size);
+         cJSON_AddStringToObject(o, "reason", reason);
+         cJSON_AddBoolToObject(o, "removed", (remove && !dry_run) ? 1 : 0);
+         cJSON_AddItemToArray(arr, o);
+      }
+   }
+   free(imgs);
+
+   if (report_json_out && arr)
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON_AddNumberToObject(root, "removed", removed);
+      cJSON_AddNumberToObject(root, "kept", kept);
+      cJSON_AddBoolToObject(root, "dry_run", dry_run ? 1 : 0);
+      cJSON_AddItemToObject(root, "images", arr);
+      *report_json_out = cJSON_PrintUnformatted(root);
+      cJSON_Delete(root);
+   }
+   else
+   {
+      cJSON_Delete(arr);
+   }
    return 0;
 }
 
