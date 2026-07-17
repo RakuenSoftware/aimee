@@ -101,6 +101,15 @@ def find_function(lines: List[str]) -> Optional[tuple]:
     return None
 
 
+def symbol_name(sig: str) -> Optional[str]:
+    """Extract the function name from a C signature line: the identifier
+    immediately before the first '('."""
+    import re
+
+    m = re.search(r"([A-Za-z_]\w*)\s*\(", sig)
+    return m.group(1) if m else None
+
+
 def find_unique(lines: List[str], min_line: int = 10) -> Optional[int]:
     """A unique substantive line deep enough to have real context above it (so an
     inserted line meaningfully shifts ordinals), skipping the header region."""
@@ -150,9 +159,13 @@ def make_tasks(path: Path, text: str, idx: int) -> List[Dict[str, Any]]:
         body = [sig, "{", "   return 0; /* rewritten */", "}"]
         # only if the original span isn't already that shape
         exp = lines[:s - 1] + body + lines[e:]
-        tasks.append({"name": f"{name}:whole-func", "category": "whole-func", "initial": text,
-                      "target_line": s, "end_line": e, "new_text": "\n".join(body),
-                      "expected": join(exp, trailing)})
+        sym = symbol_name(sig)
+        task = {"name": f"{name}:whole-func", "category": "whole-func", "initial": text,
+                "target_line": s, "end_line": e, "new_text": "\n".join(body),
+                "expected": join(exp, trailing)}
+        if sym:
+            task["symbol"] = sym  # enables the edit_symbol protocol in the eval
+        tasks.append(task)
 
     # drift: insert a line above a unique target after the read
     u = find_unique(lines)
