@@ -868,12 +868,32 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);
+         /* An explicit primary_only wins; remember whether the key was present so
+          * an ABSENT key (a legacy agents.json written before this field existed)
+          * can be migrated below rather than defaulting everything to
+          * delegate-eligible. */
          v = cJSON_GetObjectItem(a, "primary_only");
-         if (v && cJSON_IsBool(v))
+         int primary_only_present = (v && cJSON_IsBool(v));
+         if (primary_only_present)
             ag->primary_only = cJSON_IsTrue(v);
 
          agent_normalize_legacy_claude_cli(ag);
          agent_normalize_builtin_cost_tier(ag);
+
+         /* Migration for a legacy file: default an ABSENT primary_only to the
+          * pre-change semantics. Before this field, a claude-CLI subscription was
+          * primary-only by default (gated behind the removed global
+          * claude_cli_delegate_enabled, default off) and every other agent was
+          * delegate-eligible. The removed gate tested agent_is_claude_cli on the
+          * loaded+NORMALIZED agent, so evaluating the SAME predicate here — AFTER
+          * agent_normalize_legacy_claude_cli — reproduces exactly the set that was
+          * primary-only before, with no behavior change on upgrade. An explicit
+          * value always wins, and agent_save_config always writes the key, so this
+          * only fires for a genuinely legacy file; once resaved the stored value
+          * (including an explicit false) is authoritative and unchecking Primary
+          * Agent Only persists. */
+         if (!primary_only_present)
+            ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
          cfg->agent_count++;
       }
    }
@@ -1140,8 +1160,11 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "cli_kind", ag->cli_kind);
       if (ag->is_server_hosted)
          cJSON_AddBoolToObject(a, "is_server_hosted", 1);
-      if (ag->primary_only)
-         cJSON_AddBoolToObject(a, "primary_only", 1);
+      /* Always written (both true AND false), unlike is_server_hosted: an absent
+       * key triggers the legacy migration on load (see agent_load_config), so
+       * persisting false explicitly is what makes unchecking Primary Agent Only
+       * on a claude-CLI agent stick instead of re-defaulting to true. */
+      cJSON_AddBoolToObject(a, "primary_only", ag->primary_only);
 
       /* Middleware config: only write if any non-zero field is set */
       {
