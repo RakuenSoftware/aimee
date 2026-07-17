@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
 
@@ -439,8 +439,8 @@ export default function WorkflowActions() {
           Show all (operator)
         </label>
         {status && (
-          <div style={{ fontSize: 12, color: status.kind === "err" ? "#c00" : "#070", marginTop: 6 }}>
-            {status.msg}
+          <div style={{ marginTop: 6 }}>
+            <InlineStatus status={status} />
           </div>
         )}
         <div style={{ marginTop: 8 }}>

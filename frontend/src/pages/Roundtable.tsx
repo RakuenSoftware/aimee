@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Panel } from "@rakuensoftware/smoothgui";
+import { Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roundtable page: configure the named multi-model review panels ("roundtables")
  * aimee convenes. A preset captures the seats (a model + a persona per seat), the
@@ -255,9 +255,7 @@ export default function Roundtable() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Roundtable</strong>
         {active && <span style={{ fontSize: 12, color: "#666" }}>active: <code>{active}</code></span>}
-        {status && (
-          <span style={{ fontSize: 13, color: status.kind === "err" ? "#b00" : "#080" }}>{status.msg}</span>
-        )}
+        <InlineStatus status={status} />
       </div>
 
       <div style={{ maxWidth: 760 }}>
