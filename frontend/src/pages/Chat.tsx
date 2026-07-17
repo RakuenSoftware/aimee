@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { Spinner, Tabs, tokens } from '@rakuensoftware/smoothgui';
+import { Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -830,32 +830,6 @@ function PluginsPanel({ open, plugins, loading, error, onToggle, onRefresh, onPl
   );
 }
 
-/* ---- Working indicator ---- */
-
-function WorkingIndicator() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', color: tokens.primary, fontSize: '13px', alignSelf: 'flex-start' }}>
-      <div style={{ display: 'inline-flex', gap: '4px' }}>
-        {[0, 0.2, 0.4].map((delay, i) => (
-          <span
-            key={i}
-            style={{
-              width: 6, height: 6, borderRadius: '50%', background: tokens.primary,
-              animation: `pulse 1.4s ${delay}s infinite ease-in-out`,
-            }}
-          />
-        ))}
-      </div>
-      Working
-      <style>{`
-        @keyframes pulse {
-          0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
-          40% { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
-    </div>
-  );
-}
 
 function WorkflowStatusCard({
   channel,
@@ -3079,7 +3053,7 @@ export default function Chat() {
           </button>
         )}
         <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
-        {working && <WorkingIndicator />}
+        {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}
         {remoteTurnActive && !working && (
           <div style={{
             alignSelf: 'flex-start', maxWidth: '85%', padding: '6px 10px',
