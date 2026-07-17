@@ -34,6 +34,13 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    (void)fmt;
 }
 
+/* write_error's route-unresolved branch reads the per-turn auth-error channel;
+ * stub returns "no explicit reason" for this minimal link. */
+const char *agent_request_auth_error(void)
+{
+   return NULL;
+}
+
 static const delegate_driver_t *g_driver;
 static char *g_last_body;
 static char *g_last_extra;
