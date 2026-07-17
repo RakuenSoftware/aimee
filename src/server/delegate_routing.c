@@ -304,17 +304,54 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
                    NULL);
          return -1;
       }
-      if (!agent_is_available_for_routing(selected))
+      char rdetail[128];
+      agent_route_block_t rblock = agent_routing_block_reason(selected, rdetail, sizeof(rdetail));
+      if (rblock != AGENT_ROUTE_OK)
       {
-         /* Aimee's circuit breaker declining to route (or a missing CLI): an
-          * aimee-internal condition, tagged with the aimee error SLUG so it's
-          * identifiable, not mistaken for a provider outage. Slug (not the numeric
-          * code) to stay clear of substring-based error classifiers. */
-         char emsg[256];
-         snprintf(emsg, sizeof(emsg),
-                  "agent '%s' is currently unavailable (health down after repeated "
-                  "failures, or its provider-cli command is missing) [aimee_err=%s]",
-                  via_name, aimee_err_slug(AIMEE_ERR_BREAKER_OPEN));
+         /* Report the ACTUAL reason routing declined, tagged with the matching
+          * aimee error SLUG. Collapsing every cause into "health down / breaker
+          * open" sent operators chasing a provider outage when the real block was
+          * a delegate-policy decision (Primary Agent Only) or a missing CLI. Slug
+          * (not the numeric code) to stay clear of substring-based classifiers. */
+         const char *reason;
+         int code;
+         switch (rblock)
+         {
+         case AGENT_ROUTE_HEALTH_DOWN:
+            reason = "its provider health is marked DOWN (circuit breaker open after repeated "
+                     "failures)";
+            code = AIMEE_ERR_BREAKER_OPEN;
+            break;
+         case AGENT_ROUTE_CLIENT_ONLY_CLAUDE:
+            reason = "it is a client-only claude CLI agent; only a server-hosted claude can run "
+                     "as a delegate";
+            code = AIMEE_ERR_DELEGATE_INELIGIBLE;
+            break;
+         case AGENT_ROUTE_POLICY_EXCLUDED:
+            reason = rdetail[0] ? rdetail
+                                : "it is excluded by delegate policy (e.g. it is the configured "
+                                  "primary provider, which never delegates to itself)";
+            code = AIMEE_ERR_DELEGATE_INELIGIBLE;
+            break;
+         case AGENT_ROUTE_NO_CREDENTIALS:
+            reason = "its credentials could not be resolved";
+            code = AIMEE_ERR_ROUTE_UNRESOLVED;
+            break;
+         case AGENT_ROUTE_MISSING_COMMAND:
+         default:
+            reason = NULL; /* built below with the missing-command detail */
+            code = AIMEE_ERR_ROUTE_UNRESOLVED;
+            break;
+         }
+         char emsg[320];
+         if (rblock == AGENT_ROUTE_MISSING_COMMAND)
+            snprintf(emsg, sizeof(emsg),
+                     "agent '%s' cannot be routed: required command '%s' is not on PATH "
+                     "[aimee_err=%s]",
+                     via_name, rdetail[0] ? rdetail : "(unknown)", aimee_err_slug(code));
+         else
+            snprintf(emsg, sizeof(emsg), "agent '%s' cannot be routed: %s [aimee_err=%s]", via_name,
+                     reason, aimee_err_slug(code));
          route_err(errbuf, errbuf_sz, "%s", emsg, NULL);
          return -1;
       }

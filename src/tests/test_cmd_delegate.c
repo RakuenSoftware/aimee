@@ -73,6 +73,14 @@ int agent_is_available_for_routing(const agent_t *agent)
 {
    return agent && agent->enabled;
 }
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
+{
+   if (detail && detail_sz)
+      detail[0] = '\0';
+   if (!agent)
+      return AGENT_ROUTE_NULL;
+   return agent->enabled ? AGENT_ROUTE_OK : AGENT_ROUTE_POLICY_EXCLUDED;
+}
 
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {

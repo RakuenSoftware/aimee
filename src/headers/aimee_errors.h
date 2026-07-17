@@ -35,6 +35,11 @@ enum aimee_error_code
    /* The provider's per-agent concurrency slots are exhausted (max_parallel).
     * Transient/aimee-side back-pressure, not an upstream error. 503. */
    AIMEE_ERR_CONCURRENCY_LIMIT = 1011,
+   /* The named agent exists but is not a valid DELEGATION target: it is flagged
+    * "Primary Agent Only", it is the configured primary passthrough, or it is a
+    * client-only claude CLI that cannot run server-side. A policy/structural
+    * decision, distinct from a health breaker (1010) -- nothing is "down". 400. */
+   AIMEE_ERR_DELEGATE_INELIGIBLE = 1012,
 };
 
 /* Short, stable, greppable slug for a code -- used in log lines. */
@@ -52,6 +57,8 @@ static inline const char *aimee_err_slug(int code)
       return "breaker_open";
    case AIMEE_ERR_CONCURRENCY_LIMIT:
       return "concurrency_limit";
+   case AIMEE_ERR_DELEGATE_INELIGIBLE:
+      return "delegate_ineligible";
    default:
       return "unknown";
    }

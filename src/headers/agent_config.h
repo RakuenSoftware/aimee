@@ -26,6 +26,27 @@ agent_t *agent_find(agent_config_t *cfg, const char *name);
 agent_t *agent_default_primary(agent_config_t *cfg);
 int agent_is_available_for_routing(const agent_t *agent);
 
+/* Why an agent is not a routable delegate. Mirrors the decision order of
+ * agent_is_available_for_routing so callers can surface the ACTUAL reason
+ * instead of a single catch-all "unavailable" string. */
+typedef enum
+{
+   AGENT_ROUTE_OK = 0,             /* routable */
+   AGENT_ROUTE_NULL,               /* NULL agent */
+   AGENT_ROUTE_HEALTH_DOWN,        /* health catalog marked the provider DOWN (breaker open) */
+   AGENT_ROUTE_CLIENT_ONLY_CLAUDE, /* claude CLI agent that is not server-hosted */
+   AGENT_ROUTE_POLICY_EXCLUDED,    /* registered delegate-policy filter excluded it */
+   AGENT_ROUTE_MISSING_COMMAND,    /* a required CLI (tmux / provider-cli) is not on PATH */
+   AGENT_ROUTE_NO_CREDENTIALS,     /* an HTTP agent with no resolvable credentials */
+} agent_route_block_t;
+
+/* Same decision as agent_is_available_for_routing, but reports WHY. On a block
+ * that names something specific (the missing command, or a Primary-Agent-Only
+ * flag) a short phrase is written to `detail` (pass NULL/0 to skip). Returns
+ * AGENT_ROUTE_OK when the agent is routable. */
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail,
+                                               size_t detail_sz);
+
 /* True if at least one configured agent is enabled AND routable as a delegate
  * right now (loads agents.json). Gates sub-agent interception — only redirect to
  * delegates when usable delegates exist. */

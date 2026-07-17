@@ -447,6 +447,13 @@ int agent_is_available_for_routing(const agent_t *agent)
    (void)agent;
    return 1;
 }
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
+{
+   (void)agent;
+   if (detail && detail_sz)
+      detail[0] = '\0';
+   return AGENT_ROUTE_OK;
+}
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
 {
    (void)role;
