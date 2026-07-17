@@ -398,6 +398,8 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    const cJSON *mergeable = cJSON_GetObjectItem(j, "mergeable");
    const cJSON *headj = cJSON_GetObjectItem(j, "head");
    const cJSON *sha = headj ? cJSON_GetObjectItem(headj, "sha") : NULL;
+   const cJSON *basej = cJSON_GetObjectItem(j, "base");
+   const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
    out->open =
        cJSON_IsString(state) && state->valuestring && strcmp(state->valuestring, "open") == 0;
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;
@@ -405,6 +407,8 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
    if (cJSON_IsString(sha) && sha->valuestring)
       snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha->valuestring);
+   if (cJSON_IsString(baseref) && baseref->valuestring)
+      snprintf(out->base, sizeof(out->base), "%s", baseref->valuestring);
    cJSON_Delete(j);
    return 0;
 }

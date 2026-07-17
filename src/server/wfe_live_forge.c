@@ -182,12 +182,34 @@ static int live_is_merged(const char *repo, const char *pr)
 
 static wfe_merge_result_t live_merge(const char *repo, const char *pr)
 {
-   (void)repo;
    if (!forge_allowed())
       return WFE_MERGE_ERROR; /* disabled / protected target -> fail closed */
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return WFE_MERGE_ERROR;
+
+   /* HARD merge-target gate: refuse to merge unless the PR's base is a feature
+    * branch. Read the PR's ACTUAL base from the forge (not a config default) and
+    * fail closed on an unknown/non-feature base — an autonomous run must never
+    * merge into an integration/protected branch. */
+   {
+      char berr[160];
+      git_pr_info_t bi;
+      if (git_pr_info_via_api(NULL, forge_dir(repo), num, &bi, berr, sizeof berr) != 0)
+      {
+         aimee_log(LOG_WARN, "wfe-forge", "refusing merge of PR %d: cannot read base (%s)", num,
+                   berr);
+         return WFE_MERGE_ERROR;
+      }
+      if (!wfe_base_is_feature(bi.base))
+      {
+         aimee_log(LOG_WARN, "wfe-forge",
+                   "refusing merge of PR %d: base '%s' is not a feature branch — autonomous "
+                   "merges land only in aimee/feat/*; merging elsewhere is a human action",
+                   num, bi.base[0] ? bi.base : "(unknown)");
+         return WFE_MERGE_ERROR; /* parks for a human */
+      }
+   }
 
    /* CI must be green before we merge (operator ruling 2026-07-15). The canonical
     * `build` DAG already orders a ci node ahead of merge, so this is defence in

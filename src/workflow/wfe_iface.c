@@ -56,6 +56,11 @@ int wfe_autonomous_target_ok(void)
    return !wfe_base_is_protected(wfe_autonomous_base());
 }
 
+int wfe_base_is_feature(const char *base)
+{
+   return base && strncmp(base, "aimee/feat/", 11) == 0;
+}
+
 /* Server-side authoritative cost estimate (WP-5): a delegate turn's USD cost as
  * wall-clock seconds * a configured rate. Provider-agnostic (never trusts a
  * provider-reported figure) so the per-run USD budget cap actually bites. Rate is

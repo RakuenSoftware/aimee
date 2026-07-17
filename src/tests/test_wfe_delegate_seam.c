@@ -546,6 +546,19 @@ int main(void)
       (void)system(cmd);
    }
 
+   /* F: wfe_base_is_feature — the merge-seam hard gate's predicate. ONLY an
+    *    aimee-managed feature branch is an autonomous merge target; every
+    *    integration/protected/other base (and an empty/unknown base) is refused,
+    *    so a misconfigured pr.open base cannot merge work into a non-feature branch. */
+   assert(wfe_base_is_feature("aimee/feat/wi_x") == 1);
+   assert(wfe_base_is_feature("aimee/feat/") == 1); /* prefix match is sufficient */
+   assert(wfe_base_is_feature("testing") == 0);
+   assert(wfe_base_is_feature("main") == 0);
+   assert(wfe_base_is_feature("aimee/wi/x.s0") == 0); /* aimee-namespaced but not feat/ */
+   assert(wfe_base_is_feature("xaimee/feat/y") == 0); /* prefix must anchor at start */
+   assert(wfe_base_is_feature("") == 0);
+   assert(wfe_base_is_feature(NULL) == 0);
+
    printf("ok\n");
    return 0;
 }

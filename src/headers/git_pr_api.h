@@ -43,6 +43,7 @@ typedef struct
    int merged;        /* merged flag */
    int mergeable;     /* 1 mergeable, 0 conflicting, -1 unknown (GitHub still computing) */
    char head_sha[72]; /* head commit (for CI lookups) */
+   char base[128];    /* base.ref: the branch this PR merges INTO (empty if unknown) */
 } git_pr_info_t;
 
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
