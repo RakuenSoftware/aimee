@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Picker } from '@rakuensoftware/smoothgui';
+import { Button, Picker } from '@rakuensoftware/smoothgui';
 import type { GitProjectsResponse } from '../setup/ownerUrl';
 
 /* ProjectPicker — a compact "select or clone a project" control embedded in each
@@ -24,7 +24,6 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 }
 
 const input: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13 };
-const btn: React.CSSProperties = { padding: '5px 10px', borderRadius: 4, border: '1px solid #ccc', background: '#fff', color: '#444', cursor: 'pointer', fontSize: 13 };
 
 export default function ProjectPicker({ storageKey, onChange }: {
   storageKey: string;
@@ -101,9 +100,9 @@ export default function ProjectPicker({ storageKey, onChange }: {
         onChange={select}
         error={err}
         actions={
-          <button style={btn} onClick={() => setCloneOpen(o => !o)}>
+          <Button size="md" onClick={() => setCloneOpen(o => !o)}>
             {cloneOpen ? 'Cancel' : '+ Clone repo'}
-          </button>
+          </Button>
         }
       />
       {cloneOpen && (
@@ -112,8 +111,8 @@ export default function ProjectPicker({ storageKey, onChange }: {
             value={url} onChange={e => setUrl(e.target.value)} />
           <input style={{ ...input, flex: 1, minWidth: 160 }} type="password" autoComplete="off"
             placeholder="access token (private repos)" value={token} onChange={e => setToken(e.target.value)} />
-          <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-            disabled={busy || !url.trim()} onClick={clone}>Clone</button>
+          <Button variant="primary" size="md"
+            disabled={busy || !url.trim()} onClick={clone}>Clone</Button>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Panel, Badge, InlineStatus } from "@rakuensoftware/smoothgui";
+import { Button, Panel, Badge, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Personas page: edit the PERSONA definitions (identity + the roles each persona
  * may use). Roles themselves — their bodies and per-role turn caps — live on the
@@ -47,14 +47,6 @@ interface PersonaDef {
   builtin?: boolean;
 }
 
-const btn: React.CSSProperties = {
-  padding: "4px 10px",
-  fontSize: 13,
-  borderRadius: 6,
-  border: "1px solid #ccc",
-  background: "#fff",
-  cursor: "pointer",
-};
 const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
 const ta: React.CSSProperties = {
   width: "100%",
@@ -173,23 +165,25 @@ export default function Personas() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {personas.map((p) => (
-              <button
+              <Button
                 key={p.name}
+                size="md"
                 onClick={() => openPersona(p.name)}
-                style={{ ...btn, background: form?.name === p.name ? "#e8eef9" : "#fff" }}
+                style={{ background: form?.name === p.name ? "#e8eef9" : "#fff" }}
                 title={p.description || ""}
               >
                 {p.name}
                 {p.builtin ? " ·" : ""}
-              </button>
+              </Button>
             ))}
-            <button
+            <Button
+              size="md"
               onClick={newPersona}
-              style={{ ...btn, borderStyle: "dashed" }}
+              style={{ borderStyle: "dashed" }}
               title="Create a new persona from scratch"
             >
               + New
-            </button>
+            </Button>
           </div>
 
           {form && (
@@ -217,19 +211,18 @@ export default function Personas() {
                   {roleOptions.map((r) => {
                     const on = (form.roles || []).includes(r);
                     return (
-                      <button
+                      <Button
                         key={r}
+                        size="sm"
                         onClick={() => toggleRole(r)}
                         style={{
-                          ...btn,
-                          padding: "2px 8px",
                           background: on ? "#1f7a3d" : "#fff",
                           color: on ? "#fff" : r === "all" ? "#a15" : "#333",
                           fontWeight: r === "all" ? 600 : 400,
                         }}
                       >
                         {r}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -259,16 +252,17 @@ export default function Personas() {
                 <textarea rows={3} style={ta} value={form.brief || ""} onChange={(e) => upd({ brief: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={savePersona} style={btn} title="Write this persona to config.">
+                <Button size="md" onClick={savePersona} title="Write this persona to config.">
                   Save persona
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
+                  size="md"
                   onClick={deletePersona}
-                  style={{ ...btn, color: "#b00" }}
                   title="Delete this persona. Built-ins reset to their default instead of disappearing."
                 >
                   Delete
-                </button>
+                </Button>
                 {form.builtin && <Badge label="built-in" variant="neutral" />}
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Panel, InlineStatus } from "@rakuensoftware/smoothgui";
+import { Button, Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roundtable page: configure the named multi-model review panels ("roundtables")
  * aimee convenes. A preset captures the seats (a model + a persona per seat), the
@@ -58,14 +58,6 @@ type Preset = {
 type PresetSummary = { name: string; description?: string; active?: boolean; synthesized?: boolean };
 type Status = { kind: "ok" | "err"; msg: string } | null;
 
-const btn: React.CSSProperties = {
-  padding: "4px 10px",
-  fontSize: 13,
-  borderRadius: 6,
-  border: "1px solid #ccc",
-  background: "#fff",
-  cursor: "pointer",
-};
 const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
 const input: React.CSSProperties = {
   width: "100%",
@@ -267,23 +259,23 @@ export default function Roundtable() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {presets.map((p) => (
-              <button
+              <Button
                 key={p.name}
+                size="md"
                 onClick={() => openPreset(p.name)}
                 title={p.description || ""}
                 style={{
-                  ...btn,
                   background: sel === p.name ? "#e8eef9" : "#fff",
                   fontWeight: p.active ? 700 : 400,
                 }}
               >
                 {p.name}
                 {p.active ? " ★" : ""}
-              </button>
+              </Button>
             ))}
-            <button onClick={newPreset} style={{ ...btn, borderStyle: "dashed" }} title="Create a new roundtable preset, prompting for its name.">
+            <Button size="md" onClick={newPreset} style={{ borderStyle: "dashed" }} title="Create a new roundtable preset, prompting for its name.">
               + New
-            </button>
+            </Button>
           </div>
 
           {form && (
@@ -318,13 +310,14 @@ export default function Roundtable() {
                     readOnly={isRandom}
                     onChange={(e) => setSeat(i, { model: e.target.value })}
                   />
-                  <button
+                  <Button
+                    size="md"
                     onClick={() => setSeat(i, { model: isRandom ? "" : RANDOM_MODEL })}
-                    style={{ ...btn, padding: "4px 8px", background: isRandom ? "#e8eef9" : "#fff", fontWeight: isRandom ? 700 : 400 }}
+                    style={{ padding: "4px 8px", background: isRandom ? "#e8eef9" : "#fff", fontWeight: isRandom ? 700 : 400 }}
                     title={isRandom ? "switch to a specific pinned model" : "let any review-capable agent fill this seat (retried until one is accepted)"}
                   >
                     🎲 Random
-                  </button>
+                  </Button>
                   <input
                     list={personaList}
                     style={{ ...input, flex: 1 }}
@@ -333,19 +326,21 @@ export default function Roundtable() {
                     value={seat.persona}
                     onChange={(e) => setSeat(i, { persona: e.target.value })}
                   />
-                  <button
+                  <Button
+                    variant="danger"
+                    size="md"
                     onClick={() => removeSeat(i)}
-                    style={{ ...btn, color: "#b00", padding: "4px 8px" }}
+                    style={{ padding: "4px 8px" }}
                     title="remove seat"
                   >
                     ×
-                  </button>
+                  </Button>
                 </div>
                 );
               })}
-              <button onClick={addSeat} style={{ ...btn, borderStyle: "dashed", marginBottom: 8 }} title="Add another model/persona seat to the panel.">
+              <Button size="md" onClick={addSeat} style={{ borderStyle: "dashed", marginBottom: 8 }} title="Add another model/persona seat to the panel.">
                 + Add seat
-              </button>
+              </Button>
 
               {/* Aggregator + guards. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
@@ -397,13 +392,14 @@ export default function Roundtable() {
               </div>
 
               {/* Advanced: authoring-pipeline knobs. */}
-              <button
+              <Button
+                size="md"
                 onClick={() => setShowAdvanced((v) => !v)}
-                style={{ ...btn, marginTop: 12, background: "#f5f5f5" }}
+                style={{ marginTop: 12, background: "#f5f5f5" }}
                 title="Show or hide the authoring-pipeline settings."
               >
                 {showAdvanced ? "▾" : "▸"} Advanced — authoring pipeline
-              </button>
+              </Button>
               {showAdvanced && (
                 <div style={{ marginTop: 8, padding: 10, border: "1px solid #eee", borderRadius: 8 }}>
                   <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
@@ -465,15 +461,15 @@ export default function Roundtable() {
               )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                <button onClick={save} style={btn} title="Save this preset's settings.">
+                <Button size="md" onClick={save} title="Save this preset's settings.">
                   Save preset
-                </button>
-                <button onClick={makeActive} style={{ ...btn, background: "#e8f7e8", fontWeight: 600 }} title="Save this preset and make it the active default roundtable.">
+                </Button>
+                <Button variant="primary" size="md" onClick={makeActive} style={{ fontWeight: 600 }} title="Save this preset and make it the active default roundtable.">
                   Save &amp; set as default
-                </button>
-                <button onClick={del} style={{ ...btn, color: "#b00" }} title="Delete this roundtable preset.">
+                </Button>
+                <Button variant="danger" size="md" onClick={del} title="Delete this roundtable preset.">
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           )}
