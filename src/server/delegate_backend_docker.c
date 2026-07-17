@@ -229,6 +229,60 @@ static int run_docker(const char *const argv[])
    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+#define DOCKER_PROBE_TIMEOUT_MS 15000
+
+/* Determine whether the running sandbox `container` was actually isolated by the
+ * runtime, i.e. whether `--network none` was honoured. Asks the HOST daemon (not a
+ * binary inside the untrusted image, so distroless/scratch images are fine) for the
+ * container's attached networks and their IPs:
+ *   0  = isolated   (no attached network, or only the "none" network with no IP)
+ *   1  = has network (a non-"none" network is attached OR some network has an IP —
+ *                     the runtime gave the sandbox real egress; ANY assigned address
+ *                     counts, so a subnet-only/link-local route cannot slip past)
+ *  -1  = undetermined (the inspect probe could not run)
+ * The caller decides what an undetermined result means (fail-closed under enforce). */
+static int docker_sandbox_network_state(const char *container)
+{
+   const char *argv[] = {
+       resolve_docker_bin(),
+       "inspect",
+       "--format",
+       "{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}};{{end}}",
+       container,
+       NULL};
+   char *out = NULL;
+   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 65536, DOCKER_PROBE_TIMEOUT_MS) !=
+       0)
+   {
+      free(out);
+      return -1;
+   }
+   int has_net = 0;
+   if (out)
+   {
+      char *save = NULL;
+      for (char *tok = strtok_r(out, ";\n", &save); tok; tok = strtok_r(NULL, ";\n", &save))
+      {
+         char *eq = strchr(tok, '=');
+         if (!eq)
+            continue;
+         *eq = '\0';
+         const char *name = tok, *ip = eq + 1;
+         while (*name == ' ' || *name == '\t')
+            name++;
+         while (*ip == ' ' || *ip == '\t')
+            ip++;
+         if (ip[0] || (name[0] && strcmp(name, "none") != 0))
+         {
+            has_net = 1;
+            break;
+         }
+      }
+   }
+   free(out);
+   return has_net;
+}
+
 /* Read a linked worktree's `.git` pointer file: "gitdir: <absolute path>".
  * Returns 0 and fills `out` on success. */
 static int docker_read_gitlink(const char *gitfile, char *out, size_t outsz)
@@ -685,6 +739,47 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       {
          free(st);
          return -1;
+      }
+   }
+
+   /* Verify the runtime honoured --network none. Some container runtimes (e.g.
+    * SmoothNAS/tierd, which attaches a primary veth that cannot be disconnected) ignore
+    * it, giving the sandbox real egress and silently defeating the package-access proxy
+    * and its allowlist. Probe now that the container is up (covers create AND resume). */
+   {
+      int net = docker_sandbox_network_state(st->container_name);
+      int enforce = cfg && cfg->require_isolation;
+      /* Under enforce, an UNDETERMINED result (-1) is also a refusal: we will not run a
+       * delegate we cannot prove is isolated. Under warn-only, only a confirmed breach
+       * (1) is worth an error; an undetermined probe is a quiet warning. */
+      if (net == 1 || (enforce && net != 0))
+      {
+         if (net == 1)
+            aimee_log(LOG_ERROR, "delegate-sandbox",
+                      "container %s has network egress despite --network none: the runtime did "
+                      "not honour network isolation, so the delegate can reach the network "
+                      "directly and BYPASS the package-access proxy/allowlist%s",
+                      st->container_name,
+                      enforce ? " — refusing to run (delegate_sandbox_require_isolation)"
+                              : " — set delegate_sandbox_require_isolation=true to refuse");
+         else /* undetermined + enforce */
+            aimee_log(LOG_ERROR, "delegate-sandbox",
+                      "container %s: could not verify network isolation and "
+                      "delegate_sandbox_require_isolation is set — refusing to run",
+                      st->container_name);
+         if (enforce)
+         {
+            const char *rm_argv[] = {"docker", "rm", "-f", st->container_name, NULL};
+            (void)run_docker(rm_argv);
+            free(st);
+            return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
+         }
+      }
+      else if (net == -1) /* undetermined, warn-only: note it without failing */
+      {
+         aimee_log(LOG_WARN, "delegate-sandbox",
+                   "container %s: could not verify network isolation (probe failed)",
+                   st->container_name);
       }
    }
 

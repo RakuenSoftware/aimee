@@ -110,6 +110,8 @@ const config_field_t config_fields[] = {
     {"delegate_sandbox", offsetof(config_t, delegate_sandbox), sizeof(int), 0, CFG_BOOL},
     {"delegate_sandbox_package_access", offsetof(config_t, delegate_sandbox_package_access),
      sizeof(((config_t *)0)->delegate_sandbox_package_access), 0, CFG_STRING},
+    {"delegate_sandbox_require_isolation", offsetof(config_t, delegate_sandbox_require_isolation),
+     sizeof(int), 0, CFG_BOOL},
     {"typed_facts_enabled", offsetof(config_t, typed_facts_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_pdf_ingest_enabled", offsetof(config_t, kb_pdf_ingest_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_pdf_vector_enabled", offsetof(config_t, kb_pdf_vector_enabled), sizeof(int), 0, CFG_BOOL},

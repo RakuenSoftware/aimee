@@ -361,10 +361,17 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    if (!cfg.delegate_sandbox)
       return 0; /* default off: the delegate keeps running in-process, as today */
 
+   /* When set, sandboxing is MANDATORY: any path below that would otherwise fall back
+    * to un-isolated in-process host execution instead returns -1 (hard refuse), so the
+    * delegate does not run rather than run un-sandboxed. Only meaningful once we are
+    * past the dial check (sandboxing was actually requested). */
+   int require_iso = cfg.delegate_sandbox_require_isolation;
+   int fallback = require_iso ? -1 : 0;
+
    char ws_real[MAX_PATH_LEN] = "";
    if (workspace && workspace[0] &&
        !workspace_turn_workspace_authorized(workspace, ws_real, sizeof(ws_real)))
-      return 0; /* refused + logged; the turn stays in-process */
+      return fallback; /* refused + logged; in-process (or hard-refuse under require_iso) */
 
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
@@ -375,9 +382,11 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
        * "enabled but inert" bug we have shipped. */
       LOG_ERROR("delegate-sandbox",
                 "delegate_sandbox is ON but the docker backend is unavailable; delegate '%s' would "
-                "run on the HOST — refusing to bind, the turn stays in-process and unsandboxed",
-                task_id);
-      return 0;
+                "run on the HOST — refusing to bind%s",
+                task_id,
+                require_iso ? " and refusing to run (delegate_sandbox_require_isolation)"
+                            : ", the turn stays in-process and unsandboxed");
+      return fallback;
    }
 
    delegate_backend_config_t bcfg = {
@@ -386,21 +395,34 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
        .hibernate_on_exit = 0,
        .workspace = ws_real[0] ? ws_real : NULL,
        .workspace_read_only = workspace_read_only,
-       .pkg_proxy = (strcmp(cfg.delegate_sandbox_package_access, "proxy") == 0)};
+       .pkg_proxy = (strcmp(cfg.delegate_sandbox_package_access, "proxy") == 0),
+       .require_isolation = cfg.delegate_sandbox_require_isolation};
    void *state = NULL;
-   if (b->acquire(b, task_id, &bcfg, &state) != 0 || !state)
+   int arc = b->acquire(b, task_id, &bcfg, &state);
+   if (arc == DELEGATE_ACQUIRE_REFUSED_ISOLATION)
    {
+      /* HARD refuse: the sandbox could not be proven isolated and require_isolation is
+       * set. Signal the caller to abort the delegation — it must NOT fall back to the
+       * in-process host path (which is even less isolated than the container). */
       LOG_ERROR("delegate-sandbox",
-                "delegate '%s': could not acquire a container (image=%s); the turn stays "
-                "in-process and unsandboxed",
-                task_id, bcfg.image ? bcfg.image : "<default>");
-      return 0;
+                "delegate '%s': refusing to run — sandbox network isolation required "
+                "(delegate_sandbox_require_isolation) but the runtime did not provide it",
+                task_id);
+      return -1;
+   }
+   if (arc != 0 || !state)
+   {
+      LOG_ERROR("delegate-sandbox", "delegate '%s': could not acquire a container (image=%s); %s",
+                task_id, bcfg.image ? bcfg.image : "<default>",
+                require_iso ? "refusing to run (delegate_sandbox_require_isolation)"
+                            : "the turn stays in-process and unsandboxed");
+      return fallback;
    }
 
    if (ws_container_provider_init(&t_turn_container, b, state) != 0)
    {
       b->release(b, state, 0);
-      return 0;
+      return fallback;
    }
    workspace_provider_set_active(&t_turn_container.base);
    t_turn_container_backend = b;

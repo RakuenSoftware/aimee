@@ -1406,20 +1406,34 @@ void delegate_worker(void *arg)
            ? 0
            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
-   server_delegate_heartbeat_begin(cctx->background_job_id);
-   rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
-                                           max_tokens, force_tools, delegate_allows_writes,
-                                           leased_cred_name, sizeof(leased_cred_name),
-                                           credential_state_path, &result);
-   server_delegate_heartbeat_end();
+   if (container_bound < 0)
+   {
+      /* HARD isolation refusal (delegate_sandbox_require_isolation): the runtime would
+       * not provide a network-isolated sandbox. Refuse the delegation rather than fall
+       * back to the in-process host path, which has NO isolation at all. */
+      memset(&result, 0, sizeof(result));
+      snprintf(result.error, sizeof(result.error),
+               "delegate sandbox isolation required but unavailable: the container runtime did "
+               "not honour --network none; refusing to run the delegate un-isolated");
+      rc = -1;
+   }
+   else
+   {
+      server_delegate_heartbeat_begin(cctx->background_job_id);
+      rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
+                                              max_tokens, force_tools, delegate_allows_writes,
+                                              leased_cred_name, sizeof(leased_cred_name),
+                                              credential_state_path, &result);
+      server_delegate_heartbeat_end();
+   }
    concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
    if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
       workspace_turn_unbind_active();
    /* Same call, and never both (see the bind): it clears the active pointer AND
-    * releases the container. Unconditional on this path so a pooled worker thread
-    * cannot carry a dead container into the next delegation. */
-   if (container_bound)
+    * releases the container. Only when a container was actually bound (>0); a hard
+    * isolation refusal (<0) already tore the container down and set no active binding. */
+   if (container_bound > 0)
       workspace_turn_unbind_active();
    if (ephemeral_ws[0])
    {

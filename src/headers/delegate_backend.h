@@ -35,6 +35,13 @@ extern "C"
     * allocation. */
 #define DELEGATE_BACKEND_MAX 16
 
+   /* acquire() return code for a HARD isolation refusal: the sandbox could not be
+    * proven network-isolated and delegate_sandbox_require_isolation is set, so the
+    * backend tore the container down and the delegate MUST NOT run. This is distinct
+    * from a generic -1 acquire failure (which falls back to in-process execution): a
+    * hard refusal must abort the delegation, never degrade to a less-isolated path. */
+#define DELEGATE_ACQUIRE_REFUSED_ISOLATION (-2)
+
    /* Per-acquire configuration that the caller passes through. The
     * fields are advisory — backends silently ignore values they do not
     * use (e.g., `image` is meaningless to the local backend). */
@@ -66,6 +73,11 @@ extern "C"
        * in-container package forwarder + http_proxy env. The caller resolves the mode
        * (it already loads config) so the backend stays config-agnostic. */
       int pkg_proxy;
+      /* 1 when delegate_sandbox_require_isolation is set: after the sandbox starts, the
+       * docker backend probes it for network egress (a runtime may ignore --network
+       * none) and FAILS the acquire if the sandbox is not isolated. When 0 a breach is
+       * logged but the delegate still runs. Resolved by the caller (config-agnostic). */
+      int require_isolation;
    } delegate_backend_config_t;
 
    /* Result of an `exec` call. `stdout_buf` and `stderr_buf` are
