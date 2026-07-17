@@ -498,6 +498,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/yaml.c
     ${AIMEE_SRC_DIR}/diff.c
+    ${AIMEE_SRC_DIR}/provider_slots_reap.c
     ${AIMEE_SRC_DIR}/anchor_snapshot.c
     ${AIMEE_SRC_DIR}/edit_anchored.c
     ${AIMEE_SRC_DIR}/code_outline.c

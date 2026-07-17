@@ -79,6 +79,25 @@ static int provider_slot_find_or_add_locked(server_ctx_t *ctx, const char *agent
    return i;
 }
 
+/* Reclaim expired slot holders for entry `idx` (caller holds the mutex). A holder
+ * whose acquire is older than PROVIDER_SLOT_TTL_SEC is assumed dead (the request
+ * that took it was killed / dropped / torn down without ever calling release);
+ * without this the count would stay pinned until the next server restart. The
+ * live stamps are kept compacted in [0..active-1], sorted oldest-first, so the
+ * TTL check can stop at the first live one. Returns the number reaped. */
+static int provider_slot_reap_expired_locked(server_ctx_t *ctx, int idx, time_t now)
+{
+   int before = ctx->provider_slot_active[idx];
+   int after = provider_slots_reap_stamps(ctx->provider_slot_stamps[idx], before, now,
+                                          PROVIDER_SLOT_TTL_SEC);
+   ctx->provider_slot_active[idx] = after;
+   if (after < before)
+      aimee_log(LOG_WARN, "provider_slots",
+                "reclaimed %d stale slot(s) for '%s' (held > %ds without release)", before - after,
+                ctx->provider_slot_names[idx], PROVIDER_SLOT_TTL_SEC);
+   return before - after;
+}
+
 /* provider.slot_acquire {"agent_name":"...", "max_parallel":N}
  * → {"status":"ok","acquired":true}  or  {"status":"ok","acquired":false} */
 int handle_provider_slot_acquire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -103,10 +122,18 @@ int handle_provider_slot_acquire(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    pthread_mutex_lock(&ctx->provider_slots_mutex);
    int idx = provider_slot_find_or_add_locked(ctx, jname->valuestring);
    int acquired = 0;
-   if (idx >= 0 && ctx->provider_slot_active[idx] < max_parallel)
+   if (idx >= 0)
    {
-      ctx->provider_slot_active[idx]++;
-      acquired = 1;
+      time_t now = time(NULL);
+      /* self-heal: drop any holder that never released within the TTL */
+      provider_slot_reap_expired_locked(ctx, idx, now);
+      int cap = max_parallel < PROVIDER_SLOT_CAP ? max_parallel : PROVIDER_SLOT_CAP;
+      if (ctx->provider_slot_active[idx] < cap)
+      {
+         ctx->provider_slot_stamps[idx][ctx->provider_slot_active[idx]] = now;
+         ctx->provider_slot_active[idx]++;
+         acquired = 1;
+      }
    }
    pthread_mutex_unlock(&ctx->provider_slots_mutex);
 
@@ -129,8 +156,15 @@ int handle_provider_slot_release(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       {
          if (strcmp(ctx->provider_slot_names[i], jname->valuestring) == 0)
          {
+            /* opportunistic reap, then drop the oldest live holder (release is
+             * by-name, so FIFO — keeps stamps sorted oldest-first for the TTL). */
+            provider_slot_reap_expired_locked(ctx, i, time(NULL));
             if (ctx->provider_slot_active[i] > 0)
-               ctx->provider_slot_active[i]--;
+            {
+               int n = --ctx->provider_slot_active[i];
+               for (int k = 0; k < n; k++)
+                  ctx->provider_slot_stamps[i][k] = ctx->provider_slot_stamps[i][k + 1];
+            }
             break;
          }
       }

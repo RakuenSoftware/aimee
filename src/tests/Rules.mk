@@ -213,6 +213,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-doctor \
                $(TESTPREFIX)/unit-test-diff \
                $(TESTPREFIX)/unit-test-anchor-snapshot \
+               $(TESTPREFIX)/unit-test-provider-slots-reap \
                $(TESTPREFIX)/unit-test-edit-anchored \
                $(TESTPREFIX)/unit-test-hashline-gate \
                $(TESTPREFIX)/unit-test-workspace-provider \
@@ -1297,7 +1298,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o $(OBJDIR)/server_provider_slots.o \
+$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o $(OBJDIR)/server_provider_slots.o $(OBJDIR)/provider_slots_reap.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/workflow/wfe_native_gate.o $(OBJDIR)/workflow/wfe_externalization.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/server/delegate_sandbox_image.o \
@@ -4302,3 +4303,6 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
                                           $(OBJDIR)/server/tool_call_args.o \
                                           $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-provider-slots-reap: $(OBJDIR)/tests/test_provider_slots_reap.o $(OBJDIR)/provider_slots_reap.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
