@@ -14,6 +14,7 @@ interface AgentCfg {
   cost_tier?: number;
   enabled: boolean;
   tools_enabled?: boolean;
+  primary_only?: boolean;
   max_turns?: number;
   max_parallel?: number;
   context_window?: number;
@@ -398,6 +399,7 @@ function AgentEditModal({
   const [contextWindow, setContextWindow] = useState(String(agent.context_window ?? 0));
   const [tools, setTools] = useState(!!agent.tools_enabled);
   const [enabled, setEnabled] = useState(!!agent.enabled);
+  const [primaryOnly, setPrimaryOnly] = useState(!!agent.primary_only);
   const [roles, setRoles] = useState<string[]>(agent.roles || []);
   const [personas, setPersonas] = useState<string[]>(agent.personas || []);
   const [apiKey, setApiKey] = useState("");
@@ -431,6 +433,7 @@ function AgentEditModal({
       "--context-window", contextWindow || "0",
       "--tools", tools ? "on" : "off",
       "--enabled", enabled ? "true" : "false",
+      "--primary-only", primaryOnly ? "on" : "off",
       "--roles", roles.join(","),
       "--personas", personas.join(","),
     ];
@@ -578,6 +581,13 @@ function AgentEditModal({
             >
               <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} disabled={busy} />
               tools enabled
+            </label>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+              title="When on, this agent can only be the primary — it is never routed as a delegate. Recommended for a Claude subscription (ToS)."
+            >
+              <input type="checkbox" checked={primaryOnly} onChange={(e) => setPrimaryOnly(e.target.checked)} disabled={busy} />
+              primary agent only
             </label>
           </div>
 

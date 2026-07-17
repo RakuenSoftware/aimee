@@ -2,6 +2,7 @@
 
 #include "aimee.h"
 #include "agent.h"
+#include "aimee_ir.h"
 #include "cli_session.h"
 #include "log.h"
 #include <ctype.h>
@@ -288,7 +289,36 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       return -1;
    }
 
-   out->response = clean;
+   /* Unified message: fold the CLI's screen-scraped answer into the canonical
+    * message IR (one assistant TEXT block), then project it back onto the
+    * agent_result. The tmux/CLI TUI is now just another producer of an
+    * aimee_response_t — the same representation an HTTP-provider parse yields —
+    * so downstream treats this turn as a single unified message instead of a
+    * bespoke plain-text blob, and the tmux path gains a real stop_reason
+    * (end_turn) that the raw-string path never set. */
+   size_t tlen = strlen(clean);
+   aimee_response_t ir;
+   int ir_ok = (aimee_ir_response_from_text(&ir, clean, agent->model) == 0);
+   free(clean);
+   if (!ir_ok)
+   {
+      snprintf(out->error, sizeof(out->error), "out of memory");
+      return -1;
+   }
+   char *resp = malloc(tlen + 1);
+   if (resp)
+      aimee_ir_response_text(&ir, resp, tlen + 1);
+   snprintf(out->stop_reason, sizeof(out->stop_reason), "%s",
+            ir.raw_stop_reason ? ir.raw_stop_reason : aimee_stop_reason_name(ir.stop_reason));
+   aimee_response_free(&ir);
+   if (!resp || !resp[0])
+   {
+      free(resp);
+      snprintf(out->error, sizeof(out->error), "empty response from tmux session");
+      return -1;
+   }
+
+   out->response = resp;
    out->success = 1;
    out->turns = 1;
    return 0;

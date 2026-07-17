@@ -124,12 +124,41 @@ static void test_populated_config_lists_agents(void)
    printf("  PASS: a populated config lists its agents\n");
 }
 
+/* primary_only survives parse -> agent_load_config -> server_agent_to_json (the
+ * /v1/agent/list surface the Web GUI reads to render the checkbox). An agent that
+ * omits the field defaults to false. */
+static void test_primary_only_round_trips(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":["
+                "{\"name\":\"claude\",\"provider\":\"claude\",\"backend\":\"tmux-cli\","
+                "\"cli_kind\":\"claude\",\"primary_only\":true,\"roles\":[\"code\"]},"
+                "{\"name\":\"minimax\",\"provider\":\"anthropic\",\"model\":\"m\",\"roles\":[\"all\"]}"
+                "]}\n");
+   reset_capture();
+
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   assert(cJSON_IsArray(agents) && cJSON_GetArraySize(agents) == 2);
+
+   cJSON *a0 = cJSON_GetArrayItem(agents, 0); /* claude */
+   cJSON *po0 = cJSON_GetObjectItemCaseSensitive(a0, "primary_only");
+   assert(cJSON_IsBool(po0) && cJSON_IsTrue(po0));
+
+   cJSON *a1 = cJSON_GetArrayItem(agents, 1); /* minimax: field omitted -> false */
+   cJSON *po1 = cJSON_GetObjectItemCaseSensitive(a1, "primary_only");
+   assert(cJSON_IsBool(po1) && !cJSON_IsTrue(po1));
+   printf("  PASS: primary_only round-trips through the list handler\n");
+}
+
 int main(void)
 {
    printf("agent_list_handler:\n");
    test_load_failure_is_an_error_not_empty();
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
+   test_primary_only_round_trips();
    printf("all agent_list_handler tests passed\n");
    return 0;
 }

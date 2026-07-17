@@ -274,6 +274,14 @@ typedef struct
     * — distinct from a client-only claude. The roundtable panel seats a
     * server-hosted, authenticated claude; a client-only one stays excluded. */
    int is_server_hosted;
+   /* 1 = this agent may ONLY serve as the primary; it is never a delegation
+    * target. 0 = delegate-eligible (subject to the structural rules in
+    * agent_is_available_for_routing). Replaces the former global
+    * config.claude_cli_delegate_enabled opt-in with a per-agent choice made at
+    * add time: the Web GUI pre-checks "Primary Agent Only" for a claude-oauth
+    * subscription (driving a personal Claude plan as an automated delegate may
+    * breach Anthropic's terms) and leaves it off for every other agent. */
+   int primary_only;
 } agent_t;
 
 typedef struct

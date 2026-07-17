@@ -310,8 +310,6 @@ const config_field_t config_fields[] = {
     {"kb_mining_enabled", offsetof(config_t, kb_mining_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT},
     {"verify_enabled", offsetof(config_t, verify_enabled), sizeof(int), 1, CFG_BOOL},
-    {"claude_cli_delegate_enabled", offsetof(config_t, claude_cli_delegate_enabled), sizeof(int), 1,
-     CFG_BOOL},
     {"delegate_graph_context_enabled", offsetof(config_t, delegate_graph_context_enabled),
      sizeof(int), 0, CFG_BOOL},
     {"roundtable.replay_verify_enabled", offsetof(config_t, roundtable_replay_verify_enabled),
