@@ -1914,36 +1914,32 @@ static int server_agent_route_is_down(const char *agent_name)
 }
 
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
- * 1) the primary passthrough — the agent named after config.provider — is
- *    never a delegation target: the primary must not delegate back to itself
- *    (observed in the wild as a streak of failed 'code' delegations to the
- *    operator's own OAuth claude entry). Matched by NAME only, deliberately:
- *    other agents that merely share the provider tag (e.g. gateway-routed
- *    anthropic models) are legitimate delegates.
- * 2) a per-agent "Primary Agent Only" choice (agents.json `primary_only`)
- *    excludes the agent from ALL delegation. This replaces the former global
- *    claude_cli_delegate_enabled opt-in with a per-agent flag set at add time:
- *    a claude-oauth subscription is pre-flagged primary-only (driving a personal
- *    Claude plan as an automated delegate may breach Anthropic's terms), every
- *    other agent defaults off.
- * Rule 2 is config-independent (it reads the agent record), so a config_load
- * failure only means rule 1's primary name is unknown — the per-agent gate
- * still holds. */
+ * a per-agent "Primary Agent Only" choice (agents.json `primary_only`) excludes
+ * the agent from ALL delegation. This is the SOLE per-agent gate: it replaced the
+ * former global claude_cli_delegate_enabled opt-in AND the older unconditional
+ * "the provider-named agent is never a delegation target" name match. That name
+ * match made the operator's choice unreachable for the common claude-oauth-as-
+ * primary setup — the OAuth flow always names the agent "claude", so an agent
+ * named after config.provider could never be a delegate even with Primary Agent
+ * Only unchecked. Now the flag alone decides: a claude-oauth subscription is
+ * pre-flagged primary-only at add time (driving a personal Claude plan as an
+ * automated delegate may breach Anthropic's terms), and unchecking it is an
+ * explicit operator opt-in to self-delegation. Roundtable panels keep their own
+ * primary exclusion (delegate_ensemble.c) so a second opinion is never the
+ * primary itself.
+ * The gate is config-independent (it reads the agent record), so it holds even
+ * when config_load would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)
       return 1;
    /* A PRIMARY chat turn routes the provider-named agent through the same
-    * machinery as delegation; both rules below are delegation policy, so they
-    * must not exclude the primary from its own turn (they otherwise break
-    * every server-side chat whose provider is a configured agent — the
-    * webchat's default). The marker is thread-local to the chat worker. */
+    * machinery as delegation; the gate below is delegation policy, so it must
+    * not exclude the primary from its own turn (it otherwise breaks every
+    * server-side chat whose provider is a primary-only agent — the webchat's
+    * default). The marker is thread-local to the chat worker. */
    if (agent_routing_primary_turn())
       return 0;
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.provider[0] && ag->name[0] &&
-       strcasecmp(ag->name, cfg.provider) == 0)
-      return 1;
    if (ag->primary_only)
       return 1;
    return 0;
