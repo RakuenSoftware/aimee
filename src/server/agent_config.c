@@ -1,5 +1,6 @@
 /* agent_config.c: config loading/saving, agent routing, role checking, auth resolution */
 #include "aimee.h"
+#include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME (appliance has no HOME) */
 #include "util.h"
 #include "agent_config.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
@@ -2000,6 +2001,16 @@ static int codex_oauth_vault_token(char *buf, size_t len)
       snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
       if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
          got = 1;
+      /* aimee's canonical home (honors AIMEE_HOME) — on an appliance the process
+       * has AIMEE_HOME set but no HOME, so the on-disk codex auth at
+       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below. */
+      const char *ahome = aimee_home();
+      if (!got && ahome && ahome[0])
+      {
+         snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
+         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
+            got = 1;
+      }
       const char *home = getenv("HOME");
       if (!got && home && home[0])
       {
@@ -2082,6 +2093,16 @@ static int agent_read_codex_oauth_token(char *token, size_t token_len)
    snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
    if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
       return 0;
+
+   /* aimee's canonical home (honors AIMEE_HOME) — see codex_oauth_vault_token:
+    * an appliance sets AIMEE_HOME but not HOME, hiding <AIMEE_HOME>/.codex. */
+   const char *ahome = aimee_home();
+   if (ahome && ahome[0])
+   {
+      snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
+      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
+         return 0;
+   }
 
    const char *home = getenv("HOME");
    if (home && home[0])

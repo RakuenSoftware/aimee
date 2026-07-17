@@ -584,6 +584,51 @@ static void test_codex_oauth_request_creds(void)
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
 }
 
+/* On-disk codex auth is resolved under AIMEE_HOME, not just $HOME. An appliance
+ * runs the server with AIMEE_HOME set but no HOME, so <AIMEE_HOME>/.codex/auth.json
+ * must be found or codex fails /v1 auth with a route-unresolved error even though
+ * a valid token is on disk. (exp is unknown for a non-JWT token -> no refresh, so
+ * this stays hermetic: no network.) */
+static void test_codex_oauth_reads_aimee_home(void)
+{
+   char dir[] = "/tmp/aimee-codex-home.XXXXXX";
+   assert(platform_mkdtemp(dir) != NULL);
+   char sub[512], authpath[600];
+   snprintf(sub, sizeof(sub), "%s/.codex", dir);
+   assert(mkdir(sub, 0700) == 0);
+   snprintf(authpath, sizeof(authpath), "%s/auth.json", sub);
+   FILE *f = fopen(authpath, "wb");
+   assert(f != NULL);
+   fputs("{\"tokens\":{\"access_token\":\"AH-ACCESS\",\"refresh_token\":\"AH-REFRESH\"}}", f);
+   fclose(f);
+
+   char *old_home = getenv("AIMEE_HOME");
+   char saved[600] = "";
+   if (old_home)
+      snprintf(saved, sizeof(saved), "%s", old_home);
+   setenv("AIMEE_HOME", dir, 1);
+   agent_set_request_codex_creds(NULL, NULL); /* no per-turn token: force the on-disk path */
+
+   agent_t ag;
+   char auth[512];
+   memset(&ag, 0, sizeof(ag));
+   snprintf(ag.name, sizeof(ag.name), "%s", "codex");
+   snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
+   snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
+
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strstr(auth, "Bearer AH-ACCESS") != NULL);
+
+   if (saved[0])
+      setenv("AIMEE_HOME", saved, 1);
+   else
+      unsetenv("AIMEE_HOME");
+   unlink(authpath);
+   rmdir(sub);
+   rmdir(dir);
+   printf("  PASS: test_codex_oauth_reads_aimee_home\n");
+}
+
 /* WP-C.2c(3): the vault principal must ride along in the creds snapshot so a
  * fan-out delegate (fresh thread; rebinds via agent_request_creds_restore)
  * reaches the user's vault like a same-thread one; empty restores to empty. */
@@ -2980,6 +3025,7 @@ int main(void)
    test_current_code_only_dispatch_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
+   test_codex_oauth_reads_aimee_home();
    test_request_creds_snapshot_carries_vault_principal();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
