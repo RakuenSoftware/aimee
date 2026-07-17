@@ -288,6 +288,16 @@ int agent_is_available_for_routing(const agent_t *agent)
       return 0;
    return 1;
 }
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
+{
+   if (detail && detail_sz)
+      detail[0] = '\0';
+   if (!agent || !agent->enabled)
+      return AGENT_ROUTE_POLICY_EXCLUDED;
+   if (strcmp(agent->auth_type, "bearer") == 0 && agent->credential_count == 0)
+      return AGENT_ROUTE_NO_CREDENTIALS;
+   return AGENT_ROUTE_OK;
+}
 /* Stubs for the seat resolver pulled in via ensemble_resolve_random_seats. These
  * test seats are all specific model names (never "$random"), so rt_seat_is_random
  * returns 0 and the resolver passes them through unchanged; delegate_pick_for_role

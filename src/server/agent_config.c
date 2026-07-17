@@ -1477,43 +1477,74 @@ int agent_routing_primary_turn(void)
    return g_routing_primary_turn;
 }
 
-int agent_is_available_for_routing(const agent_t *agent)
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
 {
+   if (detail && detail_sz)
+      detail[0] = '\0';
    if (!agent)
-      return 0;
+      return AGENT_ROUTE_NULL;
    /* A provider the health catalog has marked unavailable (e.g. DOWN after a
     * failure streak) must not receive new routed work, or delegates wedge on
     * a dead endpoint. Treat it like a disabled agent so callers fall back to a
     * healthy peer; routing returns NULL (clean "no agent" error) only when
     * every candidate is filtered out. */
    if (g_route_health_filter && agent->name[0] && g_route_health_filter(agent->name))
-      return 0;
+      return AGENT_ROUTE_HEALTH_DOWN;
    /* A claude-CLI agent can only ever execute as a delegate SERVER-SIDE (a
     * client-only claude has no server session to drive — dispatch would just
     * fail). Structural, so it is enforced even with no policy filter
     * registered; the per-agent rules (the `primary_only` opt-out, primary
     * self-delegation) live in the registered policy filter. */
    if (agent_is_claude_cli(agent) && !agent->is_server_hosted)
-      return 0;
+      return AGENT_ROUTE_CLIENT_ONLY_CLAUDE;
    if (g_route_policy_filter && g_route_policy_filter(agent))
-      return 0;
+   {
+      /* The filter is opaque here, but the agent record names the common case:
+       * a Primary-Agent-Only opt-out. Anything else is a generic policy block. */
+      if (detail && detail_sz && agent->primary_only)
+         snprintf(detail, detail_sz, "it is flagged \"Primary Agent Only\"");
+      return AGENT_ROUTE_POLICY_EXCLUDED;
+   }
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
    {
       const char *cmd =
           agent->cli_cmd[0] ? agent->cli_cmd : (agent->cli_kind[0] ? agent->cli_kind : "claude");
-      return agent_command_on_path("tmux") && agent_command_on_path(cmd);
+      if (!agent_command_on_path("tmux"))
+      {
+         if (detail && detail_sz)
+            snprintf(detail, detail_sz, "tmux");
+         return AGENT_ROUTE_MISSING_COMMAND;
+      }
+      if (!agent_command_on_path(cmd))
+      {
+         if (detail && detail_sz)
+            snprintf(detail, detail_sz, "%s", cmd);
+         return AGENT_ROUTE_MISSING_COMMAND;
+      }
+      return AGENT_ROUTE_OK;
    }
 
    if (strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) != 0 &&
        strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) != 0)
-      return agent_has_resolvable_credentials(agent);
+      return agent_has_resolvable_credentials(agent) ? AGENT_ROUTE_OK : AGENT_ROUTE_NO_CREDENTIALS;
 
    const provider_cli_adapter_t *adapter = provider_cli_adapter_get(agent->cli_kind);
    if (adapter && adapter->native_provider && adapter->native_provider[0])
-      return 1;
+      return AGENT_ROUTE_OK;
 
    const char *cmd = agent->cli_cmd[0] ? agent->cli_cmd : agent->cli_kind;
-   return agent_command_on_path(cmd);
+   if (!agent_command_on_path(cmd))
+   {
+      if (detail && detail_sz)
+         snprintf(detail, detail_sz, "%s", cmd);
+      return AGENT_ROUTE_MISSING_COMMAND;
+   }
+   return AGENT_ROUTE_OK;
+}
+
+int agent_is_available_for_routing(const agent_t *agent)
+{
+   return agent_routing_block_reason(agent, NULL, 0) == AGENT_ROUTE_OK;
 }
 
 int agent_any_delegate_available(void)

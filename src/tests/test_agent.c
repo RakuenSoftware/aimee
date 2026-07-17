@@ -270,6 +270,58 @@ static void test_agent_route_client_only_claude_excluded(void)
    assert(agent_is_available_for_routing(&a) == 0);
 }
 
+/* agent_routing_block_reason reports WHY an agent is not routable so the delegate
+ * error path can name the real cause instead of a catch-all "unavailable". */
+static void test_agent_routing_block_reason(void)
+{
+   char detail[128];
+
+   /* Client-only claude: structural block, no filter needed. */
+   agent_t claude;
+   memset(&claude, 0, sizeof(claude));
+   strcpy(claude.name, "claude");
+   strcpy(claude.cli_kind, "claude");
+   strcpy(claude.backend, AGENT_BACKEND_TMUX_CLI);
+   claude.enabled = 1;
+   claude.is_server_hosted = 0;
+   assert(agent_routing_block_reason(&claude, detail, sizeof(detail)) ==
+          AGENT_ROUTE_CLIENT_ONLY_CLAUDE);
+
+   /* Policy exclusion of a Primary-Agent-Only agent: reason + a naming detail. */
+   agent_t primary;
+   memset(&primary, 0, sizeof(primary));
+   strcpy(primary.name, "primary");
+   strcpy(primary.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(primary.cli_cmd, "sh"); /* on PATH, so only the policy filter can block */
+   primary.enabled = 1;
+   primary.primary_only = 1;
+   agent_set_route_policy_filter(test_policy_exclude_primary);
+   assert(agent_routing_block_reason(&primary, detail, sizeof(detail)) ==
+          AGENT_ROUTE_POLICY_EXCLUDED);
+   assert(strstr(detail, "Primary Agent Only") != NULL);
+   agent_set_route_policy_filter(NULL);
+
+   /* Missing provider-cli command: reason names the absent binary. */
+   agent_t missing;
+   memset(&missing, 0, sizeof(missing));
+   strcpy(missing.name, "gone");
+   strcpy(missing.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(missing.cli_cmd, "definitely-not-a-real-binary-xyz");
+   missing.enabled = 1;
+   assert(agent_routing_block_reason(&missing, detail, sizeof(detail)) ==
+          AGENT_ROUTE_MISSING_COMMAND);
+   assert(strstr(detail, "definitely-not-a-real-binary-xyz") != NULL);
+
+   /* A provider-cli agent whose command IS on PATH is routable. */
+   agent_t ok;
+   memset(&ok, 0, sizeof(ok));
+   strcpy(ok.name, "ok");
+   strcpy(ok.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(ok.cli_cmd, "sh");
+   ok.enabled = 1;
+   assert(agent_routing_block_reason(&ok, detail, sizeof(detail)) == AGENT_ROUTE_OK);
+}
+
 static void test_agent_route(void)
 {
    agent_config_t cfg;
@@ -3092,6 +3144,7 @@ int main(void)
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
+   test_agent_routing_block_reason();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_current_code_only_role_tool_policy();
