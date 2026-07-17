@@ -1509,6 +1509,25 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    return NULL;
 }
 
+agent_t *agent_default_primary(agent_config_t *cfg)
+{
+   /* An explicitly configured default wins — but only when it is actually
+    * usable. Routing to a disabled default (or, historically, a disabled
+    * agents[0]) makes every ingress request that doesn't name a model fast-fail
+    * as "failed to reach the primary provider" even though enabled agents
+    * exist, so the fallback deliberately skips disabled seats. */
+   if (cfg->default_agent[0])
+   {
+      agent_t *ag = agent_find(cfg, cfg->default_agent);
+      if (ag && ag->enabled)
+         return ag;
+   }
+   for (int i = 0; i < cfg->agent_count; i++)
+      if (cfg->agents[i].enabled)
+         return &cfg->agents[i];
+   return NULL;
+}
+
 /* Pick randomly from an array of candidates using monotonic-clock nanoseconds.
  * Thread-safe: no shared mutable state. */
 static agent_t *agent_pick_random(agent_t **candidates, int count)

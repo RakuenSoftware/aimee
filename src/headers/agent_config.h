@@ -20,6 +20,10 @@ agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
+/* Select the default "primary" agent for ingress paths that don't name a model:
+ * an explicitly configured default when it is enabled, else the first enabled
+ * agent, else NULL. Never returns a disabled agent. */
+agent_t *agent_default_primary(agent_config_t *cfg);
 int agent_is_available_for_routing(const agent_t *agent);
 
 /* True if at least one configured agent is enabled AND routable as a delegate

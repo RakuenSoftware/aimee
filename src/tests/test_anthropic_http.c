@@ -54,6 +54,11 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
 }
 
+agent_t *agent_default_primary(agent_config_t *cfg)
+{
+   return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
+}
+
 void delegate_drivers_init(void)
 {
 }

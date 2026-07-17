@@ -41,20 +41,16 @@
 #include <string.h>
 #include <time.h>
 
-/* Resolve aimee's primary agent (the configured default, else the first
- * agent). Claude Code's requested model is intentionally ignored — switching
- * models is `aimee primary`. acfg is caller-owned and must outlive the returned
- * pointer (it indexes into acfg). Returns NULL when none configured. */
+/* Resolve aimee's primary agent (the configured default, else the first enabled
+ * agent — see agent_default_primary). Claude Code's requested model is
+ * intentionally ignored — switching models is `aimee primary`. acfg is
+ * caller-owned and must outlive the returned pointer (it indexes into acfg).
+ * Returns NULL when no usable agent exists → caller reports 503. */
 static agent_t *resolve_primary(agent_config_t *acfg)
 {
-   agent_t *ag = NULL;
    if (agent_load_config(acfg) != 0)
       return NULL;
-   if (acfg->default_agent[0])
-      ag = agent_find(acfg, acfg->default_agent);
-   if (!ag && acfg->agent_count > 0)
-      ag = &acfg->agents[0];
-   return ag;
+   return agent_default_primary(acfg);
 }
 
 /* Mint a "msg_<epoch>" id for the response/stream. */
