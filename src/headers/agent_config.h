@@ -49,8 +49,9 @@ void agent_set_route_health_filter(int (*fn)(const char *agent_name));
  *   1) the PRIMARY passthrough — the agent named after config.provider — is
  *      never a delegation target (the primary must not delegate back to
  *      itself; roundtables already enforce this for panel seats);
- *   2) a claude-CLI agent is a delegate only behind the explicit ToS-sensitive
- *      operator opt-in (claude_cli_delegate_enabled).
+ *   2) an agent flagged "Primary Agent Only" (agents.json `primary_only`) is
+ *      never a delegation target — the per-agent choice that replaced the global
+ *      claude_cli_delegate_enabled opt-in.
  * The structural half of (2) — a claude-CLI agent that is not server-hosted
  * can never execute as a delegate — is enforced unconditionally in
  * agent_is_available_for_routing, so even filter-less builds (CLI/tests) never
@@ -138,10 +139,11 @@ void agent_request_creds_restore(const agent_request_creds_t *creds);
 
 /* True if `agent` is the Claude CLI (`claude` / `claude-code`) run via tmux or
  * the provider-CLI binary — authenticated by the interactive `claude` login, not
- * an API key. Used to keep Claude-via-CLI primary-only by default (gated as a
- * delegate behind config.claude_cli_delegate_enabled). All other agents,
- * including other CLI agents (Codex CLI, gemini-cli) and API-key/HTTP agents,
- * return 0. */
+ * an API key. Still used for the structural server-hosted delegate rule and by
+ * the OAuth setup path; the primary-only DEFAULT for claude is now expressed as
+ * the per-agent `primary_only` flag set at add time (see agent_t.primary_only).
+ * All other agents, including other CLI agents (Codex CLI, gemini-cli) and
+ * API-key/HTTP agents, return 0. */
 int agent_is_claude_cli(const agent_t *agent);
 
 /* Generalized role dispatch. delegate_pick_for_role returns the index of a

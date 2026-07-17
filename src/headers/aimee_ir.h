@@ -185,6 +185,15 @@ void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
 void aimee_block_free_contents(aimee_block_t *b);
 
+/* Build a canonical assistant response carrying a single TEXT block. This is the
+ * bridge for producers that yield only flat text (the tmux/CLI TUI handler, whose
+ * screen-scrape recovers one text answer) into the unified message IR: the result
+ * is an ordinary aimee_response_t that every IR consumer treats identically to a
+ * provider-parsed one. `model` may be NULL/empty. stop_reason is END_TURN. Fills
+ * caller-provided `out` (stack-ok); free with aimee_response_free. Returns 0 on
+ * success, -1 on allocation failure (out is left freed/zeroed). */
+int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
+
 /* ---- accessors used by the core stages / KB ----
  * Concatenate the text of the LAST user-role message's TEXT blocks into `buf`
  * (truncating to n). This is the ONE shape-agnostic query extractor that replaces

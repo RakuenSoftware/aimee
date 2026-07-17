@@ -774,7 +774,7 @@ void delegate_worker(void *arg)
     * driver marshals its commands over the reverse channel) against the client's
     * tree, doing its own edits — so it bypasses the server-side worktree
     * isolation / write-guard machinery below (which assumes a local fs), exactly
-    * as the primary chat path does. Gated by claude_cli_delegate_enabled. */
+    * as the primary chat path does. Gated by the agent's `primary_only` flag. */
    if (via_name && via_name[0])
    {
       agent_t *cag = agent_find(&acfg, via_name);
@@ -784,15 +784,13 @@ void delegate_worker(void *arg)
          const workspace_provider_t *wsp = workspace_provider_active();
          if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
          {
-            config_t gate_cfg;
-            config_load(&gate_cfg);
-            if (!gate_cfg.claude_cli_delegate_enabled)
+            if (cag->primary_only)
             {
                workspace_turn_unbind_active();
                char m[320];
                snprintf(m, sizeof(m),
-                        "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
-                        "set claude_cli_delegate_enabled=true to allow it as a delegate "
+                        "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
+                        "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
                         "(see DELEGATES.md for the Anthropic account-risk warning)",
                         cag->name);
                delegation_compute_error(cctx, m);
@@ -898,17 +896,16 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   /* Claude run via the `claude` CLI/tmux login (not an API key) is primary-only
-    * by default: driving a personal Claude subscription as an automated delegate
-    * may breach Anthropic's terms. Opt in with `claude_cli_delegate_enabled`.
-    * (Concise here — the risk warning is shown once at setup when the flag is
-    * enabled, and in DELEGATES.md.) */
-   if (agent_is_claude_cli(target_agent) && !route_cfg.claude_cli_delegate_enabled)
+   /* An agent flagged "Primary Agent Only" (agents.json `primary_only`) is never
+    * a delegation target. A claude-oauth subscription is pre-flagged this way at
+    * add time: driving a personal Claude plan as an automated delegate may breach
+    * Anthropic's terms. (Concise here — the risk warning is in DELEGATES.md.) */
+   if (target_agent->primary_only)
    {
       char errmsg[320];
       snprintf(errmsg, sizeof(errmsg),
-               "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
-               "set claude_cli_delegate_enabled=true to allow it as a delegate "
+               "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
+               "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
                "(see DELEGATES.md for the Anthropic account-risk warning)",
                target_agent->name);
       delegation_compute_error(cctx, errmsg);

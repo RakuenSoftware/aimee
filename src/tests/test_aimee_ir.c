@@ -238,6 +238,34 @@ int main(void)
    }
    printf("response-accessors ok; ");
 
+   /* aimee_ir_response_from_text: the bridge the tmux/CLI TUI handler uses to
+    * fold flat scraped text into the unified message IR. */
+   {
+      aimee_response_t r;
+      assert(aimee_ir_response_from_text(&r, "line one\nline two", "claude") == 0);
+      assert(r.role && strcmp(r.role, "assistant") == 0);
+      assert(r.n_content == 1 && r.content[0].type == AIMEE_BLK_TEXT);
+      assert(r.stop_reason == AIMEE_STOP_END_TURN);
+      assert(r.raw_stop_reason && strcmp(r.raw_stop_reason, "end_turn") == 0);
+      assert(r.model && strcmp(r.model, "claude") == 0);
+      char buf[64];
+      /* Round-trips through the standard accessor -> a multi-line answer survives
+       * verbatim, so the handler's projection is lossless. */
+      assert(aimee_ir_response_text(&r, buf, sizeof buf) == (size_t)strlen("line one\nline two"));
+      assert(strcmp(buf, "line one\nline two") == 0);
+      assert(aimee_ir_response_has_tool_use(&r) == 0);
+      aimee_response_free(&r);
+
+      /* NULL/empty text is tolerated (empty TEXT block), model may be NULL. */
+      assert(aimee_ir_response_from_text(&r, NULL, NULL) == 0);
+      assert(r.n_content == 1 && r.content[0].text && r.content[0].text[0] == '\0');
+      assert(r.model == NULL);
+      aimee_response_free(&r);
+
+      assert(aimee_ir_response_from_text(NULL, "x", "y") == -1);
+   }
+   printf("response-from-text ok; ");
+
    printf("ok\n");
    return 0;
 }

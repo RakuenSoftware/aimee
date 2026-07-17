@@ -374,8 +374,8 @@ trail (not the host AI's own sub-agent tools, which are blocked).
 > participate. `aimee delegate review --via M` is a *single, exploratory* review
 > that runs tools-on so the reviewer can read the surrounding code, the right
 > tool for "review the auth module", the wrong tool for a panel gate. The panel
-> skips agents that cannot run as a server-side HTTP delegate (e.g. claude-CLI
-> unless `claude_cli_delegate_enabled`) and falls back to another panelist if the
+> skips agents that cannot run as a server-side HTTP delegate and any agent
+> flagged **Primary Agent Only** (`primary_only`), and falls back to another panelist if the
 > aggregator model fails, so one flaky model does not collapse the synthesis.
 
 The panel is configured under `ensemble` in `aimee.yaml`:
@@ -482,13 +482,18 @@ Practical notes:
 #### Claude via the CLI is primary-only by default
 
 Claude run via the `claude` CLI / tmux login, authenticated by the **interactive
-Claude subscription login, not an API key**, is **primary-only by default**. It
-can be your interactive primary (via the web chat or `acp-serve`), but it is **not** eligible as a
-delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
-use it as a delegate fails with a message pointing you here.
+Claude subscription login, not an API key**, is **primary-only by default**. When
+you add a claude-oauth subscription in the Web GUI, the **Primary Agent Only**
+checkbox is pre-checked, which sets the per-agent `primary_only` flag in
+`agents.json`. A primary-only agent can be your interactive primary (via the web
+chat or `acp-serve`), but it is **not** eligible as a delegate (neither
+auto-routed nor `aimee delegate … --via claude`). Attempting to use it as a
+delegate fails with a message pointing you here.
 
-This gate is **Claude-CLI-specific**. It does not affect any other agent: API-key
-/ HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
+**Primary Agent Only** is a per-agent choice available to any agent (it replaced
+the former global `claude_cli_delegate_enabled` opt-in); it is simply pre-checked
+for a claude-oauth subscription and left off for every other agent, so API-key /
+HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
 `mistral`, …) and other CLI agents (e.g. the Codex CLI) delegate normally.
 
 > ⚠️ **Anthropic account-risk warning.** Using a personal **Claude subscription**
@@ -499,16 +504,12 @@ This gate is **Claude-CLI-specific**. It does not affect any other agent: API-ke
 > automated or delegated Claude workloads, use an **Anthropic API key** (billed
 > per token) instead, add an `anthropic` agent with `--key`.
 
-To opt in anyway, at your own risk:
-
-```bash
-aimee config set claude_cli_delegate_enabled true
-```
-
-This prints the warning once, at the time you enable it. With the flag on,
-Claude-via-CLI may be routed to / selected as a delegate (and, on a thin client,
-runs on the client exactly like the primary path above). Set it back to `false`
-to restore the primary-only default. The default is `false`.
+To allow a claude-oauth agent to act as a delegate anyway, at your own risk,
+**uncheck Primary Agent Only** for it in the Agents tab (or run
+`aimee agent set claude --primary-only off`). With that flag off, Claude-via-CLI
+may be routed to / selected as a delegate (and, on a thin client, runs on the
+client exactly like the primary path above). Re-check it to restore the
+primary-only default.
 
 ### Config format
 

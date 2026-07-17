@@ -909,28 +909,33 @@ static void test_default_panel_excludes_claude_cli(void)
    assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
    assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0);
 
-   /* claude needs BOTH authorization (claude_cli_delegate_enabled) AND
-    * server-hosting to be seated; neither alone is enough. */
+   /* claude needs BOTH authorization (NOT primary_only) AND server-hosting to be
+    * seated; neither alone is enough. Authorization is now the per-agent
+    * `primary_only` flag (0 = delegate-eligible), which replaced the global
+    * claude_cli_delegate_enabled opt-in. */
 
-   /* (a) authorized but client-only (not server-hosted) -> still excluded */
+   /* (a) authorized (primary_only=0) but client-only (not server-hosted) -> still
+    * excluded */
+   acfg.agents[1].primary_only = 0;
    config_t cfg2;
    memset(&cfg2, 0, sizeof(cfg2));
-   cfg2.claude_cli_delegate_enabled = 1;
    ensemble_default_panel_from_agents(&cfg2, &acfg);
    assert(cfg2.ensemble_reference_count == 2);
 
-   /* (b) server-hosted but NOT authorized -> still excluded (the key invariant:
-    * a server-side OAuth setup is not authorization to act as a panelist) */
+   /* (b) server-hosted but NOT authorized (primary_only=1) -> still excluded (the
+    * key invariant: a server-side OAuth setup is not authorization to act as a
+    * panelist) */
    acfg.agents[1].is_server_hosted = 1;
+   acfg.agents[1].primary_only = 1;
    config_t cfg3;
    memset(&cfg3, 0, sizeof(cfg3));
    ensemble_default_panel_from_agents(&cfg3, &acfg);
    assert(cfg3.ensemble_reference_count == 2);
 
-   /* (c) authorized AND server-hosted -> seated */
+   /* (c) authorized (primary_only=0) AND server-hosted -> seated */
+   acfg.agents[1].primary_only = 0;
    config_t cfg4;
    memset(&cfg4, 0, sizeof(cfg4));
-   cfg4.claude_cli_delegate_enabled = 1;
    ensemble_default_panel_from_agents(&cfg4, &acfg);
    assert(cfg4.ensemble_reference_count == 3);
 
@@ -938,11 +943,11 @@ static void test_default_panel_excludes_claude_cli(void)
    acfg.agents[1].enabled = 0;
    config_t cfg5;
    memset(&cfg5, 0, sizeof(cfg5));
-   cfg5.claude_cli_delegate_enabled = 1;
    ensemble_default_panel_from_agents(&cfg5, &acfg);
    assert(cfg5.ensemble_reference_count == 2);
    acfg.agents[1].enabled = 1;
    acfg.agents[1].is_server_hosted = 0;
+   acfg.agents[1].primary_only = 0;
 
    /* a configured panel is left untouched (no-op) */
    config_t cfg6;
@@ -979,11 +984,12 @@ static void test_panel_filter_drops_unauthorized_claude(void)
    assert(strcmp(cfg.ensemble_reference_models[1], "adhoc-model") == 0);
    assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0); /* repointed off the dropped claude */
 
-   /* Authorized + server-hosted claude survives the explicit-list filter. */
+   /* Authorized (primary_only=0) + server-hosted claude survives the
+    * explicit-list filter. */
    acfg.agents[1].is_server_hosted = 1;
+   acfg.agents[1].primary_only = 0;
    config_t cfg2;
    memset(&cfg2, 0, sizeof(cfg2));
-   cfg2.claude_cli_delegate_enabled = 1;
    cfg2.ensemble_reference_count = 2;
    snprintf(cfg2.ensemble_reference_models[0], 128, "mistral");
    snprintf(cfg2.ensemble_reference_models[1], 128, "claude");
@@ -1015,7 +1021,8 @@ static void test_panel_excludes_primary(void)
 
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.claude_cli_delegate_enabled = 1; /* claude would otherwise be authorized */
+   /* claude is authorized by default (primary_only=0); the point of this test is
+    * that the PRIMARY exclusion still applies regardless. */
    snprintf(cfg.provider, sizeof(cfg.provider), "claude"); /* PRIMARY = claude */
 
    /* per-agent predicate */
@@ -1038,7 +1045,6 @@ static void test_panel_excludes_primary(void)
    /* seeding from enabled agents also never seats the primary */
    config_t seed_cfg;
    memset(&seed_cfg, 0, sizeof(seed_cfg));
-   seed_cfg.claude_cli_delegate_enabled = 1;
    snprintf(seed_cfg.provider, sizeof(seed_cfg.provider), "claude");
    ensemble_default_panel_from_agents(&seed_cfg, &acfg);
    assert(seed_cfg.ensemble_reference_count == 1); /* only codex */
