@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Badge, Panel, EmptyState } from '@rakuensoftware/smoothgui';
+import { Badge, Button, Panel, EmptyState, StatusDot } from '@rakuensoftware/smoothgui';
 import type { BadgeVariant } from '@rakuensoftware/smoothgui';
 
 /* ---- API types ---- */
@@ -530,10 +530,7 @@ function LspPanel({ data }: { data: LspStatus }) {
       ) : (
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: '50%', background: statusColor,
-              display: 'inline-block', flexShrink: 0,
-            }} />
+            <StatusDot color={statusColor} />
             <span style={{ fontSize: '12px', color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
           </div>
           <table style={{ fontSize: '12px', width: '100%', borderCollapse: 'collapse' }}>
@@ -586,10 +583,7 @@ function AgentsPanel({ data }: { data: Agent[] }) {
             {data.map((a, i) => (
               <tr key={i}>
                 <td style={tdStyle} title={a.enabled ? 'enabled' : 'disabled'}>
-                  <span style={{
-                    display: 'inline-block', width: 8, height: 8,
-                    borderRadius: '50%', background: agentEnabledDot(a.enabled),
-                  }} />
+                  <StatusDot color={agentEnabledDot(a.enabled)} />
                 </td>
                 <td style={tdStyle}>{e(a.name)}</td>
                 <td style={tdStyle}>{e(a.provider) || '—'}</td>
@@ -966,11 +960,6 @@ function loadLayout(): string[] {
   }
 }
 
-const ctrlBtn: React.CSSProperties = {
-  padding: '4px 12px', background: '#fff', color: '#666',
-  border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer', fontSize: 12,
-};
-
 /* Customize popover: toggle panels on/off and reorder the enabled ones. */
 function CustomizePopover({ layout, setLayout, onClose }: {
   layout: string[]; setLayout: (l: string[]) => void; onClose: () => void;
@@ -1007,16 +996,16 @@ function CustomizePopover({ layout, setLayout, onClose }: {
               <span style={{ flex: 1, fontSize: 13, color: on ? '#333' : '#999' }}>{p.title}</span>
               {on && (
                 <>
-                  <button onClick={() => move(id, -1)} title="Move up" style={{ ...ctrlBtn, padding: '0 6px' }}>↑</button>
-                  <button onClick={() => move(id, 1)} title="Move down" style={{ ...ctrlBtn, padding: '0 6px' }}>↓</button>
+                  <Button size="sm" onClick={() => move(id, -1)} title="Move up" style={{ padding: '0 6px' }}>↑</Button>
+                  <Button size="sm" onClick={() => move(id, 1)} title="Move down" style={{ padding: '0 6px' }}>↓</Button>
                 </>
               )}
             </div>
           );
         })}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 6px 2px' }}>
-          <button onClick={() => setLayout(defaultLayout())} style={ctrlBtn} title="Restore the default set and order of panels.">Reset</button>
-          <button onClick={onClose} style={ctrlBtn}>Done</button>
+          <Button size="sm" onClick={() => setLayout(defaultLayout())} title="Restore the default set and order of panels.">Reset</Button>
+          <Button size="sm" onClick={onClose}>Done</Button>
         </div>
       </div>
     </>
@@ -1065,8 +1054,8 @@ export default function Dashboard() {
         display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
       }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: '#555' }}>Dashboard</span>
-        <button onClick={load} style={ctrlBtn} title="Reload all dashboard data from the server.">Refresh</button>
-        <button onClick={() => setCustomizing(v => !v)} style={{ ...ctrlBtn, marginLeft: 'auto' }} title="Choose which panels are shown and reorder them.">⚙ Customize</button>
+        <Button size="sm" onClick={load} title="Reload all dashboard data from the server.">Refresh</Button>
+        <Button size="sm" onClick={() => setCustomizing(v => !v)} style={{ marginLeft: 'auto' }} title="Choose which panels are shown and reorder them.">⚙ Customize</Button>
         {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
       </div>
 
