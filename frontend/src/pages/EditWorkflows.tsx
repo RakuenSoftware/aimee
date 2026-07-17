@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Panel, Badge, Spinner, InlineStatus, KeyValue } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, KeyValue, Button } from "@rakuensoftware/smoothgui";
 import ProjectPicker from "../components/ProjectPicker";
 import type { ProjectSelection } from "../components/ProjectPicker";
 import { useSessions } from "../SessionContext";
@@ -672,9 +672,9 @@ export default function EditWorkflows() {
         }}
       >
         <Panel title="Workflows" count={defs.length}>
-          <button onClick={newDef} style={btn} title="Create a new workflow definition and open it in the editor.">
+          <Button onClick={newDef} size="md" title="Create a new workflow definition and open it in the editor.">
             + New
-          </button>
+          </Button>
           <div style={{ marginTop: 6 }}>
             {defs.map((d) => (
               <div
@@ -696,9 +696,9 @@ export default function EditWorkflows() {
           </div>
         </Panel>
         <Panel title="Blocks" count={blocks.length}>
-          <button onClick={newBlock} style={btn} title="Create a new custom delegate block.">
+          <Button onClick={newBlock} size="md" title="Create a new custom delegate block.">
             + New
-          </button>
+          </Button>
           <div style={{ marginTop: 6 }}>
             {blocks.map((b) => (
               <div
@@ -710,16 +710,17 @@ export default function EditWorkflows() {
                 <span>{b.name}</span>
                 <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   {b.custom && b.executor === "delegate" && (
-                    <button
+                    <Button
+                      size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         editExistingBlock(b);
                       }}
-                      style={{ ...btnSmall, padding: "0 6px" }}
+                      style={{ padding: "0 6px" }}
                       title="edit this custom block"
                     >
                       ✎
-                    </button>
+                    </Button>
                   )}
                   <Badge
                     label={b.custom ? "custom" : b.produces}
@@ -785,16 +786,17 @@ export default function EditWorkflows() {
                 />
               </label>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button onClick={saveBlock} style={btn} title="Save this custom block definition.">
+                <Button onClick={saveBlock} size="md" title="Save this custom block definition.">
                   Save
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
+                  size="md"
                   onClick={deleteBlock}
-                  style={{ ...btn, color: "#b00" }}
                   title={editBlock.isNew ? "Discard this new block." : "Delete this custom block."}
                 >
                   {editBlock.isNew ? "Cancel" : "Delete"}
-                </button>
+                </Button>
                 {blockStatus && <span style={{ fontSize: 12, color: "#b00" }}>{blockStatus}</span>}
               </div>
             </div>
@@ -819,17 +821,18 @@ export default function EditWorkflows() {
           {version && (
             <Badge label={`v ${version.slice(0, 8)}`} variant="neutral" />
           )}
-          <button onClick={validate} disabled={!graph} style={btn} title="Check the current workflow for errors without saving.">
+          <Button onClick={validate} disabled={!graph} size="md" title="Check the current workflow for errors without saving.">
             Validate
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
             onClick={save}
             disabled={!graph}
-            style={{ ...btn, background: "#2563eb", color: "#fff" }}
             title="Save the workflow definition (fails if the on-disk version changed)."
           >
             Save
-          </button>
+          </Button>
           <InlineStatus status={status} />
           <Spinner loading={loading} text="loading…" />
         </div>
@@ -1272,17 +1275,17 @@ function NodeInspector({
             style={{ ...inp, flex: 1, minWidth: 0 }}
           />
           {(isMulti || parts.length > 1) && (
-            <button onClick={() => delPart(i)} style={btnSmall} title="remove">
+            <Button onClick={() => delPart(i)} size="sm" title="remove">
               ×
-            </button>
+            </Button>
           )}
         </div>
       ))}
       {isMulti && (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={addPart} style={btnSmall} title="Add another persona/delegate to the review panel.">
+          <Button onClick={addPart} size="sm" title="Add another persona/delegate to the review panel.">
             + participant
-          </button>
+          </Button>
           <label style={{ ...lbl, margin: 0 }} title="How many panelists must pass; blank means all.">
             quorum&nbsp;
             <input
@@ -1407,14 +1410,14 @@ function NodeInspector({
                   </option>
                 ))}
             </select>
-            <button
+            <Button
+              size="sm"
               onClick={() => onOpenWorkflow(childWorkflowName(node))}
               disabled={!childWorkflowName(node)}
-              style={btnSmall}
               title="open the child workflow in this editor"
             >
               open ↗
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -1423,14 +1426,14 @@ function NodeInspector({
       <KeyValue label="block" value={node.block + (node.custom ? " (custom)" : "")} mono />
       <KeyValue label="produces" value={node.produces} mono />
       <div style={{ margin: "6px 0" }}>
-        <button
+        <Button
+          size="md"
           onClick={setStart}
           disabled={graph.start === node.id}
-          style={btn}
           title="Make this node the workflow's start node."
         >
           {graph.start === node.id ? "start node ✓" : "set as start"}
-        </button>
+        </Button>
       </div>
 
       <label style={lbl} title="Named outputs from other nodes fed into this step.">Inputs</label>
@@ -1455,14 +1458,14 @@ function NodeInspector({
               </option>
             ))}
           </select>
-          <button onClick={() => delBinding(i)} style={btnSmall} title="Remove this input binding.">
+          <Button onClick={() => delBinding(i)} size="sm" title="Remove this input binding.">
             ×
-          </button>
+          </Button>
         </div>
       ))}
-      <button onClick={addBinding} style={btnSmall} title="Add an input binding from another node's output.">
+      <Button onClick={addBinding} size="sm" title="Add an input binding from another node's output.">
         + input
-      </button>
+      </Button>
 
       {(["next", "on_pass", "on_fail"] as const).map((edge) => (
         <div key={edge} style={{ marginTop: 6 }}>
@@ -1484,7 +1487,8 @@ function NodeInspector({
       ))}
 
       <div style={{ marginTop: 10 }}>
-        <button
+        <Button
+          size="sm"
           onClick={() => {
             const nv = !showAdv;
             setShowAdv(nv);
@@ -1493,11 +1497,10 @@ function NodeInspector({
               setParamsErr("");
             }
           }}
-          style={btnSmall}
           title="Show/hide the raw params JSON editor."
         >
           {showAdv ? "▾ Advanced (raw params)" : "▸ Advanced (raw params)"}
-        </button>
+        </Button>
       </div>
       {showAdv && (
         <>
@@ -1522,31 +1525,20 @@ function NodeInspector({
         </>
       )}
 
-      <button
+      <Button
+        variant="danger"
+        size="md"
         onClick={onDelete}
-        style={{ ...btn, marginTop: 10, color: "#c00", borderColor: "#e0a0a0" }}
+        style={{ marginTop: 10 }}
         title="Remove this node from the workflow."
       >
         Delete node
-      </button>
+      </Button>
     </div>
   );
 }
 
 /* ---- inline styles ---- */
-const btn: React.CSSProperties = {
-  fontSize: 13,
-  padding: "4px 10px",
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  background: "#fff",
-  cursor: "pointer",
-};
-const btnSmall: React.CSSProperties = {
-  ...btn,
-  padding: "2px 6px",
-  fontSize: 12,
-};
 const row: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",

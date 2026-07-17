@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState, KeyValue } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState, KeyValue, Button } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
@@ -164,19 +164,20 @@ export default function Agents() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Agents</strong>
         <Badge label={`${agents.length}`} variant="neutral" />
-        <button onClick={refresh} style={btn} title="Reload the delegate list and run stats.">
+        <Button onClick={refresh} size="md" title="Reload the delegate list and run stats.">
           Refresh
-        </button>
-        <button onClick={probeAll} style={btn} disabled={!agents.length} title="Test live reachability of every configured delegate.">
+        </Button>
+        <Button onClick={probeAll} size="md" disabled={!agents.length} title="Test live reachability of every configured delegate.">
           Probe all
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="md"
           onClick={() => setShowAdd((v) => !v)}
-          style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
           title="Show or hide the form for adding a new delegate."
         >
           {showAdd ? "Close" : "+ Add delegate"}
-        </button>
+        </Button>
         <Spinner loading={loading} text="loading…" />
         <InlineStatus status={status} />
       </div>
@@ -314,14 +315,15 @@ function AgentCard({
               {probe.msg.slice(0, 80)}
             </div>
           )}
-          <button
+          <Button
+            size="sm"
             onClick={onProbe}
-            style={{ ...btnSmall, marginTop: 6 }}
+            style={{ marginTop: 6 }}
             disabled={pstate === "probing"}
             title="Test whether this delegate is reachable right now."
           >
             {pstate === "probing" ? "probing…" : "Probe"}
-          </button>
+          </Button>
         </div>
 
         {/* right: run stats */}
@@ -351,13 +353,14 @@ function AgentCard({
       </div>
 
       <div style={{ marginTop: 8, borderTop: "1px solid #eee", paddingTop: 8 }}>
-        <button
+        <Button
+          variant="primary"
+          size="sm"
           onClick={onEdit}
-          style={{ ...btnSmall, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
           title="Open the editor to change this delegate's config and role/persona bindings."
         >
           Edit
-        </button>
+        </Button>
       </div>
     </Panel>
   );
@@ -554,25 +557,28 @@ function AgentEditModal({
       {err && <div style={{ fontSize: 12, color: "#c00", marginTop: 8 }}>{err}</div>}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={() => void save()}
           disabled={busy}
-          style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
           title="Save all changes to this delegate."
         >
           {busy ? "Saving…" : "Save"}
-        </button>
-        <button onClick={onClose} disabled={busy} style={btn} title="Discard changes and close the editor.">
+        </Button>
+        <Button onClick={onClose} disabled={busy} size="md" title="Discard changes and close the editor.">
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="danger"
+          size="md"
           onClick={() => void remove()}
           disabled={busy}
-          style={{ ...btn, marginLeft: "auto", background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3" }}
+          style={{ marginLeft: "auto" }}
           title="Remove this delegate, editing agents.json."
         >
           Remove delegate
-        </button>
+        </Button>
       </div>
     </Modal>
   );
