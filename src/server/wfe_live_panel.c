@@ -339,7 +339,8 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
        * reviewed: interpretation caps below blocking, contradicted claims are
        * rejected — the same rule as the compute roundtable, re-grounded. */
       wfe_replay_worktree_set_root(pkt->workdir);
-      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend());
+      roundtable_verify_items_with(&rt, wfe_replay_worktree_backend(),
+                                   cfg.roundtable_require_evidence);
       wfe_replay_worktree_set_root(NULL);
       aimee_log(LOG_INFO, "wfe-panel",
                 "panel items: %d kept (verified=%d capped=%d degraded=%d), %d rejected",

@@ -37,11 +37,14 @@ extern "C"
                                          char *out_sev, size_t out_cap);
 
    /* Replay + grade every item in out->items, compacting kept items and filling
-    * out->rejected[] / the counts. Uses the real code index. */
-   void roundtable_verify_items(roundtable_result_t *out);
+    * out->rejected[] / the counts. Uses the real code index. `require_evidence` is the
+    * evidence gate: when non-zero, an item whose replay yields no structured evidence
+    * (an unfalsifiable opinion) is REJECTED, not kept-and-capped. */
+   void roundtable_verify_items(roundtable_result_t *out, int require_evidence);
 
    /* As above but against an explicit replay backend (for tests, no DB). */
-   void roundtable_verify_items_with(roundtable_result_t *out, const replay_backend_t *be);
+   void roundtable_verify_items_with(roundtable_result_t *out, const replay_backend_t *be,
+                                     int require_evidence);
 
    /* Markdown appendix listing rejected items + the verified/degraded/capped
     * counts. Returns a malloc'd string (caller frees), or NULL if nothing to add. */

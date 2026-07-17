@@ -636,7 +636,7 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
                                 roundtable_mode_t mode, int round, const char *brief,
-                                const char *context)
+                                const char *context, int require_evidence)
 {
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
@@ -652,12 +652,12 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
              "\"recommendation\":\"...\","
              "\"evidence\":{\"kind\":\"refs|symbol|search|none\",\"target\":\"symbol or search "
              "term\",\"project\":\"\",\"count\":0,\"factual\":true}}],\"overall\":\"...\"}. "
-             "evidence lets the engine VERIFY a factual structural claim against the code index "
-             "(you do NOT run it — just name it): kind=refs target=<fn> count=<claimed call "
-             "sites>; kind=symbol target=<symbol> (does it exist); kind=search target=<term>. Set "
-             "factual=true ONLY for a checkable code fact; for a judgment/opinion use kind=none "
-             "and factual=false (it will be capped below blocking). A blocking severity REQUIRES "
-             "reproducible factual evidence. "
+             "evidence lets the CHAIR VERIFY your claim against the code index (you do NOT run "
+             "it — just name what the chair should check): kind=refs target=<fn> count=<claimed "
+             "call sites>; kind=symbol target=<symbol> (does it exist); kind=search target=<term>. "
+             "Ground every finding with checkable evidence — name the refs/symbol/search the chair "
+             "can check, even for an interpretive concern. Set factual=true ONLY for a checkable "
+             "code fact; blocking REQUIRES reproducible factual evidence. "
              "Output raw JSON only — no markdown, no ``` code fences, no prose. "
              "Do not invent stable keys; the engine computes identity keys."
            : "Return the next complete draft. Incorporate useful peer input and do not describe "
@@ -670,6 +670,16 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
     * the bottom "return only JSON" instruction is tens of KB down the context and
     * long-context models drift to prose — which then parses to zero items. Leading
     * with the contract keeps it salient. */
+   /* The evidence VERDICT is conditional on the gate, so the prompt never promises a
+    * behavior the engine won't deliver: gate ON -> no-evidence findings are dropped
+    * (omit rather than fabricate); gate OFF -> legacy (kept but capped below blocking). */
+   const char *ev_verdict =
+       mode != ROUNDTABLE_REVIEW ? ""
+       : require_evidence
+           ? "\nEVIDENCE GATE: a finding with kind=none (no checkable evidence) is an "
+             "unfalsifiable opinion the chair will DISCARD — omit a genuinely non-verifiable "
+             "concern rather than fabricate evidence; it is dropped by design, not penalized."
+           : "\nA finding with kind=none is kept but capped below blocking (never blocking).";
    const char *head_note =
        mode == ROUNDTABLE_REVIEW
            ? "OUTPUT CONTRACT: reply with ONE raw JSON object "
@@ -712,7 +722,7 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
 
    size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) +
                    strlen(brief_block) + strlen(context_block) + strlen(mode_task) +
-                   strlen(role_hint) + strlen(head_note) + 512;
+                   strlen(ev_verdict) + strlen(role_hint) + strlen(head_note) + 512;
    char *prompt = malloc(needed);
    if (!prompt)
    {
@@ -724,9 +734,9 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
        prompt, needed,
        "You are one participant in an agent roundtable. Your role is to %s.\n\n%s"
        "TASK:\n%s\n\n%sCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
-       "ROUND %d INSTRUCTION:\n%s\n",
+       "ROUND %d INSTRUCTION:\n%s%s\n",
        role_hint, head_note, task ? task : "", context_block, artifact[0] ? artifact : "(none yet)",
-       peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task);
+       peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task, ev_verdict);
 
    free(owned_brief_block);
    free(owned_context_block);
@@ -1135,7 +1145,8 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    memset(personas, 0, sizeof(personas));
    for (int i = 0; i < ref_count; i++)
    {
-      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context);
+      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief, context,
+                                      cfg->roundtable_require_evidence);
       if (!prompts[i])
          goto fail;
       /* Per-participant persona is the system prompt (draft: engineer; review:
@@ -1218,7 +1229,8 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    for (int oi = 0; oi < ref_count; oi++)
    {
       int i = order[oi];
-      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief, context);
+      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief, context,
+                                        cfg->roundtable_require_evidence);
       if (!prompt)
          return -1;
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
@@ -1863,7 +1875,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
           * artifact reflects only kept items; the rejected appendix is appended
           * after. Gated; off => identical to prior behavior. */
          if (cfg->roundtable_replay_verify_enabled)
-            roundtable_verify_items(out);
+            roundtable_verify_items(out, cfg->roundtable_require_evidence);
          best_artifact = assemble_review_artifact(out);
          if (cfg->roundtable_replay_verify_enabled)
             roundtable_artifact_append_rejected(&best_artifact, out);
