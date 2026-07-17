@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, Modal } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
@@ -408,15 +408,6 @@ function AgentEditModal({
 
   const cliProvider = provider === "claude" || provider === "claude-code";
 
-  // Esc closes the modal.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const save = async () => {
     setBusy(true);
     setErr("");
@@ -473,166 +464,126 @@ function AgentEditModal({
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 30,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        padding: 24,
-        overflow: "auto",
-      }}
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit delegate"
+      headerExtra={<span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{agent.name}</span>}
+      size="lg"
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#fff",
-          borderRadius: 8,
-          maxWidth: 640,
-          width: "100%",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "12px 16px",
-            borderBottom: "1px solid #eee",
-            position: "sticky",
-            top: 0,
-            background: "#fff",
-            borderRadius: "8px 8px 0 0",
-          }}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <L label="provider" title="The backend provider used to run this delegate.">
+          <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp} disabled={busy}>
+            {(PROVIDERS.includes(provider) ? PROVIDERS : [provider, ...PROVIDERS]).map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </L>
+        <L label="model" title="The model identifier this delegate calls.">
+          <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} disabled={busy} />
+        </L>
+        <L
+          label={cliProvider ? "endpoint (optional for CLI)" : "endpoint"}
+          title="API base URL for this delegate; optional for CLI providers."
         >
-          <strong style={{ fontSize: 15 }}>Edit delegate</strong>
-          <span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{agent.name}</span>
-          <button onClick={onClose} style={{ ...btn, marginLeft: "auto" }} title="Close the editor without saving.">
-            Close
-          </button>
-        </div>
-
-        <div style={{ padding: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <L label="provider" title="The backend provider used to run this delegate.">
-              <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp} disabled={busy}>
-                {(PROVIDERS.includes(provider) ? PROVIDERS : [provider, ...PROVIDERS]).map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </L>
-            <L label="model" title="The model identifier this delegate calls.">
-              <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} disabled={busy} />
-            </L>
-            <L
-              label={cliProvider ? "endpoint (optional for CLI)" : "endpoint"}
-              title="API base URL for this delegate; optional for CLI providers."
-            >
-              <input
-                value={endpoint}
-                onChange={(e) => setEndpoint(e.target.value)}
-                style={inp}
-                placeholder="https://host:port/v1"
-                disabled={busy}
-              />
-            </L>
-            <L label="cost tier" title="Relative cost tier used when routing picks a delegate.">
-              <input type="number" value={costTier} onChange={(e) => setCostTier(e.target.value)} style={inp} min={0} disabled={busy} />
-            </L>
-            <L label="max turns (-1 = default)" title="Cap on turns per run for this delegate; -1 uses the default.">
-              <input type="number" value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} style={inp} disabled={busy} />
-            </L>
-            <L label="max parallel" title="Maximum number of concurrent runs of this delegate.">
-              <input type="number" value={maxParallel} onChange={(e) => setMaxParallel(e.target.value)} style={inp} min={0} disabled={busy} />
-            </L>
-            <L label="context window (tok, 0 = auto)" title="Context window in tokens; 0 auto-detects.">
-              <input type="number" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} style={inp} min={0} disabled={busy} />
-            </L>
-            <L label="API key (blank = keep current)" title="Set an API key or $ENV_VAR reference; leave blank to keep the current key.">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                style={inp}
-                placeholder="sk-…  or  $ENV_VAR"
-                disabled={busy}
-              />
-            </L>
-          </div>
-
-          <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
-            <label
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
-              title="Whether this delegate is available for routing."
-            >
-              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
-              enabled
-            </label>
-            <label
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
-              title="Whether this delegate is allowed to use tools."
-            >
-              <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} disabled={busy} />
-              tools enabled
-            </label>
-            <label
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
-              title="When on, this agent can only be the primary — it is never routed as a delegate. Recommended for a Claude subscription (ToS)."
-            >
-              <input type="checkbox" checked={primaryOnly} onChange={(e) => setPrimaryOnly(e.target.checked)} disabled={busy} />
-              primary agent only
-            </label>
-          </div>
-
-          <ChipSelect
-            label="roles"
-            selected={roles}
-            options={knownRoles}
-            onChange={setRoles}
-            hint="Toggle whether this delegate serves this role."
+          <input
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
+            style={inp}
+            placeholder="https://host:port/v1"
+            disabled={busy}
           />
-          <ChipSelect
-            label="personas"
-            selected={personas}
-            options={knownPersonas}
-            onChange={setPersonas}
-            emptyHint="(none set = all)"
-            hint="Toggle whether this delegate is bound to this persona (none set = all)."
+        </L>
+        <L label="cost tier" title="Relative cost tier used when routing picks a delegate.">
+          <input type="number" value={costTier} onChange={(e) => setCostTier(e.target.value)} style={inp} min={0} disabled={busy} />
+        </L>
+        <L label="max turns (-1 = default)" title="Cap on turns per run for this delegate; -1 uses the default.">
+          <input type="number" value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} style={inp} disabled={busy} />
+        </L>
+        <L label="max parallel" title="Maximum number of concurrent runs of this delegate.">
+          <input type="number" value={maxParallel} onChange={(e) => setMaxParallel(e.target.value)} style={inp} min={0} disabled={busy} />
+        </L>
+        <L label="context window (tok, 0 = auto)" title="Context window in tokens; 0 auto-detects.">
+          <input type="number" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} style={inp} min={0} disabled={busy} />
+        </L>
+        <L label="API key (blank = keep current)" title="Set an API key or $ENV_VAR reference; leave blank to keep the current key.">
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            style={inp}
+            placeholder="sk-…  or  $ENV_VAR"
+            disabled={busy}
           />
-
-          {err && <div style={{ fontSize: 12, color: "#c00", marginTop: 8 }}>{err}</div>}
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-            <button
-              onClick={() => void save()}
-              disabled={busy}
-              style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
-              title="Save all changes to this delegate."
-            >
-              {busy ? "Saving…" : "Save"}
-            </button>
-            <button onClick={onClose} disabled={busy} style={btn} title="Discard changes and close the editor.">
-              Cancel
-            </button>
-            <button
-              onClick={() => void remove()}
-              disabled={busy}
-              style={{ ...btn, marginLeft: "auto", background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3" }}
-              title="Remove this delegate, editing agents.json."
-            >
-              Remove delegate
-            </button>
-          </div>
-        </div>
+        </L>
       </div>
-    </div>
+
+      <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+          title="Whether this delegate is available for routing."
+        >
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
+          enabled
+        </label>
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+          title="Whether this delegate is allowed to use tools."
+        >
+          <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} disabled={busy} />
+          tools enabled
+        </label>
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+          title="When on, this agent can only be the primary — it is never routed as a delegate. Recommended for a Claude subscription (ToS)."
+        >
+          <input type="checkbox" checked={primaryOnly} onChange={(e) => setPrimaryOnly(e.target.checked)} disabled={busy} />
+          primary agent only
+        </label>
+      </div>
+
+      <ChipSelect
+        label="roles"
+        selected={roles}
+        options={knownRoles}
+        onChange={setRoles}
+        hint="Toggle whether this delegate serves this role."
+      />
+      <ChipSelect
+        label="personas"
+        selected={personas}
+        options={knownPersonas}
+        onChange={setPersonas}
+        emptyHint="(none set = all)"
+        hint="Toggle whether this delegate is bound to this persona (none set = all)."
+      />
+
+      {err && <div style={{ fontSize: 12, color: "#c00", marginTop: 8 }}>{err}</div>}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+        <button
+          onClick={() => void save()}
+          disabled={busy}
+          style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+          title="Save all changes to this delegate."
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button onClick={onClose} disabled={busy} style={btn} title="Discard changes and close the editor.">
+          Cancel
+        </button>
+        <button
+          onClick={() => void remove()}
+          disabled={busy}
+          style={{ ...btn, marginLeft: "auto", background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3" }}
+          title="Remove this delegate, editing agents.json."
+        >
+          Remove delegate
+        </button>
+      </div>
+    </Modal>
   );
 }
 
