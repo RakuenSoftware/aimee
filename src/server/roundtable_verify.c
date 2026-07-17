@@ -91,7 +91,8 @@ static int idkey_seen(const roundtable_result_t *out, int upto, const char *idke
    return -1;
 }
 
-void roundtable_verify_items_with(roundtable_result_t *out, const replay_backend_t *be)
+void roundtable_verify_items_with(roundtable_result_t *out, const replay_backend_t *be,
+                                  int require_evidence)
 {
    if (!out)
       return;
@@ -115,6 +116,12 @@ void roundtable_verify_items_with(roundtable_result_t *out, const replay_backend
       char sev[16];
       verify_action_t act =
           roundtable_grade_item(st, it.evidence.factual, it.severity, sev, sizeof(sev));
+
+      /* Evidence gate: a finding the chair cannot check against the code (no structured
+       * evidence) is an unfalsifiable opinion — reject it rather than keep it capped, so
+       * the primary never has to triage a claim no one can verify or refute. */
+      if (require_evidence && st == REPLAY_NO_EVIDENCE)
+         act = VERIFY_REJECT;
 
       if (act == VERIFY_REJECT)
       {
@@ -156,12 +163,12 @@ void roundtable_verify_items_with(roundtable_result_t *out, const replay_backend
    out->item_count = keep;
 }
 
-void roundtable_verify_items(roundtable_result_t *out)
+void roundtable_verify_items(roundtable_result_t *out, int require_evidence)
 {
    /* Use the process-registered backend (the server installs a kb_client-backed
     * one at startup). NULL backend => every item degrades (kept, unverified). The
     * verifier references no index/db2/kb symbol directly, so it links everywhere. */
-   roundtable_verify_items_with(out, evidence_replay_active_backend());
+   roundtable_verify_items_with(out, evidence_replay_active_backend(), require_evidence);
 }
 
 char *roundtable_render_rejected(const roundtable_result_t *out)

@@ -314,6 +314,8 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_BOOL},
     {"roundtable.replay_verify_enabled", offsetof(config_t, roundtable_replay_verify_enabled),
      sizeof(int), 1, CFG_BOOL},
+    {"roundtable.require_evidence", offsetof(config_t, roundtable_require_evidence), sizeof(int), 1,
+     CFG_BOOL},
     {"verify_cross_project", offsetof(config_t, verify_cross_project), sizeof(int), 1, CFG_BOOL},
     {"roundtable.max_rounds", offsetof(config_t, roundtable_max_rounds), sizeof(int), 0, CFG_INT},
     {"roundtable.converge_threshold", offsetof(config_t, roundtable_converge_threshold),

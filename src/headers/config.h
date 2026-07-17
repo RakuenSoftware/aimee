@@ -918,6 +918,15 @@ typedef struct config
     * appendix — byte-identical to pre-Part-A. */
    int roundtable_replay_verify_enabled;
 
+   /* roundtable_require_evidence (default 1, ON): the evidence gate. A review finding
+    * with NO structured evidence (kind=none) is an unfalsifiable opinion the chair
+    * cannot check against the code, so it is REJECTED rather than kept-but-capped —
+    * members may only raise findings they back with checkable evidence (refs/symbol/
+    * search). Only meaningful when roundtable_replay_verify_enabled is on (the chair
+    * runs). Set 0 to restore the legacy behavior (interpretive items capped, not
+    * dropped). */
+   int roundtable_require_evidence;
+
    /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
     * gate apply only to the session's current project (the repo the session is
     * rooted in). Cross-project repositories are neither auto-configured (no
