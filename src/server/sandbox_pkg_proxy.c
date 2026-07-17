@@ -284,7 +284,11 @@ int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const c
    unsigned long up_bytes = 0, down_bytes = 0;
    if (kind == SBX_REQ_CONNECT)
    {
-      if (write_all(client_fd, "HTTP/1.1 200 Connection Established\r\n\r\n", 38) == 0)
+      /* sizeof-1, not a hand-counted length: the literal is 39 bytes and a wrong
+       * count drops the final CRLF, so the client never sees the \r\n\r\n header
+       * terminator, never starts its TLS handshake, and the tunnel hangs. */
+      static const char connect_ok[] = "HTTP/1.1 200 Connection Established\r\n\r\n";
+      if (write_all(client_fd, connect_ok, sizeof(connect_ok) - 1) == 0)
          proxy_pump(client_fd, up, &up_bytes, &down_bytes);
    }
    else /* SBX_REQ_ABSOLUTE */
