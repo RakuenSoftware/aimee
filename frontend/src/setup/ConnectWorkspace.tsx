@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@rakuensoftware/smoothgui';
 import { parseOwner, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
 
 /* Wizard — Workspaces & projects. A workspace is your collection of projects: the
@@ -174,9 +175,9 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
             placeholder="owner URL (e.g. github.com/RakuenSoftware)"
             value={ownerInput} onChange={(e) => setOwnerInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && ownerInput.trim() && !listing) listRepos(); }} />
-          <button style={primaryBtn} disabled={listing || !ownerInput.trim()} onClick={listRepos}>
+          <Button variant="primary" disabled={listing || !ownerInput.trim()} onClick={listRepos}>
             {listing ? 'Listing…' : 'List repositories'}
-          </button>
+          </Button>
         </div>
         <input style={{ ...input, width: '100%' }} type="password" autoComplete="off"
           placeholder="access token — only for a private/self-hosted org; saved server-side per host"
@@ -207,9 +208,9 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
             })}
           </div>
           <div>
-            <button style={primaryBtn} disabled={cloning || selectedCount === 0} onClick={cloneSelected}>
+            <Button variant="primary" disabled={cloning || selectedCount === 0} onClick={cloneSelected}>
               {cloning ? 'Cloning…' : `Clone selected (${selectedCount})`}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -239,9 +240,9 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
       {err && <div style={{ fontSize: 12.5, color: '#c62828' }}>{err}</div>}
 
       <div>
-        <button style={{ ...primaryBtn, background: '#2c8f56' }} onClick={onDone}>
+        <Button variant="primary" onClick={onDone}>
           {projects.length > 0 ? 'Done' : 'Continue'}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -250,10 +251,6 @@ export default function ConnectWorkspace({ onDone }: ConnectWorkspaceProps) {
 const input: React.CSSProperties = {
   boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
-};
-const primaryBtn: React.CSSProperties = {
-  padding: '7px 16px', borderRadius: 7, border: '1px solid #2c6', background: '#2c8f56',
-  color: '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
 };
 const linkBtn: React.CSSProperties = {
   background: 'none', border: 'none', color: '#3a6ea5', cursor: 'pointer', fontSize: 12, padding: 0,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@rakuensoftware/smoothgui';
 
 /* Wizard — Connection (git hosts). Authenticate aimee-server to the git hosts it
  * will clone from, so the next step (Workspaces & projects) can enumerate + clone
@@ -440,13 +441,14 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
               placeholder={`host (e.g. ${meta.defaultHost || 'gitea.example.com'})`}
               value={oauthHost} onChange={(e) => setOauthHost(e.target.value)} />
           )}
-          <button
-            style={{ ...primaryBtn, background: configured ? '#2c8f56' : '#888', borderColor: configured ? '#2c6' : '#888' }}
+          <Button
+            variant="primary"
+            style={configured ? undefined : { background: '#888', borderColor: '#888' }}
             disabled={busy || !!pending || !configured}
             onClick={provider === 'github' && webAvailable ? startWebSignIn : startSignIn}
           >
             {provider === 'github' && webAvailable ? 'Sign in with GitHub' : 'Sign in'}
-          </button>
+          </Button>
         </div>
         {!configured && !pending && (
           <div style={{ fontSize: 11.5, color: '#a67c00' }}>
@@ -475,8 +477,8 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
                   placeholder="Client secret (optional — enables one-click)"
                   value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
               )}
-              <button style={ghostBtn} disabled={busy || !clientId.trim() || (meta.needsHost && !effHost)}
-                onClick={saveConfig}>Save</button>
+              <Button variant="default" disabled={busy || !clientId.trim() || (meta.needsHost && !effHost)}
+                onClick={saveConfig}>Save</Button>
             </div>
           </div>
         </details>
@@ -495,7 +497,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
             value={credHost} onChange={(e) => setCredHost(e.target.value)} />
           <input style={{ ...input, flex: 2, minWidth: 200 }} type="password" autoComplete="off"
             placeholder="access token" value={credToken} onChange={(e) => setCredToken(e.target.value)} />
-          <button style={ghostBtn} disabled={busy || !credHost.trim() || !credToken.trim()} onClick={addCred}>Save</button>
+          <Button variant="default" disabled={busy || !credHost.trim() || !credToken.trim()} onClick={addCred}>Save</Button>
         </div>
         {hosts.length > 0 && (
           <div style={{ display: 'grid', gap: 4 }}>
@@ -503,8 +505,8 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
               <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 13, fontFamily: 'monospace', flex: 1 }}>{h}</span>
                 <span style={{ fontSize: 11, color: '#2a7' }}>● token set</span>
-                <button style={{ ...ghostBtn, borderColor: '#d99', color: '#c33' }} disabled={busy}
-                  onClick={() => removeCred(h)}>remove</button>
+                <Button variant="danger" disabled={busy}
+                  onClick={() => removeCred(h)}>remove</Button>
               </div>
             ))}
           </div>
@@ -525,9 +527,9 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
           placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----'}
           value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button style={ghostBtn} disabled={busy || !sshKey.trim()} onClick={addSSHKey}>Save SSH key</button>
-          <button style={{ ...ghostBtn, borderColor: '#d99', color: '#c33' }} disabled={busy}
-            onClick={removeSSHKey}>Clear SSH key</button>
+          <Button variant="default" disabled={busy || !sshKey.trim()} onClick={addSSHKey}>Save SSH key</Button>
+          <Button variant="danger" disabled={busy}
+            onClick={removeSSHKey}>Clear SSH key</Button>
         </div>
       </section>
       )}
@@ -536,9 +538,9 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
       {msg && <div style={{ fontSize: 12.5, color: '#2c8f56' }}>{msg}</div>}
 
       <div>
-        <button style={primaryBtn} onClick={onDone}>
+        <Button variant="primary" onClick={onDone}>
           {doneLabel ?? (hosts.length > 0 ? 'Continue' : 'Continue without connecting')}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -548,14 +550,6 @@ const sectionTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color
 const input: React.CSSProperties = {
   boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
-};
-const primaryBtn: React.CSSProperties = {
-  padding: '7px 16px', borderRadius: 7, border: '1px solid #2c6', background: '#2c8f56',
-  color: '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
-};
-const ghostBtn: React.CSSProperties = {
-  padding: '6px 12px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',
-  color: '#446', cursor: 'pointer', fontSize: 13,
 };
 const methodTab: React.CSSProperties = {
   padding: '6px 14px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',

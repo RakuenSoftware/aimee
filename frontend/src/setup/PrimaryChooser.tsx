@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@rakuensoftware/smoothgui';
 
 /* Provider chooser — wizard page 1 AND the Agents tab's "add delegate" first
  * window. Four supported providers, two shapes:
@@ -85,15 +86,6 @@ const SUB_SPECS: SubSpec[] = [
   },
 ];
 
-const btn = (bg: string): React.CSSProperties => ({
-  padding: '7px 16px', borderRadius: 7, border: `1px solid ${bg}`, background: bg,
-  color: '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
-});
-const primaryBtn = btn('#2c8f56');
-const ghostBtn: React.CSSProperties = {
-  padding: '6px 12px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',
-  color: '#446', cursor: 'pointer', fontSize: 13,
-};
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
@@ -325,9 +317,9 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <button onClick={reset} style={{ ...ghostBtn, marginBottom: 12 }} disabled={busy || polling}>
+      <Button variant="default" onClick={reset} style={{ marginBottom: 12 }} disabled={busy || polling}>
         ← Choose a different {delegate ? 'provider' : 'primary'}
-      </button>
+      </Button>
 
       {apiSpec && (
         <div style={{ display: 'grid', gap: 12 }}>
@@ -358,9 +350,9 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
           </div>
           <PrimaryOnlyToggle checked={primaryOnly} disabled={busy} onChange={setPrimaryOnly} />
           <div>
-            <button style={primaryBtn} disabled={busy} onClick={submitApi}>
+            <Button variant="primary" disabled={busy} onClick={submitApi}>
               {busy ? 'Saving…' : delegate ? 'Add delegate' : 'Save & set as primary'}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -376,9 +368,9 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
               </p>
               <PrimaryOnlyToggle checked={primaryOnly} disabled={busy} onChange={setPrimaryOnly} />
               <div>
-                <button style={primaryBtn} disabled={busy} onClick={startSub}>
+                <Button variant="primary" disabled={busy} onClick={startSub}>
                   {busy ? 'Starting…' : `Sign in with ${subSpec.label}`}
-                </button>
+                </Button>
               </div>
             </>
           ) : (
@@ -404,9 +396,9 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
                   </div>
                   <input style={input} value={codeBack} onChange={(e) => setCodeBack(e.target.value)} placeholder="paste code" />
                   <div>
-                    <button style={primaryBtn} disabled={busy} onClick={submitCodeBack}>
+                    <Button variant="primary" disabled={busy} onClick={submitCodeBack}>
                       {busy ? 'Submitting…' : 'Submit code'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
