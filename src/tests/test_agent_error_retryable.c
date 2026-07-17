@@ -36,6 +36,12 @@ int main(void)
     * string), so the "at concurrency limit" message must stay non-retryable — else
     * it would wrongly record provider health and be misclassified as a fault. */
    assert(agent_error_is_retryable("agent 'codex' at concurrency limit (max_parallel=2)") == 0);
+   /* The aimee-error slug tag must not flip that classification: a digit-free slug
+    * (vs a numeric code that could contain "502"/"503"/...) keeps it non-retryable. */
+   assert(
+       agent_error_is_retryable(
+           "agent 'codex' at concurrency limit (max_parallel=2) [aimee_err=concurrency_limit]") ==
+       0);
 
    printf("  classify: ok\n");
    printf("All agent_error_retryable tests passed.\n");

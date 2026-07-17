@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
+#include "aimee_errors.h"
 #include "db1.h"
 #include "delegate_role.h"
 #include "skill_curator.h"
@@ -172,8 +173,14 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
    {
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", ag->name);
-      snprintf(out->error, sizeof(out->error), "agent '%s' at concurrency limit (max_parallel=%d)",
-               ag->name, ag->max_parallel);
+      /* Aimee-internal back-pressure, not a provider fault: tag it with the aimee
+       * error SLUG (not the numeric code) so it's identifiable wherever out->error
+       * surfaces. The slug carries no digits, so it can't collide with
+       * agent_error_is_retryable's "502"/"503"/... substring scan the way a numeric
+       * code could; the "at concurrency limit" substring stays intact too. */
+      snprintf(out->error, sizeof(out->error),
+               "agent '%s' at concurrency limit (max_parallel=%d) [aimee_err=%s]", ag->name,
+               ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));
       return AGENT_RC_AT_LIMIT;
    }
    int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,

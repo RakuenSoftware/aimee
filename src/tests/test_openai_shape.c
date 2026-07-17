@@ -151,6 +151,8 @@ int main(void)
       assert(strcmp(aimee_err_slug(AIMEE_ERR_NO_PRIMARY), "no_primary") == 0);
       assert(strcmp(aimee_err_slug(AIMEE_ERR_ROUTE_UNRESOLVED), "route_unresolved") == 0);
       assert(strcmp(aimee_err_slug(AIMEE_ERR_BREAKER_OPEN), "breaker_open") == 0);
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT), "concurrency_limit") == 0);
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_REQUEST_PIPELINE), "request_pipeline") == 0);
       assert(strcmp(aimee_err_slug(4242), "unknown") == 0);
    }
 
