@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Panel, Badge, InlineStatus } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, InlineStatus, Button } from "@rakuensoftware/smoothgui";
 import { FIELD_HELP, SECTION_HELP, RESTART_KEYS } from "./settingsHelp";
 import { resetAll as resetTutorials } from "../help/tutorialState";
 import { setDismissed as setSetupDismissed, requestOpenWizard } from "../setup/setupState";
@@ -56,14 +56,6 @@ function category(key: string): string {
   return "Other";
 }
 
-const btn: React.CSSProperties = {
-  padding: "3px 10px",
-  fontSize: 12,
-  borderRadius: 6,
-  border: "1px solid #ccc",
-  background: "#fff",
-  cursor: "pointer",
-};
 const input: React.CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
@@ -146,29 +138,29 @@ export default function Settings() {
           onChange={(e) => setFilter(e.target.value)}
           style={{ ...input, fontFamily: "system-ui", minWidth: 220 }}
         />
-        <button onClick={refresh} style={btn}>
+        <Button size="sm" onClick={refresh}>
           Reload
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           onClick={() => {
             resetTutorials();
             setStatus({ kind: "ok", msg: "Tab tutorials will show again on your next visit to each tab." });
           }}
-          style={btn}
           title="Show the per-tab tutorial overlays again"
         >
           Replay tab tutorials
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           onClick={() => {
             setSetupDismissed(false);
             requestOpenWizard();
           }}
-          style={btn}
           title="Re-open the first-run setup wizard"
         >
           Re-run setup
-        </button>
+        </Button>
         <InlineStatus status={status} />
       </div>
       <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
@@ -254,17 +246,17 @@ function SettingRow({
       </div>
       <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
         {typeof value === "boolean" ? (
-          <button
+          <Button
+            size="sm"
             onClick={() => onChange(!value)}
-            style={{
-              ...btn,
-              minWidth: 44,
-              background: value ? "#1f7a3d" : "#fff",
-              color: value ? "#fff" : "#555",
-            }}
+            style={
+              value
+                ? { minWidth: 44, background: "#1f7a3d", color: "#fff", borderColor: "#1f7a3d" }
+                : { minWidth: 44 }
+            }
           >
             {value ? "on" : "off"}
-          </button>
+          </Button>
         ) : typeof value === "number" ? (
           <input
             type="number"
@@ -281,12 +273,12 @@ function SettingRow({
         )}
         {dirty && (
           <>
-            <button onClick={onSave} style={{ ...btn, borderColor: "#2563eb", color: "#2563eb" }}>
+            <Button variant="primary" size="sm" onClick={onSave}>
               save
-            </button>
-            <button onClick={onReset} style={btn} title="discard change">
+            </Button>
+            <Button size="sm" onClick={onReset} title="discard change">
               ↺
-            </button>
+            </Button>
           </>
         )}
       </div>
