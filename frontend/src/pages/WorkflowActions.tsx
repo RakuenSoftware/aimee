@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, Badge, Spinner, InlineStatus } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, EmptyState } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
 
@@ -445,7 +445,7 @@ export default function WorkflowActions() {
         )}
         <div style={{ marginTop: 8 }}>
           {items.length === 0 && (
-            <div style={{ color: "#999", fontSize: 13 }}>No proposals yet.</div>
+            <EmptyState message="No proposals yet." inline />
           )}
           {items.map((it) => {
             const s = statusOf(it);
@@ -575,7 +575,7 @@ export default function WorkflowActions() {
                   dangerouslySetInnerHTML={{ __html: renderMd(proposalMd) }}
                 />
               ) : (
-                <div style={{ color: "#999", fontSize: 13 }}>No proposal markdown.</div>
+                <EmptyState message="No proposal markdown." inline />
               )}
             </Panel>
           </>
@@ -936,7 +936,7 @@ function StatusHeader({ item }: { item: Item }) {
 }
 
 function Timeline({ events }: { events: WfEvent[] }) {
-  if (!events.length) return <div style={{ color: "#999", fontSize: 13 }}>No events yet.</div>;
+  if (!events.length) return <EmptyState message="No events yet." inline />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       {events.map((e) => (

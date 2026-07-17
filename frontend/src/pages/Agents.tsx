@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Panel, Badge, Spinner, Modal, InlineStatus } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
@@ -345,7 +345,7 @@ function AgentCard({
               )}
             </>
           ) : (
-            <div style={{ fontSize: 13, color: "#aaa" }}>no runs recorded yet</div>
+            <EmptyState message="no runs recorded yet" inline />
           )}
         </div>
       </div>
