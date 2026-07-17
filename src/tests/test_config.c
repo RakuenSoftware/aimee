@@ -60,10 +60,12 @@ int main(void)
       assert(fabs(cfg.code_hybrid_weight_graph - 1.0) < 1e-9);
       assert(fabs(cfg.code_hybrid_rrf_k - 60.0) < 1e-9);
       assert(cfg.guardrails_blast_radius_advisory_enabled == 0);
-      /* The autonomous live forge (F4) defaults ON (operator ruling 2026-07-13);
-       * the merge-target rail still bounds every op, and wfe_live_forge_enabled:
-       * false opts out. */
-      assert(cfg.wfe_live_forge_enabled == 1);
+      /* The autonomous live forge (F4) defaults OFF (2026-07-17): it does real
+       * git push + PR + merge, so it stays opt-in while the autonomous pipeline is
+       * under test. Set wfe_live_forge_enabled true to opt in. The proposals auto-scan
+       * likewise defaults off, so pending proposals are filed one at a time by a human. */
+      assert(cfg.wfe_live_forge_enabled == 0);
+      assert(cfg.wfe_proposals_autoscan_enabled == 0);
       assert(cfg.db1_path[0] != '\0');
       assert(cfg.guardrails_semantic_advisory_only == 1);
       assert(cfg.skills_review_nudge_interval == 10);

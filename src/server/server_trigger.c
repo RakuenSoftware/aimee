@@ -75,6 +75,40 @@ int handle_trigger_fire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return server_send_error(conn, "unauthorized", NULL);
    }
 
+   /* Manual one-at-a-time proposal fire: source=proposals + proposal=<name> files exactly
+    * that pending proposal through the WFE pipeline, bypassing the default-off auto scan
+    * (wfe_proposals_autoscan_enabled). This is the controlled 'send one proposal at a time'
+    * path used while the autonomous pipeline is under test. */
+   {
+      cJSON *src = cJSON_GetObjectItemCaseSensitive(req, "source");
+      cJSON *prop = cJSON_GetObjectItemCaseSensitive(req, "proposal");
+      if (src && cJSON_IsString(src) && strcmp(src->valuestring, "proposals") == 0 && prop &&
+          cJSON_IsString(prop) && prop->valuestring[0])
+      {
+         cJSON *ws = cJSON_GetObjectItemCaseSensitive(req, "workspace");
+         if (!ws || !cJSON_IsString(ws) || !ws->valuestring[0])
+            return server_send_error(conn, "workspace is required for a proposals fire", NULL);
+         cJSON *pl = cJSON_GetObjectItemCaseSensitive(req, "pipeline");
+         const char *pipeline =
+             (pl && cJSON_IsString(pl) && pl->valuestring[0]) ? pl->valuestring : "build";
+         cJSON *ev = cJSON_GetObjectItemCaseSensitive(req, "event");
+         const char *event = (ev && cJSON_IsString(ev)) ? ev->valuestring : "";
+         cJSON *rf = cJSON_GetObjectItemCaseSensitive(req, "ref");
+         const char *ref = (rf && cJSON_IsString(rf)) ? rf->valuestring : "";
+         cJSON *md = cJSON_GetObjectItemCaseSensitive(req, "mode");
+         const char *mode = (md && cJSON_IsString(md)) ? md->valuestring : "";
+         char wid[80];
+         if (trigger_proposals_file_one(ws->valuestring, pipeline, event, ref, mode,
+                                        prop->valuestring, wid) != 0)
+            return server_send_error(
+                conn, "proposal not filed (not found, already filed, or error)", NULL);
+         cJSON *resp = jo_ok();
+         cJSON_AddStringToObject(resp, "work_item_id", wid);
+         cJSON_AddStringToObject(resp, "proposal", prop->valuestring);
+         return server_send_ok(conn, resp);
+      }
+   }
+
    /* 3. Extract required + optional fields */
    cJSON *task_item = cJSON_GetObjectItemCaseSensitive(req, "task");
    if (!task_item || !cJSON_IsString(task_item) || !task_item->valuestring[0])

@@ -1118,6 +1118,22 @@ static void test_trigger_source_registry(void)
 /* main                                                                */
 /* ------------------------------------------------------------------ */
 
+static void test_proposal_name_matches(void)
+{
+   /* full repo-relative path, bare basename, and basename-without-.md all match */
+   assert(proposal_name_matches("docs/proposals/pending/foo.md", "docs/proposals/pending/foo.md"));
+   assert(proposal_name_matches("docs/proposals/pending/foo.md", "foo.md"));
+   assert(proposal_name_matches("docs/proposals/pending/foo.md", "foo"));
+   /* non-matches, including near-misses that must not over-read `want` */
+   assert(!proposal_name_matches("docs/proposals/pending/foo.md", "bar"));
+   assert(!proposal_name_matches("docs/proposals/pending/foobar.md", "foo"));
+   assert(!proposal_name_matches("docs/proposals/pending/foo.mdx", "foo"));
+   assert(!proposal_name_matches("docs/proposals/pending/foo.md", ""));
+   assert(!proposal_name_matches(NULL, "foo"));
+   assert(!proposal_name_matches("docs/proposals/pending/foo.md", NULL));
+   printf("  proposal_name_matches: ok\n");
+}
+
 int main(void)
 {
    printf("test_trigger\n");
@@ -1165,6 +1181,7 @@ int main(void)
    test_scan_proposals_applies_cost_cap();
    test_scan_proposals_enforces_max_concurrent();
    test_trigger_source_registry();
+   test_proposal_name_matches();
    printf("All tests passed.\n");
    return 0;
 }

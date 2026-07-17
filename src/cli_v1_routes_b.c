@@ -285,18 +285,37 @@ static cJSON *marshal_trigger_fire(int argc, char **argv)
 
    const char *source = rpc_get(&opts, "source");
    const char *task = rpc_get(&opts, "task");
-   if (!source || !source[0] || !task || !task[0])
+   const char *proposal = rpc_get(&opts, "proposal");
+
+   /* Proposals one-at-a-time fire: `--source proposals --proposal <name> --workspace <ws>`
+    * files exactly that pending proposal through the WFE pipeline (no --task needed). */
+   int is_proposal_fire = source && strcmp(source, "proposals") == 0 && proposal && proposal[0];
+
+   if (!source || !source[0] || (!is_proposal_fire && (!task || !task[0])))
    {
-      fprintf(stderr, "aimee: usage: aimee trigger fire --source <source> --task <task> "
-                      "[--event <event>] [--workspace <ws>] [--token <auth_token>]\n");
+      fprintf(stderr,
+              "aimee: usage:\n"
+              "  aimee trigger fire --source <source> --task <task> [--event <e>] "
+              "[--workspace <ws>] [--token <t>]\n"
+              "  aimee trigger fire --source proposals --proposal <name> --workspace <ws> "
+              "[--pipeline <wf>] [--ref <ref>] [--mode <m>] [--event <dir>] [--token <t>]\n");
       return NULL;
    }
 
    cJSON *req = marshal_no_args("trigger.fire");
    cJSON_AddStringToObject(req, "source", source);
-   cJSON_AddStringToObject(req, "task", task);
+   if (task && task[0])
+      cJSON_AddStringToObject(req, "task", task);
 
    const char *v;
+   if ((v = rpc_get(&opts, "proposal")) && v[0])
+      cJSON_AddStringToObject(req, "proposal", v);
+   if ((v = rpc_get(&opts, "pipeline")) && v[0])
+      cJSON_AddStringToObject(req, "pipeline", v);
+   if ((v = rpc_get(&opts, "ref")) && v[0])
+      cJSON_AddStringToObject(req, "ref", v);
+   if ((v = rpc_get(&opts, "mode")) && v[0])
+      cJSON_AddStringToObject(req, "mode", v);
    if ((v = rpc_get(&opts, "event")) && v[0])
       cJSON_AddStringToObject(req, "event", v);
    if ((v = rpc_get(&opts, "workspace")) && v[0])
