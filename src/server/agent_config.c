@@ -2003,7 +2003,13 @@ static int codex_oauth_vault_token(char *buf, size_t len)
          got = 1;
       /* aimee's canonical home (honors AIMEE_HOME) — on an appliance the process
        * has AIMEE_HOME set but no HOME, so the on-disk codex auth at
-       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below. */
+       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below.
+       * This server-wide on-disk read (not a per-request vault principal) is
+       * deliberate: the /v1 ingress resolves creds here for BOTH the buffered and
+       * streaming paths, and the streaming ingress has no captured per-request
+       * identity, so a vault-principal approach could not cover streaming codex.
+       * The raw HOME branch below is kept for AIMEE_PROFILE setups, where
+       * aimee_home() points at the profile dir rather than the real ~/.codex. */
       const char *ahome = aimee_home();
       if (!got && ahome && ahome[0])
       {

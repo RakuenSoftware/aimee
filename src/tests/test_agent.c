@@ -588,7 +588,9 @@ static void test_codex_oauth_request_creds(void)
  * runs the server with AIMEE_HOME set but no HOME, so <AIMEE_HOME>/.codex/auth.json
  * must be found or codex fails /v1 auth with a route-unresolved error even though
  * a valid token is on disk. (exp is unknown for a non-JWT token -> no refresh, so
- * this stays hermetic: no network.) */
+ * this stays hermetic: no network.) The two sub-cases pin BOTH the new appliance
+ * path (AIMEE_HOME set, no HOME) and the unchanged dev-box fallback (HOME set,
+ * AIMEE_HOME unset), so the reordering never regresses the classic HOME lookup. */
 static void test_codex_oauth_reads_aimee_home(void)
 {
    char dir[] = "/tmp/aimee-codex-home.XXXXXX";
@@ -599,14 +601,24 @@ static void test_codex_oauth_reads_aimee_home(void)
    snprintf(authpath, sizeof(authpath), "%s/auth.json", sub);
    FILE *f = fopen(authpath, "wb");
    assert(f != NULL);
-   fputs("{\"tokens\":{\"access_token\":\"AH-ACCESS\",\"refresh_token\":\"AH-REFRESH\"}}", f);
+   /* Distinctive token so a stray codex-auth.json elsewhere can't masquerade as a
+    * pass (a different token would fail the assert, not silently satisfy it). */
+   fputs("{\"tokens\":{\"access_token\":\"AH-ACCESS-3f9c1\",\"refresh_token\":\"AH-REFRESH\"}}", f);
    fclose(f);
 
-   char *old_home = getenv("AIMEE_HOME");
-   char saved[600] = "";
+   /* Restore-vs-unset must key on NULL, not emptiness, so an original AIMEE_HOME=""
+    * (or HOME="") is restored to empty rather than being unset. */
+   const char *old_aimee_home = getenv("AIMEE_HOME");
+   const char *old_home = getenv("HOME");
+   const char *old_profile = getenv("AIMEE_PROFILE");
+   char sa[600] = "", sh[600] = "", sp[128] = "";
+   if (old_aimee_home)
+      snprintf(sa, sizeof(sa), "%s", old_aimee_home);
    if (old_home)
-      snprintf(saved, sizeof(saved), "%s", old_home);
-   setenv("AIMEE_HOME", dir, 1);
+      snprintf(sh, sizeof(sh), "%s", old_home);
+   if (old_profile)
+      snprintf(sp, sizeof(sp), "%s", old_profile);
+   unsetenv("AIMEE_PROFILE"); /* keep aimee_home() == the raw home in both sub-cases */
    agent_set_request_codex_creds(NULL, NULL); /* no per-turn token: force the on-disk path */
 
    agent_t ag;
@@ -616,13 +628,32 @@ static void test_codex_oauth_reads_aimee_home(void)
    snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
 
+   /* (1) Appliance: AIMEE_HOME set, HOME cleared -> the new aimee_home() branch is
+    *     the ONLY thing that can find the token. */
+   setenv("AIMEE_HOME", dir, 1);
+   unsetenv("HOME");
+   auth[0] = '\0';
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
-   assert(strstr(auth, "Bearer AH-ACCESS") != NULL);
+   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
 
-   if (saved[0])
-      setenv("AIMEE_HOME", saved, 1);
+   /* (2) Dev box: AIMEE_HOME unset, HOME set to the same dir -> the classic
+    *     fallback still resolves (aimee_home() collapses to HOME here). */
+   unsetenv("AIMEE_HOME");
+   setenv("HOME", dir, 1);
+   auth[0] = '\0';
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
+
+   if (old_aimee_home)
+      setenv("AIMEE_HOME", sa, 1);
    else
       unsetenv("AIMEE_HOME");
+   if (old_home)
+      setenv("HOME", sh, 1);
+   else
+      unsetenv("HOME");
+   if (old_profile)
+      setenv("AIMEE_PROFILE", sp, 1);
    unlink(authpath);
    rmdir(sub);
    rmdir(dir);
