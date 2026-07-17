@@ -954,8 +954,17 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
+   /* Whether we ask the UPSTREAM to stream depends on how we READ the reply, not on
+    * what the client asked. The buffered-replay path (prevent-subagents, or a
+    * /responses wire) fetches the reply to completion, so it must request a
+    * NON-streaming body for the non-responses wires -- asking for SSE and then
+    * cJSON_Parse'ing it is the "unparseable reply" bug. This applies to the ANTHROPIC
+    * parity build too, not only the IR/openai build below. */
+   int buffered_replay = gateway_prevent_subagents_enabled() || responses_wire;
+   int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
+
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 1, parity);
+      prov_body = build_anthropic_provider_body(req, ag, upstream_stream, parity);
    else
    {
       /* Slice 5 (streaming): build the provider request VIA THE IR when the flag is
@@ -963,15 +972,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        * case); legacy fallback on failure / flag off. For codex the reply is
        * fetched buffered + replayed as Anthropic SSE below, so no IR-delta stream
        * translation is needed here. */
-      /* Whether we ask the UPSTREAM to stream is decided by how we will read its
-       * reply, NOT by what the client asked for. When the buffered replay below
-       * takes over (prevent-subagents, or a /responses wire), we fetch the reply to
-       * completion; asking for SSE there and then cJSON_Parse'ing it is exactly the
-       * "primary provider returned an unparseable reply" bug. /responses is the
-       * exception: codex requires stream=true and its replay parses the raw SSE
-       * text, so it keeps the flag. */
-      int buffered_replay = gateway_prevent_subagents_enabled() || responses_wire;
-      int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
