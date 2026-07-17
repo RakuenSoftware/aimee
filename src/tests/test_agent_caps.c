@@ -125,3 +125,40 @@ void test_tools_enabled_capability_default(void)
    unlink(agent_config_path());
    printf("  PASS: test_tools_enabled_capability_default\n");
 }
+
+/* agent_default_primary must never hand back a disabled seat: a disabled
+ * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
+ * primary and every ingress request that doesn't name a model fast-fails as
+ * "failed to reach the primary provider". */
+void test_agent_default_primary_skips_disabled(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 3;
+   strcpy(cfg.agents[0].name, "claude"); /* disabled fallback footgun */
+   cfg.agents[0].enabled = 0;
+   strcpy(cfg.agents[1].name, "minimax");
+   cfg.agents[1].enabled = 1;
+   strcpy(cfg.agents[2].name, "codex");
+   cfg.agents[2].enabled = 1;
+
+   /* No default set → first ENABLED agent, not the disabled agents[0]. */
+   cfg.default_agent[0] = '\0';
+   assert(agent_default_primary(&cfg) == &cfg.agents[1]);
+
+   /* An enabled explicit default wins. */
+   strcpy(cfg.default_agent, "codex");
+   assert(agent_default_primary(&cfg) == &cfg.agents[2]);
+
+   /* A disabled explicit default is ignored → first enabled agent. */
+   strcpy(cfg.default_agent, "claude");
+   assert(agent_default_primary(&cfg) == &cfg.agents[1]);
+
+   /* Nothing enabled → NULL (caller reports a clear 503, not a phantom route). */
+   cfg.agents[1].enabled = 0;
+   cfg.agents[2].enabled = 0;
+   cfg.default_agent[0] = '\0';
+   assert(agent_default_primary(&cfg) == NULL);
+
+   printf("  PASS: test_agent_default_primary_skips_disabled\n");
+}

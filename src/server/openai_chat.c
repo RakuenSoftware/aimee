@@ -190,9 +190,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       }
    }
    if (!ag)
-      ag = agent_find(&acfg, acfg.default_agent);
-   if (!ag && acfg.agent_count > 0)
-      ag = &acfg.agents[0];
+      ag = agent_default_primary(&acfg);
    if (!ag)
    {
       free(pi_env);
@@ -603,9 +601,7 @@ static int responses_handler(const char *body, char *resp, int cap)
       }
    }
    if (!ag)
-      ag = agent_find(&acfg, acfg.default_agent);
-   if (!ag && acfg.agent_count > 0)
-      ag = &acfg.agents[0];
+      ag = agent_default_primary(&acfg);
    if (!ag)
    {
       free(prompt);
@@ -711,10 +707,7 @@ static agent_t *stream_pick_agent(agent_config_t *acfg, const char *model)
     * silently streaming a different model than the client asked for. */
    if (model[0] && strcmp(model, "aimee") != 0)
       return agent_find(acfg, model);
-   agent_t *ag = agent_find(acfg, acfg->default_agent);
-   if (!ag && acfg->agent_count > 0)
-      ag = &acfg->agents[0];
-   return ag;
+   return agent_default_primary(acfg);
 }
 
 static int chat_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
