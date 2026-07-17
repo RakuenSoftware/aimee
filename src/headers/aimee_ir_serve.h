@@ -57,7 +57,6 @@ struct cJSON *aimee_ir_build_from_chat(const char *agent_model, const struct cJS
                                        const struct cJSON *tools, const char *system,
                                        const char *driver_name);
 
-
 /* Slice 3 gate (AIMEE_IR_RESP_PATH env, DEFAULT-OFF): route the OPENAI-WIRE buffered
  * response parse through the IR. Per-wire; anthropic + responses stay on legacy. */
 int aimee_ir_resp_path_enabled(void);

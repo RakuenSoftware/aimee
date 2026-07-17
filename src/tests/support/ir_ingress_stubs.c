@@ -204,7 +204,8 @@ __attribute__((weak)) void aimee_ir_response_to_parsed(const void *r, void *out)
    (void)r;
    (void)out;
 }
-__attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char *err, unsigned long errn)
+__attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char *err,
+                                               unsigned long errn)
 {
    (void)resp;
    (void)out;

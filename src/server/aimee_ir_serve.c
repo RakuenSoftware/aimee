@@ -4,7 +4,7 @@
 #include "aimee_backend.h"
 #include "aimee_frontend.h"
 #include "aimee_ir_metrics.h"
-#include "aimee.h" /* size macros for agent_types.h */
+#include "aimee.h"          /* size macros for agent_types.h */
 #include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
 #include "aimee_ir.h"
 #include "cJSON.h"
@@ -234,7 +234,6 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
       aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_OPENAI_CHAT);
    return prov;
 }
-
 
 /* aimee_ir_resp_path_enabled -- Slice 3 gate (config-only: AIMEE_IR_RESP_PATH env,
  * DEFAULT-OFF). When on, the OPENAI-WIRE buffered response parse on the /v1/messages
