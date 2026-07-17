@@ -480,6 +480,21 @@ typedef struct config
     * See docs/proposals/pending/delegate-sandbox-image-customization.md. */
    char delegate_sandbox_package_access[32];
 
+   /* delegate_sandbox_require_isolation: fail-closed guard (default 0, OFF) for the
+    * `--network none` sandbox, meaningful only when delegate_sandbox is ON. aimee always
+    * passes --network none, but some container runtimes (e.g. SmoothNAS/tierd, which
+    * attaches a "primary" veth that cannot be disconnected) ignore it and give the
+    * sandbox real egress — silently defeating the package-access proxy/allowlist. After
+    * the container starts aimee asks the host daemon whether a network with an IP is
+    * attached; on a breach it ALWAYS logs an error. When this flag is set, sandboxing is
+    * MANDATORY: rather than fall back to un-isolated in-process host execution, aimee
+    * refuses to run the delegate at all on ANY failure to achieve an isolated sandbox —
+    * a detected breach, an unverifiable probe, the docker backend being unavailable, or
+    * the container failing to acquire. Default OFF so a non-compliant runtime degrades
+    * loudly instead of breaking every delegate; set true once the runtime honours
+    * isolation. */
+   int delegate_sandbox_require_isolation;
+
    /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
     * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a
     * proxied /v1/messages or /v1/chat/completions request, so the served model is

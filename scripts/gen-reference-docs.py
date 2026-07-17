@@ -185,6 +185,14 @@ CFG_KEY_DESC = {
     "(build-time installs + learned pre-bake only); `gated` host-allowlisted registries, "
     "off-allowlist requires human approval; `governance` allowlist from a governance provider, "
     "off-allowlist refused. Only meaningful when `delegate_sandbox` is on.",
+    "delegate_sandbox_require_isolation": "Fail-closed guard for the `--network none` delegate "
+    "sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes "
+    "`--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the "
+    "package-access proxy. After the container starts aimee asks the host daemon whether a network "
+    "with an IP is attached and always logs an error on a breach; when this is set, sandboxing is "
+    "mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated "
+    "in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker "
+    "being unavailable, or a failed acquire.",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",

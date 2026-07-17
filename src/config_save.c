@@ -877,6 +877,8 @@ int config_save(const config_t *cfg)
        strcmp(cfg->delegate_sandbox_package_access, "proxy") != 0)
       cJSON_AddStringToObject(root, "delegate_sandbox_package_access",
                               cfg->delegate_sandbox_package_access);
+   if (cfg->delegate_sandbox_require_isolation) /* default off: persist only the opt-in */
+      cJSON_AddBoolToObject(root, "delegate_sandbox_require_isolation", 1);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */
