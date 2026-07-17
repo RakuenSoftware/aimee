@@ -808,12 +808,11 @@ static cJSON *tp_git_log(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string", "Path to the git repository");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (optional — defaults to your session worktree)");
    tp_prop(props, "count", "integer", "Number of commits (default 10)");
    cJSON_AddItemToObject(params, "properties", props);
-   cJSON *req = cJSON_CreateArray();
-   cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToObject(params, "required", req);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
    return params;
 }
 
@@ -840,12 +839,11 @@ static cJSON *tp_git_diff(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string", "Path to the git repository");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (optional — defaults to your session worktree)");
    tp_prop(props, "ref", "string", "Git ref to diff against (optional)");
    cJSON_AddItemToObject(params, "properties", props);
-   cJSON *req = cJSON_CreateArray();
-   cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToObject(params, "required", req);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
    return params;
 }
 
@@ -941,11 +939,10 @@ static cJSON *tp_git_status(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string", "Path to the git repository");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (optional — defaults to your session worktree)");
    cJSON_AddItemToObject(params, "properties", props);
-   cJSON *req = cJSON_CreateArray();
-   cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToObject(params, "required", req);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
    return params;
 }
 
