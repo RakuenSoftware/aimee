@@ -17,6 +17,7 @@
 #include "persona.h"
 #include "dstr.h"
 #include "roundtable_seat_resolve.h"
+#include "roundtable_chair.h"
 #include "roundtable_verify.h"
 #include "token_tracker.h"
 
@@ -1876,7 +1877,40 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
           * after. Gated; off => identical to prior behavior. */
          if (cfg->roundtable_replay_verify_enabled)
             roundtable_verify_items(out, cfg->roundtable_require_evidence);
+         /* Chair reasoning pass (PR-B): an LLM over the verified survivors that may only
+          * DEMOTE/DROP an over-flagged finding (never escalate/add), each change shown
+          * with its rationale. Best-effort + opt-in; on any failure out is untouched. */
+         char *chair_adj = NULL;
+         if (cfg->roundtable_chair_synthesis)
+         {
+            char *chair_prompt = roundtable_chair_build_prompt(out);
+            if (chair_prompt)
+            {
+               agent_result_t chair_res;
+               memset(&chair_res, 0, sizeof(chair_res));
+               long chair_deadline = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
+               if (run_aggregator(acfg, cfg, chair_prompt, chair_deadline, &chair_res) == 0 &&
+                   chair_res.response && chair_res.response[0])
+               {
+                  int chair_changed = 0;
+                  chair_adj = roundtable_chair_apply(out, chair_res.response, &chair_changed);
+               }
+               free(chair_res.response);
+               free(chair_prompt);
+            }
+         }
          best_artifact = assemble_review_artifact(out);
+         if (chair_adj && best_artifact)
+         {
+            size_t la = strlen(best_artifact), lb = strlen(chair_adj);
+            char *m = realloc(best_artifact, la + lb + 1);
+            if (m)
+            {
+               memcpy(m + la, chair_adj, lb + 1);
+               best_artifact = m;
+            }
+         }
+         free(chair_adj);
          if (cfg->roundtable_replay_verify_enabled)
             roundtable_artifact_append_rejected(&best_artifact, out);
          out->best_round = round;
