@@ -684,7 +684,7 @@ static void config_set_defaults(config_t *cfg)
     * hold (the config_fields[] row carries is_bool, not a default value). */
    cfg->roundtable_replay_verify_enabled = 1;
    cfg->roundtable_require_evidence = 1; /* evidence gate on: no-evidence findings dropped */
-   cfg->roundtable_chair_synthesis = 0;  /* chair reasoning pass off by default (opt-in) */
+   cfg->roundtable_chair_synthesis = 1;  /* chair reasoning pass on (operator ruling 2026-07-17) */
    /* Default-on to preserve behavior: profile-card refresh ran ungated in the
     * maintenance REPLAY pass before the enable-gate was wired. Maintenance is
     * itself default-off, so this is a no-op until maintenance is enabled. */
