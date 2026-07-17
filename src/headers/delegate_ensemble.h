@@ -161,14 +161,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
 /* Seed cfg->ensemble_reference_models from the enabled agents when no panel is
- * configured (no-op if ensemble_reference_count > 0). Skips agents that cannot
- * run as a server-side HTTP delegate (claude-CLI unless
- * claude_cli_delegate_enabled). Defaults the aggregator to the first seated
- * model. */
+ * configured (no-op if ensemble_reference_count > 0). Skips agents flagged
+ * primary-only and claude-CLI agents that cannot run server-side. Defaults the
+ * aggregator to the first seated model. */
 void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg);
 
-/* 1 if `ag` may sit on a panel: enabled + named, and a claude-CLI only when
- * authorized (claude_cli_delegate_enabled) AND server-hosted (is_server_hosted). */
+/* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json
+ * `primary_only`), and a claude-CLI only when server-hosted (is_server_hosted). */
 int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag);
 
 /* Replace each "$random" seat in ensemble.reference_models with a concretely

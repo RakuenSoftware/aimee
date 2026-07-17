@@ -415,7 +415,6 @@ static const config_schema_entry_t config_schema[] = {
     {"aimee", SCHEMA_OBJECT, 0},
     {"trigger", SCHEMA_OBJECT, 0},
     {"trigger_rules", SCHEMA_ARRAY, 0},
-    {"claude_cli_delegate_enabled", SCHEMA_BOOL, 0},
     {NULL, 0, 0},
 };
 
@@ -1144,10 +1143,6 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "verify_enabled");
    if (cJSON_IsBool(item))
       cfg->verify_enabled = cJSON_IsTrue(item);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "claude_cli_delegate_enabled");
-   if (cJSON_IsBool(item))
-      cfg->claude_cli_delegate_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_graph_context_enabled");
    if (cJSON_IsBool(item))

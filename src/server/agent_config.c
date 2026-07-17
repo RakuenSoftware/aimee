@@ -868,6 +868,9 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);
+         v = cJSON_GetObjectItem(a, "primary_only");
+         if (v && cJSON_IsBool(v))
+            ag->primary_only = cJSON_IsTrue(v);
 
          agent_normalize_legacy_claude_cli(ag);
          agent_normalize_builtin_cost_tier(ag);
@@ -1137,6 +1140,8 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "cli_kind", ag->cli_kind);
       if (ag->is_server_hosted)
          cJSON_AddBoolToObject(a, "is_server_hosted", 1);
+      if (ag->primary_only)
+         cJSON_AddBoolToObject(a, "primary_only", 1);
 
       /* Middleware config: only write if any non-zero field is set */
       {
@@ -1462,9 +1467,8 @@ int agent_is_available_for_routing(const agent_t *agent)
    /* A claude-CLI agent can only ever execute as a delegate SERVER-SIDE (a
     * client-only claude has no server session to drive — dispatch would just
     * fail). Structural, so it is enforced even with no policy filter
-    * registered; the config-dependent rules (the claude_cli_delegate_enabled
-    * ToS opt-in, primary self-delegation) live in the registered policy
-    * filter, which sees the live config. */
+    * registered; the per-agent rules (the `primary_only` opt-out, primary
+    * self-delegation) live in the registered policy filter. */
    if (agent_is_claude_cli(agent) && !agent->is_server_hosted)
       return 0;
    if (g_route_policy_filter && g_route_policy_filter(agent))

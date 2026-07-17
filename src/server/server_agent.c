@@ -411,6 +411,7 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
    cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
    cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
+   cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
    cJSON_AddNumberToObject(obj, "max_parallel", ag->max_parallel);
    if (ag->middleware.context_window > 0)
@@ -726,6 +727,20 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->timeout_ms = opt_get_int(&opts, "timeout-ms", opt_get_int(&opts, "timeout", ag->timeout_ms));
    ag->middleware.context_window =
        opt_get_int(&opts, "ctx", opt_get_int(&opts, "context-window", 0));
+
+   /* Primary-only: a flagged agent is never a delegation target (replaces the
+    * former global claude_cli_delegate_enabled opt-in with a per-agent choice).
+    * An explicit --primary-only on|off wins; absent, a claude-CLI (tmux) agent
+    * defaults ON — driving a personal Claude plan as an automated delegate may
+    * breach Anthropic's terms — and every other agent defaults OFF. */
+   {
+      const char *po = opt_get(&opts, "primary-only");
+      if (po && po[0])
+         ag->primary_only =
+             (strcmp(po, "off") != 0 && strcmp(po, "false") != 0 && strcmp(po, "0") != 0);
+      else
+         ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
+   }
 
    if (opt_has(&opts, "default") || cfg.agent_count == 1 || !cfg.default_agent[0])
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
@@ -1069,6 +1084,8 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
    if ((v = opt_get(&opts, "enabled")) != NULL)
       ag->enabled = (strcmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcmp(v, "on") == 0);
+   if ((v = opt_get(&opts, "primary-only")) != NULL)
+      ag->primary_only = (strcmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcmp(v, "on") == 0);
    if ((v = opt_get(&opts, "roles")) != NULL)
       server_agent_set_roles_csv(
           ag,
@@ -1231,6 +1248,11 @@ static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const
    ag->max_turns = -1;
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
    ag->session_reuse = 1;
+   /* A freshly OAuth'd claude subscription defaults to primary-only: driving a
+    * personal Claude plan as an automated delegate may breach Anthropic's terms.
+    * The Web GUI pre-checks "Primary Agent Only" to match, and can override this
+    * with a follow-up agent.set --primary-only off. */
+   ag->primary_only = 1;
 
    /* Advertise the CLI's real context window so capability routing (min_context
     * floors, e.g. the review role) keeps this agent in the fleet. A tmux-CLI

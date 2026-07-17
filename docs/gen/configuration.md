@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (185)
+## CLI-settable keys (184)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -32,7 +32,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
 | `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
-| `claude_cli_delegate_enabled` | bool | Allow delegating to the local Claude CLI agent. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
 | `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs — Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
 | `code_hybrid_rrf_k` | float | Reciprocal Rank Fusion rank constant k for /v1/code/hybrid (default 60). |
@@ -683,7 +682,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
 
-> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `exp`, `is_server_hosted`, `refresh_token`
+> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `exp`, `is_server_hosted`, `primary_only`, `refresh_token`
 
 ### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 

@@ -302,6 +302,36 @@ static size_t ir_concat_blocks(const aimee_block_t *blocks, int n_blocks, aimee_
    return used;
 }
 
+int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   aimee_block_t *blk = calloc(1, sizeof *blk);
+   out->role = strdup("assistant");
+   out->raw_stop_reason = strdup("end_turn");
+   if (!blk || !out->role || !out->raw_stop_reason)
+   {
+      free(blk);
+      aimee_response_free(out);
+      return -1;
+   }
+   blk->type = AIMEE_BLK_TEXT;
+   blk->text = strdup(text ? text : "");
+   if (!blk->text)
+   {
+      free(blk);
+      aimee_response_free(out);
+      return -1;
+   }
+   out->content = blk; /* owned single-element array; freed by aimee_response_free */
+   out->n_content = 1;
+   out->stop_reason = AIMEE_STOP_END_TURN;
+   if (model && model[0])
+      out->model = strdup(model); /* best-effort; NULL is fine */
+   return 0;
+}
+
 size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n)
 {
    if (buf && n)

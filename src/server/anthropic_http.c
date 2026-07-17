@@ -15,6 +15,7 @@
  * executes tools itself. */
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_config.h"
+#include "aimee_errors.h"
 #include "agent_exec.h"
 #include "context_reduce.h"
 #include "gateway_mutate_wire.h"
@@ -34,6 +35,7 @@
 #include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
+#include "log.h"
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
@@ -134,8 +136,14 @@ static int write_json(cJSON *obj, char *resp, int cap)
    return rc;
 }
 
-/* Write an Anthropic-shaped error object into resp and return `status`. */
-static int write_error(char *resp, int cap, int status, const char *type, const char *message)
+/* Write an Anthropic-shaped error object into resp and return the wire `status`.
+ * aimee_code is an aimee-specific error code (>=1000, see aimee_errors.h) when the
+ * fault is aimee's own — it rides in the body's error.code and is logged — or 0
+ * for a plain HTTP-semantic error (client 4xx, genuine upstream 5xx). The wire
+ * status stays a standard 3-digit code regardless; the 4-digit aimee code never
+ * touches the status line. */
+static int write_error(char *resp, int cap, int status, const char *type, const char *message,
+                       int aimee_code)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON *e;
@@ -143,6 +151,12 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
    e = cJSON_AddObjectToObject(o, "error");
    cJSON_AddStringToObject(e, "type", type);
    cJSON_AddStringToObject(e, "message", message);
+   if (aimee_code > 0)
+   {
+      cJSON_AddNumberToObject(e, "code", aimee_code);
+      LOG_WARN("ingress", "aimee_err=%d (%s) status=%d: %s", aimee_code, aimee_err_slug(aimee_code),
+               status, message ? message : "");
+   }
    char *out = cJSON_PrintUnformatted(o);
    if (out)
    {
@@ -156,6 +170,16 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
 static int driver_is_anthropic(const delegate_driver_t *driver)
 {
    return driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+}
+
+/* Provider wire for the response-side IR shadow: compare_response re-parses the
+ * provider reply through this backend, so it must match the wire the legacy path
+ * parsed. driver_is_anthropic() is NULL-safe, so a NULL/absent driver yields
+ * OpenAI-chat -- exactly the no-driver legacy branch, which parses with
+ * agent_ir_parse_json_response with the openai wire (0). */
+static aimee_wire_t shadow_provider_wire(const delegate_driver_t *driver)
+{
+   return driver_is_anthropic(driver) ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
 }
 
 static int driver_consumes_system_prompt(const delegate_driver_t *driver, const agent_t *ag)
@@ -412,7 +436,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    gw_mutate_ctx_init(&gwmc);
 
    if (!req)
-      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body");
+      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
    model = jo_cstr(req, "model");
 
    /* SHADOW (Slice 3): observe the IR round-trip on this live request. No-op unless
@@ -423,7 +447,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (!ag)
    {
       cJSON_Delete(req);
-      return write_error(resp, cap, 503, "api_error", "no primary agent configured");
+      return write_error(resp, cap, 503, "api_error", "no primary agent configured",
+                         AIMEE_ERR_NO_PRIMARY);
    }
 
    delegate_drivers_init();
@@ -437,7 +462,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * stage returns <0 today; the intervention count is plumbed for P2b's audit). */
    if (messages_run_request_pipeline(req, driver, ag, parity, 0 /* buffered */) < 0)
    {
-      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed");
+      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed",
+                           AIMEE_ERR_REQUEST_PIPELINE);
       goto cleanup;
    }
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
@@ -461,7 +487,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
-      status = write_error(resp, cap, 502, "api_error", "failed to reach the primary provider");
+      /* Internal: we never reached the provider — the endpoint or credentials for
+       * the primary couldn't be resolved (e.g. a codex-oauth seat with no token).
+       * 503 (not 502) + an aimee code so this doesn't read as an upstream failure;
+       * surface the explicit auth reason (D6) when one was set. */
+      const char *why = agent_request_auth_error();
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "could not resolve endpoint or credentials for primary agent '%s'%s%s", ag->name,
+               (why && why[0]) ? ": " : "", (why && why[0]) ? why : "");
+      status = write_error(resp, cap, 503, "api_error", msg, AIMEE_ERR_ROUTE_UNRESOLVED);
       goto cleanup;
    }
    if (parity)
@@ -508,8 +543,10 @@ static int messages_buffered(const char *body, char *resp, int cap)
       }
       else
       {
+         /* Genuine upstream failure: the provider was reached and returned
+          * non-200. 502 with no aimee code — this really is an external problem. */
          status = write_error(resp, cap, 502, "api_error",
-                              response ? response : "primary provider call failed");
+                              response ? response : "primary provider call failed", 0);
       }
       goto cleanup;
    }
@@ -524,6 +561,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
          /* No driver: default to the openai wire, parsed through the IR (zeroed
           * *parsed on failure), matching the driver hooks. */
          agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+
+      /* Slice 2 (canonical-IR): shadow-compare the legacy parse against the IR
+       * response parse -> RESP_MATCH / RESP_MISMATCH on GET /v1/dashboard/metrics.
+       * No-op unless AIMEE_IR_SHADOW; never affects the served reply. Provider wire
+       * is anthropic when the primary is anthropic, else OpenAI chat (codex is SSE,
+       * so provider_resp is NULL here and the compare self-skips). */
+      aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
 
       /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
        * the model emitted despite the request-side strip, before the audit row
@@ -992,6 +1036,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                else
                   /* No driver: default to the openai wire via the IR. */
                   agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+               /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
+                * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
+               aimee_ir_shadow_compare_response(&parsed, provider_resp,
+                                                shadow_provider_wire(driver));
                gateway_policy_police_parsed_response(&parsed);
                emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
                /* Cost accounting (mirror the buffered path). */

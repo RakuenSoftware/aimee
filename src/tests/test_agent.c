@@ -2061,6 +2061,48 @@ static void test_parent_write_guard_shell_uses_delegate_cwd_in_git_parent(void)
    free(result);
    platform_test_rmrf(root);
 }
+static void test_git_tools_default_to_session_worktree(void)
+{
+   /* git_status/git_log/git_diff must default 'path' to the delegate's session
+    * worktree (the run_cmd cwd) when omitted. A delegate does not know its own
+    * worktree path, so a hard "missing 'path'" error forced it to a raw `git`
+    * shell — which the require_aimee_git gate then denies, leaving it no working
+    * git route at all. Omitting 'path' must resolve to the cwd, not error. */
+   char root[512];
+   snprintf(root, sizeof(root), "%s/aimee_git_default_cwd_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+   char cmd[1024];
+   int rc = 0;
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", root);
+   char *out = run_cmd(cmd, &rc);
+   free(out);
+   if (rc != 0)
+   {
+      platform_test_rmrf(root);
+      printf("  git_tools_default_to_session_worktree: skipped (git unavailable)\n");
+      return;
+   }
+
+   run_cmd_set_cwd(root);
+   char *st = dispatch_tool_call("git_status", "{}", 5000);
+   char *lg = dispatch_tool_call("git_log", "{}", 5000);
+   char *df = dispatch_tool_call("git_diff", "{}", 5000);
+   run_cmd_set_cwd(NULL);
+
+   /* None of the three read-only git tools may error for a missing 'path' now
+    * that it defaults to the session worktree. */
+   assert(st != NULL && strstr(st, "requires a session worktree") == NULL &&
+          strstr(st, "missing 'path'") == NULL);
+   assert(lg != NULL && strstr(lg, "requires a session worktree") == NULL &&
+          strstr(lg, "missing 'path'") == NULL);
+   assert(df != NULL && strstr(df, "requires a session worktree") == NULL &&
+          strstr(df, "missing 'path'") == NULL);
+   free(st);
+   free(lg);
+   free(df);
+   platform_test_rmrf(root);
+   printf("  git_tools_default_to_session_worktree: ok\n");
+}
 static void test_tool_list_files(void)
 {
    char tmpdir[512];
@@ -3021,6 +3063,7 @@ int main(void)
    test_container_bash_runs_in_sandbox();
    test_container_execute_script_runs_in_sandbox();
    test_parent_write_guard_shell_uses_delegate_cwd_in_git_parent();
+   test_git_tools_default_to_session_worktree();
    test_tool_list_files();
    test_tool_grep_excludes_heavy_dirs();
    test_dispatch_tool_call();

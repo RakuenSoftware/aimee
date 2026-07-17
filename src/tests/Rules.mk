@@ -47,6 +47,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                              $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                              $(OBJDIR)/gateway_delegate.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o \
+                             $(OBJDIR)/server/aimee_ir.o \
                              $(PLATFORM_AGENT_OBJS)
 
 TEST_MCP_CLIENT_OBJS = $(OBJDIR)/server/mcp_client.o \

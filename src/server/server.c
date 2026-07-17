@@ -1920,12 +1920,15 @@ static int server_agent_route_is_down(const char *agent_name)
  *    operator's own OAuth claude entry). Matched by NAME only, deliberately:
  *    other agents that merely share the provider tag (e.g. gateway-routed
  *    anthropic models) are legitimate delegates.
- * 2) a claude-CLI agent (tmux/provider-cli claude — the interactive-login
- *    ToS-sensitive class) is a delegate ONLY behind the explicit operator
- *    opt-in claude_cli_delegate_enabled — previously enforced on one dispatch
- *    path and on panel seats, now at every routing decision.
- * A config_load failure fails closed for the gated class (a claude-CLI agent
- * is excluded, everything else routes) rather than voiding the opt-in. */
+ * 2) a per-agent "Primary Agent Only" choice (agents.json `primary_only`)
+ *    excludes the agent from ALL delegation. This replaces the former global
+ *    claude_cli_delegate_enabled opt-in with a per-agent flag set at add time:
+ *    a claude-oauth subscription is pre-flagged primary-only (driving a personal
+ *    Claude plan as an automated delegate may breach Anthropic's terms), every
+ *    other agent defaults off.
+ * Rule 2 is config-independent (it reads the agent record), so a config_load
+ * failure only means rule 1's primary name is unknown — the per-agent gate
+ * still holds. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)
@@ -1938,11 +1941,10 @@ static int server_agent_route_policy_excluded(const agent_t *ag)
    if (agent_routing_primary_turn())
       return 0;
    config_t cfg;
-   if (config_load(&cfg) != 0)
-      return agent_is_claude_cli(ag);
-   if (cfg.provider[0] && ag->name[0] && strcasecmp(ag->name, cfg.provider) == 0)
+   if (config_load(&cfg) == 0 && cfg.provider[0] && ag->name[0] &&
+       strcasecmp(ag->name, cfg.provider) == 0)
       return 1;
-   if (agent_is_claude_cli(ag) && !cfg.claude_cli_delegate_enabled)
+   if (ag->primary_only)
       return 1;
    return 0;
 }
@@ -2271,8 +2273,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * for a role is DOWN does routing return a clean "no agent available". */
    agent_set_route_health_filter(server_agent_route_is_down);
    /* Delegate-policy invariants at every routing decision: the primary never
-    * delegates to itself, and a claude-CLI agent is only a delegate behind the
-    * explicit claude_cli_delegate_enabled opt-in. */
+    * delegates to itself, and an agent flagged "Primary Agent Only"
+    * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "
