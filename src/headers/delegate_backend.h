@@ -62,6 +62,10 @@ extern "C"
        * Ignored when `workspace` is NULL (the backend's scratch dir is nobody
        * else's). */
       int workspace_read_only;
+      /* 1 when delegate_sandbox_package_access == "proxy": the docker backend arms the
+       * in-container package forwarder + http_proxy env. The caller resolves the mode
+       * (it already loads config) so the backend stays config-agnostic. */
+      int pkg_proxy;
    } delegate_backend_config_t;
 
    /* Result of an `exec` call. `stdout_buf` and `stderr_buf` are

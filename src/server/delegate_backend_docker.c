@@ -23,7 +23,6 @@
 
 #include "aimee.h"      /* MAX_PATH_LEN */
 #include "aimee_home.h" /* aimee_home() — resolves the server's UDS path */
-#include "config.h"     /* delegate_sandbox_package_access mode */
 
 #include <assert.h>
 
@@ -581,10 +580,10 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    }
 
    /* Runtime package-access policy: "proxy" (default) arms the in-container forwarder
-    * + http_proxy so a --network none delegate can install via aimee's egress. */
-   config_t sbx_pkg_cfg;
-   int pkg_proxy = (config_load(&sbx_pkg_cfg) == 0) &&
-                   strcmp(sbx_pkg_cfg.delegate_sandbox_package_access, "proxy") == 0;
+    * + http_proxy so a --network none delegate can install via aimee's egress. The
+    * caller resolved the mode (it already loads config); the backend stays
+    * config-agnostic. */
+   int pkg_proxy = cfg && cfg->pkg_proxy;
 
    /* Try `docker start` first — if a container with this name already
     * exists (operator opted hibernate=1 last release), starting it
