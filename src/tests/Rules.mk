@@ -1324,7 +1324,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/cJSON.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
 	                                $(OBJDIR)/db1/model_catalog.o \
 	                                $(OBJDIR)/cmd_init.o \
-	                                $(OBJDIR)/server/server_trigger.o $(OBJDIR)/db1/db1_trigger.o \
+	                                $(OBJDIR)/server/server_trigger.o $(OBJDIR)/tests/support/trigger_proposals_stub.o $(OBJDIR)/db1/db1_trigger.o \
 	                                $(OBJDIR)/db1/pipelines.o $(OBJDIR)/db1/token_audit.o \
 	                                $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/server/delegate_backend_local.o \
 	                                $(OBJDIR)/server/delegate_backend_ssh.o $(OBJDIR)/server/delegate_backend_docker.o \
