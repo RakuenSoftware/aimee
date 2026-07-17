@@ -527,6 +527,10 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
 
+   /* Send-side half of the fix: the buffered Responses fetch must ask for
+    * stream=true (codex requires it), even though the ingress reads it buffered. */
+   assert(g_last_body != NULL && strstr(g_last_body, "\"stream\":true") != NULL);
+
    sent = parse(resp);
    assert(sent != NULL);
    content = obj(sent, "content");
