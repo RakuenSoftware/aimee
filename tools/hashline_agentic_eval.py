@@ -174,8 +174,15 @@ def apply_edit_symbol(fx: Dict[str, Any], edit: Dict[str, Any]) -> Tuple[Optiona
     got = str(edit.get("symbol", "")).strip()
     if not want:
         return None, "error: edit_symbol not applicable to this task"
-    if got != want:
-        return None, f'error: symbol not found: {got!r}; the file defines {want!r} — use that name'
+    # Lenient resolution, mirroring the real index-backed edit_symbol: a model may
+    # return "foo", "Type::foo", "int foo", or "foo()". Match on the identifier
+    # token, case-insensitively, rather than demanding a byte-exact string (the
+    # strict form spuriously failed capable models that named the right function).
+    import re as _re
+    got_ids = _re.findall(r"[A-Za-z_]\w*", got)
+    if want.lower() not in {g.lower() for g in got_ids}:
+        return None, (f"error: symbol {got!r} did not resolve; the file defines {want!r} — "
+                      "name that function")
     src_lines = split_lines(fx["initial"])
     o, e = fx["target_line"], fx.get("end_line", fx["target_line"])
     new = [strip_anchor_prefix(l) for l in str(edit.get("text", "")).split("\n")]
