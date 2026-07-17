@@ -120,9 +120,13 @@ void delegate_get_caps(const delegate_driver_t *driver, const agent_t *agent, dr
 int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, char *url,
                        size_t url_len)
 {
-   (void)driver;
    (void)agent;
-   snprintf(url, url_len, "https://example.invalid/v1/messages");
+   /* Mirror the real chatgpt driver: a codex/Responses agent resolves to a
+    * /responses URL, which drives the buffered responses-wire (raw-SSE) path. */
+   if (driver && driver->name && strcmp(driver->name, "chatgpt") == 0)
+      snprintf(url, url_len, "https://example.invalid/backend-api/codex/responses");
+   else
+      snprintf(url, url_len, "https://example.invalid/v1/messages");
    return 0;
 }
 
@@ -490,8 +494,54 @@ static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(
    PASS("messages_buffered_anthropic_police_keeps_non_subagent_tool_use");
 }
 
+/* parse_response stub for the codex/Responses buffered path: invoked with
+ * (NULL, raw_sse_body) — the same contract the chatgpt driver honors — and
+ * renders a text reply. Asserts it received the RAW body, not a cJSON tree. */
+static void parsed_text_pong(cJSON *root, const char *body, parsed_response_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   assert(root == NULL);
+   assert(body != NULL && strstr(body, "response.completed") != NULL);
+   out->content = strdup("PONG");
+   snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", "end_turn");
+}
+
+/* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch, so
+ * the ingress must parse it via the driver. Regression guard: before the fix,
+ * messages_buffered cJSON_Parse'd the SSE (failed) and returned an EMPTY reply. */
+static void test_messages_buffered_responses_wire_parses_sse(void)
+{
+   const delegate_driver_t driver = {.name = "chatgpt", .parse_response = parsed_text_pong};
+   char resp[8192];
+   cJSON *sent;
+   const cJSON *content;
+   const cJSON *blk;
+   const cJSON *text;
+
+   reset_capture();
+   g_driver = &driver;
+   /* Raw SSE — invalid JSON on purpose, so the old cJSON_Parse path yields empty. */
+   g_response_body = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+
+   assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 200);
+
+   sent = parse(resp);
+   assert(sent != NULL);
+   content = obj(sent, "content");
+   assert(cJSON_IsArray(content) && cJSON_GetArraySize(content) >= 1);
+   blk = cJSON_GetArrayItem(content, 0);
+   text = obj(blk, "text");
+   assert(cJSON_IsString(text) && strcmp(text->valuestring, "PONG") == 0);
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("messages_buffered_responses_wire_parses_sse");
+}
+
 int main(void)
 {
+   test_messages_buffered_responses_wire_parses_sse();
    test_messages_buffered_anthropic_police_drops_subagent_tool_use();
    test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use();
    printf("anthropic_http_p2c: OK\n");

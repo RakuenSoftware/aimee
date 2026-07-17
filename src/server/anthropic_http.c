@@ -423,24 +423,23 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
  * malloc'd JSON string (caller frees) or NULL. */
 static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driver,
                                        const agent_t *ag, int parity, cJSON *messages, cJSON *tools,
-                                       const char *system_text)
+                                       const char *system_text, int stream)
 {
    char *prov_body = NULL;
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 0, parity);
+      prov_body = build_anthropic_provider_body(req, ag, stream, parity);
    else
    {
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-             0 /* buffered ingress: never ask the upstream to stream */);
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), stream);
       if (!prov_body)
       {
          aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), 0);
+                                         jo_num(req, "temperature", 1.0), stream);
       }
    }
    return prov_body;
@@ -528,12 +527,18 @@ static int messages_buffered(const char *body, char *resp, int cap)
       status = write_error(resp, cap, 503, "api_error", msg, AIMEE_ERR_ROUTE_UNRESOLVED);
       goto cleanup;
    }
+   /* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch
+    * and requires stream=true; asking it for stream=false yields an empty body that
+    * cJSON_Parse can't read, so the buffered reply came back empty. Keyed off the
+    * resolved upstream shape (like the streaming path), not the provider label. */
+   int responses_wire = strstr(url, "/responses") != NULL;
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text);
+   prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
+                                         responses_wire);
    http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response, ag->timeout_ms,
                                  extra[0] ? extra : NULL);
 
@@ -550,7 +555,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
       system_text = NULL;
       translate_request(req, driver, ag, &messages, &tools, &system_text);
       free(prov_body);
-      prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text);
+      prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
+                                            responses_wire);
       free(response);
       response = NULL;
       http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response,
@@ -580,12 +586,23 @@ static int messages_buffered(const char *body, char *resp, int cap)
       goto cleanup;
    }
 
-   provider_resp = cJSON_Parse(response);
    memset(&parsed, 0, sizeof(parsed));
-   if (provider_resp)
+   /* Codex/Responses replies with raw SSE (response.output_* / response.completed),
+    * not a JSON body — parse it directly via the driver, the same way the streaming
+    * buffered-replay path does. cJSON_Parse would fail and yield an empty reply. */
+   if (responses_wire)
    {
-      /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). */
-      ir_or_legacy_parse_response(provider_resp, response, driver, &parsed);
+      if (driver && driver->parse_response)
+         driver->parse_response(NULL, response, &parsed);
+   }
+   else
+      provider_resp = cJSON_Parse(response);
+   if (responses_wire || provider_resp)
+   {
+      /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). The
+       * responses-wire reply was already parsed above from raw SSE. */
+      if (!responses_wire)
+         ir_or_legacy_parse_response(provider_resp, response, driver, &parsed);
 
       /* Slice 2 (canonical-IR): shadow-compare the legacy parse against the IR
        * response parse -> RESP_MATCH / RESP_MISMATCH on GET /v1/dashboard/metrics.
