@@ -10,6 +10,7 @@
 #include "server.h"
 #include "server_compute_impl.h"
 #include "gw_orch_delegates.h"
+#include "config.h"
 #include "db1.h"
 #include "log.h"
 #include "cJSON.h"
@@ -86,6 +87,17 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
    return 0;
 }
 
+/* Resolve whether the delegates module is enabled: the config-store `modules.delegates` toggle
+ * (canonical), falling back to the deprecated env default. Loaded per call (mtime-cached), so
+ * an operator toggle takes effect on the next sweep without a restart. Keeps the pure
+ * gw_orch_delegates module config-free. */
+static int coord_delegates_enabled(void)
+{
+   config_t cfg;
+   int tri = (config_load(&cfg) == 0) ? cfg.module_delegates : -1;
+   return config_module_enabled(tri, gw_orch_delegates_enabled());
+}
+
 /* Build a delegate request from a claimed coord task and submit it to a delegate worker,
  * routed through the DELEGATES orchestration module so the spawn is a togglable, registered
  * hook rather than an inline imperative call (see gw_orch_delegates). Lives here (its only
@@ -100,7 +112,7 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
    gw_turn_capabilities_t caps = {&backing, coord_spawn_delegate, NULL};
    char turn_id[48];
    snprintf(turn_id, sizeof(turn_id), "coord-task-%d", task_id);
-   if (gw_orch_delegates_run(&caps, turn_id, role, prompt) != 0)
+   if (gw_orch_delegates_run(&caps, turn_id, role, prompt, coord_delegates_enabled()) != 0)
       return -1; /* delegates module disabled -> not dispatched; caller releases + retries */
    return backing.spawn_rc; /* 0 spawned, -1 refused (ceiling/pool full) */
 }
@@ -127,7 +139,7 @@ static int dispatcher_sweep(void)
     * tasks ARE delegate work, so they simply wait until the module is re-enabled. Checked here,
     * before any claim, so a disabled module is distinct from a per-task 'refused' (pool full),
     * which alone releases+retries the single claimed task below. */
-   if (!gw_orch_delegates_enabled())
+   if (!coord_delegates_enabled())
       return 0;
 
    int job_ids[COORD_MAX_ACTIVE_JOBS];

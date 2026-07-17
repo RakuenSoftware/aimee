@@ -82,7 +82,8 @@ static const char *FIXTURE_A =
     "  warn_threshold: 0.01\n    prompt_threshold: 0.01\n    block_threshold: 0.01\n    "
     "allow_ml_only_block: true\nauxiliary:\n  enabled: true\n  default_model: ZZA_val\n  "
     "default_max_tokens: 1\nmodel_meta:\n  refresh_minutes: 1\n  capability_routing: "
-    "true\nensemble:\n  enabled: true\n  min_successful: 1\n  max_cost_usd: 1.0";
+    "true\nensemble:\n  enabled: true\n  min_successful: 1\n  max_cost_usd: 1.0\n"
+    "modules:\n  memory: true\n  governance: true\n  delegates: true\n  workflows: true";
 static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
@@ -140,7 +141,8 @@ static const char *FIXTURE_B =
     "false\n    warn_threshold: 0.99\n    prompt_threshold: 0.99\n    block_threshold: 0.99\n    "
     "allow_ml_only_block: false\nauxiliary:\n  enabled: false\n  default_model: ZZB_val\n  "
     "default_max_tokens: 4096\nmodel_meta:\n  refresh_minutes: 4096\n  capability_routing: "
-    "false\nensemble:\n  enabled: false\n  min_successful: 4096\n  max_cost_usd: 0.99";
+    "false\nensemble:\n  enabled: false\n  min_successful: 4096\n  max_cost_usd: 0.99\n"
+    "modules:\n  memory: false\n  governance: false\n  delegates: false\n  workflows: false";
 
 int main(void)
 {
@@ -330,6 +332,21 @@ int main(void)
    assert(cfgA.model_meta_capability_routing == 1 && cfgB.model_meta_capability_routing == 0);
    assert(cfgA.ensemble_min_successful != cfgB.ensemble_min_successful);
    assert(cfgA.ensemble_max_cost_usd != cfgB.ensemble_max_cost_usd);
+
+   /* modules.* pluggable-module toggles (tristate; A=true, B=false, distinct from the -1
+    * unspecified default so each key is proven read from the `modules:` block). */
+   assert(cfgA.module_memory == 1 && cfgB.module_memory == 0);
+   assert(cfgA.module_governance == 1 && cfgB.module_governance == 0);
+   assert(cfgA.module_delegates == 1 && cfgB.module_delegates == 0);
+   assert(cfgA.module_workflows == 1 && cfgB.module_workflows == 0);
+
+   /* config_module_enabled precedence: an explicit user tristate (0/1) is canonical and wins
+    * over the env default; -1 (unspecified) falls back to the env default. */
+   assert(config_module_enabled(1, 0) == 1);  /* config ON overrides env OFF */
+   assert(config_module_enabled(0, 1) == 0);  /* config OFF overrides env ON  */
+   assert(config_module_enabled(-1, 1) == 1); /* unspecified -> env default ON */
+   assert(config_module_enabled(-1, 0) == 0); /* unspecified -> env default OFF */
+   assert(config_module_enabled(1, 1) == 1 && config_module_enabled(0, 0) == 0);
 
    printf("all tests passed (146 parsed fields)\n");
    return 0;

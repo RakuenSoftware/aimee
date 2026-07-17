@@ -510,7 +510,13 @@ static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_pat
    gw_turn_capabilities_t caps = {&backing, NULL, trigger_dispatch_workflow};
    char turn_id[64];
    snprintf(turn_id, sizeof(turn_id), "trigger-%s", rule->source);
-   if (gw_orch_workflows_run(&caps, turn_id, rule->pipeline_template, artifact_path) != 0)
+   /* Resolve the workflows toggle from the config-store `modules.workflows` (canonical),
+    * falling back to the deprecated env default; keeps gw_orch_workflows config-free. */
+   config_t wcfg;
+   int wtri = (config_load(&wcfg) == 0) ? wcfg.module_workflows : -1;
+   int wf_enabled = config_module_enabled(wtri, gw_orch_workflows_enabled());
+   if (gw_orch_workflows_run(&caps, turn_id, rule->pipeline_template, artifact_path, wf_enabled) !=
+       0)
    {
       aimee_log(LOG_WARN, "trigger.sched", "%s: workflows module disabled — skipping %s repo=%s",
                 rule->source, what, rule->workspace);

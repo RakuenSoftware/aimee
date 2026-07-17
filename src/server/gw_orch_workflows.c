@@ -44,13 +44,13 @@ static gw_orch_result_t workflows_hook(const gw_turn_snapshot_t *turn,
 }
 
 int gw_orch_workflows_run(const gw_turn_capabilities_t *caps, const char *turn_id, const char *lane,
-                          const char *payload)
+                          const char *payload, int enabled)
 {
    if (!caps)
       return -1;
    workflow_hook_args_t args = {lane, payload};
    gw_orch_hook_slot_t slots[] = {
-       {"workflows", workflows_hook, &args, gw_orch_workflows_enabled()},
+       {"workflows", workflows_hook, &args, enabled},
    };
    gw_orch_hook_t hooks[1];
    int n = gw_orchestration_registry_build(slots, sizeof(slots) / sizeof(slots[0]), hooks, 1);

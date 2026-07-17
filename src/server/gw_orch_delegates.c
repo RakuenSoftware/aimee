@@ -45,13 +45,13 @@ static gw_orch_result_t delegates_hook(const gw_turn_snapshot_t *turn,
 }
 
 int gw_orch_delegates_run(const gw_turn_capabilities_t *caps, const char *turn_id, const char *role,
-                          const char *brief)
+                          const char *brief, int enabled)
 {
    if (!caps)
       return -1;
    delegate_hook_args_t args = {role, brief};
    gw_orch_hook_slot_t slots[] = {
-       {"delegates", delegates_hook, &args, gw_orch_delegates_enabled()},
+       {"delegates", delegates_hook, &args, enabled},
    };
    gw_orch_hook_t hooks[1];
    int n = gw_orchestration_registry_build(slots, sizeof(slots) / sizeof(slots[0]), hooks, 1);

@@ -311,7 +311,12 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
 int config_load(config_t *cfg)
 {
    if (cfg)
+   {
       memset(cfg, 0, sizeof(*cfg));
+      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
+      cfg->module_memory = cfg->module_governance = -1;
+      cfg->module_delegates = cfg->module_workflows = -1;
+   }
    return 0;
 }
 

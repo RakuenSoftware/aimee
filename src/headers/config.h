@@ -1140,6 +1140,28 @@ typedef struct config
    int economizer_enabled;
    int economizer_aggressive;
 
+   /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
+    * enabling/disabling the pipeline modules — memory (request stage), governance (response
+    * stage), delegates + workflows (orchestration hooks). Each is a TRISTATE:
+    *   -1  unspecified — the config does not set it; the resolver falls back to the module's
+    *       deprecated env toggle (AIMEE_STAGE_MEMORY / _GOVERNANCE / AIMEE_ORCH_DELEGATES /
+    *       _WORKFLOWS) and then to its default-ON.
+    *    0  user-disabled.    1  user-enabled.
+    * Resolution is centralized in config_module_enabled() so the future admin/governance FORCE
+    * tier (aimee-kb governance state that can pin a module on or off over the user's choice)
+    * slots in at ONE site. Defaults are -1 (unspecified) so existing env-configured deployments
+    * are unaffected until an operator writes the `modules:` block.
+    * CONTRIBUTORS: do NOT resolve module enablement inline at a wire site. ALWAYS call
+    * config_module_enabled(cfg->module_X, <env default>), where the env default is the module's
+    * own predicate (gw_stage_memory_enabled / gw_response_governance_enabled /
+    * gw_orch_delegates_enabled / gw_orch_workflows_enabled, reading AIMEE_STAGE_MEMORY /
+    * AIMEE_STAGE_GOVERNANCE / AIMEE_ORCH_DELEGATES / AIMEE_ORCH_WORKFLOWS). One resolver = the
+    * FORCE tier has exactly one place to extend. */
+   int module_memory;
+   int module_governance;
+   int module_delegates;
+   int module_workflows;
+
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
     * (AIMEE_AUTONOMY_*); the config values are bridged to those env vars at startup
     * (autonomy_config_to_env) so the wfe library — which reads them via getenv across a
@@ -2058,6 +2080,16 @@ int config_load_file(config_t *cfg);
  * master-kill (economizer.enabled) > aggressive-tier ceiling > individual reduce.* default. */
 int econ_reduction_master_on(const config_t *cfg); /* economizer.enabled (measure is exempt) */
 int econ_gateway_mutate_on(const config_t *cfg);   /* enabled && aggressive && gateway_mutate */
+
+/* Resolve whether a pluggable module is enabled, from the layered enablement surface. This is
+ * the ONE place module enablement is decided; every wire site calls it with the module's tristate
+ * config field and its deprecated env default. Precedence (highest first):
+ *   1. admin/governance FORCE (aimee-kb governance state) — NOT YET WIRED; the documented seam
+ *      for the future tier that can pin a module on/off over the user's choice.
+ *   2. user config-store tristate (`modules:` block): `config_tristate` is 0 or 1 -> honored.
+ *   3. deprecated env default (`env_default`, already the module's env-or-default-ON value).
+ * `config_tristate` is one of cfg->module_* (-1 = unspecified). Pure: reads its args only. */
+int config_module_enabled(int config_tristate, int env_default);
 
 /* Validate the economizer gateway-mutation invariants that are STARTUP-FATAL (as
  * opposed to the in-memory normalizations config_load already applied). Currently:

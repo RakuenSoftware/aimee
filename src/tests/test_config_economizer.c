@@ -284,6 +284,40 @@ int main(void)
       assert(cfg2.economizer_aggressive == 1); /* opt-in persisted */
    }
 
+   /* --- modules.* tristate: defaults are -1 (unspecified) and are NOT persisted; an explicit
+    * 0/1 round-trips; and the resolver maps -1 -> env default, 0/1 -> canonical. --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg); /* no modules: block -> all unspecified */
+      assert(cfg.module_memory == -1 && cfg.module_governance == -1);
+      assert(cfg.module_delegates == -1 && cfg.module_workflows == -1);
+
+      /* save the pristine defaults: nothing written -> reload still -1 (no stray 0). */
+      assert(config_save(&cfg) == 0);
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.module_memory == -1 && cfg2.module_governance == -1);
+      assert(cfg2.module_delegates == -1 && cfg2.module_workflows == -1);
+
+      /* explicit user toggles round-trip: governance OFF, delegates ON, others unspecified. */
+      cfg2.module_governance = 0;
+      cfg2.module_delegates = 1;
+      assert(config_save(&cfg2) == 0);
+      static config_t cfg3;
+      memset(&cfg3, 0, sizeof(cfg3));
+      config_load(&cfg3);
+      assert(cfg3.module_governance == 0); /* explicit disable persisted */
+      assert(cfg3.module_delegates == 1);  /* explicit enable persisted  */
+      assert(cfg3.module_memory == -1 && cfg3.module_workflows == -1); /* untouched stay -1 */
+
+      /* resolver precedence (governance is default-ON via env fallback when unspecified). */
+      assert(config_module_enabled(cfg3.module_governance, 1) == 0); /* config OFF wins */
+      assert(config_module_enabled(cfg3.module_memory, 1) == 1);     /* -1 -> env default ON */
+      assert(config_module_enabled(cfg3.module_memory, 0) == 0);     /* -1 -> env default OFF */
+   }
+
    /* restore env */
    if (old_home)
    {

@@ -734,6 +734,33 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
    }
 }
 
+/* Pluggable-module toggles (`modules:` block) — the canonical user surface for enabling or
+ * disabling the pipeline modules. Each key is a bool; when present it sets the tristate to 0/1,
+ * else the field stays -1 (unspecified) and the resolver falls back to env/default. See
+ * config_module_enabled() and config.h. */
+void config_parse_modules_section(config_t *cfg, cJSON *root)
+{
+   cJSON *mods = cJSON_GetObjectItemCaseSensitive(root, "modules");
+   if (!cJSON_IsObject(mods))
+      return;
+   struct
+   {
+      const char *key;
+      int *field;
+   } toggles[] = {
+       {"memory", &cfg->module_memory},
+       {"governance", &cfg->module_governance},
+       {"delegates", &cfg->module_delegates},
+       {"workflows", &cfg->module_workflows},
+   };
+   for (size_t i = 0; i < sizeof(toggles) / sizeof(toggles[0]); i++)
+   {
+      cJSON *b = cJSON_GetObjectItemCaseSensitive(mods, toggles[i].key);
+      if (cJSON_IsBool(b))
+         *toggles[i].field = cJSON_IsTrue(b) ? 1 : 0;
+   }
+}
+
 /* Unified context economizer (src/context_reduce.c). Orchestration gates for the
  * single reduction subsystem. Only knobs the current code honors are parsed here;
  * each lever / the gateway seam / min_gain is added by the slice that implements

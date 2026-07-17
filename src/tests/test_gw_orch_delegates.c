@@ -32,41 +32,38 @@ int main(void)
 {
    gw_turn_capabilities_t caps = {NULL, fake_spawn, NULL};
 
-   /* default (no env): module is ENABLED, the spawn runs through the capability handle. */
+   /* The env default predicate stays pure (config is resolved at the wire site). */
    unsetenv("AIMEE_ORCH_DELEGATES");
    assert(gw_orch_delegates_enabled() == 1);
-   reset();
-   assert(gw_orch_delegates_run(&caps, "coord-task-7", "reviewer", "check the diff") == 0);
-   assert(g_spawns == 1);
-   assert(strcmp(g_last_role, "reviewer") == 0 && strcmp(g_last_brief, "check the diff") == 0);
-
-   /* DISABLED: no spawn is attempted and the module reports -1 so the caller can release the
-    * claim and retry (delegate spawning is paused while the module is off). */
    for (const char **v = (const char *[]){"0", "off", "false", "no", NULL}; *v; v++)
    {
       setenv("AIMEE_ORCH_DELEGATES", *v, 1);
       assert(gw_orch_delegates_enabled() == 0);
-      reset();
-      assert(gw_orch_delegates_run(&caps, "coord-task-8", "reviewer", "x") == -1);
-      assert(g_spawns == 0);
    }
-
-   /* explicitly re-enabled: spawns again. */
    setenv("AIMEE_ORCH_DELEGATES", "1", 1);
    assert(gw_orch_delegates_enabled() == 1);
+
+   /* enabled=1: the spawn runs through the capability handle. */
    reset();
-   assert(gw_orch_delegates_run(&caps, "coord-task-9", "engineer", "do it") == 0);
+   assert(gw_orch_delegates_run(&caps, "coord-task-7", "reviewer", "check the diff", 1) == 0);
    assert(g_spawns == 1);
+   assert(strcmp(g_last_role, "reviewer") == 0 && strcmp(g_last_brief, "check the diff") == 0);
+
+   /* enabled=0: no spawn is attempted and the module reports -1 so the caller can release the
+    * claim and retry (delegate spawning is paused while the module is off). */
+   reset();
+   assert(gw_orch_delegates_run(&caps, "coord-task-8", "reviewer", "x", 0) == -1);
+   assert(g_spawns == 0);
 
    /* NULL caps is a clean -1 (no spawn), not a crash. */
-   assert(gw_orch_delegates_run(NULL, "t", "r", "b") == -1);
+   assert(gw_orch_delegates_run(NULL, "t", "r", "b", 1) == -1);
 
    /* a missing spawn_delegate handle is fail-open: the module still returns 0 (the hook ran),
     * and no spawn happens -- the runner surfaces the FAIL internally, never blocking. */
    {
       gw_turn_capabilities_t no_spawn = {NULL, NULL, NULL};
       reset();
-      assert(gw_orch_delegates_run(&no_spawn, "t", "r", "b") == 0);
+      assert(gw_orch_delegates_run(&no_spawn, "t", "r", "b", 1) == 0);
       assert(g_spawns == 0);
    }
 
