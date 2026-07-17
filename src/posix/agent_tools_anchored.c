@@ -17,7 +17,7 @@
 #include "edit_anchored.h"
 #include "guardrails.h"
 #include "kb_client.h"
-#include "tool_condense.h"
+#include "economizer.h"
 #include "aimee_home.h"
 #include "config.h"
 #include "workspace_provider.h"

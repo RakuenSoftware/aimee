@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../headers/coord_closet.h"
+#include "coord_closet.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 

@@ -250,7 +250,7 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
  * shadow-mode hook in messages_run_request_pipeline references these three, so stub
  * them as no-ops to keep the minimal P2c link from pulling the economizer + its
  * db1/token_tracker dependency chain. */
-#include "../headers/context_reduce.h"
+#include "context_reduce.h"
 int context_reduce(cJSON *messages, const char *system_prompt, const char *model,
                    const char *session_id, reduce_seam_t seam, const reduce_config_t *cfg,
                    reduce_state_t *st, reduce_result_t *out)

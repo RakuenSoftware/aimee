@@ -10,7 +10,7 @@
 #include "db1.h"    /* token_audit + agent_log inserts */
 #include "token_tracker.h"
 #include "request_context.h" /* per-request id / principal / idempotency */
-#include "context_reduce.h"  /* reduce_result_t for the economizer ledger */
+#include "economizer.h"
 
 #include <pthread.h>
 #include <stdio.h>

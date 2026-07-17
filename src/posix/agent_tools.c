@@ -3,7 +3,7 @@
 #include "agent_tools.h"
 #include "aimee_home.h"
 #include "delegate_ephemeral_ws.h"
-#include "tool_condense.h"
+#include "economizer.h"
 #include "log.h"
 #include "agent_tools_internal.h"
 #include "agent_source_authority.h"

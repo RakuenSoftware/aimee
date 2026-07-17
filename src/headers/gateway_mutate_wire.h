@@ -10,7 +10,7 @@
 #ifndef DEC_GATEWAY_MUTATE_WIRE_H
 #define DEC_GATEWAY_MUTATE_WIRE_H 1
 
-#include "context_reduce.h" /* reduce_state_t */
+#include "economizer.h"
 #include "msg_session_disable.h"
 #include <cJSON.h>
 

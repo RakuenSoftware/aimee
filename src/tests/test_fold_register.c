@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../headers/fold_register.h"
+#include "fold_register.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 

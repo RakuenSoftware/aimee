@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../headers/context_fold.h"
+#include "context_fold.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 

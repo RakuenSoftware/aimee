@@ -32,7 +32,7 @@
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "context_reduce.h"
+#include "economizer.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include "agent_protocol.h"  /* parsed_response_t, message_history_repair */

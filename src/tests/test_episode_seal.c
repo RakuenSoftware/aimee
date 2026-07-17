@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../headers/episode_seal.h"
+#include "episode_seal.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 
