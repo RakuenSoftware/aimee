@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { tokens } from '@rakuensoftware/smoothgui';
+import { tokens, DiffViewer } from '@rakuensoftware/smoothgui';
 import { escHtml, renderMd } from './markdown';
 
 interface BootstrapStack {
@@ -106,19 +106,10 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ text }: { text: s
 });
 
 export const DiffBlock = memo(function DiffBlock({ path, diff }: { path?: string; diff: string }) {
-  const lines = diff.split('\n');
   return (
     <details style={{ margin: '4px 0', padding: '8px 10px', background: '#0d1117', borderLeft: '3px solid #444', borderRadius: '4px', fontSize: '12px', alignSelf: 'flex-start', maxWidth: '90%' }}>
       <summary style={{ cursor: 'pointer', color: '#8bf', fontSize: '12px', fontFamily: 'monospace' }}>{path ? `diff: ${path}` : 'diff'}</summary>
-      <pre style={{ margin: '6px 0 0', fontSize: '11px', fontFamily: 'monospace', lineHeight: 1.4, overflow: 'auto', maxHeight: '300px' }}>
-        {lines.map((line, i) => {
-          let color = '#ccc';
-          if (line.startsWith('+') && !line.startsWith('+++')) color = '#4ec94e';
-          else if (line.startsWith('-') && !line.startsWith('---')) color = '#f87171';
-          else if (line.startsWith('@@')) color = '#60a5fa';
-          return <span key={i} style={{ color, display: 'block' }}>{line}</span>;
-        })}
-      </pre>
+      <DiffViewer diff={diff} />
     </details>
   );
 });
