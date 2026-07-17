@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { Button, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
+import { Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -452,52 +452,17 @@ function RulesPanel({ open, onToggle }: { open: boolean; onToggle: () => void })
   const active = rules.filter(r => r.status === 'active');
   const inactive = rules.filter(r => r.status === 'rejected' || r.status === 'retired');
 
-  if (!open) {
-    return (
-      <button
-        onClick={onToggle}
-        title="Collaborative Rules"
-        style={{
-          position: 'absolute', right: 8, top: 8, zIndex: 10,
-          padding: '4px 10px', fontSize: '12px', borderRadius: '4px',
-          cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`,
-          background: tokens.surfaceAlt, color: tokens.textSecondary,
-        }}
-      >
-        Rules{active.length > 0 ? ` (${active.length})` : ''}
-        {proposed.length > 0 && (
-          <span style={{ marginLeft: 4, color: tokens.warning, fontWeight: 'bold' }}>
-            {proposed.length} pending
-          </span>
-        )}
-      </button>
-    );
-  }
-
   return (
-    <div style={{
-      width: 280, flexShrink: 0, borderLeft: `1px solid ${tokens.border}`,
-      background: tokens.surfaceAlt, display: 'flex', flexDirection: 'column',
-      fontSize: '13px', overflow: 'hidden',
-    }}>
-      <div style={{
-        padding: '10px 12px', borderBottom: `1px solid ${tokens.border}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <span style={{ fontWeight: 'bold', color: tokens.text }}>
-          Rules <span style={{ fontWeight: 'normal', color: tokens.textFaint, fontSize: '11px' }}>epoch {epoch}</span>
-        </span>
-        <button
-          onClick={onToggle}
-          style={{
-            border: 'none', background: 'transparent', cursor: 'pointer',
-            color: tokens.textPale, fontSize: '16px', lineHeight: 1,
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
+    <Drawer
+      open={open}
+      onToggle={onToggle}
+      title="Rules"
+      subtitle={`epoch ${epoch}`}
+      badge={active.length || undefined}
+      alert={proposed.length > 0 ? <span style={{ color: tokens.warning, fontWeight: 'bold' }}>{proposed.length} pending</span> : undefined}
+      side="right"
+      width={280}
+    >
         {proposed.length > 0 && (
           <div style={{ marginBottom: 12 }}>
             <div style={{ color: tokens.warning, fontWeight: 'bold', fontSize: '11px', marginBottom: 4, textTransform: 'uppercase' }}>
@@ -586,8 +551,7 @@ function RulesPanel({ open, onToggle }: { open: boolean; onToggle: () => void })
             No collaborative rules yet. Agents can propose rules via the rules_propose tool.
           </div>
         )}
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -608,40 +572,14 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
   const sessionTokens = sessionUsage.in + sessionUsage.out;
   const usagePct = totalCost > 0 ? (sessionUsage.cost / totalCost * 100) : 0;
 
-  if (!open) {
-    return (
-      <button
-        onClick={onToggle}
-        title="Context"
-        style={{
-          position: 'absolute', right: 160, top: 8, zIndex: 10,
-          padding: '4px 10px', fontSize: '12px', borderRadius: '4px',
-          cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`,
-          background: tokens.surfaceAlt, color: tokens.textSecondary,
-        }}
-      >
-        Context
-      </button>
-    );
-  }
-
   return (
-    <div style={{
-      width: 260, flexShrink: 0, borderLeft: `1px solid ${tokens.border}`,
-      background: tokens.surfaceAlt, display: 'flex', flexDirection: 'column',
-      fontSize: '13px', overflow: 'hidden',
-    }}>
-      <div style={{
-        padding: '10px 12px', borderBottom: `1px solid ${tokens.border}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <span style={{ fontWeight: 'bold', color: tokens.text }}>Context</span>
-        <button
-          onClick={onToggle}
-          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: tokens.textPale, fontSize: '16px', lineHeight: 1 }}
-        >×</button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
+    <Drawer
+      open={open}
+      onToggle={onToggle}
+      title="Context"
+      side="right"
+      width={260}
+    >
         <div style={{ marginBottom: 12 }}>
           <div style={{ color: tokens.textSecondary, fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Session</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
@@ -724,8 +662,7 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
             })}
           </div>
         )}
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -738,40 +675,18 @@ function PluginsPanel({ open, plugins, loading, error, onToggle, onRefresh, onPl
   onRefresh: () => void;
   onPluginToggle: (name: string) => void;
 }) {
-  if (!open) {
-    return (
-      <button
-        onClick={onToggle}
-        title="Plugins"
-        style={{
-          position: 'absolute', right: 84, top: 8, zIndex: 10,
-          padding: '4px 10px', fontSize: '12px', borderRadius: '4px',
-          cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`,
-          background: tokens.surfaceAlt, color: tokens.textSecondary,
-        }}
-      >
-        Plugins{plugins.length > 0 ? ` (${plugins.length})` : ''}
-      </button>
-    );
-  }
-
   return (
-    <div style={{
-      width: 300, flexShrink: 0, borderLeft: `1px solid ${tokens.border}`,
-      background: tokens.surfaceAlt, display: 'flex', flexDirection: 'column',
-      fontSize: '13px', overflow: 'hidden',
-    }}>
-      <div style={{
-        padding: '10px 12px', borderBottom: `1px solid ${tokens.border}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <span style={{ fontWeight: 'bold', color: tokens.text }}>Plugins</span>
-        <div style={{ display: 'flex', gap: 8 }}>
+    <Drawer
+      open={open}
+      onToggle={onToggle}
+      title="Plugins"
+      badge={plugins.length || undefined}
+      side="right"
+      width={300}
+    >
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
           <Button variant="ghost" size="sm" onClick={onRefresh}>Refresh</Button>
-          <button onClick={onToggle} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: tokens.textPale, fontSize: '16px', lineHeight: 1 }}>×</button>
         </div>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
         {loading && <div style={{ color: tokens.textFaint }}>Loading plugins…</div>}
         {!loading && error && <div style={{ color: tokens.danger }}>{error}</div>}
         {!loading && !error && plugins.length === 0 && (
@@ -811,8 +726,7 @@ function PluginsPanel({ open, plugins, loading, error, onToggle, onRefresh, onPl
             </div>
           </div>
         ))}
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -3198,9 +3112,10 @@ export default function Chat() {
           const busy = queueActive || steering;
           const label = steering ? 'Steer' : 'Send';
           return (
-            <button
+            <Button
+              variant="primary"
+              busy={busy}
               onClick={sendMessage}
-              aria-busy={busy}
               title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
               style={{
                 padding: '10px 20px', background: tokens.primary,
@@ -3214,7 +3129,7 @@ export default function Chat() {
                   {label}
                 </span>
               ) : label}
-            </button>
+            </Button>
           );
         })()}
       </div>
