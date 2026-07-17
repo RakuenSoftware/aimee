@@ -47,13 +47,15 @@ int sandbox_pkg_host_allowed(const char *host, const char *allowlist);
 /* Curated default registry allowlist (deb/ubuntu mirrors, npm, PyPI). */
 const char *sandbox_pkg_default_allowlist(void);
 
-/* Serve one accepted proxy connection on `client_fd`: read the request line (+ headers
- * for absolute-form), enforce port + host-allowlist + SSRF (re-checked against every
- * address actually dialed), then CONNECT-tunnel (HTTPS) or absolute-form-forward
+/* Serve one accepted proxy connection on `client_fd`. `head` is the already-read HTTP
+ * request head (NUL-terminated, up to and including the blank line — the caller's
+ * listener consumes it before deciding this is proxy traffic). Enforces port +
+ * host-allowlist + SSRF (re-checked against every address actually dialed), then
+ * CONNECT-tunnels (HTTPS, tunnel bytes still on the socket) or absolute-form-forwards
  * (plain HTTP) to the registry. `allowlist` NULL uses the curated default; `tag` (may
  * be NULL) labels the per-request audit log. The caller owns and closes `client_fd`.
- * Returns 0 once a request has been handled — including a 4xx/5xx refusal — and -1
- * only on a request-read/setup failure. */
-int sandbox_pkg_proxy_serve(int client_fd, const char *allowlist, const char *tag);
+ * Returns 0 once a request has been handled — including a 4xx/5xx refusal. */
+int sandbox_pkg_proxy_serve(int client_fd, const char *head, const char *allowlist,
+                            const char *tag);
 
 #endif /* DEC_SANDBOX_PKG_PROXY_H */

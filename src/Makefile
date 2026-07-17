@@ -12,6 +12,8 @@ RM      = rm -rf
 endif
 BINARY  = ../aimee$(EXEEXT)
 SERVER  = ../aimee-server$(EXEEXT)
+# Statically-linked TCP<->UDS bridge that runs INSIDE a delegate sandbox container.
+FORWARDER = ../aimee-forwarder$(EXEEXT)
 KB      = ../aimee-kb$(EXEEXT)
 WEBCHAT = ../aimee-webchat$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
@@ -373,7 +375,7 @@ CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJ
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
 # --- Server ---
-SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c server/server_main.c server/server.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server_provider_slots.c server/server_api_status.c server/server_seed_config.c server/server_http.c server/server_http_routes.c server/server_http_routes_git.c server/server_dev_submit.c server/server_ci_route.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/gw_mutate_stats.c server/msg_session_disable.c server/gateway_mutate.c server/gateway_mutate_wire.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c server/gw_stage_memory.c server/fidelity_check.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_runner_endpoints.c server/server_state_audit.c server/server_css_query.c server/server_runner_endpoints.c server/server_state_audit.c server/server_css_query.c server/server_state.c server/server_state_index.c server/server_plugin.c server/server_memory_benchmark.c server/workspace_provider_detached.c server/workspace_provider_container.c server/workspace_runner_queue.c server/workspace_runner_registry.c server/workspace_turn.c server/workspace_scope.c server/delegate_sandbox_image.c server/webuser_runtime.c \
+SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c server/server_main.c server/server.c server/s2_native_gate_hook.c server_provider.c server_insights.c server_eval.c server_provider_slots.c server/server_api_status.c server/server_seed_config.c server/server_http.c server/server_http_routes.c server/server_http_routes_git.c server/server_dev_submit.c server/server_ci_route.c server/server_http_config_routes.c server/server_http_response.c server/server_http_sse.c server/server_http_conn_worker.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/gw_mutate_stats.c server/msg_session_disable.c server/gateway_mutate.c server/gateway_mutate_wire.c server/ingress_preinject.c server/retrieval_outcome_bridge.c server/code_span.c server/gw_stage_memory.c server/fidelity_check.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_runner_endpoints.c server/server_state_audit.c server/server_css_query.c server/server_runner_endpoints.c server/server_state_audit.c server/server_css_query.c server/server_state.c server/server_state_index.c server/server_plugin.c server/server_memory_benchmark.c server/workspace_provider_detached.c server/workspace_provider_container.c server/workspace_runner_queue.c server/workspace_runner_registry.c server/workspace_turn.c server/workspace_scope.c server/delegate_sandbox_image.c server/sandbox_pkg_proxy.c server/webuser_runtime.c \
               server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c server/turn_registry.c server/wfe_live_delegate.c server/wfe_live_forge.c server/wfe_live_foreach.c server/wfe_live_panel.c server/wfe_panel_roundtable.c server/wfe_replay_worktree.c server/wfe_delegate_resolve.c server/wfe_scheduler.c \
               server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_compute_roundtable.c server/server_compute_mailbox.c server_compute_concurrency.c server_compute_episodes.c server/router_advise.c server/aimee_ir.c server/aimee_ir_metrics.c server/aimee_frontend_anthropic.c server/aimee_frontend_openai.c server/aimee_frontend_responses.c server/aimee_backend_anthropic.c server/aimee_backend_openai.c server/aimee_backend_responses.c server/aimee_ir_shadow.c server/aimee_ir_serve.c server/aimee_ir_stream.c server/aimee_ir_rescue.c server/shadow_mirror.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_call_table.c server/server_mcp_ast_grep.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_ensemble.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
               server/roundtable_pipeline_eval.c server/roundtable_pipeline_capture.c server/roundtable_pipeline_chunk.c server/server_pipeline.c server/server_pipeline_merge.c \
@@ -575,7 +577,12 @@ DEPS = $(ALL_OBJS:.o=.d)
 
 .PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
 
-all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(GATEWAY)
+all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(GATEWAY) $(FORWARDER)
+
+# The forwarder is a standalone static binary (libc only, no aimee objects); it is
+# shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
+$(FORWARDER): aimee_forwarder.c
+	$(CC) -static -O2 -Wall -Wextra -Werror -o $@ $<
 ifneq ($(HAVE_GO),1)
 	@echo "aimee: NOTE - 'go' not found on PATH; skipped aimee-webchat (browser UI)."
 	@echo "aimee:        Install Go (>=1.25, see webchat/go.mod) and re-run to build it,"
@@ -603,7 +610,7 @@ verify-local: lint check-linking
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@echo "verify-local: ok"
 
-server: retire-obsolete-binaries $(SERVER) $(KB)
+server: retire-obsolete-binaries $(SERVER) $(KB) $(FORWARDER)
 
 # Lean build: size-optimized, stripped binary for minimal deployments.
 # Uses -Os (size opt), -g0 (no debug info), -s (strip symbols), and
@@ -1043,6 +1050,7 @@ install:
 	install -m 755 $(BINARY) $(PREFIX)/bin/aimee
 	install -m 755 $(WEBCHAT) $(PREFIX)/bin/aimee-webchat
 	install -m 755 $(SERVER) $(PREFIX)/bin/aimee-server
+	install -m 755 $(FORWARDER) $(PREFIX)/bin/aimee-forwarder
 	install -m 755 $(KB) $(PREFIX)/bin/aimee-kb
 	install -m 755 $(GATEWAY) $(PREFIX)/bin/aimee-gateway
 	@mkdir -p $(DATADIR)

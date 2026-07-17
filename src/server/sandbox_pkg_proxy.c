@@ -289,32 +289,6 @@ sbx_req_kind_t sandbox_pkg_classify_request_line(const char *line, char *host, s
  * The functions above are pure and unit-tested; the plumbing below wires them to
  * real sockets and is exercised by the integration test (docker). */
 
-/* Read an HTTP message head (up to the blank line) one byte at a time — the head is
- * small, and byte-wise avoids over-reading into the tunnelled/relayed body. */
-static ssize_t proxy_read_head(int fd, char *buf, size_t cap)
-{
-   size_t n = 0;
-   while (n + 1 < cap)
-   {
-      ssize_t r = read(fd, buf + n, 1);
-      if (r < 0 && errno == EINTR)
-         continue;
-      if (r <= 0)
-      {
-         buf[n] = '\0';
-         return n > 0 ? (ssize_t)n : -1;
-      }
-      n++;
-      if (n >= 2 && buf[n - 1] == '\n' && buf[n - 2] == '\n')
-         break;
-      if (n >= 4 && buf[n - 1] == '\n' && buf[n - 2] == '\r' && buf[n - 3] == '\n' &&
-          buf[n - 4] == '\r')
-         break;
-   }
-   buf[n] = '\0';
-   return (ssize_t)n;
-}
-
 static int write_all(int fd, const char *p, size_t n)
 {
    size_t off = 0;
@@ -492,16 +466,14 @@ static int proxy_forward_head(int up, const char *head)
    return write_all(up, "Connection: close\r\n\r\n", 21);
 }
 
-int sandbox_pkg_proxy_serve(int client_fd, const char *allowlist, const char *tag)
+int sandbox_pkg_proxy_serve(int client_fd, const char *head, const char *allowlist, const char *tag)
 {
    if (!allowlist)
       allowlist = sandbox_pkg_default_allowlist();
    if (!tag)
       tag = "sandbox";
-
-   char head[16384];
-   if (proxy_read_head(client_fd, head, sizeof(head)) < 0)
-      return -1;
+   if (!head)
+      return 0;
 
    char host[256];
    int port = 0;

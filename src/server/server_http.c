@@ -9,9 +9,10 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http.h"
-#include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
-#include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
-#include "server_tls.h"     /* native TLS termination (phase 1b) */
+#include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
+#include "server.h"            /* CAP_* / CAPS_* capability bits, server_capability_for_method */
+#include "server_conn_io.h"    /* transport-aware fd I/O (native-TLS phase 1) */
+#include "server_tls.h"        /* native TLS termination (phase 1b) */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
@@ -1415,6 +1416,18 @@ void handle_conn(int fd, int is_tcp)
    if (sscanf(buf, "%15s %511s", method, path) < 2)
    {
       send_response(fd, 400, "{\"error\":\"bad request\"}", NULL);
+      return;
+   }
+
+   /* Package-access proxy (UDS listener ONLY — never the TCP/TLS surface): a CONNECT
+    * or absolute-form (`http://…`) request line is a sandboxed delegate's
+    * package-manager fetch arriving via the in-container aimee-forwarder. Hand it to
+    * the forward proxy (host-allowlist + SSRF guard + per-request audit); origin-form
+    * (`/…`) request lines fall through to the /v1 API stack below. A local /v1 client
+    * never sends CONNECT, so this cannot shadow the API. The caller closes `fd`. */
+   if (!is_tcp && (strcmp(method, "CONNECT") == 0 || strncmp(path, "http://", 7) == 0))
+   {
+      sandbox_pkg_proxy_serve(fd, buf, NULL, "sandbox");
       return;
    }
 
