@@ -1244,14 +1244,16 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    return 0;
 }
 
-/* Is `ag` allowed to sit on a roundtable/ensemble panel? Enabled + named, and —
- * for claude-CLI — AUTHORIZED as a delegate (claude_cli_delegate_enabled, the
- * explicit, ToS-sensitive operator opt-in) AND able to run server-side
- * (is_server_hosted, via `aimee agent add claude-oauth`). A client-only claude
- * has no server endpoint and would just burn a slot on a "failed to build request
- * URL" participant; server-hosting is capability, NOT authorization, so both are
- * required. So an unauthorized or disabled claude is never seated, even after a
- * server-side OAuth setup. Other enabled agents are eligible.
+/* Is `ag` allowed to sit on a roundtable/ensemble panel? Enabled + named, NOT
+ * flagged primary-only (agents.json `primary_only` — the per-agent delegate
+ * opt-out that replaced the global claude_cli_delegate_enabled; a claude-oauth
+ * subscription is pre-flagged primary-only for the ToS reason), and — for
+ * claude-CLI — able to run server-side (is_server_hosted, via `aimee agent add
+ * claude-oauth`). A client-only claude has no server endpoint and would just
+ * burn a slot on a "failed to build request URL" participant; server-hosting is
+ * capability, primary_only is authorization, so both must pass. So a
+ * primary-only or disabled claude is never seated, even after a server-side
+ * OAuth setup. Other enabled agents are eligible.
  *
  * The PRIMARY agent is also never seated: a roundtable exists for an INDEPENDENT
  * second opinion, so the model the operator runs as primary (config.provider)
@@ -1266,7 +1268,9 @@ int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
    if (cfg->provider[0] && (strcasecmp(ag->name, cfg->provider) == 0 ||
                             (ag->provider[0] && strcasecmp(ag->provider, cfg->provider) == 0)))
       return 0; /* the primary must never sit on its own panel */
-   if (agent_is_claude_cli(ag) && (!cfg->claude_cli_delegate_enabled || !ag->is_server_hosted))
+   if (ag->primary_only)
+      return 0;
+   if (agent_is_claude_cli(ag) && !ag->is_server_hosted)
       return 0;
    return 1;
 }

@@ -110,8 +110,6 @@ export const FIELD_HELP: Record<string, string> = {
   llm_synth_model: "Model name the synthesizer serves.",
 
   ecomode: "Always route to the cheapest capable agent instead of the default one. Off by default.",
-  claude_cli_delegate_enabled:
-    "Allow the subscription-logged-in Claude CLI to be used as a delegate, not just the primary. Off by default — driving a personal Claude subscription as an automated delegate may breach Anthropic's terms.",
   delegate_graph_context_enabled:
     "Prepend the callers and dependencies of the files a delegate task mentions to its prompt. Advisory, off by default.",
 

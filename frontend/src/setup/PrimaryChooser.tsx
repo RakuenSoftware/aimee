@@ -152,6 +152,11 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
   // Delegate mode only: the roster name + delegation roles for the new agent.
   const [name, setName] = useState('');
   const [roles, setRoles] = useState('summarize,format,draft');
+  // "Primary Agent Only": when checked the agent can ONLY be the primary, never a
+  // delegate. Pre-checked for a Claude subscription (driving a personal Claude
+  // plan as an automated delegate may breach Anthropic's terms); off for every
+  // other agent. Persisted per-agent (agents.json `primary_only`).
+  const [primaryOnly, setPrimaryOnly] = useState(false);
 
   // Subscription OAuth flow.
   const [oauth, setOauth] = useState<OauthState | null>(null);
@@ -171,12 +176,15 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
     setName(delegate ? `${spec.provider}-delegate` : '');
     setError('');
     setOauth(null);
+    setPrimaryOnly(false); // API-key agents are delegate-eligible by default
   };
   const chooseSub = (spec: SubSpec) => {
     setSelected(spec.kind);
     setError('');
     setOauth(null);
     setCodeBack('');
+    // A Claude subscription defaults to primary-only (ToS); Codex does not.
+    setPrimaryOnly(spec.vendor === 'claude');
   };
   const reset = () => {
     setSelected(null); setError(''); setOauth(null); setCodeBack('');
@@ -207,6 +215,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
       } else {
         args.push('--default');
       }
+      args.push('--primary-only', primaryOnly ? 'on' : 'off');
       await postJSON('/api/agents/add', { args });
       await onConfigured(apiSpec.provider);
     } catch (e) {
@@ -221,12 +230,14 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
       const r = await postJSON<{ state?: string; agent?: string; error?: string }>(
         '/api/agents/oauth/poll', { vendor, session });
       if (r.state === 'authenticated') {
-        // Primary mode: promote the freshly-registered vendor agent to the
-        // global primary. A delegate stays an ordinary roster entry.
-        if (!delegate) {
-          const agent = r.agent || vendor;
-          await postJSON('/api/agents/set', { args: [agent, '--default'] });
-        }
+        // Apply the operator's "Primary Agent Only" choice to the freshly
+        // OAuth-registered agent (the server registers a claude subscription
+        // primary-only by default; this honours an unchecked box so it can serve
+        // as a delegate). Primary mode also promotes it to the global primary.
+        const agent = r.agent || vendor;
+        const setArgs = [agent, '--primary-only', primaryOnly ? 'on' : 'off'];
+        if (!delegate) setArgs.push('--default');
+        await postJSON('/api/agents/set', { args: setArgs });
         return 'authenticated';
       }
       if (r.state === 'failed') { setError(r.error || 'Login failed or timed out.'); return 'failed'; }
@@ -235,7 +246,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
       setError(e instanceof Error ? e.message : 'Poll failed.');
       return 'failed';
     }
-  }, [delegate]);
+  }, [delegate, primaryOnly]);
 
   const runPoll = useCallback(async (vendor: string, session: string, provider: string) => {
     setPolling(true);
@@ -345,6 +356,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
           <div style={{ fontSize: 11.5, color: '#778' }}>
             The key is sealed into aimee-server’s vault — it is never stored in the browser or in agents.json.
           </div>
+          <PrimaryOnlyToggle checked={primaryOnly} disabled={busy} onChange={setPrimaryOnly} />
           <div>
             <button style={primaryBtn} disabled={busy} onClick={submitApi}>
               {busy ? 'Saving…' : delegate ? 'Add delegate' : 'Save & set as primary'}
@@ -362,6 +374,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
                 aimee installs the {subSpec.vendor} CLI on the server and starts a login. You’ll get a
                 link to authorize in your browser. This can take up to a minute on first run.
               </p>
+              <PrimaryOnlyToggle checked={primaryOnly} disabled={busy} onChange={setPrimaryOnly} />
               <div>
                 <button style={primaryBtn} disabled={busy} onClick={startSub}>
                   {busy ? 'Starting…' : `Sign in with ${subSpec.label}`}
@@ -426,6 +439,26 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <label style={{ display: 'block' }}>
       <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 3 }}>{label}</div>
       {children}
+    </label>
+  );
+}
+
+// "Primary Agent Only" checkbox shown in every add flow. Checked = this agent can
+// only be the primary and is never routed as a delegate; unchecked = it may serve
+// as a delegate. Pre-checked for a Claude subscription (see PrimaryChooser).
+function PrimaryOnlyToggle(
+  { checked, disabled, onChange }:
+  { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void },
+) {
+  return (
+    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#556', cursor: disabled ? 'default' : 'pointer' }}>
+      <input type="checkbox" checked={checked} disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 2 }} />
+      <span>
+        <strong style={{ color: '#334' }}>Primary Agent Only</strong> — use only as the primary,
+        never as a delegate. Recommended for a Claude subscription: driving a personal Claude plan as
+        an automated delegate may breach Anthropic’s terms.
+      </span>
     </label>
   );
 }

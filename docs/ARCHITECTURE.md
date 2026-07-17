@@ -439,11 +439,14 @@ sequenceDiagram
   the same host as the CLI), the tmux session runs locally exactly as before.
 - **Claude via the CLI is primary-only by default.** Claude run via the `claude`
   CLI/tmux login (not an API key) is allowed as the interactive primary but is
-  gated out of delegate routing unless `claude_cli_delegate_enabled` is set,
-  automating a personal Claude subscription as a delegate risks Anthropic account
-  action. The routing above applies to the primary chat turn always, and to a
-  Claude-CLI delegate only when that flag is enabled; this gate is
-  Claude-CLI-specific (other CLI/API agents are unaffected). See
+  gated out of delegate routing whenever its per-agent **Primary Agent Only**
+  flag (`primary_only` in `agents.json`) is set — the Web GUI pre-checks it when
+  you add a claude-oauth subscription, because automating a personal Claude
+  subscription as a delegate risks Anthropic account action. The routing above
+  applies to the primary chat turn always, and to a Claude-CLI delegate only when
+  you uncheck Primary Agent Only for it. The flag is a per-agent choice available
+  to any agent, and replaced the former global `claude_cli_delegate_enabled`
+  opt-in. See
   [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default) and
   [SECURITY.md](SECURITY.md).
 
