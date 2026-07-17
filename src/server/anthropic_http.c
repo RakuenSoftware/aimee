@@ -17,7 +17,7 @@
 #include "agent_config.h"
 #include "aimee_errors.h"
 #include "agent_exec.h"
-#include "context_reduce.h"
+#include "economizer.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include "agent_protocol.h"

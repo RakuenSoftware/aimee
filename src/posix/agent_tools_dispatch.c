@@ -7,7 +7,7 @@
 #include "aimee_home.h"
 #include "delegate_ephemeral_ws.h"
 #include "log.h"
-#include "tool_condense.h"
+#include "economizer.h"
 #include "tool_args_coerce.h"
 #include "sandbox_learned.h"
 #include "workspace_provider.h"

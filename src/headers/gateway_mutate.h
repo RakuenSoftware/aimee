@@ -8,7 +8,7 @@
 #ifndef DEC_GATEWAY_MUTATE_H
 #define DEC_GATEWAY_MUTATE_H 1
 
-#include "context_reduce.h" /* reduce_result_t, reduce_state_t, reduce_error_t */
+#include "economizer.h"
 #include <cJSON.h>
 
 #ifdef __cplusplus

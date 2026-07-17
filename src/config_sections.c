@@ -4,7 +4,7 @@
 #include "json_fluent.h"
 #include "config_internal.h"
 #include "config_sections.h"
-#include "context_reduce.h" /* FREEZE_GUARD_MAX_HORIZON — clamp freeze_guard_horizon at parse */
+#include "economizer.h"
 #include "sandbox.h"
 #include "toolset.h"
 #include "cJSON.h"
