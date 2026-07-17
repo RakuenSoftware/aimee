@@ -20,10 +20,25 @@
 #include <sys/file.h>
 #include <unistd.h>
 
-/* --- pure helpers --- */
+/* --- pure helpers ---
+ *
+ * SECURITY MODEL. The input is an UNTRUSTED, delegate-authored shell command. The
+ * tokenizer below is deliberately a best-effort, QUOTE-UNAWARE lexical splitter: it
+ * does not interpret single/double quotes, backslash escapes, `$(...)`/backtick
+ * command substitution, `${...}` expansion, or globbing — the delegate's real shell
+ * (bash -c inside the sandbox) does. That is intentional and safe because pkg_valid()
+ * is THE security boundary: a token is recorded ONLY if it matches the strict Debian
+ * package-name grammar (leading alnum, then a small punctuation whitelist), so no
+ * shell metacharacter, quote, expansion, path, or flag can ever be recorded — and the
+ * recorded set is validated AGAIN by package_name_valid() when the Dockerfile's
+ * `apt-get install` line is generated. The command word itself must equal exactly
+ * "apt"/"apt-get" (an exact strcmp), so a `"$(...)"`-shaped token is not an apt
+ * command and its segment is skipped. Worst case a benign but wrong name is recorded,
+ * which fails its own build and falls back to the base image; there is no path from
+ * this parser to shell execution. */
 
 /* Debian package-name grammar (leading alnum, then [a-z0-9._+:-]). Rejects paths,
- * shell metacharacters, and flag-looking tokens. */
+ * shell metacharacters, and flag-looking tokens. This is the security boundary. */
 static int pkg_valid(const char *s)
 {
    if (!s || !s[0])
