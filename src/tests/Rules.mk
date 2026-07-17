@@ -244,6 +244,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-gw-response-registry \
                $(TESTPREFIX)/unit-test-response-governance-stage \
                $(TESTPREFIX)/unit-test-gw-orchestration-seam \
+               $(TESTPREFIX)/unit-test-gw-orch-delegates \
                $(TESTPREFIX)/unit-test-gateway-p4-delegate \
                $(TESTPREFIX)/unit-test-hud \
                $(TESTPREFIX)/unit-test-coord-jobs \
@@ -1390,6 +1391,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/delegations.o $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/session_paths.o $(OBJDIR)/db1/cost_fold.o $(OBJDIR)/db1/token_audit.o $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/server/delegate_credential_retry.o $(OBJDIR)/db1/delegate_learning.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/db1/execution_plans.o $(OBJDIR)/db1/coord_jobs.o \
 		                               $(OBJDIR)/server/delegate_launch.o $(OBJDIR)/server/delegate_source_authority.o $(OBJDIR)/server/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
+		                               $(OBJDIR)/server/gw_orch_delegates.o $(OBJDIR)/server/gw_orchestration_seam.o \
 		                               $(OBJDIR)/server/delegate_routing.o \
 		                               $(OBJDIR)/model_registry.o \
 		                               $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -2412,6 +2414,11 @@ $(TESTPREFIX)/unit-test-response-governance-stage: $(OBJDIR)/tests/test_response
 
 # Orchestration-hook seam + runner (Slice 3 of the response/orchestration seam), self-contained.
 $(TESTPREFIX)/unit-test-gw-orchestration-seam: $(OBJDIR)/tests/test_gw_orchestration_seam.o $(OBJDIR)/server/gw_orchestration_seam.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Delegates orchestration module (first port): toggle + module runner over the seam, proven
+# with a fake capability (no real delegate thread). Self-contained.
+$(TESTPREFIX)/unit-test-gw-orch-delegates: $(OBJDIR)/tests/test_gw_orch_delegates.o $(OBJDIR)/server/gw_orch_delegates.o $(OBJDIR)/server/gw_orchestration_seam.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-p4-delegate: $(OBJDIR)/tests/test_gateway_p4_delegate.o $(OBJDIR)/gateway_delegate.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
