@@ -28,6 +28,7 @@
 #include "gateway_policy.h"
 #include "gateway_pipeline.h"
 #include "gw_stage_memory.h"
+#include "gw_stage_registry.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include "aimee_ir_metrics.h"
@@ -333,13 +334,19 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
        .stream = stream,
        .allow_anthropic_inject = allow_anthropic_inject,
    };
-   static const gw_stage_t stages[] = {
-       {gw_stage_memory, NULL, "memory"},
-       {gw_stage_tool_policing, NULL, "tool_policing"},
-       {gw_stage_router, NULL, "router"}, /* S1/S2: the unified request->workflow seam */
-       {gw_stage_model_pin, NULL, "model_pin"},
+   /* Slice 7: build the enabled, ordered stage set from the catalog. Memory is a
+    * togglable module (AIMEE_STAGE_MEMORY); the registry omits it when disabled. */
+   const gw_stage_slot_t slots[] = {
+       {"memory", gw_stage_memory, NULL, gw_stage_memory_enabled()},
+       {"tool_policing", gw_stage_tool_policing, NULL, 1},
+       {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
+       {"model_pin", gw_stage_model_pin, NULL, 1},
    };
-   return gw_pipeline_run_request(&r, stages, sizeof(stages) / sizeof(stages[0]));
+   gw_stage_t stages[8];
+   int nstages = gw_stage_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 8);
+   if (nstages < 0)
+      return -1; /* misconfigured stage catalog: fail closed rather than run partial */
+   return gw_pipeline_run_request(&r, stages, (size_t)nstages);
 }
 
 /* Build the provider request body via the selected delegate driver. `stream`
