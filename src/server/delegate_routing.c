@@ -1,5 +1,6 @@
 /* delegate_routing.c: shared delegate route override helpers. */
 #include "cmd_agent_delegate_impl.h"
+#include "aimee_errors.h"
 #include "util.h"
 #include "model_registry.h"
 #include "provider_cli_adapter.h" /* declared context window for tmux-CLI agents */
@@ -305,10 +306,16 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
       }
       if (!agent_is_available_for_routing(selected))
       {
-         route_err(errbuf, errbuf_sz,
-                   "agent '%s' is currently unavailable (health down after repeated "
-                   "failures, or its provider-cli command is missing)",
-                   via_name, NULL);
+         /* Aimee's circuit breaker declining to route (or a missing CLI): an
+          * aimee-internal condition, tagged with the aimee error SLUG so it's
+          * identifiable, not mistaken for a provider outage. Slug (not the numeric
+          * code) to stay clear of substring-based error classifiers. */
+         char emsg[256];
+         snprintf(emsg, sizeof(emsg),
+                  "agent '%s' is currently unavailable (health down after repeated "
+                  "failures, or its provider-cli command is missing) [aimee_err=%s]",
+                  via_name, aimee_err_slug(AIMEE_ERR_BREAKER_OPEN));
+         route_err(errbuf, errbuf_sz, "%s", emsg, NULL);
          return -1;
       }
       if (role && role[0] && !agent_has_role(selected, role) && !agent_is_exec_role(selected, role))

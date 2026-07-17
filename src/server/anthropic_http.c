@@ -15,6 +15,7 @@
  * executes tools itself. */
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_config.h"
+#include "aimee_errors.h"
 #include "agent_exec.h"
 #include "context_reduce.h"
 #include "gateway_mutate_wire.h"
@@ -34,6 +35,7 @@
 #include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
+#include "log.h"
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
@@ -134,8 +136,14 @@ static int write_json(cJSON *obj, char *resp, int cap)
    return rc;
 }
 
-/* Write an Anthropic-shaped error object into resp and return `status`. */
-static int write_error(char *resp, int cap, int status, const char *type, const char *message)
+/* Write an Anthropic-shaped error object into resp and return the wire `status`.
+ * aimee_code is an aimee-specific error code (>=1000, see aimee_errors.h) when the
+ * fault is aimee's own — it rides in the body's error.code and is logged — or 0
+ * for a plain HTTP-semantic error (client 4xx, genuine upstream 5xx). The wire
+ * status stays a standard 3-digit code regardless; the 4-digit aimee code never
+ * touches the status line. */
+static int write_error(char *resp, int cap, int status, const char *type, const char *message,
+                       int aimee_code)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON *e;
@@ -143,6 +151,12 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
    e = cJSON_AddObjectToObject(o, "error");
    cJSON_AddStringToObject(e, "type", type);
    cJSON_AddStringToObject(e, "message", message);
+   if (aimee_code > 0)
+   {
+      cJSON_AddNumberToObject(e, "code", aimee_code);
+      LOG_WARN("ingress", "aimee_err=%d (%s) status=%d: %s", aimee_code, aimee_err_slug(aimee_code),
+               status, message ? message : "");
+   }
    char *out = cJSON_PrintUnformatted(o);
    if (out)
    {
@@ -412,7 +426,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    gw_mutate_ctx_init(&gwmc);
 
    if (!req)
-      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body");
+      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
    model = jo_cstr(req, "model");
 
    /* SHADOW (Slice 3): observe the IR round-trip on this live request. No-op unless
@@ -423,7 +437,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (!ag)
    {
       cJSON_Delete(req);
-      return write_error(resp, cap, 503, "api_error", "no primary agent configured");
+      return write_error(resp, cap, 503, "api_error", "no primary agent configured",
+                         AIMEE_ERR_NO_PRIMARY);
    }
 
    delegate_drivers_init();
@@ -437,7 +452,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * stage returns <0 today; the intervention count is plumbed for P2b's audit). */
    if (messages_run_request_pipeline(req, driver, ag, parity, 0 /* buffered */) < 0)
    {
-      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed");
+      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed",
+                           AIMEE_ERR_REQUEST_PIPELINE);
       goto cleanup;
    }
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
@@ -461,7 +477,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
-      status = write_error(resp, cap, 502, "api_error", "failed to reach the primary provider");
+      /* Internal: we never reached the provider — the endpoint or credentials for
+       * the primary couldn't be resolved (e.g. a codex-oauth seat with no token).
+       * 503 (not 502) + an aimee code so this doesn't read as an upstream failure;
+       * surface the explicit auth reason (D6) when one was set. */
+      const char *why = agent_request_auth_error();
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "could not resolve endpoint or credentials for primary agent '%s'%s%s", ag->name,
+               (why && why[0]) ? ": " : "", (why && why[0]) ? why : "");
+      status = write_error(resp, cap, 503, "api_error", msg, AIMEE_ERR_ROUTE_UNRESOLVED);
       goto cleanup;
    }
    if (parity)
@@ -508,8 +533,10 @@ static int messages_buffered(const char *body, char *resp, int cap)
       }
       else
       {
+         /* Genuine upstream failure: the provider was reached and returned
+          * non-200. 502 with no aimee code — this really is an external problem. */
          status = write_error(resp, cap, 502, "api_error",
-                              response ? response : "primary provider call failed");
+                              response ? response : "primary provider call failed", 0);
       }
       goto cleanup;
    }
