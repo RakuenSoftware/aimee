@@ -245,6 +245,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-response-governance-stage \
                $(TESTPREFIX)/unit-test-gw-orchestration-seam \
                $(TESTPREFIX)/unit-test-gw-orch-delegates \
+               $(TESTPREFIX)/unit-test-gw-orch-workflows \
                $(TESTPREFIX)/unit-test-gateway-p4-delegate \
                $(TESTPREFIX)/unit-test-hud \
                $(TESTPREFIX)/unit-test-coord-jobs \
@@ -2122,6 +2123,8 @@ $(TESTPREFIX)/unit-test-cron-config: $(OBJDIR)/tests/test_cron_config.o \
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
                                       $(OBJDIR)/server/server_cron.o \
                                       $(OBJDIR)/server/trigger_scheduler.o \
+                                      $(OBJDIR)/server/gw_orch_workflows.o \
+                                      $(OBJDIR)/server/gw_orchestration_seam.o \
                                       $(OBJDIR)/delivery_target.o \
                                       $(OBJDIR)/json_fluent.o \
                                       $(OBJDIR)/cJSON.o
@@ -2320,6 +2323,7 @@ $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
 # subprocesses + real DB1) files a work item from a committed pending proposal
 # and the real autonomy scheduler drives it to terminal (stub executors only).
 $(TESTPREFIX)/unit-test-trigger-e2e: $(OBJDIR)/tests/test_trigger_e2e.o \
+                                    $(OBJDIR)/server/gw_orch_workflows.o $(OBJDIR)/server/gw_orchestration_seam.o \
                                     $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
                                     $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
@@ -2337,7 +2341,7 @@ $(OBJDIR)/tests/test_trigger_e2e.o: tests/test_trigger_e2e.c server/trigger_sche
 	@mkdir -p $(dir $@)
 	$(CC) -c $(TEST_C_FLAGS) -I. -o $@ $<
 
-$(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/server/gw_orch_workflows.o $(OBJDIR)/server/gw_orchestration_seam.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 $(OBJDIR)/tests/test_trigger.o: tests/test_trigger.c server/trigger_scheduler.c
 	@mkdir -p $(dir $@)
@@ -2419,6 +2423,11 @@ $(TESTPREFIX)/unit-test-gw-orchestration-seam: $(OBJDIR)/tests/test_gw_orchestra
 # Delegates orchestration module (first port): toggle + module runner over the seam, proven
 # with a fake capability (no real delegate thread). Self-contained.
 $(TESTPREFIX)/unit-test-gw-orch-delegates: $(OBJDIR)/tests/test_gw_orch_delegates.o $(OBJDIR)/server/gw_orch_delegates.o $(OBJDIR)/server/gw_orchestration_seam.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Workflows orchestration module (second port): toggle + module runner over the seam, proven
+# with a fake capability (no real work item created). Self-contained.
+$(TESTPREFIX)/unit-test-gw-orch-workflows: $(OBJDIR)/tests/test_gw_orch_workflows.o $(OBJDIR)/server/gw_orch_workflows.o $(OBJDIR)/server/gw_orchestration_seam.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-p4-delegate: $(OBJDIR)/tests/test_gateway_p4_delegate.o $(OBJDIR)/gateway_delegate.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o

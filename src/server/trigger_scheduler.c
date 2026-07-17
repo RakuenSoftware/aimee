@@ -22,6 +22,7 @@
 #include "skill_curator.h"
 #include "trigger_scheduler.h"
 #include "util.h"
+#include "gw_orch_workflows.h" /* trigger workflow dispatch via the orchestration seam */
 #include "wfe_autonomy.h" /* wfe_autonomy_default_max_cost_usd — the shared intake cap policy */
 #include "wfe_def.h"      /* armed workflows: parse saved defs for trigger starts */
 #include "wfe_engine.h"
@@ -458,28 +459,67 @@ static double trigger_cost_cap(const trigger_rule_t *rule)
    return wfe_autonomy_default_max_cost_usd();
 }
 
+/* Coord of the workflow-dispatch capability for trigger filing: the create fields beyond
+ * (lane, payload) plus the create's outputs. Carried as the orchestration capability's opaque
+ * ctx; the adapter records the create outcome (rc + err) so trigger_file_run can log it. */
+typedef struct
+{
+   const char *repo;
+   const char *mode;
+   char *out_id;  /* borrows the caller's out_id[80] buffer; the adapter fills it */
+   char err[256]; /* create error text, for the caller's log */
+   int rc;        /* 0 filed, -1 refused/failed; -1 until the adapter runs */
+} trigger_wf_backing_t;
+
+/* The dispatch_workflow capability for trigger filing: create the work item on `lane` (the
+ * rule's pipeline template) with `payload` (the materialized artifact path) plus the backing's
+ * repo/mode. Returns 0/-1 and records it in the backing so the caller can log + stamp the cap. */
+static int trigger_dispatch_workflow(void *ctx, const char *lane, const char *payload)
+{
+   trigger_wf_backing_t *b = (trigger_wf_backing_t *)ctx;
+   if (!b || !b->out_id)
+      return -1; /* out_id borrows the caller's char[80]; never deref a malformed backing */
+   b->rc = -1;
+   b->err[0] = '\0';
+   b->out_id[0] = '\0';
+   if (wfe_work_item_create(lane, b->repo, payload, b->mode, b->out_id, b->err, sizeof(b->err)) !=
+           0 ||
+       !b->out_id[0])
+      return -1;
+   b->rc = 0;
+   return 0;
+}
+
 /* File one run for a materialized trigger artifact — the shared back half of
  * every artifact-producing trigger source: create the work item on the rule's
  * pipeline (in the rule's workspace, with the rule's mode), stamp the per-run
  * USD ceiling, and log the outcome. `what` labels the artifact in logs (e.g.
  * "sha=<blob>"). De-duplication is the SOURCE's job — each source knows its
  * own identity key; this helper is pure filing. Returns 0 filed (out_id set),
- * -1 refused/failed. */
+ * -1 refused/failed. The create is routed through the orchestration seam so
+ * trigger-initiated workflow dispatch is a togglable module (gw_orch_workflows). */
 static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_path, const char *what,
                             char out_id[80])
 {
-   char err[256] = "";
    out_id[0] = '\0';
    /* mode drives whether the autonomy scheduler advances the run hands-off
     * ("autonomous", the default when the rule omits it) or the item parks for
     * a human to drive in the webchat ("interactive"). */
    const char *mode = rule->mode[0] ? rule->mode : "autonomous";
-   if (wfe_work_item_create(rule->pipeline_template, rule->workspace, artifact_path, mode, out_id,
-                            err, sizeof(err)) != 0 ||
-       !out_id[0])
+   trigger_wf_backing_t backing = {rule->workspace, mode, out_id, "", -1};
+   gw_turn_capabilities_t caps = {&backing, NULL, trigger_dispatch_workflow};
+   char turn_id[64];
+   snprintf(turn_id, sizeof(turn_id), "trigger-%s", rule->source);
+   if (gw_orch_workflows_run(&caps, turn_id, rule->pipeline_template, artifact_path) != 0)
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "%s: workflows module disabled — skipping %s repo=%s",
+                rule->source, what, rule->workspace);
+      return -1;
+   }
+   if (backing.rc != 0)
    {
       aimee_log(LOG_WARN, "trigger.sched", "%s: create skipped/failed repo=%s %s: %s", rule->source,
-                rule->workspace, what, err[0] ? err : "already exists");
+                rule->workspace, what, backing.err[0] ? backing.err : "already exists");
       return -1;
    }
    double cap = trigger_cost_cap(rule);
