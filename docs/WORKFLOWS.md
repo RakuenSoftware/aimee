@@ -455,3 +455,5 @@ These are real today and worth knowing before you lean on workflows:
 - [Personas](personas.md), the identities that staff roundtable panels and steps.
 - [Delegates](DELEGATES.md), how steps dispatch model work.
 - [Architecture](ARCHITECTURE.md), where the workflow engine sits.
+
+Autonomous runs are gated: only work that passes review advances.
