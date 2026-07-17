@@ -321,14 +321,21 @@ typedef struct config
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
-   /* wfe_live_forge_enabled: gate (default 1, ON — operator ruling 2026-07-13,
-    * restoring the plan's default) for the autonomous live forge
+   /* wfe_live_forge_enabled: gate (default 0, OFF — 2026-07-17: opt-in while the
+    * autonomous pipeline is under test) for the autonomous live forge
     * (full-autonomous-development F4). When OFF the wfe forge provider is not
     * registered and every forge op fails closed, so an autonomous run can never
-    * open or merge a real PR. Even ON, every op re-checks this flag AND the
-    * merge-target rail: PRs open-only against the resolved trunk, merges only
-    * to the unprotected autonomous base. Set false to opt out. */
+    * open or merge a real PR (it parks). When ON, every op still re-checks this
+    * flag AND the merge-target rail: PRs open-only against the resolved trunk,
+    * merges only to the unprotected autonomous base. Set true to opt in. */
    int wfe_live_forge_enabled;
+   /* wfe_proposals_autoscan_enabled: gate (default 0, OFF — 2026-07-17) for the
+    * proposals/watch-dir trigger source's AUTOMATIC every-tick scan that files a
+    * WFE work item for every un-filed pending proposal. When OFF, proposals are
+    * NEVER filed automatically; a human files them one at a time via
+    * `trigger.fire source=proposals proposal=<name>`. Set true to opt in to the
+    * autonomous scan once the pipeline is trusted. */
+   int wfe_proposals_autoscan_enabled;
    /* client_integrations_enabled: gate (default 1, ON) for the automatic
     * registration of aimee into external AI-tool user configs — the Claude Code
     * MCP server/hooks/env/commands in ~/.claude, plus Gemini/Copilot/Codex. When

@@ -240,6 +240,13 @@ static void print_trigger_status(cJSON *resp)
 
 static void print_trigger_fire(cJSON *resp)
 {
+   /* Proposals one-at-a-time fire returns a filed work item, not a trigger/pipeline pair. */
+   if (json_str(resp, "work_item_id")[0])
+   {
+      printf("filed proposal: %s\n", json_str(resp, "proposal"));
+      printf("work_item_id: %s\n", json_str(resp, "work_item_id"));
+      return;
+   }
    printf("trigger_id: %s\n", json_str(resp, "trigger_id"));
    if (json_str(resp, "pipeline_id")[0])
       printf("pipeline_id: %s\n", json_str(resp, "pipeline_id"));

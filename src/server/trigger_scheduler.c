@@ -9,6 +9,7 @@
 #endif
 
 #include "config.h"
+#include "server_trigger.h"
 #include <dirent.h>
 #include "cJSON.h"
 #include "db1/db1_cron_jobs.h"
@@ -516,10 +517,40 @@ static int trigger_active_filed_runs(const char *home)
    return active;
 }
 
-static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
+/* Match a pending-proposal manual-fire selector against a repo-relative ls-tree entry
+ * name. Accepts the full repo-relative path (docs/proposals/pending/foo.md), the bare
+ * basename (foo.md), or the basename without the .md suffix (foo). */
+static int proposal_name_matches(const char *entry_name, const char *want)
 {
+   if (!entry_name || !want || !want[0])
+      return 0;
+   if (strcmp(entry_name, want) == 0)
+      return 1;
+   const char *base = strrchr(entry_name, '/');
+   base = base ? base + 1 : entry_name;
+   if (strcmp(base, want) == 0)
+      return 1;
+   size_t bl = strlen(base);
+   if (bl > 3 && strcmp(base + bl - 3, ".md") == 0)
+   {
+      size_t wl = strlen(want);
+      if (wl == bl - 3 && strncmp(base, want, wl) == 0) /* basename minus the .md suffix */
+         return 1;
+   }
+   return 0;
+}
+
+/* Scan the rule's proposal dir and file WFE work items. only_name!=NULL files just the
+ * single matching pending proposal (manual one-at-a-time fire); NULL files all un-filed
+ * ones (the auto scan). Returns the count filed; copies the first filed work-item id into
+ * out_id when non-NULL. */
+static int scan_proposals_ex(const trigger_rule_t *rule, int max_concurrent, const char *only_name,
+                             char *out_id, size_t out_id_sz)
+{
+   if (out_id && out_id_sz)
+      out_id[0] = '\0';
    if (!rule || !rule->workspace[0] || !rule->pipeline_template[0])
-      return;
+      return 0;
 
    const char *scanpath = rule->event[0] ? rule->event : PROPOSALS_DEFAULT_DIR;
    /* Reject an absolute or traversing scan dir: `event` is repo-relative and must
@@ -528,7 +559,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    {
       aimee_log(LOG_WARN, "trigger.sched", "proposals scan dir rejected (absolute/traversal): %s",
                 scanpath);
-      return;
+      return 0;
    }
 
    char ref[256];
@@ -538,7 +569,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    if (ref[0] == '-')
    {
       aimee_log(LOG_WARN, "trigger.sched", "proposals ref rejected (leading '-'): %s", ref);
-      return;
+      return 0;
    }
 
    /* git ls-tree on a bare directory pathspec lists only that directory's own
@@ -550,7 +581,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    while (sl > 0 && scanpath[sl - 1] == '/')
       sl--;
    if (snprintf(scandir, sizeof(scandir), "%.*s/", (int)sl, scanpath) >= (int)sizeof(scandir))
-      return;
+      return 0;
 
    const char *const ls_argv[] = {"git", "ls-tree", ref, "--", scandir, NULL};
    char *out = NULL;
@@ -560,7 +591,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       aimee_log(LOG_WARN, "trigger.sched", "proposals ls-tree failed repo=%s ref=%s rc=%d",
                 rule->workspace, ref, rc);
       free(out);
-      return;
+      return 0;
    }
 
    trigger_ls_tree_entry_t entries[PROPOSALS_MAX_ENTRIES];
@@ -577,13 +608,13 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    {
       aimee_log(LOG_WARN, "trigger.sched",
                 "proposals: no resolvable AIMEE_HOME; refusing to materialize under /tmp");
-      return;
+      return 0;
    }
    if (trigger_mkdir_parents(home) != 0)
    {
       aimee_log(LOG_WARN, "trigger.sched", "proposals: could not create %s/triggers/proposals: %s",
                 home, strerror(errno));
-      return;
+      return 0;
    }
 
    /* trigger.max_concurrent: admission cap on concurrently-executing triggered
@@ -598,7 +629,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       {
          aimee_log(LOG_WARN, "trigger.sched",
                    "proposals: could not count active triggered runs; deferring this pass");
-         return; /* fail closed: never overshoot the cap on a DB read fault */
+         return 0; /* fail closed: never overshoot the cap on a DB read fault */
       }
       budget = max_concurrent - active;
       if (budget <= 0)
@@ -606,13 +637,15 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
          aimee_log(LOG_INFO, "trigger.sched",
                    "proposals: %d active triggered run(s) >= max_concurrent=%d; deferring", active,
                    max_concurrent);
-         return;
+         return 0;
       }
    }
 
    int filed = 0;
    for (int i = 0; i < n; i++)
    {
+      if (only_name && !proposal_name_matches(entries[i].name, only_name))
+         continue;
       if (budget == 0)
       {
          aimee_log(LOG_INFO, "trigger.sched",
@@ -655,6 +688,8 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       if (trigger_file_run(rule, proposal_path, what, id) == 0)
       {
          filed++;
+         if (out_id && out_id_sz && !out_id[0])
+            snprintf(out_id, out_id_sz, "%s", id);
          if (budget > 0)
             budget--;
       }
@@ -664,6 +699,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
     * its 30s backstop sweep (parity with the /v1/dev/submit intake). */
    if (filed > 0)
       wfe_scheduler_notify();
+   return filed;
 }
 
 /* ------------------------------------------------------------------ */
@@ -979,14 +1015,58 @@ typedef struct
 
 static int proposals_due(const trigger_rule_t *rule, const struct tm *tm)
 {
-   (void)rule;
    (void)tm;
+   /* The generic "watch-dir" source keeps its every-pass scan. The "proposals" source
+    * is gated OFF by default (wfe_proposals_autoscan_enabled): while the autonomous
+    * pipeline is under test, pending proposals are NOT filed automatically -- a human
+    * files them one at a time via `trigger.fire source=proposals proposal=<name>`. Set
+    * the flag true to opt back in to the every-pass autonomous scan. */
+   if (rule && strcmp(rule->source, "proposals") == 0)
+   {
+      config_t cfg;
+      config_load(&cfg);
+      return cfg.wfe_proposals_autoscan_enabled ? 1 : 0;
+   }
    return 1; /* poll the repo every pass; per-proposal dedup makes re-scans idempotent */
+}
+
+/* Back-compat 2-arg wrapper: the auto scan files ALL un-filed pending proposals. */
+static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
+{
+   scan_proposals_ex(rule, max_concurrent, NULL, NULL, 0);
 }
 
 static void proposals_fire(const trigger_rule_t *rule, int max_concurrent)
 {
    scan_proposals(rule, max_concurrent);
+}
+
+/* Manual one-at-a-time proposal fire: file exactly the named pending proposal as a WFE
+ * work item, bypassing the (default-off) auto scan. Returns 0 and fills out_id on a
+ * successful file; -1 if the proposal was not found, already filed, or on error. */
+int trigger_proposals_file_one(const char *workspace, const char *pipeline, const char *event_dir,
+                               const char *ref, const char *mode, const char *proposal_name,
+                               char out_id[80])
+{
+   if (out_id)
+      out_id[0] = '\0';
+   if (!workspace || !workspace[0] || !pipeline || !pipeline[0] || !proposal_name ||
+       !proposal_name[0])
+      return -1;
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof(rule));
+   snprintf(rule.source, sizeof(rule.source), "proposals");
+   snprintf(rule.workspace, sizeof(rule.workspace), "%s", workspace);
+   snprintf(rule.pipeline_template, sizeof(rule.pipeline_template), "%s", pipeline);
+   if (event_dir && event_dir[0])
+      snprintf(rule.event, sizeof(rule.event), "%s", event_dir);
+   if (ref && ref[0])
+      snprintf(rule.schedule, sizeof(rule.schedule), "%s", ref);
+   if (mode && mode[0])
+      snprintf(rule.mode, sizeof(rule.mode), "%s", mode);
+   /* max_concurrent=0 -> uncapped: a deliberate single manual fire is not deferred. */
+   int filed = scan_proposals_ex(&rule, 0, proposal_name, out_id, 80);
+   return (filed > 0 && out_id && out_id[0]) ? 0 : -1;
 }
 
 static int cron_due(const trigger_rule_t *rule, const struct tm *tm)
