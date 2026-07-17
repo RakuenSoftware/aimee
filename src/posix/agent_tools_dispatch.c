@@ -956,10 +956,16 @@ static char *td_git_log(cJSON *args, const char *name, const char *dispatch_cwd,
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *n = cJSON_GetObjectItem(args, "count");
-   if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
+   /* Default the repo to the delegate's session worktree (dispatch_cwd) when the
+    * caller omits 'path' — a delegate does not know its own worktree path, so a
+    * required 'path' forced it to fall back to a raw `git` shell (which the
+    * require_aimee_git gate then denies). Defaulting keeps the aimee git tool
+    * always usable. */
+   const char *path = (p && cJSON_IsString(p) && p->valuestring[0]) ? p->valuestring : dispatch_cwd;
+   if (!path || !path[0])
+      result = safe_strdup("error: git tool requires a session worktree (no 'path' given)");
    else
-      result = tool_git_log(p->valuestring, (n && cJSON_IsNumber(n)) ? n->valueint : 10);
+      result = tool_git_log(path, (n && cJSON_IsNumber(n)) ? n->valueint : 10);
 
    return result;
 }
@@ -1048,10 +1054,12 @@ static char *td_git_diff(cJSON *args, const char *name, const char *dispatch_cwd
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *r = cJSON_GetObjectItem(args, "ref");
-   if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
+   /* Default 'path' to the session worktree (see td_git_log). */
+   const char *path = (p && cJSON_IsString(p) && p->valuestring[0]) ? p->valuestring : dispatch_cwd;
+   if (!path || !path[0])
+      result = safe_strdup("error: git tool requires a session worktree (no 'path' given)");
    else
-      result = tool_git_diff(p->valuestring, (r && cJSON_IsString(r)) ? r->valuestring : NULL);
+      result = tool_git_diff(path, (r && cJSON_IsString(r)) ? r->valuestring : NULL);
 
    return result;
 }
@@ -1061,10 +1069,12 @@ static char *td_git_status(cJSON *args, const char *name, const char *dispatch_c
 {
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
-   if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
+   /* Default 'path' to the session worktree (see td_git_log). */
+   const char *path = (p && cJSON_IsString(p) && p->valuestring[0]) ? p->valuestring : dispatch_cwd;
+   if (!path || !path[0])
+      result = safe_strdup("error: git tool requires a session worktree (no 'path' given)");
    else
-      result = tool_git_status(p->valuestring);
+      result = tool_git_status(path);
 
    return result;
 }
