@@ -151,9 +151,13 @@ func (s *server) handleWorkflowItems(w http.ResponseWriter, r *http.Request) {
 	if i := strings.IndexByte(rest, '/'); i >= 0 {
 		id, suffix = rest[:i], rest[i:]
 	}
-	// <id> must be one safe segment (no separators/traversal/percent-encoding that
-	// could smuggle a '/' past this guard); the server's matcher is authoritative.
-	if id == "" || strings.ContainsAny(id, "/.%") {
+	// <id> must be one safe segment: no '/' or '%' (could smuggle a separator past
+	// this guard) and no ".." traversal sequence. A single '.' IS allowed — child
+	// slice work-item ids are "<parent>.s<N>" (e.g. wi_abc123.s0), so rejecting all
+	// dots made every slice's detail/gate/events unreachable (400 "bad path"),
+	// which blocked approving a slice parked at a human gate. The server's matcher
+	// is authoritative for what resolves.
+	if id == "" || strings.ContainsAny(id, "/%") || strings.Contains(id, "..") {
 		http.Error(w, `{"error":"bad path"}`, http.StatusBadRequest)
 		return
 	}

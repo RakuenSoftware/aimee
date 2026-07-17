@@ -68,6 +68,75 @@ func TestWorkflowItemsLifecycleRouting(t *testing.T) {
 	}
 }
 
+// Child-slice work-item ids are "<parent>.s<N>" — they contain a dot. The proxy
+// must route them through (detail GET, /gate, /events, /proposal), not reject the
+// dot as traversal. Regression: a "/.%" guard rejected every slice id as "bad
+// path", so a slice parked at a human gate could not be opened or approved.
+func TestWorkflowItemsSliceIDRouting(t *testing.T) {
+	cases := []struct {
+		name    string
+		method  string
+		apiPath string
+		wantV1  string
+	}{
+		{"detail", http.MethodGet, "/api/workflow/items/wi123.s0", "/v1/workflow/items/wi123.s0"},
+		{"gate", http.MethodPost, "/api/workflow/items/wi123.s0/gate", "/v1/workflow/items/wi123.s0/gate"},
+		{"events", http.MethodGet, "/api/workflow/items/wi123.s0/events", "/v1/workflow/items/wi123.s0/events"},
+		{"proposal", http.MethodGet, "/api/workflow/items/wi123.s0/proposal", "/v1/workflow/items/wi123.s0/proposal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			mux := http.NewServeMux()
+			mux.HandleFunc(tc.wantV1, func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"status":"ok"}`))
+			})
+			cfg := startFakeV1(t, mux)
+			if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
+				[]byte("sekret-token\n"), 0600); err != nil {
+				t.Fatalf("write server.token: %v", err)
+			}
+			s := &server{cfg: cfg}
+			var body []byte
+			if tc.method == http.MethodPost {
+				body = []byte(`{"decision":"approve"}`)
+			}
+			req := withUser(httptest.NewRequest(tc.method, tc.apiPath, strings.NewReader(string(body))), "alice")
+			rr := httptest.NewRecorder()
+			s.handleWorkflowItems(rr, req)
+			if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status":"ok"`) {
+				t.Fatalf("%s: code=%d body=%q (slice id rejected as bad path?)", tc.name, rr.Code, rr.Body.String())
+			}
+			if gotPath != tc.wantV1 {
+				t.Fatalf("%s: proxied to %s, want %s", tc.name, gotPath, tc.wantV1)
+			}
+		})
+	}
+}
+
+// A ".." traversal sequence (or a '/'/'%' separator/encoding) must still be
+// refused even though a single '.' is now allowed for slice ids.
+func TestWorkflowItemsRejectsTraversal(t *testing.T) {
+	for _, apiPath := range []string{
+		"/api/workflow/items/wi123..evil",
+		"/api/workflow/items/..",
+		"/api/workflow/items/wi123..",
+		"/api/workflow/items/..wi.s0",   // leading traversal mixed with legit dots
+		"/api/workflow/items/wi%25s0",   // %25 -> '%' in the id: percent still rejected
+		"/api/workflow/items/a%2Fb",     // %2F -> '/': a smuggled separator is refused
+	} {
+		s := &server{cfg: startFakeV1(t, http.NewServeMux())}
+		req := withUser(httptest.NewRequest(http.MethodGet, apiPath, nil), "alice")
+		rr := httptest.NewRecorder()
+		s.handleWorkflowItems(rr, req)
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "bad path") {
+			t.Fatalf("%s: code=%d body=%q, want 400 bad path", apiPath, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 // Any (method, suffix) pair the item proxy doesn't map must be refused as
 // "bad path" rather than silently forwarded — including a wrong method on an
 // otherwise-known lifecycle suffix and a mutating method on the bare id path.
