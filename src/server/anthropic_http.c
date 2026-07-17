@@ -172,6 +172,16 @@ static int driver_is_anthropic(const delegate_driver_t *driver)
    return driver && driver->name && strcmp(driver->name, "anthropic") == 0;
 }
 
+/* Provider wire for the response-side IR shadow: compare_response re-parses the
+ * provider reply through this backend, so it must match the wire the legacy path
+ * parsed. driver_is_anthropic() is NULL-safe, so a NULL/absent driver yields
+ * OpenAI-chat -- exactly the no-driver legacy branch, which parses with
+ * agent_ir_parse_json_response with the openai wire (0). */
+static aimee_wire_t shadow_provider_wire(const delegate_driver_t *driver)
+{
+   return driver_is_anthropic(driver) ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
+}
+
 static int driver_consumes_system_prompt(const delegate_driver_t *driver, const agent_t *ag)
 {
    driver_caps_t caps;
@@ -551,6 +561,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
          /* No driver: default to the openai wire, parsed through the IR (zeroed
           * *parsed on failure), matching the driver hooks. */
          agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+
+      /* Slice 2 (canonical-IR): shadow-compare the legacy parse against the IR
+       * response parse -> RESP_MATCH / RESP_MISMATCH on GET /v1/dashboard/metrics.
+       * No-op unless AIMEE_IR_SHADOW; never affects the served reply. Provider wire
+       * is anthropic when the primary is anthropic, else OpenAI chat (codex is SSE,
+       * so provider_resp is NULL here and the compare self-skips). */
+      aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
 
       /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
        * the model emitted despite the request-side strip, before the audit row
@@ -1019,6 +1036,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                else
                   /* No driver: default to the openai wire via the IR. */
                   agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, &parsed);
+               /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
+                * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
+               aimee_ir_shadow_compare_response(&parsed, provider_resp,
+                                                shadow_provider_wire(driver));
                gateway_policy_police_parsed_response(&parsed);
                emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
                /* Cost accounting (mirror the buffered path). */

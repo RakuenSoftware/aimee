@@ -92,6 +92,18 @@ __attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int 
    (void)frontend;
 }
 
+/* Slice 2-wire: the response-side shadow. anthropic_http.o now calls this on the
+ * live buffered paths; the minimal shape/p2c test links do not pull the real
+ * aimee_ir_shadow.o (+ backend parsers), so a weak inert stub resolves the link.
+ * Real aimee_ir_shadow.o wins when linked. */
+__attribute__((weak)) void aimee_ir_shadow_compare_response(const void *legacy,
+                                                            const void *resp_json, int wire)
+{
+   (void)legacy;
+   (void)resp_json;
+   (void)wire;
+}
+
 __attribute__((weak)) int aimee_ir_path_enabled(void)
 {
    return 0;
