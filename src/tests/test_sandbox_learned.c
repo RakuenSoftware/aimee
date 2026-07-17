@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -52,10 +54,27 @@ int main(void)
                                  SBX_LEARN_MAX);
    assert(n == 0);
 
-   /* --- version pin / release suffix stripped to the bare name --- */
+   /* --- version pin stripped to the bare name; a `/` release/path form is rejected --- */
    n = sandbox_learned_parse_apt("apt-get install -y gcc=4:12.2 libfoo/bookworm", pk,
                                  SBX_LEARN_MAX);
-   assert(n == 2 && has(pk, n, "gcc") && has(pk, n, "libfoo"));
+   assert(n == 1 && has(pk, n, "gcc")); /* gcc kept (pin stripped); libfoo/bookworm rejected */
+
+   /* --- value-taking options consume their argument (release name is NOT a package) --- */
+   n = sandbox_learned_parse_apt("apt-get install -t bookworm-backports curl", pk, SBX_LEARN_MAX);
+   assert(n == 1 && has(pk, n, "curl") && !has(pk, n, "bookworm-backports"));
+   n = sandbox_learned_parse_apt("apt-get -t bookworm install -o APT::x=1 htop", pk, SBX_LEARN_MAX);
+   assert(n == 1 && has(pk, n, "htop") && !has(pk, n, "bookworm"));
+
+   /* --- flags after sudo are skipped; the apt install is still found --- */
+   n = sandbox_learned_parse_apt("sudo -E apt-get install -y make", pk, SBX_LEARN_MAX);
+   assert(n == 1 && has(pk, n, "make"));
+
+   /* --- path/URL-shaped args are rejected, real names kept --- */
+   n = sandbox_learned_parse_apt("apt-get install -y ./local.deb https://h/p.deb wget", pk,
+                                 SBX_LEARN_MAX);
+   assert(n == 1 && has(pk, n, "wget"));
+   for (int i = 0; i < n; i++)
+      assert(!strchr(pk[i], '/') && !strchr(pk[i], ':') && pk[i][0] != '.');
 
    /* --- de-dup within a call --- */
    n = sandbox_learned_parse_apt("apt install gcc gcc gcc", pk, SBX_LEARN_MAX);
@@ -111,6 +130,28 @@ int main(void)
 
       /* unknown project -> empty */
       assert(sandbox_learned_load("/proj/none", got, SBX_LEARN_MAX) == 0);
+
+      /* --- two concurrent processes recording: both updates must survive (flock) --- */
+      const char *proj = "/proj/concurrent";
+      pid_t kid = fork();
+      if (kid == 0)
+      {
+         const char *cp[] = {"child-a", "child-b"};
+         for (int r = 0; r < 40; r++)
+            sandbox_learned_record(proj, cp, 2);
+         _exit(0);
+      }
+      const char *pp[] = {"parent-a", "parent-b"};
+      for (int r = 0; r < 40; r++)
+         sandbox_learned_record(proj, pp, 2);
+      int st = 0;
+      waitpid(kid, &st, 0);
+      int gc = sandbox_learned_load(proj, got, SBX_LEARN_MAX);
+      /* Without the cross-process lock a rename race would drop one side's packages;
+       * with it, all four survive regardless of interleaving. */
+      assert(gc == 4);
+      assert(has(got, gc, "child-a") && has(got, gc, "child-b") && has(got, gc, "parent-a") &&
+             has(got, gc, "parent-b"));
    }
 
    printf("all tests passed\n");

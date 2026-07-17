@@ -570,8 +570,6 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       dstr_init(&c);
       const char *cwd =
           (wd && cJSON_IsString(wd) && wd->valuestring[0]) ? wd->valuestring : run_cmd_get_cwd();
-      /* Learned toolchain: capture apt-install intent from the script body. */
-      sandbox_learned_observe(cwd, body->valuestring);
       if (cwd && cwd[0])
       {
          dstr_append_str(&c, "cd '");
@@ -592,6 +590,9 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       int exit_code = -1;
       char *out = c.data ? ws->exec_shell(ws, c.data, &exit_code) : NULL;
       dstr_free(&c);
+      /* Learned toolchain: record apt-install intent only after a successful run. */
+      if (exit_code == 0)
+         sandbox_learned_observe(cwd, body->valuestring);
       free(env_json);
       if (exit_code == -1 && !out)
          return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run the "

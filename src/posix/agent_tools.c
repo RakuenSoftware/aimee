@@ -749,9 +749,6 @@ char *tool_bash(const char *command, int timeout_ms)
    if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
    {
       const char *cwd = run_cmd_get_cwd();
-      /* Learned toolchain: capture any apt-install intent so the next build of this
-       * project's sandbox image pre-bakes it. Best-effort, cheap pre-filtered. */
-      sandbox_learned_observe(cwd, command);
       char *wrapped = NULL;
       if (cwd && cwd[0])
       {
@@ -773,6 +770,11 @@ char *tool_bash(const char *command, int timeout_ms)
       int exit_code = -1;
       char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
       free(wrapped);
+      /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
+       * failed/typo'd/nonexistent install is never recorded (and can't poison later
+       * image builds). Best-effort, cheap pre-filtered inside observe(). */
+      if (exit_code == 0)
+         sandbox_learned_observe(cwd, command);
       /* exit_code == -1 with no capture means docker exec could not run the command
        * at all (transport failure) — distinct from a real command that exits 0 with
        * empty output, which the container provider returns as NULL out / exit 0. */

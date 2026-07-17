@@ -12,10 +12,12 @@
 #include "util.h" /* safe_exec_capture_* not needed; kept for platform helpers */
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 /* --- pure helpers --- */
@@ -52,6 +54,29 @@ static int is_env_assign(const char *tok)
       if (!(isalnum((unsigned char)*c) || *c == '_'))
          return 0;
    return 1;
+}
+
+/* True when `tok` is an apt option whose ARGUMENT is a SEPARATE following token (e.g.
+ * `-t bookworm`, `--option Foo::Bar=1`). The attached forms (`-t=x`, `--option=x`,
+ * `-oDebug=1`) carry their value in the same token and are just skipped as flags, so
+ * they are not listed here. Recognising these prevents an option's value (a release
+ * name, an apt config string) from being mis-recorded as a package. */
+static int apt_option_takes_arg(const char *tok)
+{
+   static const char *const with_arg[] = {"-t",
+                                          "-o",
+                                          "-c",
+                                          "-a",
+                                          "--target-release",
+                                          "--default-release",
+                                          "--option",
+                                          "--config-file",
+                                          "--arch",
+                                          NULL};
+   for (int i = 0; with_arg[i]; i++)
+      if (strcmp(tok, with_arg[i]) == 0)
+         return 1;
+   return 0;
 }
 
 static int already_have(char out[][SBX_PKG_MAX], int n, const char *name)
@@ -156,8 +181,10 @@ int sandbox_learned_parse_apt(const char *cmd, char out[][SBX_PKG_MAX], int max)
    int i = 0;
    while (i < nt && n < max)
    {
-      /* start of a command segment: skip leading env-assignments and sudo. */
-      while (i < nt && (is_env_assign(tokv[i]) || strcmp(tokv[i], "sudo") == 0))
+      /* Start of a command segment: skip leading env-assignments, `sudo`, and any
+       * flags between sudo and the command word (sudo -E / -u / --preserve-env ...). */
+      while (i < nt && (is_env_assign(tokv[i]) || strcmp(tokv[i], "sudo") == 0 ||
+                        (i > 0 && strcmp(tokv[i - 1], "sudo") == 0 && tokv[i][0] == '-')))
          i++;
       if (i >= nt)
          break;
@@ -167,7 +194,8 @@ int sandbox_learned_parse_apt(const char *cmd, char out[][SBX_PKG_MAX], int max)
       {
          while (i < nt && !is_operator_tok(tokv[i]))
             i++;
-         i++; /* step past the operator */
+         if (i < nt)
+            i++; /* step past the operator (guarded: never index past nt) */
          continue;
       }
       i++; /* consume apt/apt-get */
@@ -175,22 +203,34 @@ int sandbox_learned_parse_apt(const char *cmd, char out[][SBX_PKG_MAX], int max)
       while (i < nt && !is_operator_tok(tokv[i]) && n < max)
       {
          const char *t = tokv[i++];
+         /* A value-taking option (`-t bookworm`) consumes its following token so the
+          * value is never mistaken for a package or a subcommand — in either position. */
+         if (t[0] == '-' && apt_option_takes_arg(t))
+         {
+            if (i < nt && !is_operator_tok(tokv[i]))
+               i++;
+            continue;
+         }
          if (!seen_install)
          {
             if (strcmp(t, "install") == 0)
                seen_install = 1;
             else if (t[0] == '-')
-               continue; /* option before the subcommand: apt-get -y install ... */
+               continue; /* attached/flag option before the subcommand: apt-get -y install */
             else
                break; /* a different subcommand (update/remove/...) — not an install */
             continue;
          }
          if (t[0] == '-')
-            continue; /* -y, --no-install-recommends, etc. */
-         /* strip a version pin / release suffix: pkg=1.2 or pkg/bookworm -> pkg */
+            continue; /* -y, --no-install-recommends, attached -oDebug=1, etc. */
+         /* Reject anything path- or URL-shaped (./x.deb, https://host/pkg): a package
+          * name has no '/'. Accept a bare `pkg=version` pin or `pkg:arch` multiarch by
+          * taking the name up to '=' (the release/version follows). */
+         if (strchr(t, '/'))
+            continue;
          char name[SBX_PKG_MAX];
          size_t j = 0;
-         for (const char *c = t; *c && *c != '=' && *c != '/' && j + 1 < sizeof(name); c++)
+         for (const char *c = t; *c && *c != '=' && j + 1 < sizeof(name); c++)
             name[j++] = *c;
          name[j] = '\0';
          if (pkg_valid(name) && !already_have(out, n, name))
@@ -282,21 +322,47 @@ int sandbox_learned_load(const char *git_root, char out[][SBX_PKG_MAX], int max)
    return n;
 }
 
-/* Serialises the load-modify-write against concurrent delegate turns in this process,
- * closing the lost-update window; the unique tmp path below covers the (unusual) case
- * of a second aimee-server process on the same AIMEE_HOME. */
+/* Serialises the load-modify-write against concurrent delegate turns in THIS process
+ * (fast path); the flock below serialises it across PROCESSES sharing one AIMEE_HOME,
+ * so no update — from either — is lost. */
 static pthread_mutex_t g_learned_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Open+exclusively-flock a stable lock file under AIMEE_HOME. Returns the fd (held for
+ * the transaction) or -1 if unavailable — in which case we proceed unlocked rather than
+ * fail (best-effort store; the process mutex still covers the common single-process
+ * case). Caller closes the fd (which releases the lock). */
+static int learned_lock_fd(void)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return -1;
+   char lp[MAX_PATH_LEN];
+   if (snprintf(lp, sizeof(lp), "%s/sandbox-learned.lock", home) >= (int)sizeof(lp))
+      return -1;
+   int fd = open(lp, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+   if (fd < 0)
+      return -1;
+   if (flock(fd, LOCK_EX) != 0)
+   {
+      close(fd);
+      return -1;
+   }
+   return fd;
+}
 
 int sandbox_learned_record(const char *git_root, const char *const *pkgs, int n)
 {
    if (!git_root || !git_root[0] || !pkgs || n <= 0)
       return 0;
    pthread_mutex_lock(&g_learned_lock);
+   int lock_fd = learned_lock_fd(); /* cross-process; -1 => proceed best-effort */
    cJSON *doc = learned_load_doc();
    if (!doc)
       doc = cJSON_CreateObject();
    if (!doc)
    {
+      if (lock_fd >= 0)
+         close(lock_fd);
       pthread_mutex_unlock(&g_learned_lock);
       return -1;
    }
@@ -361,6 +427,8 @@ int sandbox_learned_record(const char *git_root, const char *const *pkgs, int n)
       free(txt);
    }
    cJSON_Delete(doc);
+   if (lock_fd >= 0)
+      close(lock_fd); /* releases the flock */
    pthread_mutex_unlock(&g_learned_lock);
    return rc;
 }
