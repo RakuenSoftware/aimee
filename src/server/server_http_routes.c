@@ -1667,6 +1667,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/kb/build", NULL, RM_EXACT, "kb.build", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/ingest", NULL, RM_EXACT, "kb.ingest", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/update", NULL, RM_EXACT, "kb.update", 0, rh_dispatch_op_async},
+    {"POST", "/v1/kb/docs/push", NULL, RM_EXACT, "kb.docs.push", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/ingest", NULL, RM_EXACT, "index.ingest", 0, rh_dispatch_op_async},
