@@ -1218,14 +1218,28 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       char snippet[256] = {0};
       if (response_body)
          snprintf(snippet, sizeof(snippet), "%.200s", response_body);
-      snprintf(out->error, sizeof(out->error), "HTTP %d: %s", http_status, snippet);
-      /* Try to parse error body */
+      /* Try to extract a STRUCTURED provider error ({"error":{"message":...}}).
+       * If the body is not JSON, parse_response() sets the generic "invalid JSON
+       * response" — which previously CLOBBERED the informative HTTP status here,
+       * making every upstream 4xx/5xx (rate limits, gateway errors, HTML error
+       * pages) undiagnosable in the field. Keep the HTTP status + body snippet
+       * unless a real structured message was extracted. */
+      out->error[0] = '\0';
       parse_response(response_body, agent, out);
+      if (!out->error[0] || strcmp(out->error, "invalid JSON response") == 0)
+         snprintf(out->error, sizeof(out->error), "HTTP %d (non-JSON body): %s", http_status,
+                  snippet);
       free(response_body);
       return -1;
    }
 
    parse_response(response_body, agent, out);
+   /* A 200 whose body is not JSON (e.g. an SSE stream leaking through, or a
+    * truncated reply) is also masked by the bare "invalid JSON response"; make it
+    * say so and show a snippet, so the cause is visible. */
+   if (out->error[0] && strcmp(out->error, "invalid JSON response") == 0)
+      snprintf(out->error, sizeof(out->error), "provider returned 200 with a non-JSON body: %.180s",
+               response_body ? response_body : "");
    free(response_body);
 
    agent_reject_degenerate_plain_response(out, agent->name);
