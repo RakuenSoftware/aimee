@@ -166,6 +166,31 @@ def apply_hashline(current: str, snap_digests: List[int], snapshot_id: str,
     return "\n".join(out) + (trailing if out else ""), "ok"
 
 
+def apply_edit_symbol(fx: Dict[str, Any], edit: Dict[str, Any]) -> Tuple[Optional[str], str]:
+    """Model edit_symbol: {"symbol": NAME, "text": <new body>}. The server (here,
+    the harness) resolves NAME to the recorded span and swaps it — no anchor
+    arithmetic. Only defined for whole-func tasks (fx carries 'symbol')."""
+    want = fx.get("symbol")
+    got = str(edit.get("symbol", "")).strip()
+    if not want:
+        return None, "error: edit_symbol not applicable to this task"
+    # Lenient resolution, mirroring the real index-backed edit_symbol: a model may
+    # return "foo", "Type::foo", "int foo", or "foo()". Match on the identifier
+    # token, case-insensitively, rather than demanding a byte-exact string (the
+    # strict form spuriously failed capable models that named the right function).
+    import re as _re
+    got_ids = _re.findall(r"[A-Za-z_]\w*", got)
+    if want.lower() not in {g.lower() for g in got_ids}:
+        return None, (f"error: symbol {got!r} did not resolve; the file defines {want!r} — "
+                      "name that function")
+    src_lines = split_lines(fx["initial"])
+    o, e = fx["target_line"], fx.get("end_line", fx["target_line"])
+    new = [strip_anchor_prefix(l) for l in str(edit.get("text", "")).split("\n")]
+    out = src_lines[: o - 1] + new + src_lines[e:]
+    trailing = "\n" if fx["initial"].endswith("\n") else ""
+    return "\n".join(out) + trailing, "ok"
+
+
 # --------------------------------------------------------------------------- #
 # model driver                                                                #
 # --------------------------------------------------------------------------- #
@@ -199,10 +224,17 @@ HL_SYS = ('You edit a file by anchor. The file is shown with "LINE:HASH| " prefi
           'insert_after(at,text) / delete_range(from,to). "text" is the raw line WITHOUT the '
           '"LINE:HASH| " prefix. If a stale_anchor error comes back, re-anchor from its context '
           'and retry.')
+SYM_SYS = ('You rewrite a whole function by name with an edit_symbol tool. Reply with ONLY a '
+           'JSON object {"symbol": "NAME", "text": "<the full new function>"}. The server resolves '
+           'the function\'s span from its name and swaps it — you do NOT reproduce the old body or '
+           'cite any line numbers. If a tool error comes back, fix the name and retry.')
 
 
 def run_task(fx: Dict[str, Any], proto: str, model: str, endpoint: Optional[str],
              max_turns: int, mock: bool) -> Dict[str, Any]:
+    # edit_symbol only applies to tasks that name a symbol (whole-func).
+    if proto == "edit_symbol" and not fx.get("symbol"):
+        return {"skipped": True}
     initial = fx["initial"]
     current = fx.get("drift_to", initial)  # the file the edit actually lands on
     expected = fx["expected"]
@@ -217,6 +249,11 @@ def run_task(fx: Dict[str, Any], proto: str, model: str, endpoint: Optional[str]
     if proto == "str_replace":
         messages = [{"role": "system", "content": SR_SYS},
                     {"role": "user", "content": f"File:\n---\n{initial}---\n{goal}"}]
+    elif proto == "edit_symbol":
+        messages = [{"role": "system", "content": SYM_SYS},
+                    {"role": "user", "content": f"File:\n---\n{initial}---\nRewrite the function "
+                                                 f"`{fx.get('symbol')}` so its full new definition is "
+                                                 f"exactly:\n<<<\n{fx['new_text']}\n>>>"}]
     else:
         messages = [{"role": "system", "content": HL_SYS},
                     {"role": "user", "content": f"{anchored}\n\n{goal}"}]
@@ -237,6 +274,8 @@ def run_task(fx: Dict[str, Any], proto: str, model: str, endpoint: Optional[str]
 
         if proto == "str_replace":
             result, err = apply_str_replace(current, edit.get("old_string", ""), edit.get("new_string", ""))
+        elif proto == "edit_symbol":
+            result, err = apply_edit_symbol(fx, edit)
         else:
             result, err = apply_hashline(current, snap_digests, snap_id, edit.get("edits", []))
 
@@ -250,7 +289,7 @@ def run_task(fx: Dict[str, Any], proto: str, model: str, endpoint: Optional[str]
 
         # feed the real tool error back + a refreshed view, and let it retry
         messages.append({"role": "assistant", "content": content})
-        if proto == "str_replace":
+        if proto in ("str_replace", "edit_symbol"):
             view = current  # re-show the (possibly drifted) file
             messages.append({"role": "user", "content": f"Tool result: {err}\nCurrent file:\n---\n{view}---\nTry again."})
         else:
@@ -267,6 +306,8 @@ def _oracle(fx: Dict[str, Any], proto: str, turn: int) -> str:
     src = split_lines(fx["initial"])
     cur = split_lines(fx.get("drift_to", fx["initial"]))
     o, e = fx["target_line"], fx.get("end_line", fx["target_line"])
+    if proto == "edit_symbol":
+        return json.dumps({"symbol": fx.get("symbol", ""), "text": fx["new_text"]})
     if proto == "str_replace":
         if "drift_to" in fx:
             # turn 1 uses the stale line (fails not-found), turn 2 edits the drifted file
@@ -352,6 +393,32 @@ def run(models: List[str], endpoint: Optional[str], runs: int, max_turns: int,
         print(f"    => hashline pass@k {hk:.0%} vs {sk:.0%}, tokens {htok:.0f} vs {stok:.0f}, "
               f"turns {ht:.2f} vs {st:.2f}  [{'PASS' if ok else 'FAIL'}]\n")
         verdict_ok = verdict_ok and ok
+
+        # Whole-func recovery: str_replace vs hashline (replace_range) vs
+        # edit_symbol on the whole-func subset. The P5 gate asks whether
+        # edit_symbol brings the weakest model's whole-func pass@k to within 10pp
+        # of str_replace (which the hand-built replace_range did not).
+        wf = [fx for fx in fixtures if fx.get("category") == "whole-func" and fx.get("symbol")]
+        if wf:
+            def subset_passk(proto: str) -> float:
+                ok_n = tot = 0
+                for _ in range(runs):
+                    for fx in wf:
+                        r = run_task(fx, proto, model, endpoint, max_turns, mock or model == "oracle")
+                        if r.get("skipped"):
+                            continue
+                        tot += 1
+                        ok_n += int(r["success"])
+                return (ok_n / tot) if tot else 0.0
+            wf_sr = subset_passk("str_replace")
+            wf_hl = subset_passk("hashline")
+            wf_es = subset_passk("edit_symbol")
+            gap_hl = (wf_sr - wf_hl) * 100
+            gap_es = (wf_sr - wf_es) * 100
+            recovered = wf_es >= wf_sr - 0.10 - 1e-9
+            print(f"    whole-func pass@k: str_replace {wf_sr:.0%}  hashline(replace_range) "
+                  f"{wf_hl:.0%} (gap {gap_hl:+.0f}pp)  edit_symbol {wf_es:.0%} (gap {gap_es:+.0f}pp)"
+                  f"  [{'RECOVERED <=10pp' if recovered else 'still short'}]\n")
 
     print("Gate (pass@k >= str_replace AND net token-negative, every model) -> "
           + ("PASS" if verdict_ok else "FAIL"))

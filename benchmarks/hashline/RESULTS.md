@@ -194,3 +194,41 @@ data-driven, per the roundtable.
 zero-retrieval telemetry shows a material rate of literal+lexical misses on real
 queries. If built, treat the embedder as an untrusted egress dependency
 (bounded payload/time, same pinning posture as web_read's HTTP leg).
+
+---
+
+## edit_symbol recovery — attempted, infra-blocked (P5 still gated)
+
+To measure whether routing whole-func edits through `edit_symbol` recovers the
+weakest-model regression (MiniMax whole-func 87%→53%), the agentic eval gained an
+`edit_symbol` protocol ({symbol, text} → server resolves the span) and a
+whole-func recovery block (str_replace vs hashline replace_range vs edit_symbol).
+
+**The number could not be obtained cleanly.** Two infrastructure realities:
+- **MiniMax upstream is intermittent.** `api.minimax.io/anthropic/v1/messages`
+  returns bursts of HTTP 404 interleaved with 200s (confirmed in the .254 server
+  log: `provider_catalog: agent 'MiniMax-M3' health → down (streak 114)`). Every
+  multi-run eval hit a 404 window during the hashline/edit_symbol phase, collapsing
+  that whole phase to 0% (0 tokens) — garbage, not a real score.
+- **A gateway bug masked this** as `invalid JSON response` (a 404 body isn't JSON,
+  and `parse_response()` clobbered the real HTTP status). Fixed in PR #1427
+  (`fix(gateway): surface upstream HTTP errors …`), which now reports
+  `HTTP 404 (non-JSON body): …` — the fix that made the root cause visible.
+
+On the one clean model run captured (mimo-v2.5-pro, which does NOT regress on
+whole-func) the harness's `edit_symbol` initially scored an implausible 30% vs
+`replace_range`'s 90% — a **harness-modeling flaw**: it demanded a byte-exact
+symbol name. That is now fixed with lenient, index-like resolution (match the
+identifier token case-insensitively), so a model naming `foo` / `int foo` /
+`Type::foo` all resolve.
+
+**Status:** the P5 removal gate's recovery criterion is **not yet demonstrated** —
+not because edit_symbol failed, but because the regressing model can't be measured
+reliably right now. `old_string` therefore stays. A clean recovery re-run is a
+single command once MiniMax's upstream is stable:
+
+    python3 tools/hashline_agentic_eval.py --endpoint … --token … --insecure \
+      --model MiniMax-M3 --runs 3 --max-turns 4 \
+      --fixtures benchmarks/hashline/corpus.generated.json
+
+Read the `whole-func pass@k … edit_symbol … [RECOVERED <=10pp]` line.
