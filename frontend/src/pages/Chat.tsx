@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
+import { AutoGrowTextarea, Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -2343,9 +2343,7 @@ export default function Chat() {
     if (!text) return;
 
     setInputText('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    // AutoGrowTextarea reflows its own height when inputText clears.
 
     // Steering: if a turn is already in flight for the active tab — a local send
     // (client stream open) or a server/foreign turn (events stream) — sending
@@ -2826,12 +2824,6 @@ export default function Chat() {
     }
   }
 
-  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setInputText(e.target.value);
-    e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
-  }
-
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
@@ -3085,21 +3077,16 @@ export default function Chat() {
         padding: '12px 16px', background: tokens.surfaceAlt, borderTop: `1px solid ${tokens.border}`,
         display: 'flex', gap: '8px', flexShrink: 0,
       }}>
-        <textarea
+        <AutoGrowTextarea
           ref={textareaRef}
           value={inputText}
-          onChange={handleInput}
+          onChange={setInputText}
           onKeyDown={handleKeyDown}
+          maxHeight={200}
           placeholder={(working || remoteTurnActive)
             ? 'Steer the running turn — Enter interrupts and continues'
             : 'Type a message… (Shift+Enter for newline)'}
-          rows={1}
-          style={{
-            flex: 1, padding: '10px', backgroundColor: tokens.surface, color: tokens.text,
-            border: `1px solid ${tokens.borderMedium}`, borderRadius: '6px', fontSize: '14px',
-            resize: 'none', fontFamily: 'system-ui', minHeight: '44px', maxHeight: '200px',
-            outline: 'none',
-          }}
+          style={{ flex: 1, minHeight: '44px' }}
           onFocus={e => (e.target.style.borderColor = tokens.primary)}
           onBlur={e => (e.target.style.borderColor = tokens.borderMedium)}
           autoFocus
