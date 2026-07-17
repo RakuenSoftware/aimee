@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Panel, Badge } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, InlineStatus } from "@rakuensoftware/smoothgui";
 import { FIELD_HELP, SECTION_HELP, RESTART_KEYS } from "./settingsHelp";
 import { resetAll as resetTutorials } from "../help/tutorialState";
 import { setDismissed as setSetupDismissed, requestOpenWizard } from "../setup/setupState";
@@ -169,17 +169,7 @@ export default function Settings() {
         >
           Re-run setup
         </button>
-        {status && (
-          <span
-            style={{
-              fontSize: 12,
-              color: status.kind === "err" ? "#b00" : "#080",
-              maxWidth: 620,
-            }}
-          >
-            {status.msg}
-          </span>
-        )}
+        <InlineStatus status={status} />
       </div>
       <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
         Changes persist to <code>aimee.yaml</code> and take effect on the next turn, unless a row is

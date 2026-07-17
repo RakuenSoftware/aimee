@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Panel, Badge } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Personas page: edit the PERSONA definitions (identity + the roles each persona
  * may use). Roles themselves — their bodies and per-role turn caps — live on the
@@ -162,9 +162,7 @@ export default function Personas() {
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Personas</strong>
-        {status && (
-          <span style={{ fontSize: 13, color: status.kind === "err" ? "#b00" : "#080" }}>{status.msg}</span>
-        )}
+        <InlineStatus status={status} />
       </div>
 
       <div style={{ maxWidth: 720 }}>

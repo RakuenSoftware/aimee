@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Panel } from "@rakuensoftware/smoothgui";
+import { Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roles page: edit the shared ROLE vocabulary — each role's name, what it does
  * (the delegate system-prompt template), and its per-role turn cap (max_turns,
@@ -135,9 +135,7 @@ export default function Roles() {
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Roles</strong>
-        {status && (
-          <span style={{ fontSize: 13, color: status.kind === "err" ? "#b00" : "#080" }}>{status.msg}</span>
-        )}
+        <InlineStatus status={status} />
       </div>
 
       <div style={{ maxWidth: 720 }}>

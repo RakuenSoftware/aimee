@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus } from "@rakuensoftware/smoothgui";
 import ProjectPicker from "../components/ProjectPicker";
 import type { ProjectSelection } from "../components/ProjectPicker";
 import { useSessions } from "../SessionContext";
@@ -830,21 +830,7 @@ export default function EditWorkflows() {
           >
             Save
           </button>
-          {status && (
-            <span
-              style={{
-                color:
-                  status.kind === "err"
-                    ? "#c00"
-                    : status.kind === "ok"
-                      ? "#070"
-                      : "#666",
-                fontSize: 13,
-              }}
-            >
-              {status.msg}
-            </span>
-          )}
+          <InlineStatus status={status} />
           <Spinner loading={loading} text="loading…" />
         </div>
         <div

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { InlineStatus } from "@rakuensoftware/smoothgui";
 import { FIELD_HELP } from "./settingsHelp";
 
 /* Pipeline page: the curator pipeline as an ordered, resource-lane-grouped view.
@@ -512,7 +513,9 @@ export default function Pipeline() {
         <div style={{ color: "#888" }}>No stages reported (aimee-server unreachable, or the KB has no curator registry).</div>
       )}
       {status && (
-        <div style={{ fontSize: 13, color: status.kind === "ok" ? "#2a2" : "#c33", marginTop: 8 }}>{status.msg}</div>
+        <div style={{ marginTop: 8 }}>
+          <InlineStatus status={status} />
+        </div>
       )}
     </div>
   );

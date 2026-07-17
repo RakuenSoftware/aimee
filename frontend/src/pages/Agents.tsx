@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Panel, Badge, Spinner, Modal } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, Modal, InlineStatus } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
@@ -178,16 +178,7 @@ export default function Agents() {
           {showAdd ? "Close" : "+ Add delegate"}
         </button>
         <Spinner loading={loading} text="loading…" />
-        {status && (
-          <span
-            style={{
-              fontSize: 13,
-              color: status.kind === "err" ? "#c00" : "#070",
-            }}
-          >
-            {status.msg}
-          </span>
-        )}
+        <InlineStatus status={status} />
       </div>
 
       {showAdd && (
