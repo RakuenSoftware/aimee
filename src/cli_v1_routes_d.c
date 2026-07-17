@@ -759,6 +759,7 @@ static const struct
     {"index.ingest", "POST", "/v1/index/ingest"},
     {"index.scan", "POST", "/v1/index/scan"},
     {"kb.build", "POST", "/v1/kb/build"},
+    {"kb.docs.push", "POST", "/v1/kb/docs/push"},
     {"kb.ingest", "POST", "/v1/kb/ingest"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},

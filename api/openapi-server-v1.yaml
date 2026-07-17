@@ -2626,6 +2626,17 @@ paths:
       summary: Update the knowledge base (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/docs/push:
+    post:
+      summary: Push document contents into the knowledge base (async; poll GET /runs/{id})
+      description: >-
+        Upload document bytes from the caller's workspace into the knowledge
+        base. The workspace-owning tier reads the files and streams their
+        content to aimee-kb, so a stateless/remote aimee-kb that cannot see the
+        caller's filesystem still ingests them (unlike the path-forwarding
+        kb.build).
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /graph/sync_code:
     post:
       summary: Sync the code graph (async; poll GET /runs/{id})
