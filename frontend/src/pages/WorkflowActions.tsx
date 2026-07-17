@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, Badge, Spinner, InlineStatus, EmptyState } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, EmptyState, Button } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
 
@@ -413,24 +413,23 @@ export default function WorkflowActions() {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <strong style={{ fontSize: 16 }}>Workflows</strong>
           <Badge label={`${items.length}`} variant="neutral" />
-          <button onClick={refreshList} style={btn} title="Reload the proposal list.">
+          <Button onClick={refreshList} size="md" title="Reload the proposal list.">
             Refresh
-          </button>
+          </Button>
         </div>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={startNew}
           title="Start composing a new proposal to submit."
           style={{
-            ...btn,
             width: "100%",
-            background: composing ? "#eef4ff" : "#2563eb",
-            color: composing ? "#2563eb" : "#fff",
-            borderColor: "#2563eb",
             marginBottom: 8,
+            ...(composing ? { background: "#eef4ff", color: "#2563eb" } : {}),
           }}
         >
           + New proposal
-        </button>
+        </Button>
         <label
           style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}
           title="Show every run across all users, not just your own."
@@ -511,49 +510,53 @@ export default function WorkflowActions() {
                 (below) rather than resume. */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "4px 0 10px" }}>
               {canResume && (
-                <button onClick={() => void doLifecycle("resume")} disabled={acting} style={btn} title="Resume this paused run.">
+                <Button onClick={() => void doLifecycle("resume")} disabled={acting} size="md" title="Resume this paused run.">
                   ▶ Start
-                </button>
+                </Button>
               )}
               {canPause && (
-                <button onClick={() => void doLifecycle("pause")} disabled={acting} style={btn} title="Pause this active run.">
+                <Button onClick={() => void doLifecycle("pause")} disabled={acting} size="md" title="Pause this active run.">
                   ⏸ Pause
-                </button>
+                </Button>
               )}
               {canStop && (
-                <button
+                <Button
+                  variant="danger"
+                  size="md"
                   onClick={() => void doLifecycle("stop")}
                   disabled={acting}
-                  style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
                   title="Abandon this run; it cannot be resumed."
                 >
                   ⏹ Stop
-                </button>
+                </Button>
               )}
-              <button
+              <Button
+                variant="danger"
+                size="md"
                 onClick={() => void doLifecycle("delete")}
                 disabled={acting}
-                style={{ ...btn, background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3", marginLeft: "auto" }}
+                style={{ marginLeft: "auto" }}
                 title="Permanently delete this run, its history, and proposal file."
               >
                 🗑 Delete
-              </button>
+              </Button>
               {actMsg && <span style={{ fontSize: 12, color: "#c00", flexBasis: "100%" }}>{actMsg}</span>}
             </div>
 
             {canDecide && (
               <Panel title={`Human gate · ${detail.stage}`}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button onClick={() => void decideGate("approve")} style={btn} title="Approve this gate and resume the run.">
+                  <Button onClick={() => void decideGate("approve")} size="md" title="Approve this gate and resume the run.">
                     Approve
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="md"
                     onClick={() => void decideGate("reject")}
-                    style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
                     title="Reject at this gate."
                   >
                     Reject
-                  </button>
+                  </Button>
                   {gateMsg && <span style={{ fontSize: 12, color: "#667" }}>{gateMsg}</span>}
                 </div>
               </Panel>
@@ -759,19 +762,20 @@ function Composer({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <strong style={{ fontSize: 13 }}>Delegate draft — preview</strong>
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={() => {
                 update({ body: preview });
                 setPreview(null);
               }}
-              style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
               title="Replace the proposal body with this generated draft."
             >
               Use this draft
-            </button>
-            <button onClick={() => setPreview(null)} style={btn} title="Discard this draft preview and keep your current body.">
+            </Button>
+            <Button onClick={() => setPreview(null)} size="md" title="Discard this draft preview and keep your current body.">
               Discard
-            </button>
+            </Button>
             <span style={{ fontSize: 11, color: "#888" }}>Replaces the body above.</span>
           </div>
           <div
@@ -782,30 +786,31 @@ function Composer({
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={onSubmit}
           disabled={busy}
-          style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
           title="Submit the proposal and start the selected workflow."
         >
           {submitting ? "Submitting…" : `Submit → run "${draft.workflow || "build"}"`}
-        </button>
-        <button
+        </Button>
+        <Button
+          size="md"
           onClick={() => void generate()}
           disabled={busy}
-          style={btn}
           title="Generate a proposal draft from your title and notes (shown as a preview to accept)."
         >
           {drafting ? "Drafting…" : "✨ Draft with a delegate"}
-        </button>
-        <button
+        </Button>
+        <Button
+          size="md"
           onClick={() => (browsing ? setBrowsing(false) : openBrowser())}
           disabled={busy}
-          style={btn}
           title="Browse the project checkout and load a .md file as the proposal."
         >
           {browsing ? "Close browser" : "📂 Load from project"}
-        </button>
+        </Button>
         {submitMsg && <span style={{ fontSize: 12, color: "#c00" }}>{submitMsg}</span>}
         {draftErr && <span style={{ fontSize: 12, color: "#c00" }}>{draftErr}</span>}
       </div>
@@ -980,14 +985,6 @@ function Field({ k, v }: { k: string; v: string }) {
   );
 }
 
-const btn: React.CSSProperties = {
-  fontSize: 13,
-  padding: "4px 10px",
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  background: "#fff",
-  cursor: "pointer",
-};
 const inp: React.CSSProperties = {
   fontSize: 13,
   padding: "5px 7px",

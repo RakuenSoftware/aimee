@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Panel } from '@rakuensoftware/smoothgui';
+import { Panel, Button } from '@rakuensoftware/smoothgui';
 import ConnectHosts from '../setup/ConnectHosts';
 import { useSessions } from '../SessionContext';
 import { groupProjectsByOrg, parseOwnerOnly, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type OwnerRef, type ProjectDetail, type ProjectDeleteResponse } from '../setup/ownerUrl';
@@ -40,10 +40,6 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-const btn: React.CSSProperties = {
-  padding: '3px 10px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff',
-  color: '#444', cursor: 'pointer', fontSize: '12px',
-};
 const input: React.CSSProperties = {
   padding: '6px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px',
 };
@@ -277,11 +273,11 @@ export default function Projects() {
               onKeyDown={e => { if (e.key === 'Enter' && url.trim() && !busy) connect(); }} />
             <input style={{ ...input, flex: 1, minWidth: '120px' }} placeholder="name (optional)"
               value={name} onChange={e => setName(e.target.value)} />
-            <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+            <Button variant="primary" size="sm"
               disabled={busy || !url.trim()} onClick={connect}
               title="Clone the repository, or if you entered an owner/org URL, list its repositories to bulk-clone.">
               {parseOwnerOnly(url) ? 'List repositories' : 'Clone'}
-            </button>
+            </Button>
           </div>
           <input style={{ ...input, width: '100%' }} type="password" autoComplete="off"
             placeholder="access token — only for a private repo/org (GitHub/Gitea/GitLab…); saved server-side per host"
@@ -295,13 +291,13 @@ export default function Projects() {
                   {orgRef.host}/{orgRef.owner}: {orgRepos.length} repositor{orgRepos.length === 1 ? 'y' : 'ies'}
                   {orgProvider ? ` · ${orgProvider}` : ''}
                 </div>
-                <button style={{ ...btn, border: 'none', color: '#3a6ea5', padding: 0 }}
+                <Button variant="ghost" size="sm" style={{ color: '#3a6ea5', padding: 0 }}
                   title="Select every repository that is not already cloned."
                   onClick={() => setOrgSelected(Object.fromEntries(orgRepos.map(r =>
-                    [r.name, !repoAlreadyCloned(r, orgRef.owner, projects, details)])))}>all</button>
-                <button style={{ ...btn, border: 'none', color: '#3a6ea5', padding: 0 }}
+                    [r.name, !repoAlreadyCloned(r, orgRef.owner, projects, details)])))}>all</Button>
+                <Button variant="ghost" size="sm" style={{ color: '#3a6ea5', padding: 0 }}
                   title="Deselect all repositories."
-                  onClick={() => setOrgSelected({})}>none</button>
+                  onClick={() => setOrgSelected({})}>none</Button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '220px', overflow: 'auto',
                             border: '1px solid #ddd', borderRadius: '6px', padding: '8px' }}>
@@ -319,12 +315,12 @@ export default function Projects() {
                 })}
               </div>
               <div>
-                <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+                <Button variant="primary" size="sm"
                   disabled={busy || orgRepos.filter(r => orgSelected[r.name]).length === 0}
                   title="Clone the checked repositories as new projects."
                   onClick={cloneOrgSelected}>
                   Clone selected ({orgRepos.filter(r => orgSelected[r.name]).length})
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -353,9 +349,9 @@ export default function Projects() {
       <Panel title="Git accounts" count={hosts.length}>
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+            <Button variant="primary" size="sm"
               title="Connect a git account (OAuth, access token, or SSH key) via the setup wizard."
-              onClick={() => setConnectOpen(true)}>+ Connect git account</button>
+              onClick={() => setConnectOpen(true)}>+ Connect git account</Button>
             <span style={{ color: '#888', fontSize: '12px' }}>
               OAuth sign-in, an access token, or an SSH key — stored server-side, never shown again.
             </span>
@@ -366,9 +362,9 @@ export default function Projects() {
                 <div key={h} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '13px', fontFamily: 'monospace', flex: 1 }}>{h}</span>
                   <span style={{ fontSize: '11px', color: '#2a7' }}>● token set</span>
-                  <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy}
+                  <Button variant="danger" size="sm" disabled={busy}
                     title="Delete the stored access token for this git host."
-                    onClick={() => removeCred(h)}>remove</button>
+                    onClick={() => removeCred(h)}>remove</Button>
                 </div>
               ))}
             </div>
@@ -390,16 +386,16 @@ export default function Projects() {
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     {g.refs.map(p => (
                       <span key={p} style={{ display: 'inline-flex' }}>
-                        <button onClick={() => { setSelected(p); setOutput(''); setErr(''); }}
+                        <Button onClick={() => { setSelected(p); setOutput(''); setErr(''); }}
+                          variant={p === selected ? 'primary' : 'default'} size="sm"
                           title="Select this project to run git operations on it."
-                          style={{ ...btn, background: p === selected ? '#234' : '#fff', color: p === selected ? '#8cf' : '#444',
-                                   borderColor: p === selected ? '#456' : '#ccc', borderRadius: '4px 0 0 4px' }}>
+                          style={{ borderRadius: '4px 0 0 4px' }}>
                           {p}
-                        </button>
-                        <button title={`Delete ${p}`} disabled={busy} onClick={() => openDelete(p)}
-                          style={{ ...btn, borderColor: '#d99', color: '#c33', borderRadius: '0 4px 4px 0', borderLeft: 'none' }}>
+                        </Button>
+                        <Button variant="danger" size="sm" title={`Delete ${p}`} disabled={busy} onClick={() => openDelete(p)}
+                          style={{ borderRadius: '0 4px 4px 0', borderLeft: 'none' }}>
                           ×
-                        </button>
+                        </Button>
                       </span>
                     ))}
                   </div>
@@ -420,23 +416,23 @@ export default function Projects() {
                 <input style={{ ...input, flex: 1, minWidth: '180px', fontFamily: 'monospace' }} placeholder={delRef}
                   value={delTyped} onChange={e => setDelTyped(e.target.value)} />
                 {!delKbDown && (
-                  <button style={{ ...btn, background: '#c33', color: '#fff', borderColor: '#a22' }}
+                  <Button variant="danger" size="sm"
                     disabled={busy || delTyped !== delRef} onClick={() => deleteProject(false)}
-                    title="Permanently delete the clone and all indexed knowledge for this project.">Delete</button>
+                    title="Permanently delete the clone and all indexed knowledge for this project.">Delete</Button>
                 )}
-                <button style={btn} disabled={busy} onClick={closeDelete}>Cancel</button>
+                <Button size="sm" disabled={busy} onClick={closeDelete}>Cancel</Button>
               </div>
               {delKbDown && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <button style={btn} disabled={busy || delTyped !== delRef}
+                  <Button size="sm" disabled={busy || delTyped !== delRef}
                     title="Retry the delete now that the knowledge service may be back."
-                    onClick={() => deleteProject(false)}>Retry</button>
-                  <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy || delTyped !== delRef}
+                    onClick={() => deleteProject(false)}>Retry</Button>
+                  <Button variant="danger" size="sm" disabled={busy || delTyped !== delRef}
                     onClick={() => { if (delForceArmed) deleteProject(true); else setDelForceArmed(true); }}>
                     {delForceArmed
                       ? 'Click again to confirm force delete'
                       : 'Force delete (leaves knowledge orphaned until the knowledge service returns)'}
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -446,31 +442,31 @@ export default function Projects() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
                 {READ_OPS.map(op => (
-                  <button key={op} style={btn} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</button>
+                  <Button key={op} size="sm" disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</Button>
                 ))}
                 {REMOTE_OPS.map(op => (
-                  <button key={op} style={{ ...btn, borderColor: '#a96' }} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</button>
+                  <Button key={op} size="sm" style={{ borderColor: '#a96' }} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</Button>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input style={{ ...input, flex: 1, minWidth: '180px' }} placeholder="commit message"
                   value={commitMsg} onChange={e => setCommitMsg(e.target.value)} />
-                <button style={btn} disabled={busy || !commitMsg.trim()}
+                <Button size="sm" disabled={busy || !commitMsg.trim()}
                   title="Commit staged changes with the entered message."
-                  onClick={() => { runOp('commit', { message: commitMsg }); setCommitMsg(''); }}>commit</button>
+                  onClick={() => { runOp('commit', { message: commitMsg }); setCommitMsg(''); }}>commit</Button>
                 <input style={{ ...input, width: '140px' }} placeholder="branch"
                   value={branch} onChange={e => setBranch(e.target.value)} />
-                <button style={btn} disabled={busy || !branch.trim()}
+                <Button size="sm" disabled={busy || !branch.trim()}
                   title="Switch to (or create) the named branch."
-                  onClick={() => runOp('checkout', { branch })}>checkout</button>
+                  onClick={() => runOp('checkout', { branch })}>checkout</Button>
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input style={{ ...input, flex: 1, minWidth: '180px' }}
                   placeholder="PR title (optional — empty fills from commits)"
                   value={prTitle} onChange={e => setPrTitle(e.target.value)} />
-                <button style={{ ...btn, borderColor: '#7a7' }} disabled={busy}
+                <Button size="sm" style={{ borderColor: '#7a7' }} disabled={busy}
                   title="Open a GitHub pull request for the pushed branch"
-                  onClick={async () => { if (await runOp('pr', { message: prTitle })) setPrTitle(''); }}>open PR</button>
+                  onClick={async () => { if (await runOp('pr', { message: prTitle })) setPrTitle(''); }}>open PR</Button>
               </div>
             </div>
           )}
