@@ -9,62 +9,100 @@
 #include "server_coord_dispatcher.h"
 #include "server.h"
 #include "server_compute_impl.h"
+#include "gw_orch_delegates.h"
 #include "db1.h"
 #include "log.h"
 #include "cJSON.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-/* Build a delegate request from a claimed coord task and submit it to a delegate
- * worker. Lives here (its only caller) rather than in server_compute.c. */
-int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
-                                       const char *prompt, const char *files_json, const char *cwd,
-                                       const char *persona, int require_handoff)
+/* Coord-task fields the spawn adapter needs beyond (role, brief). Carried as the orchestration
+ * capability's opaque ctx; the adapter records the spawn outcome in spawn_rc so the dispatcher
+ * can tell an admitted spawn from a refused one (ceiling/pool) and release+retry accordingly. */
+typedef struct
 {
-   if (!ctx || task_id <= 0 || !prompt || !prompt[0])
+   server_ctx_t *server;
+   int task_id;
+   const char *persona;
+   const char *files_json;
+   const char *cwd;
+   int require_handoff;
+   int spawn_rc; /* 0 spawned, -1 refused/failed; -1 until the adapter runs */
+} coord_spawn_backing_t;
+
+/* The spawn_delegate capability for coord tasks: build the delegate request + compute ctx from
+ * (role, brief) and the backing, then submit to an on-demand delegate worker. Returns 0/-1 and
+ * also records it in the backing so the dispatcher can release+retry a refused claim. */
+static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
+{
+   coord_spawn_backing_t *b = (coord_spawn_backing_t *)ctx;
+   if (!b)
       return -1;
+   b->spawn_rc = -1;
    cJSON *req = cJSON_CreateObject();
    if (!req)
       return -1;
    cJSON_AddStringToObject(req, "role", role && role[0] ? role : "execute");
-   cJSON_AddStringToObject(req, "prompt", prompt);
+   cJSON_AddStringToObject(req, "prompt", brief ? brief : "");
    /* Persona (the delegate's identity, required for every delegate) is carried on
     * the coord task now — the orchestrator that enqueued it (coord planner or the
     * workflow engine) named it. Default to engineer for legacy rows. */
-   cJSON_AddStringToObject(req, "persona", (persona && persona[0]) ? persona : "engineer");
+   cJSON_AddStringToObject(req, "persona", (b->persona && b->persona[0]) ? b->persona : "engineer");
    /* The structured delegate_result_v1 handoff is the patch-COORDINATOR's contract
     * (plan-based jobs aggregate structured results). WFE's ad-hoc jobs don't use
     * it — the delegate produces free-form output (a plan, a review verdict, code)
     * that WFE reads raw from the task result — so requiring a handoff would fail
     * every WFE task with "invalid delegate handoff". The caller decides. */
-   if (require_handoff)
+   if (b->require_handoff)
       cJSON_AddTrueToObject(req, "handoff_json");
-   if (files_json && files_json[0])
-      cJSON_AddStringToObject(req, "files", files_json);
-   if (cwd && cwd[0])
-      cJSON_AddStringToObject(req, "cwd", cwd);
+   if (b->files_json && b->files_json[0])
+      cJSON_AddStringToObject(req, "files", b->files_json);
+   if (b->cwd && b->cwd[0])
+      cJSON_AddStringToObject(req, "cwd", b->cwd);
    compute_ctx_t *cctx = calloc(1, sizeof(compute_ctx_t));
    if (!cctx)
    {
       cJSON_Delete(req);
       return -1;
    }
-   cctx->server = ctx;
+   cctx->server = b->server;
    cctx->conn_fd = -1;
    cctx->async_slot = -1;
-   cctx->coord_task_id = task_id;
+   cctx->coord_task_id = b->task_id;
    cctx->req = req;
    /* Coord-task delegates are I/O-bound; run on-demand, not the CPU compute
     * pool (see delegate_spawn_ondemand). */
    if (delegate_spawn_ondemand(cctx) != 0)
    {
       compute_ctx_free(cctx);
+      b->spawn_rc = -1;
       return -1;
    }
+   b->spawn_rc = 0;
    return 0;
+}
+
+/* Build a delegate request from a claimed coord task and submit it to a delegate worker,
+ * routed through the DELEGATES orchestration module so the spawn is a togglable, registered
+ * hook rather than an inline imperative call (see gw_orch_delegates). Lives here (its only
+ * caller) rather than in server_compute.c. */
+int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
+                                       const char *prompt, const char *files_json, const char *cwd,
+                                       const char *persona, int require_handoff)
+{
+   if (!ctx || task_id <= 0 || !prompt || !prompt[0])
+      return -1;
+   coord_spawn_backing_t backing = {ctx, task_id, persona, files_json, cwd, require_handoff, -1};
+   gw_turn_capabilities_t caps = {&backing, coord_spawn_delegate, NULL};
+   char turn_id[48];
+   snprintf(turn_id, sizeof(turn_id), "coord-task-%d", task_id);
+   if (gw_orch_delegates_run(&caps, turn_id, role, prompt) != 0)
+      return -1; /* delegates module disabled -> not dispatched; caller releases + retries */
+   return backing.spawn_rc; /* 0 spawned, -1 refused (ceiling/pool full) */
 }
 
 #define COORD_POLL_INTERVAL_SECS 10
@@ -84,6 +122,14 @@ static server_ctx_t *g_ctx;
 /* Sweep all coord jobs that have pending tasks and dispatch up to max_concurrent. */
 static int dispatcher_sweep(void)
 {
+   /* Delegates module disabled -> dispatch nothing: do NOT claim tasks (claiming then failing
+    * to dispatch would release them and re-claim every poll tick, churning the queue). Coord
+    * tasks ARE delegate work, so they simply wait until the module is re-enabled. Checked here,
+    * before any claim, so a disabled module is distinct from a per-task 'refused' (pool full),
+    * which alone releases+retries the single claimed task below. */
+   if (!gw_orch_delegates_enabled())
+      return 0;
+
    int job_ids[COORD_MAX_ACTIVE_JOBS];
    int njobs = db1_coord_job_list_active_ids(job_ids, COORD_MAX_ACTIVE_JOBS);
    if (njobs <= 0)
