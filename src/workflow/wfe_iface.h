@@ -186,6 +186,11 @@ const char *wfe_repo_local(const char *wi_repo);
 const char *wfe_autonomous_base(void);
 int wfe_base_is_protected(const char *branch); /* 1 if main/master/release* (refused) */
 int wfe_autonomous_target_ok(void);            /* 1 if the configured base is mergeable */
+/* 1 iff `base` is an aimee-managed feature branch (an "aimee/feat/" prefix) — the
+ * ONLY base an autonomous merge may land a PR into. The merge seam refuses every
+ * other base (integration/protected branches) so a misconfigured pr.open base
+ * cannot merge work into a non-feature branch. */
+int wfe_base_is_feature(const char *base);
 
 /* Authoritative server-side USD cost for a delegate turn of `elapsed_secs`
  * wall-clock (rate AIMEE_AUTONOMY_USD_PER_SEC, default 0.0005). Provider-agnostic,
