@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Badge, Modal, EmptyState } from '@rakuensoftware/smoothgui';
+import { Badge, Button, Modal, EmptyState } from '@rakuensoftware/smoothgui';
 import type { BadgeVariant } from '@rakuensoftware/smoothgui';
 
 /* All fields of an audit row, in display order, for the detail modal. */
@@ -134,7 +134,7 @@ export default function Logs() {
           <select value={actor} onChange={e => setActor(e.target.value)} style={selectStyle} title="Filter rows by actor (primary agent or delegate).">
             {['all', 'primary', 'delegate'].map(a => <option key={a} value={a}>{a}</option>)}
           </select>
-          <button onClick={load} style={{ ...selectStyle, cursor: 'pointer' }} title="Reload the newest page of audit rows.">Refresh</button>
+          <Button size="sm" onClick={load} title="Reload the newest page of audit rows.">Refresh</Button>
           {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
         </div>
       </div>
@@ -179,13 +179,14 @@ export default function Logs() {
         )}
         {rows.length < total && (
           <div style={{ padding: 12, textAlign: 'center' }}>
-            <button
+            <Button
+              size="sm"
               onClick={loadMore}
               disabled={loadingMore}
-              style={{ ...selectStyle, cursor: 'pointer', padding: '6px 16px' }}
+              style={{ padding: '6px 16px' }}
             >
               {loadingMore ? 'Loading…' : `Load ${Math.min(PAGE, total - rows.length).toLocaleString()} more`}
-            </button>
+            </Button>
           </div>
         )}
       </div>

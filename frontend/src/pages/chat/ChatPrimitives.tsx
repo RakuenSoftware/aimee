@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { tokens, DiffViewer } from '@rakuensoftware/smoothgui';
+import { Button, tokens, DiffViewer } from '@rakuensoftware/smoothgui';
 import { escHtml, renderMd } from './markdown';
 
 interface BootstrapStack {
@@ -23,12 +23,12 @@ export function BootstrapBanner({ onGenerate, onDismiss, stacks }: BannerProps) 
       <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#8c8' }}>No .aimee-rules file found</div>
       <div style={{ fontSize: '12px', color: '#bbb', margin: '3px 0' }}>{stackText}</div>
       <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-        <button onClick={onGenerate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '4px', cursor: 'pointer', border: '1px solid #2d4d2d', background: '#1a3a1a', color: '#8c8' }}>
+        <Button variant="primary" size="sm" onClick={onGenerate}>
           Generate .aimee-rules
-        </button>
-        <button onClick={onDismiss} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '4px', cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`, background: 'transparent', color: tokens.textSecondary }}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDismiss}>
           Dismiss
-        </button>
+        </Button>
       </div>
     </div>
   );

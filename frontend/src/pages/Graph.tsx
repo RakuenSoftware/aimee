@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Badge, Panel } from '@rakuensoftware/smoothgui';
+import { Badge, Button, Panel } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
 
 /* §8 code-graph visualization. A read-only, navigable view of the code projection
@@ -79,7 +79,7 @@ export default function Graph() {
         <strong>Code graph — {project}</strong>
         {edgeCount != null && <Badge label={`${edgeCount} edges`} variant="neutral" />}
         {loading && <span style={{ color: '#888', fontSize: 12 }}>loading…</span>}
-        <button onClick={loadHubs} style={{ marginLeft: 'auto', ...btn }} title="Reload the ranked hub list for this project's code graph.">↻ refresh</button>
+        <Button size="sm" onClick={loadHubs} style={{ marginLeft: 'auto' }} title="Reload the ranked hub list for this project's code graph.">↻ refresh</Button>
       </div>
       {err && <div style={{ color: '#b00', fontSize: 13 }}>{err}</div>}
 
@@ -115,7 +115,7 @@ export default function Graph() {
 
       <Panel title="Surprising links" count={links.length}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <button onClick={loadSurprising} style={btn} title="Find file pairs that are semantically close yet structurally far apart.">find</button>
+          <Button size="sm" onClick={loadSurprising} title="Find file pairs that are semantically close yet structurally far apart.">find</Button>
           <label style={{ fontSize: 12, color: '#555' }} title="Run an LLM to confirm or reject each surprising link (slower).">
             <input type="checkbox" checked={judge} onChange={e => setJudge(e.target.checked)} /> LLM confirm
           </label>
@@ -142,7 +142,6 @@ function shortNode(n: string): string {
   return i >= 0 ? n.slice(i + 1) : n;
 }
 
-const btn: React.CSSProperties = { padding: '3px 10px', borderRadius: 4, border: '1px solid #ccc', background: '#fff', color: '#444', cursor: 'pointer', fontSize: 12 };
 const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 4, border: 'none', background: '#fff', cursor: 'pointer', fontSize: 12, textAlign: 'left', width: '100%' };
 const ellipsis: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240 };
 const empty: React.CSSProperties = { color: '#999', fontSize: 12, padding: 8 };

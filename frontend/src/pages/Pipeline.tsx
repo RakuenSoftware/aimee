@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { InlineStatus, Switch } from "@rakuensoftware/smoothgui";
+import { Button, InlineStatus, Switch } from "@rakuensoftware/smoothgui";
 import { FIELD_HELP } from "./settingsHelp";
 
 /* Pipeline page: the curator pipeline as an ordered, resource-lane-grouped view.
@@ -479,17 +479,16 @@ export default function Pipeline() {
                         ariaLabel={on ? "Disable stage" : "Enable stage"}
                       />
                     </span>
-                    <button
+                    <Button
+                      variant="danger"
+                      size="md"
                       disabled={busy === "custom-stages"}
                       onClick={() => deleteCustomStage(s.name)}
                       title={`Delete custom stage "${s.name}"`}
-                      style={{
-                        padding: "5px 8px", fontSize: 13, borderRadius: 6, cursor: "pointer",
-                        border: "1px solid #cbd5e1", background: "#fff", color: "#b00",
-                      }}
+                      style={{ padding: "5px 8px" }}
                     >
                       ×
-                    </button>
+                    </Button>
                   </div>
                 );
               })
