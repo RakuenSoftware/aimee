@@ -13,14 +13,16 @@
 
 #include "gw_orchestration_seam.h"
 
-/* Default-ON unless AIMEE_ORCH_WORKFLOWS is an explicit 0/off/false/no. Mirrors
- * gw_orch_delegates_enabled; the config-store becomes the canonical enablement surface in the
- * dedicated config-surface slice (roundtable ruling). */
+/* The DEPRECATED env default: on unless AIMEE_ORCH_WORKFLOWS is an explicit 0/off/false/no.
+ * The config-store `modules.workflows` toggle is now canonical; the wire site resolves it via
+ * config_module_enabled() with this as the fallback and passes the result to *_run() as
+ * `enabled`. Kept pure (no config) so the module stays unit-testable in isolation. */
 int gw_orch_workflows_enabled(void);
 
 /* Run the workflows orchestration module for one dispatch decision. Builds the single-hook
- * `workflows` catalog (gated by gw_orch_workflows_enabled), a turn snapshot tagged with
- * `turn_id`, and runs it through gw_orchestration_run over `caps`. The hook invokes
+ * `workflows` catalog (gated by the caller-supplied `enabled` — the wire site resolves it from
+ * config_module_enabled), a turn snapshot tagged with `turn_id`, and runs it through
+ * gw_orchestration_run over `caps`. The hook invokes
  * caps->dispatch_workflow(caps->ctx, lane, payload); the dispatch's own success/failure is
  * recorded by the caller's capability adapter in caps->ctx (this function does not surface it).
  * Returns:
@@ -28,6 +30,6 @@ int gw_orch_workflows_enabled(void);
  *  -1   the module was DISABLED (no dispatch attempted) or the catalog failed to build, or
  *       `caps` was NULL. The caller decides what a skipped dispatch means. */
 int gw_orch_workflows_run(const gw_turn_capabilities_t *caps, const char *turn_id, const char *lane,
-                          const char *payload);
+                          const char *payload, int enabled);
 
 #endif /* DEC_GW_ORCH_WORKFLOWS_H */

@@ -980,9 +980,14 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        .parity = 1, /* client OpenAI == serving OpenAI; informational for these stages */
        .stream = 0,
    };
-   /* Slice 7: enabled, ordered stage set from the catalog (memory is togglable). */
+   /* Slice 7: enabled, ordered stage set from the catalog (memory is togglable). The memory
+    * toggle is resolved from the config-store `modules:` block, falling back to the env default
+    * (cached config_load; keeps gw_stage_memory itself config-free). */
+   config_t mcfg;
+   int mcfg_ok = (config_load(&mcfg) == 0);
    const gw_stage_slot_t slots[] = {
-       {"memory", gw_stage_memory, messages, gw_stage_memory_enabled()},
+       {"memory", gw_stage_memory, messages,
+        config_module_enabled(mcfg_ok ? mcfg.module_memory : -1, gw_stage_memory_enabled())},
        {"tool_policing", gw_stage_openai_tool_policing, NULL, 1},
        {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
    };
@@ -1096,6 +1101,15 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
  * executes locally and feeds back as function_call_output next turn. The Codex
  * parser requires output_item.added before any delta, so every turn is framed
  * created -> item.added -> delta(s) -> item.done -> completed. Compute-then-chunk. */
+/* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
+ * deprecated env default. Cached config_load; keeps gw_stage_governance config-free. */
+static int openai_governance_enabled(void)
+{
+   config_t c;
+   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   return config_module_enabled(tri, gw_response_governance_enabled());
+}
+
 static int responses_stream_handler(const char *body, server_http_sse_event_emit emit, void *ctx)
 {
    char model[64] = "";
@@ -1256,7 +1270,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        * (streaming Anthropic). */
       int police_drops = 0;
       if (gateway_prevent_subagents_enabled())
-         police_drops = gw_response_run_governance(&parsed);
+         police_drops = gw_response_run_governance(&parsed, openai_governance_enabled());
       (void)police_drops; /* drop count plumbed through the pipeline total
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */

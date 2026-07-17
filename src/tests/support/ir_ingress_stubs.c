@@ -222,8 +222,63 @@ __attribute__((weak)) void aimee_response_free(void *r)
  * (which now calls gw_response_run_governance) but links no policing graph. Inert weak
  * stub -> no policing, which the shape test does not exercise. The p2c tests link the real
  * gw_stage_governance.o + gateway_policy.o, so the strong symbol wins there. */
-__attribute__((weak)) int gw_response_run_governance(void *parsed)
+__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled)
 {
    (void)parsed;
+   (void)enabled;
    return 0;
+}
+
+/* The ingress governance resolver (anthropic_governance_enabled) reads this env default; the
+ * shape test links no gw_stage_governance.o, so a weak default-ON stub resolves the link. */
+__attribute__((weak)) int gw_response_governance_enabled(void)
+{
+   return 1;
+}
+
+/* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
+ * block gated by cfg.reduce_gateway_seam (0 under the tests' stubbed config, so NEVER entered
+ * at runtime). LTO used to dead-code-eliminate the block, but that decision is fragile (any new
+ * read of the loaded cfg in that function can retain it, and it differs across gcc versions), so
+ * resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win when a
+ * test links them. Loose signatures: never called here, matched only by name + ABI (arg count,
+ * pointer/enum-as-int). */
+__attribute__((weak)) int context_reduce(cJSON *messages, const char *system_prompt,
+                                         const char *model, const char *session_id,
+                                         reduce_seam_t seam, const reduce_config_t *cfg,
+                                         reduce_state_t *st, reduce_result_t *out)
+{
+   (void)messages;
+   (void)system_prompt;
+   (void)model;
+   (void)session_id;
+   (void)seam;
+   (void)cfg;
+   (void)st;
+   (void)out;
+   return 1; /* non-zero: "did nothing" (the caller bypasses on != 0) */
+}
+__attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
+{
+   (void)out;
+}
+__attribute__((weak)) void agent_record_reduce_ledger(const struct reduce_result_s *r,
+                                                      const char *model, const char *agent_name,
+                                                      const char *role)
+{
+   (void)r;
+   (void)model;
+   (void)agent_name;
+   (void)role;
+}
+
+/* Config-surface slice: the ingress now resolves module toggles via config_module_enabled
+ * (memory slot + governance egress). It is a pure resolver; the minimal-link ingress tests
+ * stub config_load (not the whole config.o), so provide the real logic as a weak symbol here
+ * (config.o's strong definition wins when a test links it). */
+__attribute__((weak)) int config_module_enabled(int config_tristate, int env_default)
+{
+   if (config_tristate == 0 || config_tristate == 1)
+      return config_tristate;
+   return env_default ? 1 : 0;
 }

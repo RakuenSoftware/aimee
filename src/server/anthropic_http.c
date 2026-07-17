@@ -281,6 +281,16 @@ static int gw_stage_model_pin(gw_request_t *r, void *ud)
  * place, with the same stages and order as the prior inline prelude (memory →
  * policy), plus the model-pin policy. Returns total interventions (≥0) or <0 on a
  * stage error. */
+/* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
+ * deprecated env default. Cached config_load, so an operator toggle applies without a restart;
+ * keeps gw_stage_governance config-free. */
+static int anthropic_governance_enabled(void)
+{
+   config_t c;
+   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   return config_module_enabled(tri, gw_response_governance_enabled());
+}
+
 static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *driver,
                                          const agent_t *ag, int parity, int stream)
 {
@@ -338,7 +348,8 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    /* Slice 7: build the enabled, ordered stage set from the catalog. Memory is a
     * togglable module (AIMEE_STAGE_MEMORY); the registry omits it when disabled. */
    const gw_stage_slot_t slots[] = {
-       {"memory", gw_stage_memory, NULL, gw_stage_memory_enabled()},
+       {"memory", gw_stage_memory, NULL,
+        config_module_enabled(cfg_ok ? pcfg.module_memory : -1, gw_stage_memory_enabled())},
        {"tool_policing", gw_stage_tool_policing, NULL, 1},
        {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
        {"model_pin", gw_stage_model_pin, NULL, 1},
@@ -627,7 +638,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
        * no-ops at the default config). Drop count is plumbed through to the
        * same pipeline-runner total the request-side strip already emits; a
        * future P2b audit pass surfaces both at once. */
-      gw_response_run_governance(&parsed);
+      gw_response_run_governance(&parsed, anthropic_governance_enabled());
 
       /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
        * proxy (no agent_log_call), so record this turn's spend, billed against
@@ -1056,7 +1067,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                free(buf_resp);
                goto cleanup;
             }
-            gw_response_run_governance(&parsed);
+            gw_response_run_governance(&parsed, anthropic_governance_enabled());
             emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
             /* Cost accounting (mirror the buffered path). */
             if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
@@ -1087,7 +1098,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                 * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
                aimee_ir_shadow_compare_response(&parsed, provider_resp,
                                                 shadow_provider_wire(driver));
-               gw_response_run_governance(&parsed);
+               gw_response_run_governance(&parsed, anthropic_governance_enabled());
                emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
                /* Cost accounting (mirror the buffered path). */
                if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&

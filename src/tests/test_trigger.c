@@ -15,7 +15,17 @@
 int config_load(config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
+   /* Pluggable-module toggles default to -1 (unspecified) in production; a memset-0 would read
+    * as user-DISABLED and wrongly gate trigger workflow dispatch. */
+   cfg->module_memory = cfg->module_governance = cfg->module_delegates = cfg->module_workflows = -1;
    return 0;
+}
+/* Real (pure) resolver logic, mirrored so the stubbed link stays faithful to production. */
+int config_module_enabled(int config_tristate, int env_default)
+{
+   if (config_tristate == 0 || config_tristate == 1)
+      return config_tristate;
+   return env_default ? 1 : 0;
 }
 
 #include "log.h"

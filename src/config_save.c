@@ -49,6 +49,26 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
       }
    }
 
+   /* modules.* (pluggable-module toggles; default -1 = unspecified). Persist only the keys the
+    * operator actually set, so an untouched config never sprouts a modules: block and the
+    * resolver's env/default fallback stays in effect for the rest. */
+   if (cfg->module_memory != -1 || cfg->module_governance != -1 || cfg->module_delegates != -1 ||
+       cfg->module_workflows != -1)
+   {
+      cJSON *m = cJSON_AddObjectToObject(root, "modules");
+      if (m)
+      {
+         if (cfg->module_memory != -1)
+            cJSON_AddBoolToObject(m, "memory", cfg->module_memory ? 1 : 0);
+         if (cfg->module_governance != -1)
+            cJSON_AddBoolToObject(m, "governance", cfg->module_governance ? 1 : 0);
+         if (cfg->module_delegates != -1)
+            cJSON_AddBoolToObject(m, "delegates", cfg->module_delegates ? 1 : 0);
+         if (cfg->module_workflows != -1)
+            cJSON_AddBoolToObject(m, "workflows", cfg->module_workflows ? 1 : 0);
+      }
+   }
+
    /* integrity.* (defaults enabled=0, dry_run=1) */
    if (cfg->integrity_enabled || !cfg->integrity_dry_run)
    {

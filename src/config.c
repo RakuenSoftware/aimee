@@ -620,6 +620,12 @@ static void config_set_defaults(config_t *cfg)
     * these defaults every effective lever equals its pre-P3 value (back-compat). */
    cfg->economizer_enabled = 1;
    cfg->economizer_aggressive = 0;
+   /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
+    * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
+   cfg->module_memory = -1;
+   cfg->module_governance = -1;
+   cfg->module_delegates = -1;
+   cfg->module_workflows = -1;
    /* command-aware tool-output condensation: DEFAULT-ON (P1c). Safe-tier lever — it passes
     * the deterministic gate: lossless-on-demand (full output spilled), fail-open (any
     * miss/decline -> raw), and a no-over-reduction audit (failures/diagnostics + their
@@ -948,6 +954,16 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
 int econ_reduction_master_on(const config_t *cfg)
 {
    return cfg && cfg->economizer_enabled ? 1 : 0;
+}
+
+int config_module_enabled(int config_tristate, int env_default)
+{
+   /* (Future tier 1: admin/governance FORCE would short-circuit here.) Tier 2: an explicit
+    * user config tristate (0/1) is canonical. Tier 3: -1 (unspecified) falls back to the
+    * deprecated env default. See config.h for the full precedence contract. */
+   if (config_tristate == 0 || config_tristate == 1)
+      return config_tristate;
+   return env_default ? 1 : 0;
 }
 
 int econ_gateway_mutate_on(const config_t *cfg)
@@ -1425,6 +1441,7 @@ int config_load_file(config_t *cfg)
 
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
+   config_parse_modules_section(cfg, root);
    config_parse_reduce_section(cfg, root);
    config_apply_reduce_consistency(cfg); /* mutate=1 -> auto-enable shadow seam in memory + WARN */
    config_parse_autonomy_section(cfg, root);

@@ -11,14 +11,16 @@
 
 #include "gw_orchestration_seam.h"
 
-/* Default-ON unless AIMEE_ORCH_DELEGATES is an explicit 0/off/false/no. Mirrors
- * gw_response_governance_enabled / gw_stage_memory_enabled; the config-store becomes the
- * canonical enablement surface in the dedicated config-surface slice (roundtable ruling). */
+/* The DEPRECATED env default: on unless AIMEE_ORCH_DELEGATES is an explicit 0/off/false/no.
+ * The config-store `modules.delegates` toggle is now canonical; the wire site resolves it via
+ * config_module_enabled() with this as the fallback, and passes the result to *_run() as
+ * `enabled`. Kept pure (no config) so the module stays unit-testable in isolation. */
 int gw_orch_delegates_enabled(void);
 
 /* Run the delegates orchestration module for one spawn decision. Builds the single-hook
- * `delegates` catalog (gated by gw_orch_delegates_enabled), a turn snapshot tagged with
- * `turn_id`, and runs it through gw_orchestration_run over `caps`. The hook invokes
+ * `delegates` catalog (gated by the caller-supplied `enabled` — the wire site resolves it from
+ * config_module_enabled), a turn snapshot tagged with `turn_id`, and runs it through
+ * gw_orchestration_run over `caps`. The hook invokes
  * caps->spawn_delegate(caps->ctx, role, brief); the spawn's own success/failure is recorded by
  * the caller's capability adapter in caps->ctx (this function does not surface it).
  * Returns:
@@ -28,6 +30,6 @@ int gw_orch_delegates_enabled(void);
  *       decides what a missed spawn means (the coord dispatcher releases the task claim and
  *       retries on the next sweep). */
 int gw_orch_delegates_run(const gw_turn_capabilities_t *caps, const char *turn_id, const char *role,
-                          const char *brief);
+                          const char *brief, int enabled);
 
 #endif /* DEC_GW_ORCH_DELEGATES_H */

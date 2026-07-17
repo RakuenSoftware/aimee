@@ -272,11 +272,11 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
 - **`worktree_gc`** — `enabled`, `max_age_days`
 
-## Other top-level config-file keys (3)
+## Other top-level config-file keys (4)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `proxy_token`, `toolsets`
+`db2_pool_size`, `modules`, `proxy_token`, `toolsets`
 
 ## Environment variables
 

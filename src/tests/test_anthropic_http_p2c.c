@@ -327,6 +327,10 @@ int config_load(config_t *cfg)
    {
       memset(cfg, 0, sizeof(*cfg));
       cfg->gateway_prevent_subagents = g_prevent;
+      /* module toggles are -1 (unspecified) in production; memset-0 would read as disabled and
+       * wrongly gate the governance/memory modules this test exercises. */
+      cfg->module_memory = cfg->module_governance = -1;
+      cfg->module_delegates = cfg->module_workflows = -1;
    }
    return 0;
 }

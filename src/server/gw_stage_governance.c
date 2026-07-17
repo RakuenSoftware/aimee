@@ -29,14 +29,14 @@ static gw_response_stage_result_t governance_stage(gw_response_ctx_t *ctx, void 
    return r;
 }
 
-int gw_response_run_governance(struct parsed_response *parsed)
+int gw_response_run_governance(struct parsed_response *parsed, int enabled)
 {
    if (!parsed)
       return 0;
    gw_response_ctx_t ctx;
    ctx.resp = parsed;
    gw_response_stage_slot_t slots[] = {
-       {"governance", governance_stage, NULL, gw_response_governance_enabled()},
+       {"governance", governance_stage, NULL, enabled},
    };
    gw_response_stage_t stages[2];
    int n = gw_response_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 2);

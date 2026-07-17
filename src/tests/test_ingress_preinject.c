@@ -93,6 +93,9 @@ int config_load(config_t *cfg)
       cfg->ingress_preinject_enabled = 1;
       cfg->ingress_preinject_assembly_budget = 1200;
       cfg->ingress_compress_enabled = g_test_compress;
+      /* -1 = unspecified: memset-0 would read as user-disabled and gate the memory module. */
+      cfg->module_memory = cfg->module_governance = -1;
+      cfg->module_delegates = cfg->module_workflows = -1;
    }
    return 0;
 }

@@ -36,20 +36,19 @@ int main(void)
    parsed_response_t pr;
    memset(&pr, 0, sizeof(pr));
 
-   /* ENABLED (default): governance runs -> police called, drop count returned. */
-   unsetenv("AIMEE_STAGE_GOVERNANCE");
+   /* enabled=1: governance runs -> police called, drop count returned. (The env/config
+    * resolution is now the wire site's job; the runner takes the resolved flag.) */
    g_police_calls = 0;
-   assert(gw_response_run_governance(&pr) == 3);
+   assert(gw_response_run_governance(&pr, 1) == 3);
    assert(g_police_calls == 1);
 
-   /* DISABLED: governance stage omitted -> police NOT called, 0 returned. */
-   setenv("AIMEE_STAGE_GOVERNANCE", "0", 1);
+   /* enabled=0: governance stage omitted -> police NOT called, 0 returned. */
    g_police_calls = 0;
-   assert(gw_response_run_governance(&pr) == 0);
+   assert(gw_response_run_governance(&pr, 0) == 0);
    assert(g_police_calls == 0);
 
    /* NULL-safe. */
-   assert(gw_response_run_governance(NULL) == 0);
+   assert(gw_response_run_governance(NULL, 1) == 0);
 
    printf("ok\n");
    return 0;

@@ -32,40 +32,38 @@ int main(void)
 {
    gw_turn_capabilities_t caps = {NULL, NULL, fake_dispatch};
 
-   /* default (no env): module is ENABLED, the dispatch runs through the capability handle. */
+   /* The env default predicate stays pure (config is resolved at the wire site). */
    unsetenv("AIMEE_ORCH_WORKFLOWS");
    assert(gw_orch_workflows_enabled() == 1);
-   reset();
-   assert(gw_orch_workflows_run(&caps, "trigger-proposals", "managed-change", "/w/wi-1.md") == 0);
-   assert(g_dispatches == 1);
-   assert(strcmp(g_last_lane, "managed-change") == 0 && strcmp(g_last_payload, "/w/wi-1.md") == 0);
-
-   /* DISABLED: no dispatch is attempted and the module reports -1 so the caller can log/skip. */
    for (const char **v = (const char *[]){"0", "off", "false", "no", NULL}; *v; v++)
    {
       setenv("AIMEE_ORCH_WORKFLOWS", *v, 1);
       assert(gw_orch_workflows_enabled() == 0);
-      reset();
-      assert(gw_orch_workflows_run(&caps, "trigger-x", "managed-change", "/w/wi-2.md") == -1);
-      assert(g_dispatches == 0);
    }
-
-   /* explicitly re-enabled: dispatches again. */
    setenv("AIMEE_ORCH_WORKFLOWS", "1", 1);
    assert(gw_orch_workflows_enabled() == 1);
+
+   /* enabled=1: the dispatch runs through the capability handle. */
    reset();
-   assert(gw_orch_workflows_run(&caps, "trigger-y", "review", "/w/wi-3.md") == 0);
+   assert(gw_orch_workflows_run(&caps, "trigger-proposals", "managed-change", "/w/wi-1.md", 1) ==
+          0);
    assert(g_dispatches == 1);
+   assert(strcmp(g_last_lane, "managed-change") == 0 && strcmp(g_last_payload, "/w/wi-1.md") == 0);
+
+   /* enabled=0: no dispatch is attempted and the module reports -1 so the caller can log/skip. */
+   reset();
+   assert(gw_orch_workflows_run(&caps, "trigger-x", "managed-change", "/w/wi-2.md", 0) == -1);
+   assert(g_dispatches == 0);
 
    /* NULL caps is a clean -1 (no dispatch), not a crash. */
-   assert(gw_orch_workflows_run(NULL, "t", "l", "p") == -1);
+   assert(gw_orch_workflows_run(NULL, "t", "l", "p", 1) == -1);
 
    /* a missing dispatch_workflow handle is fail-open: the module still returns 0 (the hook
     * ran), and no dispatch happens -- the runner surfaces the FAIL internally, never blocking. */
    {
       gw_turn_capabilities_t no_dispatch = {NULL, NULL, NULL};
       reset();
-      assert(gw_orch_workflows_run(&no_dispatch, "t", "l", "p") == 0);
+      assert(gw_orch_workflows_run(&no_dispatch, "t", "l", "p", 1) == 0);
       assert(g_dispatches == 0);
    }
 
