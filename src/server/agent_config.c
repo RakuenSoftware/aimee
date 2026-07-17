@@ -1,5 +1,6 @@
 /* agent_config.c: config loading/saving, agent routing, role checking, auth resolution */
 #include "aimee.h"
+#include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME (appliance has no HOME) */
 #include "util.h"
 #include "agent_config.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
@@ -868,12 +869,32 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);
+         /* An explicit primary_only wins; remember whether the key was present so
+          * an ABSENT key (a legacy agents.json written before this field existed)
+          * can be migrated below rather than defaulting everything to
+          * delegate-eligible. */
          v = cJSON_GetObjectItem(a, "primary_only");
-         if (v && cJSON_IsBool(v))
+         int primary_only_present = (v && cJSON_IsBool(v));
+         if (primary_only_present)
             ag->primary_only = cJSON_IsTrue(v);
 
          agent_normalize_legacy_claude_cli(ag);
          agent_normalize_builtin_cost_tier(ag);
+
+         /* Migration for a legacy file: default an ABSENT primary_only to the
+          * pre-change semantics. Before this field, a claude-CLI subscription was
+          * primary-only by default (gated behind the removed global
+          * claude_cli_delegate_enabled, default off) and every other agent was
+          * delegate-eligible. The removed gate tested agent_is_claude_cli on the
+          * loaded+NORMALIZED agent, so evaluating the SAME predicate here — AFTER
+          * agent_normalize_legacy_claude_cli — reproduces exactly the set that was
+          * primary-only before, with no behavior change on upgrade. An explicit
+          * value always wins, and agent_save_config always writes the key, so this
+          * only fires for a genuinely legacy file; once resaved the stored value
+          * (including an explicit false) is authoritative and unchecking Primary
+          * Agent Only persists. */
+         if (!primary_only_present)
+            ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
          cfg->agent_count++;
       }
    }
@@ -1140,8 +1161,11 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "cli_kind", ag->cli_kind);
       if (ag->is_server_hosted)
          cJSON_AddBoolToObject(a, "is_server_hosted", 1);
-      if (ag->primary_only)
-         cJSON_AddBoolToObject(a, "primary_only", 1);
+      /* Always written (both true AND false), unlike is_server_hosted: an absent
+       * key triggers the legacy migration on load (see agent_load_config), so
+       * persisting false explicitly is what makes unchecking Primary Agent Only
+       * on a claude-CLI agent stick instead of re-defaulting to true. */
+      cJSON_AddBoolToObject(a, "primary_only", ag->primary_only);
 
       /* Middleware config: only write if any non-zero field is set */
       {
@@ -2004,6 +2028,22 @@ static int codex_oauth_vault_token(char *buf, size_t len)
       snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
       if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
          got = 1;
+      /* aimee's canonical home (honors AIMEE_HOME) — on an appliance the process
+       * has AIMEE_HOME set but no HOME, so the on-disk codex auth at
+       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below.
+       * This server-wide on-disk read (not a per-request vault principal) is
+       * deliberate: the /v1 ingress resolves creds here for BOTH the buffered and
+       * streaming paths, and the streaming ingress has no captured per-request
+       * identity, so a vault-principal approach could not cover streaming codex.
+       * The raw HOME branch below is kept for AIMEE_PROFILE setups, where
+       * aimee_home() points at the profile dir rather than the real ~/.codex. */
+      const char *ahome = aimee_home();
+      if (!got && ahome && ahome[0])
+      {
+         snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
+         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
+            got = 1;
+      }
       const char *home = getenv("HOME");
       if (!got && home && home[0])
       {
@@ -2086,6 +2126,16 @@ static int agent_read_codex_oauth_token(char *token, size_t token_len)
    snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
    if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
       return 0;
+
+   /* aimee's canonical home (honors AIMEE_HOME) — see codex_oauth_vault_token:
+    * an appliance sets AIMEE_HOME but not HOME, hiding <AIMEE_HOME>/.codex. */
+   const char *ahome = aimee_home();
+   if (ahome && ahome[0])
+   {
+      snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
+      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
+         return 0;
+   }
 
    const char *home = getenv("HOME");
    if (home && home[0])

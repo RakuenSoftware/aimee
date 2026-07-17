@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "aimee.h"
+#include "agent_protocol.h"
+#include "aimee_ir.h"
 #include "aimee_ir_serve.h"
 #include "cJSON.h"
 
@@ -116,6 +119,58 @@ int main(void)
    cJSON_Delete(fc);
    cJSON_Delete(cm);
    cJSON_Delete(ct);
+
+   /* Slice 3: aimee_ir_response_to_parsed adapter (IR response -> parsed_response_t).
+    * Exhaustive per the roundtable ruling: text, tool calls, tokens, cache tokens,
+    * stop_reason, model, and the NULL guard. */
+   {
+      aimee_block_t b1 = {0};
+      b1.type = AIMEE_BLK_TEXT;
+      b1.text = (char *)"hello world";
+      aimee_response_t r1 = {0};
+      r1.model = (char *)"minimax-m3";
+      r1.raw_stop_reason = (char *)"stop";
+      r1.content = &b1;
+      r1.n_content = 1;
+      r1.usage_in = 12;
+      r1.usage_out = 5;
+      r1.usage_cache_read = 3;
+      r1.usage_cache_write = 7;
+      parsed_response_t p1;
+      aimee_ir_response_to_parsed(&r1, &p1);
+      assert(p1.content && strcmp(p1.content, "hello world") == 0);
+      assert(p1.is_tool_call == 0 && p1.call_count == 0);
+      assert(p1.prompt_tokens == 12 && p1.completion_tokens == 5);
+      assert(p1.cache_read_tokens == 3 && p1.cache_write_tokens == 7);
+      assert(strcmp(p1.model, "minimax-m3") == 0);
+      assert(strcmp(p1.stop_reason, "stop") == 0);
+      free(p1.content);
+
+      cJSON *ti = cJSON_CreateObject();
+      cJSON_AddStringToObject(ti, "city", "Paris");
+      aimee_block_t b2 = {0};
+      b2.type = AIMEE_BLK_TOOL_USE;
+      b2.tool_id = (char *)"call_abc";
+      b2.tool_name = (char *)"get_weather";
+      b2.tool_input = ti;
+      aimee_response_t r2 = {0};
+      r2.raw_stop_reason = (char *)"tool_use";
+      r2.content = &b2;
+      r2.n_content = 1;
+      parsed_response_t p2;
+      aimee_ir_response_to_parsed(&r2, &p2);
+      assert(p2.is_tool_call == 1 && p2.call_count == 1);
+      assert(strcmp(p2.calls[0].id, "call_abc") == 0);
+      assert(strcmp(p2.calls[0].name, "get_weather") == 0);
+      assert(p2.calls[0].arguments && strstr(p2.calls[0].arguments, "Paris"));
+      assert(p2.content == NULL); /* pure tool call -> no text */
+      free(p2.calls[0].arguments);
+      cJSON_Delete(ti);
+
+      parsed_response_t p3;
+      aimee_ir_response_to_parsed(NULL, &p3);
+      assert(p3.call_count == 0 && p3.content == NULL && p3.is_tool_call == 0);
+   }
 
    printf("ok\n");
    return 0;
