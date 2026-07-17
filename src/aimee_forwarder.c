@@ -153,9 +153,17 @@ int main(void)
          close(c);
          continue;
       }
+      /* Block SIGCHLD across fork + increment so the reaper cannot decrement for a
+       * child that exits before the parent has counted it (which would leak the
+       * counter up to MAX_CHILDREN and then permanently refuse). */
+      sigset_t chld, prev;
+      sigemptyset(&chld);
+      sigaddset(&chld, SIGCHLD);
+      sigprocmask(SIG_BLOCK, &chld, &prev);
       pid_t pid = fork();
       if (pid == 0)
       {
+         sigprocmask(SIG_SETMASK, &prev, NULL); /* child: restore the mask */
          close(lfd);
          int u = connect_uds(sock);
          if (u >= 0)
@@ -168,6 +176,7 @@ int main(void)
       }
       if (pid > 0)
          g_children++;
+      sigprocmask(SIG_SETMASK, &prev, NULL); /* parent: unblock — reaper sees the increment */
       close(c);
    }
    close(lfd);
