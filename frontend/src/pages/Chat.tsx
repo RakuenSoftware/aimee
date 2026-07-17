@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
+import { Button, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -349,19 +349,16 @@ function ThreadBar({ threads, activeThreadId, onSwitch, onBranch }: ThreadBarPro
         background: tokens.surfaceAlt, borderBottom: `1px solid ${tokens.borderLight}`,
         fontSize: '12px', color: tokens.textPale, gap: '8px',
       }}>
-        <button
+        <Button
+          variant="default"
+          size="sm"
           onClick={onBranch}
-          style={{
-            padding: '2px 10px', fontSize: '11px', color: tokens.textSecondary,
-            background: tokens.surface, border: `1px solid ${tokens.borderMedium}`,
-            borderRadius: '4px', cursor: 'pointer',
-          }}
           onMouseOver={e => (e.currentTarget.style.borderColor = tokens.primary)}
           onMouseOut={e => (e.currentTarget.style.borderColor = tokens.borderMedium)}
           title="Branch conversation to explore an alternative approach"
         >
           Branch
-        </button>
+        </Button>
         <span>No branches — branch to explore alternatives</span>
       </div>
     );
@@ -393,19 +390,17 @@ function ThreadBar({ threads, activeThreadId, onSwitch, onBranch }: ThreadBarPro
           <span style={{ color: tokens.textPale, marginLeft: '4px' }}>({t.msg_count})</span>
         </button>
       ))}
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onBranch}
-        style={{
-          padding: '2px 10px', fontSize: '11px', color: tokens.textPale,
-          background: 'transparent', border: `1px dashed ${tokens.borderMedium}`,
-          borderRadius: '4px', cursor: 'pointer',
-        }}
         onMouseOver={e => (e.currentTarget.style.borderColor = tokens.primary)}
         onMouseOut={e => (e.currentTarget.style.borderColor = tokens.borderMedium)}
         title="Branch from current point"
+        style={{ border: `1px dashed ${tokens.borderMedium}` }}
       >
         + Branch
-      </button>
+      </Button>
     </div>
   );
 }
@@ -523,26 +518,20 @@ function RulesPanel({ open, onToggle }: { open: boolean; onToggle: () => void })
                   by {r.proposed_by || 'unknown'}
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => doAction(r.id, 'approve')}
-                    style={{
-                      padding: '3px 10px', fontSize: '11px', borderRadius: '3px',
-                      cursor: 'pointer', border: '1px solid #2d4d2d',
-                      background: '#1a3a1a', color: '#8c8',
-                    }}
                   >
                     Approve
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={() => doAction(r.id, 'reject')}
-                    style={{
-                      padding: '3px 10px', fontSize: '11px', borderRadius: '3px',
-                      cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`,
-                      background: 'transparent', color: tokens.danger,
-                    }}
                   >
                     Reject
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -560,16 +549,13 @@ function RulesPanel({ open, onToggle }: { open: boolean; onToggle: () => void })
               }}>
                 <div style={{ color: tokens.text, marginBottom: 4 }}>{r.text}</div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button
+                  <Button
+                    variant="default"
+                    size="sm"
                     onClick={() => doAction(r.id, 'retire')}
-                    style={{
-                      padding: '3px 10px', fontSize: '11px', borderRadius: '3px',
-                      cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`,
-                      background: 'transparent', color: tokens.textSecondary,
-                    }}
                   >
                     Retire
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -781,7 +767,7 @@ function PluginsPanel({ open, plugins, loading, error, onToggle, onRefresh, onPl
       }}>
         <span style={{ fontWeight: 'bold', color: tokens.text }}>Plugins</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onRefresh} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: tokens.textPale, fontSize: '12px' }}>Refresh</button>
+          <Button variant="ghost" size="sm" onClick={onRefresh}>Refresh</Button>
           <button onClick={onToggle} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: tokens.textPale, fontSize: '16px', lineHeight: 1 }}>×</button>
         </div>
       </div>
@@ -889,35 +875,22 @@ function WorkflowStatusCard({
             outline: 'none',
           }}
         />
-        <button
+        <Button
+          variant="default"
+          size="sm"
           onClick={onRefresh}
-          style={{
-            padding: '5px 10px',
-            fontSize: '11px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            border: `1px solid ${tokens.borderMedium}`,
-            background: 'transparent',
-            color: tokens.textSecondary,
-          }}
         >
           Refresh
-        </button>
+        </Button>
         {session && session.status !== 'complete' && (
-          <button
+          <Button
+            variant="default"
+            size="sm"
             onClick={onPause}
-            style={{
-              padding: '5px 10px',
-              fontSize: '11px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              border: `1px solid ${tokens.borderMedium}`,
-              background: 'transparent',
-              color: tokens.warning,
-            }}
+            style={{ color: tokens.warning }}
           >
             Pause
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1329,13 +1302,11 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
             fontFamily: 'system-ui', outline: 'none', maxHeight: '120px',
           }}
         />
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={() => { const t = text.trim(); if (t) { onSend(t); setText(''); } }}
-          style={{
-            padding: '8px 16px', background: tokens.primary, color: '#fff',
-            border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
-          }}
-        >Send</button>
+        >Send</Button>
       </div>
     </div>
   );
@@ -2967,16 +2938,15 @@ export default function Chat() {
             }}
           />
         </div>
-        <button
+        <Button
+          variant="default"
+          size="md"
           onClick={clearChat}
           title="Clear this conversation and start a fresh session"
-          style={{
-            flexShrink: 0, padding: '5px 12px', fontSize: 13, cursor: 'pointer',
-            background: '#fff', color: '#666', border: '1px solid #ddd', borderRadius: 6,
-          }}
+          style={{ flexShrink: 0 }}
         >
           Clear
-        </button>
+        </Button>
       </div>
 
       {/* Thread bar (conversation branching) */}
@@ -3040,17 +3010,14 @@ export default function Chat() {
         }}
       >
         {hiddenCount > 0 && (
-          <button
+          <Button
+            variant="default"
+            size="sm"
             onClick={() => setVisibleCount(c => c + TRANSCRIPT_WINDOW_STEP)}
-            style={{
-              alignSelf: 'center', padding: '4px 12px', margin: '0 0 4px',
-              fontSize: '12px', fontFamily: 'system-ui', cursor: 'pointer',
-              background: tokens.surfaceAlt, color: tokens.textSecondary,
-              border: `1px solid ${tokens.borderMedium}`, borderRadius: '12px',
-            }}
+            style={{ alignSelf: 'center', margin: '0 0 4px', borderRadius: '12px' }}
           >
             Show earlier messages ({hiddenCount})
-          </button>
+          </Button>
         )}
         <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}
