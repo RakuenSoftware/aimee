@@ -1,10 +1,12 @@
 # Aimee IR as the sole path — finish the response half, retire raw-passthrough, and make modules pluggable
 
-- **State:** PENDING — sequel to the (DONE) canonical-IR proposal; this proposal finishes the
-  response half, retires the legacy translators and the raw-passthrough bypasses, and adds a pluggable
-  stage registry so modules (memory, delegates, workflows) can be added/removed from the path at will.
-  Ratifies the seams via the roundtable (2026-07-17): the raw-fast-path tradeoff, the cross-protocol
-  precision caveat, the stage-registry design points. Landed slices move to `done/` and `acked`.
+- **State:** PENDING (proposed; reviewed at roundtable 2026-07-17) — sequel to the prior
+  (completed) canonical-IR proposal, which made the IR the default request-build path. This
+  proposal makes the IR the sole core codepath in both directions, retires the legacy translators
+  and the raw-passthrough bypasses, and adds a pluggable stage registry so modules (memory,
+  delegates, workflows) can be added or removed from the path at will. The roundtable ratifies the
+  raw-fast-path tradeoff, the cross-protocol precision caveat, and the stage-registry design points.
+  Each slice is independently gated and filed per the repo's proposal lifecycle on completion.
 - **Author:** JBailes
 - **Date:** 2026-07-17
 
@@ -232,3 +234,11 @@ Open design points for the table:
 - Memory, delegates, and workflows are registered stages that can be added/removed via config,
   each with its own deterministic toggle-off parity test. Trust-boundary rule (opaque tool
   ids/names) is enforced at backend-build, not at stages.
+
+```yaml acceptance
+- {id: 1, tier: mechanical, check: "make unit-tests TEST=test_stream_flag_buffered_replay"}
+- {id: 2, tier: mechanical, check: "make unit-tests TEST=test_ir_response_parse_live"}
+- {id: 3, tier: integration, check: "curl -sk $AIMEE_API/v1/dashboard/metrics | jq -e '.ir.ir_resp_mismatch == 0'"}
+- {id: 4, tier: integration, check: "curl -sk $AIMEE_API/v1/dashboard/metrics | jq -e '.ir.ir_body_mismatch == 0 and .ir.ir_legacy_fallback == 0'"}
+- {id: 5, tier: mechanical, check: "make unit-tests TEST=test_stage_registry_toggle_parity"}
+```
