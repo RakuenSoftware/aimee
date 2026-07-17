@@ -42,8 +42,12 @@ extern "C"
     * (keeping the build in one place is what makes the consolidation byte-safe). */
    char *gw_memory_system_prompt(const char *query);
 
+   /* Slice 7: 1 unless AIMEE_STAGE_MEMORY is explicitly disabled (0/off/false). Lets
+    * the memory injection stage be removed from the pipeline "at will" via config; the
+    * registry omits the stage when this returns 0. Default-ON, matching pre-registry. */
+   int gw_stage_memory_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif
-
 #endif /* DEC_GW_STAGE_MEMORY_H */
