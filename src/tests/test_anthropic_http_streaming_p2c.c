@@ -19,10 +19,20 @@
 #include "../headers/agent_protocol.h"
 #include "../headers/anthropic_ingress.h"
 #include "../headers/delegate_driver.h"
+#include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
 
 #define PASS(name) printf("  PASS: %s\n", (name))
+
+/* anthropic_http.c's write_error now logs aimee-internal error codes; this
+ * minimal link stubs the logger like the other production deps below. */
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
+}
 
 static const delegate_driver_t *g_driver;
 static char *g_last_body;

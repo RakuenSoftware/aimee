@@ -25,7 +25,7 @@
 #include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
 #include "openai_responses_store.h"   /* previous_response_id continuation store */
 #include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
-#include "aimee.h"  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"

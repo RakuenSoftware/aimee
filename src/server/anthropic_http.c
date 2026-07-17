@@ -158,8 +158,8 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
    if (aimee_code > 0)
    {
       cJSON_AddNumberToObject(e, "code", aimee_code);
-      LOG_WARN("ingress", "aimee_err=%d (%s) status=%d: %s", aimee_code,
-               aimee_err_slug(aimee_code), status, message ? message : "");
+      LOG_WARN("ingress", "aimee_err=%d (%s) status=%d: %s", aimee_code, aimee_err_slug(aimee_code),
+               status, message ? message : "");
    }
    char *out = cJSON_PrintUnformatted(o);
    if (out)
@@ -487,8 +487,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
        * surface the explicit auth reason (D6) when one was set. */
       const char *why = agent_request_auth_error();
       char msg[256];
-      snprintf(msg, sizeof(msg), "could not resolve endpoint or credentials for primary agent '%s'%s%s",
-               ag->name, (why && why[0]) ? ": " : "", (why && why[0]) ? why : "");
+      snprintf(msg, sizeof(msg),
+               "could not resolve endpoint or credentials for primary agent '%s'%s%s", ag->name,
+               (why && why[0]) ? ": " : "", (why && why[0]) ? why : "");
       status = write_error(resp, cap, 503, "api_error", msg, AIMEE_ERR_ROUTE_UNRESOLVED);
       goto cleanup;
    }
