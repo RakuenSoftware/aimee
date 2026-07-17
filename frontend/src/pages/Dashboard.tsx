@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Badge, Panel } from '@rakuensoftware/smoothgui';
+import { Badge, Panel, EmptyState } from '@rakuensoftware/smoothgui';
 import type { BadgeVariant } from '@rakuensoftware/smoothgui';
 
 /* ---- API types ---- */
@@ -447,7 +447,7 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
   return (
     <Panel title="Cost / Tokens" count={rows.length}>
       {data.length === 0 ? (
-        <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>No realized spend recorded</div>
+        <EmptyState message="No realized spend recorded" inline />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '8px 10px' }}>
@@ -488,7 +488,7 @@ function SessionsPanel({ data }: { data: Session[] }) {
   return (
     <Panel title="Active Sessions" count={data.length}>
       {data.length === 0 ? (
-        <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>No active sessions</div>
+        <EmptyState message="No active sessions" inline />
       ) : (
         <table style={tableStyle}>
           <thead>
@@ -700,10 +700,6 @@ function BarRow({ label, value, max, right, color }: {
   );
 }
 
-function emptyBody(msg: string) {
-  return <div style={{ padding: 12, color: '#aaa', fontSize: 12 }}>{msg}</div>;
-}
-
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
@@ -721,7 +717,7 @@ function GuardrailPanel({ data }: { data: AuditSummary }) {
   };
   return (
     <Panel title="Guardrail Actions" count={data.total}>
-      {data.total === 0 ? emptyBody('No tool-action audit yet') : (
+      {data.total === 0 ? <EmptyState message="No tool-action audit yet" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {Object.keys(counts).map(v => (
             <BarRow key={v} label={v} value={counts[v]} max={max} right={String(counts[v])} color={colors[v] || '#888'} />
@@ -744,7 +740,7 @@ function SuccessByAgentPanel({ data }: { data: Delegation[] }) {
   const max = Math.max(1, ...rows.map(r => r[1].total));
   return (
     <Panel title="Success by Agent" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No delegations') : (
+      {rows.length === 0 ? <EmptyState message="No delegations" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([agent, c]) => {
             const rate = Math.round((c.ok / c.total) * 100);
@@ -769,7 +765,7 @@ function LatencyByRolePanel({ data }: { data: Delegation[] }) {
   }).sort((a, b) => b.p95 - a.p95);
   return (
     <Panel title="Latency by Role" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No delegations') : (
+      {rows.length === 0 ? <EmptyState message="No delegations" inline /> : (
         <table style={tableStyle}>
           <thead><tr>{['Role', 'p50', 'p95', 'max'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>
@@ -796,7 +792,7 @@ function TopToolsPanel({ data }: { data: Trace[] }) {
   const max = Math.max(1, ...rows.map(r => r[1]));
   return (
     <Panel title="Top Tools" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No tool calls traced') : (
+      {rows.length === 0 ? <EmptyState message="No tool calls traced" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([tool, n]) => <BarRow key={tool} label={tool} value={n} max={max} right={String(n)} color="#6366f1" />)}
         </div>
@@ -816,7 +812,7 @@ function CostByAgentPanel({ data }: { data: TokenAudit[] }) {
   const max = Math.max(1, ...rows.map(r => r[1]));
   return (
     <Panel title="Tokens by Agent" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No spend recorded') : (
+      {rows.length === 0 ? <EmptyState message="No spend recorded" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([agent, tok]) => <BarRow key={agent} label={agent} value={tok} max={max} right={fmtCompact(tok)} color="#0ea5e9" />)}
         </div>
@@ -857,7 +853,7 @@ function FailuresPanel({ data }: { data: Delegation[] }) {
   const fails = data.filter(d => !d.success);
   return (
     <Panel title="Failures" count={fails.length}>
-      {fails.length === 0 ? emptyBody('No failed delegations 🎉') : (
+      {fails.length === 0 ? <EmptyState message="No failed delegations 🎉" inline /> : (
         <table style={tableStyle}>
           <thead><tr>{['Agent', 'Role', 'Turns', 'Latency'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>
@@ -884,7 +880,7 @@ function ProviderMixPanel({ data }: { data: Agent[] }) {
   const max = Math.max(1, ...rows.map(r => r[1]));
   return (
     <Panel title="Provider Mix" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No agents') : (
+      {rows.length === 0 ? <EmptyState message="No agents" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([p, n]) => <BarRow key={p} label={p} value={n} max={max} right={String(n)} color="#8b5cf6" />)}
         </div>
@@ -906,7 +902,7 @@ function ConfidenceByRolePanel({ data }: { data: Delegation[] }) {
     .sort((a, b) => b.avg - a.avg);
   return (
     <Panel title="Confidence" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No confidence data') : (
+      {rows.length === 0 ? <EmptyState message="No confidence data" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(r => (
             <BarRow key={r.role} label={r.role} value={r.avg} max={100}
