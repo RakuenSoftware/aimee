@@ -127,6 +127,39 @@ these two interfaces separate is the whole point.
   intercept tool **actions**, not requests/responses. They are a different seam and a
   separate proposal; conflating them with the response-stage seam would muddy both
   interfaces.
+## Call sites (verified 2026-07-17)
+
+The response governance function `gateway_policy_police_parsed_response(parsed_response_t*)` is
+invoked inline at four distinct sites across three functions — the duplication Slice 2 collapses:
+
+- `anthropic_http.c:629` — `messages_buffered` (buffered `/v1/messages`).
+- `anthropic_http.c:1058` — `messages_stream` (streaming buffered-replay, non-`raw_responses` branch).
+- `anthropic_http.c:1089` — `messages_stream` (streaming buffered-replay, codex `raw_responses` branch).
+- `openai_chat.c:1258` — `responses_stream_handler`.
+
+## Design decisions (roundtable-ruled 2026-07-17)
+
+- **Response-stage signature — parsed_response_t now, but a TYPED context.** The stage takes the
+  parsed reply (reuse the existing emit/police) but the second argument is a small typed
+  `gw_response_stage_context_t` (only proven shared deps), NOT a raw `void*` — so the durable ABI
+  isn't coupled to undocumented casting. IR-native `aimee_response_t*` is a sequenced follow-up.
+- **Structured stage result, not a bare intervention count.** A stage returns a tagged result:
+  `ok(interventions)`, `reject`, or `error`. Rules: no reply is emitted after a governance `error`
+  or `reject`; later stages do NOT run after `reject`/`error`; a stage that partially mutated then
+  errored must leave a well-defined state. Fail-closed is defined for RUNTIME execution, not only
+  catalog construction.
+- **Delegates/workflows get a SEPARATE typed orchestration contract, not a stage transform.** An
+  immutable turn snapshot + narrow capability handles + a tagged result (`continue`,
+  `complete`/short-circuit, `suspend`-with-continuation, `fail`). Fail-closed does NOT apply
+  uniformly here: a misconfigured delegate hook must not block a turn from completing (unlike
+  governance, which must never be silently skipped). Continuation ownership, idempotency, and
+  cancellation are specified in that seam's own slice.
+- **Config-store is the canonical enablement source.** Stage enable/order live in the config-store
+  (schema-validated, authorized writes, audit records, a per-turn versioned snapshot so a mid-turn
+  change can't split behavior), fail-closed when the effective catalog can't be resolved. Env
+  toggles (the `AIMEE_STAGE_MEMORY` style) are NOT the durable surface for security-sensitive
+  governance enablement. (Slice 2's toggle name is left to the config-surface slice, not pre-decided.)
+
 ```yaml acceptance
 - {id: 1, tier: mechanical, check: "make unit-tests TEST=test_gw_response_registry"}
 - {id: 2, tier: mechanical, check: "make unit-tests TEST=test_response_governance_stage"}
