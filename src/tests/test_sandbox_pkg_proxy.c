@@ -45,6 +45,9 @@ static void test_ssrf_ipv4(void)
    assert(blocked4("255.255.255.255")); /* broadcast */
    assert(blocked4("192.0.0.1"));       /* IETF protocol assignments */
    assert(blocked4("198.18.0.1"));      /* benchmarking */
+   assert(blocked4("192.0.2.1"));       /* TEST-NET-1 */
+   assert(blocked4("198.51.100.1"));    /* TEST-NET-2 */
+   assert(blocked4("203.0.113.1"));     /* TEST-NET-3 */
 
    /* public addresses — must NOT be blocked */
    assert(!blocked4("8.8.8.8"));
@@ -73,6 +76,13 @@ static void test_ssrf_ipv6(void)
    assert(blocked6("::ffff:169.254.169.254"));
    assert(blocked6("::ffff:10.0.0.1"));
    assert(!blocked6("::ffff:8.8.8.8")); /* mapped public v4 is fine */
+   /* NAT64 (64:ff9b::/96) embeds a v4 in the low 32 bits — inherit the v4 policy */
+   assert(blocked6("64:ff9b::7f00:1"));    /* -> 127.0.0.1 */
+   assert(blocked6("64:ff9b::a9fe:a9fe")); /* -> 169.254.169.254 */
+   assert(!blocked6("64:ff9b::808:808"));  /* -> 8.8.8.8 (public) */
+   /* 6to4 (2002::/16) embeds a v4 at bytes 2..5 */
+   assert(blocked6("2002:7f00:1::"));   /* -> 127.0.0.1 */
+   assert(!blocked6("2002:808:808::")); /* -> 8.8.8.8 (public) */
    /* genuine public v6 */
    assert(!blocked6("2606:4700:4700::1111")); /* cloudflare */
    assert(!blocked6("2001:4860:4860::8888")); /* google */
@@ -172,6 +182,16 @@ static void test_classify(void)
    /* https:// absolute-form is not forwarded (clients use CONNECT for TLS) */
    assert(sandbox_pkg_classify_request_line("GET https://x/y HTTP/1.1", host, sizeof(host),
                                             &port) == SBX_REQ_INVALID);
+   /* userinfo ('@') is rejected in the authority */
+   assert(sandbox_pkg_classify_request_line("CONNECT user@host:443 HTTP/1.1", host, sizeof(host),
+                                            &port) == SBX_REQ_INVALID);
+   assert(sandbox_pkg_classify_request_line("GET http://u:p@host/x HTTP/1.1", host, sizeof(host),
+                                            &port) == SBX_REQ_INVALID);
+   /* only HTTP/1.0 and HTTP/1.1 are accepted */
+   assert(sandbox_pkg_classify_request_line("CONNECT host:443 HTTP/2", host, sizeof(host), &port) ==
+          SBX_REQ_INVALID);
+   assert(sandbox_pkg_classify_request_line("CONNECT host:443 HTTP/1.0", host, sizeof(host),
+                                            &port) == SBX_REQ_CONNECT);
    printf("  PASS: classify\n");
 }
 

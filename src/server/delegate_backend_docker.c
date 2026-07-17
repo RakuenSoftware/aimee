@@ -25,6 +25,8 @@
 #include "aimee_home.h" /* aimee_home() — resolves the server's UDS path */
 #include "config.h"     /* delegate_sandbox_package_access mode */
 
+#include <assert.h>
+
 /* Fixed in-container path for the bind-mounted aimee-server UDS. The delegate's
  * only outward channel: `--network none` cuts every IP route, and AIMEE_API_ENDPOINT
  * points the baked-in `aimee` CLI at this socket, so `aimee git_commit`,
@@ -409,15 +411,25 @@ static unsigned docker_mounts_fingerprint(const docker_state_t *st)
  * delegate still runs; package installs then fail fast (http_proxy -> a dead port is
  * refused immediately, no hang). The forwarder is re-copied/started after every start
  * because a `docker exec -d` process does not survive a container stop. */
+/* Remove the forwarder binary from the container so a half-configured proxy delegate
+ * can't be left with an unusable-but-present forwarder it could relaunch pointed at an
+ * arbitrary UDS path. Best-effort. */
+static void docker_pkg_forwarder_strip(const char *container)
+{
+   const char *rm_argv[] = {
+       "docker", "exec", container, "rm", "-f", "/usr/local/bin/aimee-forwarder", NULL};
+   (void)run_docker(rm_argv);
+}
+
 static void docker_pkg_forwarder_setup(const char *container)
 {
-   const char *bin = getenv("AIMEE_FORWARDER_BIN");
-   if (!bin || !bin[0])
-      bin = "/usr/local/bin/aimee-forwarder";
+   /* Fixed, canonical ship path — never operator/env-overridable, so nothing can
+    * point the copy at an attacker-controlled binary. */
+   static const char *const bin = "/usr/local/bin/aimee-forwarder";
    struct stat bst;
    if (stat(bin, &bst) != 0)
    {
-      aimee_log(LOG_WARN, "delegate-sandbox",
+      aimee_log(LOG_ERROR, "delegate-sandbox",
                 "package-access=proxy but forwarder binary '%s' is missing — sandbox package "
                 "installs will fail (ship aimee-forwarder in the aimee-server image)",
                 bin);
@@ -428,7 +440,7 @@ static void docker_pkg_forwarder_setup(const char *container)
    const char *cp_argv[] = {"docker", "cp", bin, dst, NULL};
    if (run_docker(cp_argv) != 0)
    {
-      aimee_log(LOG_WARN, "delegate-sandbox", "forwarder `docker cp` into %s failed", container);
+      aimee_log(LOG_ERROR, "delegate-sandbox", "forwarder `docker cp` into %s failed", container);
       return;
    }
    const char *ex_argv[] = {"docker",
@@ -442,7 +454,10 @@ static void docker_pkg_forwarder_setup(const char *container)
                             NULL};
    if (run_docker(ex_argv) != 0)
    {
-      aimee_log(LOG_WARN, "delegate-sandbox", "starting package forwarder in %s failed", container);
+      /* Copied but not running: strip it rather than leave a relaunchable binary. */
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "starting package forwarder in %s failed — stripping the binary", container);
+      docker_pkg_forwarder_strip(container);
       return;
    }
    /* apt does not honour http_proxy through every transport — drop in an explicit
@@ -658,6 +673,8 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       create_argv[n++] = st->image;
       create_argv[n++] = "sleep";
       create_argv[n++] = "infinity";
+      /* Guard the hand-sized slot count against a future knob overflowing it. */
+      assert(n < (int)(sizeof(create_argv) / sizeof(create_argv[0])));
       create_argv[n] = NULL;
       if (run_docker(create_argv) != 0)
       {

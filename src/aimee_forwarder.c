@@ -27,6 +27,19 @@
 
 #define DEFAULT_PORT 3129
 #define DEFAULT_SOCK "/run/aimee/aimee-http.sock"
+#define MAX_CHILDREN 256 /* cap concurrent tunnels: bound PID/FD/UDS-slot exhaustion */
+
+static volatile sig_atomic_t g_children = 0;
+
+static void reap_children(int sig)
+{
+   (void)sig;
+   int saved = errno;
+   while (waitpid(-1, NULL, WNOHANG) > 0)
+      if (g_children > 0)
+         g_children--;
+   errno = saved;
+}
 
 static int write_all(int fd, const char *p, size_t n)
 {
@@ -102,7 +115,7 @@ int main(void)
          port = p;
    }
 
-   signal(SIGCHLD, SIG_IGN); /* auto-reap children */
+   signal(SIGCHLD, reap_children); /* reap + decrement the concurrency counter */
    signal(SIGPIPE, SIG_IGN);
 
    int lfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -133,6 +146,13 @@ int main(void)
             continue;
          break;
       }
+      /* Concurrency cap: refuse past MAX_CHILDREN so a delegate cannot exhaust PIDs/
+       * FDs/UDS slots by opening thousands of tunnels. */
+      if (g_children >= MAX_CHILDREN)
+      {
+         close(c);
+         continue;
+      }
       pid_t pid = fork();
       if (pid == 0)
       {
@@ -146,6 +166,8 @@ int main(void)
          close(c);
          _exit(0);
       }
+      if (pid > 0)
+         g_children++;
       close(c);
    }
    close(lfd);

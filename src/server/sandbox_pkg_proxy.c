@@ -16,11 +16,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 const char *sandbox_pkg_default_allowlist(void)
 {
-   return "deb.debian.org,*.debian.org,*.archive.ubuntu.com,security.ubuntu.com,"
+   /* Specific registry hosts only — no broad wildcards. The `*.archive.ubuntu.com`
+    * entry is the one wildcard, for the many geo mirrors under it. */
+   return "deb.debian.org,security.debian.org,*.archive.ubuntu.com,security.ubuntu.com,"
           "registry.npmjs.org,pypi.org,files.pythonhosted.org";
 }
 
@@ -50,10 +54,16 @@ static int ipv4_blocked(uint32_t a)
       return 1; /* 172.16.0.0/12 */
    if (IN4(0xC0000000u, 24))
       return 1; /* 192.0.0.0/24 IETF protocol assignments */
+   if (IN4(0xC0000200u, 24))
+      return 1; /* 192.0.2.0/24 TEST-NET-1 */
    if (IN4(0xC0A80000u, 16))
       return 1; /* 192.168.0.0/16 */
    if (IN4(0xC6120000u, 15))
       return 1; /* 198.18.0.0/15 benchmarking */
+   if (IN4(0xC6336400u, 24))
+      return 1; /* 198.51.100.0/24 TEST-NET-2 */
+   if (IN4(0xCB007100u, 24))
+      return 1; /* 203.0.113.0/24 TEST-NET-3 */
    if (IN4(0xE0000000u, 4))
       return 1; /* 224.0.0.0/4 multicast */
    if (IN4(0xF0000000u, 4))
@@ -76,15 +86,26 @@ int sandbox_pkg_ip_is_blocked(const struct sockaddr *sa)
       const struct sockaddr_in6 *s = (const struct sockaddr_in6 *)sa;
       const uint8_t *b = s->sin6_addr.s6_addr;
 
-      /* v4-mapped (::ffff:a.b.c.d) and v4-compatible (::a.b.c.d, deprecated): apply
-       * the IPv4 policy to the embedded address so a mapped private v4 can't slip in. */
+      /* Any IPv6 form that embeds an IPv4 address must inherit the IPv4 policy, or a
+       * malicious resolver could map a private v4 into v6 to slip past the check:
+       *   - v4-mapped   ::ffff:a.b.c.d      (embedded at bytes 12..15)
+       *   - v4-compat   ::a.b.c.d           (deprecated; bytes 12..15)
+       *   - NAT64       64:ff9b::a.b.c.d    (bytes 12..15)
+       *   - 6to4        2002:AABB:CCDD::    (embedded at bytes 2..5) */
       static const uint8_t v4mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF};
-      static const uint8_t v4compat[12] = {0}; /* ::/96 with a nonzero tail */
-      if (memcmp(b, v4mapped, 12) == 0 ||
+      static const uint8_t v4compat[12] = {0};
+      static const uint8_t nat64[12] = {0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0};
+      if (memcmp(b, v4mapped, 12) == 0 || memcmp(b, nat64, 12) == 0 ||
           (memcmp(b, v4compat, 12) == 0 && (b[12] | b[13] | b[14] | b[15])))
       {
          uint32_t a = ((uint32_t)b[12] << 24) | ((uint32_t)b[13] << 16) | ((uint32_t)b[14] << 8) |
                       (uint32_t)b[15];
+         return ipv4_blocked(a);
+      }
+      if (b[0] == 0x20 && b[1] == 0x02) /* 6to4: 2002:V4:V4:: — v4 at bytes 2..5 */
+      {
+         uint32_t a = ((uint32_t)b[2] << 24) | ((uint32_t)b[3] << 16) | ((uint32_t)b[4] << 8) |
+                      (uint32_t)b[5];
          return ipv4_blocked(a);
       }
 
@@ -190,7 +211,8 @@ static int copy_host(const char *s, size_t n, char *out, size_t cap)
       char c = s[i];
       if (bracket && (c == '[' || c == ']'))
          continue;
-      if (c == '/' || c == ' ' || c == '\r' || c == '\n')
+      /* Reject userinfo ('@') and any framing/control byte in the host. */
+      if (c == '/' || c == ' ' || c == '\r' || c == '\n' || c == '@' || c == '\0')
          return -1;
       if (o + 1 >= cap)
          return -1;
@@ -218,6 +240,13 @@ sbx_req_kind_t sandbox_pkg_classify_request_line(const char *line, char *host, s
    if (!sp2 || sp2 == target)
       return SBX_REQ_INVALID;
    size_t tlen = (size_t)(sp2 - target);
+
+   /* Reject anything but HTTP/1.0 or HTTP/1.1 (request-smuggling / parser-confusion
+    * hardening). classify only runs on proxy-bound requests, so this never gates /v1. */
+   const char *ver = sp2 + 1;
+   if (strncmp(ver, "HTTP/1.", 7) != 0 || (ver[7] != '0' && ver[7] != '1') ||
+       (ver[8] != '\0' && ver[8] != '\r' && ver[8] != '\n' && ver[8] != ' '))
+      return SBX_REQ_INVALID;
 
    if (methlen == 7 && strncmp(line, "CONNECT", 7) == 0)
    {
@@ -335,6 +364,10 @@ static int proxy_dial(const char *host, int port, char *ipbuf, size_t ipcap, con
          *why = "socket-failed";
          continue;
       }
+      /* Bound the blocking connect so a blackholed allowlisted host cannot pin a
+       * server connection worker indefinitely. */
+      struct timeval ctv = {.tv_sec = 15, .tv_usec = 0};
+      setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &ctv, sizeof(ctv));
       if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
       {
          if (ipbuf && ipcap)
@@ -356,21 +389,30 @@ static int proxy_dial(const char *host, int port, char *ipbuf, size_t ipcap, con
    return fd;
 }
 
-/* Bidirectional byte pump with an idle timeout. Returns total bytes each way via the
- * out params (best-effort, for the audit log). */
+/* Bidirectional byte pump, bounded by BOTH a wall-clock deadline and a total byte cap
+ * so a compromised delegate cannot pin a worker or push unbounded data through an
+ * (opaque, TLS) tunnel to exfiltrate/DoS. Returns bytes each way via the out params. */
+#define PROXY_PUMP_DEADLINE_SEC 600
+#define PROXY_PUMP_MAX_BYTES    (2UL * 1024 * 1024 * 1024)
 static void proxy_pump(int a, int b, unsigned long *a2b, unsigned long *b2a)
 {
    struct pollfd pf[2];
    pf[0].fd = a;
    pf[1].fd = b;
    char buf[65536];
+   time_t deadline = time(NULL) + PROXY_PUMP_DEADLINE_SEC;
+   unsigned long total = 0;
    for (;;)
    {
+      if (time(NULL) >= deadline)
+         return; /* wall-clock cap: applies even to a stalled/idle tunnel */
       pf[0].events = pf[1].events = POLLIN;
       pf[0].revents = pf[1].revents = 0;
-      int pr = poll(pf, 2, 300000); /* 5-min idle timeout */
-      if (pr <= 0)
+      int pr = poll(pf, 2, 30000); /* short poll so the deadline is re-checked */
+      if (pr < 0)
          return;
+      if (pr == 0)
+         continue; /* idle tick — loop re-checks the wall-clock deadline */
       for (int i = 0; i < 2; i++)
       {
          if (pf[i].revents & (POLLIN | POLLHUP | POLLERR))
@@ -381,6 +423,9 @@ static void proxy_pump(int a, int b, unsigned long *a2b, unsigned long *b2a)
                return;
             if (write_all(dst, buf, (size_t)n) != 0)
                return;
+            total += (unsigned long)n;
+            if (total > PROXY_PUMP_MAX_BYTES)
+               return; /* byte cap */
             if (i == 0 && a2b)
                *a2b += (unsigned long)n;
             else if (i == 1 && b2a)
@@ -390,11 +435,22 @@ static void proxy_pump(int a, int b, unsigned long *a2b, unsigned long *b2a)
    }
 }
 
-static int hop_by_hop(const char *name, size_t len)
+/* Headers the proxy must NOT forward upstream: hop-by-hop headers (tunnel/keepalive
+ * correctness) AND credential-bearing headers (never leak a delegate secret to a
+ * registry). */
+static int header_should_strip(const char *name, size_t len)
 {
-   static const char *const h[] = {
-       "connection", "proxy-connection",    "keep-alive", "transfer-encoding", "te", "trailer",
-       "upgrade",    "proxy-authorization", NULL};
+   static const char *const h[] = {"connection",
+                                   "proxy-connection",
+                                   "keep-alive",
+                                   "transfer-encoding",
+                                   "te",
+                                   "trailer",
+                                   "upgrade",
+                                   "authorization",       /* credential-bearing */
+                                   "proxy-authorization", /* credential-bearing */
+                                   "cookie",              /* credential-bearing */
+                                   NULL};
    for (int i = 0; h[i]; i++)
       if (strlen(h[i]) == len && strncasecmp(name, h[i], len) == 0)
          return 1;
@@ -446,7 +502,7 @@ static int proxy_forward_head(int up, const char *head)
    if (write_all(up, firstline, (size_t)fl) != 0)
       return -1;
 
-   /* headers: copy each non-hop-by-hop header line verbatim */
+   /* headers: forward each well-formed, non-stripped header line verbatim */
    const char *ln = eol + 1;
    while (*ln)
    {
@@ -455,8 +511,19 @@ static int proxy_forward_head(int up, const char *head)
       if (linelen <= 2) /* blank line — end of headers */
          break;
       const char *colon = memchr(ln, ':', linelen);
-      size_t namelen = colon ? (size_t)(colon - ln) : 0;
-      if (!colon || !hop_by_hop(ln, namelen))
+      if (!colon)
+         return -1; /* a header line without a colon is malformed — refuse the request */
+      size_t namelen = (size_t)(colon - ln);
+      if (namelen == 0)
+         return -1;
+      /* the field name must be a token: no space, control byte, or CR/LF injection */
+      for (size_t i = 0; i < namelen; i++)
+      {
+         unsigned char c = (unsigned char)ln[i];
+         if (c <= 0x20 || c == 0x7F)
+            return -1;
+      }
+      if (!header_should_strip(ln, namelen))
          if (write_all(up, ln, linelen) != 0)
             return -1;
       if (!nl)
@@ -466,8 +533,18 @@ static int proxy_forward_head(int up, const char *head)
    return write_all(up, "Connection: close\r\n\r\n", 21);
 }
 
-int sandbox_pkg_proxy_serve(int client_fd, const char *head, const char *allowlist, const char *tag)
+int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const char *allowlist,
+                            const char *tag)
 {
+   /* Hard refusal on any non-UDS caller: the proxy must never be reachable from the
+    * public TCP/TLS listener, independent of the caller's own listener check. */
+   if (!is_uds)
+   {
+      aimee_log(LOG_ERROR, "sandbox-proxy",
+                "refusing proxy request on a non-UDS socket (would expose egress on the "
+                "public listener)");
+      return 0;
+   }
    if (!allowlist)
       allowlist = sandbox_pkg_default_allowlist();
    if (!tag)

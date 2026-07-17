@@ -1427,7 +1427,13 @@ void handle_conn(int fd, int is_tcp)
     * never sends CONNECT, so this cannot shadow the API. The caller closes `fd`. */
    if (!is_tcp && (strcmp(method, "CONNECT") == 0 || strncmp(path, "http://", 7) == 0))
    {
-      sandbox_pkg_proxy_serve(fd, buf, NULL, "sandbox");
+      /* Defense in depth beyond !is_tcp: confirm the socket really is AF_UNIX before
+       * exposing the forward proxy, so a future is_tcp regression cannot open egress on
+       * the public TCP/TLS listener. sandbox_pkg_proxy_serve also refuses if !is_uds. */
+      struct sockaddr_storage ss;
+      socklen_t sl = sizeof(ss);
+      int is_uds = getsockname(fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX;
+      sandbox_pkg_proxy_serve(fd, is_uds, buf, NULL, "sandbox");
       return;
    }
 
