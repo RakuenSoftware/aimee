@@ -601,6 +601,16 @@ ENV_DESC = {
     "AIMEE_DELEGATE_SOURCE_PATHS": ("Delegates & backends", "Allowed source paths for delegate edits."),
     "AIMEE_DELEGATE_WORKTREE_ROOT": ("Delegates & backends", "Root directory for delegate worktrees."),
     "AIMEE_DOCKER_BIN": ("Delegates & backends", "Docker delegate-backend binary."),
+    "AIMEE_FORWARDER_PORT": (
+        "Delegates & backends",
+        "Loopback port the in-sandbox aimee-forwarder listens on (default 3129); set by "
+        "aimee when it starts the forwarder in a proxy-mode delegate container.",
+    ),
+    "AIMEE_FORWARDER_SOCK": (
+        "Delegates & backends",
+        "UNIX socket the in-sandbox aimee-forwarder bridges to (default "
+        "/run/aimee/aimee-http.sock, the bound aimee UDS).",
+    ),
     "AIMEE_DOCKER_WORKDIR": ("Delegates & backends", "Docker delegate-backend working directory."),
     "AIMEE_SSH_BIN": ("Delegates & backends", "SSH delegate-backend binary."),
     "AIMEE_OPENCODE_BIN": ("Delegates & backends", "opencode CLI frontend binary."),

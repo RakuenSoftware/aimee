@@ -278,7 +278,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 153 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 155 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -400,6 +400,8 @@ The binaries read 153 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_DELEGATE_WORKTREE_ROOT` | Root directory for delegate worktrees. |
 | `AIMEE_DOCKER_BIN` | Docker delegate-backend binary. |
 | `AIMEE_DOCKER_WORKDIR` | Docker delegate-backend working directory. |
+| `AIMEE_FORWARDER_PORT` | Loopback port the in-sandbox aimee-forwarder listens on (default 3129); set by aimee when it starts the forwarder in a proxy-mode delegate container. |
+| `AIMEE_FORWARDER_SOCK` | UNIX socket the in-sandbox aimee-forwarder bridges to (default /run/aimee/aimee-http.sock, the bound aimee UDS). |
 | `AIMEE_PARENT_DELEGATION_ID` | Parent delegation id (threading). |
 | `AIMEE_SSH_BIN` | SSH delegate-backend binary. |
 

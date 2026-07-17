@@ -24,6 +24,8 @@
 #include "aimee.h"      /* MAX_PATH_LEN */
 #include "aimee_home.h" /* aimee_home() — resolves the server's UDS path */
 
+#include <assert.h>
+
 /* Fixed in-container path for the bind-mounted aimee-server UDS. The delegate's
  * only outward channel: `--network none` cuts every IP route, and AIMEE_API_ENDPOINT
  * points the baked-in `aimee` CLI at this socket, so `aimee git_commit`,
@@ -402,6 +404,80 @@ static unsigned docker_mounts_fingerprint(const docker_state_t *st)
    return h;
 }
 
+/* package_access=proxy: copy the static aimee-forwarder into the (running) delegate
+ * container and start it detached, so 127.0.0.1:3129 inside the sandbox bridges to the
+ * bound aimee UDS where the package forward proxy runs. Best-effort: on failure the
+ * delegate still runs; package installs then fail fast (http_proxy -> a dead port is
+ * refused immediately, no hang). The forwarder is re-copied/started after every start
+ * because a `docker exec -d` process does not survive a container stop. */
+/* Remove the forwarder binary from the container so a half-configured proxy delegate
+ * can't be left with an unusable-but-present forwarder it could relaunch pointed at an
+ * arbitrary UDS path. Best-effort. */
+static void docker_pkg_forwarder_strip(const char *container)
+{
+   const char *rm_argv[] = {
+       "docker", "exec", container, "rm", "-f", "/usr/local/bin/aimee-forwarder", NULL};
+   (void)run_docker(rm_argv);
+}
+
+static void docker_pkg_forwarder_setup(const char *container)
+{
+   /* Fixed, canonical ship path — never operator/env-overridable, so nothing can
+    * point the copy at an attacker-controlled binary. */
+   static const char *const bin = "/usr/local/bin/aimee-forwarder";
+   struct stat bst;
+   if (stat(bin, &bst) != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "package-access=proxy but forwarder binary '%s' is missing — sandbox package "
+                "installs will fail (ship aimee-forwarder in the aimee-server image)",
+                bin);
+      return;
+   }
+   char dst[MAX_PATH_LEN + 64];
+   snprintf(dst, sizeof(dst), "%s:/usr/local/bin/aimee-forwarder", container);
+   const char *cp_argv[] = {"docker", "cp", bin, dst, NULL};
+   if (run_docker(cp_argv) != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox", "forwarder `docker cp` into %s failed", container);
+      return;
+   }
+   const char *ex_argv[] = {"docker",
+                            "exec",
+                            "-d",
+                            container,
+                            "env",
+                            "AIMEE_FORWARDER_SOCK=" DELEGATE_SOCK_PATH,
+                            "AIMEE_FORWARDER_PORT=3129",
+                            "/usr/local/bin/aimee-forwarder",
+                            NULL};
+   if (run_docker(ex_argv) != 0)
+   {
+      /* Copied but not running: strip it rather than leave a relaunchable binary. */
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "starting package forwarder in %s failed — stripping the binary", container);
+      docker_pkg_forwarder_strip(container);
+      return;
+   }
+   /* apt does not honour http_proxy through every transport — drop in an explicit
+    * proxy config too. Best-effort (needs a root-writable /etc/apt; a non-root
+    * delegate still gets the env vars, which cover apt's http/https transports). */
+   const char *apt_argv[] = {"docker",
+                             "exec",
+                             container,
+                             "sh",
+                             "-c",
+                             "mkdir -p /etc/apt/apt.conf.d 2>/dev/null && "
+                             "printf 'Acquire::http::Proxy \"http://127.0.0.1:3129\";\\n"
+                             "Acquire::https::Proxy \"http://127.0.0.1:3129\";\\n' "
+                             "> /etc/apt/apt.conf.d/99aimee-proxy 2>/dev/null || true",
+                             NULL};
+   (void)run_docker(apt_argv);
+   aimee_log(LOG_INFO, "delegate-sandbox",
+             "package proxy armed in %s (127.0.0.1:3129 -> aimee UDS; egress via aimee)",
+             container);
+}
+
 static int docker_acquire(delegate_backend_t *self, const char *task_id,
                           const delegate_backend_config_t *cfg, void **state_out)
 {
@@ -503,6 +579,12 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
                   "%s", suffix);
    }
 
+   /* Runtime package-access policy: "proxy" (default) arms the in-container forwarder
+    * + http_proxy so a --network none delegate can install via aimee's egress. The
+    * caller resolved the mode (it already loads config); the backend stays
+    * config-agnostic. */
+   int pkg_proxy = cfg && cfg->pkg_proxy;
+
    /* Try `docker start` first — if a container with this name already
     * exists (operator opted hibernate=1 last release), starting it
     * resumes the same workspace. If start fails, create + start. */
@@ -536,7 +618,7 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       /* Sized from the mount array itself: a hand-counted bound silently overflows
        * the day a fourth mount is added. Fixed slots cover docker/create/--name/
        * --network/--user/-w/image/sleep + the aimee-socket -v and -e. */
-      const char *create_argv[24 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
+      const char *create_argv[40 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
       int n = 0;
       create_argv[n++] = "docker";
       create_argv[n++] = "create";
@@ -556,6 +638,24 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          create_argv[n++] = sock_bind;
          create_argv[n++] = "-e";
          create_argv[n++] = "AIMEE_API_ENDPOINT=unix:" DELEGATE_SOCK_PATH;
+         /* package-access=proxy: point package managers at the in-container forwarder
+          * (started after boot), which bridges to the bound UDS. docker exec inherits
+          * these, so every delegate tool run sees them. Only with the UDS present. */
+         if (pkg_proxy)
+         {
+            create_argv[n++] = "-e";
+            create_argv[n++] = "http_proxy=http://127.0.0.1:3129";
+            create_argv[n++] = "-e";
+            create_argv[n++] = "https_proxy=http://127.0.0.1:3129";
+            create_argv[n++] = "-e";
+            create_argv[n++] = "HTTP_PROXY=http://127.0.0.1:3129";
+            create_argv[n++] = "-e";
+            create_argv[n++] = "HTTPS_PROXY=http://127.0.0.1:3129";
+            create_argv[n++] = "-e";
+            create_argv[n++] = "no_proxy=localhost,127.0.0.1";
+            create_argv[n++] = "-e";
+            create_argv[n++] = "NO_PROXY=localhost,127.0.0.1";
+         }
       }
       if (userflag[0])
       {
@@ -572,6 +672,8 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       create_argv[n++] = st->image;
       create_argv[n++] = "sleep";
       create_argv[n++] = "infinity";
+      /* Guard the hand-sized slot count against a future knob overflowing it. */
+      assert(n < (int)(sizeof(create_argv) / sizeof(create_argv[0])));
       create_argv[n] = NULL;
       if (run_docker(create_argv) != 0)
       {
@@ -585,6 +687,11 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          return -1;
       }
    }
+
+   /* Container is running (resumed or freshly created): (re)arm the package forwarder.
+    * A docker exec -d process does not survive a stop, so this runs on every acquire. */
+   if (pkg_proxy)
+      docker_pkg_forwarder_setup(st->container_name);
 
    *state_out = st;
    return 0;
