@@ -1030,7 +1030,7 @@ $(TESTPREFIX)/unit-test-code-match: $(OBJDIR)/tests/test_code_match.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-gw-stage-memory: $(OBJDIR)/tests/test_gw_stage_memory.o \
-                     $(OBJDIR)/server/gw_stage_memory.o $(OBJDIR)/server/gw_stage_registry.o $(OBJDIR)/server/ingress_preinject.o \
+                     $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/ingress_preinject.o \
                      $(OBJDIR)/server/request_context.o $(OBJDIR)/log.o \
                      $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1392,7 +1392,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/delegations.o $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/session_paths.o $(OBJDIR)/db1/cost_fold.o $(OBJDIR)/db1/token_audit.o $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/server/delegate_credential_retry.o $(OBJDIR)/db1/delegate_learning.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/db1/execution_plans.o $(OBJDIR)/db1/coord_jobs.o \
 		                               $(OBJDIR)/server/delegate_launch.o $(OBJDIR)/server/delegate_source_authority.o $(OBJDIR)/server/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
-		                               $(OBJDIR)/server/gw_orch_delegates.o $(OBJDIR)/server/gw_orchestration_seam.o \
+		                               $(OBJDIR)/modules/delegates/gw_orch_delegates.o $(OBJDIR)/pipeline/gw_orchestration_seam.o \
 		                               $(OBJDIR)/server/delegate_routing.o \
 		                               $(OBJDIR)/model_registry.o \
 		                               $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
@@ -2123,8 +2123,8 @@ $(TESTPREFIX)/unit-test-cron-config: $(OBJDIR)/tests/test_cron_config.o \
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
                                       $(OBJDIR)/server/server_cron.o \
                                       $(OBJDIR)/server/trigger_scheduler.o \
-                                      $(OBJDIR)/server/gw_orch_workflows.o \
-                                      $(OBJDIR)/server/gw_orchestration_seam.o \
+                                      $(OBJDIR)/modules/workflows/gw_orch_workflows.o \
+                                      $(OBJDIR)/pipeline/gw_orchestration_seam.o \
                                       $(OBJDIR)/delivery_target.o \
                                       $(OBJDIR)/json_fluent.o \
                                       $(OBJDIR)/cJSON.o
@@ -2323,7 +2323,7 @@ $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
 # subprocesses + real DB1) files a work item from a committed pending proposal
 # and the real autonomy scheduler drives it to terminal (stub executors only).
 $(TESTPREFIX)/unit-test-trigger-e2e: $(OBJDIR)/tests/test_trigger_e2e.o \
-                                    $(OBJDIR)/server/gw_orch_workflows.o $(OBJDIR)/server/gw_orchestration_seam.o \
+                                    $(OBJDIR)/modules/workflows/gw_orch_workflows.o $(OBJDIR)/pipeline/gw_orchestration_seam.o \
                                     $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
                                     $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
@@ -2341,7 +2341,7 @@ $(OBJDIR)/tests/test_trigger_e2e.o: tests/test_trigger_e2e.c server/trigger_sche
 	@mkdir -p $(dir $@)
 	$(CC) -c $(TEST_C_FLAGS) -I. -o $@ $<
 
-$(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/server/gw_orch_workflows.o $(OBJDIR)/server/gw_orchestration_seam.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-trigger: $(OBJDIR)/tests/test_trigger.o $(OBJDIR)/modules/workflows/gw_orch_workflows.o $(OBJDIR)/pipeline/gw_orchestration_seam.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 $(OBJDIR)/tests/test_trigger.o: tests/test_trigger.c server/trigger_scheduler.c
 	@mkdir -p $(dir $@)
@@ -2375,7 +2375,7 @@ $(TESTPREFIX)/unit-test-sse-parser: $(OBJDIR)/tests/test_sse_parser.o $(OBJDIR)/
 $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingress.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/gw_stage_memory.o $(OBJDIR)/server/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o
+$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # P2c (response-side tool policing) integration test: same source as
@@ -2384,7 +2384,7 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(
 # response. The shape tests stub the request-side policy helpers so they
 # don't have to deal with guardrails dependencies; this test exercises the
 # full wiring end-to-end.
-$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/server/gw_stage_memory.o $(OBJDIR)/server/gw_stage_governance.o $(OBJDIR)/server/gw_response_registry.o $(OBJDIR)/server/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o
+$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # P2c streaming integration test: linked against the REAL gateway_policy.o
@@ -2392,7 +2392,7 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_
 # Same minimal-link pattern as the buffered P2c test above; the SSE replay
 # helper + police function exercise the buffered-fetch + replay flow when
 # `gateway_prevent_subagents` is ON.
-$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/server/gw_stage_memory.o $(OBJDIR)/server/gw_stage_governance.o $(OBJDIR)/server/gw_response_registry.o $(OBJDIR)/server/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o
+$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
@@ -2403,31 +2403,31 @@ $(TESTPREFIX)/unit-test-gateway-pipeline: $(OBJDIR)/tests/test_gateway_pipeline.
 
 
 # Slice 7: config-driven stage registry, proven through the shared pipeline.
-$(TESTPREFIX)/unit-test-gw-stage-registry: $(OBJDIR)/tests/test_gw_stage_registry.o $(OBJDIR)/server/gw_stage_registry.o $(OBJDIR)/gateway_pipeline.o
+$(TESTPREFIX)/unit-test-gw-stage-registry: $(OBJDIR)/tests/test_gw_stage_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/gateway_pipeline.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 
 # Response-stage registry + runner (Slice 1 of the response seam), self-contained.
-$(TESTPREFIX)/unit-test-gw-response-registry: $(OBJDIR)/tests/test_gw_response_registry.o $(OBJDIR)/server/gw_response_registry.o
+$(TESTPREFIX)/unit-test-gw-response-registry: $(OBJDIR)/tests/test_gw_response_registry.o $(OBJDIR)/pipeline/gw_response_registry.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 
 # Response governance stage (Slice 2): toggle proven via a counting police stub.
-$(TESTPREFIX)/unit-test-response-governance-stage: $(OBJDIR)/tests/test_response_governance_stage.o $(OBJDIR)/server/gw_stage_governance.o $(OBJDIR)/server/gw_response_registry.o
+$(TESTPREFIX)/unit-test-response-governance-stage: $(OBJDIR)/tests/test_response_governance_stage.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Orchestration-hook seam + runner (Slice 3 of the response/orchestration seam), self-contained.
-$(TESTPREFIX)/unit-test-gw-orchestration-seam: $(OBJDIR)/tests/test_gw_orchestration_seam.o $(OBJDIR)/server/gw_orchestration_seam.o
+$(TESTPREFIX)/unit-test-gw-orchestration-seam: $(OBJDIR)/tests/test_gw_orchestration_seam.o $(OBJDIR)/pipeline/gw_orchestration_seam.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Delegates orchestration module (first port): toggle + module runner over the seam, proven
 # with a fake capability (no real delegate thread). Self-contained.
-$(TESTPREFIX)/unit-test-gw-orch-delegates: $(OBJDIR)/tests/test_gw_orch_delegates.o $(OBJDIR)/server/gw_orch_delegates.o $(OBJDIR)/server/gw_orchestration_seam.o
+$(TESTPREFIX)/unit-test-gw-orch-delegates: $(OBJDIR)/tests/test_gw_orch_delegates.o $(OBJDIR)/modules/delegates/gw_orch_delegates.o $(OBJDIR)/pipeline/gw_orchestration_seam.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Workflows orchestration module (second port): toggle + module runner over the seam, proven
 # with a fake capability (no real work item created). Self-contained.
-$(TESTPREFIX)/unit-test-gw-orch-workflows: $(OBJDIR)/tests/test_gw_orch_workflows.o $(OBJDIR)/server/gw_orch_workflows.o $(OBJDIR)/server/gw_orchestration_seam.o
+$(TESTPREFIX)/unit-test-gw-orch-workflows: $(OBJDIR)/tests/test_gw_orch_workflows.o $(OBJDIR)/modules/workflows/gw_orch_workflows.o $(OBJDIR)/pipeline/gw_orchestration_seam.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-p4-delegate: $(OBJDIR)/tests/test_gateway_p4_delegate.o $(OBJDIR)/gateway_delegate.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
