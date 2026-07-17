@@ -938,13 +938,14 @@ typedef struct config
     * dropped). */
    int roundtable_require_evidence;
 
-   /* roundtable_chair_synthesis (default 0, OFF): after the deterministic evidence
-    * verifier runs, add a CHAIR reasoning pass over the surviving findings — an LLM that
-    * may DEMOTE or DROP a technically-true-but-over-flagged finding (never escalate,
-    * never add), each change shown with the chair's rationale. Opt-in because it adds a
-    * second (fallible) model to the adjudication step; server-side bounds keep it
-    * strictly conservative (it can only make the result less alarming, transparently).
-    * Single-round review only (multi-round already synthesizes via the aggregator). */
+   /* roundtable_chair_synthesis (default 1, ON — operator ruling 2026-07-17): after the
+    * deterministic evidence verifier runs, add a CHAIR reasoning pass over the surviving
+    * findings — an LLM that may DEMOTE or DROP a technically-true-but-over-flagged finding
+    * (never escalate, never add), each change shown with the chair's rationale. It adds a
+    * second (fallible) model to the adjudication step, but server-side bounds keep it
+    * strictly conservative — it can only ever make the result less alarming, transparently,
+    * and unparseable chair output is a no-op. Set 0 to disable. Single-round review only
+    * (multi-round already synthesizes via the aggregator). */
    int roundtable_chair_synthesis;
 
    /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
