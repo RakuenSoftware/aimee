@@ -156,3 +156,9 @@ char *gw_memory_system_prompt(const char *query)
    cJSON_Delete(raw);
    return out;
 }
+
+int gw_stage_memory_enabled(void)
+{
+   const char *v = getenv("AIMEE_STAGE_MEMORY");
+   return !(v && (v[0] == '0' || v[0] == 'f' || v[0] == 'F' || v[0] == 'n' || v[0] == 'N'));
+}

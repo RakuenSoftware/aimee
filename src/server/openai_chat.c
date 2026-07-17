@@ -20,6 +20,7 @@
 #include "ingress_preinject.h"
 #include "gateway_pipeline.h"         /* gw_request_t + gw_pipeline_run_request — shared seam */
 #include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "gw_stage_registry.h"        /* Slice 7: config-driven stage catalog */
 #include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
 #include "learning_implicit.h"        /* learning_implicit_detect_turn */
 #include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
@@ -978,12 +979,16 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        .parity = 1, /* client OpenAI == serving OpenAI; informational for these stages */
        .stream = 0,
    };
-   const gw_stage_t stages[] = {
-       {gw_stage_memory, messages, "memory"},
-       {gw_stage_openai_tool_policing, NULL, "tool_policing"},
-       {gw_stage_router, NULL, "router"}, /* S1/S2: the unified request->workflow seam */
+   /* Slice 7: enabled, ordered stage set from the catalog (memory is togglable). */
+   const gw_stage_slot_t slots[] = {
+       {"memory", gw_stage_memory, messages, gw_stage_memory_enabled()},
+       {"tool_policing", gw_stage_openai_tool_policing, NULL, 1},
+       {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
    };
-   gw_pipeline_run_request(&gr, stages, sizeof(stages) / sizeof(stages[0]));
+   gw_stage_t stages[6];
+   int nstages = gw_stage_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 6);
+   if (nstages >= 0)
+      gw_pipeline_run_request(&gr, stages, (size_t)nstages);
 
    cJSON *rawi = cJSON_GetObjectItemCaseSensitive(gw_raw, "instructions");
    const char *eff_system = rawi && rawi->valuestring ? rawi->valuestring : system_prompt;
