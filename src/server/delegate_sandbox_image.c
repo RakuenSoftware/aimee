@@ -348,7 +348,12 @@ char *delegate_sandbox_images_json(void)
    free(imgs);
    char *s = arr ? cJSON_PrintUnformatted(arr) : NULL;
    cJSON_Delete(arr);
-   return s ? s : safe_strdup("[]");
+   if (s)
+      return s;
+   char *empty = malloc(3); /* never embed NULL — hand back an empty array */
+   if (empty)
+      memcpy(empty, "[]", 3);
+   return empty;
 }
 
 /* Remove image `tag`. Held under g_build_lock so a removal cannot interleave with
