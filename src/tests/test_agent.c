@@ -584,6 +584,82 @@ static void test_codex_oauth_request_creds(void)
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
 }
 
+/* On-disk codex auth is resolved under AIMEE_HOME, not just $HOME. An appliance
+ * runs the server with AIMEE_HOME set but no HOME, so <AIMEE_HOME>/.codex/auth.json
+ * must be found or codex fails /v1 auth with a route-unresolved error even though
+ * a valid token is on disk. (exp is unknown for a non-JWT token -> no refresh, so
+ * this stays hermetic: no network.) The two sub-cases pin BOTH the new appliance
+ * path (AIMEE_HOME set, no HOME) and the unchanged dev-box fallback (HOME set,
+ * AIMEE_HOME unset), so the reordering never regresses the classic HOME lookup. */
+static void test_codex_oauth_reads_aimee_home(void)
+{
+   char dir[] = "/tmp/aimee-codex-home.XXXXXX";
+   assert(platform_mkdtemp(dir) != NULL);
+   char sub[512], authpath[600];
+   snprintf(sub, sizeof(sub), "%s/.codex", dir);
+   assert(mkdir(sub, 0700) == 0);
+   snprintf(authpath, sizeof(authpath), "%s/auth.json", sub);
+   FILE *f = fopen(authpath, "wb");
+   assert(f != NULL);
+   /* Distinctive token so a stray codex-auth.json elsewhere can't masquerade as a
+    * pass (a different token would fail the assert, not silently satisfy it). */
+   fputs("{\"tokens\":{\"access_token\":\"AH-ACCESS-3f9c1\",\"refresh_token\":\"AH-REFRESH\"}}", f);
+   fclose(f);
+
+   /* Restore-vs-unset must key on NULL, not emptiness, so an original AIMEE_HOME=""
+    * (or HOME="") is restored to empty rather than being unset. */
+   const char *old_aimee_home = getenv("AIMEE_HOME");
+   const char *old_home = getenv("HOME");
+   const char *old_profile = getenv("AIMEE_PROFILE");
+   char sa[600] = "", sh[600] = "", sp[128] = "";
+   if (old_aimee_home)
+      snprintf(sa, sizeof(sa), "%s", old_aimee_home);
+   if (old_home)
+      snprintf(sh, sizeof(sh), "%s", old_home);
+   if (old_profile)
+      snprintf(sp, sizeof(sp), "%s", old_profile);
+   unsetenv("AIMEE_PROFILE"); /* keep aimee_home() == the raw home in both sub-cases */
+   agent_set_request_codex_creds(NULL, NULL); /* no per-turn token: force the on-disk path */
+
+   agent_t ag;
+   char auth[512];
+   memset(&ag, 0, sizeof(ag));
+   snprintf(ag.name, sizeof(ag.name), "%s", "codex");
+   snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
+   snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
+
+   /* (1) Appliance: AIMEE_HOME set, HOME cleared -> the new aimee_home() branch is
+    *     the ONLY thing that can find the token. */
+   setenv("AIMEE_HOME", dir, 1);
+   unsetenv("HOME");
+   auth[0] = '\0';
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
+
+   /* (2) Dev box: AIMEE_HOME unset, HOME set to the same dir -> the classic
+    *     fallback still resolves (aimee_home() collapses to HOME here). */
+   unsetenv("AIMEE_HOME");
+   setenv("HOME", dir, 1);
+   auth[0] = '\0';
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
+
+   if (old_aimee_home)
+      setenv("AIMEE_HOME", sa, 1);
+   else
+      unsetenv("AIMEE_HOME");
+   if (old_home)
+      setenv("HOME", sh, 1);
+   else
+      unsetenv("HOME");
+   if (old_profile)
+      setenv("AIMEE_PROFILE", sp, 1);
+   unlink(authpath);
+   rmdir(sub);
+   rmdir(dir);
+   printf("  PASS: test_codex_oauth_reads_aimee_home\n");
+}
+
 /* WP-C.2c(3): the vault principal must ride along in the creds snapshot so a
  * fan-out delegate (fresh thread; rebinds via agent_request_creds_restore)
  * reaches the user's vault like a same-thread one; empty restores to empty. */
@@ -3022,6 +3098,7 @@ int main(void)
    test_current_code_only_dispatch_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
+   test_codex_oauth_reads_aimee_home();
    test_request_creds_snapshot_carries_vault_principal();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
