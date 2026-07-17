@@ -44,26 +44,29 @@ void agent_set_route_health_filter(int (*fn)(const char *agent_name));
 
 /* Optional route-time delegate-POLICY filter, same mechanism as the health
  * filter (returns nonzero to EXCLUDE the agent; NULL disables). The server
- * registers a live-config predicate enforcing two invariants everywhere
- * routing happens, not just on one dispatch path:
- *   1) the PRIMARY passthrough — the agent named after config.provider — is
- *      never a delegation target (the primary must not delegate back to
- *      itself; roundtables already enforce this for panel seats);
- *   2) an agent flagged "Primary Agent Only" (agents.json `primary_only`) is
- *      never a delegation target — the per-agent choice that replaced the global
- *      claude_cli_delegate_enabled opt-in.
- * The structural half of (2) — a claude-CLI agent that is not server-hosted
- * can never execute as a delegate — is enforced unconditionally in
+ * registers a predicate enforcing ONE invariant everywhere routing happens,
+ * not just on one dispatch path:
+ *   an agent flagged "Primary Agent Only" (agents.json `primary_only`) is
+ *   never a delegation target — the per-agent choice that replaced the global
+ *   claude_cli_delegate_enabled opt-in. There is deliberately no separate
+ *   "provider-named agent is never a delegate" name match: that rule made the
+ *   flag unreachable for a claude-oauth-as-primary box (the OAuth flow names
+ *   the agent "claude", which then equals config.provider), so `primary_only`
+ *   is now the sole per-agent gate and unchecking it opts the primary into
+ *   self-delegation. Roundtable panels keep their own primary exclusion
+ *   (delegate_ensemble.c) so a panel second opinion is never the primary.
+ * The structural rule — a claude-CLI agent that is not server-hosted can never
+ * execute as a delegate — is enforced unconditionally in
  * agent_is_available_for_routing, so even filter-less builds (CLI/tests) never
  * route to a client-only claude. */
 void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
 
 /* Primary-turn marker for the delegate-policy filter. The PRIMARY chat turn
  * routes the provider-named agent through the same machinery as delegation
- * (agent_run_with_tools -> agent_route), where policy rule (1) above would
- * exclude it and rule (2) would demand the delegate opt-in — but a primary
- * turn is not delegation: driving claude via its CLI as the PRIMARY is the
- * documented default. The chat worker brackets the turn with set(1)/set(0) on
+ * (agent_run_with_tools -> agent_route), where the `primary_only` gate above
+ * would exclude a primary-only agent — but a primary turn is not delegation:
+ * driving claude via its CLI as the PRIMARY is the documented default. The
+ * chat worker brackets the turn with set(1)/set(0) on
  * its own thread (thread-local, so concurrent delegate routing on other
  * threads stays policed); the server's policy predicate consults it. */
 void agent_routing_set_primary_turn(int on);
