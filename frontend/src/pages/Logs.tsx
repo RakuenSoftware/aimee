@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Badge, Button, Modal, EmptyState } from '@rakuensoftware/smoothgui';
-import type { BadgeVariant } from '@rakuensoftware/smoothgui';
+import { Badge, Button, Modal, EmptyState, DataTable } from '@rakuensoftware/smoothgui';
+import type { BadgeVariant, Column } from '@rakuensoftware/smoothgui';
 
 /* All fields of an audit row, in display order, for the detail modal. */
 const DETAIL_FIELDS: { key: keyof AuditRow; label: string }[] = [
@@ -42,12 +42,23 @@ function esc(s: unknown): string {
   return s == null ? '' : String(s);
 }
 
-const th: React.CSSProperties = {
-  textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e0e0e0',
-  color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px',
-  position: 'sticky', top: 0, background: '#fafafa', zIndex: 1,
-};
-const td: React.CSSProperties = { padding: '5px 10px', borderBottom: '1px solid #f2f2f2', fontSize: 12 };
+const AUDIT_COLUMNS: Column<AuditRow>[] = [
+  { key: 'ts', label: 'Time', render: r => <span style={{ whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</span> },
+  { key: 'actor', label: 'Actor', render: r => esc(r.actor) },
+  {
+    key: 'tool', label: 'Tool',
+    render: r => (
+      <span style={{ fontFamily: 'monospace' }}>
+        {esc(r.tool)}
+        {r.command ? <span style={{ color: '#999' }}> · {esc(r.command)}</span> : null}
+      </span>
+    ),
+  },
+  { key: 'verdict', label: 'Verdict', render: r => <Badge label={esc(r.verdict)} variant={verdictVariant(r.verdict)} /> },
+  { key: 'mode', label: 'Mode', render: r => <span style={{ color: '#888' }}>{esc(r.mode)}</span> },
+  { key: 'reason_code', label: 'Reason', render: r => <span style={{ color: '#888' }}>{esc(r.reason_code)}</span> },
+  { key: 'task_id', label: 'Task', align: 'right', render: r => <span style={{ color: '#aaa' }}>{r.task_id || ''}</span> },
+];
 
 const selectStyle: React.CSSProperties = {
   padding: '4px 8px', borderRadius: 4, border: '1px solid #ddd', background: '#fff',
@@ -148,34 +159,12 @@ export default function Logs() {
             <EmptyState message="No audit rows" inline />
           )
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>{['Time', 'Actor', 'Tool', 'Verdict', 'Mode', 'Reason', 'Task'].map(h => <th key={h} style={th}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {filtered.map((r, i) => (
-                <tr
-                  key={i}
-                  onClick={() => setSelected(r)}
-                  style={{ cursor: 'pointer' }}
-                  onMouseEnter={ev => (ev.currentTarget.style.background = '#f6f9ff')}
-                  onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
-                  title="Click for full detail"
-                >
-                  <td style={{ ...td, whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</td>
-                  <td style={td}>{esc(r.actor)}</td>
-                  <td style={{ ...td, fontFamily: 'monospace' }}>
-                    {esc(r.tool)}
-                    {r.command ? <span style={{ color: '#999' }}> · {esc(r.command)}</span> : null}
-                  </td>
-                  <td style={td}><Badge label={esc(r.verdict)} variant={verdictVariant(r.verdict)} /></td>
-                  <td style={{ ...td, color: '#888' }}>{esc(r.mode)}</td>
-                  <td style={{ ...td, color: '#888' }}>{esc(r.reason_code)}</td>
-                  <td style={{ ...td, textAlign: 'right', color: '#aaa' }}>{r.task_id || ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            columns={AUDIT_COLUMNS}
+            rows={filtered}
+            rowKey={(_r, i) => i}
+            onRowClick={r => setSelected(r)}
+          />
         )}
         {rows.length < total && (
           <div style={{ padding: 12, textAlign: 'center' }}>
