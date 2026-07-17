@@ -21,6 +21,7 @@
 #include "gateway_pipeline.h"         /* gw_request_t + gw_pipeline_run_request — shared seam */
 #include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
 #include "gw_stage_registry.h"        /* Slice 7: config-driven stage catalog */
+#include "gw_stage_governance.h"      /* response seam Slice 2: togglable governance */
 #include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
 #include "learning_implicit.h"        /* learning_implicit_detect_turn */
 #include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
@@ -1255,7 +1256,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        * (streaming Anthropic). */
       int police_drops = 0;
       if (gateway_prevent_subagents_enabled())
-         police_drops = gateway_policy_police_parsed_response(&parsed);
+         police_drops = gw_response_run_governance(&parsed);
       (void)police_drops; /* drop count plumbed through the pipeline total
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */
