@@ -48,6 +48,20 @@ typedef enum
 
 #define CATALOG_MAX_ENTRIES 64
 
+/* Max concurrent provider slot holders tracked per agent (max_parallel is
+ * clamped to this) and the TTL after which a slot with no matching release is
+ * auto-reclaimed. The TTL is set well above the worst-case legitimate request
+ * (provider timeout ~180s x up to 3 retries ~= 540s) so only truly-dead holders
+ * are reaped, never a slow-but-live request. */
+#define PROVIDER_SLOT_CAP     64
+#define PROVIDER_SLOT_TTL_SEC 900
+
+#include <time.h>
+/* Compact holders older than `ttl` out of a per-agent acquire-timestamp array
+ * kept sorted oldest-first; returns the new live count. Pure (no I/O, no locks)
+ * so the reap arithmetic is unit-testable. */
+int provider_slots_reap_stamps(time_t *stamps, int active, time_t now, int ttl);
+
 typedef struct
 {
    char agent_name[MAX_AGENT_NAME];

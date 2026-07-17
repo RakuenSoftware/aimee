@@ -213,6 +213,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-doctor \
                $(TESTPREFIX)/unit-test-diff \
                $(TESTPREFIX)/unit-test-anchor-snapshot \
+               $(TESTPREFIX)/unit-test-provider-slots-reap \
                $(TESTPREFIX)/unit-test-edit-anchored \
                $(TESTPREFIX)/unit-test-hashline-gate \
                $(TESTPREFIX)/unit-test-workspace-provider \
@@ -4302,3 +4303,6 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
                                           $(OBJDIR)/server/tool_call_args.o \
                                           $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-provider-slots-reap: $(OBJDIR)/tests/test_provider_slots_reap.o $(OBJDIR)/provider_slots_reap.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)

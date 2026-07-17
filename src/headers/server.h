@@ -215,6 +215,13 @@ typedef struct
    pthread_mutex_t provider_slots_mutex;
    char provider_slot_names[CATALOG_MAX_ENTRIES][64];
    int provider_slot_active[CATALOG_MAX_ENTRIES];
+   /* Per-holder acquire timestamps (indices 0..active-1 are live). A holder that
+    * dies without releasing (killed delegate, dropped connection, torn-down
+    * request) would otherwise pin its slot until the next server restart; a stamp
+    * older than PROVIDER_SLOT_TTL_SEC is auto-reclaimed so the counter self-heals.
+    * PROVIDER_SLOT_CAP bounds concurrent holders per agent (max_parallel is
+    * clamped to it). */
+   time_t provider_slot_stamps[CATALOG_MAX_ENTRIES][PROVIDER_SLOT_CAP];
    int provider_slot_count;
 } server_ctx_t;
 
