@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState, KeyValue } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
@@ -267,22 +267,22 @@ function AgentCard({
               variant={agent.enabled ? "success" : "neutral"}
             />
           </div>
-          <Field k="provider" v={agent.provider || "—"} />
-          <Field k="model" v={agent.model || "—"} />
-          <Field k="endpoint" v={agent.endpoint || "(cli / none)"} mono />
+          <KeyValue label="provider" value={agent.provider || "—"} />
+          <KeyValue label="model" value={agent.model || "—"} />
+          <KeyValue label="endpoint" value={agent.endpoint || "(cli / none)"} mono />
           {typeof agent.cost_tier === "number" && (
-            <Field k="cost tier" v={String(agent.cost_tier)} />
+            <KeyValue label="cost tier" value={String(agent.cost_tier)} />
           )}
           {typeof agent.max_parallel === "number" && agent.max_parallel > 0 && (
-            <Field k="max parallel" v={String(agent.max_parallel)} />
+            <KeyValue label="max parallel" value={String(agent.max_parallel)} />
           )}
           {typeof agent.max_turns === "number" && agent.max_turns >= 0 && (
-            <Field k="max turns" v={String(agent.max_turns)} />
+            <KeyValue label="max turns" value={String(agent.max_turns)} />
           )}
           {agent.context_window ? (
-            <Field k="context" v={`${agent.context_window.toLocaleString()} tok`} />
+            <KeyValue label="context" value={`${agent.context_window.toLocaleString()} tok`} />
           ) : null}
-          <Field k="tools" v={agent.tools_enabled ? "enabled" : "disabled"} />
+          <KeyValue label="tools" value={agent.tools_enabled ? "enabled" : "disabled"} />
           <StaticChips label="roles" values={agent.roles || []} />
           <StaticChips label="personas" values={agent.personas || []} emptyHint="(none = all)" />
         </div>
@@ -329,19 +329,19 @@ function AgentCard({
           <div style={{ fontSize: 12, color: "#999", marginBottom: 2 }}>run stats</div>
           {stats && stats.total_calls > 0 ? (
             <>
-              <Field k="runs" v={String(stats.total_calls)} />
-              <Field
-                k="ok / failed"
-                v={`${stats.successful_calls} / ${stats.failed_calls}`}
+              <KeyValue label="runs" value={String(stats.total_calls)} />
+              <KeyValue
+                label="ok / failed"
+                value={`${stats.successful_calls} / ${stats.failed_calls}`}
               />
-              <Field k="success" v={successPct} />
-              <Field k="avg latency" v={`${stats.avg_latency_ms} ms`} />
-              <Field
-                k="tokens (in/out)"
-                v={`${fmt(stats.prompt_tokens)} / ${fmt(stats.completion_tokens)}`}
+              <KeyValue label="success" value={successPct} />
+              <KeyValue label="avg latency" value={`${stats.avg_latency_ms} ms`} />
+              <KeyValue
+                label="tokens (in/out)"
+                value={`${fmt(stats.prompt_tokens)} / ${fmt(stats.completion_tokens)}`}
               />
               {stats.estimated_cost_usd > 0 && (
-                <Field k="est. cost" v={`$${stats.estimated_cost_usd.toFixed(4)}`} />
+                <KeyValue label="est. cost" value={`$${stats.estimated_cost_usd.toFixed(4)}`} />
               )}
             </>
           ) : (
@@ -686,22 +686,6 @@ function StaticChips({ label, values, emptyHint }: { label: string; values: stri
   );
 }
 
-function Field({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, padding: "2px 0" }}>
-      <span style={{ color: "#888" }}>{k}</span>
-      <span
-        style={{
-          fontFamily: mono ? "monospace" : undefined,
-          textAlign: "right",
-          wordBreak: "break-all",
-        }}
-      >
-        {v}
-      </span>
-    </div>
-  );
-}
 
 function L({ label, title, children }: { label: string; title?: string; children: React.ReactNode }) {
   return (

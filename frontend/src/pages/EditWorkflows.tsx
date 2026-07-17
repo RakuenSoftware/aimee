@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Panel, Badge, Spinner, InlineStatus } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, KeyValue } from "@rakuensoftware/smoothgui";
 import ProjectPicker from "../components/ProjectPicker";
 import type { ProjectSelection } from "../components/ProjectPicker";
 import { useSessions } from "../SessionContext";
@@ -1001,21 +1001,6 @@ export default function EditWorkflows() {
   );
 }
 
-function Field({ k, v }: { k: string; v: string }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 13,
-        padding: "2px 0",
-      }}
-    >
-      <span style={{ color: "#888" }}>{k}</span>
-      <span style={{ fontFamily: "monospace" }}>{v}</span>
-    </div>
-  );
-}
 
 function NodeInspector({
   node,
@@ -1435,8 +1420,8 @@ function NodeInspector({
       )}
 
       <div style={{ borderTop: "1px solid #eee", margin: "10px 0 6px" }} />
-      <Field k="block" v={node.block + (node.custom ? " (custom)" : "")} />
-      <Field k="produces" v={node.produces} />
+      <KeyValue label="block" value={node.block + (node.custom ? " (custom)" : "")} mono />
+      <KeyValue label="produces" value={node.produces} mono />
       <div style={{ margin: "6px 0" }}>
         <button
           onClick={setStart}
