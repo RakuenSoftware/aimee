@@ -26,6 +26,7 @@
 #include "openai_responses_store.h"   /* previous_response_id continuation store */
 #include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
 #include "aimee.h"  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
@@ -171,7 +172,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    {
       free(pi_env);
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configuration available");
+      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
    agent_t *ag = NULL;
@@ -197,7 +199,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    {
       free(pi_env);
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
+      openai_format_error_code(resp, cap, "server_error", "no agent configured",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
@@ -587,7 +590,8 @@ static int responses_handler(const char *body, char *resp, int cap)
    if (agent_load_config(&acfg) != 0)
    {
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configuration available");
+      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
    agent_t *ag = NULL;
@@ -609,7 +613,8 @@ static int responses_handler(const char *body, char *resp, int cap)
    if (!ag)
    {
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
+      openai_format_error_code(resp, cap, "server_error", "no agent configured",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
@@ -1531,7 +1536,8 @@ static int runs_handler(const char *body, char *resp, int cap)
    if (!ag)
    {
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
+      openai_format_error_code(resp, cap, "server_error", "no agent configured",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
