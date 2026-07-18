@@ -227,43 +227,50 @@ void aimee_ir_shadow_observe_request(const cJSON *req, aimee_wire_t frontend)
    }
    aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, frontend);
 
-   /* Rebuild same-protocol and check BYTE-exact parity -- the caching gate. The
-    * verbatim passthrough forwards serialize(req) (cJSON re-emits the parsed request
-    * in its original key order), so serialize(anthropic_backend_build(parse(req)))
-    * == serialize(req) means the IR egress is a byte-faithful drop-in and the
-    * passthrough can be retired. On a mismatch, semantic_equal (cJSON_Compare,
-    * key-order-insensitive) separates harmless key-order/formatting drift from real
-    * field loss. Per the roundtable no-raw-bytes rule, only lengths + the semantic
-    * flag are logged, never request content. */
-   cJSON *rebuilt = anthropic_backend_build(&ir);
-   if (!rebuilt)
+   /* The byte-parity gate was retired with the raw sidecar (the canonical egress now
+    * INTENTIONALLY re-renders every request, so byte-parity vs the client's raw bytes
+    * is meaningless). But the residual risk it implicitly covered -- a top-level field
+    * the IR does not model being silently DROPPED from the canonical egress -- remains.
+    * So the shadow is re-purposed to FIELD-COVERAGE detection: every top-level key the
+    * client sent must be one the IR models. A request using only modeled keys scores
+    * REBUILD_MATCH; one carrying an unmodeled top-level key scores REBUILD_MISMATCH and
+    * logs the key NAME (never its value -- no request content in logs), flagging a
+    * modeling gap to close. Cheap: a key-name scan, no rebuild. */
+   static const char *const MODELED[] = {
+       "model",        "max_tokens",  "messages", "system",         "tools",
+       "tool_choice",  "temperature", "top_p",    "top_k",          "metadata",
+       "service_tier", "thinking",    "stream",   "stop_sequences", NULL};
+   const char *unmodeled = NULL;
+   for (const cJSON *k = req->child; k; k = k->next)
    {
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, frontend);
+      if (!k->string)
+         continue;
+      int modeled = 0;
+      for (const char *const *m = MODELED; *m; m++)
+         if (strcmp(k->string, *m) == 0)
+         {
+            modeled = 1;
+            break;
+         }
+      if (!modeled)
+      {
+         unmodeled = k->string;
+         break;
+      }
+   }
+   if (!unmodeled)
+   {
+      aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MATCH, frontend);
    }
    else
    {
-      char *req_s = cJSON_PrintUnformatted(req);
-      char *reb_s = cJSON_PrintUnformatted(rebuilt);
-      if (req_s && reb_s && strcmp(req_s, reb_s) == 0)
+      aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MISMATCH, frontend);
+      if (g_logged < SHADOW_LOG_CAP)
       {
-         aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MATCH, frontend);
+         g_logged++;
+         fprintf(stderr, "[ir-shadow] anthropic canonical egress drops unmodeled top-level '%s'\n",
+                 unmodeled);
       }
-      else
-      {
-         aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MISMATCH, frontend);
-         if (g_logged < SHADOW_LOG_CAP)
-         {
-            g_logged++;
-            fprintf(
-                stderr,
-                "[ir-shadow] anthropic byte MISMATCH (req_len=%zu reb_len=%zu semantic_equal=%d)\n",
-                req_s ? strlen(req_s) : (size_t)0, reb_s ? strlen(reb_s) : (size_t)0,
-                cJSON_Compare(req, rebuilt, 1));
-         }
-      }
-      free(req_s);
-      free(reb_s);
-      cJSON_Delete(rebuilt);
    }
    aimee_request_free(&ir);
 }

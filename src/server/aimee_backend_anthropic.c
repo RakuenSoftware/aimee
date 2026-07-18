@@ -136,15 +136,14 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
       return NULL;
-   /* Same-protocol byte-faithful egress: an Anthropic request that no IR transform
-    * touched is byte-identical to its raw sidecar, so ship those exact bytes. This
-    * preserves Claude Code's prompt-cache prefix (which the typed re-serialization
-    * below would perturb via key-order/formatting) and is the whole point of routing
-    * the native path through the IR instead of a verbatim passthrough that skips it.
-    * A transform that mutates the typed fields sets ir->mutated, forcing the rebuild. */
-   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && !ir->mutated && ir->raw)
-      return cJSON_Duplicate(ir->raw, 1);
-
+   /* The raw-sidecar fast-path was RETIRED here (cross-protocol canonical egress): the
+    * Anthropic egress is now a pure, deterministic function of the typed IR for EVERY
+    * source. Shipping the client's raw bytes only for an Anthropic source made
+    * openai->IR->anthropic and anthropic->IR->anthropic diverge (client key-order +
+    * client cache markers), but Anthropic prompt-caches on exact bytes, so the same
+    * logical content must serialize identically regardless of source. All top-level
+    * fields the sidecar preserved are now modeled (slice 1) and cache_control is
+    * applied uniformly (slice 2), so nothing is lost by rebuilding. */
    cJSON *out = cJSON_CreateObject();
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);

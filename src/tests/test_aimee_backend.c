@@ -46,26 +46,30 @@ int main(void)
    printf("aimee-backend: ");
    char err[128];
 
-   /* --- (1) same-protocol round-trip is IR-stable --- */
+   /* --- (1) the canonical Anthropic egress is DETERMINISTIC and round-trip STABLE.
+    *         The raw sidecar was retired: egress is now a pure function of the typed IR
+    *         plus the uniform cache policy, so parse->build is NOT the identity (it adds
+    *         the policy's cache markers), but it IS idempotent -- building twice is
+    *         byte-identical, and re-parsing the egress then rebuilding reproduces it. --- */
    aimee_request_t air;
    parse_anthropic(ANTHROPIC, &air);
    cJSON *built = anthropic_backend_build(&air);
    assert(built);
+   char *b1 = cJSON_PrintUnformatted(built);
+   cJSON *built2 = anthropic_backend_build(&air); /* determinism: a second build matches */
+   char *b2 = cJSON_PrintUnformatted(built2);
+   assert(b1 && b2 && strcmp(b1, b2) == 0);
    aimee_request_t air2;
    assert(anthropic_frontend_parse(built, &air2, err, sizeof err) == 0);
-   assert(aimee_ir_request_equal(&air, &air2)); /* parse->build->parse stable */
-   /* ...and BYTE-exact: an unmutated same-protocol build ships the raw sidecar, so
-    * the wire bytes are identical to the client's (prompt cache preserved). */
-   {
-      cJSON *orig = cJSON_Parse(ANTHROPIC);
-      char *os = cJSON_PrintUnformatted(orig);
-      char *bs = cJSON_PrintUnformatted(built);
-      assert(os && bs && strcmp(os, bs) == 0);
-      free(os);
-      free(bs);
-      cJSON_Delete(orig);
-   }
+   cJSON *rebuilt = anthropic_backend_build(&air2); /* idempotent round-trip */
+   char *b3 = cJSON_PrintUnformatted(rebuilt);
+   assert(b3 && strcmp(b1, b3) == 0);
+   free(b1);
+   free(b2);
+   free(b3);
    cJSON_Delete(built);
+   cJSON_Delete(built2);
+   cJSON_Delete(rebuilt);
 
    /* --- (1b) ir->mutated forces the typed rebuild; MODELED top-level fields
     *          (top_p, top_k, metadata) survive it -- required so the canonical egress
