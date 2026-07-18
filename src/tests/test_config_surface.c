@@ -72,7 +72,7 @@ static const char *FIXTURE_A =
     "inline_tagging: true\nidentity:\n  working_profile_injection:\n    enabled: true\ncompact:\n  "
     "enabled: true\n  threshold: 1\n  head_bytes: 1\n  tail_bytes: 1\nsessions:\n  "
     "stale_threshold_secs: 1\n  max_sessions: 1\n  max_worktrees: 1\nprompt_tier: "
-    "ZZA_val\nprompt_file: ZZA_val\necomode: true\nmcp:\n  osv:\n    enabled: true\n    offline: "
+    "ZZA_val\nprompt_file: ZZA_val\nmcp:\n  osv:\n    enabled: true\n    offline: "
     "true\n    enforce: true\n    endpoint: ZZA_val\nrewind:\n  auto_snapshot: true\notel:\n  "
     "endpoint: ZZA_val\n  service_name: ZZA_val\nintegrity:\n  enabled: true\n  dry_run: "
     "true\nsession:\n  virtual_context:\n    enabled: true\n    assembly_budget: 1\ntransport:\n  "
@@ -132,7 +132,7 @@ static const char *FIXTURE_B =
     " working_profile_injection:\n    enabled: false\ncompact:\n  enabled: false\n  threshold: "
     "4096\n  head_bytes: 4096\n  tail_bytes: 4096\nsessions:\n  stale_threshold_secs: 4096\n  "
     "max_sessions: 4096\n  max_worktrees: 4096\nprompt_tier: ZZB_val\nprompt_file: "
-    "ZZB_val\necomode: false\nmcp:\n  osv:\n    enabled: false\n    offline: false\n    enforce: "
+    "ZZB_val\nmcp:\n  osv:\n    enabled: false\n    offline: false\n    enforce: "
     "false\n    endpoint: ZZB_val\nrewind:\n  auto_snapshot: false\notel:\n  endpoint: ZZB_val\n  "
     "service_name: ZZB_val\nintegrity:\n  enabled: false\n  dry_run: false\nsession:\n  "
     "virtual_context:\n    enabled: false\n    assembly_budget: 4096\ntransport:\n  "
@@ -288,7 +288,6 @@ int main(void)
    assert(cfgA.max_worktrees != cfgB.max_worktrees);
    assert(strcmp(cfgA.prompt_tier, cfgB.prompt_tier) != 0);
    assert(strcmp(cfgA.prompt_file, cfgB.prompt_file) != 0);
-   assert(cfgA.ecomode == 1 && cfgB.ecomode == 0);
    assert(cfgA.mcp_osv_enabled == 1 && cfgB.mcp_osv_enabled == 0);
    assert(cfgA.mcp_osv_offline == 1 && cfgB.mcp_osv_offline == 0);
    assert(cfgA.mcp_osv_enforce == 1 && cfgB.mcp_osv_enforce == 0);

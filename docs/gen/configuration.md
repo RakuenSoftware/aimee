@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (183)
+## CLI-settable keys (182)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -64,7 +64,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `dogfood_enabled` | bool | Capture sessions as dogfood training/eval data. |
 | `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
 | `dogfood_log_dir` | string | Directory for dogfood logs. |
-| `ecomode` | bool | Reduce background compute (eco mode). |
 | `economizer` | string (off\|safe\|aggressive) | Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md. |
 | `embedding_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedding_dim` | int | Embedding vector dimension. |

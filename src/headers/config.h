@@ -1144,12 +1144,6 @@ typedef struct config
    char prompt_file[MAX_PATH_LEN];
    char delegate_prompt_tier[16];
 
-   /* Ecomode: prefer lowest-cost agents for all tasks when enabled.
-    * 0 = off (default), 1 = on.
-    * In ecomode, routing skips the default agent and always picks
-    * the cheapest enabled agent capable of the requested role. */
-   int ecomode;
-
    /* Background process management.
     * max_background_processes: concurrent process limit (0 = use PROC_MAX_CONCURRENT = 5). */
    int max_background_processes;

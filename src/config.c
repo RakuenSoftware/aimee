@@ -381,7 +381,6 @@ static const config_schema_entry_t config_schema[] = {
      0}, /* off|safe|aggressive (deprecated object form still parses) */
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
-    {"ecomode", SCHEMA_BOOL, 0},
     {"prompt_tier", SCHEMA_STRING, 0},
     {"prompt_file", SCHEMA_STRING, 0},
     {"delegate_prompt_tier", SCHEMA_STRING, 0},
@@ -1655,10 +1654,6 @@ int config_load_file(config_t *cfg)
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->delegate_prompt_tier, sizeof(cfg->delegate_prompt_tier), "%s",
                item->valuestring);
-
-   item = cJSON_GetObjectItemCaseSensitive(root, "ecomode");
-   if (cJSON_IsBool(item))
-      cfg->ecomode = cJSON_IsTrue(item) ? 1 : 0;
 
    /* LSP server configuration */
    config_parse_lsp_servers_section(cfg, root);

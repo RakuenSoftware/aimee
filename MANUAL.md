@@ -439,7 +439,6 @@ corresponding `config_*.c` module.
 | `rewind` | object | Conversation rewind settings. |
 | `search` | object | Search behavior. |
 | `compact` | object | Context compaction (`compact.enabled`). |
-| `ecomode` | bool | Reduced-resource mode. |
 | `lsp_servers` | array | Language servers to launch for diagnostics. |
 | `mcp` / `mcp_clients` | object/array | MCP server transport and downstream MCP clients. |
 | `client_integrations_enabled` | bool | Auto-register aimee's MCP server + hooks into external AI-tool configs (Claude Code, Gemini, Copilot, Codex) on each run (default `true`; set `false` to opt out). See [§25](#25-integrations). |
@@ -1505,8 +1504,8 @@ depend on session history.
 
 Thread pools and concurrency are tunable in `aimee.yaml`
 (`compute_threads`, `worker_threads`, `background_threads`, `concurrency.
-per_model.<model>`). `ecomode: true` reduces resource use. Service-unit memory
-limits cap the server and KB independently.
+per_model.<model>`). Service-unit memory limits cap the server and KB
+independently.
 
 ### 27.5 Scaling and multi-user deployment
 
