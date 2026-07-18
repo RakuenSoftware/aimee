@@ -310,7 +310,7 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
     * (config-load, array, free) and context_reduce hard-bypasses on any internal
     * error, so this can never perturb the client response. Reuses the loaded pcfg;
     * cheap mtime-cached load keeps it dark by default. */
-   if (cfg_ok && pcfg.reduce_gateway_seam)
+   if (cfg_ok && econ_gateway_mutate_on(&pcfg))
    {
       char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
       const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
@@ -511,7 +511,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * req["messages"] in place (compress-only) BEFORE translate/build so the provider
     * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
     * caught below (restore-resend), the session is circuit-broken, and provenance is
-    * cleared. A dark no-op when reduce_gateway_mutate is off. */
+    * cleared. A dark no-op unless the economizer tier is aggressive. */
    if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);

@@ -928,7 +928,8 @@ char *tool_bash(const char *command, int timeout_ms)
       }
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"fork failed\",\"exit_code\":-1}");
    }
-   /* command-aware condensation (P1b): when reduce_command_filter is on, `rawcap` (the
+   /* command-aware condensation (P1b): when tool_condense is active (economizer tier != off),
+    * `rawcap` (the
     * MAXIMUM we'll capture) rises to the 2 MB ceiling so tool_condense sees the FULL output
     * (the old 32 KB read cap truncated the input before the lever could condense + spill it).
     * Default-off keeps the 32 KB cap — byte-identical. Per-call config load, reused for both
@@ -1088,7 +1089,7 @@ char *tool_bash(const char *command, int timeout_ms)
    out_buf[out_len] = '\0';
    err_buf[err_len] = '\0';
 
-   /* Command-aware condensation (reduce_command_filter, default off): for a RECOGNIZED
+   /* Command-aware condensation (safe-tier, active when economizer tier != off): for a RECOGNIZED
     * command, deterministically condense the output (test failures kept, passes elided)
     * and spill the full raw so the delegate can read it back. Fail-open: any miss/decline
     * returns NULL and we fall through to the size-based agent_compress_tool_result. */

@@ -928,7 +928,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * Cheap mtime-cached config load keeps it dark by default. */
    {
       config_t ecfg;
-      if (config_load(&ecfg) == 0 && ecfg.reduce_gateway_seam)
+      if (config_load(&ecfg) == 0 && econ_gateway_mutate_on(&ecfg))
       {
          reduce_result_t gw_res;
          if (gw_economizer_measure(messages, system_prompt, agent->model, ecfg.fold_retained_msgs,

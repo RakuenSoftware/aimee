@@ -131,7 +131,7 @@ static void test_dark_default_and_identityless(void)
    cJSON *c = container_with("orig");
    gw_mutate_ctx_t ctx;
 
-   /* default config -> reduce_gateway_mutate off -> dark no-op */
+   /* default config -> economizer tier not aggressive -> dark no-op */
    gw_buffered_mutate(c, "messages", "some-model", NULL, NULL, NULL, NULL, &ctx);
    assert(ctx.mutated == 0);
    assert(ctx.mutate_on == 0); /* flag off */
@@ -233,7 +233,7 @@ static void test_token_delta_sampling(void)
 
 static void test_no_behavior_change_when_off(void)
 {
-   /* With reduce_gateway_mutate off (default config in this test's HOME), the buffered
+   /* With economizer tier not aggressive (default config in this test's HOME), the buffered
     * mutate short-circuits at the flag gate BEFORE inspecting the payload, so the
     * container is a byte-identical no-op for ANY input regardless of size/shape. */
    cJSON *c = container_with("payload");
@@ -290,7 +290,7 @@ static void test_stat_json(void)
 int main(void)
 {
    printf("gateway_mutate_wire: ");
-   /* Deterministic defaults for config_load (no aimee.yaml -> reduce_gateway_mutate off). */
+   /* Deterministic defaults for config_load (no aimee.yaml -> economizer tier not aggressive). */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-gwwire-XXXXXX", platform_tmpdir());
    if (platform_mkdtemp(tmpdir))

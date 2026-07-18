@@ -97,6 +97,14 @@ extern "C"
  * cannot justify an unbounded cache-write bet on a single run. */
 #define FREEZE_GUARD_MAX_HORIZON 5
 
+/* Fixed freeze-guard horizon (reuse turns for the break-even estimate). Formerly the
+ * reduce.freeze_guard_horizon knob (default 1); the tier model bakes it as a constant. */
+#define ECON_FREEZE_GUARD_HORIZON 1
+
+/* How long a circuit-broken /v1 session stays disabled by the aggressive-tier gateway
+ * mutator (1h). Formerly reduce.gateway_session_disable_ttl_ms; now a fixed constant. */
+#define ECON_GATEWAY_SESSION_DISABLE_TTL_MS 3600000
+
    /* Per-CONVERSATION reducer state, owned by the caller and persisted across
     * turns within one conversation (e.g. a stack local spanning the turn loop).
     * NOT shared across agents/sessions (cross-session sharing would leak context).

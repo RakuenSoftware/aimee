@@ -27,10 +27,8 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer = -1;               /* unspecified -> tier decides */
       assert(tool_condense_enabled(&cfg) == 0); /* tier OFF (memset) -> off */
-      cfg.reduce_command_filter = 1;
-      assert(tool_condense_enabled(&cfg) == 0); /* still tier OFF */
       cfg.economizer_tier = ECON_TIER_SAFE;
-      assert(tool_condense_enabled(&cfg) == 1); /* tier on + lever on */
+      assert(tool_condense_enabled(&cfg) == 1); /* safe tier -> condensation on */
       cfg.economizer_tier = ECON_TIER_OFF;      /* off tier kills the lever */
       assert(tool_condense_enabled(&cfg) == 0);
       assert(tool_condense_enabled(NULL) == 0);
@@ -272,7 +270,6 @@ int main(void)
       /* disabled -> passthrough */
       assert(tool_condense_apply(&cfg, "pytest -q", 0, big, "/tmp", NULL) == NULL);
 
-      cfg.reduce_command_filter = 1;
       cfg.economizer_tier = ECON_TIER_SAFE; /* master on */
       /* unrecognized command -> passthrough */
       assert(tool_condense_apply(&cfg, "frobnicate", 0, big, "/tmp", NULL) == NULL);
@@ -352,7 +349,6 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer =
           -1; /* config_load default: unspecified -> legacy economizer.enabled */
-      cfg.reduce_command_filter = 1;
       cfg.economizer_tier = ECON_TIER_SAFE; /* master on */
       char big[8192];
       size_t off = 0;
@@ -381,7 +377,6 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer =
           -1; /* config_load default: unspecified -> legacy economizer.enabled */
-      cfg.reduce_command_filter = 1;
       cfg.economizer_tier = ECON_TIER_SAFE; /* master on */
       char big[8192];
       size_t off = 0;

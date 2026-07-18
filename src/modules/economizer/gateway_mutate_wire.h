@@ -2,7 +2,7 @@
  * gateway mutation (proposal §2.5, buffered). Sits above the pure decision helpers
  * (gateway_mutate.h): resolves the per-session key from the thread-local request
  * identity, honors the per-session circuit breaker, snapshots + reduces + replaces
- * the messages array under the default-OFF reduce_gateway_mutate flag, and after the
+ * the messages array under the aggressive economizer tier, and after the
  * upstream status handles the 4xx-restore-resend / 5xx-disable contract. Shared by
  * the Anthropic (/v1/messages) and OpenAI (/v1/responses) buffered paths. Provider-
  * agnostic: it operates on a cJSON `container` and the message-array `key` within
@@ -35,9 +35,9 @@ extern "C"
    void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx);
    void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx);
 
-   /* Cheap (mtime-cached config_load) check of reduce_gateway_mutate, so a caller can
-    * skip the system-prompt flattening + the mutate attempt entirely on the default-
-    * OFF hot path. gw_buffered_mutate re-checks internally (defense in depth). */
+   /* Cheap (mtime-cached config_load) check of econ_gateway_mutate_on (tier==aggressive),
+    * so a caller can skip the system-prompt flattening + the mutate attempt entirely on the
+    * default hot path. gw_buffered_mutate re-checks internally (defense in depth). */
    int gw_mutate_is_enabled(void);
 
    /* Provider-gated enable: gateway wire-mutation is OpenAI-only. Returns true only when
@@ -47,7 +47,7 @@ extern "C"
     * caller's driver_is_anthropic()/parity signal. */
    int gw_mutate_upstream_ok(int upstream_is_anthropic);
 
-   /* Pre-send: under reduce_gateway_mutate, resolve the session key from the thread-
+   /* Pre-send: under the aggressive economizer tier, resolve the session key from the thread-
     * local request identity; if the session is not disabled, snapshot container[key],
     * run the compress-only economizer, and — when gw_should_apply passes — replace
     * container[key] with the reduced array (marking provenance) so the provider body

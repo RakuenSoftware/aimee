@@ -24,7 +24,6 @@ void config_parse_fold_section(config_t *cfg, cJSON *root);
 void config_parse_modules_section(config_t *cfg, cJSON *root);
 void config_parse_reduce_section(config_t *cfg, cJSON *root);
 void config_parse_autonomy_section(config_t *cfg, cJSON *root);
-void config_apply_reduce_consistency(config_t *cfg);
 void config_parse_memory_section(config_t *cfg, cJSON *root);
 void config_parse_cross_verify_section(config_t *cfg, cJSON *root);
 void config_parse_retry_section(config_t *cfg, cJSON *root);

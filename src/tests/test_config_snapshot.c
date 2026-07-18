@@ -31,7 +31,6 @@ static void write_marker(int aggressive, int budget)
    config_load(&c);
    /* keep the config VALID regardless of what a prior (deliberately-invalid) test left on
     * disk, so config_reload's validate-or-keep never rejects a marker write. */
-   c.reduce_gateway_session_disable_ttl_ms = 3600000;
    c.economizer_tier = aggressive ? ECON_TIER_AGGRESSIVE : ECON_TIER_OFF;
    c.coord_closet_budget_bytes = budget;
    assert(config_save(&c) == 0);
@@ -104,15 +103,19 @@ int main(void)
    /* reloading the same file again is a no-op */
    assert(config_reload() == 0);
 
-   /* --- validate-or-keep: an INVALID file -> reload -1, snapshot unchanged --- */
+   /* --- validate-or-keep: an INVALID file -> reload -1, snapshot unchanged. In strict mode a
+    * schema type error (int key given a string) is fatal, so config_load_file returns -1 and
+    * config_reload keeps the last good snapshot. --- */
    {
+      extern int g_config_strict;
       const char *path = config_default_path();
       FILE *fp = fopen(path, "w");
       assert(fp);
-      /* ttl <= 0 is startup-fatal per config_reduce_validate */
-      fputs("reduce:\n  gateway_session_disable_ttl_ms: 0\n", fp);
+      fputs("db2_pool_size: \"not-a-number\"\n", fp); /* SCHEMA_INT given a string */
       fclose(fp);
+      g_config_strict = 1;
       assert(config_reload() == -1); /* kept */
+      g_config_strict = 0;
       config_t got;
       assert(config_snapshot_get(&got) == 0);
       assert(got.coord_closet_budget_bytes == 2222); /* still the last GOOD snapshot */
@@ -163,7 +166,6 @@ int main(void)
       static config_t sc;
       memset(&sc, 0, sizeof sc);
       config_load(&sc); /* snapshot base */
-      sc.reduce_gateway_session_disable_ttl_ms = 3600000;
       sc.autonomy_skeptics = 9;
       assert(config_save(&sc) == 0);
       assert(config_reload() == 1);

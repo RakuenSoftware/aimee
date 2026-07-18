@@ -361,11 +361,6 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
-      /* economizer freeze guardrail: default-on bool + default-1 horizon. Flip the
-       * bool OFF and the horizon to a non-default so both must round-trip (regression
-       * class: a default-on save-guard that emits only the non-default state). */
-      cfg.reduce_freeze_guard_enabled = 0;
-      cfg.reduce_freeze_guard_horizon = 3;
       /* require_aimee_git (default ON) + delegate_sandbox (default OFF): both are
        * enforcement dials, so a value that does not survive save+reload is a guard
        * silently in the wrong state after every restart. */
@@ -397,8 +392,6 @@ int main(void)
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
-      assert(cfg2.reduce_freeze_guard_enabled == 0); /* default-on bool persisted off */
-      assert(cfg2.reduce_freeze_guard_horizon == 3); /* non-default horizon persisted */
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);

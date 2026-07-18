@@ -19,7 +19,7 @@ request), unless noted otherwise below.
   is the only network hop; there are no server changes per field.
 - **Control inference:** the control type is inferred from the value's JSON type: a
   **boolean → toggle**, a **number → number field**, a **string → text field**. Grouping is
-  by the dotted key prefix (e.g. everything under `reduce.` forms one section).
+  by the dotted key prefix (e.g. everything under `autonomy.` forms one section).
 - **Quick panel:** a smaller gear dropdown in the top bar (`SettingsPanel`) surfaces the
   five most-used toggles (autonomous mode, cross-verify, eco mode, reasoning cap, max
   iterations). The full page is the comprehensive home for everything else.
@@ -33,28 +33,25 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer: two-tier switches (`economizer.*`) + levers (`reduce.*`)
+### Context economizer: the single `economizer` tier
 
-The economizer has two **tier switches** that gate the individual `reduce.*` levers, plus the
-levers themselves. All are booleans except the two numeric tuning knobs. Defaults in
-parentheses.
+The economizer is controlled by **one** provider-aware setting, `economizer`, with three
+values. It replaces the old `economizer.enabled`/`economizer.aggressive` switches and the
+per-lever `reduce.*` booleans — the tier now decides each reducer's behavior internally.
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| **`economizer.enabled`** | **on** | **Master switch.** Off = one kill-switch: every reducer is forced off (measurement keeps running and reports zero, proving the kill). The safe tier stays on under it by the levers' own defaults. |
-| `economizer.aggressive` | off | **Opt-in ceiling for the aggressive tier** (live **primary** `/v1` mutation). `reduce.gateway_mutate` activates only with **`economizer.enabled` AND `economizer.aggressive` AND** the lever itself; the aggressive flag alone never turns on a live-traffic mutator. |
-| **`reduce.command_filter`** | **on** | **Tool-output condensation**: deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
-| `reduce.gateway_mutate` | off | Apply the economizer to the live inbound `/v1` request so the **primary** agent's tokens are reduced too. See [Economizer gateway mutation](features/economizer-gateway-mutation.md). |
-| `reduce.compress` | on | Size-based compression of oversized tool-result bodies. |
-| `reduce.history_fold` | on | Fold old turn history into a rolling skeleton. |
-| `reduce.delegate_seam` | on | Run the economizer at the delegate turn loop. |
-| `reduce.measure` | on | Collect the baseline/opportunity token ledger. |
-| `reduce.freeze_guard` | on | Pin the fold boundary only when the cache-read savings beat the cache-write cost. |
-| `reduce.gateway_session_disable_ttl_ms` | 3600000 | Gateway-mutation circuit-breaker window (ms). Must be > 0. |
-| `reduce.freeze_guard_horizon` | 1 | Expected reuse turns for the freeze break-even estimate. |
+| `economizer` | What it does |
+| --- | --- |
+| `off` | Verbatim passthrough: no prompt caching, no reduction. |
+| `safe` **(default)** | Lossless. Anthropic prompt caching + deterministic freeze-on-first-send tool-output condensation; OpenAI recall-restorable history fold. |
+| `aggressive` | Everything in `safe`, plus lossy body compression and live OpenAI `/v1` gateway mutation (primary-agent token reduction, behind a per-session circuit breaker). |
 
-`reduce.gateway_seam` is intentionally **not** on the page. It is synthesized from
-`gateway_mutate` and its persistence is explicit-gated; toggle `gateway_mutate` instead.
+```yaml
+economizer: safe   # off | safe | aggressive
+```
+
+`modules.economizer: false` is an authoritative hard-kill that forces the tier to `off`
+regardless of its value. A deprecated `economizer: {enabled, aggressive}` object form is still
+accepted and mapped onto the tier for back-compat.
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -75,32 +72,21 @@ per-turn toggles). Values are clamped to sane bounds.
 
 ---
 
-## Turning on tool-output condensation
+## Tool-output condensation
 
-The most common new toggle. In the web UI:
+Deterministic command-aware tool-output condensation is part of the **`safe`** tier — it is on
+whenever `economizer` is `safe` or `aggressive` (i.e. not `off`). There is no separate toggle;
+set `economizer: off` to disable all reduction including condensation.
 
-1. Open **⚙️ Settings** (left nav) and filter for `command_filter` (or scroll to the
-   **`reduce`** group).
-2. Flip **`reduce.command_filter`** **on** and **Save**.
-
-Or from the CLI / config file:
-
-```yaml
-reduce:
-  command_filter: true
-```
-
-When on, a delegate's recognized command output is condensed before it enters context, with
-the full output spilled under `<aimee_home>/tool-spills/` and a recovery pointer in the
-condensed result. When off, output is byte-identical to today (it falls through to the
-size-based `reduce.compress`). See
-[features/tool-output-condensation.md](features/tool-output-condensation.md) for the full
-behavior, safety contract, and observability.
+A delegate's recognized command output is condensed before it enters context, with the full
+output spilled under `<aimee_home>/tool-spills/` and a recovery pointer in the condensed
+result. See [features/tool-output-condensation.md](features/tool-output-condensation.md) for
+the full behavior, safety contract, and observability.
 
 ## When a change takes effect
 
-- **Immediately (next turn):** the economizer `reduce.*` levers and most other fields. The
-  server reloads config per request.
+- **Immediately (next turn):** the `economizer` tier and most other fields. The server
+  reloads config per request.
 - **On next server start:** the `autonomy.*` knobs: they are bridged to `AIMEE_AUTONOMY_*`
   environment variables at startup so the workflow engine (which reads them across a module
   boundary) sees them; an explicitly-set env var always wins.

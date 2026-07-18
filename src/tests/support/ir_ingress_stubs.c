@@ -242,7 +242,7 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
 }
 
 /* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
- * block gated by cfg.reduce_gateway_seam (0 under the tests' stubbed config, so NEVER entered
+ * block gated by econ_gateway_mutate_on (false under the tests' stubbed config, so NEVER entered
  * at runtime). LTO used to dead-code-eliminate the block, but that decision is fragile (any new
  * read of the loaded cfg in that function can retain it, and it differs across gcc versions), so
  * resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win when a
@@ -268,7 +268,7 @@ __attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
    (void)out;
 }
 /* Shadow gateway-measure wrapper: anthropic_http.c / openai_chat.c call this inside the
- * cfg.reduce_gateway_seam block (0 under the tests' stubbed config, so NEVER entered at
+ * econ_gateway_mutate_on block (false under the tests' stubbed config, so NEVER entered at
  * runtime); the inert weak stub only resolves the link. Mirrors the real no-op contract:
  * zero `out` so the caller's context_reduce_result_free is safe, return 1 ("did nothing").
  * Real gateway_mutate_wire.o wins when a test links it. */
@@ -283,6 +283,15 @@ __attribute__((weak)) int gw_economizer_measure(cJSON *messages, const char *sys
    if (out)
       memset(out, 0, sizeof(*out));
    return 1;
+}
+/* The gateway-seam gate itself: messages_run_request_pipeline / anthropic_http.c now gate the
+ * shadow-measure + mutation block on econ_gateway_mutate_on (was a plain cfg field read). Inert
+ * weak stub returns 0 (dark), so the block is never entered under a stubbed config. Real
+ * config.o wins when a test links it. */
+__attribute__((weak)) int econ_gateway_mutate_on(const config_t *cfg)
+{
+   (void)cfg;
+   return 0;
 }
 __attribute__((weak)) void agent_record_reduce_ledger(const struct reduce_result_s *r,
                                                       const char *model, const char *agent_name,

@@ -1072,83 +1072,21 @@ typedef struct config
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
 
-   /* Unified context economizer (src/context_reduce.c). The single reduction
-    * subsystem invoked at every request-assembly seam. All default-off. Knobs are
-    * added here as each slice implements them, so an exposed flag is always
-    * honored. Currently the measurement engine (delegate seam, measure-only):
-    * reduce_measure_enabled: collect baseline/opportunity ledger rows (no
-    *   mutation) — the shadow mode that powers the cost numbers.
-    * reduce_delegate_seam: enable the economizer at the delegate turn loop.
-    * reduce_history_fold: actually fold old history (rolling skeleton + Coordinate
-    *   Closet) at the delegate seam — the first real reduction lever (default-off).
-    * reduce_compress: boundary-free tool-result BODY compression at the delegate
-    *   seam (Slice 4). Shrinks oversized tool-result bodies in place (identifiers
-    *   conserved in the Coordinate Closet) WITHOUT needing a clean-user-turn
-    *   boundary, so it engages on autonomous tool-loops where history_fold can't.
-    *   Provider-native output (valid for all builders incl. chatgpt). Default-off.
-    * reduce_gateway_seam: enable the economizer at the inbound /v1 gateway seam.
-    *   Shadow-mode only in this slice (measure_only is forced on at the gateway, so
-    *   it NEVER mutates the live client request) — collects baselines on live
-    *   ingress traffic with zero behavior change.
-    * reduce_freeze_guard_enabled: freeze cost guardrail (Slice 5). Pin the fold
-    *   boundary (cache-warm reduced prefix) only when the estimated cache-read
-    *   savings over reduce_freeze_guard_horizon reuses cover the one-time cache-write
-    *   churn; otherwise re-derive without pinning. Default-ON, but only acts when the
-    *   (default-off) economizer freeze is live, so no default-path behavior change.
-    * reduce_freeze_guard_horizon: expected reuse turns for the break-even estimate
-    *   (0 -> 1; clamped to FREEZE_GUARD_MAX_HORIZON).
-    * reduce_gateway_mutate: APPLY the reduction to the live inbound /v1 request (the
-    *   primary-agent path) instead of only measuring it — compress-only, behind a
-    *   per-session circuit breaker (msg_session_disable), buffered 4xx-restore-resend +
-    *   streaming disable-subsequent-turns. Default-OFF (the whole gateway-mutation
-    *   feature). mutate=1 implies gateway_seam=1: config_load auto-enables the shadow
-    *   seam IN MEMORY (never rewriting the file) + logs one WARN, so the shadow baseline
-    *   the validation gates compare against always exists.
-    * reduce_gateway_session_disable_ttl_ms: how long a circuit-broken session stays
-    *   disabled (default 3600000 = 1h). MUST be > 0 — 0/negative is a startup-fatal
-    *   config error (a permanent-pin/breaker-off knob on a live path is disproportionate
-    *   runtime risk); validated by config_reduce_validate() at server startup.
-    * (Other per-lever gates and min_gain land in later slices.) */
-   int reduce_measure_enabled;
-   int reduce_delegate_seam;
-   int reduce_history_fold;
-   int reduce_compress;
-   int reduce_gateway_seam;
-   int reduce_freeze_guard_enabled;
-   int reduce_freeze_guard_horizon;
-   int reduce_gateway_mutate;
-   int reduce_gateway_session_disable_ttl_ms;
-   /* reduce_command_filter: deterministic command-aware tool-output condensation lever.
-    * DEFAULT-ON (unified-economizer P1c): a safe-tier lever — lossless-on-demand (full
-    * output spilled), fail-open, and no-over-reduction (failures/diagnostics + their detail
-    * block kept in the condensed view). When on, tool_bash captures up to TOOL_CONDENSE_
-    * CEILING (2 MB) so the full output reaches the lever, replacing the old lossy 32 KB
-    * read-cap truncation. Set reduce.command_filter=false to opt out. */
-   int reduce_command_filter;
-   /* Runtime-only (NOT parsed as a key, NOT persisted): 1 iff the operator set the
-    * reduce.gateway_seam key explicitly. Lets config_save persist gateway_seam only
-    * when the user chose it, never when config_load synthesized it from mutate=1. */
-   int reduce_gateway_seam_explicit;
-
-   /* Unified-economizer TWO-TIER switches (P3). These GATE the individual reduce.* levers
-    * without mutating them (resolved by the econ_* accessors, never surprising config_save):
-    *   economizer.enabled   — MASTER for all reduction ACTIONS. DEFAULT-ON. false = one
-    *                          off-switch: every reducer is forced off, but measure/telemetry
-    *                          keeps running (reports zero — proving the kill works). The safe
-    *                          tier (delegate-seam: command_filter/history_fold/compress) is on
-    *                          under it by their own defaults.
-    *   economizer.aggressive — opt-in ceiling for the AGGRESSIVE tier (live PRIMARY /v1
-    *                          mutation: gateway_mutate). DEFAULT-OFF. gateway_mutate requires
-    *                          enabled && aggressive && reduce.gateway_mutate (all three) — the
-    *                          aggressive flag alone never activates a live-traffic mutator. */
-   int economizer_enabled;
-   int economizer_aggressive;
-   /* The SINGLE economizer control (supersedes economizer_enabled/aggressive + the
-    * reduce.* levers, which are being removed). One of ECON_TIER_*. Selects a
-    * provider-aware strategy: OFF = verbatim passthrough; SAFE = Anthropic prompt
-    * caching + deterministic freeze-on-first-send tool condensation, OpenAI
-    * recall-restorable reduction; AGGRESSIVE = + lossy fold/compress (OpenAI live
-    * mutation). See docs/features/economizer.md. Default ECON_TIER_SAFE. */
+   /* Unified context economizer (src/modules/economizer/context_reduce.c). A single
+    * provider-aware reduction subsystem invoked at every request-assembly seam, driven
+    * entirely by economizer_tier below. The old per-lever reduce.* booleans
+    * (measure/delegate_seam/history_fold/compress/gateway_seam/gateway_mutate/
+    * command_filter/freeze_guard[_horizon]/gateway_session_disable_ttl_ms) and the
+    * economizer_enabled/aggressive two-tier switches were removed — the tier now decides
+    * each behavior at the reducer call sites via the econ_* accessors (config.c).
+    *
+    * economizer_tier: the SINGLE economizer control. One of ECON_TIER_*. Provider-aware:
+    *   OFF        = verbatim passthrough (no caching, no reduction);
+    *   SAFE       = Anthropic prompt caching + deterministic freeze-on-first-send tool
+    *                condensation; OpenAI recall-restorable reduction (lossless);
+    *   AGGRESSIVE = + lossy fold/compress and live OpenAI /v1 gateway mutation.
+    * Default ECON_TIER_SAFE. modules.economizer:false is an authoritative hard-kill over
+    * the tier (resolved in econ_tier()). See docs/features/economizer.md. */
    int economizer_tier;
 
    /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
@@ -1172,9 +1110,9 @@ typedef struct config
    int module_governance;
    int module_delegates;
    int module_workflows;
-   /* economizer's env-default analog is the legacy economizer.enabled bool (not an AIMEE_*
-    * env), so its resolver call is config_module_enabled(module_economizer, economizer_enabled)
-    * inside econ_reduction_master_on(). */
+   /* modules.economizer is an authoritative hard-kill over economizer_tier: when set to 0 it
+    * forces econ_tier() to OFF regardless of the tier value (resolved in econ_tier()). -1
+    * (unspecified) leaves the tier in effect. */
    int module_economizer;
 
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
@@ -2124,15 +2062,6 @@ int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-o
  *   3. deprecated env default (`env_default`, already the module's env-or-default-ON value).
  * `config_tristate` is one of cfg->module_* (-1 = unspecified). Pure: reads its args only. */
 int config_module_enabled(int config_tristate, int env_default);
-
-/* Validate the economizer gateway-mutation invariants that are STARTUP-FATAL (as
- * opposed to the in-memory normalizations config_load already applied). Currently:
- * reduce_gateway_session_disable_ttl_ms must be > 0. Returns 0 if valid, non-zero
- * if the live gateway-mutation path must not start; on failure writes a human
- * message into err (when err != NULL). Called at server startup so a bad value
- * refuses to bring up the live /v1 path, without breaking unrelated CLI callers
- * of config_load. Pure (reads cfg only). */
-int config_reduce_validate(const config_t *cfg, char *err, size_t errlen);
 
 /* Resolve the effective operating mode (engineer/novel) for the running
  * process. Precedence: the AIMEE_MODE environment variable (the propagation
