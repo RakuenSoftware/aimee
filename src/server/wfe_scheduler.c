@@ -65,7 +65,11 @@ static long wfe_sched_concurrency(void)
  * driveable:
  *   - un-parked (pause_reason empty): the next step is ready to run;
  *   - a SELF-RESOLVING park the sweep exists to re-check: ci_pending / merge_pending
- *     re-poll the forge, panel_degraded / panel_unreachable retry a flaky panel.
+ *     re-poll the forge, panel_degraded / panel_unreachable retry a flaky panel,
+ *     slices_running re-aggregates a foreach parent's children (advance once all
+ *     merged). A foreach parent MUST stay driveable while its slices run: the
+ *     fan-in aggregation only happens when the parent is re-driven, so parking it
+ *     non-driveably would wedge the whole fan-out.
  * Every other park either waits for a HUMAN (pending_human, operator_paused) or is
  * a runaway/failure backstop only a human (or the stale-run reaper) clears (stuck,
  * turn_cap_exceeded, wall_cap_exceeded, budget_exceeded, max_attempts, failed).
@@ -77,7 +81,8 @@ static int wfe_sched_driveable(const char *pause_reason)
       return 1;
    return strcmp(pause_reason, "ci_pending") == 0 || strcmp(pause_reason, "merge_pending") == 0 ||
           strcmp(pause_reason, "panel_degraded") == 0 ||
-          strcmp(pause_reason, "panel_unreachable") == 0;
+          strcmp(pause_reason, "panel_unreachable") == 0 ||
+          strcmp(pause_reason, "slices_running") == 0;
 }
 
 /* Stage class for sweep priority: LOWER runs first. Downstream-first ("drain

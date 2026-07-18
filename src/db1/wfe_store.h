@@ -18,7 +18,7 @@ typedef struct
    char pause_reason[32]; /* "" | pending_human | panel_degraded | budget_exceeded |
                              panel_unreachable | ci_pending | merge_pending |
                              turn_cap_exceeded | wall_cap_exceeded | stuck |
-                             operator_paused */
+                             slices_running | operator_paused */
    char paused_state[64];
    char content_hash[72];
    /* The forge ref returned by g_forge->open (PR number/url), opaque to the

@@ -2003,12 +2003,17 @@ void wfe_set_foreach_provider(const wfe_foreach_provider_t *p)
  * parking until every child has merged into the feature branch. Aggregation is keyed
  * off the DB parent<->child linkage; only SPAWNING is delegated to the seam. With no
  * spawn provider installed (and no children yet) it parks pending_human (fail closed).
- *   - no children yet    -> spawn (park while they run); no provider -> park
- *   - any child FAILED    -> a slice will not merge (rejected/abandoned) -> park for a human
+ *   - no children yet    -> spawn (park slices_running while they run); no provider ->
+ * pending_human
+ *   - any child FAILED    -> a slice will not merge (rejected/abandoned) -> park pending_human
  *   - all children accepted -> advance (feature branch carries every merged slice)
- *   - else                -> children still running -> park, re-drive later
- * Trouble always PARKS (pending_human), never a silent advance and never a hard
- * run-fail: a human resolves the failed slice, then the run resumes. */
+ *   - else                -> children still running -> park slices_running, re-drive later
+ * "Children still running" parks slices_running -- a SELF-RESOLVING wait the sweep
+ * re-drives (see wfe_sched_driveable); it is NOT a human gate. Only a genuine human
+ * wait (no spawner, fan-out failed, or a FAILED slice) parks pending_human, so the
+ * autonomous run reaches a human exactly once: the final PR. A pending_human park
+ * here would wedge the parent, since pending_human is non-driveable and the fan-in
+ * aggregation only runs when the parent is re-driven. */
 static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *wi = wfe_ctx_work_item(ctx);
@@ -2050,7 +2055,7 @@ static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *n
          snprintf(handle, sizeof handle, "%s.out", node->id);
          return wfe_step_advanced(handle, "", 0.0);
       }
-      return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* spawned; run + re-drive */
+      return wfe_step_pending(WFE_PAUSE_SLICES_RUNNING); /* spawned; run + re-drive */
    }
 
    if (failed > 0)
@@ -2063,7 +2068,7 @@ static wfe_step_result_t exec_foreach_workflow(wfe_ctx *ctx, const wfe_node_t *n
       snprintf(handle, sizeof handle, "%s.out", node->id);
       return wfe_step_advanced(handle, "", 0.0);
    }
-   return wfe_step_pending(WFE_PAUSE_PENDING_HUMAN); /* slices still running -> re-drive */
+   return wfe_step_pending(WFE_PAUSE_SLICES_RUNNING); /* slices still running -> re-drive */
 }
 
 /* Register just the foreach.workflow executor over any prior (stub) registration --

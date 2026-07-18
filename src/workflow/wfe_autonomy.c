@@ -345,6 +345,39 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
             /* pause cleared + poll durably recorded -> fall through: the advance
              * loop re-runs exec_gate_ci for a fresh CI read. */
          }
+         else if (strcmp(wi0.pause_reason, "slices_running") == 0)
+         {
+            /* A foreach.workflow parent parks slices_running while its child
+             * slices run — a SELF-resolving wait, not a human gate. Re-aggregate
+             * from the cheap local child tally and only clear the pause + re-run
+             * the node when the block can make progress: every child merged
+             * (accepted >= total) -> the advance loop re-runs exec_foreach_workflow
+             * and advances past `slices`; a FAILED slice -> exec_foreach_workflow
+             * re-parks pending_human for a human to resolve. While slices are still
+             * running with none failed, stay parked WITHOUT re-running the block or
+             * writing an event, so a long fan-out neither spams the audit log nor
+             * inflates the turn cap. A lost compare-and-clear just retries next
+             * sweep. This is the driveable analog of the pending_human foreach arm
+             * below (which handles a run parked before a slice failed, or resumed
+             * after a human fixed one). */
+            int total = 0, accepted = 0, failed = 0;
+            if (db1_work_item_child_counts(work_item_id, &total, &accepted, &failed) != 0 ||
+                total <= 0)
+               return 0;
+            if (failed == 0 && accepted < total)
+               return 0; /* slices still running, none failed -> stay parked */
+            if (db1_work_item_clear_pause_if(work_item_id, "slices_running", wi0.current_stage) !=
+                1)
+               return 0;
+            db1_lifecycle_event_add(work_item_id, wi0.current_stage, "foreach_redrive", "engine",
+                                    accepted >= total
+                                        ? "all children merged; re-aggregating"
+                                        : "a slice failed; re-aggregating to park for a human",
+                                    "", 0);
+            /* pause cleared -> fall through: the advance loop re-runs
+             * exec_foreach_workflow, which advances (all merged) or parks
+             * pending_human (a slice failed). */
+         }
          else if (strcmp(wi0.pause_reason, "pending_human") == 0)
          {
             /* A foreach.workflow parent (the `slices` node) parks pending_human

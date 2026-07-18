@@ -187,6 +187,8 @@ static const char *pause_name(wfe_pause_reason_t r)
       return "turn_cap_exceeded";
    case WFE_PAUSE_WALL_CAP:
       return "wall_cap_exceeded";
+   case WFE_PAUSE_SLICES_RUNNING:
+      return "slices_running";
    default:
       return "";
    }
@@ -212,6 +214,8 @@ static wfe_pause_reason_t pause_from_name(const char *s)
       return WFE_PAUSE_TURN_CAP;
    if (strcmp(s, "wall_cap_exceeded") == 0)
       return WFE_PAUSE_WALL_CAP;
+   if (strcmp(s, "slices_running") == 0)
+      return WFE_PAUSE_SLICES_RUNNING;
    return WFE_PAUSE_NONE;
 }
 

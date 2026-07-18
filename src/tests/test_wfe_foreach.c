@@ -105,7 +105,8 @@ int main(void)
 
    db1_work_item_t wi;
 
-   /* (1) spawner creates 2 children -> park (slices running, nothing merged yet). */
+   /* (1) spawner creates 2 children -> park slices_running (a self-resolving wait,
+    * NOT a human gate: the sweep re-drives it to re-aggregate as slices merge). */
    wfe_set_foreach_provider(&MOCK);
    g_spawn_n = 2;
    g_spawn_err = 0;
@@ -113,7 +114,7 @@ int main(void)
    run_fe("r/one", "p/one", &wi, NULL);
    assert(g_spawned == 1);
    assert(strcmp(wi.state, "active") == 0);
-   assert(strcmp(wi.pause_reason, "pending_human") == 0);
+   assert(strcmp(wi.pause_reason, "slices_running") == 0);
 
    /* (2) spawner reports 0 packets -> advance straight through (nothing to slice). */
    g_spawn_n = 0;
@@ -174,7 +175,7 @@ int main(void)
       }
    }
 
-   /* (7) GAP-2: a foreach parent parked pending_human while its children run is
+   /* (7) GAP-2: a foreach parent parked slices_running while its children run is
     * AUTO-RESUMED by the autonomy driver once EVERY child has merged — with no
     * operator resume. The fix lives in wfe_autonomy_run's pause-dispatch block,
     * so drive it there (not wfe_engine_run). */
@@ -193,14 +194,14 @@ int main(void)
       wfe_set_foreach_provider(&MOCK); /* children pre-exist -> must NOT be called */
       g_spawned = 0;
 
-      /* first pass: runs u->sp->fe, foreach sees 2 active children -> park. */
+      /* first pass: runs u->sp->fe, foreach sees 2 active children -> park slices_running. */
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      assert(strcmp(wi.pause_reason, "slices_running") == 0);
       /* a sweep with children STILL active must leave it parked (no premature redrive). */
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      assert(strcmp(wi.pause_reason, "slices_running") == 0);
       /* mark every child merged; the NEXT sweep auto-clears the fan-in park and
        * advances past `fe` — no operator resume. */
       assert(db1_work_item_set_terminal(c0, "accepted") == 0);
@@ -218,6 +219,35 @@ int main(void)
             rd++;
       free(evs);
       assert(rd == 1); /* exactly one redrive: the all-merged transition */
+   }
+
+   /* (7b) a slices_running parent CONVERTS to a pending_human park the moment a
+    * slice fails: the driveable wait becomes a human gate so an operator resolves
+    * the dead slice. Exercises the slices_running arm's failed>0 fall-through. */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("fe", "r/g2x", "p/g2x", "autonomous", id, err, sizeof err) == 0);
+      char c0[80], c1[80], cp[96];
+      snprintf(c0, sizeof c0, "%s.x0", id);
+      snprintf(cp, sizeof cp, "xp/%s/0", id);
+      assert(db1_work_item_create(c0, "r/g2x", cp, "slice", "v1", "impl", "autonomous") == 0);
+      assert(db1_work_item_set_parent(c0, id) == 0);
+      snprintf(c1, sizeof c1, "%s.x1", id);
+      snprintf(cp, sizeof cp, "xp/%s/1", id);
+      assert(db1_work_item_create(c1, "r/g2x", cp, "slice", "v1", "impl", "autonomous") == 0);
+      assert(db1_work_item_set_parent(c1, id) == 0);
+      wfe_set_foreach_provider(&MOCK); /* children pre-exist -> must NOT be called */
+
+      /* both children active -> park slices_running. */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "slices_running") == 0);
+      /* one slice fails -> the next sweep converts the wait to a human park. */
+      assert(db1_work_item_set_terminal(c0, "rejected") == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
    }
 
    /* (8) GAP-2 guard: a foreach parent with a FAILED child stays parked for a
