@@ -318,7 +318,6 @@ int main(void)
 
    test_labels();
 
-
    printf("All provider_catalog tests passed.\n");
    return 0;
 }

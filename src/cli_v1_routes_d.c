@@ -689,8 +689,6 @@ static const struct
     {"provider.quota", "POST", "/v1/provider/quota"},
     {"provider.set", "POST", "/v1/provider/set"},
     {"provider.show", "POST", "/v1/provider/show"},
-    {"provider.slot_acquire", "POST", "/v1/provider/slot_acquire"},
-    {"provider.slot_release", "POST", "/v1/provider/slot_release"},
     {"provider.test", "POST", "/v1/provider/test"},
     {"ranker.export_view", "GET", "/v1/intelligence/ranker/export-view"},
     {"ranker.fit", "POST", "/v1/intelligence/ranker/fit"},

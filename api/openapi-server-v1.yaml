@@ -2216,16 +2216,6 @@ paths:
       summary: Test a provider
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Test result, content: { application/json: { schema: { type: object } } } } }
-  /provider/slot_acquire:
-    post:
-      summary: Acquire a provider slot
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Slot, content: { application/json: { schema: { type: object } } } } }
-  /provider/slot_release:
-    post:
-      summary: Release a provider slot
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Released, content: { application/json: { schema: { type: object } } } } }
   /model/list:
     get:
       summary: List models (provider catalog)
