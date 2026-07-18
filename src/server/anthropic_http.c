@@ -312,25 +312,15 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
     * cheap mtime-cached load keeps it dark by default. */
    if (cfg_ok && pcfg.reduce_gateway_seam)
    {
-      cJSON *cmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
-      if (cJSON_IsArray(cmsgs))
-      {
-         char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
-         const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
-         const char *model = (cmodel && cJSON_IsString(cmodel)) ? cmodel->valuestring : NULL;
-         reduce_config_t rcfg;
-         memset(&rcfg, 0, sizeof(rcfg));
-         rcfg.gateway_seam = 1;
-         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
-         rcfg.fold.retained_msgs = pcfg.fold_retained_msgs;
-         reduce_result_t gw_res;
-         memset(&gw_res, 0, sizeof(gw_res));
-         if (context_reduce(cmsgs, sys_text, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
-                            &gw_res) == 0)
-            agent_record_reduce_ledger(&gw_res, model, "gateway", NULL);
-         context_reduce_result_free(&gw_res);
-         free(sys_text);
-      }
+      char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
+      const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
+      const char *model = (cmodel && cJSON_IsString(cmodel)) ? cmodel->valuestring : NULL;
+      reduce_result_t gw_res;
+      if (gw_economizer_measure(cJSON_GetObjectItemCaseSensitive(req, "messages"), sys_text, model,
+                                pcfg.fold_retained_msgs, &gw_res) == 0)
+         agent_record_reduce_ledger(&gw_res, model, "gateway", NULL);
+      context_reduce_result_free(&gw_res);
+      free(sys_text);
    }
 
    gw_request_t r = {

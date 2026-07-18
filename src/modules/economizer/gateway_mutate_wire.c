@@ -10,6 +10,24 @@
 #include "gateway_mutate.h"
 #include "gw_mutate_stats.h"
 
+int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
+                          int retained_msgs, reduce_result_t *out)
+{
+   if (!out)
+      return 1;
+   memset(out, 0, sizeof(*out));
+   if (!cJSON_IsArray(messages))
+      return 1; /* nothing to measure; out is zeroed so the caller's free is safe */
+
+   reduce_config_t rcfg;
+   memset(&rcfg, 0, sizeof(rcfg));
+   rcfg.gateway_seam = 1;
+   rcfg.measure_only = 1; /* shadow mode: never mutates the request */
+   rcfg.fold.retained_msgs = retained_msgs;
+   return context_reduce(messages, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
+                         out);
+}
+
 void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx)
 {
    if (ctx)

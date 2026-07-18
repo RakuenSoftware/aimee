@@ -1107,13 +1107,13 @@ $(TESTPREFIX)/unit-test-msg-session-disable: $(OBJDIR)/tests/test_msg_session_di
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 $(TESTPREFIX)/unit-test-gateway-mutate: $(OBJDIR)/tests/test_gateway_mutate.o \
-                     $(OBJDIR)/server/gateway_mutate.o $(OBJDIR)/server/agent_bridge.o \
+                     $(OBJDIR)/modules/economizer/gateway_mutate.o $(OBJDIR)/server/agent_bridge.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/tool_call_args.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-gateway-mutate-wire: $(OBJDIR)/tests/test_gateway_mutate_wire.o \
-                     $(OBJDIR)/server/gateway_mutate_wire.o $(OBJDIR)/server/gateway_mutate.o \
+                     $(OBJDIR)/modules/economizer/gateway_mutate_wire.o $(OBJDIR)/modules/economizer/gateway_mutate.o \
                      $(OBJDIR)/server/msg_session_disable.o $(OBJDIR)/server/gw_mutate_stats.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o \
                      $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/token_tracker.o \
