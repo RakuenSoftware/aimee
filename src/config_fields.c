@@ -169,18 +169,13 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_INT},
     {"memory_maintenance_trigger_secs", offsetof(config_t, memory_maintenance_trigger_secs),
      sizeof(int), 0, CFG_INT},
-    {"memory_rerank_enabled", offsetof(config_t, memory_rerank_enabled), sizeof(int), 0, CFG_BOOL},
+    /* memory_rerank_{enabled,command,top_k} and memory_query_expansion_{mode,k} are already
+     * declared once above (see ~L87-153). The duplicate rows that used to sit here were
+     * shadowed dead weight — config_field_lookup returns the first match — and were removed. */
     {"memory_improve_dedupe_enabled", offsetof(config_t, memory_improve_dedupe_enabled),
      sizeof(int), 0, CFG_BOOL},
     {"memory_improve_summarise_enabled", offsetof(config_t, memory_improve_summarise_enabled),
      sizeof(int), 0, CFG_BOOL},
-    {"memory_rerank_command", offsetof(config_t, memory_rerank_command),
-     sizeof(((config_t *)0)->memory_rerank_command), 0, CFG_STRING},
-    {"memory_rerank_top_k", offsetof(config_t, memory_rerank_top_k), sizeof(int), 0, CFG_INT},
-    {"memory_query_expansion_mode", offsetof(config_t, memory_query_expansion_mode),
-     sizeof(((config_t *)0)->memory_query_expansion_mode), 0, CFG_STRING},
-    {"memory_query_expansion_k", offsetof(config_t, memory_query_expansion_k), sizeof(int), 0,
-     CFG_INT},
     {"memory_profile_cards_enabled", offsetof(config_t, memory_profile_cards_enabled), sizeof(int),
      0, CFG_BOOL},
     {"memory_profile_cards_min_obs", offsetof(config_t, memory_profile_cards_min_obs), sizeof(int),
@@ -374,10 +369,12 @@ const config_field_t config_fields[] = {
     {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT},
     {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
     {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
-    {NULL, 0, 0, 0, CFG_STRING},
     /* Curator pipeline stage gates (kb.curator.*) — exposed so the GUI pipeline editor
      * can toggle stages. Flat config_t fields; config_save reserializes them into the
-     * nested kb.curator.* YAML the KB reads on its next load. */
+     * nested kb.curator.* YAML the KB reads on its next load. These MUST stay ahead of the
+     * {NULL} terminator below: every consumer (config.show/get/set, the CLI key listing)
+     * iterates until the first NULL key, so a terminator placed before them makes them
+     * unreachable — the bug this array previously had. */
     {"kb_curator_extract_docs_enabled", offsetof(config_t, kb_curator_extract_docs_enabled),
      sizeof(int), 0, CFG_BOOL},
     {"kb_curator_extract_docs_workers", offsetof(config_t, kb_curator_extract_docs_workers),
@@ -414,6 +411,7 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_BOOL},
     {"kb_evidence_embed_enabled", offsetof(config_t, kb_evidence_embed_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {NULL, 0, 0, 0, CFG_STRING},
 };
 #pragma GCC diagnostic pop
 
