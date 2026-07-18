@@ -912,8 +912,8 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/tests/test_agent_delegate_root.o $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
+                      $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -927,8 +927,8 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
 $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
+                      $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -942,8 +942,8 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o                      $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
+                      $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -1071,7 +1071,7 @@ $(TESTPREFIX)/unit-test-sandbox-pkg-proxy: $(OBJDIR)/tests/test_sandbox_pkg_prox
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
-                      $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o \
+                      $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o \
                       $(OBJDIR)/guardrails_tdd.o \
                       $(OBJDIR)/harness_memory_common.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1316,7 +1316,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/workflow/wfe_native_gate.o $(OBJDIR)/workflow/wfe_externalization.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_enforce.o \
-                      $(OBJDIR)/harness_memory_common.o $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o \
+                      $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o \
                       $(OBJDIR)/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/config_fields.o \
@@ -1330,13 +1330,13 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/cmd_init.o \
 	                                $(OBJDIR)/server/server_trigger.o $(OBJDIR)/tests/support/trigger_proposals_stub.o $(OBJDIR)/db1/db1_trigger.o \
 	                                $(OBJDIR)/db1/pipelines.o $(OBJDIR)/db1/token_audit.o \
-	                                $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/server/delegate_backend_local.o \
-	                                $(OBJDIR)/server/delegate_backend_ssh.o $(OBJDIR)/server/delegate_backend_docker.o \
+	                                $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/modules/delegates/delegate_backend_local.o \
+	                                $(OBJDIR)/modules/delegates/delegate_backend_ssh.o $(OBJDIR)/modules/delegates/delegate_backend_docker.o \
 	                                $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
 	                                $(OBJDIR)/server/anthropic_profile.o	                                $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
 	                                $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
 	                                $(OBJDIR)/server/minimax_profile.o \
-	                                $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/model_registry.o \
+	                                $(OBJDIR)/modules/delegates/delegate_credentials.o $(OBJDIR)/model_registry.o \
 	                                $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
 	                                $(OBJDIR)/aimee_home.o \
 	                                $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -1391,20 +1391,20 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/tests/support/toolset_stub.o \
                                $(OBJDIR)/tests/support/agent_source_authority_stub.o \
                                $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
-                               $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/delegations.o $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/session_paths.o $(OBJDIR)/db1/cost_fold.o $(OBJDIR)/db1/token_audit.o $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/server/delegate_credential_retry.o $(OBJDIR)/db1/delegate_learning.o $(OBJDIR)/db1/interaction_events.o \
+                               $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/delegations.o $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/session_paths.o $(OBJDIR)/db1/cost_fold.o $(OBJDIR)/db1/token_audit.o $(OBJDIR)/modules/delegates/delegate_credentials.o $(OBJDIR)/modules/delegates/delegate_credential_retry.o $(OBJDIR)/db1/delegate_learning.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/db1/execution_plans.o $(OBJDIR)/db1/coord_jobs.o \
-		                               $(OBJDIR)/server/delegate_launch.o $(OBJDIR)/server/delegate_source_authority.o $(OBJDIR)/server/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
+		                               $(OBJDIR)/modules/delegates/delegate_launch.o $(OBJDIR)/modules/delegates/delegate_source_authority.o $(OBJDIR)/modules/delegates/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
 		                               $(OBJDIR)/modules/delegates/gw_orch_delegates.o $(OBJDIR)/pipeline/gw_orchestration_seam.o \
-		                               $(OBJDIR)/server/delegate_routing.o \
+		                               $(OBJDIR)/modules/delegates/delegate_routing.o \
 		                               $(OBJDIR)/model_registry.o \
 		                               $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
 		                               $(OBJDIR)/server/server_delegate_status.o \
-		                               $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/delegate_prompt.o $(OBJDIR)/server/delegate_ephemeral_ws.o $(OBJDIR)/server/delegate_run_phases.o $(OBJDIR)/server/delegate_checkout.o $(OBJDIR)/server/liveness.o \
+		                               $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_ephemeral_ws.o $(OBJDIR)/modules/delegates/delegate_run_phases.o $(OBJDIR)/modules/delegates/delegate_checkout.o $(OBJDIR)/server/liveness.o \
                                $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/config_mode.o $(OBJDIR)/config_fields.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                                $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/server/presence.o $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/agent_cancel_stub.o $(OBJDIR)/delivery_target.o \
-                               $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/server/workspace_provider_detached.o \
+                               $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/server/workspace_provider_detached.o \
                                $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                                $(OBJDIR)/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
                                $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o
@@ -1419,7 +1419,7 @@ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_hand
 $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/execution_plans.o \
-                               $(OBJDIR)/db1/coord_jobs.o $(OBJDIR)/server/delegate_role.o \
+                               $(OBJDIR)/db1/coord_jobs.o $(OBJDIR)/modules/delegates/delegate_role.o \
                                $(OBJDIR)/role_templates.o \
                                $(OBJDIR)/json_fluent.o \
                                $(OBJDIR)/cJSON.o
@@ -2178,7 +2178,7 @@ $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transp
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-xml-fallback: $(OBJDIR)/tests/test_delegate_xml_fallback.o \
-                                               $(OBJDIR)/server/delegate_xml_fallback.o \
+                                               $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                                $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2300,7 +2300,7 @@ $(TESTPREFIX)/unit-test-workspace-runner-registry: \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-workspace-turn: $(OBJDIR)/tests/test_workspace_turn.o \
-                      $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o \
+                      $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/server/workspace_provider_detached.o \
                       $(OBJDIR)/server/workspace_runner_registry.o \
                       $(OBJDIR)/server/workspace_runner_queue.o \
@@ -2321,10 +2321,10 @@ $(TESTPREFIX)/unit-test-cmd-cancel: $(OBJDIR)/tests/test_cmd_cancel.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
-                             $(OBJDIR)/server/delegate_depth.o $(OBJDIR)/server/delegate_role.o \
+                             $(OBJDIR)/modules/delegates/delegate_depth.o $(OBJDIR)/modules/delegates/delegate_role.o \
                              $(OBJDIR)/role_templates.o \
-                             $(OBJDIR)/server/delegate_prompt.o $(OBJDIR)/server/delegate_routing.o \
-                             $(OBJDIR)/server/delegate_checkout.o $(OBJDIR)/cJSON.o \
+                             $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o \
+                             $(OBJDIR)/modules/delegates/delegate_checkout.o $(OBJDIR)/cJSON.o \
                              $(OBJDIR)/util.o $(OBJDIR)/posix/platform_process.o $(OBJDIR)/posix/util.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
@@ -2333,7 +2333,7 @@ $(TESTPREFIX)/unit-test-delegate-plan: $(OBJDIR)/tests/test_delegate_plan.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
-                             $(OBJDIR)/server/delegate_role.o $(OBJDIR)/role_templates.o
+                             $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/role_templates.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Trigger end-to-end: the REAL scan_proposals (textually included, real git
@@ -2493,8 +2493,8 @@ $(TESTPREFIX)/unit-test-roadmap-auto: $(OBJDIR)/tests/test_roadmap_auto.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-coord-jobs: $(OBJDIR)/tests/test_coord_jobs.o \
-                            $(OBJDIR)/server/delegate_economics.o \
-                            $(OBJDIR)/server/delegate_prompt.o \
+                            $(OBJDIR)/modules/delegates/delegate_economics.o \
+                            $(OBJDIR)/modules/delegates/delegate_prompt.o \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2576,9 +2576,9 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
-                                          $(OBJDIR)/server/delegate_driver.o \
-                                          $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                          $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -2588,9 +2588,9 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
-                                          $(OBJDIR)/server/delegate_driver.o \
-                                          $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                          $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -2600,9 +2600,9 @@ $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o 
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
-                                          $(OBJDIR)/server/delegate_driver.o \
-                                          $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                          $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -2613,9 +2613,9 @@ $(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
-                                          $(OBJDIR)/server/delegate_driver.o \
-                                          $(OBJDIR)/server/delegate_openai.o \
-                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                          $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                           $(OBJDIR)/model_registry.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -2742,7 +2742,7 @@ $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_tok
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-context-shed: $(OBJDIR)/tests/test_delegate_context_shed.o \
-                                       $(OBJDIR)/server/delegate_prompt.o \
+                                       $(OBJDIR)/modules/delegates/delegate_prompt.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2752,19 +2752,19 @@ $(TESTPREFIX)/unit-test-agent-error-retryable: $(OBJDIR)/tests/test_agent_error_
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-ephemeral-ws: $(OBJDIR)/tests/test_delegate_ephemeral_ws.o \
-                                       $(OBJDIR)/server/delegate_ephemeral_ws.o \
+                                       $(OBJDIR)/modules/delegates/delegate_ephemeral_ws.o \
                                        $(OBJDIR)/aimee_home.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-handoff: $(OBJDIR)/tests/test_delegate_handoff.o \
-                                       $(OBJDIR)/server/delegate_prompt.o \
+                                       $(OBJDIR)/modules/delegates/delegate_prompt.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-dispatch-reliability: \
                                        $(OBJDIR)/tests/test_delegate_dispatch_reliability.o \
-                                       $(OBJDIR)/server/delegate_prompt.o \
+                                       $(OBJDIR)/modules/delegates/delegate_prompt.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3096,23 +3096,23 @@ $(TESTPREFIX)/unit-test-db1-session-paths: \
 
 $(TESTPREFIX)/unit-test-delegate-credentials: \
                                        $(OBJDIR)/tests/test_delegate_credentials.o \
-                                       $(OBJDIR)/server/delegate_credentials.o
+                                       $(OBJDIR)/modules/delegates/delegate_credentials.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-economics: $(OBJDIR)/tests/test_delegate_economics.o \
-                                       $(OBJDIR)/server/delegate_economics.o \
-                                       $(OBJDIR)/server/delegate_prompt.o \
+                                       $(OBJDIR)/modules/delegates/delegate_economics.o \
+                                       $(OBJDIR)/modules/delegates/delegate_prompt.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegate_patch_coordinator.o \
-                                       $(OBJDIR)/server/delegate_patch_coordinator.o \
-                                       $(OBJDIR)/server/delegate_prompt.o \
+                                       $(OBJDIR)/modules/delegates/delegate_patch_coordinator.o \
+                                       $(OBJDIR)/modules/delegates/delegate_prompt.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/tests/test_delegate_ensemble.o \
-                                       $(OBJDIR)/server/delegate_ensemble.o $(OBJDIR)/server/delegate_ensemble_review.o \
+                                       $(OBJDIR)/modules/delegates/delegate_ensemble.o $(OBJDIR)/modules/delegates/delegate_ensemble_review.o \
                                        $(OBJDIR)/server/roundtable_verify.o \
                                        $(OBJDIR)/server/roundtable_chair.o \
                                        $(OBJDIR)/server/evidence_replay.o \
@@ -3432,10 +3432,10 @@ $(TESTPREFIX)/unit-test-model-provider: $(OBJDIR)/tests/test_model_provider.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o \
-                                 $(OBJDIR)/server/delegate_driver.o \
+                                 $(OBJDIR)/modules/delegates/delegate_driver.o \
                                  $(OBJDIR)/server/agent_request_shaping.o \
-                                 $(OBJDIR)/server/delegate_openai.o \
-                                 $(OBJDIR)/server/delegate_xml_fallback.o \
+                                 $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                 $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                  $(OBJDIR)/model_registry.o \
                                  $(OBJDIR)/server/agent_tools.o \
                                  $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -3448,9 +3448,9 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                 $(OBJDIR)/server/aimee_ir_rescue.o $(OBJDIR)/server/aimee_ir_metrics.o \
                                 $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
-                                $(OBJDIR)/server/delegate_driver.o \
-                                $(OBJDIR)/server/delegate_openai.o \
-                                $(OBJDIR)/server/delegate_xml_fallback.o \
+                                $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                 $(OBJDIR)/model_registry.o \
                                 $(OBJDIR)/server/agent_tools.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -3472,9 +3472,9 @@ $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surf
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                 $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
-                                $(OBJDIR)/server/delegate_driver.o \
-                                $(OBJDIR)/server/delegate_openai.o \
-                                $(OBJDIR)/server/delegate_xml_fallback.o \
+                                $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                 $(OBJDIR)/model_registry.o \
                                 $(OBJDIR)/server/agent_tools.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -3661,26 +3661,26 @@ $(TESTPREFIX)/unit-test-cli-codex: $(OBJDIR)/tests/test_cli_codex.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.o \
-                     $(OBJDIR)/server/delegate_backend.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-backend-local: $(OBJDIR)/tests/test_delegate_backend_local.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
-                     $(OBJDIR)/server/delegate_backend.o \
-                     $(OBJDIR)/server/delegate_backend_local.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend_local.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-backend-ssh: $(OBJDIR)/tests/test_delegate_backend_ssh.o \
-                     $(OBJDIR)/server/delegate_backend.o \
-                     $(OBJDIR)/server/delegate_backend_ssh.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend_ssh.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_backend_docker.o \
-                     $(OBJDIR)/server/delegate_backend.o \
-                     $(OBJDIR)/server/delegate_backend_docker.o $(OBJDIR)/log.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend.o \
+                     $(OBJDIR)/modules/delegates/delegate_backend_docker.o $(OBJDIR)/log.o \
                      $(OBJDIR)/aimee_home.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -3759,9 +3759,9 @@ $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
-                     $(OBJDIR)/server/delegate_driver.o \
-                     $(OBJDIR)/server/delegate_openai.o \
-                     $(OBJDIR)/server/delegate_xml_fallback.o \
+                     $(OBJDIR)/modules/delegates/delegate_driver.o \
+                     $(OBJDIR)/modules/delegates/delegate_openai.o \
+                     $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                      $(OBJDIR)/model_registry.o \
                      $(OBJDIR)/server/agent_tools.o \
                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -3819,9 +3819,9 @@ $(TESTPREFIX)/unit-test-plugin-loader: $(OBJDIR)/tests/test_plugin_loader.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
-                     $(OBJDIR)/server/delegate_driver.o \
-                     $(OBJDIR)/server/delegate_openai.o \
-                     $(OBJDIR)/server/delegate_xml_fallback.o \
+                     $(OBJDIR)/modules/delegates/delegate_driver.o \
+                     $(OBJDIR)/modules/delegates/delegate_openai.o \
+                     $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                      $(OBJDIR)/model_registry.o \
                      $(OBJDIR)/server/agent_tools.o \
                      $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o \
@@ -4334,7 +4334,7 @@ $(TESTPREFIX)/unit-test-aimee-ir-rescue: $(OBJDIR)/tests/test_aimee_ir_rescue.o 
                                          $(OBJDIR)/server/aimee_ir_rescue.o \
                                          $(OBJDIR)/server/aimee_ir.o \
                                          $(OBJDIR)/server/aimee_ir_metrics.o \
-                                         $(OBJDIR)/server/delegate_xml_fallback.o \
+                                         $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                          $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4359,7 +4359,7 @@ $(TESTPREFIX)/unit-test-shadow-mirror: $(OBJDIR)/tests/test_shadow_mirror.o \
 $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/tests/test_agent_ir_parse.o \
                                         $(OBJDIR)/posix/agent_ir_parse.o \
                                         $(OBJDIR)/server/aimee_ir_rescue.o \
-                                        $(OBJDIR)/server/delegate_xml_fallback.o \
+                                        $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                         $(OBJDIR)/server/aimee_backend_anthropic.o \
                                         $(OBJDIR)/server/aimee_backend_openai.o \
                                         $(OBJDIR)/server/aimee_ir.o \
@@ -4371,8 +4371,8 @@ $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/tests/test_agent_ir_parse.o \
 $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
-                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/delegate_driver.o \
-                      $(OBJDIR)/server/delegate_openai.o $(OBJDIR)/server/delegate_xml_fallback.o $(OBJDIR)/server/delegate_role.o \
+                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
+                      $(OBJDIR)/modules/delegates/delegate_openai.o $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
@@ -4392,7 +4392,7 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
                                           $(OBJDIR)/server/aimee_ir.o \
                                           $(OBJDIR)/server/aimee_ir_rescue.o \
                                           $(OBJDIR)/server/aimee_ir_metrics.o \
-                                          $(OBJDIR)/server/delegate_xml_fallback.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                           $(OBJDIR)/server/tool_call_args.o \
                                           $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

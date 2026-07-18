@@ -17,7 +17,7 @@
 #include "headers/roadmap_report.h"
 #include "db1/roadmap_runtime.h"
 #include "headers/roadmap.h"
-#include "headers/delegate_launch.h"
+#include "delegate_launch.h"
 #include "headers/dstr.h"
 #include "headers/util.h"
 #include "headers/agent_config.h"
