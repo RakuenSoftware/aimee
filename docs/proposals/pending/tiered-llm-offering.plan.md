@@ -14,10 +14,11 @@ P1 tenancy+identity ─┬─> P2 kb egress + catalog ──┬─> P3 attributi
                      └─> P5 control plane (kb manages servers)
 P6 Bedrock ── independent (needs P2 egress seam for the org path)
 P8 thin-client mTLS ── independent (default-flip; anytime)
-P7 hardened kb vault ── MUST land with/before P2 holds live org keys
+P10 shared vault core ── extract server vault into src/vault/ (behavior-preserving; anytime)
+P7 hardened kb vault (= P10 kb profile) ── MUST land with/before P2 holds live org keys
 ```
 
-**Recommended merge order:** P1 → **P3a (schema + pricing)** → (P2 + P7 together — **P2b's egress path writes the mandatory `org_token_audit` row**, so live org egress never ships without authoritative cost rows) → **P3b (read/rollup/reporting surfaces)** → P4 → P5 → P9 → P6, with P8 slotted whenever. P3's *schema/pricing* lands right after P1; the **attribution write is part of P2b itself** (not deferred to P3b), so an unattributed org call is impossible; the hard edge remains **P7 gates real org keys in P2**.
+**Recommended merge order:** P1 → **P3a (schema + pricing)** → (P2 + P7 together — **P2b's egress path writes the mandatory `org_token_audit` row**, so live org egress never ships without authoritative cost rows) → **P3b (read/rollup/reporting surfaces)** → P4 → P5 → P9 → P6, with P8 and **P10's behavior-preserving server-vault refactor** slotted whenever (P10's *kb profile* is exactly the P7 that lands with P2b). P3's *schema/pricing* lands right after P1; the **attribution write is part of P2b itself** (not deferred to P3b), so an unattributed org call is impossible; the hard edge remains **P7 gates real org keys in P2**.
 
 ## Cross-cutting guardrails (apply to every packet)
 

@@ -2,10 +2,15 @@
 
 - **State:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
-- **Depends on:** the server vault crypto primitives (reused). **Must land before or
-  with P2b** — the first slice that handles a real key. Only **P2a** (catalog-only,
-  no keys) may precede it; no key-handling or credential-provisioning route ships
-  without it, so there is no window where P2 holds a live org key before this exists.
+- **Depends on:** **P10 (shared vault core)** — P7 is the **kb *hardening profile*** on
+  that core, not a separate vault. The assurance-neutral machinery (envelope crypto,
+  use-in-place, rotation + `hwm_read`/`hwm_cas` anti-rollback, memory hygiene) and the
+  custody/storage seams live in P10; this proposal specifies the kb profile's *mandatory*
+  policy (external custody, seal/auto-unseal, WORM non-disableable, per-slot isolation,
+  Postgres ciphertext store, stateless KEK cache). **Must land before or with P2b** — the
+  first slice that handles a real key. Only **P2a** (catalog-only, no keys) may precede it;
+  no key-handling or credential-provisioning route ships without it, so there is no window
+  where P2 holds a live org key before this exists.
 
 ## Thesis
 
@@ -108,13 +113,25 @@ is never a bare local file; it is unwrapped by an external anchor at unseal:
 - `kms` (AWS KMS / Cloud KMS `Decrypt` of a wrapped root — pairs naturally with
   the P6 AWS integration).
 
-The custody seam exposes two operations: `kek_custody_unwrap(wrapped_root) → root`
-and a **`kek_custody_epoch()` monotonic primitive** used **per key** for anti-rollback (§8). The
-monotonic primitive is concrete and non-rollbackable — a **TPM NV counter**, an
-**HSM monotonic counter**, or an **external append-only high-water-mark service**
-that refuses a regressed value (e.g. a small DynamoDB/etcd conditional-write counter,
-or a KMS-backed signed counter record); a bare `kms` `Decrypt` does **not** provide a
-counter and must be paired with one of these. The on-disk artifact becomes a *wrapped* root
+The custody seam exposes `kek_custody_unwrap(wrapped_root) → root` **plus a per-key
+attested high-water API** — not a bare monotonic tick, because §8's anti-rollback
+requires *reading* and *atomically advancing* an anchor-attested per-key current
+version, which a single `epoch()` primitive cannot express:
+- **`hwm_read(key_id) → (version, attestation)`** — an authoritative read of the
+  key's current attested version, returning a **signed attestation bound to
+  `(vault-identity, key_id, version, deployment-domain)`** so a reader can prove which
+  version the anchor considers current (and cannot be replayed against another vault or key).
+- **`hwm_cas(key_id, expected_version, new_version) → signed_token | conflict`** — an
+  **atomic compare-and-set advance** that moves the anchor's current version from
+  `expected` to `new` only if `expected` is still current, returning the custodian's
+  signed `(key_id, new_version)` token, else `conflict` (a concurrent rotation won).
+  Advance is never a blind increment.
+
+Each backend realizes **both** operations: **TPM** (per-key NV-indexed counter + a
+signed attestation quote), **HSM** (per-key monotonic counter + signing key), or an
+**external high-water service** (a conditional-write counter — DynamoDB/etcd — fronted
+by a signer). A bare `kms` `Decrypt` provides neither read-CAS nor attestation and
+**must** be paired with one of these. The on-disk artifact becomes a *wrapped* root
 blob, useless without the anchor.
 
 ## §3 Seal / unseal barrier
@@ -180,14 +197,19 @@ stops it — and any impersonator — from unsealing; the org-key ciphertext in 
 is unaffected. The `file` root cannot do any of this (no per-instance attestation,
 no shared unwrap) — one more reason it is single-instance only.
 
-**Multi-tenant kb must start sealed under an external anchor.** The `file` custody
-default and unattended non-sealed self-start (§2, §1) are permitted **only for a
-single-instance, single-org (dev/personal) box**. Any **scaled** deployment (more
-than one kb instance — the production norm) or any deployment holding **more than
-one organization's** keys **must** use a non-`file` custody anchor and start sealed
-— a `file` root cannot even distribute across instances (§1). Invariant #6 is
-binding there, not opt-in; such a kb that comes up non-sealed on a `file` root fails
-closed for org egress.
+**Multi-tenant kb must start sealed under an external anchor — and bare `file` custody
+is keyless dev mode.** The bare `file` custody default and unattended non-sealed
+self-start (§2, §1) are permitted **only for a single-instance, single-org
+(dev/personal) box that holds no live org keys**: a `file`-custody kb **refuses to
+provision or load any org vendor credential or the kb CA private key**, and **fails
+closed at boot** if such ciphertext is present. The moment a box holds live keys it
+must select a non-`file` anchor — **TPM** for the low-ops single pinned single-org
+box, or **KMS/HSM** for any **scaled** deployment (more than one kb instance — the
+production norm) or any deployment holding **more than one organization's** keys;
+both start sealed (a `file` root cannot even distribute across instances, §1).
+Invariant #6 is binding, not opt-in; a kb that comes up non-sealed on a bare `file`
+root — or one holding live-key ciphertext under `file` custody — fails closed for
+org egress.
 
 **Single-instance is enforced by an atomic lease, not by trust.** A `file`-custody kb
 must acquire a unique **singleton lease** at boot — a **single durable lease row** in
@@ -399,16 +421,21 @@ decrypt, so the security rests on revocation), and an optional scheduled cadence
 bind each stored version to a **per-key monotonic version** checked against *that
 key's own* high-water mark — **not a single global epoch**, which would invalidate
 every other key's still-current version whenever any one key rotates. The
-non-rollbackable high-water storage is the custody seam's monotonic primitive
-(`kek_custody_epoch()` — TPM NV / HSM counter / external high-water-mark, §2; **not** a
-bare KMS `Decrypt`, which has no counter). Crucially the high-water is **not merely a
-Postgres integer** (a full DB compromise could rewrite both it and the ciphertext): the
-custody primitive returns a **signed token over `(key_id, new_version)`**, stored beside
-the ciphertext row, and on use kb **verifies that token against the custodian's
-public/attestation key** before accepting the version — so a DB rewrite cannot forge a
-rolled-back version. A stored version below a key's own current high-water is refused,
-so restoring an old backup row cannot roll *that* key back while leaving unrelated keys
-untouched.
+non-rollbackable high-water storage is the custody seam's per-key attested high-water
+API (`hwm_read`/`hwm_cas` over TPM NV / HSM counter / external high-water-mark, §2;
+**not** a bare KMS `Decrypt`, which has neither counter nor attestation). Crucially the
+high-water is **not merely a Postgres integer** (a full DB compromise could rewrite both
+it and the ciphertext): `hwm_cas` returns a **signed token over `(key_id, new_version)`**
+and `hwm_read` a signed attestation of the current version, stored beside the ciphertext
+row, and on use kb **verifies that token against the custodian's public/attestation key**
+before accepting the version — so a DB rewrite cannot forge a rolled-back version. A
+stored version below a key's own current high-water is refused, so restoring an old
+backup row cannot roll *that* key back while leaving unrelated keys untouched.
+**Activation is exactly the `hwm_cas(key_id, N → N+1)` advance (§2), the single commit
+point:** a crash *before* it leaves `N` current with a harmless staged `N+1` row (retried
+idempotently); a crash *after* it leaves `N+1` current and the old `N` refused — there is
+no window in which both or neither is current, and a `conflict` return is never treated as
+success.
 
 **Rotation is a multi-version, crash-safe state machine** (there is **no CAS that
 replaces `N`** — versions are immutable rows that coexist). A durable primary-backed
@@ -495,10 +522,12 @@ enrollment end-to-end; core-dump scan asserts no key bytes.
 
 ## Non-goals
 
-No mandatory external HSM for a **single-instance, single-org (dev/personal)** box
-(`file` custody stays the default there). This default does **not** extend to any
-scaled (multi-instance) or multi-org deployment, which must use an external anchor
-and start sealed (§3). Not a general-purpose secrets manager
+No mandatory external **HSM** for a **single-instance, single-org (dev/personal)**
+box: bare `file` custody stays the default there **but only as keyless dev mode** —
+no live org key or CA key may be provisioned or loaded under it (§3); a single-org
+box that holds **live** keys uses **TPM**, not a full HSM. This default does **not**
+extend to any scaled (multi-instance) or multi-org deployment, which must use a
+KMS/HSM anchor and start sealed (§3). Not a general-purpose secrets manager
 for arbitrary app secrets — scope is org vendor keys + the kb CA key. No change
 to the server's per-user vault (this is the kb tier). No hard in-process isolation
 boundary in this packet (use-in-place is scoped-access, not memory isolation, §4);
