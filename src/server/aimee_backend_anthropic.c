@@ -22,6 +22,43 @@ static void add_cache_control(cJSON *el, const char *cc)
    cJSON_AddStringToObject(o, "type", cc[0] ? cc : "ephemeral");
 }
 
+/* Uniform aimee cache policy (cross-protocol canonical egress): cache_control on the
+ * Anthropic egress is decided by aimee at egress, NOT inherited from the client, so
+ * the bytes are identical regardless of source protocol (Anthropic prompt-caches on
+ * exact bytes; an openai-sourced request carries no markers of its own). The policy
+ * marks the stable-prefix breakpoints -- the end of the system block and the end of
+ * the tools block -- with an ephemeral cache_control. Deterministic: the same IR
+ * content yields the same markers whether parsed from anthropic, openai, or responses
+ * wire. (Message/turn-level breakpoints are a later economization refinement.) */
+/* Remove cache_control from every element of an array. The policy is the SOLE source
+ * of markers, so any client marker that leaked in (e.g. via a raw-replayed UNKNOWN
+ * block) must be stripped first, or the egress bytes would depend on the source. */
+static void strip_cache_control(cJSON *arr)
+{
+   if (!cJSON_IsArray(arr))
+      return;
+   int n = cJSON_GetArraySize(arr);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *el = cJSON_GetArrayItem(arr, i);
+      if (el && cJSON_IsObject(el))
+         cJSON_DeleteItemFromObjectCaseSensitive(el, "cache_control");
+   }
+}
+
+static void mark_cache_prefix(cJSON *arr)
+{
+   strip_cache_control(arr);
+   if (!cJSON_IsArray(arr))
+      return;
+   int n = cJSON_GetArraySize(arr);
+   if (n <= 0)
+      return;
+   cJSON *last = cJSON_GetArrayItem(arr, n - 1);
+   if (last && cJSON_IsObject(last))
+      add_cache_control(last, "ephemeral");
+}
+
 /* one IR block -> its Anthropic wire JSON (owned). NULL if not renderable. */
 static cJSON *block_to_anthropic(const aimee_block_t *b)
 {
@@ -77,7 +114,9 @@ static cJSON *block_to_anthropic(const aimee_block_t *b)
       cJSON_Delete(el);
       return b->raw ? cJSON_Duplicate(b->raw, 1) : NULL;
    }
-   add_cache_control(el, b->cache_control);
+   /* NOTE: the client's per-block cache_control is intentionally NOT copied here --
+    * the uniform aimee cache policy (mark_cache_prefix) decides markers at egress so
+    * the bytes are source-protocol-independent. */
    return el;
 }
 
@@ -126,14 +165,19 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
    if (ir->stream)
       cJSON_AddBoolToObject(out, "stream", 1);
    if (ir->n_system > 0)
-      cJSON_AddItemToObject(out, "system", blocks_to_anthropic(ir->system, ir->n_system));
+   {
+      cJSON *sys = blocks_to_anthropic(ir->system, ir->n_system);
+      cJSON_AddItemToObject(out, "system", sys);
+      mark_cache_prefix(sys); /* uniform policy: cache the stable system prefix */
+   }
    cJSON *msgs = cJSON_AddArrayToObject(out, "messages");
    for (int i = 0; i < ir->n_messages; i++)
    {
       cJSON *m = cJSON_CreateObject();
       cJSON_AddStringToObject(m, "role", ir->messages[i].role ? ir->messages[i].role : "user");
-      cJSON_AddItemToObject(m, "content",
-                            blocks_to_anthropic(ir->messages[i].blocks, ir->messages[i].n_blocks));
+      cJSON *content = blocks_to_anthropic(ir->messages[i].blocks, ir->messages[i].n_blocks);
+      strip_cache_control(content); /* uniform policy: no client markers on messages */
+      cJSON_AddItemToObject(m, "content", content);
       cJSON_AddItemToArray(msgs, m);
    }
    if (ir->n_tools > 0)
@@ -148,9 +192,10 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
          cJSON_AddItemToObject(t, "input_schema",
                                ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
                                                    : cJSON_CreateObject());
-         add_cache_control(t, ir->tools[i].cache_control);
+         /* client tool cache_control intentionally not copied -- see mark_cache_prefix */
          cJSON_AddItemToArray(tools, t);
       }
+      mark_cache_prefix(tools); /* uniform policy: cache the stable tools block */
    }
    if (ir->tool_choice)
       cJSON_AddItemToObject(out, "tool_choice", cJSON_Duplicate(ir->tool_choice, 1));

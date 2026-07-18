@@ -98,26 +98,37 @@ int main(void)
       aimee_request_free(&uir);
    }
 
-   /* --- (2) CROSS-protocol build: OpenAI-parsed IR -> Anthropic request -> same IR
-    *         an Anthropic client would produce. --- */
+   /* --- (2) CROSS-protocol BYTE-IDENTITY: the Anthropic egress of the SAME logical
+    *         content is byte-identical whether sourced from OpenAI-wire or
+    *         Anthropic-wire (Anthropic prompt-caches on exact bytes). The served model
+    *         is overridden to the target agent's in the real flow, so align it here;
+    *         force air through the typed rebuild (mutated) instead of the raw sidecar. --- */
    cJSON *oj = cJSON_Parse(OPENAI);
    aimee_request_t oir;
    assert(openai_frontend_parse(oj, &oir, err, sizeof err) == 0);
    cJSON_Delete(oj);
-   cJSON *xbuilt = anthropic_backend_build(&oir); /* IR (from OpenAI) -> Anthropic wire */
-   assert(xbuilt);
-   aimee_request_t xir;
-   assert(anthropic_frontend_parse(xbuilt, &xir, err, sizeof err) == 0);
-   assert(aimee_ir_request_equal(&air, &xir)); /* OpenAI client -> Anthropic backend == native */
+   free(oir.model);
+   oir.model = strdup("claude-3-5-sonnet");
+   free(air.model);
+   air.model = strdup("claude-3-5-sonnet");
+   air.mutated = 1;
+   cJSON *xbuilt = anthropic_backend_build(&oir); /* openai -> IR -> anthropic egress */
+   cJSON *abuilt = anthropic_backend_build(&air); /* anthropic -> IR -> anthropic egress */
+   assert(xbuilt && abuilt);
+   char *xs = cJSON_PrintUnformatted(xbuilt);
+   char *as = cJSON_PrintUnformatted(abuilt);
+   assert(xs && as && strcmp(xs, as) == 0); /* cross-protocol egress is BYTE-IDENTICAL */
    /* the built Anthropic request has system as a top-level field, not a message */
    assert(cJSON_GetObjectItem(xbuilt, "system") != NULL);
    assert(cJSON_GetArraySize(cJSON_GetObjectItem(xbuilt, "messages")) == 1);
+   free(xs);
+   free(as);
    cJSON_Delete(xbuilt);
+   cJSON_Delete(abuilt);
 
    aimee_request_free(&air);
    aimee_request_free(&air2);
    aimee_request_free(&oir);
-   aimee_request_free(&xir);
 
    /* --- (3) response parse: Anthropic response -> IR --- */
    const char *RESP =
