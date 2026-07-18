@@ -19,6 +19,7 @@
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_blocks.h"
+#include "wfe_autonomy.h"
 
 static const char *FE = "name: fe\n"
                         "start: u\n"
@@ -171,6 +172,122 @@ int main(void)
          assert(strcmp(wi.state, "active") == 0);
          assert(strcmp(wi.pause_reason, "pending_human") == 0);
       }
+   }
+
+   /* (7) GAP-2: a foreach parent parked pending_human while its children run is
+    * AUTO-RESUMED by the autonomy driver once EVERY child has merged — with no
+    * operator resume. The fix lives in wfe_autonomy_run's pause-dispatch block,
+    * so drive it there (not wfe_engine_run). */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("fe", "r/g2", "p/g2", "autonomous", id, err, sizeof err) == 0);
+      char c0[80], c1[80], cp[96];
+      snprintf(c0, sizeof c0, "%s.g0", id);
+      snprintf(cp, sizeof cp, "gp/%s/0", id);
+      assert(db1_work_item_create(c0, "r/g2", cp, "slice", "v1", "impl", "autonomous") == 0);
+      assert(db1_work_item_set_parent(c0, id) == 0);
+      snprintf(c1, sizeof c1, "%s.g1", id);
+      snprintf(cp, sizeof cp, "gp/%s/1", id);
+      assert(db1_work_item_create(c1, "r/g2", cp, "slice", "v1", "impl", "autonomous") == 0);
+      assert(db1_work_item_set_parent(c1, id) == 0);
+      wfe_set_foreach_provider(&MOCK); /* children pre-exist -> must NOT be called */
+      g_spawned = 0;
+
+      /* first pass: runs u->sp->fe, foreach sees 2 active children -> park. */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      /* a sweep with children STILL active must leave it parked (no premature redrive). */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      /* mark every child merged; the NEXT sweep auto-clears the fan-in park and
+       * advances past `fe` — no operator resume. */
+      assert(db1_work_item_set_terminal(c0, "accepted") == 0);
+      assert(db1_work_item_set_terminal(c1, "accepted") == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "accepted") == 0);
+      assert(g_spawned == 0); /* re-aggregated from the DB, never re-spawned */
+
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int rd = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "foreach_redrive") == 0)
+            rd++;
+      free(evs);
+      assert(rd == 1); /* exactly one redrive: the all-merged transition */
+   }
+
+   /* (8) GAP-2 guard: a foreach parent with a FAILED child stays parked for a
+    * human (a slice that will not merge). The auto-resume must NOT fire while any
+    * child is non-accepted. */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("fe", "r/g2f", "p/g2f", "autonomous", id, err, sizeof err) == 0);
+      char c0[80], c1[80], cp[96];
+      snprintf(c0, sizeof c0, "%s.g0", id);
+      snprintf(cp, sizeof cp, "gfp/%s/0", id);
+      assert(db1_work_item_create(c0, "r/g2f", cp, "slice", "v1", "impl", "autonomous") == 0);
+      assert(db1_work_item_set_parent(c0, id) == 0);
+      assert(db1_work_item_set_terminal(c0, "accepted") == 0);
+      snprintf(c1, sizeof c1, "%s.g1", id);
+      snprintf(cp, sizeof cp, "gfp/%s/1", id);
+      assert(db1_work_item_create(c1, "r/g2f", cp, "slice", "v1", "impl", "autonomous") == 0);
+      assert(db1_work_item_set_parent(c1, id) == 0);
+      assert(db1_work_item_set_terminal(c1, "rejected") == 0);
+
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      /* a further sweep must not auto-clear it either (rejected slice persists). */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+   }
+
+   /* (9) GAP-1 give-up bound: a ci_pending park whose poll budget is exhausted
+    * ESCALATES to a human park (pending_human) rather than polling CI forever.
+    * Parked at a non-foreach stage so only the ci_pending arm is in play. */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("fe", "r/ci", "p/ci", "autonomous", id, err, sizeof err) == 0);
+      assert(db1_work_item_set_stage(id, "u", "") == 0);
+      assert(db1_work_item_set_pause(id, "ci_pending", "active") == 0);
+      setenv("AIMEE_AUTONOMY_CI_POLL_MAX", "3", 1);
+      for (int k = 0; k < 3; k++) /* spend the whole poll budget at this stage */
+         assert(db1_lifecycle_event_add(id, "u", "ci_poll", "engine", "", "", 0) == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      unsetenv("AIMEE_AUTONOMY_CI_POLL_MAX");
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0); /* escalated, not still ci_pending */
+      /* and it now stays human-gated (a non-foreach pending_human is never auto-cleared). */
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+   }
+
+   /* (10) GAP-1 throttle/counting: with budget remaining, one sweep records exactly
+    * one ci_poll (the natural one-poll-per-backstop-sweep cadence) and re-drives. */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("fe", "r/ci2", "p/ci2", "autonomous", id, err, sizeof err) == 0);
+      assert(db1_work_item_set_stage(id, "u", "") == 0);
+      assert(db1_work_item_set_pause(id, "ci_pending", "active") == 0);
+      setenv("AIMEE_AUTONOMY_CI_POLL_MAX", "120", 1);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      unsetenv("AIMEE_AUTONOMY_CI_POLL_MAX");
+      db1_lifecycle_event_t *evs = NULL;
+      int n = db1_lifecycle_event_list(id, &evs);
+      int polls = 0;
+      for (int i = 0; i < n; i++)
+         if (strcmp(evs[i].kind, "ci_poll") == 0)
+            polls++;
+      free(evs);
+      assert(polls == 1); /* exactly one poll claimed this sweep (compare-and-clear) */
    }
 
    printf("ok\n");
