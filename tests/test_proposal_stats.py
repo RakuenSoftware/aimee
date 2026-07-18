@@ -99,7 +99,7 @@ class ProposalStatsTests(unittest.TestCase):
 
         proc = _run("--root", str(wrapper))
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("symlink", proc.stderr)
+        self.assertIn("state directory is a symlink", proc.stderr)
 
     # --- smoke: real-tree layout, not part of the acceptance contract ---
 

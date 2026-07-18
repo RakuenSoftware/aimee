@@ -3,13 +3,12 @@
 
 Reads files only. Never writes to disk. Stdlib-only.
 
-Note on read scope: this module rejects state directories whose target
-resolves outside the proposals root at scan time, and it skips symlinked
-file entries under pending/ and done/. It does not, however, open files
-relative to a directory file descriptor, and the inner read in
-_count_words reopens each path by name. Callers that need strong
-confinement against a hostile tree should not rely on this script: it is
-a reporting helper, not a sandbox.
+Note on read scope: this module resolves every state directory and every
+file in pending/ and done/ to its real path via os.path.realpath, and
+refuses to open anything whose resolved path escapes the proposals root.
+Callers that need stronger sandboxing than that (e.g. chroot / OS-level
+seccomp) should not rely on this script: it is a reporting helper, not
+a sandbox.
 """
 from __future__ import annotations
 
@@ -74,8 +73,14 @@ def _count_words(files: list[str], proposals_root: str) -> int:
     real_root = os.path.realpath(proposals_root)
     total = 0
     for path in files:
+        real_here = os.path.realpath(path)
+        if not (real_here == real_root or real_here.startswith(real_root + os.sep)):
+            raise RuntimeError(
+                f"refusing to read {path}: resolves outside proposals root "
+                f"({real_here} vs {real_root})"
+            )
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(real_here, "r", encoding="utf-8", errors="replace") as fh:
                 total += len(fh.read().split())
         except OSError as exc:
             raise RuntimeError(
