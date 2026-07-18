@@ -63,10 +63,13 @@ int main(void)
    printf("agent_request_build golden:\n");
 
    /* Anthropic Messages wire: system + user as typed text blocks, max_tokens, then
-    * temperature (from model_sampling). This is the HARD byte-identity surface. */
+    * temperature (from model_sampling). This is the HARD byte-identity surface. The
+    * system block carries the uniform aimee cache_control policy (mark_cache_prefix):
+    * the canonical Anthropic egress caches the stable system prefix on every source. */
    golden("anthropic", "claude-3-5-sonnet",
           "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":100,"
-          "\"system\":[{\"type\":\"text\",\"text\":\"You are helpful.\"}],"
+          "\"system\":[{\"type\":\"text\",\"text\":\"You are helpful.\","
+          "\"cache_control\":{\"type\":\"ephemeral\"}}],"
           "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\","
           "\"text\":\"deploy the release\"}]}],\"temperature\":0.7}");
 
