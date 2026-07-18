@@ -1627,6 +1627,7 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
                                        $(OBJDIR)/server/aimee_frontend_openai.o \
                                        $(OBJDIR)/server/aimee_frontend_responses.o \
                                        $(OBJDIR)/server/aimee_ir.o \
+                                       $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/server/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4290,6 +4291,7 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
                                        $(OBJDIR)/server/aimee_frontend_openai.o \
                                        $(OBJDIR)/server/aimee_frontend_responses.o \
                                        $(OBJDIR)/server/aimee_ir.o \
+                                       $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/server/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
