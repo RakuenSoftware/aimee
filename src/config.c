@@ -1275,10 +1275,17 @@ int config_load_file(config_t *cfg)
       cfg->require_aimee_git = cJSON_IsTrue(item);
 
    /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
-    * explicit `delegate_sandbox: true` turns it on. */
+    * explicit `delegate_sandbox: true` turns it on. A deploy that cannot easily
+    * write aimee.yaml (e.g. a container image whose config is baked) can enable
+    * it with AIMEE_DELEGATE_SANDBOX=1 in the environment — the env wins. */
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
    if (cJSON_IsBool(item))
       cfg->delegate_sandbox = cJSON_IsTrue(item);
+   {
+      const char *e = getenv("AIMEE_DELEGATE_SANDBOX");
+      if (e && (e[0] == '1' || e[0] == '0'))
+         cfg->delegate_sandbox = (e[0] == '1');
+   }
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_image");
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->delegate_sandbox_image, sizeof(cfg->delegate_sandbox_image), "%s",
