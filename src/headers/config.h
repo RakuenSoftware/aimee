@@ -2061,6 +2061,12 @@ void config_snapshot_init(const config_t *cfg);
 int config_snapshot_get(config_t *out);
 int config_reload(void);
 
+/* config_reload_if_changed — reload iff the config file changed on disk since the last call
+ * (out-of-band write: CLI local config.set, manual edit, or autonomous config_save). Poll it
+ * from the server's main-loop tick so a file change takes effect without a restart or SIGHUP.
+ * First call reconciles unconditionally. Returns config_reload()'s 1/0/-1 on a change, else 0. */
+int config_reload_if_changed(void);
+
 /* Re-applier registry (live-config-reload P3): a hook invoked after config_reload publishes a
  * new snapshot, receiving the OLD and NEW config so it can push bound state (env bridge, log
  * level, TLS, …) live when the section it owns changed. Register once at startup. Re-appliers

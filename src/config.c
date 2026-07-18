@@ -1887,3 +1887,45 @@ int config_reload(void)
    pthread_mutex_unlock(&g_snap_wlock);
    return 1; /* a new snapshot was published */
 }
+
+/* Live-config-reload P4: reload on an OUT-OF-BAND write to the config file — a CLI local
+ * `config set` one-shot, a manual edit, or the server's own autonomous config_save (wfe/
+ * trigger path) — without a restart or a SIGHUP. The server reads config from the push
+ * snapshot (config_load -> config_snapshot_get), which previously only refreshed via
+ * config_reload on SIGHUP or the in-server config.set route; a plain file write therefore
+ * did not take effect. Call this from the server's 1s main-loop tick.
+ *
+ * Tracks the file's (mtime,size,inode) across calls (same cheap identity config_load_file
+ * caches on; mtime alone is spoofable on the tiered appliance FS). The FIRST call reloads
+ * unconditionally to reconcile the snapshot with the on-disk file (covers an edit landed in
+ * the <1s window between snapshot-init and the first tick); config_reload's token no-op
+ * guard makes that a cheap no-op when nothing changed. Reusing config_reload gives us its
+ * validate-or-keep semantics for free, so a bad edit never replaces a good running config,
+ * and the server rewriting its own equivalent config is a no-op (no reload churn).
+ *
+ * Returns config_reload()'s result (1 published / 0 no-op / -1 kept) when a change was
+ * observed, else 0. */
+int config_reload_if_changed(void)
+{
+   static struct timespec last_mt;
+   static off_t last_size;
+   static ino_t last_ino;
+   static int seeded = 0;
+
+   const char *path = config_default_path();
+   struct stat st;
+   if (stat(path, &st) != 0)
+      return 0; /* transiently absent (e.g. an atomic rename in flight) — retry next tick */
+
+   struct timespec mt = AIMEE_STAT_MTIM(st);
+   int changed =
+       !seeded || !timespec_eq(&mt, &last_mt) || st.st_size != last_size || st.st_ino != last_ino;
+   if (!changed)
+      return 0;
+
+   last_mt = mt;
+   last_size = st.st_size;
+   last_ino = st.st_ino;
+   seeded = 1;
+   return config_reload();
+}

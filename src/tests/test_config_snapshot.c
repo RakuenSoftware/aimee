@@ -132,6 +132,22 @@ int main(void)
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == mid);
    }
 
+   /* --- P4 config_reload_if_changed: an OUT-OF-BAND file write (as a CLI local config.set,
+    * a manual edit, or the autonomous config_save produces) is picked up on the main-loop
+    * tick WITHOUT an explicit config_reload()/SIGHUP; an unchanged file is a no-op. --- */
+   {
+      (void)config_reload_if_changed();        /* first call seeds the baseline + reconciles */
+      assert(config_reload_if_changed() == 0); /* no on-disk change since -> no-op */
+      write_marker(0, 3333);                   /* out-of-band write */
+      assert(config_reload_if_changed() == 1); /* detected the change + published */
+      {
+         config_t got;
+         assert(config_snapshot_get(&got) == 0);
+         assert(got.coord_closet_budget_bytes == 3333); /* the new value is live now */
+      }
+      assert(config_reload_if_changed() == 0); /* stable again -> no-op */
+   }
+
    /* --- autonomy-live: config_autonomy_lookup (operator env override > live snapshot,
     * non-config var -> fall back) --- */
    {
