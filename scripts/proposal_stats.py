@@ -23,10 +23,9 @@ def _proposals_root() -> str:
 
 
 def _real_within(real_path: str, real_root: str) -> bool:
-# Compare via os.path.commonpath to avoid string-prefix traps like
-    # /foo/bar matching /foo/barbaz. realpath() is called on both sides so a
-    # symlink that slipped past the is_symlink guard (e.g. via a race) cannot
-    # trick the check either.
+    # Use os.path.commonpath (not startswith) so /foo/barbaz cannot be
+    # misread as living inside /foo/bar. realpath() on both sides closes
+    # the symlink-race gap left by the is_symlink guard above.
     real_path_abs = os.path.realpath(real_path)
     real_root_abs = os.path.realpath(real_root)
     try:
