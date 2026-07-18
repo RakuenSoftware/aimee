@@ -53,14 +53,11 @@ typedef enum
  * auto-reclaimed. The TTL is set well above the worst-case legitimate request
  * (provider timeout ~180s x up to 3 retries ~= 540s) so only truly-dead holders
  * are reaped, never a slow-but-live request. */
-#define PROVIDER_SLOT_CAP     64
-#define PROVIDER_SLOT_TTL_SEC 900
 
 #include <time.h>
 /* Compact holders older than `ttl` out of a per-agent acquire-timestamp array
  * kept sorted oldest-first; returns the new live count. Pure (no I/O, no locks)
  * so the reap arithmetic is unit-testable. */
-int provider_slots_reap_stamps(time_t *stamps, int active, time_t now, int ttl);
 
 typedef struct
 {
@@ -106,10 +103,8 @@ int provider_catalog_inferred_concurrency(const char *agent_name);
 /* Attempt to acquire one in-flight slot for agent_name.
  * max_parallel: the per-agent cap (from agent_t.max_parallel); 0 = unlimited.
  * Returns 1 if the slot was acquired, 0 if already at the cap. */
-int provider_catalog_concurrent_acquire(const char *agent_name, int max_parallel);
 
 /* Release a previously acquired in-flight slot for agent_name. */
-void provider_catalog_concurrent_release(const char *agent_name);
 
 /* Classify an endpoint URL as local / LAN / remote.
  * Pure function — no catalog state required. */

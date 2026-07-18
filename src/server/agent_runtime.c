@@ -1,7 +1,9 @@
 #include "aimee.h"
+#include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
 #include "db1.h"
+#include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include "delegate_role.h"
 #include "skill_curator.h"
 #include "skill_review.h"
@@ -132,11 +134,79 @@ static void record_outcome(const char *agent_name, const char *role, const agent
                                         outcome->tokens_used, outcome->tool_error_pattern);
 }
 
+extern const char *delegation_active_id(void);
+
+/* Apply config -> the admission controller, re-applying only when the config file changes
+ * (the acquire runs per turn, so this stays a cheap stat() on the hot path). Guarantees the
+ * controller is configured before the first acquire, and picks up hot-reloaded limits. */
+static void admission_ensure_configured(void)
+{
+   static long long applied_mtime = -1;
+   static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+   const char *path = config_default_path();
+   struct stat st;
+   long long mtime = (path && stat(path, &st) == 0)
+                         ? (long long)st.st_mtime * 1000000000LL + (long long)st.st_mtim.tv_nsec
+                         : 0;
+   pthread_mutex_lock(&mu);
+   if (mtime != applied_mtime)
+   {
+      config_t cfg;
+      config_load(&cfg); /* mtime-cached */
+      int global_max = cfg.maximum_total_concurrent_agent_sessions > 0
+                           ? cfg.maximum_total_concurrent_agent_sessions
+                           : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
+      int default_model = cfg.concurrency_default > 0 ? cfg.concurrency_default : 5;
+      agent_admission_model_limit_t overrides[CONFIG_CONCURRENCY_MAX_ENTRIES];
+      int n = 0;
+      for (int i = 0; i < cfg.concurrency_per_model_count && n < CONFIG_CONCURRENCY_MAX_ENTRIES;
+           i++)
+      {
+         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s",
+                  cfg.concurrency_per_model[i].key);
+         overrides[n].limit = cfg.concurrency_per_model[i].limit;
+         n++;
+      }
+      agent_admission_configure(global_max, default_model, overrides, n);
+      applied_mtime = mtime;
+   }
+   pthread_mutex_unlock(&mu);
+}
+
+/* Fan-out / fallback callers must try a DIFFERENT agent when one is at its limit rather
+ * than block; they set this thread-local so the admission acquire fails fast. Default (0)
+ * blocks and queues — the right behaviour for a pinned turn (e.g. `delegate --via <agent>`,
+ * or a single-agent chat/panel turn). Thread-local so the ~15 callers stay untouched. */
+static __thread int tl_admission_fail_fast = 0;
+void agent_dispatch_set_fail_fast(int on)
+{
+   tl_admission_fail_fast = on ? 1 : 0;
+}
+
+/* Abandon a queued turn if its delegation was stopped (cancel_ctx is the delegation id). */
+static int admission_cancel_poll(const char *deleg_id)
+{
+   return (deleg_id && deleg_id[0]) ? db1_delegation_spawn_is_stopped(deleg_id) : 0;
+}
+
+/* The admission execution-context handle. A delegation is its own context (stable across
+ * the delegate's turns, distinct per fan-out sibling); otherwise the session+agent binding
+ * (a persistent CLI pane / repeated same-agent turns in a session reuse the one slot). */
+static const char *admission_ctx(const agent_t *ag, char *buf, size_t n)
+{
+   const char *deleg = delegation_active_id();
+   if (deleg && deleg[0])
+      return deleg;
+   const char *sid = session_id();
+   snprintf(buf, n, "%s:%s", (sid && sid[0]) ? sid : "local", ag->name);
+   return buf;
+}
+
 /* THE single per-agent turn executor — see agent_exec.h. Every model turn (panel
  * lens, ensemble reference, delegate, fallback peer, chat/responses passthrough,
- * aux) routes through here so the per-agent max_parallel cap and provider-health
- * recording are enforced in ONE place instead of being re-implemented (and
- * forgotten) per dispatch path.
+ * aux) routes through here so admission control (global + per-agent + per-model caps)
+ * and provider-health recording are enforced in ONE place instead of being
+ * re-implemented (and forgotten) per dispatch path.
  *
  * Health-domain note: this deliberately WIDENS provider-health accounting to the
  * OpenAI-compatible ingress and the aux router, which previously bypassed it — a
@@ -166,12 +236,29 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
       return -1;
    }
-   /* Concurrency choke point: acquire the agent's max_parallel slot. At the limit,
-    * report a DISTINCT at-limit signal (so a fan-out/retry caller picks a different
-    * agent) and return BEFORE any health recording — saturation is a load signal,
-    * not a provider fault. acquire() returns "unlimited" for max_parallel<=0 /
-    * unknown agents, so single-dispatch callers are unaffected. */
-   if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
+   admission_ensure_configured();
+
+   /* Admission choke point: acquire a slot subject to the global, per-agent and
+    * per-model caps (fail-closed — an unconfigured/invalid agent is rejected, never
+    * waved through). A pinned turn blocks and queues; a fan-out/fallback caller
+    * (tl_admission_fail_fast) gets a DISTINCT at-limit signal instead so it can pick a
+    * different agent. Return BEFORE any health recording — saturation is a load signal,
+    * not a provider fault. */
+   char admit_ctxbuf[192];
+   const char *admit_deleg = delegation_active_id();
+   agent_admit_req_t admit_req = {
+       .ctx_handle = admission_ctx(ag, admit_ctxbuf, sizeof(admit_ctxbuf)),
+       .agent = ag->name,
+       .model = ag->model,
+       .per_agent_max = ag->max_parallel,
+       .priority = (admit_deleg && admit_deleg[0]) ? AGENT_ADMIT_PRIORITY_BACKGROUND
+                                                   : AGENT_ADMIT_PRIORITY_INTERACTIVE,
+       .flags = tl_admission_fail_fast ? AGENT_ADMIT_NONBLOCKING : 0u,
+       .cancel_fn = admission_cancel_poll,
+       .cancel_ctx = (admit_deleg && admit_deleg[0]) ? admit_deleg : NULL,
+   };
+   agent_slot_t *admit_slot = agent_admission_acquire(&admit_req, NULL);
+   if (!admit_slot)
    {
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", ag->name);
       /* Aimee-internal back-pressure, not a provider fault: tag it with the aimee
@@ -187,7 +274,7 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                           max_tokens, temperature, out)
                       : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
-   provider_catalog_concurrent_release(ag->name);
+   agent_admission_release(admit_slot);
    if (rc == 0)
       provider_catalog_record_success(ag->name);
    else

@@ -76,6 +76,9 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
    /* Cost-tier fallback: a tier is a pool. Even when fallback_chain is stale
     * or names only one primary, retry any same-cost peer before failing. */
    int tier = ag->cost_tier;
+   /* Fail fast at a peer's limit so we move to the next free peer instead of queueing on
+    * a busy one; the caller's own turn already queued at its admission point. */
+   agent_dispatch_set_fail_fast(1);
    for (int i = 0; i < cfg->agent_count && rc != 0; i++)
    {
       agent_t *peer = &cfg->agents[i];
@@ -108,6 +111,7 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
             *current = peer;
       }
    }
+   agent_dispatch_set_fail_fast(0);
 
    return rc;
 }

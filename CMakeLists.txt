@@ -498,7 +498,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/yaml.c
     ${AIMEE_SRC_DIR}/diff.c
-    ${AIMEE_SRC_DIR}/provider_slots_reap.c
     ${AIMEE_SRC_DIR}/anchor_snapshot.c
     ${AIMEE_SRC_DIR}/edit_anchored.c
     ${AIMEE_SRC_DIR}/code_outline.c
@@ -849,7 +848,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server_provider.c
     ${AIMEE_SRC_DIR}/server_insights.c
     ${AIMEE_SRC_DIR}/server_eval.c
-    ${AIMEE_SRC_DIR}/server_provider_slots.c
     ${AIMEE_SRC_DIR}/server/server_api_status.c
     ${AIMEE_SRC_DIR}/server/server_seed_config.c
     ${AIMEE_SRC_DIR}/server/server_auth.c
@@ -890,7 +888,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_compute.c
     ${AIMEE_SRC_DIR}/server/server_compute_roundtable.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
-    ${AIMEE_SRC_DIR}/server_compute_concurrency.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c
     ${AIMEE_SRC_DIR}/server/server_delegate_ondemand.c
     ${AIMEE_SRC_DIR}/server/server_delegate_status.c
@@ -916,7 +913,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
-    ${AIMEE_SRC_DIR}/server/compute_concurrency.c
+    ${AIMEE_SRC_DIR}/server/agent_admission.c
     ${AIMEE_SRC_DIR}/server/provider_catalog.c
     ${AIMEE_SRC_DIR}/server/dashboard_server.c
     ${AIMEE_SRC_DIR}/hud.c

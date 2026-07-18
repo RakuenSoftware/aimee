@@ -19,8 +19,6 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_provider_quota(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_provider_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_provider_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_provider_slot_acquire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_provider_slot_release(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_provider_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 void server_seed_config_defaults(void);
 

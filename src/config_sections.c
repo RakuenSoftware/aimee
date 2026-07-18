@@ -498,6 +498,10 @@ void config_parse_concurrency_section(config_t *cfg, cJSON *root)
       if (cJSON_IsNumber(item) && item->valuedouble > 0)
          cfg->concurrency_default = (int)item->valuedouble;
 
+      item = cJSON_GetObjectItemCaseSensitive(conc, "maximum_total_concurrent_agent_sessions");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->maximum_total_concurrent_agent_sessions = (int)item->valuedouble;
+
       cJSON *pm = cJSON_GetObjectItemCaseSensitive(conc, "per_model");
       if (cJSON_IsObject(pm))
       {

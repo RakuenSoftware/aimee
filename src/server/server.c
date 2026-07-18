@@ -1391,8 +1391,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"delegate.backend_exec", handle_delegate_backend_exec},
     {"delegate.sandbox_list", handle_delegate_sandbox_list},
     {"delegate.sandbox_gc", handle_delegate_sandbox_gc},
-    {"provider.slot_acquire", handle_provider_slot_acquire},
-    {"provider.slot_release", handle_provider_slot_release},
     {"provider.list", handle_provider_list},
     {"provider.show", handle_provider_show},
     {"provider.models", handle_provider_models},
@@ -2170,7 +2168,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Mutex for ctx->conns array (accept inserts; conn_close swap-shrinks). */
    pthread_mutex_init(&ctx->conns_mutex, NULL);
    /* Provider concurrency slots: global active count per agent. */
-   pthread_mutex_init(&ctx->provider_slots_mutex, NULL);
    /* Initialize the in-server compute thread pool. Long-running server-side
     * work (delegates, ingest) runs here; chat streams and tool callbacks use
     * bounded async lanes so callbacks can still get workers. */

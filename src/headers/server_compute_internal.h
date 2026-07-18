@@ -18,18 +18,8 @@ typedef struct
 } delegation_mailbox_t;
 /* Cross-TU declarations for the server_compute cluster. Formerly file-local
  * statics shared by textual .inc inclusion. */
-typedef struct
-{
-   const char *model;
-   const char *provider;
-} concurrency_route_key_t;
 
 /* promoted cross-TU (former .inc statics) */
-void concurrency_ensure_current(void);
-concurrency_route_key_t concurrency_key(const char *via_name, const agent_t *target_agent,
-                                        char *tier_key, size_t tier_key_len);
-void concurrency_maybe_preempt_delegate(const char *model, const char *provider,
-                                        int requester_priority, const char *requester_id);
 int delegate_agent_uses_mistral_path(const agent_t *agent);
 delegation_mailbox_t *mailbox_acquire(const char *delegation_id);
 delegation_mailbox_t *mailbox_find(const char *delegation_id);
@@ -37,7 +27,6 @@ void mailbox_release(delegation_mailbox_t *mb);
 void mailbox_reply(delegation_mailbox_t *mb, const char *content);
 int mailbox_wait(delegation_mailbox_t *mb, char *out, size_t out_len, int timeout_secs);
 
-extern concurrency_mgr_t g_concurrency_mgr;
 extern __thread delegation_mailbox_t *tl_mailbox;
 extern __thread char tl_parent_delegation_id[64];
 extern __thread int tl_delegation_depth;

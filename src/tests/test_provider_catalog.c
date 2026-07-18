@@ -6,9 +6,8 @@
 
 #include "../server/provider_catalog.c"
 
-/* Stub the co-located /v1 dispatch with a minimal single-agent slot counter, so
- * provider_catalog_concurrent_{acquire,release} exercise their real
- * server-authoritative path (the production path on the server) end-to-end. */
+/* Stub the co-located /v1 dispatch so provider_catalog's health/locality calls
+ * resolve without a live server. */
 static int g_stub_slots = 0;
 cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 {
@@ -289,47 +288,6 @@ static void test_labels(void)
    printf("  labels: OK\n");
 }
 
-/* ---- concurrency cap (the invariant agent_dispatch_one enforces) ---- */
-
-/* acquire()/release() must be an exact pair: up to max_parallel acquisitions
- * succeed, the next is refused (0), and every release restores exactly one slot
- * so the cap returns to its prior value. This is the guard agent_dispatch_one
- * relies on to stop the parallel panel/ensemble fan-out from hammering one model
- * past max_parallel. Exercises the real server-authoritative path against the
- * slot-counter stub above. */
-static void test_concurrent_acquire_release_cap(void)
-{
-   const char *ag = "concur-cap-test";
-   g_stub_slots = 0;
-
-   /* max_parallel = 2: two acquire, third refused. */
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 1);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 1);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 0); /* at the cap */
-
-   /* one release frees exactly one slot — the cap returns to its prior value. */
-   provider_catalog_concurrent_release(ag);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 1);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 0); /* full again */
-
-   /* drain both in-flight slots -> cap fully restored. */
-   provider_catalog_concurrent_release(ag);
-   provider_catalog_concurrent_release(ag);
-   assert(g_stub_slots == 0);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 1);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 1);
-   assert(provider_catalog_concurrent_acquire(ag, 2) == 0);
-   provider_catalog_concurrent_release(ag);
-   provider_catalog_concurrent_release(ag);
-   assert(g_stub_slots == 0);
-
-   /* max_parallel <= 0 is UNLIMITED (returns before any slot call) -> a
-    * single-dispatch caller is never blocked. */
-   assert(provider_catalog_concurrent_acquire(ag, 0) == 1);
-   assert(g_stub_slots == 0); /* no slot consumed for the unlimited case */
-   printf("  concurrent_acquire_release_cap: OK\n");
-}
-
 int main(void)
 {
    printf("test_provider_catalog:\n");
@@ -358,8 +316,6 @@ int main(void)
    test_dump_json_overflow();
 
    test_labels();
-
-   test_concurrent_acquire_release_cap();
 
    printf("All provider_catalog tests passed.\n");
    return 0;
