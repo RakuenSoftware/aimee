@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "description": "Validation corpus for the memory_negation feature (config: memory_negation_enabled). Each negated fact is paired with a positive distractor stating the OPPOSITE, so retrieval must be negation-aware to separate them: a naive lexical/semantic retriever scores both members of a pair highly on a negation query. Run the memory-retrieval eval with memory_negation OFF vs ON; the ON run should raise recall on the negation + discrimination cases WITHOUT regressing the positive controls. Kept OUT of the gated golden (memory_retrieval_corpus.json) so it never perturbs that regression baseline.",
+  "fixtures": [
+    {"fid": "n001", "tier": "L2", "kind": "fact", "key": "redis persistence staging", "content": "In staging, Redis is configured WITHOUT persistence; all data is in-memory and lost on restart."},
+    {"fid": "n002", "tier": "L2", "kind": "fact", "key": "postgres local ssl", "content": "The local Postgres connection does NOT use SSL; it runs over a trusted unix socket only."},
+    {"fid": "n003", "tier": "L2", "kind": "fact", "key": "metrics endpoint auth", "content": "The public metrics endpoint requires NO authentication and is exposed read-only."},
+    {"fid": "n004", "tier": "L2", "kind": "fact", "key": "job retry policy", "content": "Failed background jobs are NEVER retried automatically; a human must requeue them."},
+    {"fid": "n005", "tier": "L2", "kind": "fact", "key": "cdn purge on deploy", "content": "The CDN cache is never purged on deploy; entries expire only by their TTL."},
+    {"fid": "n006", "tier": "L2", "kind": "fact", "key": "staging email delivery", "content": "The staging environment does not send real emails; all mail is captured by a local sink."},
+    {"fid": "n007", "tier": "L2", "kind": "fact", "key": "embedder gpu use", "content": "The embedder runs on CPU only; no GPU is used in the default deployment."},
+    {"fid": "n008", "tier": "L2", "kind": "fact", "key": "backup encryption", "content": "Nightly backups are stored unencrypted on the local disk."},
+
+    {"fid": "n101", "tier": "L2", "kind": "fact", "key": "redis persistence prod", "content": "In production, Redis persists to disk via AOF fsync every second and survives restarts."},
+    {"fid": "n102", "tier": "L2", "kind": "fact", "key": "postgres prod ssl", "content": "The production Postgres connection enforces SSL with full certificate verification."},
+    {"fid": "n103", "tier": "L2", "kind": "fact", "key": "admin endpoint auth", "content": "The admin endpoint requires both an API key and a bearer token for every request."},
+    {"fid": "n104", "tier": "L2", "kind": "fact", "key": "payment webhook retry", "content": "Failed payment webhooks are retried automatically with exponential backoff up to five times."},
+    {"fid": "n105", "tier": "L2", "kind": "fact", "key": "asset cache purge", "content": "The asset cache is purged on every deploy so clients always fetch the newest bundle."},
+    {"fid": "n106", "tier": "L2", "kind": "fact", "key": "prod email delivery", "content": "The production environment sends real emails through the SES transactional provider."},
+    {"fid": "n107", "tier": "L2", "kind": "fact", "key": "reranker gpu use", "content": "The reranker runs on a dedicated GPU in the default production deployment."},
+    {"fid": "n108", "tier": "L2", "kind": "fact", "key": "snapshot encryption", "content": "Nightly database snapshots are encrypted at rest with a KMS-managed key."},
+
+    {"fid": "n201", "tier": "L2", "kind": "fact", "key": "log retention", "content": "Application logs rotate daily and are retained for fourteen days."},
+    {"fid": "n202", "tier": "L2", "kind": "fact", "key": "timestamp timezone", "content": "All stored timestamps are in UTC regardless of the client locale."},
+    {"fid": "n203", "tier": "L2", "kind": "fact", "key": "python version", "content": "The service requires Python 3.11 or newer for its typing features."}
+  ],
+  "cases": [
+    {"id": "neg01", "query": "which service is configured without persistence", "expected": ["n001"], "difficulty": "hard", "notes": "negation: no persistence"},
+    {"id": "neg02", "query": "database connection that does not use SSL", "expected": ["n002"], "difficulty": "hard", "notes": "negation: not SSL"},
+    {"id": "neg03", "query": "endpoint that requires no authentication", "expected": ["n003"], "difficulty": "hard", "notes": "negation: no auth"},
+    {"id": "neg04", "query": "what is never retried automatically", "expected": ["n004"], "difficulty": "hard", "notes": "negation: never retried"},
+    {"id": "neg05", "query": "cache that is never purged on deploy", "expected": ["n005"], "difficulty": "hard", "notes": "negation: never purged"},
+    {"id": "neg06", "query": "environment that does not send real email", "expected": ["n006"], "difficulty": "hard", "notes": "negation: no real email"},
+    {"id": "neg07", "query": "component that runs without a GPU", "expected": ["n007"], "difficulty": "hard", "notes": "negation: no GPU"},
+    {"id": "neg08", "query": "backups that are not encrypted", "expected": ["n008"], "difficulty": "hard", "notes": "negation: unencrypted"},
+
+    {"id": "dis01", "query": "the redis that keeps no data across restarts", "expected": ["n001"], "difficulty": "hard", "notes": "discriminate n001 (no persistence) from n101 (persistent)"},
+    {"id": "dis02", "query": "postgres connection with no SSL", "expected": ["n002"], "difficulty": "hard", "notes": "discriminate n002 from n102 (SSL enforced)"},
+    {"id": "dis03", "query": "endpoint with no auth required", "expected": ["n003"], "difficulty": "hard", "notes": "discriminate n003 from n103 (key + bearer)"},
+    {"id": "dis04", "query": "jobs that are not retried", "expected": ["n004"], "difficulty": "hard", "notes": "discriminate n004 from n104 (retried with backoff)"},
+    {"id": "dis05", "query": "cache that is not purged on deploy", "expected": ["n005"], "difficulty": "hard", "notes": "discriminate n005 from n105 (purged each deploy)"},
+    {"id": "dis06", "query": "environment with no real email sending", "expected": ["n006"], "difficulty": "hard", "notes": "discriminate n006 from n106 (sends via SES)"},
+    {"id": "dis07", "query": "inference component not using a GPU", "expected": ["n007"], "difficulty": "hard", "notes": "discriminate n007 from n107 (GPU reranker)"},
+    {"id": "dis08", "query": "backups without encryption", "expected": ["n008"], "difficulty": "hard", "notes": "discriminate n008 from n108 (encrypted snapshots)"},
+
+    {"id": "pos01", "query": "which redis persists to disk across restarts", "expected": ["n101"], "difficulty": "easy", "notes": "positive control: must still find the affirmative fact"},
+    {"id": "pos02", "query": "connection that enforces SSL with cert verification", "expected": ["n102"], "difficulty": "easy", "notes": "positive control"},
+    {"id": "pos03", "query": "endpoint requiring an API key and bearer token", "expected": ["n103"], "difficulty": "easy", "notes": "positive control"},
+    {"id": "pos04", "query": "webhooks retried with exponential backoff", "expected": ["n104"], "difficulty": "easy", "notes": "positive control"}
+  ]
+}
