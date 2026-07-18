@@ -30,7 +30,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/mcp_client.o $(OBJDIR)/server/mcp_client_registry.o \
                              $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                              $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/cli_main.o \
-	                             $(OBJDIR)/guardrails.o $(OBJDIR)/guardrails_orchestrator.o $(OBJDIR)/guardrails_action_audit.o $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/guardrails_tdd.o $(OBJDIR)/guardrails_semantic.o $(OBJDIR)/guardrails_blast_radius.o $(OBJDIR)/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_state.o $(OBJDIR)/git_verify_config.o $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o \
+	                             $(OBJDIR)/guardrails.o $(OBJDIR)/guardrails_orchestrator.o $(OBJDIR)/guardrails_action_audit.o $(OBJDIR)/audit_action.o $(OBJDIR)/audit_worm.o $(OBJDIR)/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/guardrails_tdd.o $(OBJDIR)/guardrails_semantic.o $(OBJDIR)/guardrails_blast_radius.o $(OBJDIR)/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o \
                              $(OBJDIR)/branch_ownership.o \
                              $(OBJDIR)/dstr.o $(OBJDIR)/diff.o $(OBJDIR)/anchor_snapshot.o $(OBJDIR)/edit_anchored.o \
                              $(OBJDIR)/code_outline.o $(OBJDIR)/posix/agent_tools_anchored.o \
@@ -1406,7 +1406,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/server/presence.o $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/agent_cancel_stub.o $(OBJDIR)/delivery_target.o \
                                $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/server/workspace_provider_container.o $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/server/workspace_provider_detached.o \
                                $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
-                               $(OBJDIR)/workspace_mirror.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o \
+                               $(OBJDIR)/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
                                $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1854,8 +1854,8 @@ $(TESTPREFIX)/unit-test-trace-analysis: $(OBJDIR)/tests/test_trace_analysis.o $(
 
 $(TESTPREFIX)/unit-test-cmd-branch: $(OBJDIR)/tests/test_cmd_branch.o $(OBJDIR)/cmd_branch.o \
                            $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
-                           $(OBJDIR)/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/mcp_git_write.o \
-                           $(OBJDIR)/mcp_git_branch.o $(OBJDIR)/mcp_git_pr.o
+                           $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o \
+                           $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OBJS) \
@@ -1863,31 +1863,31 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
                          $(OBJDIR)/cmd_util.o \
                          $(OBJDIR)/cmd_infra.o \
                          $(OBJDIR)/cmd_init.o \
-                         $(OBJDIR)/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/mcp_git_write.o \
-                         $(OBJDIR)/mcp_git_branch.o $(OBJDIR)/mcp_git_pr.o
+                         $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o \
+                         $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/mcp_git_write.o \
-                        $(OBJDIR)/mcp_git_branch.o $(OBJDIR)/mcp_git_pr.o $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_state.o $(OBJDIR)/git_verify_config.o \
-                        $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o \
-                        $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
+$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o \
+                        $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
+                        $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
+                        $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-verify-select: $(OBJDIR)/tests/test_git_verify_select.o \
-                        $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_state.o $(OBJDIR)/git_verify_config.o \
-                        $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o \
-                        $(OBJDIR)/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
+                        $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
+                        $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
+                        $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-verify-contract: $(OBJDIR)/tests/test_git_verify_contract.o \
-                        $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_state.o $(OBJDIR)/git_verify_config.o \
-                        $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o \
-                        $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
+                        $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
+                        $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
+                        $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2203,8 +2203,8 @@ $(TESTPREFIX)/unit-test-cmd-doctor: $(OBJDIR)/tests/test_cmd_doctor.o $(OBJDIR)/
                             $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o $(OBJDIR)/db1/secrets.o \
                             $(OBJDIR)/server/kb_client.o $(OBJDIR)/server/kb_client_cache.o $(OBJDIR)/server/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/server/kb_client_memory.o $(OBJDIR)/server/kb_client_memory_mutations.o $(OBJDIR)/server/kb_client_agent.o $(OBJDIR)/server/kb_client_dashboard.o $(OBJDIR)/server/kb_client_tasks.o $(OBJDIR)/server/kb_client_data.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
-                            $(OBJDIR)/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/mcp_git_write.o \
-                            $(OBJDIR)/mcp_git_branch.o $(OBJDIR)/mcp_git_pr.o
+                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o \
+                            $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
@@ -2214,8 +2214,8 @@ $(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
                             $(DB2_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o $(OBJDIR)/db1/secrets.o \
-                            $(OBJDIR)/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/mcp_git_write.o \
-                            $(OBJDIR)/mcp_git_branch.o $(OBJDIR)/mcp_git_pr.o
+                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o \
+                            $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-diff: $(OBJDIR)/tests/test_diff.o $(OBJDIR)/diff.o $(OBJDIR)/dstr.o \
@@ -2244,7 +2244,7 @@ $(TESTPREFIX)/unit-test-workspace-handle: $(OBJDIR)/tests/test_workspace_handle.
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-forge-credentials: $(OBJDIR)/tests/test_forge_credentials.o \
-                      $(OBJDIR)/forge_credentials.o
+                      $(OBJDIR)/modules/git/forge_credentials.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # Forge App installation-token provider: JWT shape, token-response parse,
@@ -2264,7 +2264,7 @@ $(TESTPREFIX)/unit-test-workspace-mirror: $(OBJDIR)/tests/test_workspace_mirror.
 # Gated live integration test (NOT in unit-tests / verify): drives the broker
 # against a real authenticated git remote. Build + run via `make forge-cred-integration`.
 $(TESTPREFIX)/forge-cred-live: $(OBJDIR)/tests/test_forge_credentials_live.o \
-                      $(OBJDIR)/forge_credentials.o
+                      $(OBJDIR)/modules/git/forge_credentials.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-workspace-provider-detached: \
@@ -2304,7 +2304,7 @@ $(TESTPREFIX)/unit-test-workspace-turn: $(OBJDIR)/tests/test_workspace_turn.o \
                       $(OBJDIR)/server/workspace_provider_detached.o \
                       $(OBJDIR)/server/workspace_runner_registry.o \
                       $(OBJDIR)/server/workspace_runner_queue.o \
-                      $(OBJDIR)/workspace_mirror.o $(OBJDIR)/forge_credentials.o $(OBJDIR)/server/git_host_resolve.o \
+                      $(OBJDIR)/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
                       $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
@@ -3070,7 +3070,7 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
 $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_ctl.o \
                                        $(OBJDIR)/server/server_pipeline.o $(OBJDIR)/server/server_pipeline_merge.o \
-                                       $(OBJDIR)/server/git_pr_ci_grade.o \
+                                       $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                                        $(OBJDIR)/server/roundtable_pipeline_eval.o \
                                        $(OBJDIR)/server/roundtable_pipeline_chunk.o \
                                        $(OBJDIR)/db1/roundtable_pipeline.o \
@@ -3180,7 +3180,7 @@ $(TESTPREFIX)/unit-test-evidence-replay: $(OBJDIR)/tests/test_evidence_replay.o 
 
 # Live forge: the pure check-runs/combined-status -> CI verdict aggregation.
 $(TESTPREFIX)/unit-test-git-pr-ci-grade: $(OBJDIR)/tests/test_git_pr_ci_grade.o \
-                              $(OBJDIR)/server/git_pr_ci_grade.o $(OBJDIR)/cJSON.o
+                              $(OBJDIR)/modules/git/git_pr_ci_grade.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-roundtable-verify: $(OBJDIR)/tests/test_roundtable_verify.o \
@@ -3214,9 +3214,9 @@ $(TESTPREFIX)/unit-test-vault-store: $(OBJDIR)/tests/test_vault_store.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
-                              $(OBJDIR)/server/git_ops.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
-                              $(OBJDIR)/server/git_forge_vault.o $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/server/workspace_scope.o \
-                              $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o $(OBJDIR)/util_url.o \
+                              $(OBJDIR)/modules/git/git_ops.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
+                              $(OBJDIR)/modules/git/git_forge_vault.o $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/server/workspace_scope.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o $(OBJDIR)/util_url.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
@@ -3226,9 +3226,9 @@ $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
 
 $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
                               $(OBJDIR)/tests/support/kb_purge_stub.o \
-                              $(OBJDIR)/server/git_project.o $(OBJDIR)/server/ws_registry.o $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
-                              $(OBJDIR)/server/git_forge_vault.o $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/server/workspace_scope.o \
-                              $(OBJDIR)/forge_credentials.o $(OBJDIR)/util_url.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/git_project.o $(OBJDIR)/server/ws_registry.o $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
+                              $(OBJDIR)/modules/git/git_forge_vault.o $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/server/workspace_scope.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/util_url.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
@@ -3237,9 +3237,9 @@ $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.o \
-                              $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
-                              $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/modules/git/git_forge_vault.o \
+                              $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -3247,7 +3247,7 @@ $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
-                              $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/git_forge_vault.o \
+                              $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/git/git_forge_vault.o \
                               $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o \
                               $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
@@ -3257,9 +3257,9 @@ $(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-cred-inject: $(OBJDIR)/tests/test_git_cred_inject.o \
-                              $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
-                              $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/modules/git/git_forge_vault.o \
+                              $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -3267,11 +3267,11 @@ $(TESTPREFIX)/unit-test-git-cred-inject: $(OBJDIR)/tests/test_git_cred_inject.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-webuser-editor: $(OBJDIR)/tests/test_webuser_editor.o \
-                              $(OBJDIR)/server/webuser_editor.o $(OBJDIR)/server/git_cred_inject.o \
-                              $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
-                              $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
-                              $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/server/webuser_editor.o $(OBJDIR)/modules/git/git_cred_inject.o \
+                              $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
+                              $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/modules/git/git_forge_vault.o \
+                              $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
+                              $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -3279,7 +3279,7 @@ $(TESTPREFIX)/unit-test-webuser-editor: $(OBJDIR)/tests/test_webuser_editor.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-forge-vault: $(OBJDIR)/tests/test_git_forge_vault.o \
-                              $(OBJDIR)/server/git_forge_vault.o \
+                              $(OBJDIR)/modules/git/git_forge_vault.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
@@ -3287,7 +3287,7 @@ $(TESTPREFIX)/unit-test-git-forge-vault: $(OBJDIR)/tests/test_git_forge_vault.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-host-resolve: $(OBJDIR)/tests/test_git_host_resolve.o \
-                              $(OBJDIR)/server/git_host_resolve.o \
+                              $(OBJDIR)/modules/git/git_host_resolve.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -3372,7 +3372,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
-                           $(OBJDIR)/forge_credentials.o \
+                           $(OBJDIR)/modules/git/forge_credentials.o \
                            $(OBJDIR)/delivery_target.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o \
@@ -3486,12 +3486,12 @@ $(TESTPREFIX)/unit-test-middleware: $(OBJDIR)/tests/test_middleware.o $(OBJDIR)/
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-verify-hook: $(OBJDIR)/tests/test_verify_hook.o \
-	                                     $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_state.o $(OBJDIR)/git_verify_config.o $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o $(TEST_CORE_OBJS)
+	                                     $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-pipeline: $(OBJDIR)/tests/test_pipeline.o \
                                    $(OBJDIR)/server/agent_pipeline.o \
-	                                   $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_state.o $(OBJDIR)/git_verify_config.o $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o \
+	                                   $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o \
                                    $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

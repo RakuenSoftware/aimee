@@ -1,12 +1,12 @@
 /* mcp_git_write.c: MCP git write handlers (commit, push, pull, clone, reset, restore) */
 #include "aimee.h"
 #include "cJSON.h"
-#include "headers/config.h"
-#include "headers/guardrails.h"
-#include "headers/git_verify.h"
-#include "headers/mcp_git.h"
-#include "headers/util.h"
-#include "headers/branch_ownership.h"
+#include "config.h"
+#include "guardrails.h"
+#include "git_verify.h"
+#include "mcp_git.h"
+#include "util.h"
+#include "branch_ownership.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>

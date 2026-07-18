@@ -92,7 +92,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Iworkflow -Imodules/economizer -Imodules/memory -Imodules/governance -Imodules/delegates -Imodules/workflows -Imodules/vault -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Iworkflow -Imodules/economizer -Imodules/memory -Imodules/governance -Imodules/delegates -Imodules/workflows -Imodules/vault -Imodules/git -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -286,11 +286,11 @@ PLATFORM_CLI_OBJS   = $(filter %/cli_client.o %/cli_main.o %/events.o,$(PLATFORM
 # --- MCP git tools (compiled into both shipped binaries; not in LIB_CORE) ---
 # Keep git MCP handlers out of the shared core library so the thin client and
 # server remain the only shipped binaries while still sharing the same handlers.
-MCP_GIT_SRCS = mcp_git_query.c mcp_git_write.c mcp_git_branch.c mcp_git_pr.c git_verify.c git_verify_state.c git_verify_config.c git_verify_jobs.c git_verify_hook.c git_verify_ops.c git_verify_select.c git_verify_step.c
+MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/git/mcp_git_branch.c modules/git/mcp_git_pr.c modules/git/git_verify.c modules/git/git_verify_state.c modules/git/git_verify_config.c modules/git/git_verify_jobs.c modules/git/git_verify_hook.c modules/git/git_verify_ops.c modules/git/git_verify_select.c modules/git/git_verify_step.c
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
-CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.c config_learning.c config_memory.c config_charter.c config_trigger.c config_kb_maintenance.c config_kb_curator.c config_server_api.c config_skills.c config_save.c config_mode.c config_fields.c toolset.c util.c util_url.c forge_credentials.c forge_app_token.c workspace_mirror.c report_enrichment.c audit_action.c audit_worm.c audit_worm_chain.c audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
+CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.c config_learning.c config_memory.c config_charter.c config_trigger.c config_kb_maintenance.c config_kb_curator.c config_server_api.c config_skills.c config_save.c config_mode.c config_fields.c toolset.c util.c util_url.c modules/git/forge_credentials.c forge_app_token.c workspace_mirror.c report_enrichment.c audit_action.c audit_worm.c audit_worm_chain.c audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             compact.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
@@ -382,7 +382,7 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               server/agent_admission.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c roundtable_preset.c server/roundtable_seat_resolve.c working_profile.c \
               server/delegate_role.c server/delegate_depth.c server/delegate_prompt.c server/delegate_ephemeral_ws.c server/delegate_run_phases.c server/delegate_routing.c server/delegate_launch.c server/delegate_source_authority.c server/delegate_economics.c server/delegate_credentials.c server/delegate_credential_retry.c server/delegate_patch_coordinator.c server/delegate_ensemble.c server/delegate_ensemble_review.c server/evidence_replay.c server/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c server/server_sweep.c server/delegate_checkout.c cmd_init.c \
-              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c modules/vault/vault_principal.c modules/vault/vault_crypto.c modules/vault/vault_kek_cache.c modules/vault/vault_server_key.c modules/vault/vault_store.c modules/vault/vault_service.c server/git_forge_vault.c server/git_cred_inject.c server/git_host_resolve.c server/git_ssh_agent.c server/git_project.c server/ws_registry.c server/git_ops.c server/git_host_cred.c server/git_org_repos.c server/git_oauth_github.c server/git_oauth_gh.c server/git_oauth_device.c server/deploy_apply.c server/git_pr_api.c server/git_pr_ci_grade.c server/webuser_editor.c modules/vault/vault_capability.c server/server_vault.c server/server_vault_bootstrap.c server/pki.c server/server_cert.c \
+              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c modules/vault/vault_principal.c modules/vault/vault_crypto.c modules/vault/vault_kek_cache.c modules/vault/vault_server_key.c modules/vault/vault_store.c modules/vault/vault_service.c modules/git/git_forge_vault.c modules/git/git_cred_inject.c modules/git/git_host_resolve.c modules/git/git_ssh_agent.c modules/git/git_project.c server/ws_registry.c modules/git/git_ops.c modules/git/git_host_cred.c modules/git/git_org_repos.c modules/git/git_oauth_github.c modules/git/git_oauth_gh.c modules/git/git_oauth_device.c server/deploy_apply.c modules/git/git_pr_api.c modules/git/git_pr_ci_grade.c server/webuser_editor.c modules/vault/vault_capability.c server/server_vault.c server/server_vault_bootstrap.c server/pki.c server/server_cert.c \
               workflow/wfe_engine.c workflow/wfe_blocks.c workflow/wfe_approval.c \
               workflow/wfe_verdict.c workflow/wfe_roundtable.c workflow/wfe_autonomy.c \
               server/server_workflow_api.c
@@ -596,7 +596,7 @@ retire-obsolete-binaries:
 # Test targets (included after 'all' so unit-tests is not the default target)
 include tests/Rules.mk
 
-# Fast local verification target used by git_verify auto-generation when
+# Fast local verification target used by modules/git/git_verify auto-generation when
 # available. This keeps lint in the enforced path while still running the
 # full unit suite before push/PR creation.
 #
@@ -851,7 +851,7 @@ BENCH_OBJS = $(OBJDIR)/tests/bench_perf.o $(OBJDIR)/guardrails.o $(OBJDIR)/file_
              $(OBJDIR)/workspace.o \
              $(OBJDIR)/guardrails_orchestrator.o $(OBJDIR)/guardrails_tdd.o $(OBJDIR)/guardrails_blast_radius.o \
              $(OBJDIR)/server/agent_config.o $(OBJDIR)/cmd_describe.o \
-             $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_config.o $(OBJDIR)/git_verify_step.o $(OBJDIR)/branch_ownership.o \
+             $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/branch_ownership.o \
              $(OBJDIR)/tests/support/kb_client_test_stub.o \
              $(AGENT_OBJS)
 

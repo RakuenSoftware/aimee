@@ -1,7 +1,7 @@
-#include "headers/aimee.h"
-#include "headers/git_verify.h"
-#include "headers/platform_path.h"
-#include "headers/util.h"
+#include "aimee.h"
+#include "git_verify.h"
+#include "platform_path.h"
+#include "util.h"
 
 #include <errno.h>
 #include <stdio.h>

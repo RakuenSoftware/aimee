@@ -1,10 +1,10 @@
 /* mcp_git_branch.c: MCP git branch, stash, tag, and fetch handlers */
 #include "aimee.h"
 #include "cJSON.h"
-#include "headers/git_verify.h"
-#include "headers/mcp_git.h"
-#include "headers/util.h"
-#include "headers/branch_ownership.h"
+#include "git_verify.h"
+#include "mcp_git.h"
+#include "util.h"
+#include "branch_ownership.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

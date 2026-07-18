@@ -14,19 +14,19 @@
 #include <pthread.h>
 #include <ctype.h>
 
-#include "headers/aimee_home.h"
-#include "headers/compute_pool.h"
-#include "headers/git_verify.h"
-#include "headers/git_verify_internal.h"
-#include "headers/git_verify_select.h"
-#include "headers/git_verify_jobs.h"
-#include "headers/aimee.h"
-#include "headers/config.h"
-#include "headers/util.h"
-#include "headers/dstr.h"
-#include "headers/log.h"
-#include "headers/mcp_git.h"
-#include "headers/platform_path.h"
+#include "aimee_home.h"
+#include "compute_pool.h"
+#include "git_verify.h"
+#include "git_verify_internal.h"
+#include "git_verify_select.h"
+#include "git_verify_jobs.h"
+#include "aimee.h"
+#include "config.h"
+#include "util.h"
+#include "dstr.h"
+#include "log.h"
+#include "mcp_git.h"
+#include "platform_path.h"
 
 /* --- Helpers --- */
 

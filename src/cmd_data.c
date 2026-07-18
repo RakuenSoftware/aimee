@@ -15,8 +15,8 @@
 #include "memory.h"
 #include "cJSON.h"
 #include "dstr.h"
-#include "headers/mcp_git.h"
-#include "headers/git_verify.h"
+#include "mcp_git.h"
+#include "git_verify.h"
 #include "config_fields.h"
 #include "config_database.h" /* config_emit_deploy_env — page-2 compose env */
 #include <unistd.h>
