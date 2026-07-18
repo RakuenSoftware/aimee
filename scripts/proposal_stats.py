@@ -8,8 +8,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 
+
+# Cap per-file read size; large binary-like blobs shouldn't be slurped into memory
+# for word counting.
+_MAX_FILE_BYTES = 4 * 1024 * 1024
 
 def _proposals_root() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
@@ -50,7 +55,9 @@ def _list_files(dir_path: str, root: str) -> list[str]:
     candidates: list[str] = []
     with os.scandir(dir_path) as it:
         for entry in it:
-            if entry.is_file(follow_symlinks=False):
+            if entry.is_file(follow_symlinks=False) or (
+                entry.is_symlink() and os.path.isfile(os.path.realpath(entry.path))
+            ):
                 real_path = os.path.realpath(entry.path)
                 if not _real_within(real_path, real_root):
                     raise RuntimeError(
@@ -61,18 +68,42 @@ def _list_files(dir_path: str, root: str) -> list[str]:
     candidates.sort()
     return candidates
 
-
 def _count_words(files: list[str], proposals_root: str) -> int:
-    real_root = os.path.realpath(proposals_root)
     total = 0
     for path in files:
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                total += len(fh.read().split())
+            st = os.stat(path)
         except OSError as exc:
-            raise RuntimeError(
-                f"failed to read {path}: {exc}"
-            ) from exc
+            print(f"warning: skipping {path}: stat failed: {exc}", file=sys.stderr)
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            print(f"warning: skipping {path}: not a regular file", file=sys.stderr)
+            continue
+        if st.st_size > _MAX_FILE_BYTES:
+            print(
+                f"warning: skipping {path}: size {st.st_size} > "
+                f"limit {_MAX_FILE_BYTES}",
+                file=sys.stderr,
+            )
+            continue
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+        except OSError as exc:
+            print(f"warning: skipping {path}: read failed: {exc}", file=sys.stderr)
+            continue
+        if b"\x00" in raw:
+            print(f"warning: skipping {path}: appears to be binary", file=sys.stderr)
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            print(
+                f"warning: skipping {path}: not valid utf-8: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        total += len(text.split())
     return total
 
 
