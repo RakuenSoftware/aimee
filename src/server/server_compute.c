@@ -1353,8 +1353,17 @@ void delegate_worker(void *arg)
         delegate_sandbox_resolve_image(container_ws, sbx_image, sizeof(sbx_image)) == 0)
            ? sbx_image
            : NULL;
+   /* container_ws == NULL is the write-capable-but-no-own-worktree case resolved
+    * above: the intent there is to run IN-PROCESS under the write guard, NOT to hand
+    * the delegate a scratch sandbox. Binding with a NULL workspace mints an EMPTY
+    * scratch tree and mounts THAT, so the delegate edits files the engine never sees
+    * ("write role reported success but produced no diff") — which stalls every WFE
+    * implement slice (its cwd already IS a dedicated worktree; it needs no sibling
+    * tree, so delegate_needs_worktree is false and container_ws stays NULL). Only
+    * bind a container when there is a real tree to mount; otherwise run in-process in
+    * cwd so writes land where the engine diffs and commits them. */
    int container_bound =
-       detached_bound
+       (detached_bound || !container_ws || !container_ws[0])
            ? 0
            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
