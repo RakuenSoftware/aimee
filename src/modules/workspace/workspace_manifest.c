@@ -34,7 +34,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "headers/workspace_manifest.h"
+#include "workspace_manifest.h"
 #include "headers/yaml.h"
 #include "vendor/headers/cJSON.h"
 
