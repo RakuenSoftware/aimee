@@ -696,11 +696,8 @@ typedef struct config
 
    /* Invertible chunking and session window expansion.
     * memory_window_radius: how many turns before/after a conversational hit to
-    *   include when it has a source_session (0 = off, default 0; 1–3 recommended).
-    * memory_kb_neighbour_expand: if 1, expand KB hits to include prev/next chunk
-    *   under a budget (default 0). */
+    *   include when it has a source_session (0 = off, default 0; 1–3 recommended). */
    int memory_window_radius;
-   int memory_kb_neighbour_expand;
 
    /* Upper bound on results returned by `aimee kb search` / kb_search().
     * Requests with --max N above this value are silently clamped. Default 50;
@@ -763,12 +760,8 @@ typedef struct config
 
    /* Scene clustering and two-stage retrieval.
     * memory_scenes_enabled: 0 = disabled (default), 1 = enabled.
-    * memory_scenes_min_cluster_size: minimum turns per scene (default 3).
-    * memory_scenes_top_m: top-M scenes to boost during retrieval (default 3).
     * memory_scenes_global_escape_ratio: fraction of results from global pool (default 0.2). */
    int memory_scenes_enabled;
-   int memory_scenes_min_cluster_size;
-   int memory_scenes_top_m;
    double memory_scenes_global_escape_ratio;
 
    /* Quantitative / date-arithmetic post-retrieval deriver.

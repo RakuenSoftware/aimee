@@ -206,7 +206,6 @@ int main(void)
    assert(cfgA.memory_recall_lanes_floor_summary != cfgB.memory_recall_lanes_floor_summary);
    assert(cfgA.memory_recall_lanes_floor_fact != cfgB.memory_recall_lanes_floor_fact);
    assert(cfgA.memory_window_radius != cfgB.memory_window_radius);
-   assert(cfgA.memory_kb_neighbour_expand == 1 && cfgB.memory_kb_neighbour_expand == 0);
    assert(cfgA.kb_search_max_results != cfgB.kb_search_max_results);
    assert(cfgA.memory_maintenance_trigger_inserts != cfgB.memory_maintenance_trigger_inserts);
    assert(cfgA.memory_maintenance_trigger_secs != cfgB.memory_maintenance_trigger_secs);
@@ -234,8 +233,6 @@ int main(void)
    assert(cfgA.memory_improve_min_cluster != cfgB.memory_improve_min_cluster);
    assert(cfgA.memory_improve_max_confidence != cfgB.memory_improve_max_confidence);
    assert(cfgA.memory_scenes_enabled == 1 && cfgB.memory_scenes_enabled == 0);
-   assert(cfgA.memory_scenes_min_cluster_size != cfgB.memory_scenes_min_cluster_size);
-   assert(cfgA.memory_scenes_top_m != cfgB.memory_scenes_top_m);
    assert(cfgA.memory_scenes_global_escape_ratio != cfgB.memory_scenes_global_escape_ratio);
    assert(cfgA.memory_episode_summaries_enabled == 1 && cfgB.memory_episode_summaries_enabled == 0);
    assert(cfgA.memory_derive_facts_enabled == 1 && cfgB.memory_derive_facts_enabled == 0);
