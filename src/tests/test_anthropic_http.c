@@ -10,7 +10,7 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
-#include "../headers/delegate_driver.h"
+#include "../modules/delegates/delegate_driver.h"
 #include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
