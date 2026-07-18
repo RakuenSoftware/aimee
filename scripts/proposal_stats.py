@@ -23,7 +23,16 @@ def _proposals_root() -> str:
 
 
 def _real_within(real_path: str, real_root: str) -> bool:
-    return real_path == real_root or real_path.startswith(real_root + os.sep)
+# Compare via os.path.commonpath to avoid string-prefix traps like
+    # /foo/bar matching /foo/barbaz. realpath() is called on both sides so a
+    # symlink that slipped past the is_symlink guard (e.g. via a race) cannot
+    # trick the check either.
+    real_path_abs = os.path.realpath(real_path)
+    real_root_abs = os.path.realpath(real_root)
+    try:
+        return os.path.commonpath([real_path_abs, real_root_abs]) == real_root_abs
+    except ValueError:
+        return False
 
 
 def _list_files(dir_path: str, root: str) -> list[str]:
@@ -116,16 +125,16 @@ def _collect(root: str) -> dict[str, object]:
     done_files = _list_files(done_dir, root)
     pending_words = _count_words(pending_files)
     return {
-        "pending_count": len(pending_files),
-        "done_count": len(done_files),
+        "pending": len(pending_files),
+        "done": len(done_files),
         "pending_words": pending_words,
     }
 
 
 def _format_human(stats: dict[str, object]) -> str:
     return (
-        f"pending_count: {stats['pending_count']}\n"
-        f"done_count:    {stats['done_count']}\n"
+        f"pending:      {stats['pending']}\n"
+        f"done:         {stats['done']}\n"
         f"pending_words: {stats['pending_words']}\n"
     )
 
