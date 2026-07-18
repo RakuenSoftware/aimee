@@ -182,6 +182,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-compute \
                $(TESTPREFIX)/unit-test-server-memory-benchmark \
                $(TESTPREFIX)/unit-test-server-jobs-aux \
+               $(TESTPREFIX)/unit-test-agent-admission \
                $(TESTPREFIX)/unit-test-compute-concurrency \
                $(TESTPREFIX)/unit-test-provider-catalog \
                $(TESTPREFIX)/unit-test-trace-analysis \
@@ -1425,6 +1426,9 @@ $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o 
                                $(OBJDIR)/json_fluent.o \
                                $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-agent-admission: $(OBJDIR)/tests/test_agent_admission.o $(OBJDIR)/server/agent_admission.o
+	$(TESTLINK) -o $@ $^ -lpthread
 
 $(TESTPREFIX)/unit-test-compute-concurrency: $(OBJDIR)/tests/test_compute_concurrency.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
