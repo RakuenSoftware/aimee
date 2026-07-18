@@ -241,8 +241,7 @@ int wf_api_triggers(char *resp, int cap)
       cJSON *t = cJSON_CreateObject();
       cJSON_AddStringToObject(t, "source", r->source);
       cJSON_AddStringToObject(t, "event",
-                              r->event[0] ? r->event
-                                          : (is_watch ? "docs/proposals/pending" : ""));
+                              r->event[0] ? r->event : (is_watch ? "docs/proposals/pending" : ""));
       cJSON_AddStringToObject(t, "schedule", r->schedule);
       /* Empty mode => autonomous (the scheduler default). */
       cJSON_AddStringToObject(t, "mode", r->mode[0] ? r->mode : "autonomous");

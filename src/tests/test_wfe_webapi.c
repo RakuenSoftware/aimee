@@ -311,7 +311,8 @@ int main(void)
                     "/srv/repos/demo") == 0);
       cJSON *c = cJSON_GetArrayItem(trigs, 1);
       assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "source")->valuestring, "cron") == 0);
-      assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "schedule")->valuestring, "0 * * * *") == 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "schedule")->valuestring, "0 * * * *") ==
+             0);
       assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "mode")->valuestring, "interactive") == 0);
       cJSON_Delete(o);
       unlink(p); /* keep the rest of the suite config-free */

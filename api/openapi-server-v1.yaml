@@ -398,6 +398,15 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /workflow/triggers:
+    get:
+      summary: Configured trigger rules (aimee.yaml trigger_rules) that auto-start runs
+      responses:
+        "200":
+          description: "{max_concurrent,triggers:[{source,event,schedule,mode,template,workspace,max_spend_usd?}]}"
+          content:
+            application/json:
+              schema: { type: object }
   /workflow/defs/{name}:
     get:
       summary: One workflow definition (canonical form, version, node graph)
