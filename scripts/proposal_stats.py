@@ -16,34 +16,63 @@ def _proposals_root() -> str:
     return os.path.normpath(os.path.join(here, "..", "docs", "proposals"))
 
 
-def _list_files(dir_path: str) -> list[str]:
+def _real_within(real_path: str, real_root: str) -> bool:
+    return real_path == real_root or real_path.startswith(real_root + os.sep)
+
+
+def _ensure_real_dir(dir_path: str, root: str) -> None:
+    # Refuse to traverse a symlinked state directory. Following it would let
+    # docs/proposals/pending -> /etc cause us to enumerate and read files
+    # outside the canonical proposals root, violating read scope.
+    if os.path.islink(dir_path):
+        raise RuntimeError(
+            f"refusing to read {dir_path}: state directory is a symlink"
+        )
+    if not os.path.isdir(dir_path):
+        return
+    real_dir = os.path.realpath(dir_path)
+    real_root = os.path.realpath(root)
+    if not _real_within(real_dir, real_root):
+        raise RuntimeError(
+            f"refusing to read {dir_path}: resolves outside proposals root "
+            f"{root}"
+        )
+
+
+def _list_files(dir_path: str, root: str) -> list[str]:
+    _ensure_real_dir(dir_path, root)
     if not os.path.isdir(dir_path):
         return []
-    # Use os.scandir so we can classify entries without following symlinks;
-    # following them would let a link under pending/ or done/ cause us to
-    # read content from outside docs/proposals, violating the read scope.
+    # Use os.scandir with follow_symlinks=False so each entry is classified by
+    # the link itself, not its target. A link under pending/ or done/ would
+    # otherwise let us read content from outside docs/proposals.
+    real_root = os.path.realpath(root)
     candidates: list[str] = []
     with os.scandir(dir_path) as it:
         for entry in it:
             if entry.is_file(follow_symlinks=False):
+                real_path = os.path.realpath(entry.path)
+                if not _real_within(real_path, real_root):
+                    raise RuntimeError(
+                        f"refusing to read {entry.path}: resolves outside "
+                        f"proposals root {root}"
+                    )
                 candidates.append(entry.path)
     candidates.sort()
     return candidates
 
 
-def _count_words(files: list[str]) -> int:
-    # "words" is defined as whitespace-separated tokens (str.split() with no
-    # arguments). This matches any run of whitespace as a single delimiter
-    # and intentionally double-counts hyphenated tokens like "state-machine"
-    # as two tokens; callers comparing pending_words across runs see the
-    # same definition each time.
+def _count_words(files: list[str], proposals_root: str) -> int:
+    real_root = os.path.realpath(proposals_root)
     total = 0
     for path in files:
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 total += len(fh.read().split())
-        except OSError:
-            continue
+        except OSError as exc:
+            raise RuntimeError(
+                f"failed to read {path}: {exc}"
+            ) from exc
     return total
 
 
@@ -51,13 +80,13 @@ def _collect(proposals_root: str) -> dict[str, int]:
     pending_dir = os.path.join(proposals_root, "pending")
     done_dir = os.path.join(proposals_root, "done")
 
-    pending_files = _list_files(pending_dir)
-    done_files = _list_files(done_dir)
+    pending_files = _list_files(pending_dir, proposals_root)
+    done_files = _list_files(done_dir, proposals_root)
 
     return {
         "pending": len(pending_files),
         "done": len(done_files),
-        "pending_words": _count_words(pending_files),
+        "pending_words": _count_words(pending_files, proposals_root),
     }
 
 
@@ -81,7 +110,11 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    stats = _collect(_proposals_root())
+    try:
+        stats = _collect(_proposals_root())
+    except RuntimeError as exc:
+        sys.stderr.write(f"proposal_stats: {exc}\n")
+        return 1
 
     if args.as_json:
         json.dump(stats, sys.stdout)
