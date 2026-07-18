@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (182)
+## CLI-settable keys (180)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -74,11 +74,9 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
 | `guardrail_mode` | string | Guardrail enforcement mode (off / warn / block). |
 | `guardrails_blast_radius_advisory_enabled` | bool | Surface a structural blast-radius advisory (graph-impacted files) before an edit (advisory, fail-open). |
-| `guardrails_semantic_allow_ml_only_block` | bool | Allow blocking on the ML classifier alone. |
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_command` | string | External semantic-guardrail classifier command. |
-| `guardrails_semantic_dry_run` | bool | Evaluate but don't enforce semantic guardrails. |
-| `guardrails_semantic_enabled` | bool | Enable the semantic guardrail classifier. |
+| `guardrails_semantic_mode` | string | — |
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
 | `identity_working_profile_injection_enabled` | bool | Inject the working-profile identity into prompts. |
@@ -209,7 +207,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | — |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_code_workers`, `kb_curator_extract_docs_enabled`, `kb_curator_extract_docs_workers`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `llm_embed_backend`, `llm_embed_gpu`, `llm_embed_host`, `llm_embed_tier`, `llm_rerank_backend`, `llm_rerank_endpoint`, `llm_rerank_gpu`, `llm_rerank_host`, `llm_rerank_tier`, `llm_synth_backend`, `llm_synth_endpoint`, `llm_synth_gpu`, `llm_synth_host`, `llm_synth_model`, `llm_synth_tier`, `wfe_proposals_autoscan_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `guardrails_semantic_mode`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_code_workers`, `kb_curator_extract_docs_enabled`, `kb_curator_extract_docs_workers`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `llm_embed_backend`, `llm_embed_gpu`, `llm_embed_host`, `llm_embed_tier`, `llm_rerank_backend`, `llm_rerank_endpoint`, `llm_rerank_gpu`, `llm_rerank_host`, `llm_rerank_tier`, `llm_synth_backend`, `llm_synth_endpoint`, `llm_synth_gpu`, `llm_synth_host`, `llm_synth_model`, `llm_synth_tier`, `wfe_proposals_autoscan_enabled`
 
 ## Config-file sections (52)
 

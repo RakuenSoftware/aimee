@@ -1222,15 +1222,31 @@ void config_parse_guardrails_section(config_t *cfg, cJSON *root)
       cJSON *sem = cJSON_GetObjectItemCaseSensitive(gr, "semantic");
       if (cJSON_IsObject(sem))
       {
-         item = cJSON_GetObjectItemCaseSensitive(sem, "enabled");
-         if (cJSON_IsBool(item))
-            cfg->guardrails_semantic_enabled = cJSON_IsTrue(item) ? 1 : 0;
-         item = cJSON_GetObjectItemCaseSensitive(sem, "dry_run");
-         if (cJSON_IsBool(item))
-            cfg->guardrails_semantic_dry_run = cJSON_IsTrue(item) ? 1 : 0;
-         item = cJSON_GetObjectItemCaseSensitive(sem, "advisory_only");
-         if (cJSON_IsBool(item))
-            cfg->guardrails_semantic_advisory_only = cJSON_IsTrue(item) ? 1 : 0;
+         /* Canonical form: `mode: off|dry_run|advisory|enforce`. If absent, fall back to the
+          * deprecated {enabled,dry_run,advisory_only,allow_ml_only_block} quad and map it onto
+          * the ladder (using the historical defaults for any missing sibling). */
+         item = cJSON_GetObjectItemCaseSensitive(sem, "mode");
+         if (cJSON_IsString(item) && item->valuestring)
+            snprintf(
+                cfg->guardrails_semantic_mode, sizeof(cfg->guardrails_semantic_mode), "%s",
+                guardrails_semantic_mode_name(guardrails_semantic_mode_parse(item->valuestring)));
+         else if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(sem, "enabled")))
+         {
+            int enabled = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sem, "enabled"));
+            int dry = 1, adv = 1, allow = 0;
+            cJSON *t;
+            if (cJSON_IsBool(t = cJSON_GetObjectItemCaseSensitive(sem, "dry_run")))
+               dry = cJSON_IsTrue(t);
+            if (cJSON_IsBool(t = cJSON_GetObjectItemCaseSensitive(sem, "advisory_only")))
+               adv = cJSON_IsTrue(t);
+            if (cJSON_IsBool(t = cJSON_GetObjectItemCaseSensitive(sem, "allow_ml_only_block")))
+               allow = cJSON_IsTrue(t);
+            const char *m = !enabled          ? "off"
+                            : dry             ? "dry_run"
+                            : (adv || !allow) ? "advisory"
+                                              : "enforce";
+            snprintf(cfg->guardrails_semantic_mode, sizeof(cfg->guardrails_semantic_mode), "%s", m);
+         }
          item = cJSON_GetObjectItemCaseSensitive(sem, "command");
          if (cJSON_IsString(item) && item->valuestring)
             snprintf(cfg->guardrails_semantic_command, sizeof(cfg->guardrails_semantic_command),
@@ -1244,9 +1260,6 @@ void config_parse_guardrails_section(config_t *cfg, cJSON *root)
          item = cJSON_GetObjectItemCaseSensitive(sem, "block_threshold");
          if (cJSON_IsNumber(item))
             cfg->guardrails_semantic_block_threshold = item->valuedouble;
-         item = cJSON_GetObjectItemCaseSensitive(sem, "allow_ml_only_block");
-         if (cJSON_IsBool(item))
-            cfg->guardrails_semantic_allow_ml_only_block = cJSON_IsTrue(item) ? 1 : 0;
       }
       cJSON *br = cJSON_GetObjectItemCaseSensitive(gr, "blast_radius");
       if (cJSON_IsObject(br))

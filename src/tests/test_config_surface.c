@@ -307,15 +307,13 @@ int main(void)
    assert(cfgA.cache_aware_rewrite_max_defer_turns != cfgB.cache_aware_rewrite_max_defer_turns);
    assert(cfgA.cache_aware_rewrite_segment_check_turns !=
           cfgB.cache_aware_rewrite_segment_check_turns);
-   assert(cfgA.guardrails_semantic_enabled == 1 && cfgB.guardrails_semantic_enabled == 0);
-   assert(cfgA.guardrails_semantic_dry_run == 1 && cfgB.guardrails_semantic_dry_run == 0);
-   assert(cfgA.guardrails_semantic_advisory_only == 1 &&
-          cfgB.guardrails_semantic_advisory_only == 0);
+   /* Legacy object form maps onto the mode: A {enabled:true,dry_run:true} -> "dry_run";
+    * B {enabled:false} -> "off". Exercises the back-compat parse mapping. */
+   assert(strcmp(cfgA.guardrails_semantic_mode, "dry_run") == 0);
+   assert(strcmp(cfgB.guardrails_semantic_mode, "off") == 0);
    assert(cfgA.guardrails_semantic_warn_threshold != cfgB.guardrails_semantic_warn_threshold);
    assert(cfgA.guardrails_semantic_prompt_threshold != cfgB.guardrails_semantic_prompt_threshold);
    assert(cfgA.guardrails_semantic_block_threshold != cfgB.guardrails_semantic_block_threshold);
-   assert(cfgA.guardrails_semantic_allow_ml_only_block == 1 &&
-          cfgB.guardrails_semantic_allow_ml_only_block == 0);
    assert(cfgA.kb_api_http_port != cfgB.kb_api_http_port);
    assert(cfgA.kb_bg_ingest_enabled == 1 && cfgB.kb_bg_ingest_enabled == 0);
    assert(cfgA.kb_bg_ingest_interval_hours != cfgB.kb_bg_ingest_interval_hours);

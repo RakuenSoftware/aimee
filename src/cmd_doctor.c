@@ -696,9 +696,11 @@ static void check_guardrails_semantic(check_result_t *r, config_t *cfg)
    r->name = "guardrails.semantic";
    r->status = CHECK_OK;
 
-   if (!cfg->guardrails_semantic_enabled)
+   int gmode = guardrails_semantic_mode_parse(cfg->guardrails_semantic_mode);
+   const char *mode_name = guardrails_semantic_mode_name(gmode);
+   if (gmode == GSEM_MODE_OFF)
    {
-      snprintf(r->message, sizeof(r->message), "disabled");
+      snprintf(r->message, sizeof(r->message), "disabled (mode=off)");
       return;
    }
 
@@ -706,27 +708,21 @@ static void check_guardrails_semantic(check_result_t *r, config_t *cfg)
    if (db1_guardrail_event_counts_7d(&counts) != 0)
    {
       r->status = CHECK_WARN;
-      snprintf(r->message, sizeof(r->message),
-               "enabled=true dry_run=%s advisory_only=%s; counts unavailable",
-               cfg->guardrails_semantic_dry_run ? "true" : "false",
-               cfg->guardrails_semantic_advisory_only ? "true" : "false");
+      snprintf(r->message, sizeof(r->message), "mode=%s; counts unavailable", mode_name);
       snprintf(r->remediation, sizeof(r->remediation),
                "Initialize DB1 or check guardrail_events table health");
       return;
    }
 
-   if (cfg->guardrails_semantic_dry_run)
+   if (gmode == GSEM_MODE_DRY_RUN)
    {
-      snprintf(r->message, sizeof(r->message),
-               "enabled=true dry_run=true advisory_only=%s 7d dry_run events: %d",
-               cfg->guardrails_semantic_advisory_only ? "true" : "false", counts.dry_run);
+      snprintf(r->message, sizeof(r->message), "mode=dry_run 7d dry_run events: %d",
+               counts.dry_run);
    }
    else
    {
-      snprintf(r->message, sizeof(r->message),
-               "enabled=true dry_run=false advisory_only=%s 7d warns: %d prompts: %d blocks: %d",
-               cfg->guardrails_semantic_advisory_only ? "true" : "false", counts.warn,
-               counts.prompt, counts.block);
+      snprintf(r->message, sizeof(r->message), "mode=%s 7d warns: %d prompts: %d blocks: %d",
+               mode_name, counts.warn, counts.prompt, counts.block);
    }
 }
 

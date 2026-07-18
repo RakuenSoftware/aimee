@@ -2083,9 +2083,7 @@ static void test_semantic_advisory_pre_tool_check(void)
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    assert(config_load(&cfg) == 0);
-   cfg.guardrails_semantic_enabled = 1;
-   cfg.guardrails_semantic_dry_run = 0;
-   cfg.guardrails_semantic_advisory_only = 1;
+   snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "advisory");
    snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
             "printf '%%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
             "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
@@ -2111,7 +2109,7 @@ static void test_semantic_advisory_pre_tool_check(void)
    assert(strstr(msg, "semantic guardrail: high risk") != NULL);
    assert(strstr(msg, "advisory mode") != NULL);
 
-   cfg.guardrails_semantic_allow_ml_only_block = 1;
+   /* Still advisory mode: a "block" recommendation must be downgraded to a prompt. */
    snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
             "printf '%%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
             "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
