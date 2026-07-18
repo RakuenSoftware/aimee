@@ -78,6 +78,8 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
     * buffered-replay path ask for SSE and then parse it as JSON. */
    ir.stream = want_stream ? 1 : 0;
 
+   aimee_ir_apply_request_stages(&ir); /* the one protocol-neutral module stage (no-op today) */
+
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
    cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
    aimee_request_free(&ir);
@@ -130,6 +132,8 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
       snprintf(model, model_n, "%s", ir.model);
    if (stream_out)
       *stream_out = ir.stream;
+
+   aimee_ir_apply_request_stages(&ir); /* the one protocol-neutral module stage (no-op today) */
 
    /* build the chat shape, then split leading system messages -> instructions */
    cJSON *chat = openai_backend_build(&ir);
@@ -225,6 +229,8 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
       free(ir.model);
       ir.model = strdup(agent_model);
    }
+   aimee_ir_apply_request_stages(&ir); /* the one protocol-neutral module stage (no-op today) */
+
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
    cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
    aimee_request_free(&ir);

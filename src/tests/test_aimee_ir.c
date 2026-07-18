@@ -19,6 +19,21 @@ static aimee_block_t *mk_blocks(int n)
    return calloc((size_t)n, sizeof(aimee_block_t));
 }
 
+/* transform-stage test fns: t_count is read-only (returns 0, bumps a counter);
+ * t_change reports a mutation (returns 1). */
+static int t_count(aimee_request_t *ir, void *ud)
+{
+   (void)ir;
+   (*(int *)ud)++;
+   return 0;
+}
+static int t_change(aimee_request_t *ir, void *ud)
+{
+   (void)ir;
+   (void)ud;
+   return 1;
+}
+
 int main(void)
 {
    printf("aimee-ir: ");
@@ -149,6 +164,33 @@ int main(void)
    assert(aimee_ir_request_equal(&a, NULL) == 0);
    aimee_request_free(&a);
    aimee_request_free(&b);
+
+   /* --- request transform stage (the protocol-neutral module seam) --- */
+   {
+      aimee_request_t t;
+      memset(&t, 0, sizeof t);
+      int calls = 0;
+      aimee_ir_transform_t stages[] = {
+          {"reader", t_count, &calls, 1},   /* runs */
+          {"disabled", t_count, &calls, 0}, /* skipped: enabled=0 */
+          {"", t_count, &calls, 1},         /* skipped: empty name */
+          {"nofn", NULL, &calls, 1},        /* skipped: NULL fn */
+          {"mutator", t_change, NULL, 1},   /* runs, reports a change */
+      };
+      aimee_ir_run_transforms(&t, stages, sizeof(stages) / sizeof(stages[0]));
+      assert(calls == 1);     /* only "reader" ran among the counters */
+      assert(t.mutated == 1); /* mutator set it */
+
+      /* NULL-safe + empty catalog is a no-op */
+      t.mutated = 0;
+      aimee_ir_run_transforms(NULL, stages, 1); /* no crash */
+      aimee_ir_run_transforms(&t, NULL, 0);     /* no-op */
+      assert(t.mutated == 0);
+
+      /* the single apply hook has no transforms registered yet -> leaves ir unmutated */
+      aimee_ir_apply_request_stages(&t);
+      assert(t.mutated == 0);
+   }
 
    /* --- response accessors: the delegate path's replacement for
     *     parsed_response_t.content / .is_tool_call ---
