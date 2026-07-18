@@ -355,6 +355,27 @@ void cli_session_prepare_claude(const char *work_dir, int autonomous)
    pthread_mutex_unlock(&g_prep_mu);
 }
 
+int cli_session_resolve_cwd(const char *turn_cwd, char *out, size_t n)
+{
+   if (!out || n == 0)
+      return 0;
+   /* The turn-bound cwd is usable only if it exists on THIS host. It won't on a
+    * detached thin-client turn whose bound cwd is the client's workspace path,
+    * where a server-hosted CLI session actually runs — using it would make every
+    * `cd '<path>' &&` shell-out fail. Fall back to the server process cwd and
+    * report the fallback so the caller can retarget run_cmd's thread-local cwd. */
+   if (turn_cwd && turn_cwd[0] && access(turn_cwd, F_OK) == 0)
+   {
+      snprintf(out, n, "%s", turn_cwd);
+      return 0;
+   }
+   if (getcwd(out, n) == NULL)
+      out[0] = '\0';
+   /* Fell back only if there WAS a bound cwd that we had to discard; an empty
+    * bound cwd is the ordinary co-located case (run_cmd has no cd prefix). */
+   return (turn_cwd && turn_cwd[0]) ? 1 : 0;
+}
+
 int cli_session_create(cli_session_t *s, const char *session_name, const char *cli_cmd,
                        const char *work_dir, int reuse)
 {
