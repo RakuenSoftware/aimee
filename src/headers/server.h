@@ -362,6 +362,7 @@ int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_attempt_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_attempt_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_delegations(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_traces(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_plans(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

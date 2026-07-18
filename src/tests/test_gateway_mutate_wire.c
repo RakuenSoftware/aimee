@@ -262,6 +262,31 @@ static void test_upstream_provider_gate(void)
    assert(gw_mutate_upstream_ok(0) == 0);                      /* so both are off here */
 }
 
+/* gw_stat_to_json: the JSON the /v1/economizer/stats endpoint serves reflects the
+ * live counters — flat counters, the sampled token_delta (+ derived pct_reduced), and
+ * the {group:{reason:count}} breakdown. */
+static void test_stat_json(void)
+{
+   gw_stat_reset();
+   gw_stat_inc(GW_STAT_MUTATE_ATTEMPTED);
+   gw_stat_inc(GW_STAT_MUTATE_APPLIED);
+   gw_stat_inc_reason("session_disabled_set", "4xx");
+   gw_stat_record_token_delta(1000, 600); /* n=0 is sampled */
+
+   cJSON *o = cJSON_CreateObject();
+   gw_stat_to_json(o);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_attempted")) == 1);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_applied")) == 1);
+   cJSON *td = cJSON_GetObjectItem(o, "token_delta");
+   assert(td);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "baseline_sum")) == 1000);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "reduced_sum")) == 600);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(td, "pct_reduced")) == 40.0);
+   cJSON *sds = cJSON_GetObjectItem(cJSON_GetObjectItem(o, "reasons"), "session_disabled_set");
+   assert(sds && (int)cJSON_GetNumberValue(cJSON_GetObjectItem(sds, "4xx")) == 1);
+   cJSON_Delete(o);
+}
+
 int main(void)
 {
    printf("gateway_mutate_wire: ");
@@ -283,6 +308,7 @@ int main(void)
    test_token_delta_sampling();
    test_no_behavior_change_when_off();
    test_upstream_provider_gate();
+   test_stat_json();
    printf("ok\n");
    return 0;
 }

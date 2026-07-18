@@ -3,6 +3,9 @@
 #include "aimee.h"
 #include "aimee_ir_metrics.h"
 #include "shadow_mirror.h"
+#include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
+#include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
+#include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "server.h"
 #include "dashboard.h"
 #include "render.h"               /* decision_to_json + db2_decision_log_list */
@@ -1475,6 +1478,56 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddNumberToObject(sm, "dropped", (double)shadow_mirror_dropped_count());
          cJSON_AddNumberToObject(sm, "pruned", (double)shadow_mirror_pruned_count());
       }
+   }
+
+   return send_and_free(conn, resp);
+}
+
+/* GET /v1/economizer/stats — user-facing view of ALL economizer telemetry in one place:
+ *   gateway  — live gateway-mutation counters (mutate attempted/applied, disables,
+ *              session-blocks, sampled token-reduction %, hard-bypass/disable reasons).
+ *              Process-lifetime counters; reset on restart.
+ *   tool_condense — realized tool-output condensation savings (bytes condensed vs
+ *              re-injected on page-back). Process-lifetime.
+ *   avoided  — persistent avoided-cost aggregate from the token-audit ledger (the
+ *              economizer's forecast/dedup "avoided" rows), all-time.
+ * Read-only; CAP_DASHBOARD_READ. Previously these counters had NO reachable surface. */
+int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   cJSON *resp = jo_ok();
+
+   cJSON *gw = cJSON_AddObjectToObject(resp, "gateway");
+   if (gw)
+      gw_stat_to_json(gw);
+
+   cJSON *tc = cJSON_AddObjectToObject(resp, "tool_condense");
+   if (tc)
+   {
+      tool_condense_totals_t t;
+      tool_condense_stats_snapshot(&t);
+      cJSON_AddNumberToObject(tc, "recognized", (double)t.recognized);
+      cJSON_AddNumberToObject(tc, "applied", (double)t.applied);
+      cJSON_AddNumberToObject(tc, "applied_raw_bytes", (double)t.applied_raw);
+      cJSON_AddNumberToObject(tc, "applied_final_bytes", (double)t.applied_final);
+      cJSON_AddNumberToObject(tc, "saved_bytes", (double)t.saved_bytes);
+      cJSON_AddNumberToObject(tc, "recovered", (double)t.recovered);
+      cJSON_AddNumberToObject(tc, "recovered_bytes", (double)t.recovered_bytes);
+      cJSON_AddNumberToObject(tc, "net_saved_bytes", (double)t.net_saved_bytes);
+   }
+
+   cJSON *av = cJSON_AddObjectToObject(resp, "avoided");
+   if (av)
+   {
+      db1_token_audit_spend_t sp;
+      memset(&sp, 0, sizeof sp);
+      /* 0 = all-time (see token_audit.h). Best-effort: on a DB error the fields stay 0. */
+      (void)db1_token_audit_spend_breakdown(0, &sp);
+      cJSON_AddNumberToObject(av, "avoided_cost_usd", sp.avoided_cost_usd);
+      cJSON_AddNumberToObject(av, "realized_cost_usd", sp.realized_cost_usd);
+      cJSON_AddNumberToObject(av, "estimated_cost_usd", sp.estimated_cost_usd);
    }
 
    return send_and_free(conn, resp);

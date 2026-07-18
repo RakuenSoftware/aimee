@@ -64,6 +64,7 @@ const method_policy_t method_registry[] = {
     {"attempt.*", CAP_SESSION_READ, "attempt log operation"},
     /* Dashboard (prefix) */
     {"dashboard.*", CAP_DASHBOARD_READ, "dashboard operation"},
+    {"economizer.*", CAP_DASHBOARD_READ, "economizer telemetry"},
     {"audit.verify", CAP_DASHBOARD_READ, "WORM audit chain verify"},
     {"audit.checkpoint", CAP_TOOL_EXECUTE, "WORM audit checkpoint"},
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},

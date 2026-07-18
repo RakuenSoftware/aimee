@@ -38,6 +38,8 @@
      "  list             List memories\n"
      "  get              Read a memory by id\n"
      "  read             Assemble current memory context\n"},
+    {"economizer", "Economizer telemetry", CLIENT_TIER_ADVANCED, 0,
+     "  stats            Gateway-mutation counters, tool-condense savings, avoided-$\n"},
     {"session", "Session history", CLIENT_TIER_ADVANCED, 0,
      "  list             List recent sessions\n"
      "  show             Show one session\n"

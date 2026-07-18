@@ -2,6 +2,7 @@
  * reason registry is a small fixed table under one mutex (exceptional-event rate). */
 #include "gw_mutate_stats.h"
 
+#include "cJSON.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -180,6 +181,52 @@ void gw_stat_dump(FILE *out)
               (unsigned long long)g_reasons[i].count);
    }
    pthread_mutex_unlock(&g_reason_lock);
+}
+
+/* JSON view of the same counters for the user-facing GET /v1/economizer/stats endpoint.
+ * Keeps the flat-counter names (g_flat_names) and the reason registry (g_reasons)
+ * encapsulated here rather than hardcoded in the handler. Emits every flat counter
+ * (including zeros) for a stable schema; token_delta carries the sampled baseline-vs-
+ * reduced sums plus the derived pct_reduced; reasons is {group:{reason:count}} over the
+ * registered non-zero pairs. */
+void gw_stat_to_json(cJSON *out)
+{
+   if (!out)
+      return;
+
+   for (int i = 0; i < GW_STAT__COUNT; i++)
+      cJSON_AddNumberToObject(out, g_flat_names[i], (double)gw_stat_get((gw_stat_t)i));
+
+   uint64_t bs = gw_stat_token_baseline_sum();
+   uint64_t rs = gw_stat_token_reduced_sum();
+   cJSON *td = cJSON_AddObjectToObject(out, "token_delta");
+   if (td)
+   {
+      cJSON_AddNumberToObject(td, "sample_count", (double)gw_stat_token_sample_count());
+      cJSON_AddNumberToObject(td, "baseline_sum", (double)bs);
+      cJSON_AddNumberToObject(td, "reduced_sum", (double)rs);
+      /* fraction of sampled context removed; 0 before the first sample (no div-by-zero) */
+      cJSON_AddNumberToObject(td, "pct_reduced",
+                              bs > 0 ? (double)(bs - rs) * 100.0 / (double)bs : 0.0);
+      cJSON_AddNumberToObject(td, "sample_rate_1_in_n", (double)GW_STAT_TOKEN_SAMPLE_N);
+   }
+
+   cJSON *reasons = cJSON_AddObjectToObject(out, "reasons");
+   if (reasons)
+   {
+      pthread_mutex_lock(&g_reason_lock);
+      for (int i = 0; i < g_reason_n; i++)
+      {
+         if (!g_reasons[i].count)
+            continue;
+         cJSON *grp = cJSON_GetObjectItemCaseSensitive(reasons, g_reasons[i].group);
+         if (!grp)
+            grp = cJSON_AddObjectToObject(reasons, g_reasons[i].group);
+         if (grp)
+            cJSON_AddNumberToObject(grp, g_reasons[i].reason, (double)g_reasons[i].count);
+      }
+      pthread_mutex_unlock(&g_reason_lock);
+   }
 }
 
 void gw_stat_reset(void)

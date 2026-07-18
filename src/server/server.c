@@ -1523,6 +1523,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"attempt.list", handle_attempt_list},
     /* Dashboard */
     {"dashboard.metrics", handle_dashboard_metrics},
+    {"economizer.stats", handle_economizer_stats},
     {"dashboard.delegations", handle_dashboard_delegations},
     {"dashboard.traces", handle_dashboard_traces},
     {"dashboard.plans", handle_dashboard_plans},

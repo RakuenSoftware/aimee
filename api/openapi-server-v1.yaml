@@ -2144,6 +2144,10 @@ paths:
     get:
       summary: Per-delegate run statistics
       responses: { "200": { description: Per-delegate run stats, content: { application/json: { schema: { type: object } } } } }
+  /economizer/stats:
+    get:
+      summary: Economizer telemetry (gateway mutation counters, tool-condense savings, avoided-$)
+      responses: { "200": { description: Economizer stats, content: { application/json: { schema: { type: object } } } } }
   /agent/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
