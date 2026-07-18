@@ -25,14 +25,13 @@ int main(void)
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer =
-          -1; /* config_load default: unspecified -> legacy economizer.enabled */
-      assert(tool_condense_enabled(&cfg) == 0);
+      cfg.module_economizer = -1;               /* unspecified -> tier decides */
+      assert(tool_condense_enabled(&cfg) == 0); /* tier OFF (memset) -> off */
       cfg.reduce_command_filter = 1;
-      assert(tool_condense_enabled(&cfg) == 0); /* P3 master (economizer.enabled) still off */
-      cfg.economizer_enabled = 1;
-      assert(tool_condense_enabled(&cfg) == 1); /* master + lever both on */
-      cfg.economizer_enabled = 0;               /* master-kill overrides the lever */
+      assert(tool_condense_enabled(&cfg) == 0); /* still tier OFF */
+      cfg.economizer_tier = ECON_TIER_SAFE;
+      assert(tool_condense_enabled(&cfg) == 1); /* tier on + lever on */
+      cfg.economizer_tier = ECON_TIER_OFF;      /* off tier kills the lever */
       assert(tool_condense_enabled(&cfg) == 0);
       assert(tool_condense_enabled(NULL) == 0);
    }
@@ -274,7 +273,7 @@ int main(void)
       assert(tool_condense_apply(&cfg, "pytest -q", 0, big, "/tmp", NULL) == NULL);
 
       cfg.reduce_command_filter = 1;
-      cfg.economizer_enabled = 1; /* P3 master gate */
+      cfg.economizer_tier = ECON_TIER_SAFE; /* master on */
       /* unrecognized command -> passthrough */
       assert(tool_condense_apply(&cfg, "frobnicate", 0, big, "/tmp", NULL) == NULL);
       /* recognized but no spill dir -> passthrough (lossless: never condense without spill) */
@@ -354,7 +353,7 @@ int main(void)
       cfg.module_economizer =
           -1; /* config_load default: unspecified -> legacy economizer.enabled */
       cfg.reduce_command_filter = 1;
-      cfg.economizer_enabled = 1; /* P3 master gate */
+      cfg.economizer_tier = ECON_TIER_SAFE; /* master on */
       char big[8192];
       size_t off = 0;
       for (int k = 0; k < 80; k++)
@@ -383,7 +382,7 @@ int main(void)
       cfg.module_economizer =
           -1; /* config_load default: unspecified -> legacy economizer.enabled */
       cfg.reduce_command_filter = 1;
-      cfg.economizer_enabled = 1; /* P3 master gate */
+      cfg.economizer_tier = ECON_TIER_SAFE; /* master on */
       char big[8192];
       size_t off = 0;
       off += (size_t)snprintf(big + off, sizeof big - off, "==== session ====\n");

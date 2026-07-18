@@ -770,10 +770,22 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
  * it, so an exposed flag is never silently inert. All default-off. */
 void config_parse_reduce_section(config_t *cfg, cJSON *root)
 {
-   /* Two-tier economizer switches (P3), colocated `economizer:` block — parsed FIRST, before
-    * the reduce early-return, so a config that sets economizer.* but no reduce.* is honored. */
+   /* The economizer control — parsed FIRST (before the reduce early-return). The canonical
+    * form is a STRING: `economizer: off|safe|aggressive`. A deprecated OBJECT form
+    * ({enabled,aggressive}) is still accepted and mapped to the tier for back-compat. */
    cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
-   if (cJSON_IsObject(econ))
+   if (cJSON_IsString(econ) && econ->valuestring)
+   {
+      const char *v = econ->valuestring;
+      /* Warn (don't fail) on an unrecognized tier so a typo like "agressive" doesn't
+       * silently resolve to safe -- fail-safe to the lossless default, but loudly. */
+      if (strcasecmp(v, "off") && strcasecmp(v, "0") && strcasecmp(v, "false") &&
+          strcasecmp(v, "safe") && strcasecmp(v, "aggressive") && strcasecmp(v, "aggro"))
+         fprintf(stderr, "aimee: config warning: unknown economizer tier \"%s\"; using \"safe\"\n",
+                 v);
+      cfg->economizer_tier = econ_tier_parse(v);
+   }
+   else if (cJSON_IsObject(econ))
    {
       cJSON *e = cJSON_GetObjectItemCaseSensitive(econ, "enabled");
       if (cJSON_IsBool(e))
@@ -781,6 +793,9 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
       e = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
       if (cJSON_IsBool(e))
          cfg->economizer_aggressive = cJSON_IsTrue(e) ? 1 : 0;
+      cfg->economizer_tier = !cfg->economizer_enabled     ? ECON_TIER_OFF
+                             : cfg->economizer_aggressive ? ECON_TIER_AGGRESSIVE
+                                                          : ECON_TIER_SAFE;
    }
 
    cJSON *reduce = cJSON_GetObjectItemCaseSensitive(root, "reduce");

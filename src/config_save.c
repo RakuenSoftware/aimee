@@ -1139,16 +1139,9 @@ int config_save(const config_t *cfg)
                                  cfg->reduce_gateway_session_disable_ttl_ms);
    }
 
-   /* Two-tier economizer switches (P3): enabled default-ON -> persist only the opt-out;
-    * aggressive default-OFF -> persist only when opted in. */
-   if (!cfg->economizer_enabled || cfg->economizer_aggressive)
-   {
-      cJSON *econ = cJSON_AddObjectToObject(root, "economizer");
-      if (!cfg->economizer_enabled)
-         cJSON_AddBoolToObject(econ, "enabled", 0);
-      if (cfg->economizer_aggressive)
-         cJSON_AddBoolToObject(econ, "aggressive", 1);
-   }
+   /* The economizer tier -- persist as a string only when non-default (default: safe). */
+   if (cfg->economizer_tier != ECON_TIER_SAFE)
+      cJSON_AddStringToObject(root, "economizer", econ_tier_name(cfg->economizer_tier));
 
    /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,
     * unit_retry 2, unit_max 16, ci_retry_max 2). */

@@ -1143,6 +1143,13 @@ typedef struct config
     *                          aggressive flag alone never activates a live-traffic mutator. */
    int economizer_enabled;
    int economizer_aggressive;
+   /* The SINGLE economizer control (supersedes economizer_enabled/aggressive + the
+    * reduce.* levers, which are being removed). One of ECON_TIER_*. Selects a
+    * provider-aware strategy: OFF = verbatim passthrough; SAFE = Anthropic prompt
+    * caching + deterministic freeze-on-first-send tool condensation, OpenAI
+    * recall-restorable reduction; AGGRESSIVE = + lossy fold/compress (OpenAI live
+    * mutation). See docs/features/economizer.md. Default ECON_TIER_SAFE. */
+   int economizer_tier;
 
    /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
     * enabling/disabling the pipeline modules — memory (request stage), governance (response
@@ -2089,11 +2096,24 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
 
-/* Two-tier economizer resolution (P3) — compute EFFECTIVE lever states without mutating
- * config_t (so config_save always round-trips the raw user values). Precedence:
- * master-kill (economizer.enabled) > aggressive-tier ceiling > individual reduce.* default. */
-int econ_reduction_master_on(const config_t *cfg); /* economizer.enabled (measure is exempt) */
-int econ_gateway_mutate_on(const config_t *cfg);   /* enabled && aggressive && gateway_mutate */
+/* The economizer tier — the single user control. See docs/features/economizer.md. */
+enum
+{
+   ECON_TIER_OFF = 0,  /* verbatim passthrough: no caching, no reduction */
+   ECON_TIER_SAFE = 1, /* lossless: Anthropic caching + frozen tool condensation; OpenAI recall */
+   ECON_TIER_AGGRESSIVE = 2 /* + lossy fold/compress; OpenAI live mutation */
+};
+
+/* Resolve the economizer tier (ECON_TIER_*). The single point that decides
+ * off/safe/aggressive; every economizer predicate routes through it. */
+int econ_tier(const config_t *cfg);
+const char *econ_tier_name(int tier); /* "off"/"safe"/"aggressive" */
+int econ_tier_parse(const char *s);   /* string -> ECON_TIER_* (default SAFE on unknown) */
+
+/* Economizer resolution — compute EFFECTIVE gates from the tier without mutating config_t
+ * (so config_save round-trips the raw user value). */
+int econ_reduction_master_on(const config_t *cfg); /* tier != off */
+int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-only at call site) */
 
 /* Resolve whether a pluggable module is enabled, from the layered enablement surface. This is
  * the ONE place module enablement is decided; every wire site calls it with the module's tristate
