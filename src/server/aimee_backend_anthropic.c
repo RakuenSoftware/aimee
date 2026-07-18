@@ -102,6 +102,8 @@ static cJSON *block_to_anthropic(const aimee_block_t *b)
    case AIMEE_BLK_THINKING:
       cJSON_AddStringToObject(el, "type", "thinking");
       cJSON_AddStringToObject(el, "thinking", b->text ? b->text : "");
+      if (b->thinking_signature)
+         cJSON_AddStringToObject(el, "signature", b->thinking_signature);
       break;
    case AIMEE_BLK_TOOL_USE:
       cJSON_AddStringToObject(el, "type", "tool_use");

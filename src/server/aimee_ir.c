@@ -17,6 +17,7 @@ void aimee_block_free_contents(aimee_block_t *b)
    if (!b)
       return;
    free_str(b->text);
+   free_str(b->thinking_signature);
    free_str(b->tool_id);
    free_str(b->tool_name);
    cJSON_Delete(b->tool_input);
@@ -177,8 +178,9 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    switch (a->type)
    {
    case AIMEE_BLK_TEXT:
-   case AIMEE_BLK_THINKING:
       return str_eq(a->text, b->text);
+   case AIMEE_BLK_THINKING:
+      return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature);
    case AIMEE_BLK_TOOL_USE:
       return str_eq(a->tool_id, b->tool_id) && str_eq(a->tool_name, b->tool_name) &&
              json_eq(a->tool_input, b->tool_input);

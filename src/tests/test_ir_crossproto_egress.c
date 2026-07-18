@@ -138,6 +138,34 @@ int main(void)
       free(e);
    }
 
+   /* Thinking block signature: Anthropic requires the opaque signature echoed back
+    * verbatim on a resubmitted assistant thinking turn. With the raw sidecar retired,
+    * the canonical rebuild must preserve it (it is modeled, not carried via raw). */
+   {
+      char *e = egress("{\"model\":\"m\",\"max_tokens\":8,\"messages\":[{\"role\":\"assistant\","
+                       "\"content\":[{\"type\":\"thinking\",\"thinking\":\"reasoning\","
+                       "\"signature\":\"sig123\"}]}]}",
+                       0);
+      assert(e);
+      assert(strstr(e, "\"signature\":\"sig123\"") != NULL); /* preserved through rebuild */
+      printf("  thinking-signature-preserved OK\n");
+      free(e);
+   }
+
+   /* redacted_thinking blocks (opaque base64 data) have no typed IR arm, so they are
+    * preserved verbatim via the UNKNOWN/raw replay path -- confirm the canonical
+    * rebuild does not drop them (required to resubmit an extended-thinking turn). */
+   {
+      char *e = egress("{\"model\":\"m\",\"max_tokens\":8,\"messages\":[{\"role\":\"assistant\","
+                       "\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"Er0Bopaque\"}]}]}",
+                       0);
+      assert(e);
+      assert(strstr(e, "\"redacted_thinking\"") != NULL);
+      assert(strstr(e, "Er0Bopaque") != NULL); /* opaque data preserved verbatim */
+      printf("  redacted-thinking-preserved OK\n");
+      free(e);
+   }
+
    printf("all cross-protocol egress byte-identity checks passed\n");
    return 0;
 }

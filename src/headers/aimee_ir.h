@@ -60,6 +60,10 @@ typedef struct
    aimee_block_type_t type;
    /* TEXT / THINKING */
    char *text;
+   /* THINKING: the provider's opaque signature over the reasoning block. Anthropic
+    * REQUIRES it echoed back verbatim on a resubmitted assistant thinking turn, so it
+    * must be modeled (not lost to the raw sidecar) for the canonical egress. Owned. */
+   char *thinking_signature;
    /* TOOL_USE: id = the call id (stable, links to the matching TOOL_RESULT);
     * name = opaque tool name; input = opaque argument JSON (borrowed sidecar view,
     * preserved verbatim). TOOL_RESULT: id = the tool_use id it answers;

@@ -51,6 +51,7 @@ static void parse_block(const cJSON *el, aimee_block_t *b)
    {
       b->type = AIMEE_BLK_THINKING;
       b->text = dupstr(ostr(el, "thinking"));
+      b->thinking_signature = dupstr(ostr(el, "signature"));
    }
    else if (strcmp(type, "tool_use") == 0)
    {
