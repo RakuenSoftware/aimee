@@ -793,7 +793,7 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
       e = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
       if (cJSON_IsBool(e))
          cfg->economizer_aggressive = cJSON_IsTrue(e) ? 1 : 0;
-      cfg->economizer_tier = !cfg->economizer_enabled  ? ECON_TIER_OFF
+      cfg->economizer_tier = !cfg->economizer_enabled     ? ECON_TIER_OFF
                              : cfg->economizer_aggressive ? ECON_TIER_AGGRESSIVE
                                                           : ECON_TIER_SAFE;
    }

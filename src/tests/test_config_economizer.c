@@ -25,14 +25,14 @@ static void test_two_tier_resolution(void)
 {
    config_t c;
    memset(&c, 0, sizeof c);
-   c.module_economizer = -1;      /* unspecified -> tier is authoritative */
+   c.module_economizer = -1; /* unspecified -> tier is authoritative */
    c.reduce_command_filter = 1;
 
    /* OFF tier: no economization at all. */
    c.economizer_tier = ECON_TIER_OFF;
    assert(econ_tier(&c) == ECON_TIER_OFF);
    assert(econ_reduction_master_on(&c) == 0);
-   assert(cf_effective(&c) == 0);           /* command_filter suppressed with reduction off */
+   assert(cf_effective(&c) == 0); /* command_filter suppressed with reduction off */
    assert(econ_gateway_mutate_on(&c) == 0);
 
    /* SAFE tier: reduction on, but no live gateway mutation. */
@@ -281,7 +281,8 @@ int main(void)
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.economizer_tier == ECON_TIER_AGGRESSIVE); /* persisted as economizer: aggressive */
+      assert(cfg2.economizer_tier ==
+             ECON_TIER_AGGRESSIVE); /* persisted as economizer: aggressive */
 
       /* off also round-trips (non-default); safe is the default and is not persisted. */
       cfg.economizer_tier = ECON_TIER_OFF;

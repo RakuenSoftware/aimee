@@ -25,7 +25,7 @@ int main(void)
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
-      cfg.module_economizer = -1; /* unspecified -> tier decides */
+      cfg.module_economizer = -1;               /* unspecified -> tier decides */
       assert(tool_condense_enabled(&cfg) == 0); /* tier OFF (memset) -> off */
       cfg.reduce_command_filter = 1;
       assert(tool_condense_enabled(&cfg) == 0); /* still tier OFF */

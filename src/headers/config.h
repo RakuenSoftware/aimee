@@ -2099,8 +2099,8 @@ int config_load_file(config_t *cfg);
 /* The economizer tier — the single user control. See docs/features/economizer.md. */
 enum
 {
-   ECON_TIER_OFF = 0,   /* verbatim passthrough: no caching, no reduction */
-   ECON_TIER_SAFE = 1,  /* lossless: Anthropic caching + frozen tool condensation; OpenAI recall */
+   ECON_TIER_OFF = 0,  /* verbatim passthrough: no caching, no reduction */
+   ECON_TIER_SAFE = 1, /* lossless: Anthropic caching + frozen tool condensation; OpenAI recall */
    ECON_TIER_AGGRESSIVE = 2 /* + lossy fold/compress; OpenAI live mutation */
 };
 
@@ -2113,7 +2113,7 @@ int econ_tier_parse(const char *s);   /* string -> ECON_TIER_* (default SAFE on 
 /* Economizer resolution — compute EFFECTIVE gates from the tier without mutating config_t
  * (so config_save round-trips the raw user value). */
 int econ_reduction_master_on(const config_t *cfg); /* tier != off */
-int econ_gateway_mutate_on(const config_t *cfg);   /* tier == aggressive (OpenAI-only at call site) */
+int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-only at call site) */
 
 /* Resolve whether a pluggable module is enabled, from the layered enablement surface. This is
  * the ONE place module enablement is decided; every wire site calls it with the module's tristate
