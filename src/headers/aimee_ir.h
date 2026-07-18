@@ -229,22 +229,6 @@ size_t aimee_ir_response_reasoning(const aimee_response_t *r, char *buf, size_t 
 const char *aimee_stop_reason_name(aimee_stop_reason_t s);
 aimee_stop_reason_t aimee_stop_reason_parse(const char *canonical_name);
 
-/* The path a request takes (ruling Q2). */
-typedef enum
-{
-   AIMEE_ROUTE_PASSTHROUGH = 0, /* same-protocol, no mutation: forward raw bytes verbatim
-                                   (prompt-cache preserved) */
-   AIMEE_ROUTE_IR               /* cross-protocol OR a stage will mutate: parse -> IR -> build */
-} aimee_route_t;
-
-/* Decide the request path UP-FRONT (avoids the TOCTOU where a mutating stage has
- * already broken byte-parity). PASSTHROUGH only when frontend==backend protocol,
- * both known, AND no stage will mutate the request; otherwise the IR path (a
- * mutation already invalidates the cached suffix, so the IR round-trip costs
- * nothing extra). */
-aimee_route_t aimee_ir_route_decide(aimee_wire_t frontend, aimee_wire_t backend,
-                                    int stage_will_mutate);
-
 /* 1 if two requests are SEMANTICALLY equal: same system blocks, messages (role +
  * ordered content blocks incl. tool ids/names/args/results + cache_control),
  * tools, tool_choice, and sampling params. IGNORES provenance that legitimately

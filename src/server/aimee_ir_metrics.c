@@ -50,6 +50,8 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
       return "ir_backend_build_failures";
    case AIMEE_IR_M_BACKEND_PARSE_FAIL:
       return "ir_backend_parse_failures";
+   case AIMEE_IR_M_REBUILD_MATCH:
+      return "ir_rebuild_match_bytes";
    case AIMEE_IR_M_REBUILD_MISMATCH:
       return "ir_rebuild_mismatch_bytes";
    case AIMEE_IR_M_STAGE_MUTATION:

@@ -150,16 +150,6 @@ int main(void)
    aimee_request_free(&a);
    aimee_request_free(&b);
 
-   /* --- route decision (Q2) --- */
-   /* same protocol, no mutation -> raw passthrough (byte-parity) */
-   assert(aimee_ir_route_decide(AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_ANTHROPIC, 0) ==
-          AIMEE_ROUTE_PASSTHROUGH);
-   /* same protocol but a stage will mutate -> IR path */
-   assert(aimee_ir_route_decide(AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_ANTHROPIC, 1) == AIMEE_ROUTE_IR);
-   /* cross-protocol -> IR path regardless */
-   assert(aimee_ir_route_decide(AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_RESPONSES, 0) == AIMEE_ROUTE_IR);
-   /* unknown protocol -> IR path (safe) */
-   assert(aimee_ir_route_decide(AIMEE_WIRE_UNKNOWN, AIMEE_WIRE_ANTHROPIC, 0) == AIMEE_ROUTE_IR);
    /* --- response accessors: the delegate path's replacement for
     *     parsed_response_t.content / .is_tool_call ---
     *
