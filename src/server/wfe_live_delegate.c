@@ -26,7 +26,10 @@
 #include "agent_types.h"
 #include "cJSON.h"
 #include "coord_jobs.h"
+#include "delegate_backend.h" /* run verify steps inside the delegate sandbox */
 #include "delegate_role.h"
+#include "delegate_sandbox_image.h" /* resolve the work item's sandbox image */
+#include "sandbox_learned.h"        /* learn verify's apt installs -> pre-bake next image */
 #include "persona.h"
 #include "provider_catalog.h"
 #include "headers/git_verify.h"
@@ -171,6 +174,113 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
 
 static const wfe_delegate_provider_t WFE_LIVE_DELEGATE = {wfe_live_delegate_run};
 
+/* Mechanical-verify default step timeout — mirrors git_verify_step.c's default so
+ * a step run in the sandbox gets the same wall budget as in-process. */
+#define WFE_VERIFY_STEP_TIMEOUT_MS (30 * 60 * 1000)
+
+/* Run the resolved verify steps INSIDE the work item's delegate sandbox — the
+ * `--network none`, toolchain-baked image the engineer delegate builds against —
+ * instead of in the aimee-server process (the slim runtime container ships no
+ * gcc/make, so an in-process `aimee git verify` there can never pass and the
+ * implement block loops to its wall-cap; see docs/DELEGATE_SANDBOX_VERIFY.md).
+ *
+ * Reuses the docker delegate backend so verify inherits the SAME sandbox the
+ * delegate used: the resolved per-project image (custom `sandbox:` spec honored
+ * via delegate_sandbox_resolve_image) and the egress package proxy for first-time
+ * dependency installs — and each step is fed to sandbox_learned_observe so those
+ * apt installs are captured and pre-baked into the next image build (egress →
+ * offline over time).
+ *
+ * Returns 0 and writes a {verdict, steps:[{name,rc}]} JSON to out_verdict when the
+ * sandbox path ran; -1 when it is unavailable (no docker backend, no resolvable
+ * verify steps, or the sandbox could not start) so the caller falls back to the
+ * in-process gate — preserving CLI and non-sandboxed behavior unchanged. */
+static int wfe_verify_in_sandbox(const char *workdir, char *out_verdict, size_t n)
+{
+   if (!workdir || !workdir[0])
+      return -1;
+   verify_config_t cfg;
+   if (verify_load_config(workdir, &cfg) != 0 || cfg.count <= 0)
+      return -1; /* no steps resolvable here -> let the caller fall back */
+
+   delegate_backend_t *be = delegate_backend_lookup("docker");
+   if (!be || !be->acquire || !be->exec || !be->release)
+      return -1; /* no sandbox backend -> fall back to in-process verify */
+
+   char image[256] = "";
+   (void)delegate_sandbox_resolve_image(workdir, image, sizeof image); /* "" -> backend default */
+
+   delegate_backend_config_t bc = {0};
+   bc.image = image[0] ? image : NULL;
+   bc.workspace = workdir;
+   bc.pkg_proxy = 1;         /* egress proxy for first-time dep installs (learned pre-bake) */
+   bc.require_isolation = 1; /* --network none; refuse to run un-isolated */
+   bc.hibernate_on_exit = 1; /* keep the container + learned materials for reuse */
+
+   /* Stable per-worktree task id so the sandbox (and its learned toolchain) is
+    * reused across an implement unit's retries rather than rebuilt each round. */
+   char task_id[80];
+   const char *slash = strrchr(workdir, '/');
+   snprintf(task_id, sizeof task_id, "wfe-verify-%s", (slash && slash[1]) ? slash + 1 : workdir);
+
+   void *state = NULL;
+   if (be->acquire(be, task_id, &bc, &state) != 0)
+      return -1; /* sandbox could not start -> fall back */
+
+   cJSON *verdict = cJSON_CreateObject();
+   cJSON *steps = verdict ? cJSON_AddArrayToObject(verdict, "steps") : NULL;
+   char *obuf = malloc(1 << 18), *ebuf = malloc(1 << 15);
+   int failed = 0, ran = 0;
+   if (verdict && steps && obuf && ebuf)
+   {
+      for (int i = 0; i < cfg.count; i++)
+      {
+         const verify_step_t *s = &cfg.steps[i];
+         if (!s->run[0])
+            continue;
+         /* Capture any apt installs this step performs so they pre-bake into the
+          * next sandbox image build (B -> A: egress-installed becomes baked-in). */
+         sandbox_learned_observe(workdir, s->run);
+         delegate_exec_result_t res = {0};
+         res.stdout_buf = obuf;
+         res.stdout_cap = 1 << 18;
+         res.stderr_buf = ebuf;
+         res.stderr_cap = 1 << 15;
+         obuf[0] = ebuf[0] = '\0';
+         int trc = be->exec(be, state, s->run, WFE_VERIFY_STEP_TIMEOUT_MS, &res);
+         int step_rc = (trc != 0) ? -1 : res.exit_code; /* transport failure = step failure */
+         if (step_rc != 0)
+            failed++;
+         ran++;
+         cJSON *js = cJSON_CreateObject();
+         if (js)
+         {
+            cJSON_AddStringToObject(js, "name", s->name);
+            cJSON_AddNumberToObject(js, "rc", step_rc);
+            cJSON_AddItemToArray(steps, js);
+         }
+      }
+   }
+   be->release(be, state, 1 /* hibernate: keep the sandbox for the next retry */);
+
+   int rc = -1;
+   if (verdict && steps && ran > 0)
+   {
+      cJSON_AddStringToObject(verdict, "verdict", failed ? "failed" : "passed");
+      char *sv = cJSON_PrintUnformatted(verdict);
+      if (sv)
+      {
+         snprintf(out_verdict, n, "%s", sv);
+         free(sv);
+         rc = 0;
+      }
+   }
+   free(obuf);
+   free(ebuf);
+   cJSON_Delete(verdict);
+   return rc;
+}
+
 /* Live verify provider (WP-1b): run the mechanical verify gate synchronously on
  * `workdir` and return the structured format=json verdict. The implement block
  * gates a unit's advance on verdict:passed. Returns 0 + fills out_verdict, or -1
@@ -179,6 +289,11 @@ static int wfe_live_verify_run(const char *workdir, char *out_verdict, size_t n)
 {
    if (out_verdict && n)
       out_verdict[0] = '\0';
+   /* Prefer the sandbox: the in-process gate below runs in the toolchain-less
+    * server container and can never build a real project. Falls through to
+    * in-process only when no sandbox is available (CLI / non-sandboxed setups). */
+   if (wfe_verify_in_sandbox(workdir, out_verdict, n) == 0)
+      return 0;
    cJSON *args = cJSON_CreateObject();
    if (!args)
       return -1;
