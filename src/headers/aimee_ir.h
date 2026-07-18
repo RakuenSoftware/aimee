@@ -116,9 +116,15 @@ typedef struct
    char **stop_sequences;
    int n_stop;
    aimee_wire_t frontend; /* the client wire this was parsed from */
+   /* Set to 1 by any IR transform that changes the typed fields (a module editing
+    * messages/system/tools). While 0, the request is byte-identical to `raw`, so a
+    * same-protocol backend may emit `raw` verbatim (byte-faithful egress -> prompt
+    * cache preserved). A transform that dirties the IR MUST set this so the backend
+    * re-serializes from the typed fields instead of shipping stale original bytes. */
+   int mutated;
    /* Whole-request sidecar: the ORIGINAL request JSON. Enables the same-protocol
-    * raw-passthrough fast-path (frontend==backend, no mutating stage) and lossless
-    * replay. Owned. */
+    * raw-passthrough fast-path (frontend==backend, unmutated) and lossless replay.
+    * Owned. */
    struct cJSON *raw;
 } aimee_request_t;
 

@@ -44,20 +44,21 @@ int main(void)
    aimee_ir_shadow_observe_request(req, AIMEE_WIRE_OPENAI_CHAT);
    assert(aimee_ir_metric_total(AIMEE_IR_M_IR_PATH) == 1); /* unchanged */
 
-   /* a request carrying a field the IR does not model (top_p) parses fine but the
-    * backend drops it on rebuild -> the bytes differ -> REBUILD_MISMATCH. This is the
-    * exact class (silent field loss) the byte gate must catch before we can retire
-    * the passthrough. */
-   cJSON *lossy = cJSON_Parse(
+   /* a request carrying a field the IR does not model (top_p): the byte-faithful
+    * same-protocol egress ships the raw sidecar verbatim, so top_p is PRESERVED and
+    * the round-trip still MATCHes. This is the passthrough FIXING the silent field
+    * loss the typed rebuild used to cause -- a clean Anthropic request is now
+    * byte-identical regardless of which fields the typed IR models. */
+   cJSON *unmodeled = cJSON_Parse(
        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
        "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}],"
        "\"top_p\":0.9}");
-   assert(lossy);
-   aimee_ir_shadow_observe_request(lossy, AIMEE_WIRE_ANTHROPIC);
+   assert(unmodeled);
+   aimee_ir_shadow_observe_request(unmodeled, AIMEE_WIRE_ANTHROPIC);
    assert(aimee_ir_metric_total(AIMEE_IR_M_IR_PATH) == 2);          /* parsed + observed */
-   assert(aimee_ir_metric_total(AIMEE_IR_M_REBUILD_MISMATCH) == 1); /* dropped top_p */
-   assert(aimee_ir_metric_total(AIMEE_IR_M_REBUILD_MATCH) == 1);    /* still just the first */
-   cJSON_Delete(lossy);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REBUILD_MATCH) == 2);    /* both byte-identical */
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REBUILD_MISMATCH) == 0); /* passthrough preserves all */
+   cJSON_Delete(unmodeled);
 
    /* NULL request is safe */
    aimee_ir_shadow_observe_request(NULL, AIMEE_WIRE_ANTHROPIC);

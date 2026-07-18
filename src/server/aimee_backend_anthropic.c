@@ -97,6 +97,15 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
       return NULL;
+   /* Same-protocol byte-faithful egress: an Anthropic request that no IR transform
+    * touched is byte-identical to its raw sidecar, so ship those exact bytes. This
+    * preserves Claude Code's prompt-cache prefix (which the typed re-serialization
+    * below would perturb via key-order/formatting) and is the whole point of routing
+    * the native path through the IR instead of a verbatim passthrough that skips it.
+    * A transform that mutates the typed fields sets ir->mutated, forcing the rebuild. */
+   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && !ir->mutated && ir->raw)
+      return cJSON_Duplicate(ir->raw, 1);
+
    cJSON *out = cJSON_CreateObject();
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);

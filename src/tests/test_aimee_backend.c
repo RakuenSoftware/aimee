@@ -54,7 +54,37 @@ int main(void)
    aimee_request_t air2;
    assert(anthropic_frontend_parse(built, &air2, err, sizeof err) == 0);
    assert(aimee_ir_request_equal(&air, &air2)); /* parse->build->parse stable */
+   /* ...and BYTE-exact: an unmutated same-protocol build ships the raw sidecar, so
+    * the wire bytes are identical to the client's (prompt cache preserved). */
+   {
+      cJSON *orig = cJSON_Parse(ANTHROPIC);
+      char *os = cJSON_PrintUnformatted(orig);
+      char *bs = cJSON_PrintUnformatted(built);
+      assert(os && bs && strcmp(os, bs) == 0);
+      free(os);
+      free(bs);
+      cJSON_Delete(orig);
+   }
    cJSON_Delete(built);
+
+   /* --- (1b) ir->mutated forces the typed rebuild; an unmodeled field (top_p) is
+    *          preserved by the raw passthrough but dropped by the rebuild. --- */
+   {
+      cJSON *uj = cJSON_Parse("{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,\"messages\":[{"
+                              "\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}"
+                              "],\"top_p\":0.9}");
+      aimee_request_t uir;
+      assert(anthropic_frontend_parse(uj, &uir, err, sizeof err) == 0);
+      cJSON_Delete(uj);
+      cJSON *clean = anthropic_backend_build(&uir); /* mutated=0 -> raw passthrough */
+      assert(clean && cJSON_GetObjectItem(clean, "top_p") != NULL); /* preserved */
+      uir.mutated = 1;
+      cJSON *rebuilt = anthropic_backend_build(&uir);                   /* typed rebuild */
+      assert(rebuilt && cJSON_GetObjectItem(rebuilt, "top_p") == NULL); /* dropped (unmodeled) */
+      cJSON_Delete(clean);
+      cJSON_Delete(rebuilt);
+      aimee_request_free(&uir);
+   }
 
    /* --- (2) CROSS-protocol build: OpenAI-parsed IR -> Anthropic request -> same IR
     *         an Anthropic client would produce. --- */
