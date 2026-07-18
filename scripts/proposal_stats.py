@@ -103,43 +103,84 @@ def _count_words(files: list[str]) -> int:
     total = 0
     for path in files:
         try:
-            with open(path, "rb") as fh:
-                decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            except OSError as exc:
+                print(
+                    f"warning: skipping {path}: open failed: {exc}",
+                    file=sys.stderr,
+                )
+                binary = True
+            else:
+                try:
+                    st_fd = os.fstat(fd)
+                    st_path = os.stat(path, follow_symlinks=False)
+                except OSError as exc:
+                    print(
+                        f"warning: skipping {path}: stat failed: {exc}",
+                        file=sys.stderr,
+                    )
+                    os.close(fd)
+                    binary = True
+                else:
+                    if (
+                        not stat.S_ISREG(st_fd.st_mode)
+                        or st_fd.st_ino != st_path.st_ino
+                        or st_fd.st_dev != st_path.st_dev
+                    ):
+                        print(
+                            f"warning: skipping {path}: not a regular file",
+                            file=sys.stderr,
+                        )
+                        os.close(fd)
+                        binary = True
+                    else:
+                        binary = False
+            if not binary:
+                decoder = codecs.getincrementaldecoder("utf-8")(
+                    errors="strict"
+                )
                 pending = ""
-                binary = False
-                while True:
-                    chunk = fh.read(_READ_CHUNK_BYTES)
-                    if not chunk:
-                        text = decoder.decode(b"", final=True)
-                        if pending or text:
-                            total += len((pending + text).split())
-                        break
-                    if b"\x00" in chunk:
-                        print(
-                            f"warning: skipping {path}: appears to be binary",
-                            file=sys.stderr,
-                        )
-                        binary = True
-                        break
-                    try:
-                        text = decoder.decode(chunk, final=False)
-                    except UnicodeDecodeError as exc:
-                        print(
-                            f"warning: skipping {path}: not valid utf-8: {exc}",
-                            file=sys.stderr,
-                        )
-                        binary = True
-                        break
-                    # Prepend the unfinished token from the previous chunk
-                    # so a word split across the boundary is one whole token.
-                    tokens = (pending + text).split()
-                    pending = ""
-                    if text and not text[-1].isspace():
-                        # Last token may continue into the next chunk.
-                        pending = tokens.pop()
-                    total += len(tokens)
-                if binary:
-                    continue
+                with os.fdopen(fd, "rb") as fh:
+                    while True:
+                        chunk = fh.read(_READ_CHUNK_BYTES)
+                        if not chunk:
+                            try:
+                                text = decoder.decode(b"", final=True)
+                            except UnicodeDecodeError as exc:
+                                print(
+                                    f"warning: skipping {path}: not valid utf-8: {exc}",
+                                    file=sys.stderr,
+                                )
+                                binary = True
+                                break
+                            if pending or text:
+                                total += len((pending + text).split())
+                            break
+                        if b"\x00" in chunk:
+                            print(
+                                f"warning: skipping {path}: appears to be binary",
+                                file=sys.stderr,
+                            )
+                            binary = True
+                            break
+                        try:
+                            text = decoder.decode(chunk, final=False)
+                        except UnicodeDecodeError as exc:
+                            print(
+                                f"warning: skipping {path}: not valid utf-8: {exc}",
+                                file=sys.stderr,
+                            )
+                            binary = True
+                            break
+                        # Prepend the unfinished token from the previous chunk
+                        # so a word split across the boundary is one whole token.
+                        tokens = (pending + text).split()
+                        pending = ""
+                        if text and not text[-1].isspace():
+                            # Last token may continue into the next chunk.
+                            pending = tokens.pop()
+                        total += len(tokens)
         except OSError as exc:
             print(
                 f"warning: skipping {path}: read failed: {exc}", file=sys.stderr
@@ -161,11 +202,12 @@ def _collect(root: str) -> dict[str, object]:
 
 
 def _format_human(stats: dict[str, object]) -> str:
-    return (
-        f"pending:      {stats['pending']}\n"
-        f"done:         {stats['done']}\n"
-        f"pending_words: {stats['pending_words']}\n"
-    )
+    label_width = max(len(k) for k in stats) + 2
+    lines = [
+        f"{key + ':':<{label_width}}{stats[key]}"
+        for key in ("pending", "done", "pending_words")
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def main(argv: list[str]) -> int:

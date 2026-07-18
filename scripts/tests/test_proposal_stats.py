@@ -159,5 +159,37 @@ class CollectIntegration(unittest.TestCase):
         self.assertEqual(parsed["pending_words"], 3)
 
 
+
+    def test_truncated_utf8_at_eof_is_skipped_not_crashed(self):
+        # 0xE2 0x80 0xA6 is the UTF-8 encoding of "…" (U+2026). Truncating
+        # the trailing byte leaves an incomplete multibyte sequence at EOF.
+        # Before the fix this raised UnicodeDecodeError and crashed the
+        # script. The expected behavior is to emit a warning and skip the
+        # file by returning a count (not raising).
+        self._setup_root(
+            pending=[b"alpha \xe2\x80"],
+            done=[b"x\n"],
+        )
+        with _Capture() as cap:
+            count = self.mod._count_words(
+                [os.path.join(self.root, "pending", "p0.md")]
+            )
+        self.assertIsInstance(count, int)
+        self.assertIn(b"not valid utf-8", cap.err.getvalue().encode())
+
+    def test_format_human_aligned_columns(self):
+        out = self.mod._format_human(
+            {"pending": 1, "done": 2, "pending_words": 3}
+        ).splitlines()
+        self.assertEqual(len(out), 3)
+        self.assertTrue(out[0].startswith("pending:"))
+        self.assertTrue(out[1].startswith("done:"))
+        self.assertTrue(out[2].startswith("pending_words:"))
+        # The value column must start at the same offset on every line.
+        col = out[2].index("3")
+        self.assertEqual(out[0][col:], "1")
+        self.assertEqual(out[1][col:], "2")
+
+
 if __name__ == "__main__":
     unittest.main()
