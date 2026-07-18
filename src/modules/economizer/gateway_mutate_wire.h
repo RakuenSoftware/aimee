@@ -94,6 +94,18 @@ extern "C"
     * which the streaming contract forwards without disabling). */
    int gw_status_is_invalid_request(int http_status);
 
+   /* SHADOW (measure-only) gateway reduction: build the measure-only reduce_config and
+    * run context_reduce over `messages` so the ingress can record a forecast ledger
+    * row from `out`. NEVER mutates `messages` (measure_only is forced). The ONE place
+    * the gateway-seam measurement mechanics live — both ingresses (/v1/messages,
+    * /v1/responses) call this instead of open-coding the reduce_config. `out` is
+    * zeroed here; the caller records the ledger (server-layer telemetry) and frees it
+    * with context_reduce_result_free. Returns context_reduce's rc (0 on success incl.
+    * a deliberate no-op; non-zero => hard bypass, out->messages NULL). No-op rc=1 when
+    * `messages` is not a cJSON array or `out` is NULL. */
+   int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
+                             int retained_msgs, reduce_result_t *out);
+
 #ifdef __cplusplus
 }
 #endif
