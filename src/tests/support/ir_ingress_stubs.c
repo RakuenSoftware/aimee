@@ -262,6 +262,23 @@ __attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
 {
    (void)out;
 }
+/* Shadow gateway-measure wrapper: anthropic_http.c / openai_chat.c call this inside the
+ * cfg.reduce_gateway_seam block (0 under the tests' stubbed config, so NEVER entered at
+ * runtime); the inert weak stub only resolves the link. Mirrors the real no-op contract:
+ * zero `out` so the caller's context_reduce_result_free is safe, return 1 ("did nothing").
+ * Real gateway_mutate_wire.o wins when a test links it. */
+__attribute__((weak)) int gw_economizer_measure(cJSON *messages, const char *system_prompt,
+                                                const char *model, int retained_msgs,
+                                                reduce_result_t *out)
+{
+   (void)messages;
+   (void)system_prompt;
+   (void)model;
+   (void)retained_msgs;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 1;
+}
 __attribute__((weak)) void agent_record_reduce_ledger(const struct reduce_result_s *r,
                                                       const char *model, const char *agent_name,
                                                       const char *role)
