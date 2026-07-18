@@ -3,23 +3,7 @@
 Helper scripts that aimee can shell out to.  Installable anywhere, but
 they're kept here so they track the schema of the APIs they plumb into.
 
-## `proposal_stats.py`, inspect the docs/proposals/ pipeline
-
-Read-only stats inspector for the proposal-tracking pipeline under
-`docs/proposals/`. Scans `docs/proposals/pending` and `docs/proposals/done`
-relative to the repo root (resolved from the script's own location, not
-the caller's cwd) and reports the proposal counts plus the total word
-count of the pending bucket.  Pure read-only, stdlib-only Python.
-
-### Usage
-
-```bash
-python3 scripts/proposal_stats.py            # human-readable summary
-python3 scripts/proposal_stats.py --json     # one JSON object on stdout
-```
-
-Use `--json` when piping the numbers into another tool or dashboard;
-the human-readable form is the default for ad-hoc shell runs.
+## `proposal_stats.py`, reports statistics for proposals.
 
 ## `check_tier_deps.sh`, enforce DB1/DB2 tier boundaries
 
