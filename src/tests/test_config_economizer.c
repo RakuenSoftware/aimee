@@ -93,6 +93,20 @@ static void test_reload_class(void)
    assert(config_field_lookup("economizer.enabled") == NULL);
    assert(config_field_lookup("reduce.history_fold") == NULL);
    assert(config_field_lookup("reduce.command_filter") == NULL);
+
+   /* the single `economizer` tier IS a settable HOT field (get/set as a string). */
+   const config_field_t *econ = config_field_lookup("economizer");
+   assert(econ && econ->reload_class == RELOAD_HOT);
+   config_t c;
+   memset(&c, 0, sizeof c);
+   c.economizer_tier = ECON_TIER_SAFE;
+   assert(config_field_set_value(&c, econ, "aggressive") == 0 &&
+          c.economizer_tier == ECON_TIER_AGGRESSIVE);
+   assert(config_field_set_value(&c, econ, "off") == 0 && c.economizer_tier == ECON_TIER_OFF);
+   assert(config_field_set_value(&c, econ, "bogus") == -1); /* invalid token rejected */
+   cJSON *v = config_field_value_json(&c, econ);            /* reads back as a string */
+   assert(cJSON_IsString(v) && strcmp(v->valuestring, "off") == 0);
+   cJSON_Delete(v);
 }
 
 int main(void)

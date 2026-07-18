@@ -94,13 +94,15 @@ def render_cli(entries):
 
 # ─── Config: CLI-settable scalars (src/config_fields.c) ───────────────────────
 
-CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float"}
+CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float",
+            "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
 
 # Curated one-line descriptions for the CLI-settable keys (the `aimee config set`
 # surface). A key in the generated table with no entry here renders "—" and is
 # counted as undescribed so the gap is visible (see render_config).
 CFG_KEY_DESC = {
     "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
+    "economizer": "Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md.",
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
