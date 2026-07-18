@@ -16,7 +16,7 @@
  * being truncated at the old 32 KB read cap, and it bounds fail-open blast radius. */
 #define TOOL_CONDENSE_CEILING (2 * 1024 * 1024)
 
-/* 1 iff the command-filter lever is enabled (reduce_command_filter). */
+/* 1 iff the command-filter lever is enabled (economizer safe/aggressive tool condensation). */
 int tool_condense_enabled(const config_t *cfg);
 
 /* ---- command recognition (Slice 2) ---- */

@@ -306,22 +306,6 @@ static const char *config_save_default_db1_path(void)
    return path;
 }
 
-/* Does the unified context economizer hold any non-default value worth persisting?
- * Centralized so each new reduce.* key is accounted for in exactly one place (the
- * save gate + this predicate stay in sync). freeze_guard defaults ON and horizon
- * defaults 1, so those count as non-default only when changed away from that. */
-static int reduce_has_non_default(const config_t *cfg)
-{
-   return !cfg->reduce_measure_enabled || !cfg->reduce_delegate_seam || !cfg->reduce_history_fold ||
-          !cfg->reduce_compress ||
-          (cfg->reduce_gateway_seam && cfg->reduce_gateway_seam_explicit) ||
-          !cfg->reduce_freeze_guard_enabled ||
-          (cfg->reduce_freeze_guard_horizon > 0 && cfg->reduce_freeze_guard_horizon != 1) ||
-          cfg->reduce_gateway_mutate || !cfg->reduce_command_filter /* default-ON (P1c) */ ||
-          (cfg->reduce_gateway_session_disable_ttl_ms != 3600000 &&
-           cfg->reduce_gateway_session_disable_ttl_ms > 0);
-}
-
 int config_save(const config_t *cfg)
 {
    ensure_config_dir();
@@ -1100,43 +1084,6 @@ int config_save(const config_t *cfg)
          if (cfg->fold_recall_ttl_turns)
             cJSON_AddNumberToObject(recall, "ttl_turns", cfg->fold_recall_ttl_turns);
       }
-   }
-
-   /* Unified context economizer (only save if non-default). freeze_guard defaults ON
-    * and horizon defaults 1, so they are emitted only when an operator changed them. */
-   if (reduce_has_non_default(cfg))
-   {
-      cJSON *reduce = cJSON_AddObjectToObject(root, "reduce");
-      /* measure/delegate_seam/history_fold/compress default ON -> persist only the
-       * non-default OFF state so an operator opt-out round-trips. gateway_seam stays
-       * default-OFF -> persist only when enabled. */
-      if (!cfg->reduce_measure_enabled)
-         cJSON_AddBoolToObject(reduce, "measure", 0);
-      if (!cfg->reduce_delegate_seam)
-         cJSON_AddBoolToObject(reduce, "delegate_seam", 0);
-      if (!cfg->reduce_history_fold)
-         cJSON_AddBoolToObject(reduce, "history_fold", 0);
-      if (!cfg->reduce_compress)
-         cJSON_AddBoolToObject(reduce, "compress", 0);
-      /* gateway_seam: persist ONLY when the operator set it explicitly, never when
-       * config_load synthesized it from gateway_mutate=1 (that stays an in-memory
-       * normalization, re-applied each load). */
-      if (cfg->reduce_gateway_seam && cfg->reduce_gateway_seam_explicit)
-         cJSON_AddBoolToObject(reduce, "gateway_seam", cfg->reduce_gateway_seam);
-      if (!cfg->reduce_freeze_guard_enabled) /* default-on -> persist only when disabled */
-         cJSON_AddBoolToObject(reduce, "freeze_guard", 0);
-      if (cfg->reduce_freeze_guard_horizon > 0 && cfg->reduce_freeze_guard_horizon != 1)
-         cJSON_AddNumberToObject(reduce, "freeze_guard_horizon", cfg->reduce_freeze_guard_horizon);
-      /* gateway_mutate defaults OFF -> persist only when enabled. TTL defaults 1h ->
-       * persist only a non-default positive override (a bad <=0 is never written). */
-      if (cfg->reduce_gateway_mutate)
-         cJSON_AddBoolToObject(reduce, "gateway_mutate", cfg->reduce_gateway_mutate);
-      if (!cfg->reduce_command_filter) /* default-ON (P1c) -> persist only the opt-out */
-         cJSON_AddBoolToObject(reduce, "command_filter", 0);
-      if (cfg->reduce_gateway_session_disable_ttl_ms != 3600000 &&
-          cfg->reduce_gateway_session_disable_ttl_ms > 0)
-         cJSON_AddNumberToObject(reduce, "gateway_session_disable_ttl_ms",
-                                 cfg->reduce_gateway_session_disable_ttl_ms);
    }
 
    /* The economizer tier -- persist as a string only when non-default (default: safe). */

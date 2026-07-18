@@ -1209,6 +1209,22 @@ int config_save(const config_t *cfg)
    return 0;
 }
 
+/* config_fields.o (linked here for the config.get/set allowlist) resolves the economizer
+ * tier string via these two pure helpers; this test doesn't link the real config.o. */
+const char *econ_tier_name(int tier)
+{
+   return tier == ECON_TIER_OFF ? "off" : tier == ECON_TIER_AGGRESSIVE ? "aggressive" : "safe";
+}
+
+int econ_tier_parse(const char *s)
+{
+   if (s && (strcasecmp(s, "off") == 0 || strcasecmp(s, "0") == 0 || strcasecmp(s, "false") == 0))
+      return ECON_TIER_OFF;
+   if (s && (strcasecmp(s, "aggressive") == 0 || strcasecmp(s, "aggro") == 0))
+      return ECON_TIER_AGGRESSIVE;
+   return ECON_TIER_SAFE;
+}
+
 const char *config_output_dir(void)
 {
    return "/tmp";

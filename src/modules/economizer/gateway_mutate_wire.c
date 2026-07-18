@@ -80,9 +80,11 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    if (config_load(&cfg) != 0)
       return;
    if (!econ_gateway_mutate_on(&cfg))
-      return; /* dark by default; needs enabled && aggressive && gateway_mutate (P3) */
+      return; /* dark unless the economizer tier is aggressive (OpenAI-family egress only) */
+   econ_preset_t ep;
+   econ_preset(&cfg, &ep);
    ctx->mutate_on = 1;
-   ctx->ttl_ms = cfg.reduce_gateway_session_disable_ttl_ms;
+   ctx->ttl_ms = ep.gateway_session_disable_ttl_ms;
 
    /* Resolve a per-identity session key; an identity-less request is a pristine
     * passthrough with NO disable state written (§2.4). */

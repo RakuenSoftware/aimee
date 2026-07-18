@@ -354,13 +354,20 @@ void agent_record_reduce_ledger(const reduce_result_t *r, const char *model, con
       break;
    }
 
+   /* Tag the active economizer tier so telemetry is attributable to the tier that
+    * produced it (the row's `model` identifies the egress provider). Cheap mtime-cached
+    * config load; falls back to the default tier name if the load fails. */
+   config_t lcfg;
+   const char *tier = (config_load(&lcfg) == 0) ? econ_tier_name(econ_tier(&lcfg)) : "safe";
+
    char meta[512];
    snprintf(meta, sizeof(meta),
-            "{\"kind\":\"economizer_forecast\",\"reason\":\"%s\",\"baseline\":%d,\"reduced\":%d,"
-            "\"removed\":%d,\"foldable\":%d,\"floor\":%.6f,\"ceiling\":%.6f,\"folded_msgs\":%d,"
-            "\"reused_boundary\":%d}",
-            reason, r->baseline_tokens, r->reduced_tokens, r->removed_tokens, r->foldable_tokens,
-            r->est_saved_cost_floor, r->est_saved_cost_ceiling, r->folded_msgs, r->reused_boundary);
+            "{\"kind\":\"economizer_forecast\",\"tier\":\"%s\",\"reason\":\"%s\",\"baseline\":%d,"
+            "\"reduced\":%d,\"removed\":%d,\"foldable\":%d,\"floor\":%.6f,\"ceiling\":%.6f,"
+            "\"folded_msgs\":%d,\"reused_boundary\":%d}",
+            tier, reason, r->baseline_tokens, r->reduced_tokens, r->removed_tokens,
+            r->foldable_tokens, r->est_saved_cost_floor, r->est_saved_cost_ceiling, r->folded_msgs,
+            r->reused_boundary);
 
    /* avoided-$ counts only an actual reduction's modeled saving (REASON_REDUCED);
     * measure-only / skipped / already-reduced rows contribute 0 avoided-$. */

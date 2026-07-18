@@ -10,20 +10,23 @@ LLM, so it is ~free). It knows that a test runner's value is its *failures*, a c
 its *diagnostics*, and drops the rest, **losslessly**: the full raw output is spilled to
 disk and a recovery pointer is left in the condensed result, so nothing is destroyed.
 
-It is **default-ON** (unified-economizer P1c, a safe-tier lever: lossless-on-demand,
-fail-open, no-over-reduction) and complements (does not replace) the size-based
-`reduce.compress`, which stays the fallback for unrecognized output. Set
-`reduce.command_filter=false` to opt out.
+It is part of the economizer's **safe** tier (and therefore **on by default**):
+lossless-on-demand, fail-open, no-over-reduction. It complements (does not replace) the
+aggressive-tier size-based body compression, which is the fallback for unrecognized output
+when that tier is active.
 
 ## Configuration
 
+Condensation has **no independent toggle** — it is one lever of the single
+[`economizer`](economizer.md) tier:
+
 ```yaml
-reduce:
-  command_filter: true    # DEFAULT ON. Set false to opt out.
+economizer: safe        # off | safe | aggressive   (default: safe)
 ```
 
-Turn it on from the web UI (**⚙️ Settings → `reduce.command_filter`**, see
-[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical to today**: the seam falls through to the size-based `reduce.compress`.
+Condensation runs on **`safe`** and **`aggressive`**; **`economizer: off`** disables it (along
+with all other reduction — verbatim passthrough). See [SETTINGS.md](../SETTINGS.md) and
+[the economizer overview](economizer.md).
 
 ## What it does
 
@@ -50,14 +53,15 @@ before the size-based compression:
 
 ## Safety contract
 
-- `reduce.command_filter: false` ⇒ tool output is **byte-identical** to today.
+- `economizer: off` ⇒ tool output is **byte-identical** to today (verbatim passthrough).
 - **Lossless-on-demand.** A condensed body is only ever produced when the full raw output
   was **durably spilled** first; a failed spill, no spill dir, or a would-be-truncated
   recovery pointer all fall through to passthrough. Nothing is dropped without a backstop.
 - **Never hide a failure.** A test runner or build with a **non-zero exit and no recognized
   failure line** passes through verbatim rather than risk eliding the cause.
 - **Fail-open everywhere.** An unrecognized command, an over-ceiling body (> 2 MB), or any
-  filter error degrades to the size-based `reduce.compress`, never a crash or a dropped
+  filter error degrades to passthrough (or, on the aggressive tier, the size-based body
+  compression), never a crash or a dropped
   result.
 - **No masquerade.** A path-prefixed command whose basename matches a known tool (`./git`)
   never inherits that tool's family filter.
@@ -69,7 +73,7 @@ before the size-based compression:
 ## Observability + recovery cost (P4)
 
 Process-wide counters accumulate realized savings **and recovery cost** on live traffic
-([`tool_condense_stats_snapshot`](../../src/tool_condense.c)): `recognized`, `applied`,
+([`tool_condense_stats_snapshot`](../../src/modules/economizer/tool_condense.c)): `recognized`, `applied`,
 `applied_raw` vs `applied_final` bytes, per-family (`test`, `diag`) counts, and the
 **recovery-cost** side: `recovered` (successful `tool_output_get` page-backs) and
 `recovered_bytes` (bytes re-injected). Two derived fields make the promotion-gate metric
@@ -90,8 +94,8 @@ recovery via fold-recall remains best-effort, not byte-exact.)
 
 Shipped as the **delegate surface**, **default-ON** (the safe-tier lever): when on, the
 delegate bash seam captures the full output (up to a 2 MB ceiling) so the lever sees all of
-it, condenses recognized families losslessly, and spills the raw for recovery. Opt out with
-`reduce.command_filter=false`; roll back the default by the same flag.
+it, condenses recognized families losslessly, and spills the raw for recovery. Set
+`economizer: off` to disable it (along with all other reduction).
 
 The **default-ON** flip landed in unified-economizer **P1c**, justified by the deterministic
 gate (lossless-on-demand + fail-open + a no-over-reduction audit); it replaces the old lossy

@@ -15,7 +15,8 @@ typedef enum
    CFG_STRING,
    CFG_BOOL,
    CFG_INT,
-   CFG_FLOAT
+   CFG_FLOAT,
+   CFG_ECON_TIER /* int enum stored, but get/set as an "off|safe|aggressive" string */
 } config_field_type_t;
 
 /* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.

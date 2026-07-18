@@ -376,8 +376,9 @@ static const config_schema_entry_t config_schema[] = {
     {"search", SCHEMA_OBJECT, 0},
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
-    {"reduce", SCHEMA_OBJECT, 0},
-    {"economizer", SCHEMA_OBJECT, 0},
+    {"modules", SCHEMA_OBJECT, 0}, /* memory/governance/delegates/workflows/economizer toggles */
+    {"economizer", SCHEMA_STRING,
+     0}, /* off|safe|aggressive (deprecated object form still parses) */
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"ecomode", SCHEMA_BOOL, 0},
@@ -593,34 +594,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
-   /* Context economizer: DEFAULT-ON on the delegate seam (the implemented, tested
-    * reduction path). measure + delegate_seam + history_fold + compress all on.
-    * Lossy reduction stays recoverable: both levers only touch messages BEFORE the
-    * retained tail (the most recent retained_msgs stay full), and the Coordinate
-    * Closet (also default-on) conserves the exact identifiers so the agent can
-    * re-issue a tool call to recover an elided body. history_fold is converted to a
-    * live fold ONLY at agent_runtime.c (rcfg.history_fold = reduce_history_fold &&
-    * !chatgpt) — it reaches the Responses builder on ZERO paths; compress is
-    * shape-preserving and runs for all providers. */
-   cfg->reduce_measure_enabled = 1;
-   cfg->reduce_delegate_seam = 1;
-   cfg->reduce_history_fold = 1;
-   cfg->reduce_compress = 1;
-   /* GATEWAY seam (primary-agent /v1 path) stays off: shadow-only until its
-    * request-mutation + 400-retry-from-pristine circuit breaker are built. */
-   cfg->reduce_gateway_seam = 0;
-   cfg->reduce_freeze_guard_enabled = 1; /* safety: on for the default-on economizer freeze */
-   cfg->reduce_freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the write */
-   /* Gateway MUTATION (primary-agent reduction) is the whole feature default-OFF; the
-    * session-disable TTL is a live-path breaker window (1h) that must stay > 0. */
-   cfg->reduce_gateway_mutate = 0;
-   cfg->reduce_gateway_session_disable_ttl_ms = 3600000;
-   cfg->reduce_gateway_seam_explicit = 0;
-   /* Two-tier economizer switches (P3): master ON (measure exempt), aggressive tier OFF. With
-    * these defaults every effective lever equals its pre-P3 value (back-compat). */
-   cfg->economizer_enabled = 1;
-   cfg->economizer_aggressive = 0;
-   cfg->economizer_tier = ECON_TIER_SAFE; /* the single control; default lossless */
+   /* Context economizer: the SINGLE control. Default SAFE (lossless: Anthropic prompt
+    * caching + deterministic tool condensation + recall-restorable history fold on
+    * OpenAI). The concrete per-tier levers are resolved by econ_preset(); there is no
+    * per-lever config surface. See docs/features/economizer.md. */
+   cfg->economizer_tier = ECON_TIER_SAFE;
    /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
     * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
    cfg->module_memory = -1;
@@ -628,12 +606,6 @@ static void config_set_defaults(config_t *cfg)
    cfg->module_delegates = -1;
    cfg->module_workflows = -1;
    cfg->module_economizer = -1;
-   /* command-aware tool-output condensation: DEFAULT-ON (P1c). Safe-tier lever — it passes
-    * the deterministic gate: lossless-on-demand (full output spilled), fail-open (any
-    * miss/decline -> raw), and a no-over-reduction audit (failures/diagnostics + their
-    * detail block are kept in the condensed view, not just the spill). It replaces the old
-    * lossy 32 KB read-cap truncation with lossless-recoverable condensation. */
-   cfg->reduce_command_filter = 1;
    /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
     * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */
    cfg->autonomy_skeptics = 0;
@@ -1007,6 +979,29 @@ int econ_gateway_mutate_on(const config_t *cfg)
    /* The live-primary mutator is an AGGRESSIVE-tier action. (The call site additionally
     * restricts it to OpenAI-family egress -- it never runs against Anthropic.) */
    return econ_tier(cfg) == ECON_TIER_AGGRESSIVE ? 1 : 0;
+}
+
+void econ_preset(const config_t *cfg, econ_preset_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof *out);
+   int tier = econ_tier(cfg);
+   if (tier == ECON_TIER_OFF)
+      return; /* verbatim passthrough: every lever off */
+   /* SAFE and AGGRESSIVE both fold history (recall-restorable, freeze-guarded ->
+    * cache-safe on Anthropic) and run deterministic tool-output condensation. */
+   out->history_fold = 1;
+   out->command_filter = 1;
+   out->freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the cache write */
+   out->gateway_session_disable_ttl_ms = 3600000; /* 1h circuit-breaker window */
+   if (tier == ECON_TIER_AGGRESSIVE)
+   {
+      /* Lossy tool-body compression + the live inbound /v1 mutation seam. Both are
+       * OpenAI-family only at their call sites -- Anthropic context is never mutated. */
+      out->compress = 1;
+      out->gateway_seam = 1;
+   }
 }
 
 static int config_snapshot_live(void);
@@ -1483,8 +1478,7 @@ int config_load_file(config_t *cfg)
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
    config_parse_modules_section(cfg, root);
-   config_parse_reduce_section(cfg, root);
-   config_apply_reduce_consistency(cfg); /* mutate=1 -> auto-enable shadow seam in memory + WARN */
+   config_parse_economizer_section(cfg, root);
    config_parse_autonomy_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
@@ -1899,12 +1893,6 @@ int config_reload(void)
    {
       pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* parse failure -> keep the running snapshot */
-   }
-   char err[256];
-   if (config_reduce_validate(&fresh, err, sizeof err) != 0)
-   {
-      pthread_mutex_unlock(&g_snap_wlock);
-      return -1; /* invalid -> keep the running snapshot (validate-or-keep) */
    }
    uint64_t tok = config_snapshot_token(&fresh);
    if (atomic_load_explicit(&g_snap_inited, memory_order_acquire) && tok == g_snap_token)
