@@ -135,7 +135,15 @@ static int run_delegate_attempt(agent_config_t *cfg, const char *role, const cha
    if (force_tools)
       return agent_run_with_tools_write_enforce(cfg, role, system_prompt, run_prompt, max_tokens,
                                                 enforce_writes, result);
-   return agent_run(cfg, role, system_prompt, run_prompt, max_tokens, result);
+   /* The delegate decided tools-OFF (e.g. CLI --no-tools -> force_tools=0). Force
+    * it for the turn: agent_run_ex would otherwise re-derive use_tools from the
+    * agent's config (tools_enabled + exec-role) and silently re-enable tools,
+    * which makes an agentic model (e.g. codex) loop on tool calls and return no
+    * text instead of the requested single-shot answer. */
+   agent_run_force_no_tools(1);
+   int rc = agent_run(cfg, role, system_prompt, run_prompt, max_tokens, result);
+   agent_run_force_no_tools(0);
+   return rc;
 }
 
 static int result_failed_for_pool(const agent_result_t *result, int rc)
