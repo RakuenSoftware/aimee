@@ -15,7 +15,15 @@ typedef enum
    AIMEE_IR_M_RENDER_FAIL,        /* frontend.render(IR) failed */
    AIMEE_IR_M_BACKEND_BUILD_FAIL, /* backend.build(IR) failed */
    AIMEE_IR_M_BACKEND_PARSE_FAIL, /* backend.parse(provider resp) failed */
-   AIMEE_IR_M_REBUILD_MISMATCH,   /* same-protocol round-trip != original bytes (BUG) */
+   /* Same-protocol round-trip serialize(backend_build(parse(req))) vs serialize(req),
+    * BYTE-exact. This is the CACHING gate: Claude Code's prompt cache keys on exact
+    * bytes, so the verbatim Anthropic passthrough cannot be retired until MISMATCH
+    * reads 0 over real traffic. Distinct from BODY_MATCH (semantic / key-order
+    * insensitive). MATCH is the denominator so a parity RATE is computable; a mismatch
+    * that is still semantically equal is harmless key-order/formatting drift, one that
+    * is semantically UNEQUAL is real field loss (logged with a semantic_equal flag). */
+   AIMEE_IR_M_REBUILD_MATCH,
+   AIMEE_IR_M_REBUILD_MISMATCH,
    AIMEE_IR_M_STAGE_MUTATION,     /* a core stage mutated the request (forces IR path) */
    AIMEE_IR_M_CACHE_CONTROL_LOST, /* a cache_control marker was dropped in round-trip (BUG) */
    AIMEE_IR_M_PASSTHROUGH,        /* same-protocol raw-passthrough fast-path taken */

@@ -227,7 +227,14 @@ void aimee_ir_shadow_observe_request(const cJSON *req, aimee_wire_t frontend)
    }
    aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, frontend);
 
-   /* rebuild same-protocol and check the round-trip is IR-stable */
+   /* Rebuild same-protocol and check BYTE-exact parity -- the caching gate. The
+    * verbatim passthrough forwards serialize(req) (cJSON re-emits the parsed request
+    * in its original key order), so serialize(anthropic_backend_build(parse(req)))
+    * == serialize(req) means the IR egress is a byte-faithful drop-in and the
+    * passthrough can be retired. On a mismatch, semantic_equal (cJSON_Compare,
+    * key-order-insensitive) separates harmless key-order/formatting drift from real
+    * field loss. Per the roundtable no-raw-bytes rule, only lengths + the semantic
+    * flag are logged, never request content. */
    cJSON *rebuilt = anthropic_backend_build(&ir);
    if (!rebuilt)
    {
@@ -235,25 +242,27 @@ void aimee_ir_shadow_observe_request(const cJSON *req, aimee_wire_t frontend)
    }
    else
    {
-      aimee_request_t ir2;
-      if (anthropic_frontend_parse(rebuilt, &ir2, err, sizeof err) == 0)
+      char *req_s = cJSON_PrintUnformatted(req);
+      char *reb_s = cJSON_PrintUnformatted(rebuilt);
+      if (req_s && reb_s && strcmp(req_s, reb_s) == 0)
       {
-         if (!aimee_ir_request_equal(&ir, &ir2))
-         {
-            aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MISMATCH, frontend);
-            if (g_logged < SHADOW_LOG_CAP)
-            {
-               fprintf(stderr, "[ir-shadow] anthropic round-trip MISMATCH (n_msgs=%d n_tools=%d)\n",
-                       ir.n_messages, ir.n_tools);
-               g_logged++;
-            }
-         }
-         aimee_request_free(&ir2);
+         aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MATCH, frontend);
       }
       else
       {
-         aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, frontend);
+         aimee_ir_metric_inc(AIMEE_IR_M_REBUILD_MISMATCH, frontend);
+         if (g_logged < SHADOW_LOG_CAP)
+         {
+            g_logged++;
+            fprintf(
+                stderr,
+                "[ir-shadow] anthropic byte MISMATCH (req_len=%zu reb_len=%zu semantic_equal=%d)\n",
+                req_s ? strlen(req_s) : (size_t)0, reb_s ? strlen(reb_s) : (size_t)0,
+                cJSON_Compare(req, rebuilt, 1));
+         }
       }
+      free(req_s);
+      free(reb_s);
       cJSON_Delete(rebuilt);
    }
    aimee_request_free(&ir);

@@ -31,6 +31,7 @@ int main(void)
    assert(aimee_ir_metric_total(AIMEE_IR_M_IR_PATH) == 1);
 
    /* names are stable + distinct */
+   assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_REBUILD_MATCH), "ir_rebuild_match_bytes") == 0);
    assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_REBUILD_MISMATCH), "ir_rebuild_mismatch_bytes") ==
           0);
    assert(strcmp(aimee_ir_metric_name(AIMEE_IR_M_PASSTHROUGH), "ir_passthrough") == 0);
