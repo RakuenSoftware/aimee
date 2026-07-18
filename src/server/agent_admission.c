@@ -12,12 +12,12 @@
 #include <string.h>
 #include <time.h>
 
-#define ADMIT_MAX_AGENTS 128
-#define ADMIT_MAX_MODELS 128
+#define ADMIT_MAX_AGENTS   128
+#define ADMIT_MAX_MODELS   128
 #define ADMIT_MAX_CONTEXTS 512
-#define ADMIT_MAX_WAITERS 256
-#define ADMIT_NAME_LEN 64
-#define ADMIT_CTX_LEN 128
+#define ADMIT_MAX_WAITERS  256
+#define ADMIT_NAME_LEN     64
+#define ADMIT_CTX_LEN      128
 
 typedef struct
 {

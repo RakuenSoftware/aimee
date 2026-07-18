@@ -149,7 +149,7 @@ static void test_release_null_and_stale(void)
 /* ---- concurrency stress: peak in-flight must never exceed the global cap ---- */
 
 #define STRESS_THREADS 40
-#define STRESS_CAP 5
+#define STRESS_CAP     5
 
 static volatile int s_inflight = 0;
 static volatile int s_peak = 0;

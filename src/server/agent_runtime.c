@@ -159,7 +159,8 @@ static void admission_ensure_configured(void)
       int default_model = cfg.concurrency_default > 0 ? cfg.concurrency_default : 5;
       agent_admission_model_limit_t overrides[CONFIG_CONCURRENCY_MAX_ENTRIES];
       int n = 0;
-      for (int i = 0; i < cfg.concurrency_per_model_count && n < CONFIG_CONCURRENCY_MAX_ENTRIES; i++)
+      for (int i = 0; i < cfg.concurrency_per_model_count && n < CONFIG_CONCURRENCY_MAX_ENTRIES;
+           i++)
       {
          snprintf(overrides[n].model, sizeof(overrides[n].model), "%s",
                   cfg.concurrency_per_model[i].key);

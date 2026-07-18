@@ -45,16 +45,16 @@ typedef int (*agent_admit_cancel_fn)(const char *cancel_ctx);
 
 /* Higher priority is admitted first when capacity frees. */
 #define AGENT_ADMIT_PRIORITY_INTERACTIVE 0
-#define AGENT_ADMIT_PRIORITY_BACKGROUND (-10)
+#define AGENT_ADMIT_PRIORITY_BACKGROUND  (-10)
 
 typedef struct
 {
-   const char *ctx_handle;   /* REQUIRED: execution-context id (see file header) */
-   const char *agent;        /* REQUIRED: agent name — the per-agent limit key */
-   const char *model;        /* REQUIRED: model name — the per-model limit key */
-   int per_agent_max;        /* REQUIRED > 0: this agent's max_parallel */
-   int priority;             /* AGENT_ADMIT_PRIORITY_* (default 0) */
-   unsigned flags;           /* AGENT_ADMIT_NONBLOCKING */
+   const char *ctx_handle;          /* REQUIRED: execution-context id (see file header) */
+   const char *agent;               /* REQUIRED: agent name — the per-agent limit key */
+   const char *model;               /* REQUIRED: model name — the per-model limit key */
+   int per_agent_max;               /* REQUIRED > 0: this agent's max_parallel */
+   int priority;                    /* AGENT_ADMIT_PRIORITY_* (default 0) */
+   unsigned flags;                  /* AGENT_ADMIT_NONBLOCKING */
    agent_admit_cancel_fn cancel_fn; /* optional */
    const char *cancel_ctx;          /* passed to cancel_fn */
 } agent_admit_req_t;
