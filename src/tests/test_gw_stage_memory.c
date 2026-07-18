@@ -336,6 +336,53 @@ static void test_instructions_placement_appends(void)
    printf("instructions_placement_appends OK\n");
 }
 
+/* Build a minimal IR carrying a single last-user text block (heap-owned so
+ * aimee_request_free reclaims everything). */
+static void mk_user_ir(aimee_request_t *ir, const char *user_text)
+{
+   memset(ir, 0, sizeof *ir);
+   ir->messages = calloc(1, sizeof *ir->messages);
+   ir->n_messages = 1;
+   ir->messages[0].role = strdup("user");
+   ir->messages[0].blocks = calloc(1, sizeof *ir->messages[0].blocks);
+   ir->messages[0].n_blocks = 1;
+   ir->messages[0].blocks[0].type = AIMEE_BLK_TEXT;
+   ir->messages[0].blocks[0].text = strdup(user_text);
+}
+
+/* IR seam (P4 port): ir_stage_memory appends the envelope as a trailing system TEXT
+ * block, derives the query from the last user message, and reports the mutation. The
+ * appended env is byte-identical to the legacy ingress_preinject_build(query, 0). */
+static void test_ir_stage_appends_system_block(void)
+{
+   aimee_request_t ir;
+   mk_user_ir(&ir, "deploy matrix");
+   int rc = ir_stage_memory(&ir, NULL);
+   assert(rc == 1);          /* changed typed fields -> runner marks ir->mutated */
+   assert(ir.n_system == 1); /* exactly one trailing block appended */
+   assert(ir.system[0].type == AIMEE_BLK_TEXT);
+   assert(ir.system[0].cache_control == NULL); /* trailing block stays uncached */
+   char *direct = ingress_preinject_build("deploy matrix", 0);
+   assert(direct && ir.system[0].text && strcmp(ir.system[0].text, direct) == 0);
+   free(direct);
+   aimee_request_free(&ir);
+   printf("ir_stage_appends_system_block OK\n");
+}
+
+/* IR seam: empty recall -> ingress_preinject_build NULL -> no block, no mutation. */
+static void test_ir_stage_no_recall_noop(void)
+{
+   g_no_recall = 1;
+   aimee_request_t ir;
+   mk_user_ir(&ir, "deploy matrix");
+   int rc = ir_stage_memory(&ir, NULL);
+   assert(rc == 0);
+   assert(ir.n_system == 0 && ir.system == NULL);
+   aimee_request_free(&ir);
+   g_no_recall = 0;
+   printf("ir_stage_no_recall_noop OK\n");
+}
+
 int main(void)
 {
    printf("test_gw_stage_memory:\n");
@@ -346,6 +393,8 @@ int main(void)
    test_anthropic_parity_gate();
    test_anthropic_parity_opt_in_inject();
    test_disabled_noop();
+   test_ir_stage_appends_system_block();
+   test_ir_stage_no_recall_noop();
    printf("all gw_stage_memory tests passed\n");
    return 0;
 }

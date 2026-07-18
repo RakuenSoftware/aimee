@@ -3,6 +3,8 @@
 
 #include "aimee_backend.h"
 #include "aimee_frontend.h"
+#include "gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
+#include "config.h"          /* config_load + config_module_enabled (modules.memory) */
 #include "aimee_ir_metrics.h"
 #include "aimee.h"          /* size macros for agent_types.h */
 #include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
@@ -37,6 +39,30 @@ int aimee_ir_stream_relay_enabled(void)
     * (The user's codex config uses the buffered-replay path, not this relay.) */
    const char *v = getenv("AIMEE_IR_STREAM_RELAY");
    return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
+}
+
+/* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
+ * default (gw_stage_memory_enabled). Cached config_load, so an operator toggle applies
+ * without a restart; keeps ir_stage_memory itself config-free. Resolved at the seam
+ * call site, mirroring the legacy gw_stage_slot_t catalogs. */
+static int ir_memory_enabled(void)
+{
+   config_t c;
+   int tri = (config_load(&c) == 0) ? c.module_memory : -1;
+   return config_module_enabled(tri, gw_stage_memory_enabled());
+}
+
+void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
+{
+   /* The one place modules register on the IR (universal-gateway P4): fired once per
+    * ingress, after frontend_parse and before backend_build, protocol-neutral. Memory
+    * is the first ported module -- it replaces gw_stage_memory's two structured-ingress
+    * arms (anthropic /v1/messages + /v1/responses). The four legacy plain-chat handlers
+    * stay on gw_memory_system_prompt until agent_execute itself moves onto the IR. */
+   const aimee_ir_transform_t stages[] = {
+       {"memory", ir_stage_memory, NULL, memory_enabled},
+   };
+   aimee_ir_run_transforms(ir, stages, sizeof stages / sizeof stages[0]);
 }
 
 char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
@@ -78,7 +104,8 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
     * buffered-replay path ask for SSE and then parse it as JSON. */
    ir.stream = want_stream ? 1 : 0;
 
-   aimee_ir_apply_request_stages(&ir); /* the one protocol-neutral module stage (no-op today) */
+   aimee_ir_apply_request_stages(
+       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
    cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
@@ -133,7 +160,8 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
    if (stream_out)
       *stream_out = ir.stream;
 
-   aimee_ir_apply_request_stages(&ir); /* the one protocol-neutral module stage (no-op today) */
+   aimee_ir_apply_request_stages(
+       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
    /* build the chat shape, then split leading system messages -> instructions */
    cJSON *chat = openai_backend_build(&ir);
@@ -229,7 +257,8 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
       free(ir.model);
       ir.model = strdup(agent_model);
    }
-   aimee_ir_apply_request_stages(&ir); /* the one protocol-neutral module stage (no-op today) */
+   aimee_ir_apply_request_stages(
+       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
    cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);

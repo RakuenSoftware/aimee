@@ -980,14 +980,11 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        .parity = 1, /* client OpenAI == serving OpenAI; informational for these stages */
        .stream = 0,
    };
-   /* Slice 7: enabled, ordered stage set from the catalog (memory is togglable). The memory
-    * toggle is resolved from the config-store `modules:` block, falling back to the env default
-    * (cached config_load; keeps gw_stage_memory itself config-free). */
-   config_t mcfg;
-   int mcfg_ok = (config_load(&mcfg) == 0);
+   /* Memory PORTED to the IR transform seam (aimee_ir_apply_request_stages): it now
+    * fires once on the typed IR inside openai_build_body's IR path, so it is no longer
+    * a pre-IR wire-anchored stage here. This catalog keeps the stages that still act on
+    * the raw /v1/responses request (tool policing, routing). */
    const gw_stage_slot_t slots[] = {
-       {"memory", gw_stage_memory, messages,
-        config_module_enabled(mcfg_ok ? mcfg.module_memory : -1, gw_stage_memory_enabled())},
        {"tool_policing", gw_stage_openai_tool_policing, NULL, 1},
        {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
    };

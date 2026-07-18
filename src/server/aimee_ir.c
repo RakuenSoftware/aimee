@@ -363,13 +363,3 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
          ir->mutated = 1; /* a change means the raw sidecar is stale -> backend rebuilds */
    }
 }
-
-void aimee_ir_apply_request_stages(aimee_request_t *ir)
-{
-   /* The one place modules hook the IR. No transforms are ported yet, so this is a
-    * no-op and the request stays byte-identical to its raw sidecar. As each module
-    * moves off its legacy wire-anchored site (memory's three arms, the economizer's
-    * gateway seams, tool policing), it is added to the catalog HERE -- fired once,
-    * protocol-neutral, for every ingress. */
-   aimee_ir_run_transforms(ir, NULL, 0);
-}

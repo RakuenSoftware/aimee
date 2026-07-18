@@ -10,7 +10,35 @@
 #include "agent_protocol.h"
 #include "aimee_ir.h"
 #include "aimee_ir_serve.h"
+#include "config.h"
 #include "cJSON.h"
+
+/* aimee_ir_serve.c registers the ported memory module on the transform seam, so it
+ * now references the memory + config toggles. This suite exercises the build/
+ * translation parity paths, NOT memory injection, so keep it a minimal link: stub
+ * the module DISABLED (gw_stage_memory_enabled -> 0) with an inert transform, and a
+ * config_load that reports "no config" so enablement falls to that env default. With
+ * memory off the seam is a no-op and every byte-exact assertion below is unchanged. */
+int ir_stage_memory(aimee_request_t *ir, void *ud)
+{
+   (void)ir;
+   (void)ud;
+   return 0;
+}
+int gw_stage_memory_enabled(void)
+{
+   return 0;
+}
+int config_load(config_t *c)
+{
+   if (c)
+      memset(c, 0, sizeof *c);
+   return -1;
+}
+int config_module_enabled(int config_tristate, int env_default)
+{
+   return config_tristate >= 0 ? config_tristate : env_default;
+}
 
 static const char *REQ =
     "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":100,"
