@@ -8,7 +8,7 @@ Changes to files listed below should be reviewed by the named owner.
 | File | Layer | Cap | Owner | Notes |
 |------|-------|-----|-------|-------|
 | `webchat/` | Go service | 2000 | aimee core | Standalone browser webchat service |
-| `src/guardrails.c` | 1 (data) | 2000 | aimee core | Safety-critical policy enforcement |
+| `src/modules/guardrails/guardrails.c` | 1 (data) | 2000 | aimee core | Safety-critical policy enforcement |
 | `src/cmd_agent.c` | 3 (cmd) | 2000 | aimee core | Agent command entry points |
 | `src/agent_tools.c` | 2 (agent) | 2000 | aimee core | Tool execution engine |
 | `src/mcp_git.c` | 0 (core) | 1850 | aimee core | Git operations (has layer exemptions) |

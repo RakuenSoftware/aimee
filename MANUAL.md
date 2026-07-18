@@ -946,7 +946,7 @@ referenced projects, and subtasks).
 
 Guardrails are enforced *server-side*, clients cannot bypass them. See
 [`docs/SECURITY.md`](docs/SECURITY.md) for the trust model and
-`src/guardrails.c` / `src/guardrails_orchestrator.c` for the implementation.
+`src/modules/guardrails/guardrails.c` / `src/modules/guardrails/guardrails_orchestrator.c` for the implementation.
 
 ---
 

@@ -131,7 +131,7 @@ public_header_scan '\\b(DB2_FORK_SPEC_SHIM|db2_shim_|db2_is_shim|db2_pg_url|[Ss]
 scan '\\bdb2_(open|close)_legacy_shared_store' "DB2 shared-store lifecycle alias outside src/db2"
 path_scan 'legacy_state_path|load_legacy_state_file|session-[^[:space:]]+\\.state' \
   "legacy file-backed session state migration path" \
-  src/session_state.c src/headers/guardrails.h
+  src/session_state.c src/modules/guardrails/guardrails.h
 path_scan 'legacy db handle|server-side db handle|legacy DB1 tables' \
   "legacy database-handle vocabulary outside tier internals" \
   src/cmd_index.c src/tasks.c src/cmd_memory_core.c src/headers/memory.h
