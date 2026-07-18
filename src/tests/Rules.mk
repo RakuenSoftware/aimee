@@ -1081,11 +1081,11 @@ $(TESTPREFIX)/unit-test-sandbox-learned: $(OBJDIR)/tests/test_sandbox_learned.o 
                       $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-roundtable-preset: $(OBJDIR)/tests/test_roundtable_preset.o $(OBJDIR)/roundtable_preset.o $(TEST_CORE_OBJS)
+$(TESTPREFIX)/unit-test-roundtable-preset: $(OBJDIR)/tests/test_roundtable_preset.o $(OBJDIR)/modules/roundtable/roundtable_preset.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-roundtable-seat-resolve: $(OBJDIR)/tests/test_roundtable_seat_resolve.o \
-                      $(OBJDIR)/server/roundtable_seat_resolve.o \
+                      $(OBJDIR)/modules/roundtable/roundtable_seat_resolve.o \
                       $(OBJDIR)/server/agent_config.o \
                       $(OBJDIR)/tests/support/vault_service_stub.o \
                       $(OBJDIR)/tests/support/oauth_tokens_stub.o \
@@ -3058,21 +3058,21 @@ $(TESTPREFIX)/unit-test-db1-roundtable-pipeline: \
 
 $(TESTPREFIX)/unit-test-roundtable-pipeline-eval: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_eval.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_chunk.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_ctl.o \
                                        $(OBJDIR)/server/server_pipeline.o $(OBJDIR)/server/server_pipeline_merge.o \
                                        $(OBJDIR)/modules/git/git_pr_ci_grade.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_eval.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o \
                                        $(OBJDIR)/db1/roundtable_pipeline.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                        $(OBJDIR)/db1/local_operator.o \
@@ -3081,8 +3081,8 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
 
 $(TESTPREFIX)/unit-test-roundtable-pipeline-capture: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_capture.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_capture.o \
-                                       $(OBJDIR)/server/roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
                                        $(OBJDIR)/db1/roundtable_pipeline.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                        $(OBJDIR)/cJSON.o
@@ -3113,8 +3113,8 @@ $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegat
 
 $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/tests/test_delegate_ensemble.o \
                                        $(OBJDIR)/modules/delegates/delegate_ensemble.o $(OBJDIR)/modules/delegates/delegate_ensemble_review.o \
-                                       $(OBJDIR)/server/roundtable_verify.o \
-                                       $(OBJDIR)/server/roundtable_chair.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_verify.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_chair.o \
                                        $(OBJDIR)/server/evidence_replay.o \
                                        $(OBJDIR)/server/token_tracker.o \
                                        $(OBJDIR)/server/token_tracker_registry.o \
@@ -3184,12 +3184,12 @@ $(TESTPREFIX)/unit-test-git-pr-ci-grade: $(OBJDIR)/tests/test_git_pr_ci_grade.o 
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-roundtable-verify: $(OBJDIR)/tests/test_roundtable_verify.o \
-                              $(OBJDIR)/server/roundtable_verify.o $(OBJDIR)/server/evidence_replay.o \
+                              $(OBJDIR)/modules/roundtable/roundtable_verify.o $(OBJDIR)/server/evidence_replay.o \
                               $(OBJDIR)/dstr.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-roundtable-chair: $(OBJDIR)/tests/test_roundtable_chair.o \
-                              $(OBJDIR)/server/roundtable_chair.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+                              $(OBJDIR)/modules/roundtable/roundtable_chair.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-sweep-logic: $(OBJDIR)/tests/test_sweep_logic.o \
@@ -3379,11 +3379,11 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/compute_pool.o \
                            $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
-                           $(OBJDIR)/roundtable_preset.o \
+                           $(OBJDIR)/modules/roundtable/roundtable_preset.o \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
-                           $(OBJDIR)/server/roundtable_pipeline_capture.o \
-                           $(OBJDIR)/server/roundtable_pipeline_eval.o \
+                           $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
+                           $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
                            $(DB1_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
