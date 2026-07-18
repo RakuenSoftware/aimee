@@ -1,12 +1,12 @@
 /* mcp_git_pr.c: MCP git PR handlers */
 #include "aimee.h"
 #include "cJSON.h"
-#include "headers/config.h"
-#include "headers/guardrails.h"
-#include "headers/git_verify.h"
-#include "headers/mcp_git.h"
-#include "headers/util.h"
-#include "headers/branch_ownership.h"
+#include "config.h"
+#include "guardrails.h"
+#include "git_verify.h"
+#include "mcp_git.h"
+#include "util.h"
+#include "branch_ownership.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

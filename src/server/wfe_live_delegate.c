@@ -32,7 +32,7 @@
 #include "sandbox_learned.h"        /* learn verify's apt installs -> pre-bake next image */
 #include "persona.h"
 #include "provider_catalog.h"
-#include "headers/git_verify.h"
+#include "git_verify.h"
 #include "log.h"
 #include "util.h"
 #include "wfe_approval.h"

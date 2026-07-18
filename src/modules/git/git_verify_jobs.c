@@ -1,5 +1,5 @@
-#include "headers/git_verify.h"
-#include "headers/git_verify_jobs.h"
+#include "git_verify.h"
+#include "git_verify_jobs.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -14,8 +14,8 @@
 #include "platform_process.h"
 #include "platform_random.h"
 #include "cJSON.h"
-#include "headers/mcp_git.h"
-#include "headers/git_verify.h"
+#include "mcp_git.h"
+#include "git_verify.h"
 #include "headers/workspace_manifest.h"
 #include <unistd.h>
 #include <sys/stat.h>

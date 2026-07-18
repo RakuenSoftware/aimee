@@ -9,7 +9,7 @@
 #include "cJSON.h"
 #include "guardrails_internal.h"
 #include "guardrails_blast_radius.h"
-#include "headers/git_verify.h"
+#include "git_verify.h"
 #include "kb_client.h"
 #include "log.h"
 #include "platform_path.h"

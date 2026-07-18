@@ -1,4 +1,4 @@
-#include "headers/git_verify_internal.h"
+#include "git_verify_internal.h"
 
 #include <stdio.h>
 #include <string.h>

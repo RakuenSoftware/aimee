@@ -1,8 +1,8 @@
-#include "headers/git_verify_select.h"
+#include "git_verify_select.h"
 
-#include "headers/dstr.h"
-#include "headers/platform_process.h"
-#include "headers/util.h"
+#include "dstr.h"
+#include "platform_process.h"
+#include "util.h"
 
 #include <ctype.h>
 #include <fnmatch.h>

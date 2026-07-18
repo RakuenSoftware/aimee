@@ -12,12 +12,12 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include "headers/aimee.h"
-#include "headers/git_verify.h"
-#include "headers/git_verify_internal.h"
-#include "headers/util.h"
-#include "headers/log.h"
-#include "headers/platform_path.h"
+#include "aimee.h"
+#include "git_verify.h"
+#include "git_verify_internal.h"
+#include "util.h"
+#include "log.h"
+#include "platform_path.h"
 
 /* --- Commit-hash-based change detection --- */
 

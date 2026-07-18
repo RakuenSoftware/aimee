@@ -4,12 +4,12 @@
 #include <ctype.h>
 #include <unistd.h>
 
-#include "headers/git_verify_internal.h"
-#include "headers/config.h"
-#include "headers/guardrails.h"
-#include "headers/dstr.h"
-#include "headers/util.h"
-#include "headers/mcp_git.h"
+#include "git_verify_internal.h"
+#include "config.h"
+#include "guardrails.h"
+#include "dstr.h"
+#include "util.h"
+#include "mcp_git.h"
 
 /* --- Verify scope + master-switch gate --- */
 
