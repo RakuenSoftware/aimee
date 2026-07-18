@@ -1,7 +1,7 @@
 /* memory_extract_patterns.c: pattern-first fact extraction (§6) + retraction
  * scan (§4). Pure logic, no DB. See memory_extract_patterns.h. P5. */
-#include "headers/memory_extract_patterns.h"
-#include "headers/rel_types.h" /* rel_type_normalize */
+#include "memory_extract_patterns.h"
+#include "rel_types.h" /* rel_type_normalize */
 
 #include <ctype.h>
 #include <stddef.h>

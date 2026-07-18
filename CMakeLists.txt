@@ -517,7 +517,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/plugin.c
     ${AIMEE_SRC_DIR}/plugin_ctx.c
     ${AIMEE_SRC_DIR}/plugin_loader.c
-    ${AIMEE_SRC_DIR}/memory_provider.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_provider.c
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
@@ -551,22 +551,22 @@ set(CORE_SRCS
 )
 
 set(DATA_SRCS
-    ${AIMEE_SRC_DIR}/memory_core.c
-    ${AIMEE_SRC_DIR}/memory_logic.c
-    ${AIMEE_SRC_DIR}/memory_effective.c
-    ${AIMEE_SRC_DIR}/memory_advanced.c
-    ${AIMEE_SRC_DIR}/memory_assemble.c
-    ${AIMEE_SRC_DIR}/memory_conflict.c
-    ${AIMEE_SRC_DIR}/memory_context.c
-    ${AIMEE_SRC_DIR}/memory_directives.c
-    ${AIMEE_SRC_DIR}/memory_episodes.c
-    ${AIMEE_SRC_DIR}/memory_graph.c
-    ${AIMEE_SRC_DIR}/memory_health.c
-    ${AIMEE_SRC_DIR}/memory_improve.c
-    ${AIMEE_SRC_DIR}/memory_lifecycle.c
-    ${AIMEE_SRC_DIR}/memory_maintenance.c
-    ${AIMEE_SRC_DIR}/memory_prospective.c
-    ${AIMEE_SRC_DIR}/memory_scan.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_advanced.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_assemble.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_conflict.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_context.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_directives.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_episodes.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_graph.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_health.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_improve.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_lifecycle.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_maintenance.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_prospective.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_scan.c
     ${AIMEE_SRC_DIR}/trace_analysis.c
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
@@ -608,7 +608,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/conversation.c
     ${AIMEE_SRC_DIR}/trajectory_export.c
     ${AIMEE_SRC_DIR}/trajectory_batch.c
-    ${AIMEE_SRC_DIR}/memory_profile_pack.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_profile_pack.c
     ${AIMEE_SRC_DIR}/wiki_render.c
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c
@@ -745,7 +745,7 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_diagnose.c
     ${AIMEE_SRC_DIR}/cmd_hooks.c
     ${AIMEE_SRC_DIR}/cmd_hooks_scope.c
-    ${AIMEE_SRC_DIR}/memory_redirect.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_redirect.c
     ${AIMEE_SRC_DIR}/cmd_agent.c
     ${AIMEE_SRC_DIR}/cmd_agent_setup.c
     ${AIMEE_SRC_DIR}/cmd_agent_trace.c
@@ -807,7 +807,7 @@ set(CLI_SRCS
     # cli_main's remote-only hooks-pre path calls memory_redirect_check; the CLI
     # doesn't link aimee-core, so its definer must build in directly (make links it
     # via CLIENT_SUPPORT_OBJS). Without it the CLI link fails undefined.
-    ${AIMEE_SRC_DIR}/memory_redirect.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_redirect.c
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
     ${AIMEE_SRC_DIR}/harness_memory_spill.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
@@ -1010,22 +1010,22 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_memory_embed.c
 )
 set(KB_DATA_SRCS
-    ${AIMEE_SRC_DIR}/memory_core.c
-    ${AIMEE_SRC_DIR}/memory_logic.c
-    ${AIMEE_SRC_DIR}/memory_effective.c
-    ${AIMEE_SRC_DIR}/memory_health.c
-    ${AIMEE_SRC_DIR}/memory_conflict.c
-    ${AIMEE_SRC_DIR}/memory_context.c
-    ${AIMEE_SRC_DIR}/memory_assemble.c
-    ${AIMEE_SRC_DIR}/memory_advanced.c
-    ${AIMEE_SRC_DIR}/memory_prospective.c
-    ${AIMEE_SRC_DIR}/memory_lifecycle.c
-    ${AIMEE_SRC_DIR}/memory_directives.c
-    ${AIMEE_SRC_DIR}/memory_maintenance.c
-    ${AIMEE_SRC_DIR}/memory_graph.c
-    ${AIMEE_SRC_DIR}/memory_scan.c
-    ${AIMEE_SRC_DIR}/memory_improve.c
-    ${AIMEE_SRC_DIR}/memory_episodes.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_health.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_conflict.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_context.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_assemble.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_advanced.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_prospective.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_lifecycle.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_directives.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_maintenance.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_graph.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_scan.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_improve.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_episodes.c
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
     ${AIMEE_SRC_DIR}/css_analyze.c
@@ -1040,7 +1040,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/workspace.c
     ${AIMEE_SRC_DIR}/workspace_manifest.c
-    ${AIMEE_SRC_DIR}/memory_profile_pack.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_profile_pack.c
     ${AIMEE_SRC_DIR}/wiki_render.c
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c

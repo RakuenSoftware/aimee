@@ -8,7 +8,7 @@
 #include "../db2/entity_edges.h"
 #include "../db2/ontology_evolution.h"
 #include "../db2/db2_test_shim.h"
-#include "../headers/memory_extract_patterns.h"
+#include "memory_extract_patterns.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

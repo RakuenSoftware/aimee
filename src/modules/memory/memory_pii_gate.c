@@ -1,7 +1,7 @@
 /* memory_pii_gate.c: per-attribute PII recall gating (§7). Pure. P5.
  * See memory_pii_gate.h. */
-#include "headers/memory_pii_gate.h"
-#include "headers/rel_types.h" /* rel_types_seed_lookup, rel_type_normalize */
+#include "memory_pii_gate.h"
+#include "rel_types.h" /* rel_types_seed_lookup, rel_type_normalize */
 
 #include <ctype.h>
 #include <string.h>
