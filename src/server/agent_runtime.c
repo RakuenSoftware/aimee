@@ -15,6 +15,7 @@
 #include "agent.h"
 #include "agent_protocol.h"
 #include "agent_request_shaping.h"
+#include "agent_request_build.h" /* agent_build_request + provider predicates */
 #include "agent_tools.h"
 #include "agent_tunnel.h"
 #include "config.h"
@@ -648,115 +649,6 @@ void agent_store_feedback(const agent_result_t *result, const char *role,
 
 /* --- Request/response (simple, non-tool path) --- */
 
-static int is_chatgpt_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "chatgpt") == 0;
-}
-
-static int is_anthropic_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "anthropic") == 0;
-}
-
-static cJSON *build_request_openai(const agent_t *agent, const char *system_prompt,
-                                   const char *user_prompt, int max_tokens, double temperature)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   cJSON *messages = cJSON_CreateArray();
-   if (system_prompt && system_prompt[0])
-   {
-      cJSON *sys = cJSON_CreateObject();
-      cJSON_AddStringToObject(sys, "role", "system");
-      cJSON_AddStringToObject(sys, "content", system_prompt);
-      cJSON_AddItemToArray(messages, sys);
-   }
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   char *shaped_prompt = agent_request_shape_user_prompt(agent, user_prompt);
-   cJSON_AddStringToObject(user, "content", shaped_prompt ? shaped_prompt : user_prompt);
-   free(shaped_prompt);
-   cJSON_AddItemToArray(messages, user);
-
-   cJSON_AddItemToObject(req, "messages", messages);
-
-   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
-   model_sampling_apply_openai(agent, req, temperature);
-
-   return req;
-}
-
-static cJSON *build_request_responses(const agent_t *agent, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature)
-{
-   (void)max_tokens;
-   (void)temperature;
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   /* ChatGPT Codex backend requires instructions, store=false, stream=true */
-   if (system_prompt && system_prompt[0])
-      cJSON_AddStringToObject(req, "instructions", system_prompt);
-   else
-      cJSON_AddStringToObject(req, "instructions", "You are a helpful assistant.");
-
-   cJSON_AddBoolToObject(req, "store", 0);
-   cJSON_AddBoolToObject(req, "stream", 1);
-
-   /* Responses API uses "input" as an array of messages */
-   cJSON *input = cJSON_CreateArray();
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", user_prompt);
-   cJSON_AddItemToArray(input, user);
-
-   cJSON_AddItemToObject(req, "input", input);
-
-   return req;
-}
-
-static cJSON *build_request_anthropic(const agent_t *agent, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
-
-   /* §3 cache-aware shaping: mark the stable system prefix cacheable (cache_control)
-    * only when the flag is on, matching the tool-bearing builder. Default-off so
-    * this request-mutating optimization lands dark behind the flag (config load is
-    * cheap/mtime-cached). The min-size floor is applied to the stable prefix inside
-    * the helper, not the whole prompt. */
-   config_t cs_cfg;
-   int cs_marking = (config_load(&cs_cfg) == 0 && cs_cfg.cache_shaping_enabled) ? 1 : 0;
-   agent_anthropic_set_system(req, system_prompt, cs_marking,
-                              cs_marking ? cs_cfg.cache_min_chars : 0);
-
-   cJSON *messages = cJSON_CreateArray();
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", user_prompt);
-   cJSON_AddItemToArray(messages, user);
-   cJSON_AddItemToObject(req, "messages", messages);
-
-   model_sampling_apply_anthropic(agent, req, temperature);
-
-   return req;
-}
-
-static cJSON *build_request(const agent_t *agent, const char *system_prompt,
-                            const char *user_prompt, int max_tokens, double temperature)
-{
-   if (is_chatgpt_provider(agent))
-      return build_request_responses(agent, system_prompt, user_prompt, max_tokens, temperature);
-   if (is_anthropic_provider(agent))
-      return build_request_anthropic(agent, system_prompt, user_prompt, max_tokens, temperature);
-   return build_request_openai(agent, system_prompt, user_prompt, max_tokens, temperature);
-}
-
 static int text_prompt_token_estimate(const char *system_prompt, const char *user_prompt)
 {
    size_t len = 0;
@@ -1137,7 +1029,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    int tok = agent_request_max_tokens(agent, max_tokens);
    if (is_anthropic_provider(agent))
       track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
-   cJSON *req = build_request(agent, system_prompt, effective_user, tok, temperature);
+   cJSON *req = agent_build_request(agent, system_prompt, effective_user, tok, temperature);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    free(augmented_prompt);
@@ -1187,7 +1079,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 
       if (is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, user_prompt);
-      cJSON *fb_req = build_request(&fb_agent, system_prompt, user_prompt, tok, temperature);
+      cJSON *fb_req = agent_build_request(&fb_agent, system_prompt, user_prompt, tok, temperature);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
