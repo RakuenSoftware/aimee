@@ -21,7 +21,7 @@
 #include "git_verify.h"
 #include "headers/events.h"
 #include "headers/aimee_home.h"
-#include "headers/workspace_manifest.h"
+#include "workspace_manifest.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
