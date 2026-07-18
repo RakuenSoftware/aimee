@@ -1309,7 +1309,7 @@ $(TESTPREFIX)/unit-test-log: $(OBJDIR)/tests/test_log.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
-                           $(OBJDIR)/acp_server.o \
+                           $(OBJDIR)/modules/protocols/acp/acp_server.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
@@ -2113,7 +2113,7 @@ $(TESTPREFIX)/unit-test-gateway-ntfy-webhook: $(OBJDIR)/tests/test_gateway_ntfy_
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
 $(TESTPREFIX)/unit-test-mcp-gateway-tools: $(OBJDIR)/tests/test_mcp_gateway_tools.o \
-                                            $(OBJDIR)/mcp_tools_gateway.o \
+                                            $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                                             $(OBJDIR)/server/server_mcp_gateway.o \
                                             $(OBJDIR)/delivery_target.o \
                                             $(OBJDIR)/cJSON.o
@@ -4279,7 +4279,7 @@ $(TESTPREFIX)/unit-test-mcp-osv-cache: $(OBJDIR)/tests/test_mcp_osv_cache.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_registry.o \
-                     $(OBJDIR)/mcp_tools.o $(OBJDIR)/mcp_tool_profile.o $(OBJDIR)/mcp_tools_extended.o $(OBJDIR)/mcp_skill_tools.o $(OBJDIR)/mcp_tools_gateway.o \
+                     $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                      $(OBJDIR)/server/session_search_tool.o \
                      $(OBJDIR)/plugin.o \
                      $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/config_save.o \
@@ -4292,7 +4292,7 @@ $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_reg
                      $(OBJDIR)/server/mcp_client_registry.o \
                      $(TEST_MCP_CLIENT_OBJS) \
                      $(TESTPREFIX)/mock-mcp-server
-	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/mcp_tools.o $(OBJDIR)/mcp_tool_profile.o $(OBJDIR)/mcp_tools_extended.o $(OBJDIR)/mcp_skill_tools.o $(OBJDIR)/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(OBJDIR)/plugin.o $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/config_save.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/server/mcp_client_registry.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(OBJDIR)/plugin.o $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/config_save.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/server/mcp_client_registry.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_build.o \
                                        $(OBJDIR)/server/agent_request_build.o \

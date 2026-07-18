@@ -1,4 +1,4 @@
-#include "headers/mcp_skill_tools.h"
+#include "mcp_skill_tools.h"
 
 static cJSON *skill_tool(const char *name, const char *desc, cJSON *schema)
 {
