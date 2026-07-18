@@ -26,6 +26,11 @@ __attribute__((weak)) int gw_mutate_is_enabled(void)
 {
    return 0;
 }
+__attribute__((weak)) int gw_mutate_upstream_ok(int upstream_is_anthropic)
+{
+   (void)upstream_is_anthropic;
+   return 0; /* mutation inert on the shape-test path; real object wins when linked */
+}
 __attribute__((weak)) void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
                                               const char *system_prompt, const char *session_hdr,
                                               const char *bearer, const char *auth_identity,

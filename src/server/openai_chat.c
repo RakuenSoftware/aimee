@@ -1011,7 +1011,11 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    gw_mutate_ctx_init(&gwmc);
    cJSON *mbox = NULL;
    cJSON *eff_messages = messages;
-   if (gw_mutate_is_enabled())
+   /* Gateway mutation is OpenAI-only (never an Anthropic prompt-cached upstream). The
+    * /v1/responses path is OpenAI-wire, but gate defensively on the serving driver so an
+    * Anthropic-backed provider on this endpoint is still excluded. */
+   int upstream_is_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+   if (gw_mutate_upstream_ok(upstream_is_anthropic))
    {
       mbox = cJSON_CreateObject();
       cJSON_AddItemReferenceToObject(mbox, "input", messages); /* reference: messages stays owned */

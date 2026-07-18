@@ -40,6 +40,13 @@ extern "C"
     * OFF hot path. gw_buffered_mutate re-checks internally (defense in depth). */
    int gw_mutate_is_enabled(void);
 
+   /* Provider-gated enable: gateway wire-mutation is OpenAI-only. Returns true only when
+    * the serving upstream is NOT Anthropic AND gw_mutate_is_enabled(). An Anthropic upstream
+    * is a byte-verbatim prompt-cached passthrough, so it is reduced (if at all) at the
+    * pre-economize seam, never by mutating the live wire. `upstream_is_anthropic` is the
+    * caller's driver_is_anthropic()/parity signal. */
+   int gw_mutate_upstream_ok(int upstream_is_anthropic);
+
    /* Pre-send: under reduce_gateway_mutate, resolve the session key from the thread-
     * local request identity; if the session is not disabled, snapshot container[key],
     * run the compress-only economizer, and — when gw_should_apply passes — replace
