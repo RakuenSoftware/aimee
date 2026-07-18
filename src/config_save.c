@@ -992,14 +992,17 @@ int config_save(const config_t *cfg)
        cfg->concurrency_preempt_requeue_max != CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX;
 
    /* Concurrency limits (only save if configured) */
-   if (cfg->concurrency_default || cfg->concurrency_per_model_count ||
-       cfg->concurrency_per_provider_count || cfg->concurrency_preempt_enabled ||
-       !cfg->concurrency_preempt_single_slot_only ||
+   if (cfg->concurrency_default || cfg->maximum_total_concurrent_agent_sessions ||
+       cfg->concurrency_per_model_count || cfg->concurrency_per_provider_count ||
+       cfg->concurrency_preempt_enabled || !cfg->concurrency_preempt_single_slot_only ||
        (cfg->concurrency_preempt_enabled && save_preempt_requeue))
    {
       cJSON *conc = cJSON_AddObjectToObject(root, "concurrency");
       if (cfg->concurrency_default)
          cJSON_AddNumberToObject(conc, "default", cfg->concurrency_default);
+      if (cfg->maximum_total_concurrent_agent_sessions)
+         cJSON_AddNumberToObject(conc, "maximum_total_concurrent_agent_sessions",
+                                 cfg->maximum_total_concurrent_agent_sessions);
       if (cfg->concurrency_per_model_count > 0)
       {
          cJSON *pm = cJSON_AddObjectToObject(conc, "per_model");

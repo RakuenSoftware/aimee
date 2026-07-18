@@ -998,6 +998,10 @@ typedef struct config
     * pathological fan-out. 0 = default to 512. Key: delegate_max_inflight. */
    int delegate_max_inflight;
 
+   /* Global ceiling on concurrent agent execution contexts across ALL agents
+    * (the agent_admission controller). 0 uses AGENT_ADMISSION_DEFAULT_GLOBAL_MAX. */
+   int maximum_total_concurrent_agent_sessions;
+
    /* Per-model/provider concurrency limits: prevent rate-limit cascades.
     * concurrency_default = 0 uses CONCURRENCY_DEFAULT_LIMIT (5). */
    int concurrency_default;

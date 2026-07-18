@@ -24,6 +24,9 @@
  * (b) low-level health/connectivity probes. Those never call acquire.
  */
 
+/* Default global ceiling when maximum_total_concurrent_agent_sessions is unset (0). */
+#define AGENT_ADMISSION_DEFAULT_GLOBAL_MAX 14
+
 typedef struct agent_slot agent_slot_t;
 
 typedef enum
