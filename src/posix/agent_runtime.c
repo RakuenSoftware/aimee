@@ -799,16 +799,26 @@ native_provider_http:
             /* P3 master-kill: economizer.enabled=false forces the MUTATING levers off but
              * leaves the block reachable, so measure_only shadow accounting keeps running
              * (reports zero reductions — proof the kill works, per the two-tier contract). */
-            int econ_master = econ_reduction_master_on(&ecfg);
+            int econ_master = econ_reduction_master_on(&ecfg); /* tier != off */
+            int aggressive = econ_tier(&ecfg) == ECON_TIER_AGGRESSIVE;
+            /* history_fold is the SAFE-tier lever: recall-restorable (non-destructive) and
+             * freeze-guarded, so it is cache-favorable even on Anthropic (frozen on first
+             * send). Runs on safe+aggressive. (!chatgpt: the Responses builder can't take
+             * folded turns yet — a separate constraint, not a tier decision.) */
             rcfg.history_fold = econ_master && ecfg.reduce_history_fold && !chatgpt;
-            /* Compress only shrinks tool-result BODIES in place — the message
-             * shape (role/type, ids, typed items) is preserved — so its output is
-             * valid for ALL builders INCLUDING chatgpt/Responses. Not gated off. */
-            rcfg.compress = econ_master && ecfg.reduce_compress;
+            /* Compress LOSSILY shrinks tool-result bodies in place -> the AGGRESSIVE tier
+             * only. Shape (role/type, ids, typed items) is preserved, so it is valid for
+             * all builders including chatgpt/Responses. */
+            rcfg.compress = aggressive && ecfg.reduce_compress;
             rcfg.measure_only =
                 !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
-            rcfg.freeze_guard_enabled = ecfg.reduce_freeze_guard_enabled; /* Slice 5 guardrail */
-            rcfg.freeze_guard_horizon = ecfg.reduce_freeze_guard_horizon;
+            /* Tier model: fold is ALWAYS freeze-guarded (cache-favorability gated). This is
+             * what makes fold cache-safe on Anthropic -- the folded prefix is frozen on
+             * first send and only re-folded when the savings beat the cache-write cost over
+             * the horizon, so a cache miss never costs more than it saves. Not togglable. */
+            rcfg.freeze_guard_enabled = 1;
+            rcfg.freeze_guard_horizon =
+                ecfg.reduce_freeze_guard_horizon > 0 ? ecfg.reduce_freeze_guard_horizon : 1;
             rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
             rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
             rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
