@@ -1738,12 +1738,22 @@ $(TESTPREFIX)/unit-test-workflow-gate-caps: $(OBJDIR)/tests/test_workflow_gate_c
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # Workflow visual composer (W7): /v1/workflow read+author handlers.
+# wf_api_triggers reads the live config's trigger_rules via config_load, so this
+# target links config.o + its section modules. check-linking pairs config.o with
+# platform_random.o (config draws entropy) — keep both here or build-integrity fails.
 $(TESTPREFIX)/unit-test-wfe-webapi: $(OBJDIR)/tests/test_wfe_webapi.o \
                                     $(OBJDIR)/server/server_workflow_api.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
                                     $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o \
+                                    $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o \
+                                    $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o \
+                                    $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o \
+                                    $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/config_mode.o \
+                                    $(OBJDIR)/config_fields.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
+                                    $(OBJDIR)/platform_random.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

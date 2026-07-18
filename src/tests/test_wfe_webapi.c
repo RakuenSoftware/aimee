@@ -266,6 +266,57 @@ int main(void)
       cJSON_Delete(o);
    }
 
+   /* --- triggers: none configured (no aimee.yaml) → empty list + default cap --- */
+   {
+      assert(wf_api_triggers(buf, CAP) == 200);
+      cJSON *o = parse_resp(buf);
+      cJSON *trigs = cJSON_GetObjectItemCaseSensitive(o, "triggers");
+      assert(cJSON_IsArray(trigs) && cJSON_GetArraySize(trigs) == 0);
+      assert(cJSON_HasObjectItem(o, "max_concurrent"));
+      cJSON_Delete(o);
+   }
+
+   /* --- triggers: a configured watch-dir rule surfaces with its effective
+    * defaults (empty event → docs/proposals/pending, empty mode → autonomous). --- */
+   {
+      char p[256];
+      snprintf(p, sizeof p, "%s/aimee.yaml", home);
+      FILE *f = fopen(p, "wb");
+      assert(f);
+      fputs("trigger_rules:\n"
+            "  - source: watch-dir\n"
+            "    pipeline:\n"
+            "      template: build\n"
+            "      workspace: /srv/repos/demo\n"
+            "  - source: cron\n"
+            "    schedule: \"0 * * * *\"\n"
+            "    mode: interactive\n"
+            "    pipeline:\n"
+            "      template: nightly\n",
+            f);
+      fclose(f);
+
+      assert(wf_api_triggers(buf, CAP) == 200);
+      cJSON *o = parse_resp(buf);
+      cJSON *trigs = cJSON_GetObjectItemCaseSensitive(o, "triggers");
+      assert(cJSON_IsArray(trigs) && cJSON_GetArraySize(trigs) == 2);
+      cJSON *w = cJSON_GetArrayItem(trigs, 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(w, "source")->valuestring, "watch-dir") == 0);
+      /* empty event defaults to the proposals dir; empty mode defaults to autonomous */
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(w, "event")->valuestring,
+                    "docs/proposals/pending") == 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(w, "mode")->valuestring, "autonomous") == 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(w, "template")->valuestring, "build") == 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(w, "workspace")->valuestring,
+                    "/srv/repos/demo") == 0);
+      cJSON *c = cJSON_GetArrayItem(trigs, 1);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "source")->valuestring, "cron") == 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "schedule")->valuestring, "0 * * * *") == 0);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(c, "mode")->valuestring, "interactive") == 0);
+      cJSON_Delete(o);
+      unlink(p); /* keep the rest of the suite config-free */
+   }
+
    /* --- run-state: empty list + unknown item 404 --- */
    {
       assert(wf_api_items(buf, CAP) == 200);

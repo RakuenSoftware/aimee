@@ -30,6 +30,16 @@ interface WfEvent {
   cost_usd: number;
   created_at: string;
 }
+// A configured trigger rule (aimee.yaml `trigger_rules`) that auto-starts runs.
+interface Trigger {
+  source: string;
+  event: string;
+  schedule: string;
+  mode: string;
+  template: string;
+  workspace: string;
+  max_spend_usd?: number;
+}
 
 const POLL_MS = 4000;
 const DRAFT_KEY = "aimee_proposal_draft"; // cleared on logout (App.tsx)
@@ -173,6 +183,8 @@ export default function WorkflowActions() {
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState<Draft>(loadDraft);
   const [defs, setDefs] = useState<string[]>([]);
+  const [triggers, setTriggers] = useState<Trigger[]>([]);
+  const [triggersOpen, setTriggersOpen] = useState(true);
   const [submitMsg, setSubmitMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const afterRef = useRef(0); // events pagination cursor for the open proposal
@@ -192,6 +204,10 @@ export default function WorkflowActions() {
     getJSON<{ defs: { name: string }[] }>("/api/workflow/defs")
       .then((d) => setDefs((d.defs || []).map((x) => x.name)))
       .catch(() => setDefs([]));
+    // Configured trigger rules — what auto-starts runs (read-only view).
+    getJSON<{ triggers: Trigger[] }>("/api/workflow/triggers")
+      .then((d) => setTriggers(d.triggers || []))
+      .catch(() => setTriggers([]));
   }, [refreshList]);
 
   // Persist the in-progress draft locally (device-local; cleared on logout).
@@ -442,6 +458,11 @@ export default function WorkflowActions() {
             <InlineStatus status={status} />
           </div>
         )}
+        <TriggersPanel
+          triggers={triggers}
+          open={triggersOpen}
+          onToggle={() => setTriggersOpen((v) => !v)}
+        />
         <div style={{ marginTop: 8 }}>
           {items.length === 0 && (
             <EmptyState message="No proposals yet." inline />
@@ -584,6 +605,93 @@ export default function WorkflowActions() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// The configured trigger rules that auto-start runs, rendered as a compact,
+// collapsible section above the run list. This is the GUI's answer to "what is
+// wired to fire a workflow, and which workflow does it start" — read-only; rules
+// are edited in aimee.yaml. Empty => a hint that runs start only from a manual
+// submit (the + New proposal button).
+function TriggersPanel({
+  triggers,
+  open,
+  onToggle,
+}: {
+  triggers: Trigger[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
+      <div
+        onClick={onToggle}
+        style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>⚡ Triggers</span>
+        <Badge label={`${triggers.length}`} variant="neutral" />
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>auto-start</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {triggers.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#999", lineHeight: 1.4 }}>
+              No triggers configured — runs start from a manual submit (+ New proposal). Add a{" "}
+              <code>trigger_rules</code> entry in <code>aimee.yaml</code> to auto-start runs.
+            </div>
+          ) : (
+            triggers.map((t, i) => <TriggerCard key={i} t={t} />)
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One trigger rule as a compact card: what fires it (source + event/schedule),
+// which workflow it starts, how it runs (mode), and where (workspace).
+function TriggerCard({ t }: { t: Trigger }) {
+  const isCron = t.source === "cron";
+  const isWatch = t.source === "watch-dir" || t.source === "proposals";
+  // The "fires when" phrase, per source: a watched dir, a cron schedule, else the raw event.
+  const fires = isCron
+    ? `cron ${t.schedule || "(unset)"}`
+    : isWatch
+      ? `watches ${t.event || "docs/proposals/pending"}`
+      : t.event || t.source;
+  const interactive = t.mode === "interactive";
+  return (
+    <div
+      style={{
+        border: "1px solid #f0f0f0",
+        borderRadius: 6,
+        padding: "6px 8px",
+        marginBottom: 4,
+        background: "#fafbfc",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <Badge label={t.source} variant="running" />
+        <span style={{ fontSize: 12, color: "#555", overflowWrap: "anywhere" }}>{fires}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "#999" }}>→</span>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{t.template || "(no workflow)"}</span>
+        <Badge
+          label={interactive ? "interactive" : "autonomous"}
+          variant={interactive ? "warning" : "success"}
+        />
+      </div>
+      {t.workspace && (
+        <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace", marginTop: 3, overflowWrap: "anywhere" }}>
+          {t.workspace}
+          {typeof t.max_spend_usd === "number" && t.max_spend_usd > 0
+            ? ` · cap $${t.max_spend_usd.toFixed(2)}`
+            : ""}
+        </div>
+      )}
     </div>
   );
 }
