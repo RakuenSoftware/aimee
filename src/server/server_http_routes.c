@@ -779,6 +779,11 @@ static int rh_wf_list(const route_req_t *rq, char *resp, int cap)
    (void)rq;
    return wf_api_list(resp, cap);
 }
+static int rh_wf_triggers(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return wf_api_triggers(resp, cap);
+}
 static int rh_wf_get(const route_req_t *rq, char *resp, int cap)
 {
    return wf_api_get(rq->id, resp, cap);
@@ -1771,6 +1776,7 @@ static const http_route_t g_v1_routes[] = {
     {"DELETE", "/v1/workflow/blocks/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
      rh_wf_block_delete},
     {"GET", "/v1/workflow/defs", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_list},
+    {"GET", "/v1/workflow/triggers", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_triggers},
     {"GET", "/v1/workflow/defs/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_get},
     {"POST", "/v1/workflow/validate", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_validate},
     {"POST", "/v1/workflow/save", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN, rh_wf_save},

@@ -439,13 +439,20 @@ These are real today and worth knowing before you lean on workflows:
    agents — but all of them require a `proposal_md`: there is still no way to
    start a workflow whose entry node isn't `author.proposal` without supplying
    proposal text. (There is still no Run button on the **Edit Workflows** page.)
-2. **Forge operations are process-global.** Per-step blocks now resolve their
-   working directory from the work-item's `repo` (when it names a local
-   directory; `$AIMEE_WORKFLOW_REPO`/cwd otherwise), so a triggered run executes
-   in its configured workspace. But the forge half (`git push`, `gh pr …` via
-   the vaulted runner) still runs in the server's own checkout, so PR-opening
-   workflows against a workspace that is not the server's primary repo are not
-   yet fully wired.
+2. **Forge binding requires a local-path `repo`.** Every stage — the per-work-item
+   worktree, each step's working directory, *and* the forge half (`git push`,
+   the GitHub REST create/CI/merge, and the vaulted credential) — resolves its
+   directory from the work-item's `repo` via `wfe_repo_local()`. When `repo`
+   names a **local directory** (a trigger rule's absolute `pipeline.workspace`,
+   or an explicit dev-submit path) that repo wins end-to-end: the run's branch is
+   created in *that* checkout, pushed from *that* checkout, and the PR is opened
+   against the slug read from *that* checkout's `origin` — so a triggered
+   `watch-dir` run reaches a real PR in its configured workspace. The residual
+   gap is only when `repo` is **not** a local path — a bare `owner/name`
+   identifier or a clone URL — for which `wfe_repo_local()` falls back to
+   `$AIMEE_WORKFLOW_REPO`/cwd (the server's own checkout). So a dev-submit that
+   names a repo the server hasn't checked out is not yet workspace-isolated;
+   point the run at an absolute `pipeline.workspace`/`repo` path to bind it.
 3. **Composer ergonomics.** New steps are added disconnected; you wire order in
    the inspector. The **Edit Workflows** page has no live run/progress view — you
    start and watch runs on the separate **Workflow Actions** tab.

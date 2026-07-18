@@ -110,6 +110,11 @@ func (s *server) handleWorkflowDefs(w http.ResponseWriter, r *http.Request) {
 	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/defs/", "/api/workflow/defs/")
 }
 
+// GET /api/workflow/triggers — the configured trigger rules that auto-start runs.
+func (s *server) handleWorkflowTriggers(w http.ResponseWriter, r *http.Request) {
+	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/triggers", "")
+}
+
 // POST /api/workflow/validate — validate posted YAML without saving.
 func (s *server) handleWorkflowValidate(w http.ResponseWriter, r *http.Request) {
 	s.proxyWorkflow(w, r, http.MethodPost, "/v1/workflow/validate", "")

@@ -36,6 +36,10 @@ int wf_api_list(char *resp, int cap)
 {
    return stub(resp, cap);
 }
+int wf_api_triggers(char *resp, int cap)
+{
+   return stub(resp, cap);
+}
 int wf_api_get(const char *name, char *resp, int cap)
 {
    (void)name;

@@ -20,6 +20,7 @@
 
 #include "aimee_home.h"
 #include "cJSON.h"
+#include "config.h" /* trigger_rule_t / config_load — surface configured trigger rules */
 #include "server_http_identity.h" /* server_http_identity_principal — ownership scoping */
 #include "wfe_def.h"
 #include "wfe_engine.h" /* wfe_load_workflow — roundtable-park resume check */
@@ -209,6 +210,48 @@ int wf_api_blocks(char *resp, int cap)
          cJSON_AddItemToArray(acc, cJSON_CreateString(wfe_artifact_name(c->consumes)));
       cJSON_AddItemToArray(arr, b);
    }
+   return emit(o, resp, cap);
+}
+
+/* GET /v1/workflow/triggers -- the configured trigger rules (aimee.yaml
+ * `trigger_rules`) that auto-start workflow runs, so the GUI can show *what* is
+ * wired to fire a run and *which* workflow it starts. Read-only view of the
+ * live config; empty `triggers` means no rule is configured (runs start only
+ * from a manual submit). Each rule mirrors trigger_rule_t plus the effective
+ * defaults the scheduler applies, so the UI need not re-derive them. */
+int wf_api_triggers(char *resp, int cap)
+{
+   config_t *cfg = calloc(1, sizeof *cfg);
+   if (!cfg)
+   {
+      snprintf(resp, cap, "{\"error\":\"out of memory\"}");
+      return 500;
+   }
+   config_load(cfg);
+
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddNumberToObject(o, "max_concurrent", cfg->trigger_max_concurrent);
+   cJSON *arr = cJSON_AddArrayToObject(o, "triggers");
+   for (int i = 0; i < cfg->trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
+   {
+      const trigger_rule_t *r = &cfg->trigger_rules[i];
+      /* A watch-dir/proposals rule watches a repo-relative directory (its
+       * `event`), defaulting to docs/proposals/pending when unset. */
+      int is_watch = strcmp(r->source, "watch-dir") == 0 || strcmp(r->source, "proposals") == 0;
+      cJSON *t = cJSON_CreateObject();
+      cJSON_AddStringToObject(t, "source", r->source);
+      cJSON_AddStringToObject(t, "event",
+                              r->event[0] ? r->event : (is_watch ? "docs/proposals/pending" : ""));
+      cJSON_AddStringToObject(t, "schedule", r->schedule);
+      /* Empty mode => autonomous (the scheduler default). */
+      cJSON_AddStringToObject(t, "mode", r->mode[0] ? r->mode : "autonomous");
+      cJSON_AddStringToObject(t, "template", r->pipeline_template);
+      cJSON_AddStringToObject(t, "workspace", r->workspace);
+      if (r->max_spend_usd != 0.0)
+         cJSON_AddNumberToObject(t, "max_spend_usd", r->max_spend_usd);
+      cJSON_AddItemToArray(arr, t);
+   }
+   free(cfg);
    return emit(o, resp, cap);
 }
 
