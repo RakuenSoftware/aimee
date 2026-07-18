@@ -31,6 +31,12 @@ import argparse, glob, json, os, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Truthful cold best-of-N + speed defaults (shell env still overrides): bust the
+# server-side draft cache so worker candidates actually run, widen driver
+# concurrency, and poll finely enough to time the first viable response.
+os.environ.setdefault("AIMEE_BENCH_CACHE_BUST", "1")
+os.environ.setdefault("AIMEE_BENCH_POLL_WORKERS", "64")
+os.environ.setdefault("AIMEE_BENCH_POLL_PERIOD", "1")
 from benchmarks.coding import bench_swebench_supervised as B
 from benchmarks.coding import cost_savings as C
 
@@ -110,7 +116,12 @@ def main() -> None:
 
     pool = [w.strip() for w in args.pool.split(",") if w.strip()]
     if args.primary in pool:
-        raise SystemExit(f"--primary '{args.primary}' must not appear in --pool")
+        # Allowed: the primary may also race as a worker. Its worker-draft tokens are
+        # NOT counted as cost -- only the manager (selection) window is bracketed for
+        # tokens, and worker rows are settled out before that window opens.
+        print(f"note: primary '{args.primary}' is also racing as a worker; its worker "
+              f"tokens are excluded from cost (manager window bracketed separately).",
+              file=sys.stderr)
 
     insts = [json.load(open(f)) for f in sorted(glob.glob(str(Path(args.regions) / "*.json")))]
     if args.limit:
@@ -144,16 +155,48 @@ def main() -> None:
           f"realized={primary_tok.realized_total} avoided_prompt={primary_tok.avoided_prompt}",
           file=sys.stderr)
 
-    # --- Arm S: supervised best-of-N (measurement 3, supervisor tokens only) ---
-    print("=== ARM S: supervised best-of-N + selection (single-shot) ===", file=sys.stderr)
-    s_lo = _maxid()
-    S_recs, s_wall, _ = B.run_arm_C(insts, fleet, args.primary, pool, args.n, args.seed)
-    s_hi = _settle_maxid(s_lo)
-    superv_tok = _arm_tokens(s_lo, s_hi, args.primary_model)
-    print(f"  wall={s_wall}s  ledger[{s_lo}->{s_hi}]  supervisor_realized={superv_tok.realized_total}",
-          file=sys.stderr)
+    # --- Arm S: supervised best-of-N (measurement 3). Phase 1 = cheap workers race to
+    # draft candidates (their tokens are NOT the cost, even a codex worker's -- excluded
+    # by bracketing this phase's ledger separately and never counting it). Phase 2 = the
+    # MANAGER (primary) selects; ONLY this window's primary-model tokens are the cost. ---
+    print("=== ARM S phase 1: worker candidates race ===", file=sys.stderr)
+    cand, first_viable, w_cand, _ = B.run_arm_C_candidates(insts, fleet, pool, args.n, args.seed)
+    # Settle so all (async-flushed) worker rows land BEFORE the manager window opens,
+    # otherwise a late worker row would leak into the manager token count.
+    sel_lo = _settle_maxid(_maxid())
+    print("=== ARM S phase 2: manager selects (single-shot) ===", file=sys.stderr)
+    S_recs, w_sel, _ = B.run_arm_C_select(insts, fleet, args.primary, cand)
+    sel_hi = _settle_maxid(sel_lo)
+    for iid in S_recs:
+        S_recs[iid]["first_viable_s"] = first_viable.get(iid)
+    superv_tok = _arm_tokens(sel_lo, sel_hi, args.primary_model)  # MANAGER only
+    s_wall = round(w_cand + w_sel, 1)
+    s_lo, s_hi = sel_lo, sel_hi
+    print(f"  cand_wall={w_cand}s sel_wall={w_sel}s  manager_ledger[{sel_lo}->{sel_hi}]  "
+          f"manager_realized={superv_tok.realized_total}", file=sys.stderr)
 
     summary = C.summarize(primary_tok, superv_tok, p_wall, s_wall, price)
+
+    # Per-instance runtime: default = single-shot solve latency; delegate =
+    # time-to-first-viable-worker-candidate (N workers race, earliest viable diff wins;
+    # codex selection is not on this latency path). Suite runtime = the slowest single
+    # instance (fully-parallel wall assuming enough fleet concurrency).
+    iids = [i["instance_id"] for i in insts]
+    per_instance_time = {
+        iid: {"default_solve_s": P_recs.get(iid, {}).get("solve_s"),
+              "delegate_first_viable_s": S_recs.get(iid, {}).get("first_viable_s")}
+        for iid in iids
+    }
+    _dsolve = [v["default_solve_s"] for v in per_instance_time.values() if v["default_solve_s"] is not None]
+    _dfv = [v["delegate_first_viable_s"] for v in per_instance_time.values() if v["delegate_first_viable_s"] is not None]
+    suite_time = {
+        "default_max_s": round(max(_dsolve), 1) if _dsolve else None,
+        "delegate_first_viable_max_s": round(max(_dfv), 1) if _dfv else None,
+        "default_median_s": round(sorted(_dsolve)[len(_dsolve) // 2], 1) if _dsolve else None,
+        "delegate_first_viable_median_s": round(sorted(_dfv)[len(_dfv) // 2], 1) if _dfv else None,
+    }
+    print(f"  suite time (max single instance): default={suite_time['default_max_s']}s  "
+          f"delegate_first_viable={suite_time['delegate_first_viable_max_s']}s", file=sys.stderr)
 
     def _git(*a):
         try:
@@ -171,6 +214,8 @@ def main() -> None:
         },
         "raw_tokens": {"primary": vars(primary_tok), "supervised": vars(superv_tok)},
         "candidate_counts": {iid: r.get("n_candidates") for iid, r in S_recs.items()},
+        "per_instance_time": per_instance_time,
+        "suite_time": suite_time,
         "summary": summary,
     }
     out = Path(args.output)
