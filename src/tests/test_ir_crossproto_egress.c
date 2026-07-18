@@ -67,6 +67,77 @@ int main(void)
         "\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},"
         "{\"role\":\"user\",\"content\":\"hi\"}]}");
 
+   /* Tool-bearing multi-turn: system + user + assistant tool_use + user tool_result,
+    * plus a tool definition. Exercises tool_input, tool_result shape, and tool schema
+    * canonicalization across the frontends. */
+   same(
+       "tools",
+       "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":100,"
+       "\"system\":[{\"type\":\"text\",\"text\":\"sys\"}],"
+       "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"read foo\"}]},"
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":"
+       "\"Read\","
+       "\"input\":{\"path\":\"foo\"}}]},"
+       "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\","
+       "\"content\":\"file body\"}]}],"
+       "\"tools\":[{\"name\":\"Read\",\"description\":\"Read a file\",\"input_schema\":"
+       "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}}]}",
+       "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":100,"
+       "\"messages\":[{\"role\":\"system\",\"content\":\"sys\"},"
+       "{\"role\":\"user\",\"content\":\"read foo\"},"
+       "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"t1\","
+       "\"type\":\"function\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"path\\\":"
+       "\\\"foo\\\"}\"}}]},"
+       "{\"role\":\"tool\",\"tool_call_id\":\"t1\",\"content\":\"file body\"}],"
+       "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"description\":\"Read a "
+       "file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
+       "\"string\"}}}}}]}");
+
+   /* Inline base64 image: Anthropic sends a structured base64 source; OpenAI sends a
+    * data: URL. The openai frontend must decompose the data: URL to match. */
+   same("image-b64",
+        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
+        "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source\":"
+        "{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AAAA\"}}]}]}",
+        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
+        "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":"
+        "{\"url\":\"data:image/png;base64,AAAA\"}}]}]}");
+
+   /* tool_result as an Anthropic block-array vs an OpenAI string: the egress collapses
+    * a single text block to the string form so both match. */
+   same("tool-result-array",
+        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
+        "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+        "\"tool_use_id\":\"t1\",\"content\":[{\"type\":\"text\",\"text\":\"body\"}]}]}]}",
+        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
+        "\"messages\":[{\"role\":\"tool\",\"tool_call_id\":\"t1\",\"content\":\"body\"}]}");
+
+   /* Mixed multi-part user content: text + inline base64 image in one message. */
+   same("mixed-content",
+        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
+        "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"see this\"},"
+        "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\","
+        "\"data\":\"AAAA\"}}]}]}",
+        "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,"
+        "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"see this\"},"
+        "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,AAAA\"}}]}]}");
+
+   /* Regression: a data: URL where ";base64," appears only AFTER the first comma (i.e.
+    * inside the payload, not as the RFC-2397 header marker) must NOT be decomposed --
+    * it is kept as a verbatim url reference, not misparsed into a base64 source. */
+   {
+      char *e = egress("{\"model\":\"m\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\","
+                       "\"content\":[{\"type\":\"image_url\",\"image_url\":"
+                       "{\"url\":\"data:image/png,payload;base64,tail\"}}]}]}",
+                       1);
+      assert(e);
+      assert(strstr(e, "\"type\":\"url\"") != NULL);                   /* kept as url ref */
+      assert(strstr(e, "data:image/png,payload;base64,tail") != NULL); /* verbatim */
+      assert(strstr(e, "\"type\":\"base64\"") == NULL);                /* NOT decomposed */
+      printf("  data-url-earlier-comma-passthrough OK\n");
+      free(e);
+   }
+
    printf("all cross-protocol egress byte-identity checks passed\n");
    return 0;
 }

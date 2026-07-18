@@ -59,6 +59,36 @@ static void mark_cache_prefix(cJSON *arr)
       add_cache_control(last, "ephemeral");
 }
 
+/* Canonicalize a tool_result's content so an anthropic-sourced tool_result (verbatim
+ * block array) and an openai-sourced one (string) with the same text serialize
+ * IDENTICALLY. An empty or single-text-block array collapses to the plain string form
+ * (matching the NULL default and the OpenAI string). Multi-block / non-text / object
+ * content is preserved verbatim -- canonicalizing image/document blocks *inside* a
+ * tool_result is out of scope (the IR stores tool_result content opaquely). */
+static cJSON *tool_result_content(const cJSON *tr)
+{
+   if (!tr)
+      return cJSON_CreateString("");
+   if (cJSON_IsArray(tr))
+   {
+      int n = cJSON_GetArraySize(tr);
+      if (n == 0)
+         return cJSON_CreateString(""); /* empty content == the NULL default, not [] */
+      if (n == 1)
+      {
+         cJSON *only = cJSON_GetArrayItem((cJSON *)tr, 0);
+         const cJSON *t = only ? cJSON_GetObjectItemCaseSensitive(only, "type") : NULL;
+         if (t && cJSON_IsString(t) && t->valuestring && strcmp(t->valuestring, "text") == 0)
+         {
+            const cJSON *txt = cJSON_GetObjectItemCaseSensitive(only, "text");
+            return cJSON_CreateString(
+                (txt && cJSON_IsString(txt) && txt->valuestring) ? txt->valuestring : "");
+         }
+      }
+   }
+   return cJSON_Duplicate((cJSON *)tr, 1);
+}
+
 /* one IR block -> its Anthropic wire JSON (owned). NULL if not renderable. */
 static cJSON *block_to_anthropic(const aimee_block_t *b)
 {
@@ -85,9 +115,7 @@ static cJSON *block_to_anthropic(const aimee_block_t *b)
       cJSON_AddStringToObject(el, "tool_use_id", b->tool_id ? b->tool_id : "");
       if (b->tool_is_error)
          cJSON_AddBoolToObject(el, "is_error", 1);
-      cJSON_AddItemToObject(el, "content",
-                            b->tool_result ? cJSON_Duplicate(b->tool_result, 1)
-                                           : cJSON_CreateString(""));
+      cJSON_AddItemToObject(el, "content", tool_result_content(b->tool_result));
       break;
    case AIMEE_BLK_IMAGE:
    case AIMEE_BLK_DOCUMENT:
