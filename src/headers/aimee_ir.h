@@ -244,4 +244,35 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *canonical_name);
  * identical IR -> identical KB input + identical backend build. */
 int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b);
 
+/* ----- Request transform stage (the protocol-neutral module seam) -------------
+ * A transform edits the typed IR request in place BETWEEN frontend_parse and
+ * backend_build. This is where modules act ONCE, on the one IR, regardless of the
+ * client wire -- replacing the per-ingress, per-wire-format sites (gw_stage_memory's
+ * three arms, the economizer's gateway seams, tool policing, ...). Producer-specific
+ * translation stays at the edges (frontend/backend); everything here is neutral. */
+
+/* Edit `ir` in place; return nonzero IFF the typed fields (messages/system/tools/...)
+ * were CHANGED, so the caller sets ir->mutated and a same-protocol backend
+ * re-serializes instead of shipping the now-stale raw sidecar. A read-only transform
+ * (e.g. measurement) returns 0. */
+typedef int (*aimee_ir_transform_fn)(aimee_request_t *ir, void *ud);
+
+typedef struct
+{
+   const char *name; /* stable id, for ordering + trace */
+   aimee_ir_transform_fn fn;
+   void *ud;
+   int enabled; /* 0 -> the slot is skipped */
+} aimee_ir_transform_t;
+
+/* Run `stages` (length n) over `ir` in catalog order; skips disabled / empty-name /
+ * NULL-fn slots. Sets ir->mutated if any transform reports a change. NULL-safe. */
+void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *stages, size_t n);
+
+/* The SINGLE request-transform stage every ingress funnels through: all three
+ * aimee_ir_serve build paths call this after frontend_parse and before
+ * backend_build. Modules are registered HERE (one place) as they are ported onto the
+ * IR. Empty today -> a no-op that leaves the request byte-identical to its sidecar. */
+void aimee_ir_apply_request_stages(aimee_request_t *ir);
+
 #endif /* DEC_AIMEE_IR_H */
