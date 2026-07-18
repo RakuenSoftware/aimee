@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (186)
+## CLI-settable keys (183)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -170,7 +170,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_hard_negative_log` | string | Path to the hard-negative recall log file (empty = disabled). |
 | `memory_improve_dedupe_enabled` | bool | Dedupe during memory-improve. |
 | `memory_improve_summarise_enabled` | bool | Summarise during memory-improve. |
-| `memory_kb_neighbour_expand` | bool | Expand recall to KB neighbours. |
 | `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
 | `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
@@ -189,8 +188,6 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_rewrite_hyde` | bool | Use HyDE (hypothetical-document) rewrite. |
 | `memory_rewrite_max_subqueries` | int | Max sub-queries produced by rewrite. |
 | `memory_scenes_enabled` | bool | Cluster memories into scenes. |
-| `memory_scenes_min_cluster_size` | int | Min cluster size for a scene. |
-| `memory_scenes_top_m` | int | Top-M scenes to consider. |
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
@@ -254,7 +251,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`memory_recall_lanes`** — _Per-lane recall floors / caps._ Keys: `enabled`, `fact_kinds`, `floor_fact`, `floor_summary`, `k_fact`, `k_summary`, `summary_kinds`
 - **`memory_rerank`** — _Recall reranking._ Keys: `command`, `enabled`, `mix`, `top_k`
 - **`memory_rewrite`** — _Recall query rewriting._ Keys: `command`, `decompose`, `enabled`, `hyde`, `max_subqueries`
-- **`memory_window`** — _Memory-window neighbour expansion._ Keys: `kb_neighbour_expand`, `radius`
+- **`memory_window`** — _Memory-window neighbour expansion._ Keys: `radius`
 - **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
 - **`otel`** — _OpenTelemetry export._ Keys: `endpoint`, `service_name`
 - **`reasoning_cap`** — _Reasoning-effort cap._ Keys: `enabled`

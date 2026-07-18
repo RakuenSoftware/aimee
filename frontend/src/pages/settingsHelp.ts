@@ -169,14 +169,10 @@ export const FIELD_HELP: Record<string, string> = {
   memory_rewrite_max_subqueries: "Cap on sub-questions when decomposing. Default 4.",
   memory_window_radius:
     "When a stored conversation turn matches, also pull this many turns before and after it for context. 0 is off; 1–3 is typical.",
-  memory_kb_neighbour_expand:
-    "When a knowledge-base chunk matches, also pull the chunks next to it. Off by default.",
   memory_negation_enabled:
     "Track explicit absences ('X is not Y') so negative facts are searchable. Off by default.",
   memory_scenes_enabled:
     "Cluster conversation turns into scenes and use them to focus retrieval. Off by default.",
-  memory_scenes_min_cluster_size: "Fewest turns that count as a scene. Default 3.",
-  memory_scenes_top_m: "How many scenes to boost during retrieval. Default 3.",
   memory_bm25_weight: "How much keyword (BM25) matching counts in the blended score. 0 uses the profile default.",
   memory_semantic_weight:
     "How much semantic (embedding) matching counts in the blended score. 0 uses the profile default.",

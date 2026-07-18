@@ -617,8 +617,6 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
    cfg->memory_scenes_enabled = 0;
-   cfg->memory_scenes_min_cluster_size = 3;
-   cfg->memory_scenes_top_m = 3;
    cfg->memory_scenes_global_escape_ratio = 0.2;
    cfg->memory_bm25_weight = 0.0;
    cfg->memory_semantic_weight = 0.0;

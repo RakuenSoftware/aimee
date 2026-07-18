@@ -122,9 +122,6 @@ void config_parse_memory_window_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(mem_window, "radius");
       if (cJSON_IsNumber(item) && item->valuedouble >= 0)
          cfg->memory_window_radius = (int)item->valuedouble;
-      item = cJSON_GetObjectItemCaseSensitive(mem_window, "kb_neighbour_expand");
-      if (cJSON_IsBool(item))
-         cfg->memory_kb_neighbour_expand = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
 void config_parse_kb_section(config_t *cfg, cJSON *root)
@@ -307,12 +304,6 @@ void config_parse_memory_section(config_t *cfg, cJSON *root)
          item = cJSON_GetObjectItemCaseSensitive(scenes_cfg, "enabled");
          if (cJSON_IsBool(item))
             cfg->memory_scenes_enabled = cJSON_IsTrue(item) ? 1 : 0;
-         item = cJSON_GetObjectItemCaseSensitive(scenes_cfg, "min_cluster_size");
-         if (cJSON_IsNumber(item) && item->valuedouble > 0)
-            cfg->memory_scenes_min_cluster_size = (int)item->valuedouble;
-         item = cJSON_GetObjectItemCaseSensitive(scenes_cfg, "top_m");
-         if (cJSON_IsNumber(item) && item->valuedouble > 0)
-            cfg->memory_scenes_top_m = (int)item->valuedouble;
          item = cJSON_GetObjectItemCaseSensitive(scenes_cfg, "global_escape_ratio");
          if (cJSON_IsNumber(item))
             cfg->memory_scenes_global_escape_ratio = item->valuedouble;
