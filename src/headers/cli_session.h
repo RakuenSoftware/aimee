@@ -72,6 +72,15 @@ void cli_session_set_kind(cli_session_t *s, const char *cli_kind);
  * before cli_session_send so the turn's reply is diffed from a clean boundary. */
 void cli_session_mark_baseline(cli_session_t *s);
 
+/* Resolve the directory a SERVER-HOSTED CLI session should run in. Writes the
+ * chosen dir into `out` (turn_cwd when it exists on this host, else the server
+ * process cwd) and returns 1 iff it FELL BACK — i.e. a non-empty turn_cwd was
+ * absent here and had to be replaced. On fallback the caller must retarget
+ * run_cmd_set_cwd() to `out`, else run_cmd's `cd '<turn_cwd>' &&` prefix fails
+ * every session shell-out ("failed to create tmux session"). Returns 0 when
+ * turn_cwd is usable or empty (nothing to retarget). */
+int cli_session_resolve_cwd(const char *turn_cwd, char *out, size_t n);
+
 /* --- Lifecycle --- */
 /* Creates (or attaches to existing) tmux session, starts CLI.
  * session_name must be unique (e.g. "aimee-<agent>-<taskid>").

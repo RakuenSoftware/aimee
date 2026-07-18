@@ -12,10 +12,15 @@
 #include <unistd.h>
 
 /* run_cmd cwd control (util.c): the active turn binds the thread-local working
- * directory to the (client) workspace root. On a detached thin-client turn the
- * tmux session runs on the client, so the session must be created in the
- * client's cwd, not the server's process cwd. */
+ * directory to the (client) workspace root, and run_cmd prefixes each shell-out
+ * with `cd '<that dir>' &&`. For a SERVER-HOSTED CLI agent (e.g. the fleet's
+ * claude) the tmux session runs on the server, where a detached thin-client's
+ * bound cwd does not exist — so the cd fails and tmux never launches. The public
+ * wrapper below resolves a server-valid cwd (cli_session_resolve_cwd) and
+ * retargets this thread-local for the session's lifetime, restoring it on the
+ * single exit. Co-located turns (bound cwd present here) are unaffected. */
 extern const char *run_cmd_get_cwd(void);
+extern void run_cmd_set_cwd(const char *cwd);
 
 /* delegation_active_id is provided by server_compute.c at link time (a
  * thread-local: the id of the delegate running on THIS thread, or NULL for a
@@ -25,9 +30,9 @@ extern const char *run_cmd_get_cwd(void);
  * across concurrent delegate threads. */
 const char *delegation_active_id(void);
 
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out)
+static int cli_session_execute_inner(const agent_t *agent, const agent_network_t *network,
+                                     const char *system_prompt, const char *user_prompt,
+                                     int max_tokens, double temperature, agent_result_t *out)
 {
    (void)network;
    (void)max_tokens;
@@ -322,4 +327,35 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    out->success = 1;
    out->turns = 1;
    return 0;
+}
+
+/* Public entry. A server-hosted CLI agent runs its tmux session on THIS host,
+ * but the turn-bound cwd can be a detached client's workspace path that exists
+ * only on the client; run_cmd would then prefix every session shell-out with a
+ * `cd '<client-path>' &&` that fails, so tmux never launches ("failed to create
+ * tmux session for <agent>"). Resolve a server-valid cwd and retarget run_cmd's
+ * thread-local cwd for the whole session, restoring it on this single exit — so
+ * the inner runner keeps its many per-failure returns without any cwd bookkeeping. */
+int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
+                              const char *system_prompt, const char *user_prompt, int max_tokens,
+                              double temperature, agent_result_t *out)
+{
+   char server_cwd[MAX_PATH_LEN];
+   int fell_back = cli_session_resolve_cwd(run_cmd_get_cwd(), server_cwd, sizeof(server_cwd));
+
+   char saved_cwd[MAX_PATH_LEN] = {0};
+   if (fell_back)
+   {
+      const char *cur = run_cmd_get_cwd();
+      if (cur)
+         snprintf(saved_cwd, sizeof(saved_cwd), "%s", cur);
+      run_cmd_set_cwd(server_cwd[0] ? server_cwd : NULL);
+   }
+
+   int rc = cli_session_execute_inner(agent, network, system_prompt, user_prompt, max_tokens,
+                                      temperature, out);
+
+   if (fell_back)
+      run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
+   return rc;
 }

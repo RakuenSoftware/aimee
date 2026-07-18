@@ -377,6 +377,43 @@ static void test_make_name_null_role(void)
    free(name);
 }
 
+/* --- cli_session_resolve_cwd tests --- */
+
+/* A bound cwd that exists on this host is used verbatim; no fallback. */
+static void test_resolve_cwd_existing_used(void)
+{
+   char out[256];
+   int fb = cli_session_resolve_cwd("/tmp", out, sizeof(out));
+   assert(fb == 0);
+   assert(strcmp(out, "/tmp") == 0);
+}
+
+/* A non-empty bound cwd that is ABSENT on this host (the detached thin-client
+ * case that used to make every tmux shell-out `cd` fail) falls back to the
+ * server process cwd and reports the fallback so the caller retargets run_cmd. */
+static void test_resolve_cwd_missing_falls_back(void)
+{
+   char out[4096], here[4096];
+   assert(getcwd(here, sizeof(here)) != NULL);
+   int fb = cli_session_resolve_cwd("/no/such/dir/aimee-does-not-exist-xyz", out, sizeof(out));
+   assert(fb == 1);
+   assert(strcmp(out, here) == 0);
+}
+
+/* An empty / NULL bound cwd is the ordinary co-located case: use the server cwd
+ * but report NO fallback (run_cmd has no `cd` prefix to retarget). */
+static void test_resolve_cwd_empty_no_fallback(void)
+{
+   char out[4096], here[4096];
+   assert(getcwd(here, sizeof(here)) != NULL);
+   int fb = cli_session_resolve_cwd(NULL, out, sizeof(out));
+   assert(fb == 0);
+   assert(strcmp(out, here) == 0);
+   fb = cli_session_resolve_cwd("", out, sizeof(out));
+   assert(fb == 0);
+   assert(strcmp(out, here) == 0);
+}
+
 /* --- cli_session_strip_ansi tests --- */
 
 static void test_strip_ansi_plain_text(void)
@@ -841,6 +878,18 @@ static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
 
 int main(void)
 {
+   printf("test_resolve_cwd_existing_used... ");
+   test_resolve_cwd_existing_used();
+   printf("OK\n");
+
+   printf("test_resolve_cwd_missing_falls_back... ");
+   test_resolve_cwd_missing_falls_back();
+   printf("OK\n");
+
+   printf("test_resolve_cwd_empty_no_fallback... ");
+   test_resolve_cwd_empty_no_fallback();
+   printf("OK\n");
+
    printf("test_prepare_claude_seeds_gates... ");
    test_prepare_claude_seeds_gates();
    printf("OK\n");
