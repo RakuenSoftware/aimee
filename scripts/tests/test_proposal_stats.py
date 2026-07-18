@@ -191,5 +191,91 @@ class CollectIntegration(unittest.TestCase):
         self.assertEqual(out[1][col:], "2")
 
 
+    def test_format_human_reorders_dict_to_canonical(self):
+        # _format_human must not depend on the dict's own insertion order;
+        # it must always emit the canonical (pending, done, pending_words)
+        # sequence even if the caller hands in a dict built in a different
+        # order or with extra keys.
+        out = self.mod._format_human(
+            {"pending_words": 3, "pending": 1, "done": 2}
+        ).splitlines()
+        self.assertTrue(out[0].startswith("pending:"))
+        self.assertTrue(out[1].startswith("done:"))
+        self.assertTrue(out[2].startswith("pending_words:"))
+
+    def test_format_human_missing_key_raises(self):
+        # Dropping a key must fail loudly at format time, not silently
+        # misalign the table.
+        with self.assertRaises(KeyError):
+            self.mod._format_human({"pending": 1, "done": 2})
+
+
+class PerFileSubtotal(unittest.TestCase):
+    """Regression tests for per-file word accumulation.
+
+    A file that contributes some words in its first 64 KiB chunk and then
+    hits a NUL byte, invalid UTF-8, or read error must NOT leak those
+    earlier words into the overall total; the file must be reported as
+    skipped and contribute zero.
+    """
+
+    def setUp(self):
+        self.mod = _load_module()
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _path(self, name: str) -> str:
+        return os.path.join(self.tmp, name)
+
+    def test_nul_in_later_chunk_does_not_leak_earlier_words(self):
+        # 100 words in the first chunk, then a NUL byte mid-second chunk.
+        chunk = self.mod._READ_CHUNK_BYTES
+        first = (b"alpha " * (chunk // 6))[: chunk - 1]  # fills exactly the chunk
+        # Add a clear token so we can count words deterministically:
+        first = b"alpha " * ((chunk - len(b" world")) // 6) + b" world"
+        second = b"more text \x00binary garbage"
+        path = self._path("p.md")
+        with open(path, "wb") as fh:
+            fh.write(first + second)
+        with _Capture() as cap:
+            count = self.mod._count_words([path])
+        self.assertIn(b"appears to be binary", cap.err.getvalue().encode())
+        # Total must be 0: every word came from a file that was skipped.
+        self.assertEqual(count, 0)
+
+    def test_invalid_utf8_in_later_chunk_does_not_leak_earlier_words(self):
+        chunk = self.mod._READ_CHUNK_BYTES
+        first = (b"hello world ") * 1000  # many words, well under chunk
+        # Pad first to exactly one full chunk so the bad byte lands in the
+        # next read.
+        first = first + b"a" * (chunk - len(first))
+        second = b"\xff\xfe\xfdnot utf-8"
+        path = self._path("p.md")
+        with open(path, "wb") as fh:
+            fh.write(first + second)
+        with _Capture() as cap:
+            count = self.mod._count_words([path])
+        self.assertIn(b"not valid utf-8", cap.err.getvalue().encode())
+        self.assertEqual(count, 0)
+
+    def test_other_files_still_counted_when_one_is_skipped(self):
+        # Two files: one clean, one with a NUL late. The clean one must
+        # still contribute its words to the total.
+        chunk = self.mod._READ_CHUNK_BYTES
+        first_clean = b"alpha beta gamma delta\n"
+        first_bad = b"keep these words " + b"a" * (chunk - 30) + b"\x00x"
+        path_clean = self._path("clean.md")
+        path_bad = self._path("bad.md")
+        with open(path_clean, "wb") as fh:
+            fh.write(first_clean)
+        with open(path_bad, "wb") as fh:
+            fh.write(first_bad)
+        with _Capture() as cap:
+            count = self.mod._count_words([path_clean, path_bad])
+        self.assertIn(b"appears to be binary", cap.err.getvalue().encode())
+        self.assertEqual(count, 4)  # only the clean file's words
+
 if __name__ == "__main__":
     unittest.main()

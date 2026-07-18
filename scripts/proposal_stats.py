@@ -17,6 +17,10 @@ import sys
 # memory. Word counts must include all text regardless of file size.
 _READ_CHUNK_BYTES = 64 * 1024
 
+# Canonical key order for stats; shared by _collect and _format_human so
+# iteration order is stable and the label column lines up regardless of
+# the dict's insertion order or any future additions.
+_STAT_KEYS: tuple[str, ...] = ("pending", "done", "pending_words")
 
 def _proposals_root() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
@@ -100,94 +104,96 @@ def _count_words(files: list[str]) -> int:
     # carry the trailing partial token across chunks so a word straddling
     # the boundary is counted exactly once. NUL bytes short-circuit the
     # rest of the file as binary, matching prior behavior.
+    #
+    # Words are accumulated in a per-file subtotal and only merged into the
+    # running total once the entire file has been read and decoded without
+    # error; this guarantees that a NUL byte, invalid UTF-8, or read error
+    # encountered after some chunks have already been counted does not leak
+    # partial words into the total while still being reported as skipped.
+    # An open file descriptor is always closed via a top-level try/finally
+    # so exceptions during fstat / fdopen / read cannot leak it.
     total = 0
     for path in files:
+        subtotal = 0
+        fd_owned: int | None = None
+        skip_reason: str | None = None
         try:
             try:
                 fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
             except OSError as exc:
-                print(
-                    f"warning: skipping {path}: open failed: {exc}",
-                    file=sys.stderr,
-                )
-                binary = True
+                skip_reason = f"open failed: {exc}"
             else:
+                fd_owned = fd
                 try:
                     st_fd = os.fstat(fd)
                     st_path = os.stat(path, follow_symlinks=False)
                 except OSError as exc:
-                    print(
-                        f"warning: skipping {path}: stat failed: {exc}",
-                        file=sys.stderr,
-                    )
-                    os.close(fd)
-                    binary = True
+                    skip_reason = f"stat failed: {exc}"
                 else:
                     if (
                         not stat.S_ISREG(st_fd.st_mode)
                         or st_fd.st_ino != st_path.st_ino
                         or st_fd.st_dev != st_path.st_dev
                     ):
-                        print(
-                            f"warning: skipping {path}: not a regular file",
-                            file=sys.stderr,
-                        )
-                        os.close(fd)
-                        binary = True
-                    else:
-                        binary = False
-            if not binary:
-                decoder = codecs.getincrementaldecoder("utf-8")(
-                    errors="strict"
-                )
+                        skip_reason = "not a regular file"
+            if skip_reason is None:
+                decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
                 pending = ""
-                with os.fdopen(fd, "rb") as fh:
-                    while True:
-                        chunk = fh.read(_READ_CHUNK_BYTES)
-                        if not chunk:
-                            try:
-                                text = decoder.decode(b"", final=True)
-                            except UnicodeDecodeError as exc:
-                                print(
-                                    f"warning: skipping {path}: not valid utf-8: {exc}",
-                                    file=sys.stderr,
-                                )
-                                binary = True
-                                break
-                            if pending or text:
-                                total += len((pending + text).split())
-                            break
-                        if b"\x00" in chunk:
-                            print(
-                                f"warning: skipping {path}: appears to be binary",
-                                file=sys.stderr,
-                            )
-                            binary = True
-                            break
+                fh = None
+                try:
+                    try:
+                        fh = os.fdopen(fd_owned, "rb")
+                    except OSError as exc:
+                        skip_reason = f"fdopen failed: {exc}"
+                    else:
                         try:
-                            text = decoder.decode(chunk, final=False)
-                        except UnicodeDecodeError as exc:
-                            print(
-                                f"warning: skipping {path}: not valid utf-8: {exc}",
-                                file=sys.stderr,
-                            )
-                            binary = True
-                            break
-                        # Prepend the unfinished token from the previous chunk
-                        # so a word split across the boundary is one whole token.
-                        tokens = (pending + text).split()
-                        pending = ""
-                        if text and not text[-1].isspace():
-                            # Last token may continue into the next chunk.
-                            pending = tokens.pop()
-                        total += len(tokens)
-        except OSError as exc:
+                            while True:
+                                chunk = fh.read(_READ_CHUNK_BYTES)
+                                if not chunk:
+                                    try:
+                                        text = decoder.decode(b"", final=True)
+                                    except UnicodeDecodeError as exc:
+                                        skip_reason = f"not valid utf-8: {exc}"
+                                        break
+                                    tokens = (pending + text).split()
+                                    if tokens:
+                                        subtotal += len(tokens)
+                                    break
+                                if b"\x00" in chunk:
+                                    skip_reason = "appears to be binary"
+                                    break
+                                try:
+                                    text = decoder.decode(chunk, final=False)
+                                except UnicodeDecodeError as exc:
+                                    skip_reason = f"not valid utf-8: {exc}"
+                                    break
+                                tokens = (pending + text).split()
+                                pending = ""
+                                if text and not text[-1].isspace():
+                                    # Last token may continue into the next chunk.
+                                    pending = tokens.pop()
+                                subtotal += len(tokens)
+                        except OSError as exc:
+                            skip_reason = f"read failed: {exc}"
+                finally:
+                    if fh is not None:
+                        fh.close()
+        finally:
+            if fd_owned is not None:
+                try:
+                    os.close(fd_owned)
+                except OSError:
+                    # os.fdopen took ownership and already closed it; the
+                    # OSError from double-close is expected and safe to
+                    # ignore here.
+                    pass
+        if skip_reason is not None:
             print(
-                f"warning: skipping {path}: read failed: {exc}", file=sys.stderr
+                f"warning: skipping {path}: {skip_reason}", file=sys.stderr
             )
+        else:
+            total += subtotal
     return total
-
-
 def _collect(root: str) -> dict[str, object]:
     pending_dir = os.path.join(root, "pending")
     done_dir = os.path.join(root, "done")
@@ -202,10 +208,17 @@ def _collect(root: str) -> dict[str, object]:
 
 
 def _format_human(stats: dict[str, object]) -> str:
-    label_width = max(len(k) for k in stats) + 2
+    # Iterate the canonical _STAT_KEYS order rather than the dict's own
+    # insertion order so the output column alignment is stable regardless
+    # of how _collect builds its dict, and raise if any expected key is
+    # missing so a future refactor that drops a key fails loudly here
+    # instead of silently misaligning the table.
+    for key in _STAT_KEYS:
+        if key not in stats:
+            raise KeyError(f"missing required stat: {key}")
+    label_width = max(len(k) for k in _STAT_KEYS) + 2
     lines = [
-        f"{key + ':':<{label_width}}{stats[key]}"
-        for key in ("pending", "done", "pending_words")
+        f"{key + ':':<{label_width}}{stats[key]}" for key in _STAT_KEYS
     ]
     return "\n".join(lines) + "\n"
 
