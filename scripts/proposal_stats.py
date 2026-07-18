@@ -2,6 +2,14 @@
 """proposal_stats.py: summarize docs/proposals/{pending,done} pipeline state.
 
 Reads files only. Never writes to disk. Stdlib-only.
+
+Note on read scope: this module rejects state directories whose target
+resolves outside the proposals root at scan time, and it skips symlinked
+file entries under pending/ and done/. It does not, however, open files
+relative to a directory file descriptor, and the inner read in
+_count_words reopens each path by name. Callers that need strong
+confinement against a hostile tree should not rely on this script: it is
+a reporting helper, not a sandbox.
 """
 from __future__ import annotations
 
@@ -11,7 +19,7 @@ import os
 import sys
 
 
-def _proposals_root() -> str:
+def _default_root() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(here, "..", "docs", "proposals"))
 
@@ -103,6 +111,13 @@ def main(argv: list[str]) -> int:
         description="Summarize the docs/proposals pipeline (pending vs done)."
     )
     parser.add_argument(
+        "--root",
+        dest="root",
+        default=None,
+        help="Proposals root containing 'pending' and 'done' subdirectories. "
+             "Defaults to <repo>/docs/proposals.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
@@ -110,8 +125,9 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
+    root = args.root if args.root is not None else _default_root()
     try:
-        stats = _collect(_proposals_root())
+        stats = _collect(root)
     except RuntimeError as exc:
         sys.stderr.write(f"proposal_stats: {exc}\n")
         return 1
