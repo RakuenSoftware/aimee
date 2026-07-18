@@ -18,7 +18,7 @@ static int g_last_agg = -1;
 static void probe_reapplier(const config_t *o, const config_t *n)
 {
    (void)o;
-   g_last_agg = n->economizer_aggressive;
+   g_last_agg = n->economizer_tier;
    atomic_fetch_add_explicit(&g_reapply_calls, 1, memory_order_relaxed);
 }
 
@@ -32,7 +32,7 @@ static void write_marker(int aggressive, int budget)
    /* keep the config VALID regardless of what a prior (deliberately-invalid) test left on
     * disk, so config_reload's validate-or-keep never rejects a marker write. */
    c.reduce_gateway_session_disable_ttl_ms = 3600000;
-   c.economizer_aggressive = aggressive;
+   c.economizer_tier = aggressive ? ECON_TIER_AGGRESSIVE : ECON_TIER_OFF;
    c.coord_closet_budget_bytes = budget;
    assert(config_save(&c) == 0);
 }
@@ -51,8 +51,8 @@ static void *reader_thread(void *arg)
       if (config_snapshot_get(&c) != 0)
          continue;
       atomic_fetch_add_explicit(&g_reads, 1, memory_order_relaxed);
-      int a = (c.economizer_aggressive == 1 && c.coord_closet_budget_bytes == 1111);
-      int b = (c.economizer_aggressive == 0 && c.coord_closet_budget_bytes == 2222);
+      int a = (c.economizer_tier == ECON_TIER_AGGRESSIVE && c.coord_closet_budget_bytes == 1111);
+      int b = (c.economizer_tier == ECON_TIER_OFF && c.coord_closet_budget_bytes == 2222);
       if (!a && !b)
          atomic_fetch_add_explicit(&g_torn, 1, memory_order_relaxed);
    }
@@ -85,7 +85,7 @@ int main(void)
       config_snapshot_init(&c0);
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_aggressive == 1);
+      assert(got.economizer_tier == ECON_TIER_AGGRESSIVE);
       assert(got.coord_closet_budget_bytes == 1111);
    }
 
@@ -98,7 +98,7 @@ int main(void)
    {
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_aggressive == 0);
+      assert(got.economizer_tier == ECON_TIER_OFF);
       assert(got.coord_closet_budget_bytes == 2222);
    }
    /* reloading the same file again is a no-op */
@@ -125,7 +125,7 @@ int main(void)
       write_marker(1, 1111); /* change back to aggressive=1 */
       assert(config_reload() == 1);
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == before + 1);
-      assert(g_last_agg == 1); /* re-applier saw the NEW value */
+      assert(g_last_agg == ECON_TIER_AGGRESSIVE); /* re-applier saw the NEW value */
       /* a no-op reload does NOT fire the re-applier */
       int mid = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
       assert(config_reload() == 0);

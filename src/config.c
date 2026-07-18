@@ -620,6 +620,7 @@ static void config_set_defaults(config_t *cfg)
     * these defaults every effective lever equals its pre-P3 value (back-compat). */
    cfg->economizer_enabled = 1;
    cfg->economizer_aggressive = 0;
+   cfg->economizer_tier = ECON_TIER_SAFE; /* the single control; default lossless */
    /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
     * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
    cfg->module_memory = -1;
@@ -952,14 +953,43 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
       cfg->memory_rewrite_enabled = accel;
 }
 
+int econ_tier(const config_t *cfg)
+{
+   if (!cfg)
+      return ECON_TIER_OFF;
+   /* modules.economizer:false is still an authoritative hard kill over the tier. */
+   if (cfg->module_economizer == 0)
+      return ECON_TIER_OFF;
+   return cfg->economizer_tier;
+}
+
+const char *econ_tier_name(int tier)
+{
+   switch (tier)
+   {
+   case ECON_TIER_OFF:
+      return "off";
+   case ECON_TIER_AGGRESSIVE:
+      return "aggressive";
+   case ECON_TIER_SAFE:
+   default:
+      return "safe";
+   }
+}
+
+int econ_tier_parse(const char *s)
+{
+   if (s && (strcasecmp(s, "off") == 0 || strcasecmp(s, "0") == 0 || strcasecmp(s, "false") == 0))
+      return ECON_TIER_OFF;
+   if (s && (strcasecmp(s, "aggressive") == 0 || strcasecmp(s, "aggro") == 0))
+      return ECON_TIER_AGGRESSIVE;
+   return ECON_TIER_SAFE; /* default / "safe" / unknown -> lossless */
+}
+
 int econ_reduction_master_on(const config_t *cfg)
 {
-   /* The economizer's master gate is a pluggable-module toggle like the other four: the
-    * modules.economizer tristate is canonical when set (0/1); -1 (unspecified) falls back to
-    * the legacy economizer.enabled bool, which plays the "deprecated default" role env plays
-    * for memory/governance/delegates/workflows. Every economizer sub-predicate routes through
-    * here, so modules.economizer:false is one authoritative kill. */
-   return cfg ? config_module_enabled(cfg->module_economizer, cfg->economizer_enabled) : 0;
+   /* Any economization at all runs unless the tier is off. */
+   return econ_tier(cfg) != ECON_TIER_OFF;
 }
 
 int config_module_enabled(int config_tristate, int env_default)
@@ -974,11 +1004,9 @@ int config_module_enabled(int config_tristate, int env_default)
 
 int econ_gateway_mutate_on(const config_t *cfg)
 {
-   /* the live-primary mutator needs the master ON, the aggressive tier opted IN, AND the
-    * lever itself set — the aggressive flag alone never activates a live-traffic mutator. */
-   return econ_reduction_master_on(cfg) && cfg->economizer_aggressive && cfg->reduce_gateway_mutate
-              ? 1
-              : 0;
+   /* The live-primary mutator is an AGGRESSIVE-tier action. (The call site additionally
+    * restricts it to OpenAI-family egress -- it never runs against Anthropic.) */
+   return econ_tier(cfg) == ECON_TIER_AGGRESSIVE ? 1 : 0;
 }
 
 static int config_snapshot_live(void);

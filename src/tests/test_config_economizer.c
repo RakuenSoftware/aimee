@@ -25,37 +25,39 @@ static void test_two_tier_resolution(void)
 {
    config_t c;
    memset(&c, 0, sizeof c);
-   c.module_economizer = -1; /* config_load default: unspecified -> legacy economizer.enabled */
-
-   /* back-compat: defaults (enabled=1, aggressive=0) => effective == raw individual */
-   c.economizer_enabled = 1;
-   c.economizer_aggressive = 0;
+   c.module_economizer = -1;      /* unspecified -> tier is authoritative */
    c.reduce_command_filter = 1;
-   c.reduce_history_fold = 1;
-   c.reduce_compress = 1;
-   c.reduce_gateway_mutate = 0;
-   assert(econ_reduction_master_on(&c) == 1);
-   assert(cf_effective(&c) == 1);           /* command_filter on, as pre-P3 */
-   assert(econ_gateway_mutate_on(&c) == 0); /* off, as pre-P3 */
 
-   /* master-kill: enabled=0 forces reduction off even with every lever set... */
-   c.economizer_enabled = 0;
-   c.reduce_gateway_mutate = 1;
-   c.economizer_aggressive = 1;
+   /* OFF tier: no economization at all. */
+   c.economizer_tier = ECON_TIER_OFF;
+   assert(econ_tier(&c) == ECON_TIER_OFF);
    assert(econ_reduction_master_on(&c) == 0);
-   assert(cf_effective(&c) == 0);           /* command_filter suppressed */
-   assert(econ_gateway_mutate_on(&c) == 0); /* mutate suppressed by master */
+   assert(cf_effective(&c) == 0);           /* command_filter suppressed with reduction off */
+   assert(econ_gateway_mutate_on(&c) == 0);
 
-   /* aggressive ceiling: gateway_mutate needs ALL THREE (enabled && aggressive && lever) */
-   c.economizer_enabled = 1;
-   c.economizer_aggressive = 1;
-   c.reduce_gateway_mutate = 1;
+   /* SAFE tier: reduction on, but no live gateway mutation. */
+   c.economizer_tier = ECON_TIER_SAFE;
+   assert(econ_reduction_master_on(&c) == 1);
+   assert(cf_effective(&c) == 1);
+   assert(econ_gateway_mutate_on(&c) == 0); /* live mutation is aggressive-only */
+
+   /* AGGRESSIVE tier: reduction on + live mutation (OpenAI-only enforced at the call site). */
+   c.economizer_tier = ECON_TIER_AGGRESSIVE;
+   assert(econ_reduction_master_on(&c) == 1);
    assert(econ_gateway_mutate_on(&c) == 1);
-   c.economizer_aggressive = 0; /* aggressive off -> suppressed even though lever set */
+
+   /* modules.economizer:false is an authoritative hard-kill over any tier. */
+   c.module_economizer = 0;
+   assert(econ_tier(&c) == ECON_TIER_OFF);
+   assert(econ_reduction_master_on(&c) == 0);
    assert(econ_gateway_mutate_on(&c) == 0);
-   c.economizer_aggressive = 1;
-   c.reduce_gateway_mutate = 0; /* aggressive on but lever off -> still off (no auto-enable) */
-   assert(econ_gateway_mutate_on(&c) == 0);
+
+   /* the tier parser + names round-trip. */
+   assert(econ_tier_parse("off") == ECON_TIER_OFF);
+   assert(econ_tier_parse("safe") == ECON_TIER_SAFE);
+   assert(econ_tier_parse("aggressive") == ECON_TIER_AGGRESSIVE);
+   assert(econ_tier_parse("bogus") == ECON_TIER_SAFE); /* unknown -> safe */
+   assert(strcmp(econ_tier_name(ECON_TIER_AGGRESSIVE), "aggressive") == 0);
 
    /* NULL-safe */
    assert(econ_reduction_master_on(NULL) == 0);
@@ -267,22 +269,26 @@ int main(void)
       assert(config_reduce_validate(&cfg, err, sizeof(err)) != 0);
    }
 
-   /* --- two-tier switches (P3): defaults + save/load round-trip --- */
+   /* --- economizer tier: default + save/load round-trip (string form) --- */
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      assert(cfg.economizer_enabled == 1);    /* master default ON */
-      assert(cfg.economizer_aggressive == 0); /* aggressive tier default OFF */
-      cfg.economizer_enabled = 0;             /* opt-out the master */
-      cfg.economizer_aggressive = 1;          /* opt-in the aggressive tier */
+      assert(cfg.economizer_tier == ECON_TIER_SAFE); /* default is safe */
+      cfg.economizer_tier = ECON_TIER_AGGRESSIVE;
       assert(config_save(&cfg) == 0);
 
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.economizer_enabled == 0);    /* opt-out persisted */
-      assert(cfg2.economizer_aggressive == 1); /* opt-in persisted */
+      assert(cfg2.economizer_tier == ECON_TIER_AGGRESSIVE); /* persisted as economizer: aggressive */
+
+      /* off also round-trips (non-default); safe is the default and is not persisted. */
+      cfg.economizer_tier = ECON_TIER_OFF;
+      assert(config_save(&cfg) == 0);
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.economizer_tier == ECON_TIER_OFF);
    }
 
    /* --- modules.* tristate: defaults are -1 (unspecified) and are NOT persisted; an explicit
@@ -322,20 +328,18 @@ int main(void)
       assert(config_module_enabled(cfg3.module_memory, 1) == 1);     /* -1 -> env default ON */
       assert(config_module_enabled(cfg3.module_memory, 0) == 0);     /* -1 -> env default OFF */
 
-      /* economizer master gate honors modules.economizer AUTHORITATIVELY over the legacy
-       * economizer.enabled bool (economizer's "env default" analog). */
+      /* modules.economizer:false is an authoritative hard-kill over the tier; otherwise the
+       * tier decides. */
       config_t ec;
       memset(&ec, 0, sizeof(ec));
-      ec.economizer_enabled = 1; /* legacy master ON... */
-      ec.module_economizer = 0;  /* ...but modules.economizer:false wins */
+      ec.economizer_tier = ECON_TIER_SAFE;
+      ec.module_economizer = 0; /* hard kill regardless of tier */
       assert(econ_reduction_master_on(&ec) == 0);
-      ec.economizer_enabled = 0; /* legacy master OFF... */
-      ec.module_economizer = 1;  /* ...but modules.economizer:true wins */
+      ec.module_economizer = 1; /* not killed -> tier decides */
       assert(econ_reduction_master_on(&ec) == 1);
-      ec.module_economizer = -1; /* unspecified -> fall back to legacy economizer.enabled */
-      ec.economizer_enabled = 1;
+      ec.module_economizer = -1; /* unspecified -> tier decides */
       assert(econ_reduction_master_on(&ec) == 1);
-      ec.economizer_enabled = 0;
+      ec.economizer_tier = ECON_TIER_OFF;
       assert(econ_reduction_master_on(&ec) == 0);
    }
 
