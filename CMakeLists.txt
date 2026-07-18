@@ -753,7 +753,7 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_agent_delegate_toolset.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt_stdin.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_depth.c
-    ${AIMEE_SRC_DIR}/server/delegate_plan.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_run_phases.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_routing.c
@@ -832,7 +832,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_workspace_serve.c
     ${AIMEE_SRC_DIR}/cli_agent_keys.c
     ${AIMEE_SRC_DIR}/cli_remote.c
-    ${AIMEE_SRC_DIR}/server/delegate_plan.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
     ${AIMEE_SRC_DIR}/modules/protocols/acp/acp_server.c
     ${AIMEE_SRC_DIR}/cmd_workflow.c
 )

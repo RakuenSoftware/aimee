@@ -46,7 +46,7 @@ static void test_plan_from_changes_table(void)
        "| File | Change |\n"
        "|------|--------|\n"
        "| `src/cmd_agent_delegate.c` | Add plan subcommand. |\n"
-       "| `src/server/delegate_plan.c` | Add planner helpers. |\n"
+       "| `src/modules/delegates/delegate_plan.c` | Add planner helpers. |\n"
        "\n"
        "## Acceptance Criteria\n"
        "\n"
@@ -77,7 +77,7 @@ static void test_plan_from_changes_table(void)
    assert(!str_arr_contains(arr(first, "verify_commands"),
                             "make -C src build/obj/tests/unit-test-delegate-plan"));
    assert(!str_arr_contains(arr(first, "read_context"), "src/tests/test_delegate_plan.c"));
-   /* The second packet owns src/server/delegate_plan.c, whose test exists, so it
+   /* The second packet owns src/modules/delegates/delegate_plan.c, whose test exists, so it
     * verifies against and reads exactly that test. */
    cJSON *second = cJSON_GetArrayItem(packets, 1);
    assert(str_arr_contains(arr(second, "verify_commands"),
@@ -99,7 +99,7 @@ static void test_plan_from_changes_table(void)
    assert(strcmp(cJSON_GetObjectItem(review, "role")->valuestring, "review") == 0);
    assert(cJSON_GetArraySize(arr(review, "owned_files")) == 0);
    assert(str_arr_contains(arr(review, "expected_files"), "src/cmd_agent_delegate.c"));
-   assert(str_arr_contains(arr(review, "expected_files"), "src/server/delegate_plan.c"));
+   assert(str_arr_contains(arr(review, "expected_files"), "src/modules/delegates/delegate_plan.c"));
    assert(strcmp(cJSON_GetObjectItem(review, "handoff_schema")->valuestring,
                  "delegate_review_v1") == 0);
    contract = cJSON_GetObjectItem(review, "final_output_contract");
@@ -120,8 +120,8 @@ static void test_plan_flags_overlapping_owned_files(void)
                           "### Changes\n"
                           "| File | Change |\n"
                           "|------|--------|\n"
-                          "| `src/server/delegate_plan.c` | First slice. |\n"
-                          "| `src/server/delegate_plan.c` | Second slice. |\n"
+                          "| `src/modules/delegates/delegate_plan.c` | First slice. |\n"
+                          "| `src/modules/delegates/delegate_plan.c` | Second slice. |\n"
                           "\n"
                           "## Acceptance Criteria\n"
                           "- [ ] Works.\n";
@@ -134,7 +134,7 @@ static void test_plan_flags_overlapping_owned_files(void)
    assert(cJSON_GetArraySize(arr(plan, "conflicts")) == 1);
    cJSON *conflict = cJSON_GetArrayItem(arr(plan, "conflicts"), 0);
    assert(strcmp(cJSON_GetObjectItem(conflict, "file")->valuestring,
-                 "src/server/delegate_plan.c") == 0);
+                 "src/modules/delegates/delegate_plan.c") == 0);
    assert(num(conflict, "packet_count") == 2);
    cJSON_Delete(plan);
    printf("  PASS: test_plan_flags_overlapping_owned_files\n");
@@ -236,7 +236,7 @@ static void test_acceptance_criteria_preserve_wrapped_lines(void)
                           "### Changes\n"
                           "| File | Change |\n"
                           "|------|--------|\n"
-                          "| `src/server/delegate_plan.c` | Touch planner. |\n"
+                          "| `src/modules/delegates/delegate_plan.c` | Touch planner. |\n"
                           "\n"
                           "## Acceptance Criteria\n"
                           "- [ ] `aimee delegate code --via claude-cli \"Add a README\"` runs\n"
@@ -262,7 +262,7 @@ static void test_plan_falls_back_to_backticked_paths(void)
 {
    const char *proposal = "# Proposal: Backtick Example\n"
                           "\n"
-                          "Update `src/server/delegate_plan.c` and document it in "
+                          "Update `src/modules/delegates/delegate_plan.c` and document it in "
                           "`src/tests/test_delegate_plan.c`.\n"
                           "\n"
                           "## Acceptance Criteria\n"
@@ -372,7 +372,7 @@ static void test_plan_keeps_new_files_out_of_read_context(void)
        "| File | Change |\n"
        "|------|--------|\n"
        "| `src/not-yet-created-delegate-plan-fixture.c` (new) | Add the implementation. |\n"
-       "| `src/server/delegate_plan.c` | Wire planner behavior. |\n"
+       "| `src/modules/delegates/delegate_plan.c` | Wire planner behavior. |\n"
        "\n"
        "## Acceptance Criteria\n"
        "- [ ] Delegates are not asked to preload missing owned files.\n";
@@ -390,16 +390,16 @@ static void test_plan_keeps_new_files_out_of_read_context(void)
                            "src/not-yet-created-delegate-plan-fixture.c") == 0);
 
    cJSON *existing_file_packet = cJSON_GetArrayItem(packets, 1);
-   assert(
-       str_arr_contains(arr(existing_file_packet, "read_context"), "src/server/delegate_plan.c"));
+   assert(str_arr_contains(arr(existing_file_packet, "read_context"),
+                           "src/modules/delegates/delegate_plan.c"));
 
    cJSON *review = cJSON_GetArrayItem(packets, 2);
    assert(str_arr_contains(arr(review, "expected_files"),
                            "src/not-yet-created-delegate-plan-fixture.c"));
-   assert(str_arr_contains(arr(review, "expected_files"), "src/server/delegate_plan.c"));
+   assert(str_arr_contains(arr(review, "expected_files"), "src/modules/delegates/delegate_plan.c"));
    assert(str_arr_contains(arr(review, "read_context"),
                            "src/not-yet-created-delegate-plan-fixture.c") == 0);
-   assert(str_arr_contains(arr(review, "read_context"), "src/server/delegate_plan.c"));
+   assert(str_arr_contains(arr(review, "read_context"), "src/modules/delegates/delegate_plan.c"));
    cJSON_Delete(plan);
    printf("  PASS: test_plan_keeps_new_files_out_of_read_context\n");
 }
@@ -411,7 +411,7 @@ static void test_plan_flags_unmarked_missing_owned_files(void)
                           "### Changes\n"
                           "| File | Change |\n"
                           "|------|--------|\n"
-                          "| `src/server/delegate_plan.c` | Existing planner work. |\n"
+                          "| `src/modules/delegates/delegate_plan.c` | Existing planner work. |\n"
                           "| `src/does-not-exist-delegate-plan-fixture.c` | Suspect stale path. |\n"
                           "\n"
                           "## Acceptance Criteria\n"
@@ -430,7 +430,7 @@ static void test_plan_flags_unmarked_missing_owned_files(void)
                            "src/does-not-exist-delegate-plan-fixture.c") == 0);
    cJSON *packets = arr(plan, "packets");
    cJSON *impl = cJSON_GetArrayItem(packets, 0);
-   assert(str_arr_contains(arr(impl, "owned_files"), "src/server/delegate_plan.c"));
+   assert(str_arr_contains(arr(impl, "owned_files"), "src/modules/delegates/delegate_plan.c"));
    assert(str_arr_contains(arr(impl, "owned_files"),
                            "src/does-not-exist-delegate-plan-fixture.c") == 0);
    cJSON_Delete(plan);
@@ -475,7 +475,7 @@ static void test_plan_allows_declared_new_owned_files(void)
        "| File | Change |\n"
        "|------|--------|\n"
        "| `src/brand-new-delegate-plan-fixture.c` (new) | Add implementation. |\n"
-       "| `src/server/delegate_plan.c` | Wire planner behavior. |\n"
+       "| `src/modules/delegates/delegate_plan.c` | Wire planner behavior. |\n"
        "\n"
        "## Acceptance Criteria\n"
        "- [ ] Declared new files can launch without missing-file review.\n";
@@ -500,8 +500,9 @@ static void test_plan_allows_declared_new_owned_files(void)
 static void test_large_plan_gets_reviewer_packet(void)
 {
    char proposal[2600];
-   int len = snprintf(proposal, sizeof(proposal),
-                      "# Proposal: Large Example\n\nUpdate `src/server/delegate_plan.c`.\n\n");
+   int len =
+       snprintf(proposal, sizeof(proposal),
+                "# Proposal: Large Example\n\nUpdate `src/modules/delegates/delegate_plan.c`.\n\n");
    assert(len > 0 && (size_t)len < sizeof(proposal));
    memset(proposal + len, 'a', sizeof(proposal) - (size_t)len - 1);
    proposal[sizeof(proposal) - 1] = '\0';

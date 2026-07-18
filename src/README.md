@@ -124,7 +124,7 @@ thin `aimee` and `aimee-webchat` targets do not link database,
 | `server/vault_service.c` | Server-sealed credential vault (agent and delegate keys, Codex OAuth) |
 | `context_fold.c`, `gateway_delegate.c` | Context economizer: deterministic context folding and ingress compression on the delegate and gateway path |
 | `server/agent_tools.c` | Tool execution (bash, read, write), checkpoints |
-| `server/delegate_plan.c` | Delegate packet planning |
+| `modules/delegates/delegate_plan.c` | Delegate packet planning |
 | `agent_eval.c` | Eval harness, task suites |
 | `agent_coord.c` | Multi-delegate coordination, voting, directives |
 | `server/server_compute*.c`, `server/server_jobs_aux.c` | Durable/background delegate jobs and compute dispatch |
