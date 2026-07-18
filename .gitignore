@@ -143,3 +143,4 @@ src/vendor/tree-sitter-powershell/
 # its engineering diff. See wfe_manager_artifacts.c (intent_self_referential).
 .wfe-scope.json
 intent_record_*.json
+.rt-tmp/
