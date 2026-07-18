@@ -1161,6 +1161,10 @@ typedef struct config
    int module_governance;
    int module_delegates;
    int module_workflows;
+   /* economizer's env-default analog is the legacy economizer.enabled bool (not an AIMEE_*
+    * env), so its resolver call is config_module_enabled(module_economizer, economizer_enabled)
+    * inside econ_reduction_master_on(). */
+   int module_economizer;
 
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
     * (AIMEE_AUTONOMY_*); the config values are bridged to those env vars at startup

@@ -748,10 +748,9 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
       const char *key;
       int *field;
    } toggles[] = {
-       {"memory", &cfg->module_memory},
-       {"governance", &cfg->module_governance},
-       {"delegates", &cfg->module_delegates},
-       {"workflows", &cfg->module_workflows},
+       {"memory", &cfg->module_memory},         {"governance", &cfg->module_governance},
+       {"delegates", &cfg->module_delegates},   {"workflows", &cfg->module_workflows},
+       {"economizer", &cfg->module_economizer},
    };
    for (size_t i = 0; i < sizeof(toggles) / sizeof(toggles[0]); i++)
    {

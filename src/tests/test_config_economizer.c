@@ -16,7 +16,7 @@
  * tool_condense_enabled without pulling the CORE object into this test's link set. */
 static int cf_effective(const config_t *c)
 {
-   return c->economizer_enabled && c->reduce_command_filter;
+   return econ_reduction_master_on(c) && c->reduce_command_filter;
 }
 
 /* P3 two-tier resolution: master-kill, aggressive ceiling, and BACK-COMPAT (default
@@ -25,6 +25,7 @@ static void test_two_tier_resolution(void)
 {
    config_t c;
    memset(&c, 0, sizeof c);
+   c.module_economizer = -1; /* config_load default: unspecified -> legacy economizer.enabled */
 
    /* back-compat: defaults (enabled=1, aggressive=0) => effective == raw individual */
    c.economizer_enabled = 1;
@@ -292,6 +293,7 @@ int main(void)
       config_load(&cfg); /* no modules: block -> all unspecified */
       assert(cfg.module_memory == -1 && cfg.module_governance == -1);
       assert(cfg.module_delegates == -1 && cfg.module_workflows == -1);
+      assert(cfg.module_economizer == -1);
 
       /* save the pristine defaults: nothing written -> reload still -1 (no stray 0). */
       assert(config_save(&cfg) == 0);
@@ -300,22 +302,41 @@ int main(void)
       config_load(&cfg2);
       assert(cfg2.module_memory == -1 && cfg2.module_governance == -1);
       assert(cfg2.module_delegates == -1 && cfg2.module_workflows == -1);
+      assert(cfg2.module_economizer == -1);
 
-      /* explicit user toggles round-trip: governance OFF, delegates ON, others unspecified. */
+      /* explicit user toggles round-trip: governance OFF, delegates ON, economizer OFF. */
       cfg2.module_governance = 0;
       cfg2.module_delegates = 1;
+      cfg2.module_economizer = 0;
       assert(config_save(&cfg2) == 0);
       static config_t cfg3;
       memset(&cfg3, 0, sizeof(cfg3));
       config_load(&cfg3);
       assert(cfg3.module_governance == 0); /* explicit disable persisted */
       assert(cfg3.module_delegates == 1);  /* explicit enable persisted  */
+      assert(cfg3.module_economizer == 0); /* explicit disable persisted */
       assert(cfg3.module_memory == -1 && cfg3.module_workflows == -1); /* untouched stay -1 */
 
       /* resolver precedence (governance is default-ON via env fallback when unspecified). */
       assert(config_module_enabled(cfg3.module_governance, 1) == 0); /* config OFF wins */
       assert(config_module_enabled(cfg3.module_memory, 1) == 1);     /* -1 -> env default ON */
       assert(config_module_enabled(cfg3.module_memory, 0) == 0);     /* -1 -> env default OFF */
+
+      /* economizer master gate honors modules.economizer AUTHORITATIVELY over the legacy
+       * economizer.enabled bool (economizer's "env default" analog). */
+      config_t ec;
+      memset(&ec, 0, sizeof(ec));
+      ec.economizer_enabled = 1; /* legacy master ON... */
+      ec.module_economizer = 0;  /* ...but modules.economizer:false wins */
+      assert(econ_reduction_master_on(&ec) == 0);
+      ec.economizer_enabled = 0; /* legacy master OFF... */
+      ec.module_economizer = 1;  /* ...but modules.economizer:true wins */
+      assert(econ_reduction_master_on(&ec) == 1);
+      ec.module_economizer = -1; /* unspecified -> fall back to legacy economizer.enabled */
+      ec.economizer_enabled = 1;
+      assert(econ_reduction_master_on(&ec) == 1);
+      ec.economizer_enabled = 0;
+      assert(econ_reduction_master_on(&ec) == 0);
    }
 
    /* restore env */

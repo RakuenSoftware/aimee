@@ -25,6 +25,8 @@ int main(void)
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
+      cfg.module_economizer =
+          -1; /* config_load default: unspecified -> legacy economizer.enabled */
       assert(tool_condense_enabled(&cfg) == 0);
       cfg.reduce_command_filter = 1;
       assert(tool_condense_enabled(&cfg) == 0); /* P3 master (economizer.enabled) still off */
@@ -255,6 +257,8 @@ int main(void)
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
+      cfg.module_economizer =
+          -1; /* config_load default: unspecified -> legacy economizer.enabled */
 
       /* a big passing pytest run (exit 0) */
       char big[8192];
@@ -347,6 +351,8 @@ int main(void)
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
+      cfg.module_economizer =
+          -1; /* config_load default: unspecified -> legacy economizer.enabled */
       cfg.reduce_command_filter = 1;
       cfg.economizer_enabled = 1; /* P3 master gate */
       char big[8192];
@@ -374,6 +380,8 @@ int main(void)
       tool_condense_stats_reset();
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
+      cfg.module_economizer =
+          -1; /* config_load default: unspecified -> legacy economizer.enabled */
       cfg.reduce_command_filter = 1;
       cfg.economizer_enabled = 1; /* P3 master gate */
       char big[8192];
