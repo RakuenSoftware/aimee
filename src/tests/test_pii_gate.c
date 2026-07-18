@@ -1,5 +1,5 @@
 /* test_pii_gate.c: typed-fact §7 per-attribute PII recall gating. Pure. P5. */
-#include "../headers/memory_pii_gate.h"
+#include "memory_pii_gate.h"
 #include "../headers/rel_types.h"
 #include <assert.h>
 #include <math.h>

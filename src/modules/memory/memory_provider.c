@@ -6,8 +6,8 @@
  * Enforcement: bundled provider always accepted; at most one external provider.
  * A second external registration is rejected with LOG_WARN.
  */
-#include "headers/memory_provider.h"
-#include "headers/log.h"
+#include "memory_provider.h"
+#include "log.h"
 #include <string.h>
 
 static memory_provider_t g_bundled;

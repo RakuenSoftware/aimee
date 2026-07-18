@@ -1,7 +1,7 @@
 /* fact_recall.c: typed-fact recall into the envelope + §7 PII gating. P5.
  * See fact_recall.h. */
 #include "fact_recall.h"
-#include "../headers/memory_pii_gate.h" /* memory_pii_rel_sensitivity / should_inject */
+#include "memory_pii_gate.h" /* memory_pii_rel_sensitivity / should_inject */
 #include "db2_internal.h"
 #include "db_postgres.h"
 

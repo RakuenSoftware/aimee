@@ -148,16 +148,16 @@ scan '\\bdb1_window_fts_(add|search|available)\\b|\\bdb1_window_fts_hit_t\\b' \
   "non-DB1 callers expose DB1 lexical-index implementation names"
 path_scan 'pm_build_fts_match|db2_prospective_list_by_fts|pm_match_clause_to_tsquery|memory_negation_fts|FTS5 prefix matching|FTS5 noise|FTS5 reserved-char|FTS5 indexing|expand_terms_for_fts|pre-built FTS5 MATCH|FTS5 index' \
   "prospective/negation helpers expose backend-specific lexical index names" \
-  src/memory_prospective.c src/memory_core_search.inc src/headers/config.h \
+  src/modules/memory/memory_prospective.c src/modules/memory/memory_core_search.inc src/headers/config.h \
   src/headers/util.h src/text.c src/tests/test_text.c \
   src/db2/prospective_memories.h src/db2/prospective_memories.c
 path_scan 'memory_collect_fts_via_vector|MEM_SOURCE_FTS|FTS string|FTS query string|FTS/graph|unit/fts|generic FTS path|memory FTS|FTS5 / semantic|pre-DB3 FTS|db2_memory_collect_fts_matches|memory_units_fts MATCH|memory_negation_fts FTS table' \
   "memory recall helpers expose stale FTS collector names" \
-  src/memory_core_search.inc src/db2/memory_query.h src/db2/memory_query.c
+  src/modules/memory/memory_core_search.inc src/db2/memory_query.h src/db2/memory_query.c
 path_scan 'fts_search_via_vector|MAX_FTS_RESULTS|fts_res|n_fts|fts_weight|weights: fts|"fts"|ed_build_fts_match|db2_directive_match_by_fts|FTS over question|FTS match on question|alpha\*FTS|FTS and vector|FTS_OR|ED_FTS' \
   "KB/directive/query-plan surfaces expose stale FTS vocabulary" \
   src/kb/kb.c src/headers/config.h src/headers/memory.h src/headers/aimee.h \
-  src/memory_directives.c src/cmd_memory_core.c src/memory_core_search.inc \
+  src/modules/memory/memory_directives.c src/cmd_memory_core.c src/modules/memory/memory_core_search.inc \
   src/db2/epistemic_directives.h src/db2/epistemic_directives.c src/tests/test_kb.c
 path_scan 'use sqlite|sqlite WAL' \
   "SQLite-named compute comments outside src/db1" \
@@ -171,7 +171,7 @@ path_scan '\\b([Pp]ostgres|pg_trgm|libpq)\\b' \
 path_scan '\\b(Postgres|libpq|pg_trgm)\\b' \
   "Postgres-named DB2 implementation comments outside src/db2" \
   src/cmd_index.c src/kb/kb_main.c src/dashboard.c src/cmd_work.c src/kb/kb.c \
-  src/memory_core_search.inc src/headers/config.h src/db1/db_schema.c src/db1/db_schema.h
+  src/modules/memory/memory_core_search.inc src/headers/config.h src/db1/db_schema.c src/db1/db_schema.h
 path_scan 'system-provided SQLite|SQLite database \(all state\)|`db\.c`[[:space:]]*\|[[:space:]]*SQLite|shared Postgres tier|sqlite\.sql and postgres\.sql' \
   "source docs/build text exposes legacy storage ownership" \
   src/README.md src/Makefile
@@ -204,18 +204,18 @@ path_scan 'Memory search \(FTS5\)|Full-text search on memories table|memories ta
   docs/BENCHMARKS.md
 path_scan 'memory\.c: 4-tier|^/\* memory\.c: POSIX|^/\* memory\.c: Windows|private declarations for memory\.c platform split|posix/memory\.c \(POSIX\)|windows/memory\.c \(Windows stubs\)|memory_scan_content is implemented in posix/memory\.c|Add error handling to src/memory\.c' \
   "source comments/examples expose stale memory.c source names" \
-  src/memory_core.c src/memory_core_crud.inc src/cmd_session_lifecycle.c \
-  src/headers/memory_platform.h src/posix/memory.c src/windows/memory.c
+  src/modules/memory/memory_core.c src/modules/memory/memory_core_crud.inc src/cmd_session_lifecycle.c \
+  src/modules/memory/memory_platform.h src/posix/memory.c src/windows/memory.c
 path_scan 'sqlite db postgres storage sql|"postgres"' \
   "memory retrieval hints expose backend product names outside tier modules" \
-  src/memory_core_search.inc src/memory_core_scope_embed.inc
+  src/modules/memory/memory_core_search.inc src/modules/memory/memory_core_scope_embed.inc
 path_scan 'legacy no-gate behaviour|legacy DBs may|legacy edge|legacy rows|/\* legacy \*/' \
   "memory source comments expose legacy compatibility labels" \
-  src/memory_core_tiers.inc src/memory_core_crud.inc src/memory_episodes.c \
-  src/headers/memory_ontology.h
+  src/modules/memory/memory_core_tiers.inc src/modules/memory/memory_core_crud.inc src/modules/memory/memory_episodes.c \
+  src/modules/memory/memory_ontology.h
 path_scan 'Untagged memories \(legacy\)|legacy promote/demote cycle|legacy hybrid|legacy `symbols` table' \
   "source comments expose legacy storage/route labels" \
-  src/memory_assemble.c src/memory_maintenance.c src/headers/config.h src/cmd_doctor.c
+  src/modules/memory/memory_assemble.c src/modules/memory/memory_maintenance.c src/headers/config.h src/cmd_doctor.c
 path_scan 'legacy in-repo|legacy behavior|legacy: 1|legacy prospective-only|legacy MCP server|legacy forward path|pre-concurrent legacy behavior' \
   "active source comments expose legacy runtime labels" \
   src/agent_policy.c src/git_verify.c src/cmd_data.c src/agent_runtime.c \

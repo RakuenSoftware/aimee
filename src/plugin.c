@@ -1,7 +1,7 @@
 /* plugin.c: plugin manifest parsing and registry persistence */
 #include "aimee.h"
 #include "headers/plugin.h"
-#include "headers/memory_provider.h"
+#include "memory_provider.h"
 #include "headers/context_engine.h"
 #include "cJSON.h"
 #include "log.h"

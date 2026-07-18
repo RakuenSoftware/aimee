@@ -3,7 +3,7 @@
 #include "../headers/aimee.h" /* edge_t (used by entity_edges.h) */
 #include "rel_types_store.h"
 #include "../headers/rel_types.h"
-#include "../headers/memory_pii_gate.h" /* memory_pii_rel_sensitivity — personal-data boundary */
+#include "memory_pii_gate.h" /* memory_pii_rel_sensitivity — personal-data boundary */
 #include "entity_edges.h"
 #include "entity_registry.h"    /* db2_entity_register_named (§3 endpoint resolution) */
 #include "ontology_evolution.h" /* db2_ontology_eval_observe (§2 / P4) */
