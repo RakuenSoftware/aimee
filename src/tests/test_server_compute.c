@@ -46,6 +46,11 @@ static const char *g_agent_repair_response = NULL;
 static int g_agent_calls = 0;
 static int g_agent_run_calls = 0;
 static int g_agent_tool_run_calls = 0, g_config_tools_enabled = 1;
+/* Tracks agent_run_force_no_tools: g_force_no_tools is the live thread-local
+ * stand-in; g_agent_run_seen_no_tools latches its value at the agent_run call so
+ * a test can assert the delegate no-tools path forced tools off for the turn. */
+static int g_force_no_tools = 0;
+static int g_agent_run_seen_no_tools = 0;
 static int g_last_agent_max_turns = -999;
 static int g_last_write_enforce = -999;
 static int g_budget_acquire_calls = 0;
@@ -275,6 +280,7 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, 
       snprintf(g_last_system_prompt, sizeof(g_last_system_prompt), "%s", system_prompt);
    memset(result, 0, sizeof(*result));
    g_agent_run_calls++;
+   g_agent_run_seen_no_tools = g_force_no_tools;
    g_agent_run_seen_compute_override = g_aimee_compute_threads_override;
    g_last_agent_max_turns = cfg->agent_count > 0 ? cfg->agents[0].max_turns : -999;
    g_agent_seen_compute_override = g_aimee_compute_threads_override;
@@ -283,6 +289,11 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, 
    if (g_agent_run_rc != 0)
       snprintf(result->error, sizeof(result->error), "stubbed agent failure");
    return g_agent_run_rc;
+}
+
+void agent_run_force_no_tools(int on)
+{
+   g_force_no_tools = on ? 1 : 0;
 }
 
 int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
@@ -2200,6 +2211,58 @@ static void test_direct_delegate_explicit_tools_forces_tools(void)
    printf("  PASS: test_direct_delegate_explicit_tools_forces_tools\n");
 }
 
+/* Regression: an explicit tools:false (CLI --no-tools) on a tools-on-by-default
+ * exec role must run the tools-OFF branch AND force tools off for the turn, so
+ * agent_run_ex cannot silently re-enable tools from the agent config (the codex
+ * "no content in final response" bug). */
+static void test_direct_delegate_no_tools_forces_no_tools(void)
+{
+   reset_last_response();
+   g_agent_run_calls = 0;
+   g_agent_tool_run_calls = 0;
+   g_force_no_tools = 0;
+   g_agent_run_seen_no_tools = 0;
+   int fds[2];
+   assert(pipe(fds) == 0);
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->fd = fds[1];
+   g_agent_response = "answer produced without tools";
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "review");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the direct delegate no-tools policy test prompt");
+   cJSON_AddFalseToObject(req, "tools");
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker);
+   assert(g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   close(fds[1]);
+   char buf[2048];
+   ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
+   assert(n >= 0);
+   buf[n] = '\0';
+   close(fds[0]);
+   db1_agent_job_t job;
+   assert(delegate_current_job(&job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
+   /* tools:false -> the no-tools branch (agent_run, not agent_run_with_tools)... */
+   assert(g_agent_run_calls == 1);
+   assert(g_agent_tool_run_calls == 0);
+   /* ...and the fix: tools were force-disabled for the turn. */
+   assert(g_agent_run_seen_no_tools == 1);
+   /* the override is cleared again after the run. */
+   assert(g_force_no_tools == 0);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_direct_delegate_no_tools_forces_no_tools\n");
+}
+
 static void test_direct_delegate_one_turn_diagnose_suppresses_default_tools(void)
 {
    reset_last_response();
@@ -3224,6 +3287,7 @@ int main(void)
    test_direct_delegate_review_auto_tools_uses_tools();
    test_direct_delegate_reviewer_alias_auto_tools_uses_tools();
    test_direct_delegate_explicit_tools_forces_tools();
+   test_direct_delegate_no_tools_forces_no_tools();
    test_direct_delegate_one_turn_diagnose_suppresses_default_tools();
    test_readonly_code_delegate_disables_write_enforce();
    test_readonly_refactor_delegate_disables_write_enforce();

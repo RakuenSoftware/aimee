@@ -198,6 +198,13 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    return rc;
 }
 
+/* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
+static __thread int tl_force_no_tools = 0;
+void agent_run_force_no_tools(int on)
+{
+   tl_force_no_tools = on ? 1 : 0;
+}
+
 int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
                  const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
 {
@@ -239,8 +246,12 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          break;       /* no viable agent remains */
       }
 
-      int use_tools =
-          agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
+      /* tl_force_no_tools: the delegate no-tools path (CLI --no-tools ->
+       * force_tools=0) sets this so a tools-capable agent on an exec role does
+       * not silently re-enable tools here and ignore the caller's decision. */
+      int use_tools = tl_force_no_tools ? 0
+                                        : (agent_uses_provider_cli(ag) ||
+                                           (ag->tools_enabled && agent_is_exec_role(ag, role)));
       agent_apply_runtime_config(ag);
       ag->ablation = cfg->ablation;
       ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;

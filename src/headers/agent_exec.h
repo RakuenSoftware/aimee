@@ -27,6 +27,15 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
               const char *user_prompt, int max_tokens, agent_result_t *out);
 
+/* Per-thread override of agent_run/agent_run_ex tool-mode inference. agent_run_ex
+ * normally derives use_tools from the routed agent's config (tools_enabled +
+ * exec-role); a delegate that decided tools-OFF (CLI --no-tools -> force_tools=0)
+ * calls agent_run, so that inference would re-enable tools and ignore the
+ * decision. The delegate no-tools path sets this to 1 around its agent_run call
+ * to force use_tools=0 for the turn, then clears it. Scoped per-thread so
+ * agent_run's other ~28 callers are unaffected. */
+void agent_run_force_no_tools(int on);
+
 /* Like agent_run, but with an explicit sampling temperature. agent_run is the
  * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are
  * byte-unchanged; the parallel fan-out path uses this to honour a per-task
