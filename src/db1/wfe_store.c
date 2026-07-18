@@ -511,6 +511,34 @@ int db1_work_item_clear_pause_if(const char *wi, const char *expect_reason,
    return sqlite3_changes(db) > 0 ? 1 : 0; /* 1 = won the clear, 0 = row no longer matched */
 }
 
+int db1_work_item_reap_stale_parks(long grace_secs)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || grace_secs <= 0)
+      return 0;
+   /* Backstop reaper: make TERMINAL any autonomous run parked in a runaway/failure
+    * backstop (stuck / turn-|wall-cap / budget) older than grace_secs, so a dead run
+    * cannot linger 'active' forever holding a worktree + agent-scheduling weight.
+    * Human-review parks (pending_human) and operator_paused are LEGITIMATE waits —
+    * a person is expected to act — and are NEVER reaped here; only self-clearing
+    * parks (ci_pending / merge_pending / panel_*) are likewise left to the sweep. */
+   static const char *sql =
+       "UPDATE lifecycle_work_item SET state='abandoned', updated_at=datetime('now') "
+       "WHERE state='active' AND mode='autonomous' "
+       "AND pause_reason IN ('stuck','wall_cap_exceeded','turn_cap_exceeded','budget_exceeded') "
+       "AND updated_at < datetime('now', ?)";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return 0;
+   char window[48];
+   snprintf(window, sizeof window, "-%ld seconds", grace_secs);
+   sqlite3_bind_text(st, 1, window, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int reaped = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
+   sqlite3_finalize(st);
+   return reaped;
+}
+
 int db1_work_item_delete(const char *wi)
 {
    if (!wi || !wi[0])

@@ -144,6 +144,15 @@ int db1_work_item_inc_override(const char *work_item_id); /* returns new count, 
  * worktree). */
 int db1_work_item_delete(const char *work_item_id);
 
+/* Backstop reaper: abandon (make terminal) any autonomous run parked in a
+ * runaway/failure backstop (stuck / turn_cap_exceeded / wall_cap_exceeded /
+ * budget_exceeded) whose last update is older than grace_secs, so a dead run does
+ * not linger 'active' forever. Human-review parks (pending_human) and
+ * operator_paused are legitimate waits and are NOT reaped. grace_secs <= 0
+ * disables. Returns the number of runs reaped. The scheduler's terminal walk then
+ * tears down each reaped run's worktree on the next sweep. */
+int db1_work_item_reap_stale_parks(long grace_secs);
+
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
 int db1_work_item_list(db1_work_item_t **out);
 
