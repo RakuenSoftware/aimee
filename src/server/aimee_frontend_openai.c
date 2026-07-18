@@ -66,7 +66,38 @@ static int append_openai_content(const cJSON *content, aimee_block_t **blocks, i
       {
          b->type = AIMEE_BLK_IMAGE;
          const cJSON *iu = cJSON_GetObjectItemCaseSensitive((cJSON *)el, "image_url");
-         b->media_ref = dupstr(iu ? ostr(iu, "url") : NULL);
+         const char *url = iu ? ostr(iu, "url") : NULL;
+/* Canonicalize an inline base64 data: URL into the structured media_type + base64
+ * data form the Anthropic egress emits, so an OpenAI-sourced inline image serializes
+ * identically to an Anthropic-sourced one. The RFC-2397 shape is
+ * "data:<media_type>;base64,<data>": the FIRST comma delimits the header from the
+ * data, and the header must end with ";base64". Anything else (plain http(s) URL, a
+ * non-base64 data URL, or a ";base64," that appears only inside the payload after the
+ * comma) is kept as a url reference verbatim -- Anthropic has no data:-url image form,
+ * so there is no cross-protocol counterpart to canonicalize toward. */
+#define DATA_URL_PREFIX_LEN 5 /* strlen("data:") */
+#define B64_SUFFIX          ";base64"
+#define B64_SUFFIX_LEN      7 /* strlen(";base64") */
+         const char *comma = url ? strchr(url, ',') : NULL;
+         int decomposed = 0;
+         if (url && strncmp(url, "data:", DATA_URL_PREFIX_LEN) == 0 && comma)
+         {
+            const char *hdr = url + DATA_URL_PREFIX_LEN;
+            size_t hdr_len = (size_t)(comma - hdr);
+            if (hdr_len > B64_SUFFIX_LEN &&
+                strncmp(comma - B64_SUFFIX_LEN, B64_SUFFIX, B64_SUFFIX_LEN) == 0)
+            {
+               size_t mt_len = hdr_len - B64_SUFFIX_LEN; /* media_type before ";base64" */
+               b->media_type = strndup(hdr, mt_len);
+               b->media_ref = strdup(comma + 1);
+               decomposed = 1;
+            }
+         }
+         if (!decomposed)
+            b->media_ref = dupstr(url);
+#undef DATA_URL_PREFIX_LEN
+#undef B64_SUFFIX
+#undef B64_SUFFIX_LEN
       }
       else /* text (default) */
       {
@@ -103,6 +134,21 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       out->temperature = temp->valuedouble;
       out->has_temperature = 1;
    }
+   const cJSON *top_p = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "top_p");
+   if (top_p && cJSON_IsNumber(top_p))
+   {
+      out->top_p = top_p->valuedouble;
+      out->has_top_p = 1;
+   }
+   const cJSON *top_k = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "top_k");
+   if (top_k && cJSON_IsNumber(top_k))
+   {
+      out->top_k = top_k->valueint;
+      out->has_top_k = 1;
+   }
+   const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
+   if (meta && !cJSON_IsNull(meta))
+      out->metadata = cJSON_Duplicate(meta, 1);
    const cJSON *stream = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stream");
    out->stream = (stream && cJSON_IsTrue(stream)) ? 1 : 0;
 

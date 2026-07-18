@@ -17,6 +17,7 @@ void aimee_block_free_contents(aimee_block_t *b)
    if (!b)
       return;
    free_str(b->text);
+   free_str(b->thinking_signature);
    free_str(b->tool_id);
    free_str(b->tool_name);
    cJSON_Delete(b->tool_input);
@@ -71,6 +72,9 @@ void aimee_request_free(aimee_request_t *r)
       free(r->tools);
    }
    cJSON_Delete(r->tool_choice);
+   cJSON_Delete(r->metadata);
+   free_str(r->service_tier);
+   cJSON_Delete(r->thinking);
    if (r->stop_sequences)
    {
       for (int i = 0; i < r->n_stop; i++)
@@ -174,8 +178,9 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    switch (a->type)
    {
    case AIMEE_BLK_TEXT:
-   case AIMEE_BLK_THINKING:
       return str_eq(a->text, b->text);
+   case AIMEE_BLK_THINKING:
+      return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature);
    case AIMEE_BLK_TOOL_USE:
       return str_eq(a->tool_id, b->tool_id) && str_eq(a->tool_name, b->tool_name) &&
              json_eq(a->tool_input, b->tool_input);
@@ -237,6 +242,16 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
       return 0;
    if (a->has_temperature != b->has_temperature ||
        (a->has_temperature && a->temperature != b->temperature))
+      return 0;
+   if (a->has_top_p != b->has_top_p || (a->has_top_p && a->top_p != b->top_p))
+      return 0;
+   if (a->has_top_k != b->has_top_k || (a->has_top_k && a->top_k != b->top_k))
+      return 0;
+   if (!json_eq(a->metadata, b->metadata))
+      return 0;
+   if (!str_eq(a->service_tier, b->service_tier))
+      return 0;
+   if (!json_eq(a->thinking, b->thinking))
       return 0;
    if (a->stream != b->stream || a->n_stop != b->n_stop)
       return 0;
