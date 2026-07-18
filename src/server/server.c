@@ -20,8 +20,9 @@
 #include "wfe_native_gate.h" /* wfe_shell_invokes_git — the shell-git classifier */
 #include "turn_registry.h"
 #include "server_http.h"
-#include "server_tls.h" /* server_http_api_status_report */
-#include "config.h"     /* config_t / config_load for api.status, api.enable */
+#include "server_tls.h"    /* server_http_api_status_report */
+#include "config.h"        /* config_t / config_load for api.status, api.enable */
+#include "aimee_backend.h" /* aimee_backend_anthropic_set_cache_enabled (economizer tier) */
 #include "delegate_backend_docker.h"
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
@@ -2317,8 +2318,19 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    server_vault_bootstrap();
    return 0;
 }
+/* Push the economizer tier's runtime effects that live outside config_t readers -- the
+ * Anthropic-egress caching gate (off -> no cache markers). Called at startup and after
+ * every config reload so `economizer` takes effect live. */
+static void server_sync_economizer_runtime(void)
+{
+   config_t cfg;
+   if (config_load(&cfg) == 0)
+      aimee_backend_anthropic_set_cache_enabled(econ_tier(&cfg) != ECON_TIER_OFF);
+}
+
 int server_run(server_ctx_t *ctx)
 {
+   server_sync_economizer_runtime(); /* apply economizer=off caching gate at startup */
    /* enforce-delegate-only: register the delegate-availability provider so the
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
@@ -2354,6 +2366,7 @@ int server_run(server_ctx_t *ctx)
          int rc = config_reload();
          aimee_log(rc < 0 ? LOG_WARN : LOG_INFO, "config", "SIGHUP config reload: %s",
                    rc > 0 ? "applied" : (rc == 0 ? "no change" : "rejected (kept running config)"));
+         server_sync_economizer_runtime();
          /* Also live-reload the TLS cert (re-read cert/key + swap SSL_CTX) so a renewed cert
           * is picked up on SIGHUP without dropping the listener (live-config-reload). */
          (void)server_tls_reload();
@@ -2364,8 +2377,12 @@ int server_run(server_ctx_t *ctx)
        * written. No-op tick when the file is unchanged. */
       int cfg_rc = config_reload_if_changed();
       if (cfg_rc != 0)
+      {
          aimee_log(cfg_rc < 0 ? LOG_WARN : LOG_INFO, "config", "config file change: %s",
                    cfg_rc > 0 ? "reloaded" : "rejected (kept running config)");
+         if (cfg_rc > 0)
+            server_sync_economizer_runtime();
+      }
    }
    return 0;
 }

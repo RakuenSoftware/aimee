@@ -17,6 +17,11 @@ struct cJSON;
  * the caller owns (cJSON_Delete), or NULL on bad args. */
 struct cJSON *anthropic_backend_build(const aimee_request_t *ir);
 
+/* Economizer caching gate for the Anthropic egress. The server sets this from the
+ * economizer tier (off -> 0, disabling all aimee cache_control; safe/aggressive -> 1).
+ * Default 1 (caching on). Kept as a runtime flag so this pure TU needs no config. */
+void aimee_backend_anthropic_set_cache_enabled(int on);
+
 /* Parse an Anthropic Messages API response into the IR. Returns 0 (out owned by
  * caller -> aimee_response_free), -1 on error. */
 int anthropic_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err,

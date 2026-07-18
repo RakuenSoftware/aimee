@@ -166,6 +166,28 @@ int main(void)
       free(e);
    }
 
+   /* economizer=off: the caching gate is disabled -> the Anthropic egress carries NO
+    * cache_control at all, yet is STILL byte-identical across source protocols (the
+    * verbatim, uncached, deterministic passthrough). Restore caching afterwards. */
+   aimee_backend_anthropic_set_cache_enabled(0);
+   {
+      char *a = egress("{\"model\":\"m\",\"max_tokens\":8,"
+                       "\"system\":[{\"type\":\"text\",\"text\":\"sys\"}],"
+                       "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\","
+                       "\"text\":\"hi\"}]}]}",
+                       0);
+      char *o = egress("{\"model\":\"m\",\"max_tokens\":8,"
+                       "\"messages\":[{\"role\":\"system\",\"content\":\"sys\"},"
+                       "{\"role\":\"user\",\"content\":\"hi\"}]}",
+                       1);
+      assert(a && o && strcmp(a, o) == 0);        /* still cross-source identical */
+      assert(strstr(a, "cache_control") == NULL); /* no markers when economizer=off */
+      free(a);
+      free(o);
+      printf("  economizer-off-disables-cache OK\n");
+   }
+   aimee_backend_anthropic_set_cache_enabled(1); /* restore default (caching on) */
+
    printf("all cross-protocol egress byte-identity checks passed\n");
    return 0;
 }

@@ -46,10 +46,27 @@ static void strip_cache_control(cJSON *arr)
    }
 }
 
+/* The economizer's SAFE/AGGRESSIVE caching is on by default; the server flips it to 0
+ * when economizer=off (a pure verbatim passthrough with no cache markers). Kept as a
+ * server-set flag so the pure backend TU stays free of config linkage; minimal-link
+ * tests get the default (caching on), matching the cross-protocol byte-identity gate. */
+/* volatile: written on the server main loop (config reload), read on request threads.
+ * A single aligned 0/1 int -- volatile prevents the compiler caching a stale value; no
+ * torn reads are possible for the width, so no heavier atomic is warranted. */
+static volatile int g_anthropic_cache_enabled = 1;
+
+void aimee_backend_anthropic_set_cache_enabled(int on)
+{
+   g_anthropic_cache_enabled = on ? 1 : 0;
+}
+
 static void mark_cache_prefix(cJSON *arr)
 {
+   /* Always strip client/leaked markers so the egress is source-independent and
+    * deterministic; only ADD the aimee breakpoint when caching is enabled. When off,
+    * the request carries no cache_control at all (verbatim, uncached, still stable). */
    strip_cache_control(arr);
-   if (!cJSON_IsArray(arr))
+   if (!g_anthropic_cache_enabled || !cJSON_IsArray(arr))
       return;
    int n = cJSON_GetArraySize(arr);
    if (n <= 0)
