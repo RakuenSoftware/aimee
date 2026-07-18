@@ -55,6 +55,31 @@ static long wfe_sched_concurrency(void)
    return 8;
 }
 
+/* Whether the autonomy scheduler should hand this active item a worker slot.
+ *
+ * A step WAITING on external action holds no agent and does no work — it just
+ * waits — so it must NOT be driven. Driving a parked item only burns a scheduler
+ * slot to reach a no-op advance (wfe_engine_advance returns PENDING on a still-set
+ * pause), which STARVES genuinely-runnable runs when parked items pile up (a fleet
+ * of pending_human proposals could hold every worker slot forever). Two kinds are
+ * driveable:
+ *   - un-parked (pause_reason empty): the next step is ready to run;
+ *   - a SELF-RESOLVING park the sweep exists to re-check: ci_pending / merge_pending
+ *     re-poll the forge, panel_degraded / panel_unreachable retry a flaky panel.
+ * Every other park either waits for a HUMAN (pending_human, operator_paused) or is
+ * a runaway/failure backstop only a human (or the stale-run reaper) clears (stuck,
+ * turn_cap_exceeded, wall_cap_exceeded, budget_exceeded, max_attempts, failed).
+ * Those hold NO agent: the gate/resume API clears the pause and wakes the
+ * scheduler, and the next sweep sees it un-parked and drives it. */
+static int wfe_sched_driveable(const char *pause_reason)
+{
+   if (!pause_reason || !pause_reason[0])
+      return 1;
+   return strcmp(pause_reason, "ci_pending") == 0 || strcmp(pause_reason, "merge_pending") == 0 ||
+          strcmp(pause_reason, "panel_degraded") == 0 ||
+          strcmp(pause_reason, "panel_unreachable") == 0;
+}
+
 /* Stage class for sweep priority: LOWER runs first. Downstream-first ("drain
  * the pipe"): an item at a gate/forge stage is a finished diff waiting on
  * review/CI/merge, while every impl delegate launched competes with panel
@@ -114,6 +139,27 @@ void wfe_scheduler_run_once(void)
     * the busiest items eat every sweep and starve the rest (observed live: 2 of
     * 13 slices monopolized 3.5h of sweeps). With the parallel pass below the
     * order decides who gets a worker FIRST when items outnumber workers. */
+   /* Backstop reaper (before the drive walk, so a freshly-reaped run's worktree is
+    * torn down in this same sweep's terminal-cleanup pass below): abandon dead
+    * autonomous runs parked in a runaway/failure backstop past a grace window, so
+    * they cannot linger 'active' forever. Legitimate human waits (pending_human /
+    * operator_paused) are never reaped. Default 1h; AIMEE_AUTONOMY_STALE_ABANDON_SECS
+    * overrides, 0 disables. */
+   {
+      long grace = 3600;
+      const char *g = getenv("AIMEE_AUTONOMY_STALE_ABANDON_SECS");
+      if (g && g[0])
+      {
+         char *end = NULL;
+         long v = strtol(g, &end, 10);
+         if (end && *end == '\0' && v >= 0)
+            grace = v;
+      }
+      int reaped = db1_work_item_reap_stale_parks(grace);
+      if (reaped > 0)
+         aimee_log(LOG_INFO, "wfe-sched", "reaped %d stale-parked run(s) -> abandoned", reaped);
+   }
+
    db1_work_item_t *items = NULL;
    int n = db1_work_item_list_lru(&items);
    if (n <= 0 || !items)
@@ -145,6 +191,9 @@ void wfe_scheduler_run_once(void)
          continue; /* any other non-terminal state: leave it (don't reap its worktree) */
       if (strcmp(items[i].mode, "autonomous") != 0)
          continue; /* interactive items are human-driven in the webchat */
+      if (!wfe_sched_driveable(items[i].pause_reason))
+         continue; /* parked on a human/dead gate: no agent, just waits (a gate/resume
+                    * API or the reaper moves it) — driving it only starves runnable runs */
       if (run)
          run[run_n++] = items[i];
    }
