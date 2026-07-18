@@ -476,19 +476,20 @@ int config_save(const config_t *cfg)
       cJSON *rcap = cJSON_AddObjectToObject(root, "reasoning_cap");
       cJSON_AddBoolToObject(rcap, "enabled", cfg->reasoning_cap_enabled ? 1 : 0);
    }
-   if (cfg->dedup_enabled || cfg->dedup_window_seconds != 5)
+   if (!cfg->dedup_enabled || cfg->dedup_window_seconds != 5) /* default-on: persist the opt-out */
    {
       cJSON *ddp = cJSON_AddObjectToObject(root, "dedup");
       cJSON_AddBoolToObject(ddp, "enabled", cfg->dedup_enabled ? 1 : 0);
       cJSON_AddNumberToObject(ddp, "window_seconds", cfg->dedup_window_seconds);
    }
-   if (cfg->cache_shaping_enabled || cfg->cache_min_chars != 0)
+   if (!cfg->cache_shaping_enabled || cfg->cache_min_chars != 0) /* default-on: persist opt-out */
    {
       cJSON *csh = cJSON_AddObjectToObject(root, "cache_shaping");
       cJSON_AddBoolToObject(csh, "enabled", cfg->cache_shaping_enabled ? 1 : 0);
       cJSON_AddNumberToObject(csh, "min_chars", cfg->cache_min_chars);
    }
-   if (cfg->ingress_usage_accounting_enabled || cfg->ingress_audit_async ||
+   /* usage_accounting + audit_async are default-on: persist only an opt-out of either. */
+   if (!cfg->ingress_usage_accounting_enabled || !cfg->ingress_audit_async ||
        cfg->ingress_trusted_proxy_secret[0])
    {
       cJSON *ing = cJSON_AddObjectToObject(root, "ingress");

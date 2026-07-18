@@ -1276,7 +1276,7 @@ typedef struct config
    int reasoning_cap_enabled;
 
    /* Short-window response dedup for buffered ingress (response_dedup.*; §4).
-    * dedup_enabled: 0 = off (default), 1 = on. When on, a re-sent identical
+    * dedup_enabled: 1 = on (default), 0 = off. When on, a re-sent identical
     * buffered, non-streaming, tool-free completion carrying an explicit
     * Idempotency-Key is served from a small TTL cache instead of paying for the
     * provider call again; the avoided call is recorded as usage_kind=avoided
@@ -1285,7 +1285,7 @@ typedef struct config
    int dedup_enabled;
 
    /* Cache-aware request shaping for the aimee-owned Anthropic path (§3).
-    * cache_shaping_enabled: 0 = off (default), 1 = on. When on, the tool-bearing
+    * cache_shaping_enabled: 1 = on (default), 0 = off. When on, the tool-bearing
     * Anthropic request builder marks the aimee-owned system prefix cacheable
     * (cache_control: ephemeral content block), matching the no-tools path, so the
     * provider caches the stable system prompt across calls. Anthropic-only; never
@@ -1293,11 +1293,12 @@ typedef struct config
    int cache_shaping_enabled;
 
    /* Ingress cost-accounting rollout knobs (ingress.*; §2/§4/#3).
-    * ingress_usage_accounting_enabled: 0 = off (default), 1 = on. Master gate for
+    * ingress_usage_accounting_enabled: 1 = on (default), 0 = off. Master gate for
     *   writing ingress cost rows (OpenAI/Codex + Anthropic /v1/messages + /v1/runs).
-    *   Off by default per the flag-rollout program; flip to begin accounting.
-    * ingress_audit_async: 0 = write the cost row inline (default), 1 = hand it to
-    *   a background writer so the response is not blocked on the DB insert.
+    *   Default-on so accounting runs out of the box; set false to opt out.
+    * ingress_audit_async: 1 = hand the cost row to a background writer so the response
+    *   is not blocked on the DB insert (default); 0 = write inline. Pairs with
+    *   usage_accounting so the default-on accounting write stays off the response path.
     * ingress_trusted_proxy_secret: shared secret that authorises a front proxy to
     *   stamp X-Aimee-Principal / X-Aimee-Source on a request. EMPTY (default) means
     *   NO client-supplied principal/source is ever trusted — the server derives the
