@@ -19,15 +19,24 @@ def _proposals_root() -> str:
 def _list_files(dir_path: str) -> list[str]:
     if not os.path.isdir(dir_path):
         return []
-    entries = sorted(os.listdir(dir_path))
-    return [
-        os.path.join(dir_path, name)
-        for name in entries
-        if os.path.isfile(os.path.join(dir_path, name))
-    ]
+    # Use os.scandir so we can classify entries without following symlinks;
+    # following them would let a link under pending/ or done/ cause us to
+    # read content from outside docs/proposals, violating the read scope.
+    candidates: list[str] = []
+    with os.scandir(dir_path) as it:
+        for entry in it:
+            if entry.is_file(follow_symlinks=False):
+                candidates.append(entry.path)
+    candidates.sort()
+    return candidates
 
 
 def _count_words(files: list[str]) -> int:
+    # "words" is defined as whitespace-separated tokens (str.split() with no
+    # arguments). This matches any run of whitespace as a single delimiter
+    # and intentionally double-counts hyphenated tokens like "state-machine"
+    # as two tokens; callers comparing pending_words across runs see the
+    # same definition each time.
     total = 0
     for path in files:
         try:
