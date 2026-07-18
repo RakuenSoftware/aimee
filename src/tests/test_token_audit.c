@@ -302,6 +302,9 @@ static void test_record_token_audit_ingress_source(void)
    r.completion_tokens = 1000;
    r.success = 1;
    agent_record_token_audit(&r, "", "openai-ingress");
+   /* ingress_audit_async defaults ON, so the row is enqueued to the background writer;
+    * drain it before reading back (the server drains the same queue at shutdown). */
+   agent_audit_async_flush();
 
    /* requested model recorded separately from served; stop_reason captured;
     * usage_kind defaults to "realized". */
@@ -338,6 +341,7 @@ static void test_ingress_source_override(void)
    r.completion_tokens = 50;
    agent_record_token_audit(&r, "execute", "agent"); /* caller passes "agent" */
    agent_set_ingress_source("");                     /* clear for later tests */
+   agent_audit_async_flush(); /* drain the async ingress row before read-back */
 
    assert(count_where("tool_name", "runbot") == 1);
    sqlite3_stmt *st = NULL;
@@ -590,6 +594,7 @@ static void test_trusted_source_overrides_ingress(void)
    agent_record_token_audit(&internal, "", "agent"); /* internal -> stays agent */
 
    request_context_clear();
+   agent_audit_async_flush(); /* drain the async ingress row before read-back */
 
    /* The ingress row took the trusted source; the agent row did not. */
    sqlite3_stmt *st = NULL;
@@ -625,6 +630,7 @@ static void test_ingress_session_attribution(void)
    r.prompt_tokens = 10;
    agent_record_token_audit(&r, "", "openai-ingress");
    request_context_clear();
+   agent_audit_async_flush(); /* drain the async ingress row before read-back */
 
    sqlite3_stmt *st = NULL;
    assert(sqlite3_prepare_v2(db1_conn(),

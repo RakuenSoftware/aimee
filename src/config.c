@@ -755,10 +755,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->cost_reward_lambda_pct = 30;
    cfg->cost_reward_ref_usd_milli = 500;
    cfg->reasoning_cap_enabled = 0;
-   cfg->dedup_enabled = 0;
-   cfg->cache_shaping_enabled = 0;
-   cfg->ingress_usage_accounting_enabled = 0;
-   cfg->ingress_audit_async = 0;
+   cfg->dedup_enabled = 1;         /* default-ON: only acts on caller Idempotency-Key requests */
+   cfg->cache_shaping_enabled = 1; /* default-ON: cost win, marks aimee's own Anthropic prefix */
+   cfg->ingress_usage_accounting_enabled = 1; /* default-ON: begin ingress cost accounting */
+   cfg->ingress_audit_async = 1; /* default-ON: keep the cost-row write off the response path */
    cfg->ingress_trusted_proxy_secret[0] = '\0';
    cfg->dedup_window_seconds = 5;
    cfg->cache_min_chars = 0;
