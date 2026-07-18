@@ -51,8 +51,9 @@ void tool_condense_stats_reset(void)
 
 int tool_condense_enabled(const config_t *cfg)
 {
-   /* safe-tier lever, gated by the P3 master switch: economizer.enabled off = one kill. */
-   return cfg && cfg->economizer_enabled && cfg->reduce_command_filter ? 1 : 0;
+   /* safe-tier lever, gated by the P3 master switch: master off = one kill. Resolve the master
+    * through econ_reduction_master_on so the modules.economizer toggle is honored here too. */
+   return econ_reduction_master_on(cfg) && cfg->reduce_command_filter ? 1 : 0;
 }
 
 /* ---- command recognition (Slice 2) ---- */

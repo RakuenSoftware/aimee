@@ -626,6 +626,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->module_governance = -1;
    cfg->module_delegates = -1;
    cfg->module_workflows = -1;
+   cfg->module_economizer = -1;
    /* command-aware tool-output condensation: DEFAULT-ON (P1c). Safe-tier lever — it passes
     * the deterministic gate: lossless-on-demand (full output spilled), fail-open (any
     * miss/decline -> raw), and a no-over-reduction audit (failures/diagnostics + their
@@ -953,7 +954,12 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
 
 int econ_reduction_master_on(const config_t *cfg)
 {
-   return cfg && cfg->economizer_enabled ? 1 : 0;
+   /* The economizer's master gate is a pluggable-module toggle like the other four: the
+    * modules.economizer tristate is canonical when set (0/1); -1 (unspecified) falls back to
+    * the legacy economizer.enabled bool, which plays the "deprecated default" role env plays
+    * for memory/governance/delegates/workflows. Every economizer sub-predicate routes through
+    * here, so modules.economizer:false is one authoritative kill. */
+   return cfg ? config_module_enabled(cfg->module_economizer, cfg->economizer_enabled) : 0;
 }
 
 int config_module_enabled(int config_tristate, int env_default)
@@ -970,7 +976,7 @@ int econ_gateway_mutate_on(const config_t *cfg)
 {
    /* the live-primary mutator needs the master ON, the aggressive tier opted IN, AND the
     * lever itself set — the aggressive flag alone never activates a live-traffic mutator. */
-   return cfg && cfg->economizer_enabled && cfg->economizer_aggressive && cfg->reduce_gateway_mutate
+   return econ_reduction_master_on(cfg) && cfg->economizer_aggressive && cfg->reduce_gateway_mutate
               ? 1
               : 0;
 }

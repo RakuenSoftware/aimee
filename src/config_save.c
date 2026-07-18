@@ -53,7 +53,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
     * operator actually set, so an untouched config never sprouts a modules: block and the
     * resolver's env/default fallback stays in effect for the rest. */
    if (cfg->module_memory != -1 || cfg->module_governance != -1 || cfg->module_delegates != -1 ||
-       cfg->module_workflows != -1)
+       cfg->module_workflows != -1 || cfg->module_economizer != -1)
    {
       cJSON *m = cJSON_AddObjectToObject(root, "modules");
       if (m)
@@ -66,6 +66,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddBoolToObject(m, "delegates", cfg->module_delegates ? 1 : 0);
          if (cfg->module_workflows != -1)
             cJSON_AddBoolToObject(m, "workflows", cfg->module_workflows ? 1 : 0);
+         if (cfg->module_economizer != -1)
+            cJSON_AddBoolToObject(m, "economizer", cfg->module_economizer ? 1 : 0);
       }
    }
 

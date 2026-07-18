@@ -201,7 +201,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
    /* P3: surface suppressed intent — an explicit lever the two-tier switches override, so an
     * operator is never silently ignored (per the two-tier design's startup-WARN ruling). */
-   if (!cfg.economizer_enabled &&
+   if (!econ_reduction_master_on(&cfg) &&
        (cfg.reduce_history_fold || cfg.reduce_compress || cfg.reduce_command_filter))
       aimee_log(LOG_WARN, "economizer",
                 "economizer.enabled=false MASTER-KILL: all reduction is off (measure still "
