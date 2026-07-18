@@ -138,11 +138,17 @@ kb exposes standardized surfaces for the org's own observability stack:
 - **Traces (optional):** OTLP spans for the egress path (server → kb → vendor) so an
   org can see end-to-end latency.
 The export projection is **explicit and content-free**: only token counts, USD cost,
-latency, model id, team id, and `cert_cn` are exported; content-bearing `org_token_audit`
-columns (prompt/completion bodies, message text, tool args) are **excluded by projection,
-not by redaction**, so an OTLP/Prometheus consumer cannot be configured to ingest content
-by accident (AC: a synthetic record with content columns populated never surfaces them on
-any export). These export surfaces are **authenticated, authorized, and tenant-isolated** — not
+latency, model id, team id, and an **opaque `server_id`** are exported. Raw `cert_cn`
+(and any other natural identifier — hostname, username) is a **transient authentication
+input only**: kb maps it to a **stable opaque `server_id` at ingress** and
+persists/exports **only that surrogate**, so a CN carrying a username or hostname never
+enters persisted or exported multi-tenant telemetry (PII invariant #7). Payload-supplied
+origin fields are **rejected**, not trusted. Content-bearing `org_token_audit` columns
+(prompt/completion bodies, message text, tool args) are **excluded by projection, not by
+redaction**, so an OTLP/Prometheus consumer cannot be configured to ingest content by
+accident (AC: a synthetic record with a **PII-bearing CN** and populated content columns
+surfaces **neither** the raw CN nor content on any export surface — Postgres rows, OTLP,
+Prometheus labels, logs, or deletion-audit records). These export surfaces are **authenticated, authorized, and tenant-isolated** — not
 open scrape targets: `/metrics`, OTLP, and log export require mTLS or OIDC, are gated
 by an org-admin/team-lead capability, and a team-scoped consumer sees **only its own
 team's series** (the same team-scoped predicate / RLS as the P3 spend reads, invariant

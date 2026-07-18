@@ -128,14 +128,19 @@ server (existing TOFU pin), server verifies client (`mtls_verify_cb`).
   authoritative origin at kb (invariant #7); the thin-client's identity is authoritative
   only if it rides a kb-verifiable actor token — a client cert alone does not make the
   forwarded human identity authoritative.
-- Capability gating (`server_http_conn_caps`, `server_http.c:334-347`) can grant
-  a `cert:CN`-attested client more than a bearer-only one — e.g. `remote_writes`
-  without the current UDS-only restriction, since the caller is now strongly
-  identified. **In `optional` mode this asymmetry is enforced, not incidental:** a
-  bearer-only client is capped to a floor capability set and **never** receives the
-  elevated capabilities (`remote_writes` etc.) reserved for `cert:CN`-attested
-  callers — so accepting bearer during the migration window cannot be used to
-  exercise cert-level privilege. Elevation strictly requires cert attestation.
+- **Thin-client mTLS changes *authentication and revocation*, never the capability
+  boundary.** A `cert:CN`-attested thin-client is a **strongly-identified session
+  caller**, not a privileged one: it still **never** gains `remote_writes` or any
+  network config-mutation capability — that boundary stays exactly where the UDS-only
+  rule puts it, and privileged network writes remain reserved for **P5's
+  separately-scoped kb-management cert + operator OIDC**, not the thin-client link. What
+  cert attestation buys over bearer, and *only* this, is a **stronger auth floor**: in
+  `optional` mode a bearer-only client is capped to the read-only floor set, while a
+  cert-attested client is trusted for the full **non-privileged** session surface with
+  per-request revocation. The asymmetry is in *authentication strength and revocability*,
+  never in reaching a write endpoint the UDS-only rule forbids. (`server_http_conn_caps`,
+  `server_http.c:334-347` gates this; a test asserts **both** bearer-only and
+  thin-client-cert callers are denied every network remote-write endpoint.)
 
 ## §4 Shipped-config defaults
 
