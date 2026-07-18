@@ -6,11 +6,28 @@
 #define DEC_GW_STAGE_MEMORY_H
 
 #include "gateway_pipeline.h"
+#include "aimee_ir.h" /* aimee_request_t: the IR the transform edits */
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+   /* The IR-native memory transform (universal-gateway P4 / IR-canonical funnel):
+    * the protocol-neutral replacement for gw_stage_memory's three per-wire arms.
+    * Fires ONCE at the single request-transform seam (aimee_ir_apply_request_stages),
+    * after frontend_parse and before backend_build, so it acts on the typed IR
+    * regardless of client wire. Derives the recall query from the IR's last user
+    * message (aimee_ir_last_user_text), builds the <aimee-context> envelope, and
+    * appends it as a trailing system TEXT block on `ir->system` — cache-safe (the
+    * cached prefix blocks are untouched; the new block carries no cache_control and
+    * no raw sidecar, so a byte-faithful backend re-serializes it from the typed
+    * field). `ud` is unused (the query comes from the IR). Conforms to
+    * aimee_ir_transform_fn: returns 1 iff it appended a block (so the runner marks
+    * ir->mutated and the stale raw sidecar is dropped), 0 on off/empty/no-query.
+    * The same-protocol Anthropic passthrough never reaches this seam (it ships the
+    * raw sidecar directly), so Arm A's parity-skip is structurally satisfied here. */
+   int ir_stage_memory(aimee_request_t *ir, void *ud);
 
    /* The shared memory stage. Renders the envelope into `r->raw` per
     * `r->mem_target`. The `ud` (stage user data) contract is per target:

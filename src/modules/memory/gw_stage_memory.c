@@ -9,11 +9,17 @@
  * trailing "\n\n" and silently change the provider request bytes. */
 #include "gw_stage_memory.h"
 #include "ingress_preinject.h"
+#include "aimee_ir.h"
 #include "cJSON.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <strings.h> /* strcasecmp */
 #include <string.h>
+
+/* Recall-query buffer for the IR transform. The query only feeds semantic KB
+ * recall, so bounding an over-long last-user message here is acceptable (it does
+ * not change what the model receives — only which memories are retrieved). */
+#define IR_MEMORY_QUERY_MAX 16384
 
 /* The Anthropic arm: build the <aimee-context> envelope from this turn's query
  * and fold it into the request's `system` so BOTH the Anthropic-native
@@ -135,6 +141,45 @@ int gw_stage_memory(gw_request_t *r, void *ud)
 
    assert(0 && "gw_stage_memory: unknown mem_target");
    return 0;
+}
+
+int ir_stage_memory(aimee_request_t *ir, void *ud)
+{
+   (void)ud; /* query comes from the IR, not per-call user data */
+   if (!ir)
+      return 0;
+
+   char *query = malloc(IR_MEMORY_QUERY_MAX);
+   if (!query)
+      return 0;
+   size_t qn = aimee_ir_last_user_text(ir, query, IR_MEMORY_QUERY_MAX);
+   if (qn == 0)
+   {
+      free(query); /* no user text -> no recall query -> no injection */
+      return 0;
+   }
+   char *env = ingress_preinject_build(query, 0);
+   free(query);
+   if (!env)
+      return 0; /* pre-injection off or recall empty: byte-identical no-op */
+
+   /* Append the envelope as a trailing system TEXT block. Grow the ordered block
+    * array by one; the new block owns `env` (freed by aimee_request_free) and
+    * carries no cache_control / raw sidecar so the backend serializes it from the
+    * typed field per wire — collapsing the old three per-wire arms into one. */
+   aimee_block_t *grown = realloc(ir->system, (size_t)(ir->n_system + 1) * sizeof *grown);
+   if (!grown)
+   {
+      free(env);
+      return 0;
+   }
+   ir->system = grown;
+   aimee_block_t *b = &ir->system[ir->n_system];
+   memset(b, 0, sizeof *b);
+   b->type = AIMEE_BLK_TEXT;
+   b->text = env;
+   ir->n_system += 1;
+   return 1; /* changed typed fields -> runner sets ir->mutated */
 }
 
 char *gw_memory_system_prompt(const char *query)

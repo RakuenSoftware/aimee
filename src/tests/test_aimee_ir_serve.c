@@ -12,6 +12,11 @@
 #include "aimee_ir_serve.h"
 #include "cJSON.h"
 
+/* The memory module + config toggles that aimee_ir_serve.c now references (memory is
+ * registered on the IR transform seam) are satisfied by tests/support/
+ * ir_seam_memory_stub.o -- stubbed DISABLED, so this build/translation-parity suite
+ * stays a minimal link and its byte-exact assertions are unchanged. */
+
 static const char *REQ =
     "{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":100,"
     "\"system\":[{\"type\":\"text\",\"text\":\"be helpful\"}],"

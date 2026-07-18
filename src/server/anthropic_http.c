@@ -335,11 +335,11 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
        .stream = stream,
        .allow_anthropic_inject = allow_anthropic_inject,
    };
-   /* Slice 7: build the enabled, ordered stage set from the catalog. Memory is a
-    * togglable module (AIMEE_STAGE_MEMORY); the registry omits it when disabled. */
+   /* Memory PORTED to the IR transform seam (aimee_ir_apply_request_stages): it now
+    * fires once on the typed IR after frontend_parse, so it is no longer a pre-IR
+    * wire-anchored stage here. This catalog keeps the stages that still act on the raw
+    * wire request (tool policing, routing, model pin). */
    const gw_stage_slot_t slots[] = {
-       {"memory", gw_stage_memory, NULL,
-        config_module_enabled(cfg_ok ? pcfg.module_memory : -1, gw_stage_memory_enabled())},
        {"tool_policing", gw_stage_tool_policing, NULL, 1},
        {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
        {"model_pin", gw_stage_model_pin, NULL, 1},

@@ -271,8 +271,11 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
 
 /* The SINGLE request-transform stage every ingress funnels through: all three
  * aimee_ir_serve build paths call this after frontend_parse and before
- * backend_build. Modules are registered HERE (one place) as they are ported onto the
- * IR. Empty today -> a no-op that leaves the request byte-identical to its sidecar. */
-void aimee_ir_apply_request_stages(aimee_request_t *ir);
+ * backend_build. Modules are registered HERE (one place, in aimee_ir_serve.c so the
+ * pure IR core stays free of module + config linkage) as they are ported onto the
+ * IR. `memory_enabled` is the caller-resolved gw_stage_memory toggle (config-store
+ * modules.memory -> env default), injected here exactly like the legacy stage
+ * catalogs so the transform stays config-free. */
+void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled);
 
 #endif /* DEC_AIMEE_IR_H */

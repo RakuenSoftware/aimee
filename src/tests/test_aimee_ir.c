@@ -187,9 +187,10 @@ int main(void)
       aimee_ir_run_transforms(&t, NULL, 0);     /* no-op */
       assert(t.mutated == 0);
 
-      /* the single apply hook has no transforms registered yet -> leaves ir unmutated */
-      aimee_ir_apply_request_stages(&t);
-      assert(t.mutated == 0);
+      /* aimee_ir_apply_request_stages (the single module-registration hook) now lives
+       * in the serve layer (aimee_ir_serve.c) and registers the ported memory module,
+       * so its behavior is covered by test_aimee_ir_serve; the pure core only owns the
+       * neutral runner exercised above. */
    }
 
    /* --- response accessors: the delegate path's replacement for
