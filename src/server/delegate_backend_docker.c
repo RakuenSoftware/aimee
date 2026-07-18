@@ -314,12 +314,60 @@ static int docker_read_gitlink(const char *gitfile, char *out, size_t outsz)
 }
 
 /* Add "<src>:<dst>[:ro]" to the state's mount list. */
+/* Translate a bind-mount SOURCE from this process's filesystem view to the docker
+ * DAEMON's view. Needed when aimee-server itself runs in a container and drives a
+ * SIBLING daemon (docker-in-docker / SmoothNAS LXC2Docker): a path like
+ * /var/lib/aimee/... exists inside aimee-server's container but NOT on the daemon's
+ * host, so binding `src:dst` with the container path silently mounts the wrong (or
+ * an empty) directory. The mapping comes from AIMEE_SANDBOX_HOST_MOUNTS, a
+ * comma-separated list of `<container-prefix>=<host-prefix>` pairs (longest match
+ * wins); the deploy sets it from the plugin's own bind mounts. Unset / no match =>
+ * the path is used unchanged, so ordinary same-host deploys are untouched. Only
+ * the source is translated — the destination (the path the delegate sees inside
+ * the sandbox) is deliberately left as-is. */
+static void docker_translate_host_source(const char *src, char *out, size_t cap)
+{
+   snprintf(out, cap, "%s", src ? src : "");
+   const char *map = getenv("AIMEE_SANDBOX_HOST_MOUNTS");
+   if (!map || !map[0] || !src || !src[0])
+      return;
+   size_t best_clen = 0;
+   char best[512] = "";
+   const char *p = map;
+   while (*p)
+   {
+      const char *comma = strchr(p, ',');
+      size_t plen = comma ? (size_t)(comma - p) : strlen(p);
+      const char *eq = memchr(p, '=', plen);
+      if (eq)
+      {
+         size_t clen = (size_t)(eq - p); /* container-prefix length */
+         const char *hpath = eq + 1;     /* host-prefix (to end of pair) */
+         size_t hlen = (size_t)(plen - clen - 1);
+         /* src must equal the prefix or continue with '/', so /var/lib/aimee never
+          * matches /var/lib/aimee-workspaces. */
+         if (clen > 0 && clen > best_clen && strncmp(src, p, clen) == 0 &&
+             (src[clen] == '/' || src[clen] == '\0') && hlen < sizeof(best))
+         {
+            memcpy(best, hpath, hlen);
+            best[hlen] = '\0';
+            best_clen = clen;
+         }
+      }
+      p = comma ? comma + 1 : p + plen;
+   }
+   if (best_clen > 0)
+      snprintf(out, cap, "%s%s", best, src + best_clen);
+}
+
 static int docker_add_mount(docker_state_t *st, const char *src, const char *dst, int ro)
 {
    if (st->mount_count >= (int)(sizeof(st->mounts) / sizeof(st->mounts[0])))
       return -1;
-   if ((size_t)snprintf(st->mounts[st->mount_count], sizeof(st->mounts[0]), "%s:%s%s", src, dst,
-                        ro ? ":ro" : "") >= sizeof(st->mounts[0]))
+   char host_src[1024];
+   docker_translate_host_source(src, host_src, sizeof host_src);
+   if ((size_t)snprintf(st->mounts[st->mount_count], sizeof(st->mounts[0]), "%s:%s%s", host_src,
+                        dst, ro ? ":ro" : "") >= sizeof(st->mounts[0]))
       return -1;
    st->mount_count++;
    return 0;
