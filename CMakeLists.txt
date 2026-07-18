@@ -859,12 +859,12 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
     ${AIMEE_SRC_DIR}/server/wfe_delegate_resolve.c
     ${AIMEE_SRC_DIR}/server/wfe_scheduler.c
-    ${AIMEE_SRC_DIR}/server/vault_principal.c
-    ${AIMEE_SRC_DIR}/server/vault_crypto.c
-    ${AIMEE_SRC_DIR}/server/vault_kek_cache.c
-    ${AIMEE_SRC_DIR}/server/vault_store.c
-    ${AIMEE_SRC_DIR}/server/vault_service.c
-    ${AIMEE_SRC_DIR}/server/vault_capability.c
+    ${AIMEE_SRC_DIR}/modules/vault/vault_principal.c
+    ${AIMEE_SRC_DIR}/modules/vault/vault_crypto.c
+    ${AIMEE_SRC_DIR}/modules/vault/vault_kek_cache.c
+    ${AIMEE_SRC_DIR}/modules/vault/vault_store.c
+    ${AIMEE_SRC_DIR}/modules/vault/vault_service.c
+    ${AIMEE_SRC_DIR}/modules/vault/vault_capability.c
     ${AIMEE_SRC_DIR}/server/server_vault.c
     ${AIMEE_SRC_DIR}/server/server_state.c
     ${AIMEE_SRC_DIR}/server/server_runner_endpoints.c
@@ -1087,7 +1087,7 @@ add_library(aimee-core STATIC
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}
-    ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/pipeline
+    ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
@@ -1097,12 +1097,12 @@ target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
 
 add_library(aimee-data STATIC ${DATA_SRCS})
-target_include_directories(aimee-data PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-data PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-data PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-data PUBLIC aimee-core ${ZSTD_LIBRARY})
 
 add_library(aimee-agent STATIC ${AGENT_SRCS})
-target_include_directories(aimee-agent PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-agent PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-agent PRIVATE ${AIMEE_COMMON_WARNINGS})
 if(OpenSSL_FOUND OR OPENSSL_FOUND)
     target_link_libraries(aimee-agent PUBLIC aimee-data aimee-core OpenSSL::SSL OpenSSL::Crypto)
@@ -1111,12 +1111,12 @@ else()
 endif()
 
 add_library(aimee-git STATIC ${GIT_SRCS})
-target_include_directories(aimee-git PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-git PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-git PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-git PUBLIC aimee-agent aimee-data aimee-core)
 
 add_library(aimee-cmd STATIC ${CMD_SRCS})
-target_include_directories(aimee-cmd PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-cmd PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-cmd PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-cmd PUBLIC aimee-git aimee-agent aimee-data aimee-core)
 if(WITH_UI)
@@ -1287,7 +1287,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/workflow/wfe_router_catalog.c
     ${AIMEE_SRC_DIR}/workflow/wfe_autonomous_route.c
 )
-target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2 ${AIMEE_SRC_DIR}/workflow)
+target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2 ${AIMEE_SRC_DIR}/workflow)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE Threads::Threads)
 if(NOT WIN32)
