@@ -6,9 +6,8 @@
 
 #include "../server/provider_catalog.c"
 
-/* Stub the co-located /v1 dispatch with a minimal single-agent slot counter, so
- * provider_catalog_concurrent_{acquire,release} exercise their real
- * server-authoritative path (the production path on the server) end-to-end. */
+/* Stub the co-located /v1 dispatch so provider_catalog's health/locality calls
+ * resolve without a live server. */
 static int g_stub_slots = 0;
 cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 {
