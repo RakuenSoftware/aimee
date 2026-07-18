@@ -17,7 +17,6 @@
 #include "agent.h"
 #include "agent_coord.h"
 #include "cmd_agent_delegate_impl.h"
-#include "compute_concurrency.h"
 #include "config.h"
 #include "token_tracker.h"
 #include "delegate_credential_retry.h"

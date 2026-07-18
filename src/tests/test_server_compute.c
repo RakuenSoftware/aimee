@@ -33,7 +33,6 @@ int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (
 /* server_compute.c's former .inc fragments are now sibling TUs; the white-box
  * test pulls them into this TU the same way it used to get them via the .inc. */
 #include "../server/server_compute_mailbox.c"
-#include "../server_compute_concurrency.c"
 #include "../server_compute_episodes.c"
 #include "../server/server_compute_roundtable.c"
 #include "../server/server_compute_async.c"
@@ -59,11 +58,6 @@ static int g_budget_last_grant = 0;
 static int g_agent_run_seen_compute_override = -999;
 static int g_agent_seen_compute_override = -999;
 static int g_agent_seen_budget_release_calls = -999;
-static int g_last_concurrency_priority = -999;
-static int g_concurrency_acquire_calls = 0;
-static int g_concurrency_release_calls = 0;
-static int g_concurrency_force_status =
-    0; /* CONCURRENCY_ACQUIRE_OK; non-OK -> acquire returns NULL */
 static int g_agent_run_rc = 0;
 static char g_session_during_run[128]; /* session_id() observed inside the provider run */
 static char g_last_agent_prompt[4096];
@@ -715,112 +709,6 @@ int kb_client_bandit_close(const char *decision_point, const char *decision_id, 
    return 0;
 }
 
-void concurrency_mgr_init(concurrency_mgr_t *mgr, int default_limit,
-                          const concurrency_entry_t *per_model, int per_model_count,
-                          const concurrency_entry_t *per_provider, int per_provider_count)
-{
-   (void)mgr;
-   (void)default_limit;
-   (void)per_model;
-   (void)per_model_count;
-   (void)per_provider;
-   (void)per_provider_count;
-}
-
-void concurrency_mgr_update_limits(concurrency_mgr_t *mgr, int default_limit,
-                                   const concurrency_entry_t *per_model, int per_model_count,
-                                   const concurrency_entry_t *per_provider, int per_provider_count)
-{
-   (void)mgr;
-   (void)default_limit;
-   (void)per_model;
-   (void)per_model_count;
-   (void)per_provider;
-   (void)per_provider_count;
-}
-
-concurrency_slot_t *concurrency_acquire_cancellable(concurrency_mgr_t *mgr, const char *model,
-                                                    const char *provider,
-                                                    concurrency_cancel_fn_t cancel_fn,
-                                                    const char *cancel_ctx)
-{
-   return concurrency_acquire_priority_cancellable(
-       mgr, model, provider, CONCURRENCY_PRIORITY_INTERACTIVE, cancel_fn, cancel_ctx);
-}
-
-concurrency_slot_t *concurrency_acquire_priority_cancellable(concurrency_mgr_t *mgr,
-                                                             const char *model,
-                                                             const char *provider, int priority,
-                                                             concurrency_cancel_fn_t cancel_fn,
-                                                             const char *cancel_ctx)
-{
-   return concurrency_acquire_priority_cancellable_status(mgr, model, provider, priority, cancel_fn,
-                                                          cancel_ctx, NULL);
-}
-
-concurrency_slot_t *concurrency_acquire_priority_cancellable_status(
-    concurrency_mgr_t *mgr, const char *model, const char *provider, int priority,
-    concurrency_cancel_fn_t cancel_fn, const char *cancel_ctx,
-    concurrency_acquire_status_t *status_out)
-{
-   return concurrency_acquire_priority_owner_cancellable_status(
-       mgr, model, provider, priority, NULL, cancel_fn, cancel_ctx, status_out);
-}
-
-concurrency_slot_t *concurrency_acquire_priority_owner_cancellable_status(
-    concurrency_mgr_t *mgr, const char *model, const char *provider, int priority,
-    const char *owner_id, concurrency_cancel_fn_t cancel_fn, const char *cancel_ctx,
-    concurrency_acquire_status_t *status_out)
-{
-   static concurrency_slot_t slot;
-   (void)mgr;
-   (void)model;
-   (void)provider;
-   (void)owner_id;
-   (void)cancel_fn;
-   (void)cancel_ctx;
-   g_last_concurrency_priority = priority;
-   /* Forced non-OK status: no slot granted (cancelled / queue-full path). */
-   if (g_concurrency_force_status != CONCURRENCY_ACQUIRE_OK)
-   {
-      if (status_out)
-         *status_out = (concurrency_acquire_status_t)g_concurrency_force_status;
-      return NULL;
-   }
-   g_concurrency_acquire_calls++;
-   if (status_out)
-      *status_out = CONCURRENCY_ACQUIRE_OK;
-   return &slot;
-}
-
-void concurrency_release(concurrency_slot_t *slot)
-{
-   concurrency_release_owner(slot, NULL);
-}
-
-void concurrency_release_owner(concurrency_slot_t *slot, const char *owner_id)
-{
-   (void)slot;
-   (void)owner_id;
-   g_concurrency_release_calls++;
-}
-
-int concurrency_preempt_candidate_for_key(concurrency_mgr_t *mgr, const char *model,
-                                          const char *provider, int requester_priority,
-                                          int single_slot_only, char *owner_out,
-                                          size_t owner_out_len, int *priority_out)
-{
-   (void)mgr;
-   (void)model;
-   (void)provider;
-   (void)requester_priority;
-   (void)single_slot_only;
-   (void)owner_out;
-   (void)owner_out_len;
-   (void)priority_out;
-   return 0;
-}
-
 int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg)
 {
    (void)pool;
@@ -923,10 +811,6 @@ static void reset_last_response(void)
    g_budget_release_calls = 0;
    g_budget_last_grant = 0;
    g_agent_run_seen_compute_override = -999;
-   g_last_concurrency_priority = -999;
-   g_concurrency_acquire_calls = 0;
-   g_concurrency_release_calls = 0;
-   g_concurrency_force_status = CONCURRENCY_ACQUIRE_OK;
    g_agent_run_rc = 0;
    g_session_during_run[0] = '\0';
    g_delegate_dispatch_override = test_delegate_dispatch_stub;
@@ -1500,26 +1384,6 @@ static void test_delegate_background_handler(void)
    free(conn);
    free(ctx);
    printf("  PASS: test_delegate_background_handler\n");
-}
-
-static void test_delegate_request_priority_defaults(void)
-{
-   compute_ctx_t interactive = {0};
-   compute_ctx_t background = {.background_job_id = 42};
-
-   assert(delegate_request_priority(&interactive, NULL) == CONCURRENCY_PRIORITY_INTERACTIVE);
-   assert(delegate_request_priority(&background, NULL) == CONCURRENCY_PRIORITY_BACKGROUND);
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "priority", -5);
-   assert(delegate_request_priority(&background, cJSON_GetObjectItem(req, "priority")) == -5);
-   cJSON_ReplaceItemInObject(req, "priority", cJSON_CreateNumber(5000));
-   assert(delegate_request_priority(&interactive, cJSON_GetObjectItem(req, "priority")) == 1000);
-   cJSON_ReplaceItemInObject(req, "priority", cJSON_CreateNumber(-5000));
-   assert(delegate_request_priority(&interactive, cJSON_GetObjectItem(req, "priority")) == -1000);
-   cJSON_Delete(req);
-
-   printf("  PASS: test_delegate_request_priority_defaults\n");
 }
 
 static void test_chat_stream_dispatch_uses_dedicated_lane(void)
@@ -2832,32 +2696,6 @@ static void test_delegate_worker_restores_caller_context(void)
    printf("  PASS: test_delegate_worker_restores_caller_context\n");
 }
 
-/* The per-model concurrency slot acquired for the run must be released exactly once. */
-static void test_delegate_worker_balances_concurrency_slot(void)
-{
-   reset_last_response();
-   tl_delegation_depth = 0;
-   tl_parent_delegation_id[0] = '\0';
-
-   g_agent_response = "ok";
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "execute");
-   cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "concurrency balance characterization");
-   cJSON *resp = sci_drive_delegate(req);
-   cJSON_Delete(req);
-
-   assert(resp != NULL);
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
-   cJSON_Delete(resp);
-
-   assert(g_concurrency_acquire_calls == 1);
-   assert(g_concurrency_release_calls == g_concurrency_acquire_calls);
-
-   reset_last_response();
-   printf("  PASS: test_delegate_worker_balances_concurrency_slot\n");
-}
-
 /* (WP-B) async-only: a successful delegate persists to a durable, pollable job
  * row — status "done" with the provider's response text in job.result. The rich
  * synchronous envelope (delegation_id / turns / tool_calls / agent / token
@@ -2922,7 +2760,6 @@ static void test_delegate_worker_restores_state_on_error(void)
    assert(strcmp(sci_getenv("AIMEE_ACTIVE_TOOLSET"), "err-toolset") == 0);
    assert(tl_mailbox == NULL);
    assert(run_cmd_get_cwd() == NULL || run_cmd_get_cwd()[0] == '\0');
-   assert(g_concurrency_release_calls == g_concurrency_acquire_calls);
 
    tl_delegation_depth = 0;
    tl_parent_delegation_id[0] = '\0';
@@ -2958,87 +2795,6 @@ static void test_delegate_worker_sets_session_override_during_run(void)
    printf("  PASS: test_delegate_worker_sets_session_override_during_run\n");
 }
 
-/* Concurrency cancelled before a slot is granted: the worker must respond
- * "cancelled", never run the provider, and unwind the caller context — the
- * early-return path that duplicates the normal teardown. */
-static void test_delegate_worker_concurrency_cancelled_restores(void)
-{
-   reset_last_response();
-   tl_delegation_depth = 1;
-   snprintf(tl_parent_delegation_id, sizeof(tl_parent_delegation_id), "cx-parent");
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "1");
-   platform_setenv("AIMEE_PARENT_DELEGATION_ID", "cx-parent");
-   run_cmd_set_cwd(NULL);
-   tl_mailbox = NULL;
-
-   g_concurrency_force_status = CONCURRENCY_ACQUIRE_CANCELLED;
-   g_agent_response = "should not run";
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "execute");
-   cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "concurrency cancelled");
-   cJSON *resp = sci_drive_delegate(req);
-   cJSON_Delete(req);
-
-   assert(resp != NULL);
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "cancelled") == 0);
-   cJSON_Delete(resp);
-
-   /* The provider must never have run, and no slot was held. */
-   assert(g_agent_calls == 0);
-   assert(g_concurrency_acquire_calls == 0);
-   assert(g_concurrency_release_calls == 0);
-   /* Caller context unwound on the cancelled path. */
-   assert(tl_delegation_depth == 1);
-   assert(strcmp(tl_parent_delegation_id, "cx-parent") == 0);
-   assert(strcmp(sci_getenv("AIMEE_DELEGATE_DEPTH"), "1") == 0);
-   assert(strcmp(sci_getenv("AIMEE_PARENT_DELEGATION_ID"), "cx-parent") == 0);
-   assert(tl_mailbox == NULL);
-   assert(run_cmd_get_cwd() == NULL || run_cmd_get_cwd()[0] == '\0');
-
-   tl_delegation_depth = 0;
-   tl_parent_delegation_id[0] = '\0';
-   reset_last_response();
-   printf("  PASS: test_delegate_worker_concurrency_cancelled_restores\n");
-}
-
-/* Concurrency queue full: same early-return teardown, but the response is an
- * error (queue full is a rejection, not a cancellation). */
-static void test_delegate_worker_concurrency_queue_full_errors(void)
-{
-   reset_last_response();
-   tl_delegation_depth = 1;
-   snprintf(tl_parent_delegation_id, sizeof(tl_parent_delegation_id), "qf-parent");
-   platform_setenv("AIMEE_DELEGATE_DEPTH", "1");
-   platform_setenv("AIMEE_PARENT_DELEGATION_ID", "qf-parent");
-   tl_mailbox = NULL;
-
-   g_concurrency_force_status = CONCURRENCY_ACQUIRE_QUEUE_FULL;
-   g_agent_response = "should not run";
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "execute");
-   cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "concurrency queue full");
-   cJSON *resp = sci_drive_delegate(req);
-   cJSON_Delete(req);
-
-   assert(resp != NULL);
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "error") == 0);
-   assert(strstr(cJSON_GetObjectItem(resp, "message")->valuestring, "queue full") != NULL);
-   cJSON_Delete(resp);
-
-   assert(g_agent_calls == 0);
-   assert(g_concurrency_release_calls == g_concurrency_acquire_calls);
-   assert(tl_delegation_depth == 1);
-   assert(strcmp(tl_parent_delegation_id, "qf-parent") == 0);
-   assert(strcmp(sci_getenv("AIMEE_DELEGATE_DEPTH"), "1") == 0);
-   assert(tl_mailbox == NULL);
-
-   tl_delegation_depth = 0;
-   tl_parent_delegation_id[0] = '\0';
-   reset_last_response();
-   printf("  PASS: test_delegate_worker_concurrency_queue_full_errors\n");
-}
 /* test_server_compute_child_env.inc: delegate_child_export_context_env coverage.
  * Split out of test_server_compute.c to keep it under the 2000-line hard limit.
  * Included into test_server_compute.c so it shares the server_compute.c
@@ -3264,7 +3020,6 @@ int main(void)
    test_delegate_generated_ids_are_unique();
    test_delegate_status_handler();
    test_delegate_background_handler();
-   test_delegate_request_priority_defaults();
    test_chat_stream_dispatch_uses_dedicated_lane();
    test_chat_stream_trims_appended_transcript_jsonl();
    test_chat_stream_trims_malformed_appended_transcript_head();
@@ -3296,12 +3051,9 @@ int main(void)
    test_read_only_branch_delegate_rejected();
    test_inspection_roles_get_evidence_bundle();
    test_delegate_worker_restores_caller_context();
-   test_delegate_worker_balances_concurrency_slot();
    test_delegate_worker_ok_response_shape();
    test_delegate_worker_restores_state_on_error();
    test_delegate_worker_sets_session_override_during_run();
-   test_delegate_worker_concurrency_cancelled_restores();
-   test_delegate_worker_concurrency_queue_full_errors();
    test_create_compute_ctx_threads_vault_identity();
    db1_shutdown();
    reset_last_response();

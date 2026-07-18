@@ -15,7 +15,6 @@
 #include "agent.h"
 #include "agent_coord.h"
 #include "cmd_agent_delegate_impl.h"
-#include "compute_concurrency.h"
 #include "config.h"
 #include "token_tracker.h"
 #include "delegate_credential_retry.h"
@@ -437,19 +436,6 @@ static void delegate_request_parent_context(cJSON *jdepth, cJSON *jparent, int *
    *parent_out = parent;
 }
 
-static int delegate_request_priority(const compute_ctx_t *cctx, cJSON *jpriority)
-{
-   int priority = cctx && cctx->background_job_id > 0 ? CONCURRENCY_PRIORITY_BACKGROUND
-                                                      : CONCURRENCY_PRIORITY_INTERACTIVE;
-   if (cJSON_IsNumber(jpriority))
-      priority = (int)jpriority->valuedouble;
-   if (priority < -1000)
-      priority = -1000;
-   if (priority > 1000)
-      priority = 1000;
-   return priority;
-}
-
 /* The caller-context a delegate run mutates and must restore exactly: the
  * thread-local delegation depth/parent, their AIMEE_DELEGATE_DEPTH /
  * AIMEE_PARENT_DELEGATION_ID env mirror (for cross-process child clients), and
@@ -672,7 +658,6 @@ void delegate_worker(void *arg)
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jparent_deleg = cJSON_GetObjectItemCaseSensitive(req, "parent_delegation_id");
-   cJSON *jpriority = cJSON_GetObjectItemCaseSensitive(req, "priority");
    cJSON *jreq_caps = cJSON_GetObjectItemCaseSensitive(req, "required_caps");
    cJSON *jmin_ctx = cJSON_GetObjectItemCaseSensitive(req, "min_context");
    const char *role =
@@ -716,7 +701,6 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   int delegate_priority = delegate_request_priority(cctx, jpriority);
    int explicit_tools = cJSON_IsTrue(jtools),
        force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
@@ -1211,38 +1195,9 @@ void delegate_worker(void *arg)
    (void)db1_delegation_spawn_record(deleg_id, effective_parent, effective_sid, current_depth,
                                      role);
 
-   /* Free-routed delegates use a shared tier pool; explicit --via stays per-model. */
-   concurrency_ensure_current();
-   char conc_tier_key[16] = "";
-   concurrency_route_key_t conc =
-       concurrency_key(via_name, target_agent, conc_tier_key, sizeof(conc_tier_key));
-   concurrency_maybe_preempt_delegate(conc.model, conc.provider, delegate_priority, deleg_id);
-   if (cctx->background_job_id > 0 && conc.model[0])
-      db1_agent_job_heartbeat_ext(cctx->background_job_id, "concurrency_slot", 0);
-   concurrency_acquire_status_t conc_status = CONCURRENCY_ACQUIRE_BYPASS;
-   concurrency_slot_t *conc_slot = concurrency_acquire_priority_owner_cancellable_status(
-       &g_concurrency_mgr, conc.model, conc.provider, delegate_priority, deleg_id,
-       db1_delegation_spawn_is_stopped, deleg_id, &conc_status);
-   if (!conc_slot && conc.model[0] && conc_status != CONCURRENCY_ACQUIRE_BYPASS)
-   {
-      const int queue_full = conc_status == CONCURRENCY_ACQUIRE_QUEUE_FULL;
-      aimee_log(queue_full ? LOG_WARN : LOG_INFO, "delegate",
-                queue_full ? "delegation %s rejected: concurrency queue full for %s"
-                           : "delegation %s cancelled while queued for concurrency slot",
-                deleg_id, conc.model);
-      delegate_run_ctx_restore(&run_ctx);
-      cJSON *cresp = cJSON_CreateObject();
-      cJSON_AddStringToObject(cresp, "delegation_id", deleg_id);
-      cJSON_AddStringToObject(cresp, "status", queue_full ? "error" : "cancelled");
-      cJSON_AddStringToObject(cresp, "message",
-                              queue_full
-                                  ? "delegate concurrency queue full"
-                                  : "delegation cancelled while waiting for concurrency slot");
-      compute_respond(cctx, cresp);
-      goto delegate_fail;
-   }
-   if (cctx->background_job_id > 0 && conc.model[0])
-      db1_agent_job_heartbeat_ext(cctx->background_job_id, "", 0);
+   /* Concurrency (global + per-agent + per-model caps) is enforced downstream by the single
+    * agent_admission controller inside agent_dispatch_one — there is no separate per-model
+    * gate here. A pinned turn blocks+queues there; fan-out/fallback fail fast. */
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    char *handoff_prompt = NULL;
@@ -1423,7 +1378,6 @@ void delegate_worker(void *arg)
                                               credential_state_path, &result);
       server_delegate_heartbeat_end();
    }
-   concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
    if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
       workspace_turn_unbind_active();

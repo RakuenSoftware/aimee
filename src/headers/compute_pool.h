@@ -114,6 +114,4 @@ void compute_pool_unregister_secondary(compute_pool_t *pool);
  * pools are registered. */
 char *compute_pool_secondary_pools_json(void);
 
-#include "compute_concurrency.h"
-
 #endif /* DEC_COMPUTE_POOL_H */
