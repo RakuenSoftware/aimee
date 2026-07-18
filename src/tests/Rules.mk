@@ -2329,7 +2329,7 @@ $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delegate-plan: $(OBJDIR)/tests/test_delegate_plan.o \
-                             $(OBJDIR)/server/delegate_plan.o $(OBJDIR)/cJSON.o
+                             $(OBJDIR)/modules/delegates/delegate_plan.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
