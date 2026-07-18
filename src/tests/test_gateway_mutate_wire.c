@@ -250,6 +250,18 @@ static void test_no_behavior_change_when_off(void)
    cJSON_Delete(c);
 }
 
+static void test_upstream_provider_gate(void)
+{
+   /* Policy: gateway wire-mutation is OpenAI-only. An Anthropic upstream is ALWAYS excluded,
+    * regardless of the enable state, so its prompt-cached verbatim passthrough is never
+    * mutated. For a non-Anthropic upstream the helper simply mirrors the base enable gate
+    * (off under this test's default config HOME). */
+   assert(gw_mutate_upstream_ok(1) == 0);                      /* Anthropic: never mutate */
+   assert(gw_mutate_upstream_ok(0) == gw_mutate_is_enabled()); /* non-Anthropic: base gate */
+   assert(gw_mutate_is_enabled() == 0);                        /* default config -> dark */
+   assert(gw_mutate_upstream_ok(0) == 0);                      /* so both are off here */
+}
+
 int main(void)
 {
    printf("gateway_mutate_wire: ");
@@ -270,6 +282,7 @@ int main(void)
    test_stream_error_classify();
    test_token_delta_sampling();
    test_no_behavior_change_when_off();
+   test_upstream_provider_gate();
    printf("ok\n");
    return 0;
 }

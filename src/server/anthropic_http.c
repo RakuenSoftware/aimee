@@ -512,7 +512,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
     * caught below (restore-resend), the session is circuit-broken, and provenance is
     * cleared. A dark no-op when reduce_gateway_mutate is off. */
-   if (gw_mutate_is_enabled())
+   if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);
       gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
@@ -952,7 +952,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * first byte), so on a bad reduction only SUBSEQUENT turns are circuit-broken —
     * via the SSE error-frame inspect-as-forward in relay_flush + the post-stream
     * fail-safe below. Default-OFF dark no-op. */
-   if (gw_mutate_is_enabled())
+   if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);
       gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),

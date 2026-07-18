@@ -54,6 +54,18 @@ int gw_mutate_is_enabled(void)
    return econ_gateway_mutate_on(&cfg);
 }
 
+int gw_mutate_upstream_ok(int upstream_is_anthropic)
+{
+   /* Gateway wire-mutation is OpenAI-only by policy. An Anthropic upstream serves a
+    * byte-verbatim, prompt-cached passthrough (build_anthropic_parity_headers); mutating
+    * the wire there would bust the cached prefix AND force the request off the parity
+    * passthrough. Reducing that upstream cache-coherently is the pre-economize seam's job
+    * (delegate seam / tool_condense), not the gateway's. So the live mutator engages only
+    * when the serving upstream is NOT Anthropic. `upstream_is_anthropic` is the caller's
+    * driver_is_anthropic()/parity signal. */
+   return !upstream_is_anthropic && gw_mutate_is_enabled();
+}
+
 void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
                         const char *system_prompt, const char *session_hdr, const char *bearer,
                         const char *auth_identity, gw_mutate_ctx_t *ctx)
