@@ -1321,7 +1321,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/config_fields.o \
 	                                $(OBJDIR)/server/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/vault_principal.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
@@ -3167,11 +3167,11 @@ $(TESTPREFIX)/unit-test-slop-detect: $(OBJDIR)/tests/test_slop_detect.o \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-principal: $(OBJDIR)/tests/test_vault_principal.o \
-                              $(OBJDIR)/server/vault_principal.o
+                              $(OBJDIR)/modules/vault/vault_principal.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-crypto: $(OBJDIR)/tests/test_vault_crypto.o \
-                              $(OBJDIR)/server/vault_crypto.o
+                              $(OBJDIR)/modules/vault/vault_crypto.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-evidence-replay: $(OBJDIR)/tests/test_evidence_replay.o \
@@ -3205,11 +3205,11 @@ $(TESTPREFIX)/unit-test-sweep-parse: $(OBJDIR)/tests/test_sweep_parse.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-kek-cache: $(OBJDIR)/tests/test_vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_kek_cache.o
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-vault-store: $(OBJDIR)/tests/test_vault_store.o \
-                              $(OBJDIR)/server/vault_store.o $(OBJDIR)/server/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3218,9 +3218,9 @@ $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
                               $(OBJDIR)/server/git_forge_vault.o $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/server/workspace_scope.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o $(OBJDIR)/util_url.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3230,9 +3230,9 @@ $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
                               $(OBJDIR)/server/git_forge_vault.o $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/server/workspace_scope.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/util_url.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3240,9 +3240,9 @@ $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.
                               $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3250,9 +3250,9 @@ $(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
                               $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o \
                               $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3260,9 +3260,9 @@ $(TESTPREFIX)/unit-test-git-cred-inject: $(OBJDIR)/tests/test_git_cred_inject.o 
                               $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3272,17 +3272,17 @@ $(TESTPREFIX)/unit-test-webuser-editor: $(OBJDIR)/tests/test_webuser_editor.o \
                               $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/server/git_host_cred.o $(OBJDIR)/server/git_host_resolve.o $(OBJDIR)/util_url.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-forge-vault: $(OBJDIR)/tests/test_git_forge_vault.o \
                               $(OBJDIR)/server/git_forge_vault.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3293,16 +3293,16 @@ $(TESTPREFIX)/unit-test-git-host-resolve: $(OBJDIR)/tests/test_git_host_resolve.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-service: $(OBJDIR)/tests/test_vault_service.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-master-rotate: $(OBJDIR)/tests/test_vault_master_rotate.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3313,22 +3313,22 @@ $(TESTPREFIX)/unit-test-agent-key-import: $(OBJDIR)/tests/test_agent_key_import.
 
 $(TESTPREFIX)/unit-test-vault-bootstrap: $(OBJDIR)/tests/test_vault_bootstrap.o \
                               $(OBJDIR)/server/server_vault_bootstrap.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-pki: $(OBJDIR)/tests/test_pki.o $(OBJDIR)/server/pki.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o $(OBJDIR)/server/vault_principal.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_principal.o \
                               $(DB1_OBJS) \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/tests/test_vault_server_key.o \
-                              $(OBJDIR)/server/vault_server_key.o $(OBJDIR)/server/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3342,15 +3342,15 @@ $(TESTPREFIX)/unit-test-aimee-tls-pin: $(OBJDIR)/tests/test_aimee_tls_pin.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-capability: $(OBJDIR)/tests/test_vault_capability.o \
-                              $(OBJDIR)/server/vault_capability.o \
+                              $(OBJDIR)/modules/vault/vault_capability.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-audit: $(OBJDIR)/tests/test_vault_audit.o \
                               $(OBJDIR)/server/server_vault.o \
-                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
-                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
-                              $(OBJDIR)/server/vault_server_key.o $(OBJDIR)/server/vault_capability.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_capability.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3369,7 +3369,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/server/vault_principal.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                            $(OBJDIR)/forge_credentials.o \
@@ -3699,11 +3699,11 @@ $(TESTPREFIX)/unit-test-oauth-pkce: $(OBJDIR)/tests/test_oauth_pkce.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
                      $(OBJDIR)/db1/secrets.o \
-                     $(OBJDIR)/server/vault_service.o \
-                     $(OBJDIR)/server/vault_store.o \
-                     $(OBJDIR)/server/vault_crypto.o \
-                     $(OBJDIR)/server/vault_kek_cache.o \
-                     $(OBJDIR)/server/vault_server_key.o \
+                     $(OBJDIR)/modules/vault/vault_service.o \
+                     $(OBJDIR)/modules/vault/vault_store.o \
+                     $(OBJDIR)/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                     $(OBJDIR)/modules/vault/vault_server_key.o \
                      $(OBJDIR)/platform_random.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -3712,11 +3712,11 @@ $(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
                      $(OBJDIR)/db1/secrets.o \
-                     $(OBJDIR)/server/vault_service.o \
-                     $(OBJDIR)/server/vault_store.o \
-                     $(OBJDIR)/server/vault_crypto.o \
-                     $(OBJDIR)/server/vault_kek_cache.o \
-                     $(OBJDIR)/server/vault_server_key.o \
+                     $(OBJDIR)/modules/vault/vault_service.o \
+                     $(OBJDIR)/modules/vault/vault_store.o \
+                     $(OBJDIR)/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                     $(OBJDIR)/modules/vault/vault_server_key.o \
                      $(OBJDIR)/platform_random.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
