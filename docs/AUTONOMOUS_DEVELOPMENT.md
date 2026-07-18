@@ -113,7 +113,10 @@ with a `security` lens before `pr.open` adds a mandatory security review.
    The commit happens at `freeze`, not per unit.
 3. **Verify, as hard as possible.** Verification runs through the engine's gates
    and delegates, never the primary's own hands, in ascending cost:
-   - mechanical, the build compiles, targeted tests/lint pass (`gate.ci`);
+   - mechanical, the build compiles, targeted tests/lint pass (`gate.ci`). The
+     `implement` block's mandatory mechanical verify runs **inside the delegate's
+     toolchain sandbox**, not the server process — see
+     [Verifying in the delegate sandbox](DELEGATE_SANDBOX_VERIFY.md);
    - review, a roundtable / `reviewer` panel checks the change against its spec
      (`gate.roundtable`);
    - adversarial, for risky changes, skeptic verifiers attempt to refute it.
