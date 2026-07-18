@@ -6,6 +6,7 @@ Reads files only. Never writes to disk. Stdlib-only.
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import os
 import stat
@@ -43,6 +44,14 @@ def _list_files(dir_path: str, root: str) -> list[str]:
     # script usable even if a contributor accidentally drops a dangling or
     # wrong-target symlink into the queue, which matches the acceptance
     # criterion that missing/escaped dirs be handled gracefully.
+    #
+    # Caveat: between the lstat/realpath validation here and the open() in
+    # _count_words, an attacker who can write inside docs/proposals could
+    # atomically replace a verified regular file with a symlink that points
+    # outside the tree. The script does not claim to defend against that
+    # TOCTOU race; this script is intended for trusted operator use, not
+    # adversarial input. If untrusted proposals ever land here, switch to
+    # opening via O_NOFOLLOW on a directory fd or equivalent.
     if not os.path.isdir(dir_path):
         return []
     real_root = os.path.realpath(root)
@@ -85,31 +94,52 @@ def _list_files(dir_path: str, root: str) -> list[str]:
 
 def _count_words(files: list[str]) -> int:
     # Count words across all pending files regardless of size. Bounded
-    # memory: stream each file in chunks and split on whitespace so very
-    # large files do not blow up RSS.
+    # memory: stream each file in chunks. We use an incremental UTF-8
+    # decoder so a multibyte character split across a 64 KiB read boundary
+    # does not raise UnicodeDecodeError or get double-counted, and we
+    # carry the trailing partial token across chunks so a word straddling
+    # the boundary is counted exactly once. NUL bytes short-circuit the
+    # rest of the file as binary, matching prior behavior.
     total = 0
     for path in files:
         try:
             with open(path, "rb") as fh:
+                decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+                pending = ""
+                binary = False
                 while True:
                     chunk = fh.read(_READ_CHUNK_BYTES)
                     if not chunk:
+                        text = decoder.decode(b"", final=True)
+                        if pending or text:
+                            total += len((pending + text).split())
                         break
                     if b"\x00" in chunk:
                         print(
                             f"warning: skipping {path}: appears to be binary",
                             file=sys.stderr,
                         )
+                        binary = True
                         break
                     try:
-                        text = chunk.decode("utf-8")
+                        text = decoder.decode(chunk, final=False)
                     except UnicodeDecodeError as exc:
                         print(
                             f"warning: skipping {path}: not valid utf-8: {exc}",
                             file=sys.stderr,
                         )
+                        binary = True
                         break
-                    total += len(text.split())
+                    # Prepend the unfinished token from the previous chunk
+                    # so a word split across the boundary is one whole token.
+                    tokens = (pending + text).split()
+                    pending = ""
+                    if text and not text[-1].isspace():
+                        # Last token may continue into the next chunk.
+                        pending = tokens.pop()
+                    total += len(tokens)
+                if binary:
+                    continue
         except OSError as exc:
             print(
                 f"warning: skipping {path}: read failed: {exc}", file=sys.stderr
