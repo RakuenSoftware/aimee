@@ -112,9 +112,27 @@ typedef struct
    int has_max_tokens;
    double temperature;
    int has_temperature;
+   /* Sampling params clients send at the top level. Modeled (not raw-carried) so the
+    * canonical egress can re-emit them deterministically once the raw sidecar is
+    * retired -- and so they survive cross-protocol translation. top_p/top_k are valid
+    * on both Anthropic and OpenAI; a source that omits one leaves has_* == 0. */
+   double top_p;
+   int has_top_p;
+   int top_k;
+   int has_top_k;
    int stream;
    char **stop_sequences;
    int n_stop;
+   /* Opaque top-level request metadata (e.g. Anthropic `metadata.user_id`), preserved
+    * verbatim through the IR so the canonical egress is byte-faithful without the raw
+    * sidecar. Owned. NULL when the client sent none. */
+   struct cJSON *metadata;
+   /* Anthropic `service_tier` ("auto"/"standard_only"/...); NULL if unset. Owned. */
+   char *service_tier;
+   /* Anthropic extended-thinking CONFIG object ({type:"enabled",budget_tokens:N}) -- a
+    * top-level request field, distinct from THINKING content blocks in messages.
+    * Opaque, preserved verbatim. Owned. NULL when the client sent none. */
+   struct cJSON *thinking;
    aimee_wire_t frontend; /* the client wire this was parsed from */
    /* Set to 1 by any IR transform that changes the typed fields (a module editing
     * messages/system/tools). While 0, the request is byte-identical to `raw`, so a

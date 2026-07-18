@@ -51,6 +51,12 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       cJSON_AddNumberToObject(out, "max_tokens", ir->max_tokens);
    if (ir->has_temperature)
       cJSON_AddNumberToObject(out, "temperature", ir->temperature);
+   if (ir->has_top_p)
+      cJSON_AddNumberToObject(out, "top_p", ir->top_p);
+   if (ir->has_top_k) /* OpenAI-compatible local providers (ollama/llama.cpp) accept top_k */
+      cJSON_AddNumberToObject(out, "top_k", ir->top_k);
+   if (ir->metadata)
+      cJSON_AddItemToObject(out, "metadata", cJSON_Duplicate(ir->metadata, 1));
    if (ir->stream)
       cJSON_AddBoolToObject(out, "stream", 1);
 

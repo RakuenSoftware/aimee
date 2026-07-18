@@ -67,20 +67,32 @@ int main(void)
    }
    cJSON_Delete(built);
 
-   /* --- (1b) ir->mutated forces the typed rebuild; an unmodeled field (top_p) is
-    *          preserved by the raw passthrough but dropped by the rebuild. --- */
+   /* --- (1b) ir->mutated forces the typed rebuild; MODELED top-level fields
+    *          (top_p, top_k, metadata) survive it -- required so the canonical egress
+    *          is byte-faithful once the raw sidecar is retired. --- */
    {
       cJSON *uj = cJSON_Parse("{\"model\":\"claude-3-5-sonnet\",\"max_tokens\":8,\"messages\":[{"
                               "\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}"
-                              "],\"top_p\":0.9}");
+                              "],\"top_p\":0.9,\"top_k\":40,\"metadata\":{\"user_id\":\"u1\"},"
+                              "\"service_tier\":\"standard_only\","
+                              "\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":1024}}");
       aimee_request_t uir;
       assert(anthropic_frontend_parse(uj, &uir, err, sizeof err) == 0);
       cJSON_Delete(uj);
       cJSON *clean = anthropic_backend_build(&uir); /* mutated=0 -> raw passthrough */
       assert(clean && cJSON_GetObjectItem(clean, "top_p") != NULL); /* preserved */
       uir.mutated = 1;
-      cJSON *rebuilt = anthropic_backend_build(&uir);                   /* typed rebuild */
-      assert(rebuilt && cJSON_GetObjectItem(rebuilt, "top_p") == NULL); /* dropped (unmodeled) */
+      cJSON *rebuilt = anthropic_backend_build(&uir); /* typed rebuild */
+      cJSON *tp = cJSON_GetObjectItem(rebuilt, "top_p");
+      cJSON *tk = cJSON_GetObjectItem(rebuilt, "top_k");
+      cJSON *md = cJSON_GetObjectItem(rebuilt, "metadata");
+      cJSON *st = cJSON_GetObjectItem(rebuilt, "service_tier");
+      cJSON *th = cJSON_GetObjectItem(rebuilt, "thinking");
+      assert(tp && tp->valuedouble == 0.9); /* modeled -> survives the rebuild */
+      assert(tk && tk->valueint == 40);     /* modeled */
+      assert(md && cJSON_IsObject(md));     /* modeled (opaque, preserved) */
+      assert(st && cJSON_IsString(st) && strcmp(st->valuestring, "standard_only") == 0);
+      assert(th && cJSON_IsObject(th)); /* thinking config (opaque, preserved) */
       cJSON_Delete(clean);
       cJSON_Delete(rebuilt);
       aimee_request_free(&uir);

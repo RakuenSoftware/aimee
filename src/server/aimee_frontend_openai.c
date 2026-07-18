@@ -103,6 +103,21 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       out->temperature = temp->valuedouble;
       out->has_temperature = 1;
    }
+   const cJSON *top_p = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "top_p");
+   if (top_p && cJSON_IsNumber(top_p))
+   {
+      out->top_p = top_p->valuedouble;
+      out->has_top_p = 1;
+   }
+   const cJSON *top_k = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "top_k");
+   if (top_k && cJSON_IsNumber(top_k))
+   {
+      out->top_k = top_k->valueint;
+      out->has_top_k = 1;
+   }
+   const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
+   if (meta && !cJSON_IsNull(meta))
+      out->metadata = cJSON_Duplicate(meta, 1);
    const cJSON *stream = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stream");
    out->stream = (stream && cJSON_IsTrue(stream)) ? 1 : 0;
 
