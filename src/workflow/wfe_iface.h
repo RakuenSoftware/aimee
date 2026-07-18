@@ -98,8 +98,13 @@ typedef enum
                              * be determined (transient/unknown) -- re-drive later */
    WFE_PAUSE_TURN_CAP,      /* autonomy runaway backstop: cumulative audit-event
                              * (turn) cap reached -- NOT a spend issue */
-   WFE_PAUSE_WALL_CAP       /* autonomy runaway backstop: this resume exceeded its
+   WFE_PAUSE_WALL_CAP,      /* autonomy runaway backstop: this resume exceeded its
                              * wall-clock ceiling -- NOT a spend issue */
+   WFE_PAUSE_SLICES_RUNNING /* foreach.workflow: children spawned and still running --
+                             * a SELF-RESOLVING wait, NOT a human gate. Each sweep
+                             * re-drives the parent to re-aggregate child state and
+                             * advances once every slice has merged. Must stay
+                             * driveable (see wfe_sched_driveable). */
 } wfe_pause_reason_t;
 
 /* Failure taxonomy (Phase-C Q4): how the autonomy run loop should react to a
