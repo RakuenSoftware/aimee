@@ -36,6 +36,11 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
  * agent_run's other ~28 callers are unaffected. */
 void agent_run_force_no_tools(int on);
 
+/* Per-thread: make agent_dispatch_one's admission acquire FAIL FAST (at-limit) instead of
+ * blocking, so a fan-out / fallback caller tries a different agent rather than queueing on
+ * a busy one. Default off = block+queue (correct for a pinned single-agent turn). */
+void agent_dispatch_set_fail_fast(int on);
+
 /* Like agent_run, but with an explicit sampling temperature. agent_run is the
  * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are
  * byte-unchanged; the parallel fan-out path uses this to honour a per-task
