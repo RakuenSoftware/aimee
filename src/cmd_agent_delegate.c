@@ -33,6 +33,12 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Max bytes of pre-loaded content (per --file block, --context-file block, and the
+   symbol block) handed to a delegate/roundtable. 256KB (~62k tokens) sits well inside
+   every supported model's context window while letting a full multi-proposal review
+   packet through without silent mid-file truncation. */
+#define DELEGATE_MAX_CONTENT_BYTES (256 * 1024)
+
 char *delegate_read_prompt_stdin(void);
 static const char *DELEGATE_COORD_STATUS_NOTE =
     "coord jobs are queued packet plans. `aimee jobs status` and `aimee delegate status` show "
@@ -883,7 +889,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       snprintf(files_copy, sizeof(files_copy), "%s", files_arg);
 
       /* First pass: accumulate file contents */
-      char *file_block = malloc(128 * 1024); /* 128KB for file contents */
+      char *file_block = malloc(DELEGATE_MAX_CONTENT_BYTES); /* content buffer */
       size_t fpos = 0;
       if (file_block)
       {
@@ -896,9 +902,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             FILE *fp = fopen(path, "r");
             if (fp)
             {
-               fpos += (size_t)snprintf(file_block + fpos, 128 * 1024 - fpos,
+               fpos += (size_t)snprintf(file_block + fpos, DELEGATE_MAX_CONTENT_BYTES - fpos,
                                         "\n--- File: %s ---\n", path);
-               size_t nread = fread(file_block + fpos, 1, 128 * 1024 - fpos - 1, fp);
+               size_t nread =
+                   fread(file_block + fpos, 1, DELEGATE_MAX_CONTENT_BYTES - fpos - 1, fp);
                fpos += nread;
                file_block[fpos] = '\0';
                fclose(fp);
@@ -914,7 +921,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             }
             else
             {
-               fpos += (size_t)snprintf(file_block + fpos, 128 * 1024 - fpos,
+               fpos += (size_t)snprintf(file_block + fpos, DELEGATE_MAX_CONTENT_BYTES - fpos,
                                         "\n--- File: %s (not found) ---\n", path);
                fprintf(stderr,
                        "aimee: warn: explicitly named file '%s' does not exist "
@@ -1015,7 +1022,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *base = effective_prompt ? effective_prompt : prompt;
       size_t blen = strlen(base);
-      char *cf_block = malloc(128 * 1024);
+      char *cf_block = malloc(DELEGATE_MAX_CONTENT_BYTES);
       size_t cfpos = 0;
       if (cf_block)
       {
@@ -1024,9 +1031,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             FILE *fp = fopen(context_files[i], "r");
             if (fp)
             {
-               cfpos += (size_t)snprintf(cf_block + cfpos, 128 * 1024 - cfpos,
+               cfpos += (size_t)snprintf(cf_block + cfpos, DELEGATE_MAX_CONTENT_BYTES - cfpos,
                                          "\n--- File: %s ---\n", context_files[i]);
-               size_t nread = fread(cf_block + cfpos, 1, 128 * 1024 - cfpos - 1, fp);
+               size_t nread =
+                   fread(cf_block + cfpos, 1, DELEGATE_MAX_CONTENT_BYTES - cfpos - 1, fp);
                cfpos += nread;
                cf_block[cfpos] = '\0';
                fclose(fp);
@@ -1034,7 +1042,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             }
             else
             {
-               cfpos += (size_t)snprintf(cf_block + cfpos, 128 * 1024 - cfpos,
+               cfpos += (size_t)snprintf(cf_block + cfpos, DELEGATE_MAX_CONTENT_BYTES - cfpos,
                                          "\n--- File: %s (not found) ---\n", context_files[i]);
             }
          }
@@ -1062,7 +1070,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *base = effective_prompt ? effective_prompt : prompt;
       size_t blen = strlen(base);
-      char *sym_block = malloc(128 * 1024);
+      char *sym_block = malloc(DELEGATE_MAX_CONTENT_BYTES);
       size_t sympos = 0;
       if (sym_block)
       {
@@ -1118,9 +1126,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                      if (src)
                      {
                         int start = best_lineno > 5 ? best_lineno - 5 : 1;
-                        sympos +=
-                            (size_t)snprintf(sym_block + sympos, 128 * 1024 - sympos,
-                                             "\n## %s (%s:%d)\n```\n", tok, best_file, best_lineno);
+                        sympos += (size_t)snprintf(
+                            sym_block + sympos, DELEGATE_MAX_CONTENT_BYTES - sympos,
+                            "\n## %s (%s:%d)\n```\n", tok, best_file, best_lineno);
                         int cur = 1;
                         char srcline[1024];
                         while (fgets(srcline, sizeof(srcline), src) && cur < start + 65 &&
@@ -1129,7 +1137,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                            if (cur >= start)
                            {
                               size_t sll = strlen(srcline);
-                              if (sympos + sll + 8 < 128 * 1024)
+                              if (sympos + sll + 8 < DELEGATE_MAX_CONTENT_BYTES)
                               {
                                  memcpy(sym_block + sympos, srcline, sll);
                                  sympos += sll;
@@ -1140,8 +1148,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                         fclose(src);
                         delegate_source_path_add(source_paths, &source_path_count, 128, best_file);
                         if (sympos < 120 * 1024)
-                           sympos +=
-                               (size_t)snprintf(sym_block + sympos, 128 * 1024 - sympos, "```\n");
+                           sympos += (size_t)snprintf(sym_block + sympos,
+                                                      DELEGATE_MAX_CONTENT_BYTES - sympos, "```\n");
                      }
                   }
                }
