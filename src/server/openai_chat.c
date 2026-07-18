@@ -928,17 +928,11 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * Cheap mtime-cached config load keeps it dark by default. */
    {
       config_t ecfg;
-      if (config_load(&ecfg) == 0 && ecfg.reduce_gateway_seam && cJSON_IsArray(messages))
+      if (config_load(&ecfg) == 0 && ecfg.reduce_gateway_seam)
       {
-         reduce_config_t rcfg;
-         memset(&rcfg, 0, sizeof(rcfg));
-         rcfg.gateway_seam = 1;
-         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
-         rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
          reduce_result_t gw_res;
-         memset(&gw_res, 0, sizeof(gw_res));
-         if (context_reduce(messages, system_prompt, agent->model, NULL, REDUCE_SEAM_GATEWAY, &rcfg,
-                            NULL, &gw_res) == 0)
+         if (gw_economizer_measure(messages, system_prompt, agent->model, ecfg.fold_retained_msgs,
+                                   &gw_res) == 0)
             agent_record_reduce_ledger(&gw_res, agent->model, "gateway", NULL);
          context_reduce_result_free(&gw_res);
       }
