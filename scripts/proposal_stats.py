@@ -12,9 +12,10 @@ import stat
 import sys
 
 
-# Cap per-file read size; large binary-like blobs shouldn't be slurped into memory
-# for word counting.
-_MAX_FILE_BYTES = 4 * 1024 * 1024
+# Read pending files in 64 KiB chunks so very large proposals don't blow up
+# memory. Word counts must include all text regardless of file size.
+_READ_CHUNK_BYTES = 64 * 1024
+
 
 def _proposals_root() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
@@ -25,106 +26,106 @@ def _real_within(real_path: str, real_root: str) -> bool:
     return real_path == real_root or real_path.startswith(real_root + os.sep)
 
 
-def _ensure_real_dir(dir_path: str, root: str) -> None:
-    # Refuse to traverse a symlinked state directory. Following it would let
-    # docs/proposals/pending -> /etc cause us to enumerate and read files
-    # outside the canonical proposals root, violating read scope.
-    if os.path.islink(dir_path):
-        raise RuntimeError(
-            f"refusing to read {dir_path}: state directory is a symlink"
-        )
-    if not os.path.isdir(dir_path):
-        return
-    real_dir = os.path.realpath(dir_path)
-    real_root = os.path.realpath(root)
-    if not _real_within(real_dir, real_root):
-        raise RuntimeError(
-            f"refusing to read {dir_path}: resolves outside proposals root "
-            f"{root}"
-        )
-
-
 def _list_files(dir_path: str, root: str) -> list[str]:
-    _ensure_real_dir(dir_path, root)
+    # Walk strictly via lstat metadata (follow_symlinks=False), so a symlink
+    # under pending/ or done/ cannot trick us into reading content from
+    # outside docs/proposals. We never follow links or call isfile on a
+    # realpath; symlinks and other non-regular entries are skipped with a
+    # warning instead of raising. Treating an escape as non-fatal keeps the
+    # script usable even if a contributor accidentally drops a dangling or
+    # wrong-target symlink into the queue, which matches the acceptance
+    # criterion that missing/escaped dirs be handled gracefully.
     if not os.path.isdir(dir_path):
         return []
-    # Use os.scandir with follow_symlinks=False so each entry is classified by
-    # the link itself, not its target. A link under pending/ or done/ would
-    # otherwise let us read content from outside docs/proposals.
     real_root = os.path.realpath(root)
     candidates: list[str] = []
     with os.scandir(dir_path) as it:
         for entry in it:
-            if entry.is_file(follow_symlinks=False) or (
-                entry.is_symlink() and os.path.isfile(os.path.realpath(entry.path))
-            ):
-                real_path = os.path.realpath(entry.path)
-                if not _real_within(real_path, real_root):
-                    raise RuntimeError(
-                        f"refusing to read {entry.path}: resolves outside "
-                        f"proposals root {root}"
-                    )
-                candidates.append(entry.path)
+            try:
+                st = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                print(
+                    f"warning: skipping {entry.path}: lstat failed: {exc}",
+                    file=sys.stderr,
+                )
+                continue
+            if entry.is_symlink():
+                print(
+                    f"warning: skipping {entry.path}: symlinks are not "
+                    f"followed under {dir_path}",
+                    file=sys.stderr,
+                )
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                print(
+                    f"warning: skipping {entry.path}: not a regular file",
+                    file=sys.stderr,
+                )
+                continue
+            real_path = os.path.realpath(entry.path)
+            if not _real_within(real_path, real_root):
+                print(
+                    f"warning: skipping {entry.path}: resolves outside "
+                    f"proposals root {root}",
+                    file=sys.stderr,
+                )
+                continue
+            candidates.append(entry.path)
     candidates.sort()
     return candidates
 
-def _count_words(files: list[str], proposals_root: str) -> int:
+
+def _count_words(files: list[str]) -> int:
+    # Count words across all pending files regardless of size. Bounded
+    # memory: stream each file in chunks and split on whitespace so very
+    # large files do not blow up RSS.
     total = 0
     for path in files:
         try:
-            st = os.stat(path)
-        except OSError as exc:
-            print(f"warning: skipping {path}: stat failed: {exc}", file=sys.stderr)
-            continue
-        if not stat.S_ISREG(st.st_mode):
-            print(f"warning: skipping {path}: not a regular file", file=sys.stderr)
-            continue
-        if st.st_size > _MAX_FILE_BYTES:
-            print(
-                f"warning: skipping {path}: size {st.st_size} > "
-                f"limit {_MAX_FILE_BYTES}",
-                file=sys.stderr,
-            )
-            continue
-        try:
             with open(path, "rb") as fh:
-                raw = fh.read()
+                while True:
+                    chunk = fh.read(_READ_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    if b"\x00" in chunk:
+                        print(
+                            f"warning: skipping {path}: appears to be binary",
+                            file=sys.stderr,
+                        )
+                        break
+                    try:
+                        text = chunk.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        print(
+                            f"warning: skipping {path}: not valid utf-8: {exc}",
+                            file=sys.stderr,
+                        )
+                        break
+                    total += len(text.split())
         except OSError as exc:
-            print(f"warning: skipping {path}: read failed: {exc}", file=sys.stderr)
-            continue
-        if b"\x00" in raw:
-            print(f"warning: skipping {path}: appears to be binary", file=sys.stderr)
-            continue
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
             print(
-                f"warning: skipping {path}: not valid utf-8: {exc}",
-                file=sys.stderr,
+                f"warning: skipping {path}: read failed: {exc}", file=sys.stderr
             )
-            continue
-        total += len(text.split())
     return total
 
 
-def _collect(proposals_root: str) -> dict[str, int]:
-    pending_dir = os.path.join(proposals_root, "pending")
-    done_dir = os.path.join(proposals_root, "done")
-
-    pending_files = _list_files(pending_dir, proposals_root)
-    done_files = _list_files(done_dir, proposals_root)
-
+def _collect(root: str) -> dict[str, object]:
+    pending_dir = os.path.join(root, "pending")
+    done_dir = os.path.join(root, "done")
+    pending_files = _list_files(pending_dir, root)
+    done_files = _list_files(done_dir, root)
+    pending_words = _count_words(pending_files)
     return {
-        "pending": len(pending_files),
-        "done": len(done_files),
-        "pending_words": _count_words(pending_files, proposals_root),
+        "pending_count": len(pending_files),
+        "done_count": len(done_files),
+        "pending_words": pending_words,
     }
 
 
-def _format_human(stats: dict[str, int]) -> str:
+def _format_human(stats: dict[str, object]) -> str:
     return (
-        f"pending: {stats['pending']}\n"
-        f"done:    {stats['done']}\n"
+        f"pending_count: {stats['pending_count']}\n"
+        f"done_count:    {stats['done_count']}\n"
         f"pending_words: {stats['pending_words']}\n"
     )
 
@@ -141,11 +142,7 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    try:
-        stats = _collect(_proposals_root())
-    except RuntimeError as exc:
-        sys.stderr.write(f"proposal_stats: {exc}\n")
-        return 1
+    stats = _collect(_proposals_root())
 
     if args.as_json:
         json.dump(stats, sys.stdout)
