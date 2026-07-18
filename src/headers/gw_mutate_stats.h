@@ -8,6 +8,7 @@
 #ifndef DEC_GW_MUTATE_STATS_H
 #define DEC_GW_MUTATE_STATS_H 1
 
+#include "cJSON.h" /* gw_stat_to_json param type */
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -56,6 +57,10 @@ extern "C"
    /* Human-readable dump of every non-zero counter, one `name value` per line
     * (Prometheus-ish), for a /metrics-style endpoint or diagnostics. */
    void gw_stat_dump(FILE *out);
+
+   /* JSON view of the counters (flat counters + token_delta + reason breakdown) for the
+    * user-facing GET /v1/economizer/stats endpoint. `out` is a cJSON object to populate. */
+   void gw_stat_to_json(cJSON *out);
 
    /* Test-only: zero every counter and clear the reason registry. */
    void gw_stat_reset(void);

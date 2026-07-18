@@ -631,6 +631,7 @@ static const struct
     {"dogfood.report", "GET", "/v1/dogfood/report"},
     {"dogfood.review", "POST", "/v1/dogfood/review"},
     {"dogfood.tag", "POST", "/v1/dogfood/tag"},
+    {"economizer.stats", "GET", "/v1/economizer/stats"},
     {"episode.list", "GET", "/v1/episode/list"},
     {"eval.results", "GET", "/v1/eval/results"},
     {"evidence.fidelity_retrieval_event", "POST", "/v1/audit/fidelity"},

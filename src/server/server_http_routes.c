@@ -1579,6 +1579,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/memory_stats", NULL, RM_EXACT, "dashboard.memory_stats", 0,
      rh_dispatch_op},
     {"GET", "/v1/dashboard/metrics", NULL, RM_EXACT, "dashboard.metrics", 0, rh_dispatch_op},
+    {"GET", "/v1/economizer/stats", NULL, RM_EXACT, "economizer.stats", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/onboard", NULL, RM_EXACT, "dashboard.onboard", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/plans", NULL, RM_EXACT, "dashboard.plans", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/plugins", NULL, RM_EXACT, "dashboard.plugins", 0, rh_dispatch_op},

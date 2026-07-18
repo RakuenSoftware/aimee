@@ -150,6 +150,7 @@ static const struct
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
+    {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
     {"index", "scan", "index.scan", NULL, NULL, 300000},
     {"index", "overview", "index.list", NULL, "projects", 0},

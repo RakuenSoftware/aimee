@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 58
+Total commands: 59
 
 ## Core commands
 
@@ -332,6 +332,16 @@ Subcommands:
   tag              Label one dogfood record
   review           Summarize review state and close armed reminders
   report           Build a monthly dogfood report (--month YYYY-MM, --json)
+```
+
+### `aimee economizer`
+
+Economizer telemetry.
+
+Subcommands:
+
+```
+  stats            Gateway-mutation counters, tool-condense savings, avoided-$
 ```
 
 ### `aimee ensemble`
