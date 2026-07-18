@@ -2360,6 +2360,14 @@ int server_run(server_ctx_t *ctx)
           * is picked up on SIGHUP without dropping the listener (live-config-reload). */
          (void)server_tls_reload();
       }
+      /* Live-config-reload P4: also pick up an OUT-OF-BAND file change (a CLI local
+       * `config set`, a manual edit, or the autonomous config_save) — not just SIGHUP — so
+       * the "operator toggle applies without a restart" contract holds however the file was
+       * written. No-op tick when the file is unchanged. */
+      int cfg_rc = config_reload_if_changed();
+      if (cfg_rc != 0)
+         aimee_log(cfg_rc < 0 ? LOG_WARN : LOG_INFO, "config", "config file change: %s",
+                   cfg_rc > 0 ? "reloaded" : "rejected (kept running config)");
    }
    return 0;
 }
