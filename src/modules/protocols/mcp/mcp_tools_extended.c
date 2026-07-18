@@ -9,7 +9,7 @@
  * the P2 default presentation profile is "core", these are not shown upfront but
  * are discoverable via find_tools/describe_tool and callable by name. */
 #include "cJSON.h"
-#include "headers/mcp_tools.h"
+#include "mcp_tools.h"
 #include <stdio.h>
 #include <string.h>
 

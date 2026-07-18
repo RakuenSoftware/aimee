@@ -1,11 +1,11 @@
 /* mcp_tools.c: shared MCP tool definitions */
 #include "cJSON.h"
-#include "headers/mcp_client_registry.h"
-#include "headers/mcp_skill_tools.h"
-#include "headers/mcp_tools.h"
-#include "headers/mcp_tools_gateway.h"
-#include "headers/plugin.h"
-#include "headers/session_search_tool.h"
+#include "mcp_client_registry.h"
+#include "mcp_skill_tools.h"
+#include "mcp_tools.h"
+#include "mcp_tools_gateway.h"
+#include "plugin.h"
+#include "session_search_tool.h"
 #include "log.h"
 #include <stdio.h>
 #include <string.h>

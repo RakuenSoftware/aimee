@@ -1,5 +1,5 @@
 /* mcp_tools_gateway.c: MCP tool registrations for the ambient-presence gateway. */
-#include "headers/mcp_tools_gateway.h"
+#include "mcp_tools_gateway.h"
 #include <cJSON.h>
 #include <string.h>
 
