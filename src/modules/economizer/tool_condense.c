@@ -51,9 +51,12 @@ void tool_condense_stats_reset(void)
 
 int tool_condense_enabled(const config_t *cfg)
 {
-   /* safe-tier lever, gated by the P3 master switch: master off = one kill. Resolve the master
-    * through econ_reduction_master_on so the modules.economizer toggle is honored here too. */
-   return econ_reduction_master_on(cfg) && cfg->reduce_command_filter ? 1 : 0;
+   /* Deterministic tool-output condensation is a SAFE+AGGRESSIVE lever (econ_preset
+    * command_filter): on whenever the economizer is not off. econ_reduction_master_on
+    * also honors the modules.economizer hard kill. */
+   econ_preset_t ep;
+   econ_preset(cfg, &ep);
+   return ep.command_filter;
 }
 
 /* ---- command recognition (Slice 2) ---- */

@@ -186,30 +186,10 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * operator-exported AIMEE_AUTONOMY_* still overrides), so a config.set applies without a
     * restart and without an unsafe cross-thread setenv. */
 
-   /* Startup-fatal validation for the live gateway-mutation path: an invalid
-    * session-disable TTL (<=0) must refuse to bring up the /v1 server rather than
-    * pin/disable the breaker on live client traffic. Scoped to server startup so
-    * unrelated CLI callers of config_load are unaffected. */
-   {
-      char cfg_err[256];
-      if (config_reduce_validate(&cfg, cfg_err, sizeof(cfg_err)) != 0)
-      {
-         fprintf(stderr, "aimee: fatal config error: %s\n", cfg_err);
-         return 1;
-      }
-   }
-
-   /* P3: surface suppressed intent — an explicit lever the two-tier switches override, so an
-    * operator is never silently ignored (per the two-tier design's startup-WARN ruling). */
-   if (!econ_reduction_master_on(&cfg) &&
-       (cfg.reduce_history_fold || cfg.reduce_compress || cfg.reduce_command_filter))
-      aimee_log(LOG_WARN, "economizer",
-                "economizer.enabled=false MASTER-KILL: all reduction is off (measure still "
-                "runs); individual reduce.* levers are suppressed");
-   if (cfg.reduce_gateway_mutate && !econ_gateway_mutate_on(&cfg))
-      aimee_log(LOG_WARN, "economizer",
-                "reduce.gateway_mutate=true is SUPPRESSED: the live-primary mutator needs "
-                "economizer.enabled && economizer.aggressive (both) to activate");
+   /* Surface the active economizer tier at startup (observability). off = verbatim
+    * passthrough; safe = caching + lossless reduction; aggressive = + lossy compress
+    * and live inbound /v1 mutation. See docs/features/economizer.md. */
+   aimee_log(LOG_INFO, "economizer", "tier=%s", econ_tier_name(econ_tier(&cfg)));
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the

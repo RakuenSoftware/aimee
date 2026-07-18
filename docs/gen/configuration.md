@@ -202,7 +202,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `require_aimee_git` | bool | Block a delegate from running `git` or `gh` in a shell (reads included) and redirect git/forge work to aimee's `git_*` tools, which execute on aimee-server where the forge credential stays in-process; delegates are also spawned without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed SSH to any host) and neuters the global/system git config (default on). |
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
-| `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the (default-off) context-economizer compresses older results to keep history bounded. |
+| `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the context-economizer (aggressive tier) compresses older results to keep history bounded. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
@@ -214,7 +214,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_code_workers`, `kb_curator_extract_docs_enabled`, `kb_curator_extract_docs_workers`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `llm_embed_backend`, `llm_embed_gpu`, `llm_embed_host`, `llm_embed_tier`, `llm_rerank_backend`, `llm_rerank_endpoint`, `llm_rerank_gpu`, `llm_rerank_host`, `llm_rerank_tier`, `llm_synth_backend`, `llm_synth_endpoint`, `llm_synth_gpu`, `llm_synth_host`, `llm_synth_model`, `llm_synth_tier`, `wfe_proposals_autoscan_enabled`
 
-## Config-file sections (53)
+## Config-file sections (52)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -233,7 +233,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`db2`** — _DB2 / vector store settings._ Keys: `vector`
 - **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
-- **`economizer`** — `aggressive`, `enabled`
+- **`economizer`** — _Context economizer tier (a single string: `off` | `safe` | `aggressive`). off = verbatim passthrough; safe (default) = Anthropic prompt caching + lossless, freeze-guarded reduction; aggressive = adds lossy tool-body compression + live OpenAI-side gateway mutation. Anthropic context is never mutated at any tier. The `{enabled, aggressive}` object form is deprecated. See docs/features/economizer.md._ Keys: `aggressive`, `enabled`
 - **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
 - **`fold`** — `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
 - **`guardrails`** — _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
@@ -257,7 +257,6 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
 - **`otel`** — _OpenTelemetry export._ Keys: `endpoint`, `service_name`
 - **`reasoning_cap`** — _Reasoning-effort cap._ Keys: `enabled`
-- **`reduce`** — `command_filter`, `compress`, `delegate_seam`, `freeze_guard`, `freeze_guard_horizon`, `gateway_mutate`, `gateway_seam`, `gateway_session_disable_ttl_ms`, `history_fold`, `measure`
 - **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
 - **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`

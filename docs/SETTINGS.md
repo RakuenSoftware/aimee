@@ -33,28 +33,24 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer: two-tier switches (`economizer.*`) + levers (`reduce.*`)
+### Context economizer: the `economizer` tier
 
-The economizer has two **tier switches** that gate the individual `reduce.*` levers, plus the
-levers themselves. All are booleans except the two numeric tuning knobs. Defaults in
-parentheses.
+The economizer is a **single tiered control** — one string, not a set of levers:
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| **`economizer.enabled`** | **on** | **Master switch.** Off = one kill-switch: every reducer is forced off (measurement keeps running and reports zero, proving the kill). The safe tier stays on under it by the levers' own defaults. |
-| `economizer.aggressive` | off | **Opt-in ceiling for the aggressive tier** (live **primary** `/v1` mutation). `reduce.gateway_mutate` activates only with **`economizer.enabled` AND `economizer.aggressive` AND** the lever itself; the aggressive flag alone never turns on a live-traffic mutator. |
-| **`reduce.command_filter`** | **on** | **Tool-output condensation**: deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
-| `reduce.gateway_mutate` | off | Apply the economizer to the live inbound `/v1` request so the **primary** agent's tokens are reduced too. See [Economizer gateway mutation](features/economizer-gateway-mutation.md). |
-| `reduce.compress` | on | Size-based compression of oversized tool-result bodies. |
-| `reduce.history_fold` | on | Fold old turn history into a rolling skeleton. |
-| `reduce.delegate_seam` | on | Run the economizer at the delegate turn loop. |
-| `reduce.measure` | on | Collect the baseline/opportunity token ledger. |
-| `reduce.freeze_guard` | on | Pin the fold boundary only when the cache-read savings beat the cache-write cost. |
-| `reduce.gateway_session_disable_ttl_ms` | 3600000 | Gateway-mutation circuit-breaker window (ms). Must be > 0. |
-| `reduce.freeze_guard_horizon` | 1 | Expected reuse turns for the freeze break-even estimate. |
+```yaml
+economizer: safe        # off | safe | aggressive   (default: safe)
+```
 
-`reduce.gateway_seam` is intentionally **not** on the page. It is synthesized from
-`gateway_mutate` and its persistence is explicit-gated; toggle `gateway_mutate` instead.
+| Tier | What it does |
+| --- | --- |
+| `off` | Verbatim passthrough — no prompt-cache breakpoint, no reduction. |
+| `safe` (default) | Anthropic prompt caching **+** deterministic, freeze-on-first-send tool-output condensation (the full output stays recall-restorable); recall-restorable history fold on OpenAI. Lossless — nothing the model can see is dropped. |
+| `aggressive` | Everything in `safe` **+** lossy tool-body compression and live inbound `/v1` request mutation. Mutation/compression apply to **OpenAI-family egress only** — Anthropic context is never mutated at any tier. |
+
+`modules.economizer: false` is an authoritative hard-kill that forces the tier to `off`
+regardless of the `economizer` value. The per-tier reduction behavior (fold, condensation,
+compression, gateway mutation) is an **internal preset** selected by the tier — there are no
+per-lever config knobs. See [The aimee Economizer](features/economizer.md).
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -75,31 +71,29 @@ per-turn toggles). Values are clamped to sane bounds.
 
 ---
 
-## Turning on tool-output condensation
+## Choosing an economizer tier
 
-The most common new toggle. In the web UI:
-
-1. Open **⚙️ Settings** (left nav) and filter for `command_filter` (or scroll to the
-   **`reduce`** group).
-2. Flip **`reduce.command_filter`** **on** and **Save**.
-
-Or from the CLI / config file:
+The economizer is on by default at the `safe` tier (lossless). To change it, in the web UI
+open **⚙️ Settings** and set **`economizer`**, or from the CLI / config file:
 
 ```yaml
-reduce:
-  command_filter: true
+economizer: aggressive   # or: off
 ```
 
-When on, a delegate's recognized command output is condensed before it enters context, with
-the full output spilled under `<aimee_home>/tool-spills/` and a recovery pointer in the
-condensed result. When off, output is byte-identical to today (it falls through to the
-size-based `reduce.compress`). See
-[features/tool-output-condensation.md](features/tool-output-condensation.md) for the full
-behavior, safety contract, and observability.
+```sh
+aimee config set economizer aggressive
+```
+
+Tool-output condensation (recognized command output condensed before it enters context, with
+the full output spilled under `<aimee_home>/tool-spills/` and a recovery pointer) is part of
+the `safe` tier and on by default. See
+[features/tool-output-condensation.md](features/tool-output-condensation.md) for the
+condensation safety contract and observability, and
+[features/economizer.md](features/economizer.md) for the full tier model.
 
 ## When a change takes effect
 
-- **Immediately (next turn):** the economizer `reduce.*` levers and most other fields. The
+- **Immediately (next turn):** the `economizer` tier and most other fields. The
   server reloads config per request.
 - **On next server start:** the `autonomy.*` knobs: they are bridged to `AIMEE_AUTONOMY_*`
   environment variables at startup so the workflow engine (which reads them across a module

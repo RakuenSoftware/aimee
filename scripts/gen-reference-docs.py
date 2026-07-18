@@ -157,7 +157,7 @@ CFG_KEY_DESC = {
     "tool_output_max_bytes": "Per-result cap (bytes) on the model-visible tool output "
     "(read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is "
     "clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the "
-    "prompt + history; the (default-off) context-economizer compresses older results to keep "
+    "prompt + history; the context-economizer (aggressive tier) compresses older results to keep "
     "history bounded.",
     "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
     "(session-isolation guard; default off).",
@@ -327,6 +327,7 @@ SECTION_DESC = {
     "db2": "DB2 / vector store settings.",
     "dedup": "Response deduplication.",
     "dogfood": "Session capture for dogfood data.",
+    "economizer": "Context economizer tier (a single string: `off` | `safe` | `aggressive`). off = verbatim passthrough; safe (default) = Anthropic prompt caching + lossless, freeze-guarded reduction; aggressive = adds lossy tool-body compression + live OpenAI-side gateway mutation. Anthropic context is never mutated at any tier. The `{enabled, aggressive}` object form is deprecated. See docs/features/economizer.md.",
     "ensemble": "Roundtable ensemble panel + aggregator.",
     "guardrails": "Semantic guardrail policy.",
     "identity": "Working-profile identity injection.",

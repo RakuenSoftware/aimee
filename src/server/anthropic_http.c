@@ -300,17 +300,19 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    int cfg_ok = (config_load(&pcfg) == 0);
    int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
 
-   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
-    * is on, measure this inbound /v1/messages request's baseline + foldable
-    * opportunity and record a forecast ledger row. measure_only is forced on here so
-    * the request is NEVER mutated — the client transcript is read for the baseline
-    * and the live `req` is forwarded byte-identical (we ignore res.messages, NULL in
-    * measure-only). Done BEFORE the request pipeline so the baseline reflects the
-    * pristine client request, not the memory-injected one. Fully guarded
+   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when the aggressive-tier
+    * gateway seam is on, measure this inbound /v1/messages request's baseline +
+    * foldable opportunity and record a forecast ledger row. measure_only is forced on
+    * here so the request is NEVER mutated — the client transcript is read for the
+    * baseline and the live `req` is forwarded byte-identical (we ignore res.messages,
+    * NULL in measure-only). Done BEFORE the request pipeline so the baseline reflects
+    * the pristine client request, not the memory-injected one. Fully guarded
     * (config-load, array, free) and context_reduce hard-bypasses on any internal
     * error, so this can never perturb the client response. Reuses the loaded pcfg;
     * cheap mtime-cached load keeps it dark by default. */
-   if (cfg_ok && pcfg.reduce_gateway_seam)
+   econ_preset_t gw_ep;
+   econ_preset(cfg_ok ? &pcfg : NULL, &gw_ep);
+   if (gw_ep.gateway_seam)
    {
       char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
       const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
@@ -511,7 +513,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * req["messages"] in place (compress-only) BEFORE translate/build so the provider
     * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
     * caught below (restore-resend), the session is circuit-broken, and provenance is
-    * cleared. A dark no-op when reduce_gateway_mutate is off. */
+    * cleared. A dark no-op unless the economizer tier is aggressive. */
    if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);

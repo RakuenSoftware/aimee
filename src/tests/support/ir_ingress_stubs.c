@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "config.h"              /* config_t + econ_preset_t (for the econ_preset stub) */
 #include "gateway_mutate_wire.h" /* gw_mutate_ctx_t + gw_post_action_t (header-only deps) */
 
 /* Gateway-mutation hooks wired into anthropic_http.c / openai_chat.c (§ economizer
@@ -242,7 +243,7 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
 }
 
 /* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
- * block gated by cfg.reduce_gateway_seam (0 under the tests' stubbed config, so NEVER entered
+ * block gated by the economizer gateway seam (off under the tests' stubbed safe-tier config, so NEVER entered
  * at runtime). LTO used to dead-code-eliminate the block, but that decision is fragile (any new
  * read of the loaded cfg in that function can retain it, and it differs across gcc versions), so
  * resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win when a
@@ -267,8 +268,17 @@ __attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
 {
    (void)out;
 }
+/* anthropic_http.c / openai_chat.c resolve the economizer gateway-seam gate through
+ * econ_preset(); this inert weak stub returns an all-zero preset (gateway_seam off), so
+ * the shadow-measure block is never entered. The real config.o wins when linked. */
+__attribute__((weak)) void econ_preset(const config_t *cfg, econ_preset_t *out)
+{
+   (void)cfg;
+   if (out)
+      memset(out, 0, sizeof(*out));
+}
 /* Shadow gateway-measure wrapper: anthropic_http.c / openai_chat.c call this inside the
- * cfg.reduce_gateway_seam block (0 under the tests' stubbed config, so NEVER entered at
+ * economizer gateway-seam block (off under the tests' stubbed safe-tier config, so NEVER entered at
  * runtime); the inert weak stub only resolves the link. Mirrors the real no-op contract:
  * zero `out` so the caller's context_reduce_result_free is safe, return 1 ("did nothing").
  * Real gateway_mutate_wire.o wins when a test links it. */

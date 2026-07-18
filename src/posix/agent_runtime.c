@@ -784,9 +784,10 @@ native_provider_http:
       int reduce_active = 0; /* 1 once a real reduction replaced the message array */
       {
          config_t ecfg;
-         if (config_load(&ecfg) == 0 && ecfg.reduce_delegate_seam &&
-             (ecfg.reduce_measure_enabled || ecfg.reduce_history_fold || ecfg.reduce_compress))
+         if (config_load(&ecfg) == 0 && econ_reduction_master_on(&ecfg))
          {
+            econ_preset_t ep;
+            econ_preset(&ecfg, &ep);
             reduce_config_t rcfg;
             memset(&rcfg, 0, sizeof(rcfg));
             rcfg.delegate_seam = 1;
@@ -796,20 +797,15 @@ native_provider_http:
              * top-level typed items, so feeding it folded turns is unverified.
              * Keep the Responses path measure-only here; fold it in a later slice
              * once verified live. */
-            /* P3 master-kill: economizer.enabled=false forces the MUTATING levers off but
-             * leaves the block reachable, so measure_only shadow accounting keeps running
-             * (reports zero reductions — proof the kill works, per the two-tier contract). */
-            int econ_master = econ_reduction_master_on(&ecfg); /* tier != off */
-            int aggressive = econ_tier(&ecfg) == ECON_TIER_AGGRESSIVE;
-            /* history_fold is the SAFE-tier lever: recall-restorable (non-destructive) and
-             * freeze-guarded, so it is cache-favorable even on Anthropic (frozen on first
-             * send). Runs on safe+aggressive. (!chatgpt: the Responses builder can't take
-             * folded turns yet — a separate constraint, not a tier decision.) */
-            rcfg.history_fold = econ_master && ecfg.reduce_history_fold && !chatgpt;
+            /* history_fold is a SAFE+AGGRESSIVE lever: recall-restorable (non-destructive)
+             * and freeze-guarded, so it is cache-favorable even on Anthropic (frozen on
+             * first send). (!chatgpt: the Responses builder can't take folded turns yet —
+             * a separate constraint, not a tier decision.) */
+            rcfg.history_fold = ep.history_fold && !chatgpt;
             /* Compress LOSSILY shrinks tool-result bodies in place -> the AGGRESSIVE tier
              * only. Shape (role/type, ids, typed items) is preserved, so it is valid for
              * all builders including chatgpt/Responses. */
-            rcfg.compress = aggressive && ecfg.reduce_compress;
+            rcfg.compress = ep.compress;
             rcfg.measure_only =
                 !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
             /* Tier model: fold is ALWAYS freeze-guarded (cache-favorability gated). This is
@@ -817,8 +813,7 @@ native_provider_http:
              * first send and only re-folded when the savings beat the cache-write cost over
              * the horizon, so a cache miss never costs more than it saves. Not togglable. */
             rcfg.freeze_guard_enabled = 1;
-            rcfg.freeze_guard_horizon =
-                ecfg.reduce_freeze_guard_horizon > 0 ? ecfg.reduce_freeze_guard_horizon : 1;
+            rcfg.freeze_guard_horizon = ep.freeze_guard_horizon;
             rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
             rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
             rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
