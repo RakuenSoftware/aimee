@@ -109,6 +109,32 @@ static int autonomy_panel_retries_used(const char *work_item_id, const char *sta
    return used;
 }
 
+/* Count how many times this run has already re-polled CI at `stage` — one
+ * "ci_poll" audit event is written per re-drive of a ci_pending park. The caller
+ * bounds this against a budget so a PR whose CI never turns green escalates to a
+ * human instead of polling forever. Identical shape and fail-open rationale to
+ * autonomy_panel_retries_used: a transient DB read fault returns 0 (fail toward
+ * polling — a healthy run must not be permanently stranded), and the same
+ * turn-cap check hard-closes on a PERSISTENT unreadable log. Same durability
+ * guarantee: lifecycle events are never pruned mid-run, so the derived count is
+ * authoritative while the run is active. */
+static int autonomy_ci_polls_used(const char *work_item_id, const char *stage)
+{
+   db1_lifecycle_event_t *evs = NULL;
+   int n = db1_lifecycle_event_list(work_item_id, &evs);
+   if (n <= 0)
+   {
+      free(evs); /* NULL-safe: nothing read -> 0 polls used (fail toward polling) */
+      return 0;
+   }
+   int used = 0;
+   for (int i = 0; i < n; i++)
+      if (strcmp(evs[i].kind, "ci_poll") == 0 && strcmp(evs[i].stage, stage) == 0)
+         used++;
+   free(evs);
+   return used;
+}
+
 /* Park an active, not-yet-parked autonomous work item at a runaway-backstop cap
  * and audit the reason. `reason` is the accurate pause token for the breach that
  * fired (turn_cap_exceeded / wall_cap_exceeded — NOT the dollar cost cap, which
@@ -268,6 +294,90 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
             }
             /* pause cleared + retry durably recorded -> fall through to the advance
              * loop, which re-runs the parked roundtable node for a fresh panel. */
+         }
+         else if (strcmp(wi0.pause_reason, "ci_pending") == 0)
+         {
+            /* gate.ci parked because CI was not yet conclusive. Unlike a human
+             * decision this SELF-resolves: a signed CI webhook records a fresh
+             * 'passed' ci_event (server_ci_route.c) or a forge poll flips green.
+             * Re-drive the gate on a throttled cadence (one poll per backstop
+             * sweep = natural ~30s backoff, exactly like panel_retry) so
+             * exec_gate_ci re-reads the outcome and ADVANCES on a real green /
+             * re-parks on still-pending. gate.ci stays the sole CI arbiter — we
+             * only clear the pause so it can run; we never advance CI ourselves.
+             * Bounded by a poll budget so a PR whose CI never goes green
+             * escalates to a human instead of polling forever. */
+            long ci_poll_cap = wfe_env_long("AIMEE_AUTONOMY_CI_POLL_MAX", 120);
+            if (autonomy_ci_polls_used(work_item_id, wi0.current_stage) >= ci_poll_cap)
+            {
+               /* Give up: escalate to a human park AT THIS gate.ci node. This is a
+                * loop-cap escalation, NOT a gate.human — the resume API clears it
+                * with a plain resume (server_workflow_api.c), and the foreach arm
+                * below leaves it parked because a gate.ci node is not a foreach. */
+               if (db1_work_item_clear_pause_if(work_item_id, "ci_pending", wi0.current_stage) ==
+                       1 &&
+                   db1_work_item_set_pause(work_item_id, "pending_human", wi0.paused_state) == 0)
+                  db1_lifecycle_event_add(work_item_id, wi0.current_stage, "pause", "engine",
+                                          "ci_pending: poll budget exhausted, escalating to human",
+                                          "", 0);
+               return 0;
+            }
+            /* Claim the poll with the same compare-and-clear the panel arm uses:
+             * clear only while the (reason, stage) still matches, so at most one
+             * poll runs per park. On a lost claim, retry next sweep — no poll
+             * counted. */
+            if (db1_work_item_clear_pause_if(work_item_id, "ci_pending", wi0.current_stage) != 1)
+               return 0;
+            /* An uncounted poll would bypass the give-up budget, so treat a failed
+             * audit write like a failed claim: re-park with the original state and
+             * do not advance; surface a double-failure the way the panel arm does. */
+            if (db1_lifecycle_event_add(work_item_id, wi0.current_stage, "ci_poll", "engine", "",
+                                        "", 0) != 0)
+            {
+               if (db1_work_item_set_pause(work_item_id, "ci_pending", wi0.paused_state) != 0)
+               {
+                  snprintf(err, errlen, "ci-poll: audit write and re-park both failed for '%s'",
+                           work_item_id);
+                  return -1;
+               }
+               return 0;
+            }
+            /* pause cleared + poll durably recorded -> fall through: the advance
+             * loop re-runs exec_gate_ci for a fresh CI read. */
+         }
+         else if (strcmp(wi0.pause_reason, "pending_human") == 0)
+         {
+            /* A foreach.workflow parent (the `slices` node) parks pending_human
+             * while its child slice runs are still merging, and must re-aggregate
+             * as they finish. Re-drive ONLY when the parked node is the foreach
+             * block — NEVER a real gate.human (an inviolable human stop) or any
+             * other loop-cap pending_human park. This is the exact inverse of the
+             * resume API's is_human_gate discriminator (node->block ==
+             * WFE_BLK_GATE_HUMAN); a non-foreach pending_human falls to return 0
+             * and stays human-gated. */
+            char ferr[256];
+            wfe_def_t *fdef = wfe_load_workflow(wi0.workflow_name, ferr, sizeof ferr);
+            const wfe_node_t *fn = fdef ? wfe_def_node(fdef, wi0.current_stage) : NULL;
+            int is_foreach = fn && fn->block == WFE_BLK_FOREACH_WORKFLOW;
+            if (fdef)
+               wfe_def_free(fdef);
+            if (!is_foreach)
+               return 0; /* gate.human / other pending_human: human-gated, never auto-clear */
+            /* Re-aggregate only once EVERY child has merged (accepted >= total).
+             * A still-running or FAILED slice leaves the parent parked for a human
+             * — matching exec_foreach_workflow's own park-on-failed semantics — so
+             * this never busy-loops clearing/re-parking. The count is a cheap local
+             * DB read (no forge/API), so no throttle is needed. */
+            int total = 0, accepted = 0, failed = 0;
+            if (db1_work_item_child_counts(work_item_id, &total, &accepted, &failed) != 0 ||
+                total <= 0 || accepted < total)
+               return 0; /* children still running or a slice failed -> stay parked */
+            if (db1_work_item_clear_pause_if(work_item_id, "pending_human", wi0.current_stage) != 1)
+               return 0;
+            db1_lifecycle_event_add(work_item_id, wi0.current_stage, "foreach_redrive", "engine",
+                                    "all children merged; re-aggregating", "", 0);
+            /* pause cleared -> fall through: the advance loop re-runs
+             * exec_foreach_workflow, which advances past `slices`. */
          }
       }
    }
