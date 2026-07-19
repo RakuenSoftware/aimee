@@ -2014,7 +2014,8 @@ CREATE TRIGGER org_audit_project_team BEFORE INSERT ON org_token_audit
 -- A second settle of an already-terminal row raises (no legal transition matches).
 CREATE OR REPLACE FUNCTION org_audit_settle_guard() RETURNS trigger AS $$
 BEGIN
-  IF NEW.request_id      IS DISTINCT FROM OLD.request_id
+  IF NEW.id              IS DISTINCT FROM OLD.id
+  OR NEW.request_id      IS DISTINCT FROM OLD.request_id
   OR NEW.origin_cert_cn  IS DISTINCT FROM OLD.origin_cert_cn
   OR NEW.actor_issuer    IS DISTINCT FROM OLD.actor_issuer
   OR NEW.actor_subject   IS DISTINCT FROM OLD.actor_subject
@@ -2033,6 +2034,11 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'WORM: org_token_audit illegal state transition % -> %', OLD.state, NEW.state
       USING ERRCODE = '42501';
+  END IF;
+  -- A settled_* terminal row must carry a settlement timestamp (blocks a direct
+  -- owner-level UPDATE from marking a row settled without recording when).
+  IF NEW.state LIKE 'settled_%' AND (NEW.settled_at IS NULL OR NEW.settled_at = '') THEN
+    RAISE EXCEPTION 'WORM: org_token_audit settled row requires settled_at' USING ERRCODE = '42501';
   END IF;
   RETURN NEW;
 END; $$ LANGUAGE plpgsql;

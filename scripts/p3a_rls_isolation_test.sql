@@ -151,5 +151,74 @@ BEGIN
   END;
 END $$;
 
-\echo '== P3a RLS/cost isolation assertions PASSED =='
+-- ----------------------------------------------------------------------------
+-- Core correctness of the metering functions (owner context; the acceptance
+-- claims the plan makes, proven in CI rather than only in scratch).
+-- ----------------------------------------------------------------------------
+SELECT set_config('aimee.principal', 'owner', true);
+
+-- Idempotent start + replay-mismatch rejection.
+DO $$
+DECLARE id1 bigint; id2 bigint;
+BEGIN
+  id1 := org_token_audit_start('cr', 'origin-C', 'iss', 'sub', 930001, 930010, 'p3a-model', 1, '', '');
+  id2 := org_token_audit_start('cr', 'origin-C', 'iss', 'sub', 930001, 930010, 'p3a-model', 1, '', '');
+  IF id1 <> id2 THEN
+    RAISE EXCEPTION 'P3a FAIL: idempotent re-start returned different ids % vs %', id1, id2;
+  END IF;
+  BEGIN
+    -- same key, mismatched immutable triple (different team) -> reject
+    PERFORM org_token_audit_start('cr', 'origin-C', 'iss', 'sub', 930002, NULL, 'p3a-model', 1, '', '');
+    RAISE EXCEPTION 'P3a FAIL: replay with mismatched attributes was accepted';
+  EXCEPTION WHEN unique_violation THEN NULL;  -- expected (errcode 23505)
+  END;
+  -- same request_id from a DIFFERENT origin is a distinct valid row, not a replay
+  IF org_token_audit_start('cr', 'origin-D', '', '', 930001, 930010, 'p3a-model', 1, '', '')
+       = id1 THEN
+    RAISE EXCEPTION 'P3a FAIL: cross-origin same request_id collapsed onto the same row';
+  END IF;
+END $$;
+
+-- Double-settle is a no-op (state-checked UPDATE); rollup increments exactly once.
+DO $$
+DECLARE ok boolean; rc bigint;
+BEGIN
+  ok := org_token_audit_settle('origin-C', 'cr', 'settled_success', 'p3a-model', 10, 5, 0, 0, 0.0002, '2026-07-20');
+  IF NOT ok THEN RAISE EXCEPTION 'P3a FAIL: first settle returned false'; END IF;
+  ok := org_token_audit_settle('origin-C', 'cr', 'settled_failed', 'x', 99, 99, 0, 0, 9.9, '2026-07-20');
+  IF ok THEN RAISE EXCEPTION 'P3a FAIL: double-settle of terminal row returned true'; END IF;
+  SELECT row_count INTO rc FROM org_spend_rollup
+    WHERE team_id = 930001 AND billable_model = 'p3a-model' AND day = '2026-07-20';
+  IF rc <> 1 THEN RAISE EXCEPTION 'P3a FAIL: rollup row_count=% after double-settle (want 1)', rc; END IF;
+END $$;
+
+-- indeterminate -> settled reconciliation contributes to the rollup exactly ONCE.
+DO $$
+DECLARE rc bigint; pt bigint;
+BEGIN
+  PERFORM org_token_audit_start('ir', 'origin-C', '', '', 930001, 930010, 'p3a-model', 1, '', '');
+  PERFORM org_token_audit_settle('origin-C', 'ir', 'indeterminate', '', 0, 0, 0, 0, 0, '2026-07-20');
+  SELECT row_count INTO rc FROM org_spend_rollup
+    WHERE team_id = 930001 AND billable_model = 'p3a-model' AND day = '2026-07-20';
+  IF rc <> 1 THEN RAISE EXCEPTION 'P3a FAIL: indeterminate wrote a rollup delta (row_count=%, want 1)', rc; END IF;
+  PERFORM org_token_audit_settle('origin-C', 'ir', 'settled_success', 'p3a-model', 20, 10, 0, 0, 0.0004, '2026-07-20');
+  SELECT row_count, prompt_tokens INTO rc, pt FROM org_spend_rollup
+    WHERE team_id = 930001 AND billable_model = 'p3a-model' AND day = '2026-07-20';
+  IF rc <> 2 OR pt <> 30 THEN
+    RAISE EXCEPTION 'P3a FAIL: reconciliation double/under-count (row_count=% prompt=%, want 2/30)', rc, pt;
+  END IF;
+END $$;
+
+-- Monotonic versioning: a second price version bumps the current pointer to 2.
+DO $$
+DECLARE v bigint;
+BEGIN
+  v := org_pricing_add_version('anthropic', 'p3a-model', 11, 21, 1, 2);
+  IF v <> 2 THEN RAISE EXCEPTION 'P3a FAIL: second version = % (want 2)', v; END IF;
+  IF org_pricing_current_version('p3a-model') <> 2 THEN
+    RAISE EXCEPTION 'P3a FAIL: current pointer did not advance to 2';
+  END IF;
+END $$;
+
+\echo '== P3a RLS/cost isolation + correctness assertions PASSED =='
 ROLLBACK;
