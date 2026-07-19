@@ -1179,8 +1179,177 @@ static cJSON *marshal_cert_revoke(int argc, char **argv)
    return req;
 }
 
+typedef cJSON *(*marshal_argv_fn)(int argc, char **argv);
+typedef cJSON *(*marshal_method_fn)(const char *method, int argc, char **argv);
+
+/* marshal_request dispatch tables. Generated-from and completeness-verified
+ * against the original if/strcmp chain (see git history / the PR). Methods are
+ * unique across all tables, so lookup order is irrelevant for correctness; the
+ * exact tables are consulted before the prefix fallbacks so an exact method
+ * (e.g. agent.episodes) is never shadowed by a prefix (agent.*). */
+static const char *const MARSHAL_NO_ARGS[] = {
+    "api.disable",
+    "api.status",
+    "audit.checkpoint",
+    "audit.seal",
+    "audit.snapshot",
+    "audit.verify",
+    "aux.config_show",
+    "calibration.readiness",
+    "cert.list",
+    "config.show",
+    "cron.list",
+    "delegate.backend_list",
+    "delegate.sandbox_list",
+    "demotion.check",
+    "episode.list",
+    "hud.status",
+    "identity.show",
+    "kb.ingest.status",
+    "mcp.audit",
+    "memory.stats",
+    "model.refresh",
+    "notes.list",
+    "provider.get",
+    "ranker.export_view",
+    "ranker.fit",
+    "rules.generate",
+    "rules.list",
+    "server.health",
+    "toolset.list",
+    "vault.list",
+    "vault.lock",
+    "workers",
+    "workspace.list",
+};
+
+static const struct
+{
+   const char *method;
+   marshal_argv_fn fn;
+} MARSHAL_ARGV[] = {
+    {"agent.episodes", marshal_agent_episodes},
+    {"api.enable", marshal_api_enable},
+    {"aux.test", marshal_aux_test},
+    {"cert.issue", marshal_cert_issue},
+    {"cert.revoke", marshal_cert_revoke},
+    {"config.get", marshal_config_get},
+    {"config.set", marshal_config_set},
+    {"cron.add", marshal_cron_add},
+    {"curator.contradictions", marshal_curator_contradictions},
+    {"delegate", marshal_delegate},
+    {"delegate.aggregate", marshal_delegate_aggregate},
+    {"delegate.backend_exec", marshal_delegate_backend_exec},
+    {"delegate.launch", marshal_delegate_launch},
+    {"delegate.log", marshal_delegate_log},
+    {"delegate.roundtable", marshal_delegate_roundtable},
+    {"delegate.sandbox_gc", marshal_delegate_sandbox_gc},
+    {"delegate.status", marshal_delegate_status},
+    {"dogfood.report", marshal_dogfood_report},
+    {"dogfood.review", marshal_dogfood_review},
+    {"dogfood.tag", marshal_dogfood_tag},
+    {"eval.results", marshal_eval_results},
+    {"eval.run", marshal_eval_run},
+    {"evidence.fidelity_retrieval_event", marshal_audit_fidelity},
+    {"evidence.provenance_retrieval_event", marshal_audit_provenance},
+    {"evidence.trace_retrieval_event", marshal_audit_trace},
+    {"get_help", marshal_get_help},
+    {"git.verify", marshal_git_verify},
+    {"graph.explain", marshal_graph_explain},
+    {"graph.sync_code", marshal_graph_sync_code},
+    {"identity.diff", marshal_identity_diff},
+    {"identity.snapshot", marshal_identity_snapshot},
+    {"index.blast_radius", marshal_index_blast_radius},
+    {"index.deps", marshal_index_deps},
+    {"index.find", marshal_index_find},
+    {"index.find_callers", marshal_index_find_callers},
+    {"index.list", marshal_index_list},
+    {"index.scan", marshal_index_scan},
+    {"index.structure", marshal_index_structure},
+    {"insights.overview", marshal_insights_overview},
+    {"job.list", marshal_coord_jobs_list},
+    {"job.start", marshal_coord_job_start},
+    {"jobs.list", marshal_jobs_list},
+    {"kb.build", marshal_kb_build},
+    {"kb.docs.push", marshal_kb_docs_push},
+    {"kb.ingest", marshal_kb_ingest},
+    {"kb.search", marshal_kb_search},
+    {"kb.status", marshal_kb_status},
+    {"kb.update", marshal_kb_update},
+    {"mcp.recheck", marshal_mcp_recheck},
+    {"memory.archive", marshal_memory_archive},
+    {"memory.benchmark", marshal_memory_benchmark},
+    {"memory.get", marshal_memory_get},
+    {"memory.identity", marshal_memory_identity},
+    {"memory.list", marshal_memory_list},
+    {"memory.prefer", marshal_memory_prefer},
+    {"memory.read", marshal_memory_read},
+    {"memory.recall", marshal_memory_recall},
+    {"memory.search", marshal_memory_search},
+    {"memory.store", marshal_memory_store},
+    {"model.list", marshal_model_list},
+    {"model.show", marshal_model_show},
+    {"notes.search", marshal_notes_search},
+    {"primary.set", marshal_primary},
+    {"provider.list", marshal_provider_list},
+    {"provider.models", marshal_provider_models},
+    {"provider.set", marshal_provider_set},
+    {"repo.trust", marshal_repo_trust},
+    {"rules.delete", marshal_rules_delete},
+    {"session.attach", marshal_session_attach},
+    {"session.brief", marshal_session_brief},
+    {"session.close", marshal_session_close},
+    {"session.detach", marshal_session_detach},
+    {"session.get", marshal_session_get},
+    {"session.list", marshal_session_list},
+    {"session.presence", marshal_session_presence},
+    {"trajectory.batch", marshal_trajectory_batch},
+    {"trajectory.export", marshal_trajectory_export},
+    {"trigger.fire", marshal_trigger_fire},
+    {"trigger.list", marshal_trigger_list},
+    {"vault.capability", marshal_vault_capability},
+    {"vault.delete", marshal_vault_delete},
+    {"vault.set", marshal_vault_set},
+    {"vault.set_server", marshal_vault_set_server},
+    {"vault.unlock", marshal_vault_unlock},
+    {"wm.get", marshal_wm_get},
+    {"wm.list", marshal_wm_list},
+    {"wm.set", marshal_wm_set},
+    {"workspace.add", marshal_workspace_add},
+    {"workspace.mirror-sync", marshal_workspace_mirror_sync},
+    {"worktree.gc", marshal_worktree_gc},
+};
+
+static const struct
+{
+   const char *method;
+   marshal_method_fn fn;
+} MARSHAL_METHOD_ARGV[] = {
+    {"cron.disable", marshal_cron_id},
+    {"cron.enable", marshal_cron_id},
+    {"cron.history", marshal_cron_id},
+    {"cron.remove", marshal_cron_id},
+    {"cron.run", marshal_cron_id},
+    {"cron.show", marshal_cron_id},
+    {"curator.implements", marshal_curator_topic},
+    {"curator.synthesize", marshal_curator_topic},
+    {"job.cancel", marshal_job_id_request},
+    {"job.status", marshal_job_id_request},
+    {"jobs.cancel", marshal_job_id_request},
+    {"jobs.logs", marshal_job_id_request},
+    {"jobs.status", marshal_job_id_request},
+    {"provider.quota", marshal_provider_name_method},
+    {"provider.show", marshal_provider_name_method},
+    {"provider.test", marshal_provider_name_method},
+    {"trigger.cancel", marshal_trigger_id},
+    {"trigger.status", marshal_trigger_id},
+    {"workspace.get", marshal_agent_args},
+    {"workspace.remove", marshal_agent_args},
+};
+
 cJSON *marshal_request(const char *method, int argc, char **argv)
 {
+   /* Custom-body cases (handled before the tables). */
    if (strcmp(method, "init.run") == 0)
    {
       (void)argc;
@@ -1191,238 +1360,6 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
          cJSON_AddStringToObject(req, "cwd", cwd);
       return req;
    }
-   if (strcmp(method, "api.status") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "audit.verify") == 0 || strcmp(method, "audit.checkpoint") == 0 ||
-       strcmp(method, "audit.seal") == 0 || strcmp(method, "audit.snapshot") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "api.enable") == 0)
-      return marshal_api_enable(argc, argv);
-   if (strcmp(method, "api.disable") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "vault.unlock") == 0)
-      return marshal_vault_unlock(argc, argv);
-   if (strcmp(method, "vault.set") == 0)
-      return marshal_vault_set(argc, argv);
-   if (strcmp(method, "vault.set_server") == 0)
-      return marshal_vault_set_server(argc, argv);
-   if (strcmp(method, "vault.capability") == 0)
-      return marshal_vault_capability(argc, argv);
-   if (strcmp(method, "vault.delete") == 0)
-      return marshal_vault_delete(argc, argv);
-   if (strcmp(method, "vault.list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "vault.lock") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "cert.issue") == 0)
-      return marshal_cert_issue(argc, argv);
-   if (strcmp(method, "cert.revoke") == 0)
-      return marshal_cert_revoke(argc, argv);
-   if (strcmp(method, "cert.list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "delegate.backend_exec") == 0)
-      return marshal_delegate_backend_exec(argc, argv);
-   if (strcmp(method, "delegate.backend_list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "memory.search") == 0)
-      return marshal_memory_search(argc, argv);
-   if (strcmp(method, "memory.recall") == 0)
-      return marshal_memory_recall(argc, argv);
-   if (strcmp(method, "memory.store") == 0)
-      return marshal_memory_store(argc, argv);
-   if (strcmp(method, "memory.identity") == 0)
-      return marshal_memory_identity(argc, argv);
-   if (strcmp(method, "memory.prefer") == 0)
-      return marshal_memory_prefer(argc, argv);
-   if (strcmp(method, "memory.archive") == 0)
-      return marshal_memory_archive(argc, argv);
-   if (strcmp(method, "memory.list") == 0)
-      return marshal_memory_list(argc, argv);
-   if (strcmp(method, "memory.get") == 0)
-      return marshal_memory_get(argc, argv);
-   if (strcmp(method, "memory.read") == 0)
-      return marshal_memory_read(argc, argv);
-   if (strcmp(method, "memory.stats") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "memory.benchmark") == 0)
-      return marshal_memory_benchmark(argc, argv);
-   if (strcmp(method, "index.scan") == 0)
-      return marshal_index_scan(argc, argv);
-   if (strcmp(method, "index.find") == 0)
-      return marshal_index_find(argc, argv);
-   if (strcmp(method, "index.list") == 0)
-      return marshal_index_list(argc, argv);
-   if (strcmp(method, "index.blast_radius") == 0)
-      return marshal_index_blast_radius(argc, argv);
-   if (strcmp(method, "index.structure") == 0)
-      return marshal_index_structure(argc, argv);
-   if (strcmp(method, "index.find_callers") == 0)
-      return marshal_index_find_callers(argc, argv);
-   if (strcmp(method, "index.deps") == 0)
-      return marshal_index_deps(argc, argv);
-   if (strcmp(method, "repo.trust") == 0)
-      return marshal_repo_trust(argc, argv);
-   if (strcmp(method, "graph.sync_code") == 0)
-      return marshal_graph_sync_code(argc, argv);
-   if (strcmp(method, "graph.explain") == 0)
-      return marshal_graph_explain(argc, argv);
-   if (strcmp(method, "curator.implements") == 0)
-      return marshal_curator_topic("curator.implements", argc, argv);
-   if (strcmp(method, "curator.synthesize") == 0)
-      return marshal_curator_topic("curator.synthesize", argc, argv);
-   if (strcmp(method, "curator.contradictions") == 0)
-      return marshal_curator_contradictions(argc, argv);
-   if (strcmp(method, "workspace.add") == 0)
-      return marshal_workspace_add(argc, argv);
-   if (strcmp(method, "workspace.remove") == 0 || strcmp(method, "workspace.get") == 0)
-      return marshal_agent_args(method, argc, argv);
-   if (strcmp(method, "workspace.mirror-sync") == 0)
-      return marshal_workspace_mirror_sync(argc, argv);
-   if (strcmp(method, "workspace.list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "notes.list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "notes.search") == 0)
-      return marshal_notes_search(argc, argv);
-   if (strcmp(method, "session.list") == 0)
-      return marshal_session_list(argc, argv);
-   if (strcmp(method, "session.get") == 0)
-      return marshal_session_get(argc, argv);
-   if (strcmp(method, "session.close") == 0)
-      return marshal_session_close(argc, argv);
-   if (strcmp(method, "session.brief") == 0)
-      return marshal_session_brief(argc, argv);
-   if (strcmp(method, "session.attach") == 0)
-      return marshal_session_attach(argc, argv);
-   if (strcmp(method, "session.detach") == 0)
-      return marshal_session_detach(argc, argv);
-   if (strcmp(method, "session.presence") == 0)
-      return marshal_session_presence(argc, argv);
-   if (strcmp(method, "trajectory.export") == 0)
-      return marshal_trajectory_export(argc, argv);
-   if (strcmp(method, "trajectory.batch") == 0)
-      return marshal_trajectory_batch(argc, argv);
-   if (strcmp(method, "rules.delete") == 0)
-      return marshal_rules_delete(argc, argv);
-   if (strncmp(method, "skill.", 6) == 0)
-      return marshal_skill_request(method, argc, argv);
-   if (strcmp(method, "rules.list") == 0 || strcmp(method, "rules.generate") == 0 ||
-       strcmp(method, "server.health") == 0 || strcmp(method, "hud.status") == 0 ||
-       strcmp(method, "provider.get") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "provider.set") == 0)
-      return marshal_provider_set(argc, argv);
-   if (strcmp(method, "provider.list") == 0)
-      return marshal_provider_list(argc, argv);
-   if (strcmp(method, "provider.show") == 0)
-      return marshal_provider_name_method(method, argc, argv);
-   if (strcmp(method, "provider.models") == 0)
-      return marshal_provider_models(argc, argv);
-   if (strcmp(method, "provider.test") == 0)
-      return marshal_provider_name_method(method, argc, argv);
-   if (strcmp(method, "provider.quota") == 0)
-      return marshal_provider_name_method(method, argc, argv);
-   if (strcmp(method, "model.list") == 0)
-      return marshal_model_list(argc, argv);
-   if (strcmp(method, "model.show") == 0)
-      return marshal_model_show(argc, argv);
-   if (strcmp(method, "model.refresh") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "wm.set") == 0)
-      return marshal_wm_set(argc, argv);
-   if (strcmp(method, "wm.get") == 0)
-      return marshal_wm_get(argc, argv);
-   if (strcmp(method, "wm.list") == 0)
-      return marshal_wm_list(argc, argv);
-   if (strcmp(method, "primary.set") == 0)
-      return marshal_primary(argc, argv);
-   if (strcmp(method, "kb.search") == 0)
-      return marshal_kb_search(argc, argv);
-   if (strcmp(method, "kb.build") == 0)
-      return marshal_kb_build(argc, argv);
-   if (strcmp(method, "kb.update") == 0)
-      return marshal_kb_update(argc, argv);
-   if (strcmp(method, "kb.ingest") == 0)
-      return marshal_kb_ingest(argc, argv);
-   if (strcmp(method, "kb.docs.push") == 0)
-      return marshal_kb_docs_push(argc, argv);
-   if (strcmp(method, "kb.ingest.status") == 0 || strcmp(method, "workers") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "kb.status") == 0)
-      return marshal_kb_status(argc, argv);
-   if (strcmp(method, "insights.overview") == 0)
-      return marshal_insights_overview(argc, argv);
-   if (strcmp(method, "worktree.gc") == 0)
-      return marshal_worktree_gc(argc, argv);
-   if (strcmp(method, "delegate") == 0)
-      return marshal_delegate(argc, argv);
-   if (strcmp(method, "delegate.aggregate") == 0)
-      return marshal_delegate_aggregate(argc, argv);
-   if (strcmp(method, "delegate.roundtable") == 0)
-      return marshal_delegate_roundtable(argc, argv);
-   if (strcmp(method, "delegate.launch") == 0)
-      return marshal_delegate_launch(argc, argv);
-   if (strcmp(method, "delegate.status") == 0)
-      return marshal_delegate_status(argc, argv);
-   if (strcmp(method, "delegate.sandbox_list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "delegate.sandbox_gc") == 0)
-      return marshal_delegate_sandbox_gc(argc, argv);
-   if (strcmp(method, "jobs.list") == 0)
-      return marshal_jobs_list(argc, argv);
-   if (strcmp(method, "jobs.status") == 0 || strcmp(method, "jobs.logs") == 0 ||
-       strcmp(method, "jobs.cancel") == 0)
-      return marshal_job_id_request(method, argc, argv);
-   if (strcmp(method, "job.start") == 0)
-      return marshal_coord_job_start(argc, argv);
-   if (strcmp(method, "job.list") == 0)
-      return marshal_coord_jobs_list(argc, argv);
-   if (strcmp(method, "job.status") == 0 || strcmp(method, "job.cancel") == 0)
-      return marshal_job_id_request(method, argc, argv);
-   if (strcmp(method, "aux.config_show") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "config.show") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "config.get") == 0)
-      return marshal_config_get(argc, argv);
-   if (strcmp(method, "evidence.trace_retrieval_event") == 0)
-      return marshal_audit_trace(argc, argv);
-   if (strcmp(method, "evidence.provenance_retrieval_event") == 0)
-      return marshal_audit_provenance(argc, argv);
-   if (strcmp(method, "evidence.fidelity_retrieval_event") == 0)
-      return marshal_audit_fidelity(argc, argv);
-   if (strcmp(method, "config.set") == 0)
-      return marshal_config_set(argc, argv);
-   if (strcmp(method, "aux.test") == 0)
-      return marshal_aux_test(argc, argv);
-   if (strcmp(method, "delegate.log") == 0)
-      return marshal_delegate_log(argc, argv);
-   if (strcmp(method, "episode.list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "agent.episodes") == 0)
-      return marshal_agent_episodes(argc, argv);
-   if (strcmp(method, "trigger.list") == 0)
-      return marshal_trigger_list(argc, argv);
-   if (strcmp(method, "trigger.status") == 0 || strcmp(method, "trigger.cancel") == 0)
-      return marshal_trigger_id(method, argc, argv);
-   if (strcmp(method, "trigger.fire") == 0)
-      return marshal_trigger_fire(argc, argv);
-   if (strcmp(method, "cron.list") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "cron.add") == 0)
-      return marshal_cron_add(argc, argv);
-   if (strcmp(method, "cron.show") == 0 || strcmp(method, "cron.history") == 0 ||
-       strcmp(method, "cron.run") == 0 || strcmp(method, "cron.enable") == 0 ||
-       strcmp(method, "cron.disable") == 0 || strcmp(method, "cron.remove") == 0)
-      return marshal_cron_id(method, argc, argv);
-   if (strncmp(method, "agent.", 6) == 0)
-      return marshal_agent_args(method, argc, argv);
-   if (strcmp(method, "mcp.audit") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "mcp.recheck") == 0)
-      return marshal_mcp_recheck(argc, argv);
-   if (strcmp(method, "toolset.list") == 0)
-      return marshal_no_args(method);
    if (strcmp(method, "toolset.show") == 0 || strcmp(method, "toolset.resolve") == 0)
    {
       if (argc < 1)
@@ -1431,34 +1368,21 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       cJSON_AddStringToObject(req, "name", argv[0]);
       return req;
    }
-   if (strcmp(method, "get_help") == 0)
-      return marshal_get_help(argc, argv);
-   if (strcmp(method, "git.verify") == 0)
-      return marshal_git_verify(argc, argv);
-   if (strcmp(method, "dogfood.tag") == 0)
-      return marshal_dogfood_tag(argc, argv);
-   if (strcmp(method, "dogfood.review") == 0)
-      return marshal_dogfood_review(argc, argv);
-   if (strcmp(method, "dogfood.report") == 0)
-      return marshal_dogfood_report(argc, argv);
-   if (strcmp(method, "eval.run") == 0)
-      return marshal_eval_run(argc, argv);
-   if (strcmp(method, "eval.results") == 0)
-      return marshal_eval_results(argc, argv);
-   if (strcmp(method, "identity.show") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "calibration.readiness") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "demotion.check") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "ranker.export_view") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "ranker.fit") == 0)
-      return marshal_no_args(method);
-   if (strcmp(method, "identity.snapshot") == 0)
-      return marshal_identity_snapshot(argc, argv);
-   if (strcmp(method, "identity.diff") == 0)
-      return marshal_identity_diff(argc, argv);
+   /* Exact-method tables (before the prefix fallbacks). */
+   for (size_t i = 0; i < sizeof(MARSHAL_NO_ARGS) / sizeof(MARSHAL_NO_ARGS[0]); i++)
+      if (strcmp(method, MARSHAL_NO_ARGS[i]) == 0)
+         return marshal_no_args(method);
+   for (size_t i = 0; i < sizeof(MARSHAL_METHOD_ARGV) / sizeof(MARSHAL_METHOD_ARGV[0]); i++)
+      if (strcmp(method, MARSHAL_METHOD_ARGV[i].method) == 0)
+         return MARSHAL_METHOD_ARGV[i].fn(method, argc, argv);
+   for (size_t i = 0; i < sizeof(MARSHAL_ARGV) / sizeof(MARSHAL_ARGV[0]); i++)
+      if (strcmp(method, MARSHAL_ARGV[i].method) == 0)
+         return MARSHAL_ARGV[i].fn(argc, argv);
+   /* Prefix fallbacks (after all exact matches). */
+   if (strncmp(method, "skill.", 6) == 0)
+      return marshal_skill_request(method, argc, argv);
+   if (strncmp(method, "agent.", 6) == 0)
+      return marshal_agent_args(method, argc, argv);
    if (strncmp(method, "pipeline.", 9) == 0)
       return marshal_pipeline_request(method, argc, argv);
    return NULL;
