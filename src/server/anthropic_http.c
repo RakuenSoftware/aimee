@@ -983,6 +983,152 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
    return;
 }
 
+/* Native Anthropic streaming relay: forward the upstream Anthropic SSE
+ * verbatim through the mutation breaker, then record realized/partial cost.
+ * Extracted from messages_stream(); goto cleanup became return. */
+static void messages_stream_native_relay(const char *url, const char *auth, const char *prov_body,
+                                         const char *extra, agent_t *ag, const char *model,
+                                         server_http_sse_event_emit emit, void *ctx,
+                                         gw_mutate_ctx_t *gwmc)
+{
+   anthropic_relay_ctx_t relay;
+   int stream_status;
+   memset(&relay, 0, sizeof(relay));
+   sse_parser_init(&relay.parser);
+   relay.emit = emit;
+   relay.emit_ctx = ctx;
+   relay.gwmc = gwmc; /* enable the streaming breaker for a mutated stream */
+   stream_status =
+       agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", anthropic_relay_chunk_cb,
+                              &relay, ag->timeout_ms, extra[0] ? extra : NULL);
+   relay_flush(&relay);
+   if (stream_status != 200)
+   {
+      relay_emit_transport_error(&relay, stream_status);
+      /* Fail-safe (§2.5): a non-SSE post-200 upstream failure on a mutated stream
+       * disables subsequent turns (the current turn is already lost). */
+      gw_stream_disable(gwmc, "stream_decoder_error");
+   }
+   /* Cost accounting for the native Anthropic streaming ingress, from the
+    * usage tapped off the relayed SSE. A clean 200 is realized spend; an
+    * aborted stream that still observed usage is recorded as partial so the
+    * observed tokens are not silently lost. */
+   if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model, NULL, relay.input_tokens,
+                                relay.output_tokens, relay.cache_write_tokens,
+                                relay.cache_read_tokens, "anthropic-ingress",
+                                stream_status == 200 ? "realized" : "partial");
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   return;
+}
+
+/* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
+ * through the neutral IR-delta model, synthesize a clean close if the upstream
+ * cut off early, and record cost. Extracted from messages_stream(). */
+static void messages_stream_ir_relay(const char *url, const char *auth, const char *prov_body,
+                                     const char *extra, agent_t *ag, const char *model,
+                                     const char *msg_id, int input_est,
+                                     server_http_sse_event_emit emit, void *ctx)
+{
+   prov_stream_ctx_t pc;
+   /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
+    * SSE relay through the neutral IR-delta model instead of the legacy
+    * anthropic_stream_feed_openai translator -- the last live direct-translation
+    * site. */
+   memset(&pc, 0, sizeof pc);
+   sse_parser_init(&pc.parser);
+   pc.ir_relay = 1;
+   openai_stream_state_init(&pc.ir_ost);
+   pc.emit = emit;
+   pc.emit_ctx = ctx;
+   pc.msg_id = msg_id;
+   pc.model = model;
+   int ir_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
+                                          &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+   sse_parser_free(&pc.parser);
+   /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
+    * TURN_STOP was produced), synthesize the closing sequence so the client's
+    * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
+    * still-open content blocks, then emit TURN_STOP. */
+   if (pc.ir_ast.started && !pc.ir_ost.stopped)
+   {
+      aimee_delta_t bs = {0};
+      bs.type = AIMEE_DELTA_BLOCK_STOP;
+      if (pc.ir_ost.text_block >= 0)
+      {
+         bs.block_id = pc.ir_ost.text_block;
+         anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+      }
+      for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
+         if (pc.ir_ost.tool_block[i] >= 0)
+         {
+            bs.block_id = pc.ir_ost.tool_block[i];
+            anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+         }
+      aimee_delta_t ts = {0};
+      ts.type = AIMEE_DELTA_TURN_STOP;
+      ts.stop_reason = AIMEE_STOP_END_TURN;
+      ts.usage_out = pc.ir_usage_out;
+      anthropic_delta_emit(&ts, &pc.ir_ast, msg_id, model, emit, ctx);
+   }
+   /* Cost row: input from the local estimate (message_start reports 0, same as
+    * the legacy translator's estimate basis), output tapped from the IR
+    * TURN_STOP delta. */
+   if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model, NULL, input_est, (int)pc.ir_usage_out,
+                                0, 0, "anthropic-ingress",
+                                ir_status == 200 ? "realized" : "partial");
+   return;
+}
+
+/* OpenAI-via-translator streaming: the legacy incremental translator path.
+ * Begins an Anthropic stream, feeds upstream OpenAI-chat chunks through it,
+ * finishes, and records cost. Extracted from messages_stream(). */
+static void messages_stream_xlate(const char *url, const char *auth, const char *prov_body,
+                                  const char *extra, agent_t *ag, const char *model,
+                                  const char *msg_id, int input_est,
+                                  server_http_sse_event_emit emit, void *ctx, gw_mutate_ctx_t *gwmc)
+{
+   anthropic_stream_xlate_t *xl;
+   prov_stream_ctx_t pc;
+   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
+   if (!xl)
+      return;
+
+   sse_parser_init(&pc.parser);
+   pc.xl = xl;
+   int xlate_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
+                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+   sse_parser_free(&pc.parser);
+
+   /* OpenAI-via-translator streaming: this path lacks per-frame Anthropic error
+    * classification, so a non-200 upstream on a mutated request is a fail-safe
+    * disable of subsequent turns. */
+   if (xlate_status != 200)
+      gw_stream_disable(gwmc, "stream_decoder_error");
+
+   anthropic_stream_finish(xl);
+
+   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
+    * usage captured off the upstream OpenAI stream (prompt count preferring the
+    * upstream-reported value over the estimate, plus completion and cached
+    * tokens) and write one ingress cost row, mirroring the native relay path. A
+    * clean 200 is realized; an aborted stream with observed usage is partial. */
+   {
+      int in_tok = 0, out_tok = 0, cr_tok = 0;
+      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
+      if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
+      {
+         agent_ingress_record_cost(ag->name, ag->model, model, NULL, in_tok, out_tok, 0, cr_tok,
+                                   "anthropic-ingress",
+                                   xlate_status == 200 ? "realized" : "partial");
+      }
+   }
+
+   anthropic_stream_free(xl);
+}
+
 static int messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -998,7 +1144,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    const char *model = req ? jo_cstr(req, "model") : "";
    const delegate_driver_t *driver;
    anthropic_stream_xlate_t *xl;
-   prov_stream_ctx_t pc;
    int input_est;
    int responses_wire = 0;
    gw_mutate_ctx_t gwmc;
@@ -1137,35 +1282,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (driver_is_anthropic(driver))
    {
-      anthropic_relay_ctx_t relay;
-      int stream_status;
-      memset(&relay, 0, sizeof(relay));
-      sse_parser_init(&relay.parser);
-      relay.emit = emit;
-      relay.emit_ctx = ctx;
-      relay.gwmc = &gwmc; /* enable the streaming breaker for a mutated stream */
-      stream_status =
-          agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", anthropic_relay_chunk_cb,
-                                 &relay, ag->timeout_ms, extra[0] ? extra : NULL);
-      relay_flush(&relay);
-      if (stream_status != 200)
-      {
-         relay_emit_transport_error(&relay, stream_status);
-         /* Fail-safe (§2.5): a non-SSE post-200 upstream failure on a mutated stream
-          * disables subsequent turns (the current turn is already lost). */
-         gw_stream_disable(&gwmc, "stream_decoder_error");
-      }
-      /* Cost accounting for the native Anthropic streaming ingress, from the
-       * usage tapped off the relayed SSE. A clean 200 is realized spend; an
-       * aborted stream that still observed usage is recorded as partial so the
-       * observed tokens are not silently lost. */
-      if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
-         agent_ingress_record_cost(ag->name, ag->model, model, NULL, relay.input_tokens,
-                                   relay.output_tokens, relay.cache_write_tokens,
-                                   relay.cache_read_tokens, "anthropic-ingress",
-                                   stream_status == 200 ? "realized" : "partial");
-      sse_parser_free(&relay.parser);
-      free(relay.data);
+      messages_stream_native_relay(url, auth, prov_body, extra, ag, model, emit, ctx, &gwmc);
       goto cleanup;
    }
 
@@ -1173,92 +1290,13 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (aimee_ir_stream_relay_enabled())
    {
-      /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
-       * SSE relay through the neutral IR-delta model instead of the legacy
-       * anthropic_stream_feed_openai translator -- the last live direct-translation
-       * site. */
-      memset(&pc, 0, sizeof pc);
-      sse_parser_init(&pc.parser);
-      pc.ir_relay = 1;
-      openai_stream_state_init(&pc.ir_ost);
-      pc.emit = emit;
-      pc.emit_ctx = ctx;
-      pc.msg_id = msg_id;
-      pc.model = model;
-      int ir_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
-                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
-      sse_parser_free(&pc.parser);
-      /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
-       * TURN_STOP was produced), synthesize the closing sequence so the client's
-       * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
-       * still-open content blocks, then emit TURN_STOP. */
-      if (pc.ir_ast.started && !pc.ir_ost.stopped)
-      {
-         aimee_delta_t bs = {0};
-         bs.type = AIMEE_DELTA_BLOCK_STOP;
-         if (pc.ir_ost.text_block >= 0)
-         {
-            bs.block_id = pc.ir_ost.text_block;
-            anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
-         }
-         for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
-            if (pc.ir_ost.tool_block[i] >= 0)
-            {
-               bs.block_id = pc.ir_ost.tool_block[i];
-               anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
-            }
-         aimee_delta_t ts = {0};
-         ts.type = AIMEE_DELTA_TURN_STOP;
-         ts.stop_reason = AIMEE_STOP_END_TURN;
-         ts.usage_out = pc.ir_usage_out;
-         anthropic_delta_emit(&ts, &pc.ir_ast, msg_id, model, emit, ctx);
-      }
-      /* Cost row: input from the local estimate (message_start reports 0, same as
-       * the legacy translator's estimate basis), output tapped from the IR
-       * TURN_STOP delta. */
-      if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
-         agent_ingress_record_cost(ag->name, ag->model, model, NULL, input_est,
-                                   (int)pc.ir_usage_out, 0, 0, "anthropic-ingress",
-                                   ir_status == 200 ? "realized" : "partial");
+      messages_stream_ir_relay(url, auth, prov_body, extra, ag, model, msg_id, input_est, emit,
+                               ctx);
       goto cleanup;
    }
 
-   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
-   if (!xl)
-      goto cleanup;
-
-   sse_parser_init(&pc.parser);
-   pc.xl = xl;
-   int xlate_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
-                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
-   sse_parser_free(&pc.parser);
-
-   /* OpenAI-via-translator streaming: this path lacks per-frame Anthropic error
-    * classification, so a non-200 upstream on a mutated request is a fail-safe
-    * disable of subsequent turns. */
-   if (xlate_status != 200)
-      gw_stream_disable(&gwmc, "stream_decoder_error");
-
-   anthropic_stream_finish(xl);
-
-   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
-    * usage captured off the upstream OpenAI stream (prompt count preferring the
-    * upstream-reported value over the estimate, plus completion and cached
-    * tokens) and write one ingress cost row, mirroring the native relay path. A
-    * clean 200 is realized; an aborted stream with observed usage is partial. */
-   {
-      int in_tok = 0, out_tok = 0, cr_tok = 0;
-      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
-      if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_ingress_record_cost(ag->name, ag->model, model, NULL, in_tok, out_tok, 0, cr_tok,
-                                   "anthropic-ingress",
-                                   xlate_status == 200 ? "realized" : "partial");
-      }
-   }
-
-   anthropic_stream_free(xl);
-
+   messages_stream_xlate(url, auth, prov_body, extra, ag, model, msg_id, input_est, emit, ctx,
+                         &gwmc);
 cleanup:
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
