@@ -879,6 +879,110 @@ static int anthropic_relay_chunk_cb(const char *data, size_t len, void *ud)
    return sse_parser_feed(&c->parser, data, len, anthropic_relay_line_cb, c);
 }
 
+/* P2c buffered-replay streaming: fetch the upstream reply to completion, police the
+ * parsed struct, and replay it as a well-formed Anthropic SSE sequence. Used when
+ * gateway_prevent_subagents is on, or the primary speaks the OpenAI Responses wire
+ * (whose stream shape the incremental translator does not understand). Extracted
+ * verbatim from messages_stream(); goto cleanup became return (the caller runs the
+ * shared cleanup). */
+static void messages_stream_buffered_replay(const char *url, const char *auth,
+                                            const char *prov_body, const char *extra, agent_t *ag,
+                                            const delegate_driver_t *driver, const char *model,
+                                            const char *msg_id, int responses_wire,
+                                            server_http_sse_event_emit emit, void *ctx,
+                                            gw_mutate_ctx_t *gwmc)
+{
+   char *buf_resp = NULL;
+   int buf_status;
+   parsed_response_t parsed;
+   int raw_responses = responses_wire;
+   memset(&parsed, 0, sizeof(parsed));
+   buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp, ag->timeout_ms,
+                                extra[0] ? extra : NULL);
+   if (buf_status == 200 && buf_resp)
+   {
+      if (raw_responses)
+      {
+         if (driver && driver->parse_response)
+            driver->parse_response(NULL, buf_resp, &parsed);
+         else
+         {
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider parser unavailable\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+            free(buf_resp);
+            return;
+         }
+         gw_response_run_governance(&parsed, anthropic_governance_enabled());
+         emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+         /* Cost accounting (mirror the buffered path). */
+         if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+             agent_ingress_accounting_enabled())
+            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                      parsed.prompt_tokens, parsed.completion_tokens,
+                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                      "anthropic-ingress", NULL);
+         agent_free_parsed_response(&parsed);
+      }
+      else
+      {
+         cJSON *provider_resp = cJSON_Parse(buf_resp);
+         if (provider_resp)
+         {
+            /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). */
+            ir_or_legacy_parse_response(provider_resp, buf_resp, driver, &parsed);
+            /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
+             * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
+            aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
+            gw_response_run_governance(&parsed, anthropic_governance_enabled());
+            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+            /* Cost accounting (mirror the buffered path). */
+            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+                agent_ingress_accounting_enabled())
+               agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                         parsed.prompt_tokens, parsed.completion_tokens,
+                                         parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                         "anthropic-ingress", NULL);
+            agent_free_parsed_response(&parsed);
+         }
+         else
+         {
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider returned an unparseable reply\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+         }
+         cJSON_Delete(provider_resp);
+      }
+   }
+   else
+   {
+      char err[256];
+      snprintf(err, sizeof(err),
+               "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+               "\"message\":\"primary provider call failed with status %d\"}}",
+               buf_status);
+      if (emit)
+         emit(ctx, "error", err);
+      /* Buffered-replay streaming: circuit-break subsequent turns only when the
+       * non-200 indicates a bad reduced payload — an invalid-request-class 4xx
+       * (400/413/422) or, fail-safe, a 5xx. Auth / rate-limit / not-found
+       * (401/403/404/429) are NOT reduction bugs and are forwarded WITHOUT
+       * disabling. No restore/resend — the 200 is already committed. */
+      if (gw_status_is_invalid_request(buf_status))
+         gw_stream_disable(gwmc, "stream_invalid_request");
+      else if (buf_status / 100 == 5)
+         gw_stream_disable(gwmc, "stream_decoder_error");
+   }
+   free(buf_resp);
+   return;
+}
+
 static int messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -1026,95 +1130,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * default) falls through to today's incremental relay/translator. */
    if (gateway_prevent_subagents_enabled() || responses_wire)
    {
-      char *buf_resp = NULL;
-      int buf_status;
-      parsed_response_t parsed;
-      int raw_responses = responses_wire;
-      memset(&parsed, 0, sizeof(parsed));
-      buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp,
-                                   ag->timeout_ms, extra[0] ? extra : NULL);
-      if (buf_status == 200 && buf_resp)
-      {
-         if (raw_responses)
-         {
-            if (driver && driver->parse_response)
-               driver->parse_response(NULL, buf_resp, &parsed);
-            else
-            {
-               char err[256];
-               snprintf(err, sizeof(err),
-                        "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                        "\"message\":\"primary provider parser unavailable\"}}");
-               if (emit)
-                  emit(ctx, "error", err);
-               free(buf_resp);
-               goto cleanup;
-            }
-            gw_response_run_governance(&parsed, anthropic_governance_enabled());
-            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
-            /* Cost accounting (mirror the buffered path). */
-            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
-                agent_ingress_accounting_enabled())
-               agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                         parsed.prompt_tokens, parsed.completion_tokens,
-                                         parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                         "anthropic-ingress", NULL);
-            agent_free_parsed_response(&parsed);
-         }
-         else
-         {
-            cJSON *provider_resp = cJSON_Parse(buf_resp);
-            if (provider_resp)
-            {
-               /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). */
-               ir_or_legacy_parse_response(provider_resp, buf_resp, driver, &parsed);
-               /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
-                * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
-               aimee_ir_shadow_compare_response(&parsed, provider_resp,
-                                                shadow_provider_wire(driver));
-               gw_response_run_governance(&parsed, anthropic_governance_enabled());
-               emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
-               /* Cost accounting (mirror the buffered path). */
-               if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
-                   agent_ingress_accounting_enabled())
-                  agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                            parsed.prompt_tokens, parsed.completion_tokens,
-                                            parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                            "anthropic-ingress", NULL);
-               agent_free_parsed_response(&parsed);
-            }
-            else
-            {
-               char err[256];
-               snprintf(err, sizeof(err),
-                        "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                        "\"message\":\"primary provider returned an unparseable reply\"}}");
-               if (emit)
-                  emit(ctx, "error", err);
-            }
-            cJSON_Delete(provider_resp);
-         }
-      }
-      else
-      {
-         char err[256];
-         snprintf(err, sizeof(err),
-                  "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                  "\"message\":\"primary provider call failed with status %d\"}}",
-                  buf_status);
-         if (emit)
-            emit(ctx, "error", err);
-         /* Buffered-replay streaming: circuit-break subsequent turns only when the
-          * non-200 indicates a bad reduced payload — an invalid-request-class 4xx
-          * (400/413/422) or, fail-safe, a 5xx. Auth / rate-limit / not-found
-          * (401/403/404/429) are NOT reduction bugs and are forwarded WITHOUT
-          * disabling. No restore/resend — the 200 is already committed. */
-         if (gw_status_is_invalid_request(buf_status))
-            gw_stream_disable(&gwmc, "stream_invalid_request");
-         else if (buf_status / 100 == 5)
-            gw_stream_disable(&gwmc, "stream_decoder_error");
-      }
-      free(buf_resp);
+      messages_stream_buffered_replay(url, auth, prov_body, extra, ag, driver, model, msg_id,
+                                      responses_wire, emit, ctx, &gwmc);
       goto cleanup;
    }
 
