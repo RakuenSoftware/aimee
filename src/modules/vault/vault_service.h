@@ -25,6 +25,8 @@ typedef enum
    VAULT_ERR_BADARG,     /* missing/oversize argument */
    VAULT_ERR_CRYPTO,     /* KDF/decrypt/entropy failure — fail closed */
    VAULT_ERR_IO,         /* vault file read/write failure */
+   VAULT_ERR_UNSUPPORTED_OP, /* op not supported by the active store backend (e.g. the
+                                server-autonomous dual-wrap ops on the kb pg backend) */
 } vault_status_t;
 
 /* A short human-readable label for a status (for error responses/logging). */

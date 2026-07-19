@@ -32,6 +32,8 @@ const char *vault_status_str(vault_status_t s)
       return "crypto_error";
    case VAULT_ERR_IO:
       return "io_error";
+   case VAULT_ERR_UNSUPPORTED_OP:
+      return "unsupported_op";
    }
    return "error";
 }

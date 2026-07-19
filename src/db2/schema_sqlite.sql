@@ -410,3 +410,11 @@ CREATE INDEX IF NOT EXISTS idx_css_render_snapshots_unit ON css_render_snapshots
 CREATE TABLE IF NOT EXISTS typed_facts (  id INTEGER PRIMARY KEY AUTOINCREMENT,  subject TEXT NOT NULL DEFAULT '',  subject_kind TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  object_kind TEXT NOT NULL DEFAULT '',  confidence INTEGER NOT NULL DEFAULT 50,  source TEXT NOT NULL DEFAULT '',  asserted_at TEXT NOT NULL DEFAULT '',  active INTEGER NOT NULL DEFAULT 1,  superseded_by INTEGER NOT NULL DEFAULT -1);
 CREATE INDEX IF NOT EXISTS idx_typed_facts_subject ON typed_facts(subject, relation, active);
 CREATE INDEX IF NOT EXISTS idx_typed_facts_relation ON typed_facts(relation, active);
+-- P10 kb credential vault (sqlite shim mirror of schema.sql: columns only; the RLS
+-- and SECURITY DEFINER envelope machinery is Postgres-only, so the shim carries no
+-- vault definer functions — the pg backend requires a real Postgres to operate).
+CREATE TABLE IF NOT EXISTS org_vault_salt (  principal TEXT PRIMARY KEY,  salt BLOB NOT NULL,  kek_check BLOB NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS org_vault_secret (  id INTEGER PRIMARY KEY AUTOINCREMENT,  principal TEXT NOT NULL,  team_id INTEGER,  agent TEXT NOT NULL DEFAULT '',  cred TEXT NOT NULL DEFAULT '',  version INTEGER NOT NULL,  wrapped_dek BLOB NOT NULL,  nonce BLOB NOT NULL,  ciphertext BLOB NOT NULL,  tag BLOB NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(principal, agent, cred, version));
+CREATE INDEX IF NOT EXISTS idx_org_vault_secret_team ON org_vault_secret(team_id);
+CREATE INDEX IF NOT EXISTS idx_org_vault_secret_slot ON org_vault_secret(principal, agent, cred);
+CREATE TABLE IF NOT EXISTS org_vault_current (  principal TEXT NOT NULL,  agent TEXT NOT NULL DEFAULT '',  cred TEXT NOT NULL DEFAULT '',  version INTEGER NOT NULL,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (principal, agent, cred));

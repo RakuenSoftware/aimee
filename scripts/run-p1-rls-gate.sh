@@ -44,6 +44,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p1_rls_isolation_test.sql"
 echo "== P3a cost-attribution isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p3a_rls_isolation_test.sql"
 
+echo "== P10 kb-vault isolation assertions (same provisioned db) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p10_vault_rls_test.sql"
+
 echo "== P1 RLS gate: cleanup =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
 echo "== P1 RLS gate: PASSED =="

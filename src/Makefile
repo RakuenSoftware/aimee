@@ -317,8 +317,20 @@ DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2
            db2/curator_terms.c db2/curator_gaps.c \
            db2/cross_repo_resolver.c db2/cross_repo_classify.c db2/cross_repo_stats.c \
            db2/cross_repo_deps.c db2/cross_repo_review.c db2/cross_repo_identity.c \
-           db2/cross_repo_route.c db2/cross_repo_build.c
+           db2/cross_repo_route.c db2/cross_repo_build.c \
+           db2/vault_pg.c
 DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
+
+# Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
+# (in SERVER_SRCS above, compiled as $(OBJDIR)/modules/vault/*.o) and aimee-kb (linked
+# as KB_VAULT_OBJS below, kb/-prefixed objects). db2/vault_pg.c (the kb Postgres store)
+# rides DB2_SRCS -> KB_DB2_OBJS and never enters aimee-server (the server links no
+# DB2_OBJS). The dual-compile is intentional: one crypto core, two persistence backends.
+VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_principal.c \
+                  modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
+                  modules/vault/vault_service.c modules/vault/vault_server_key.c \
+                  modules/vault/vault_capability.c
+KB_VAULT_OBJS = $(VAULT_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
 DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
@@ -929,7 +941,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # oauth_pkce.o provides the base64url encoder kb/enroll.c uses to mint
 # enrollment tokens (now reachable from `aimee-kb enroll`). It is a leaf crypto
 # util (openssl + platform_random only), so the kb sidecar links it directly.
-$(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+$(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 

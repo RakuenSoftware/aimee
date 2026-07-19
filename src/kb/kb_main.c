@@ -26,6 +26,7 @@
 #include "memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
+#include "db2/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -769,6 +770,13 @@ int main(int argc, char **argv)
    if (db2_rel_types_ensure_seed() != 0)
       fprintf(stderr, "aimee-kb: warning: rel_types ontology seed failed; typed-fact "
                       "commits will DEFER until the seed lands on a later start\n");
+
+   /* Bind the Postgres credential-vault backend (P10 slice 2) now that DB2 is up.
+    * The kb org vault stores ciphertext in org_vault_secret via the SECURITY DEFINER
+    * vault functions; the KEK stays behind file custody (the default provider). This
+    * is the kb bind — file custody stays default; later slices add external-anchor
+    * custody + seal/unseal before any key-holding activation on a hardened tier. */
+   vault_store_set_backend(&vault_pg_backend);
 
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
     * starting the service. */

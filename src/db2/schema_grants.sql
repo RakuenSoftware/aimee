@@ -62,5 +62,41 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_token_estimate_cost(TEXT,BIGINT,BIGINT,BIGINT,BIGINT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_token_audit_start(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_token_audit_settle(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BIGINT,BIGINT,NUMERIC,TEXT) TO aimee_kb_runtime;
+
+  -- P10 kb credential vault. The ciphertext store is WRITTEN ONLY by the SECURITY
+  -- DEFINER vault functions (owned by aimee_kb_owner, which bypasses RLS for its own
+  -- internal version scan). Runtime therefore gets SELECT (RLS-filtered: own-team rows
+  -- / admin) but its direct write grant from the ALL TABLES line above is REVOKED, so a
+  -- compromised runtime session cannot forge or mutate vault rows out of band.
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
+    org_vault_salt, org_vault_secret, org_vault_current FROM aimee_kb_runtime;
+  GRANT SELECT ON
+    org_vault_salt, org_vault_secret, org_vault_current TO aimee_kb_runtime;
+  -- The vault definer functions are the ONLY write/read-through path; EXECUTE to
+  -- runtime, never PUBLIC.
+  REVOKE ALL ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_salt_read(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_kek_check_read(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_kek_check_set(TEXT,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_put(TEXT,BIGINT,TEXT,TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_get_current(TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_has(TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_list(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_list_principals() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_current_wraps(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_salt_read(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_kek_check_read(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_kek_check_set(TEXT,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_put(TEXT,BIGINT,TEXT,TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_get_current(TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_has(TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_list(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_list_principals() TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_current_wraps(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
 END
 $$;
