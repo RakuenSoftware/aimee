@@ -13,7 +13,7 @@ extern "C"
 {
 #endif
 
-/* ROUNDTABLE_MAX_QUESTIONS in delegate_ensemble.h is 16; the questions-answered
+/* ROUNDTABLE_MAX_QUESTIONS in roundtable_types.h is 16; the questions-answered
  * done-bar refuses a brief with more accepted questions than this (#14). */
 #define RTP_MAX_BRIEF_QUESTIONS 16
 

@@ -13,7 +13,7 @@
 #define DEC_ROUNDTABLE_VERIFY_H 1
 
 #include "evidence_replay.h" /* pulls aimee.h (MAX_PATH_LEN) + index types first */
-#include "delegate_ensemble.h"
+#include "roundtable_types.h"
 
 #ifdef __cplusplus
 extern "C"
