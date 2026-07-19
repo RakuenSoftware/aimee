@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "server/wfe_panel_roundtable.h"
+#include "wfe_panel_roundtable.h"
 
 static const char *LENS[2] = {"security", "qa"};
 static const char *SEAT[2] = {"codex", "mimo"};
