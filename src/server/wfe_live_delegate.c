@@ -98,11 +98,10 @@ static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t
  * commit, so out_commit_sha is left empty here. The block's `role` arg is the
  * delegate PERSONA (architect/engineer/...); the delegate ROLE (read vs write) is
  * derived from whether the block named a captured artifact_path — see below. */
-static int wfe_live_delegate_run(const char *workdir, const char *role, const char *delegate,
-                                 const char *prompt, const char *artifact_path,
-                                 char out_commit_sha[64], char *err, size_t errlen)
+static int wfe_live_delegate_run(const char *workdir, const char *role, const char *prompt,
+                                 const char *artifact_path, char out_commit_sha[64], char *err,
+                                 size_t errlen)
 {
-   (void)delegate; /* agent selection is the delegate system's routing decision */
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
    if (!workdir || !workdir[0] || !prompt || !prompt[0])

@@ -599,14 +599,6 @@ int wfe_tdd_tests_survive(const char *workdir, const char *red_sha)
 
 /* The step's assigned delegate from node params ("delegate"), or "" for none.
  * May be the sentinel "$random" — the provider resolves it to a random agent. */
-static const char *node_delegate(const wfe_node_t *node)
-{
-   if (!node || !node->params)
-      return "";
-   const cJSON *d = cJSON_GetObjectItemCaseSensitive(node->params, "delegate");
-   return (d && cJSON_IsString(d) && d->valuestring) ? d->valuestring : "";
-}
-
 /* A string-typed node param by key, or "" if absent/non-string. */
 static const char *node_str(const wfe_node_t *node, const char *key)
 {
@@ -633,9 +625,9 @@ static int node_bool(const wfe_node_t *node, const char *key)
  *   1  provider ran and succeeded,
  *   0  no provider installed (caller falls back to its fail-closed path),
  *  -1  provider ran and failed (caller should loop/retry). */
-static int wfe_delegate_dispatch(const char *workdir, const char *role, const char *delegate,
-                                 const char *prompt, const char *artifact_path,
-                                 char out_commit_sha[64], double *out_cost)
+static int wfe_delegate_dispatch(const char *workdir, const char *role, const char *prompt,
+                                 const char *artifact_path, char out_commit_sha[64],
+                                 double *out_cost)
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
@@ -647,8 +639,7 @@ static int wfe_delegate_dispatch(const char *workdir, const char *role, const ch
    char err[256] = "";
    struct timespec t0 = {0, 0}, t1 = {0, 0};
    int ok0 = clock_gettime(CLOCK_MONOTONIC, &t0) == 0;
-   int rc = g_delegate->run(wd, role, delegate ? delegate : "", prompt, artifact_path,
-                            out_commit_sha, err, sizeof err);
+   int rc = g_delegate->run(wd, role, prompt, artifact_path, out_commit_sha, err, sizeof err);
    int ok1 = clock_gettime(CLOCK_MONOTONIC, &t1) == 0;
    if (out_cost) /* a failed turn still consumed wall-clock -> still costs */
       *out_cost = (ok0 && ok1) ? wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +
@@ -697,8 +688,7 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
       snprintf(prompt, sizeof prompt, "%s", base_prompt);
    char commit[64] = "";
    double cost = 0.0;
-   int drc =
-       wfe_delegate_dispatch(wd, "architect", node_delegate(node), prompt, path, commit, &cost);
+   int drc = wfe_delegate_dispatch(wd, "architect", prompt, path, commit, &cost);
    /* Hash the artifact file as the produced content, and note whether it holds
     * any content at all. */
    char hash[65] = "";
@@ -848,7 +838,7 @@ static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost
    {
       char c[64] = "";
       (void)wfe_delegate_dispatch(
-          wd, "architect", "$random",
+          wd, "architect",
           "Decompose the approved plan into a SMALL number of INDEPENDENT implementation units. "
           "Write ONLY a JSON array of concise imperative unit-task strings to .aimee/units.json in "
           "the repo root, then commit that file. Do NOT implement anything else.",
@@ -892,12 +882,12 @@ static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost
       int ok = 0;
       for (long attempt = 0; attempt <= retry_max && !ok; attempt++)
       {
-         /* retry-DIFFERENT-delegate: the first attempt uses the pinned delegate
-          * (an unnamed one resolves to a random roster agent); retries force
-          * $random so a fresh perspective takes over (Q2). */
-         const char *deleg = (attempt == 0) ? node_delegate(node) : "$random";
+         /* Re-dispatch the implement until the mechanical verify passes or the
+          * retry budget is spent. Agent selection is the delegate system's
+          * routing decision (agent_route_with_caps), so each attempt may land a
+          * different agent. */
          char uc[64] = "";
-         if (wfe_delegate_dispatch(wd, "engineer", deleg, prompt, NULL, uc, cost) < 0)
+         if (wfe_delegate_dispatch(wd, "engineer", prompt, NULL, uc, cost) < 0)
             continue; /* dispatch failed -> next attempt */
          if (wfe_implement_verify_ok(wd))
             ok = 1;
@@ -931,7 +921,7 @@ static int run_tdd(const char *wd, const wfe_node_t *node, double *cost)
    char tc[64] = "";
    double c1 = 0.0;
    int r1 = wfe_delegate_dispatch(
-       wd, test_persona, node_str(node, "test_delegate"),
+       wd, test_persona,
        "Test-Driven Development, RED step. Write FAILING tests on the work-item branch that "
        "specify the behavior the approved plan requires. Do NOT implement the production code — "
        "only the tests. Commit the failing tests.",
@@ -968,7 +958,7 @@ static int run_tdd(const char *wd, const wfe_node_t *node, double *cost)
    char cc[64] = "";
    double c2 = 0.0;
    int r2 = wfe_delegate_dispatch(
-       wd, code_persona, node_delegate(node),
+       wd, code_persona,
        "Test-Driven Development, GREEN step. Implement the production code on the work-item branch "
        "to make the failing tests pass WITHOUT weakening or deleting them. Run `aimee git verify`, "
        "fix any failures, then commit the accepted work.",
@@ -1045,8 +1035,7 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
          }
          free(o);
       }
-      if (wfe_delegate_dispatch(wd, "engineer", node_delegate(node), prompt, NULL, commit, &cost) <
-          0)
+      if (wfe_delegate_dispatch(wd, "engineer", prompt, NULL, commit, &cost) < 0)
          return with_cost(wfe_step_looped(), cost);
       /* A dispatch that changed NOTHING (reply-only, no tool edits, so the
        * provider's add+commit no-opped and HEAD is unchanged) is a FAILED
@@ -1092,7 +1081,7 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
    resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(wd, "engineer", node_delegate(node),
+   if (wfe_delegate_dispatch(wd, "engineer",
                              "Document the change on the work-item branch (README/CHANGELOG/docs "
                              "+ inline comments), then commit.",
                              NULL, commit, &cost) < 0)
@@ -1746,7 +1735,7 @@ static wfe_step_result_t manager_produce(wfe_ctx *ctx, const wfe_node_t *node, c
    remove(path);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch(wd, role, node_delegate(node), prompt, path, commit, &cost) < 0)
+   if (wfe_delegate_dispatch(wd, role, prompt, path, commit, &cost) < 0)
       return with_cost(wfe_step_looped(), cost);
    char hash[65] = "";
    cJSON *j = manager_read_hash_json(path, hash);
@@ -1834,8 +1823,8 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
    return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }
 
-/* review: a READ-ONLY reviewer delegate (persona from node params `reviewer`,
- * validator-checked disjoint from the roundtable panel + producer) emits a typed
+/* review: a READ-ONLY reviewer delegate (role "reviewer"; agent selection is the
+ * delegate system's routing decision) emits a typed
  * verdict. pass -> ADVANCED (on_pass); changes -> LOOPED (on_fail, re-delegate).
  * The re-delegate loop is bounded by the engine's GENERIC per-node loop cap
  * (params.max_iters / on_max, keyed on the gate node): the engine owns the cap
@@ -1845,10 +1834,6 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
 static wfe_step_result_t exec_review(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *wi = wfe_ctx_work_item(ctx);
-   const cJSON *jrev =
-       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "reviewer") : NULL;
-   const char *reviewer =
-       (jrev && cJSON_IsString(jrev) && jrev->valuestring) ? jrev->valuestring : "";
    char wd[1024];
    resolve_workdir(ctx, wd, sizeof wd);
    char path[1200];
@@ -1856,7 +1841,7 @@ static wfe_step_result_t exec_review(wfe_ctx *ctx, const wfe_node_t *node)
    char commit[64] = "";
    double cost = 0.0;
    if (wfe_delegate_dispatch(
-           wd, "reviewer", reviewer[0] ? reviewer : node_delegate(node),
+           wd, "reviewer",
            "Review the delegate's frozen diff READ-ONLY (do NOT edit files). Emit a REVIEW VERDICT "
            "as JSON to the given path (nothing else): {\"schema_version\":1,\"verdict\":\"pass\" "
            "or "
