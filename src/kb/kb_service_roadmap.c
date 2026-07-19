@@ -4,7 +4,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
-#include "headers/roadmap.h"
+#include "roadmap.h"
 #include "kb_service_roadmap.h"
 
 /* Defined in kb_service.c; non-static so this file can call them. */

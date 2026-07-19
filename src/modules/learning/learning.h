@@ -1,6 +1,15 @@
 #ifndef DEC_LEARNING_H
 #define DEC_LEARNING_H 1
 
+/* NOTE: this basename (learning.h) is shared with src/db2/learning.h — a DIFFERENT
+ * header (the DB2 SQL layer, guard DEC_DB2_LEARNING_H). Resolution is unambiguous:
+ * files under db2/ pick up db2/learning.h via C's same-directory quote-include rule,
+ * while everyone else gets THIS header because -Imodules/learning is ordered ahead of
+ * -Idb1/-Idb2 in C_FLAGS. The distinct include guards are the safety net: if the wrong
+ * header is ever resolved, the expected types go missing and the build fails loudly.
+ * Keep -Imodules/learning before -Idb1/-Idb2. Renaming db2/learning.h to
+ * db2/db2_learning.h would retire the collision outright (tracked follow-up). */
+
 #include <stdint.h>
 
 #define LEARNING_MAX_PROPOSAL_IDS 8

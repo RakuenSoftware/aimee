@@ -3,8 +3,8 @@
  */
 
 #include "aimee.h"
-#include "headers/roadmap_report.h"
-#include "headers/roadmap.h"
+#include "roadmap_report.h"
+#include "roadmap.h"
 #include "headers/platform_path.h"
 #include "db2/artifacts.h"
 #include "db2/db_postgres.h"

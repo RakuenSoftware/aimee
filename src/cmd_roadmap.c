@@ -6,7 +6,7 @@
 #include "cJSON.h"
 #include "agent_exec.h"
 #include "agent_config.h"
-#include "headers/roadmap_decompose.h"
+#include "roadmap_decompose.h"
 
 /* Model hook for roadmap_decompose_run: wraps agent_run with the "draft"
  * role. ud is a pointer to an already-loaded agent_config_t. */

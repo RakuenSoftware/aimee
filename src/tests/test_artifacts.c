@@ -20,7 +20,7 @@
 #include "feature_rows.h"
 #include "db2_test_shim.h"
 #include "cJSON.h"
-#include "../learning_evidence.h"
+#include "learning_evidence.h"
 
 /* Stub the memory-store typed verb so learning_promote's memory dispatch is
  * exercisable without linking the whole memory subsystem. The real

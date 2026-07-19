@@ -16,7 +16,7 @@
 #include "workspace_provider.h" /* skip worktree enforcement for a detached (client) workspace */
 #include "headers/config.h"
 #include "git_verify.h"
-#include "headers/skill.h"
+#include "skill.h"
 #include "kb_client.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "kb_reasoning.h"

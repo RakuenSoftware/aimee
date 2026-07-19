@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "log.h"
 #include "commands.h"
-#include "headers/roadmap_auto.h"
+#include "roadmap_auto.h"
 #include "cJSON.h"
 
 void cmd_auto(app_ctx_t *ctx, int argc, char **argv)
