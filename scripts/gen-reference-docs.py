@@ -444,7 +444,7 @@ def render_config(fields, sections, flat):
            "> Auto-generated from the canonical source tables by "
            "`scripts/gen-reference-docs.py` — config keys from `src/config_fields.c` + "
            "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
-           "workflow surface from `src/workflow/`. Do not edit by hand; run "
+           "workflow surface from `src/modules/workflows/`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
            "This reference covers every configurable surface:",
@@ -862,7 +862,7 @@ def render_external_env(found):
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Workflow engine config (src/workflow/) ───────────────────────────────────
+# ─── Workflow engine config (src/modules/workflows/) ───────────────────────────────────
 
 ART = {f"WFE_ART_{k.upper()}": k for k in
        ("none", "proposal", "plan", "branch", "frozen_diff", "pr", "verdict", "approval")}
@@ -871,7 +871,7 @@ BLOCK_ENTRY_RE = re.compile(
 
 
 def parse_block_catalog():
-    text = (SRC / "workflow" / "wfe_def.c").read_text(encoding="utf-8")
+    text = (SRC / "modules" / "workflows" / "wfe_def.c").read_text(encoding="utf-8")
     body = text[text.index("CATALOG[] = {"):text.index("\n};", text.index("CATALOG[] = {"))]
     cat = []
     for m in BLOCK_ENTRY_RE.finditer(body):
@@ -883,8 +883,8 @@ def parse_block_catalog():
 
 
 def parse_engine_consts():
-    dfn = (SRC / "workflow" / "wfe_def.h").read_text(encoding="utf-8")
-    auto = (SRC / "workflow" / "wfe_autonomy.h").read_text(encoding="utf-8")
+    dfn = (SRC / "modules" / "workflows" / "wfe_def.h").read_text(encoding="utf-8")
+    auto = (SRC / "modules" / "workflows" / "wfe_autonomy.h").read_text(encoding="utf-8")
     att = re.search(r'#define\s+WFE_DEFAULT_MAX_ITERS\s+(\d+)', dfn)
     ovr = re.search(r'#define\s+WFE_MAX_OVERRIDES\s+(\d+)', auto)
     return (att.group(1) if att else "?"), (ovr.group(1) if ovr else "?")

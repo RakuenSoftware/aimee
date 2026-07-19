@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "server/wfe_replay_worktree.h"
+#include "wfe_replay_worktree.h"
 
 static void write_file(const char *dir, const char *rel, const char *content)
 {

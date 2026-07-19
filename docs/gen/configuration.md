@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py` — config keys from `src/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow surface from `src/workflow/`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py` — config keys from `src/config_fields.c` + `src/config*.c`, env vars scanned from `getenv()` in `src/`, and the workflow surface from `src/modules/workflows/`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 

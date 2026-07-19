@@ -532,20 +532,20 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/models_dev_cache.c
     ${AIMEE_SRC_DIR}/lsp_client.c
     ${AIMEE_SRC_DIR}/lsp_manager.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_iface.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_def.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_validate.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_canonical.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_custom.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_manager_artifacts.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_externalization.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_native_gate.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_enforce.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_deliver.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_advance.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_router.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_router_catalog.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_autonomous_route.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_iface.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_def.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_validate.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_canonical.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_advance.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_router.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomous_route.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${PLATFORM_CORE_SRCS}
 )
@@ -585,7 +585,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_action_audit.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_tdd.c
-    ${AIMEE_SRC_DIR}/workflow_learn.c
+   _learn.c
     ${AIMEE_SRC_DIR}/session_state.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/file_safety.c
@@ -857,7 +857,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/turn_registry.c
     ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
-    ${AIMEE_SRC_DIR}/server/wfe_scheduler.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_scheduler.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_principal.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_crypto.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_kek_cache.c
@@ -954,15 +954,15 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
     ${AIMEE_SRC_DIR}/cmd_hooks_scope.c
     ${AIMEE_SRC_DIR}/server/server_session_start_stubs.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_engine.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_advance_exec.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_block_resolve.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_bind_ingress.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_blocks.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_approval.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_verdict.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_roundtable.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_autonomy.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_engine.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_advance_exec.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_block_resolve.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_bind_ingress.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_blocks.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_approval.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_verdict.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_roundtable.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomy.c
     ${PLATFORM_SERVER_SRCS}
 )
 set(SERVER_DATA_SRCS ${DATA_SRCS})
@@ -1090,7 +1090,7 @@ target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
-    ${AIMEE_SRC_DIR}/workflow
+   
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
@@ -1271,22 +1271,22 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/markdown.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${AIMEE_SRC_DIR}/yaml.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_iface.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_def.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_validate.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_canonical.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_custom.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_manager_artifacts.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_externalization.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_native_gate.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_enforce.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_deliver.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_advance.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_router.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_router_catalog.c
-    ${AIMEE_SRC_DIR}/workflow/wfe_autonomous_route.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_iface.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_def.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_validate.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_canonical.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_advance.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_router.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
+    ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomous_route.c
 )
-target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_SRC_DIR}/modules/audit ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2 ${AIMEE_SRC_DIR}/workflow)
+target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_SRC_DIR}/modules/audit ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE Threads::Threads)
 if(NOT WIN32)

@@ -30,7 +30,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(DB1_OBJS) 
                              $(OBJDIR)/modules/protocols/mcp/mcp_client.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o \
                              $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                              $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/cli_main.o \
-	                             $(OBJDIR)/modules/guardrails/guardrails.o $(OBJDIR)/modules/guardrails/guardrails_orchestrator.o $(OBJDIR)/modules/guardrails/guardrails_action_audit.o $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/modules/guardrails/guardrails_tdd.o $(OBJDIR)/modules/guardrails/guardrails_semantic.o $(OBJDIR)/modules/guardrails/guardrails_blast_radius.o $(OBJDIR)/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o \
+	                             $(OBJDIR)/modules/guardrails/guardrails.o $(OBJDIR)/modules/guardrails/guardrails_orchestrator.o $(OBJDIR)/modules/guardrails/guardrails_action_audit.o $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/guardrails/guardrails_tdd.o $(OBJDIR)/modules/guardrails/guardrails_semantic.o $(OBJDIR)/modules/guardrails/guardrails_blast_radius.o $(OBJDIR)/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o \
                              $(OBJDIR)/branch_ownership.o \
                              $(OBJDIR)/dstr.o $(OBJDIR)/diff.o $(OBJDIR)/anchor_snapshot.o $(OBJDIR)/edit_anchored.o \
                              $(OBJDIR)/code_outline.o $(OBJDIR)/posix/agent_tools_anchored.o \
@@ -65,7 +65,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memor
                  $(DB1_OBJS) $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/agent_hints.o $(OBJDIR)/db2/agent_outcomes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/collab_rules.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/memory_export.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/prospective_memories.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/trace_mining.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/learning.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/sketch.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/sketch.o \
                  $(OBJDIR)/modules/workspace/workspace.o \
                  $(OBJDIR)/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
-                 $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/db2/calibration.o \
+                 $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/db2/calibration.o \
                  $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o \
                  $(OBJDIR)/kb/kb_reasoning.o \
                  $(OBJDIR)/db2/bandit.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o \
@@ -654,7 +654,7 @@ $(TESTPREFIX)/unit-test-cross-repo-review: \
 $(TESTPREFIX)/unit-test-fidelity: \
                                        $(OBJDIR)/tests/test_fidelity.o \
                                        $(OBJDIR)/db2/fidelity.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)
@@ -751,7 +751,7 @@ $(TESTPREFIX)/unit-test-curator-version: \
                                        $(OBJDIR)/tests/test_curator_version.o \
                                        $(OBJDIR)/kb/kb_curator_version.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/kb_payload.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -764,7 +764,7 @@ $(TESTPREFIX)/unit-test-curator-version: \
 $(TESTPREFIX)/unit-test-curator-invalidate: \
                                        $(OBJDIR)/tests/test_curator_invalidate.o \
                                        $(OBJDIR)/db2/kb_payload.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -809,7 +809,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/index.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/kb_payload.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -870,7 +870,7 @@ $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-memory: $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o \
-                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/calibration.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
+                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/calibration.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
                         $(OBJDIR)/tests/support/mock_agent_http.o \
                         $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o \
                         $(OBJDIR)/posix/memory.o \
@@ -909,7 +909,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/server/aimee_ir_rescue.o \
                       $(OBJDIR)/server/aimee_ir_metrics.o \
                       $(OBJDIR)/tests/test_agent_delegate_root.o $(OBJDIR)/server/agent_cli_shell.o \
-                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -939,7 +939,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
 # limit). Mirrors unit-test-agent's link line.
 $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
-                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -1093,13 +1093,13 @@ $(TESTPREFIX)/unit-test-roundtable-seat-resolve: $(OBJDIR)/tests/test_roundtable
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-audit-worm: $(OBJDIR)/tests/test_audit_worm.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o \
-                      $(OBJDIR)/workflow/wfe_canonical.o $(TEST_CORE_OBJS)
+                      $(OBJDIR)/modules/workflows/wfe_canonical.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Pure-primitive drift/golden test for the shared WORM chain (no storage engine):
 # the single source of truth for the cross-engine hash contract.
 $(TESTPREFIX)/unit-test-audit-worm-chain: $(OBJDIR)/tests/test_audit_worm_chain.o $(OBJDIR)/modules/audit/audit_worm_chain.o \
-                      $(OBJDIR)/workflow/wfe_canonical.o $(TEST_CORE_OBJS)
+                      $(OBJDIR)/modules/workflows/wfe_canonical.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-config-economizer: $(OBJDIR)/tests/test_config_economizer.o $(TEST_CORE_OBJS)
@@ -1319,8 +1319,8 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
-	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/workflow/wfe_native_gate.o $(OBJDIR)/workflow/wfe_externalization.o \
-	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_enforce.o \
+	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o \
+	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/server/sandbox_learned.o \
                       $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
@@ -1435,8 +1435,8 @@ $(TESTPREFIX)/unit-test-agent-admission: $(OBJDIR)/tests/test_agent_admission.o 
 
 # Workflow engine W1: pure (yaml/cJSON/dstr only), no DB/config needed.
 $(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
-                                  $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
-                                  $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                  $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
+                                  $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                   $(OBJDIR)/aimee_home.o \
                                   $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1444,21 +1444,21 @@ $(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
 # Workflow engine W2: state machine + engine (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-engine: $(OBJDIR)/tests/test_wfe_engine.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_engine.o \
-                                    $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
-                                    $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_engine.o \
+                                    $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
+                                    $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                                     $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Workflow engine W3: block executors (freeze is real git; others integration-gated).
 $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/yaml.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1466,65 +1466,65 @@ $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
 # primary-as-manager (S0): the def-parse-based tests need the def/validate/canonical
 # chain (no engine/db1); the schema + externalization tests are pure.
 $(TESTPREFIX)/unit-test-wfe-manager-blocks: $(OBJDIR)/tests/test_wfe_manager_blocks.o \
-                                    $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
-                                    $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
-                                    $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
+                                    $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                    $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/yaml.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-manager-artifacts: $(OBJDIR)/tests/test_wfe_manager_artifacts.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/cJSON.o
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-externalization: $(OBJDIR)/tests/test_wfe_externalization.o \
-                                    $(OBJDIR)/workflow/wfe_externalization.o
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-deliver: $(OBJDIR)/tests/test_wfe_deliver.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S1 router pure core (no engine/DB/LLM deps).
 $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
-                                    $(OBJDIR)/workflow/wfe_router.o
+                                    $(OBJDIR)/modules/workflows/wfe_router.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S4 autonomous-parity routing policy (pure; no engine/DB deps).
 $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomous_route.o \
-                                    $(OBJDIR)/workflow/wfe_autonomous_route.o
+                                    $(OBJDIR)/modules/workflows/wfe_autonomous_route.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 enforcement pure cores (no engine/DB deps).
 $(TESTPREFIX)/unit-test-wfe-native-gate: $(OBJDIR)/tests/test_wfe_native_gate.o \
-                                    $(OBJDIR)/workflow/wfe_native_gate.o $(OBJDIR)/workflow/wfe_externalization.o
+                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-enforce: $(OBJDIR)/tests/test_wfe_enforce.o \
-                                    $(OBJDIR)/workflow/wfe_enforce.o $(OBJDIR)/workflow/wfe_externalization.o
+                                    $(OBJDIR)/modules/workflows/wfe_enforce.o $(OBJDIR)/modules/workflows/wfe_externalization.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 sub-slice 3: advance_request pure core (parser + CAS/replay decision; cJSON only).
 $(TESTPREFIX)/unit-test-wfe-advance: $(OBJDIR)/tests/test_wfe_advance.o \
-                                    $(OBJDIR)/workflow/wfe_advance.o $(OBJDIR)/cJSON.o
+                                    $(OBJDIR)/modules/workflows/wfe_advance.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 binding seam: auth-token->sid parser + idempotent interactive bind.
 $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.o \
-                                    $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/log.o $(OBJDIR)/workflow/wfe_enforce.o \
-                                    $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
-                                    $(OBJDIR)/workflow/wfe_router.o $(OBJDIR)/workflow/wfe_router_catalog.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/modules/workflows/wfe_bind_ingress.o $(OBJDIR)/log.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/modules/workflows/wfe_router.o $(OBJDIR)/modules/workflows/wfe_router_catalog.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1534,44 +1534,44 @@ $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.
 # ingestor object.
 $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_ingestor.o \
                                     $(OBJDIR)/server/primary_cli_ingestor.o $(OBJDIR)/log.o \
-                                    $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/workflow/wfe_enforce.o \
-                                    $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
-                                    $(OBJDIR)/workflow/wfe_router.o $(OBJDIR)/workflow/wfe_router_catalog.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/modules/workflows/wfe_bind_ingress.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/modules/workflows/wfe_router.o $(OBJDIR)/modules/workflows/wfe_router_catalog.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 sub-slice 4: per-block resolver + dispatch-time externalization guard.
 $(TESTPREFIX)/unit-test-wfe-block-resolve: $(OBJDIR)/tests/test_wfe_block_resolve.o \
-                                    $(OBJDIR)/workflow/wfe_block_resolve.o $(OBJDIR)/workflow/wfe_enforce.o \
-                                    $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/modules/workflows/wfe_block_resolve.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 sub-slice 3: interactive-driver executor (binding + engine + audit).
 $(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.o \
-                                    $(OBJDIR)/workflow/wfe_advance_exec.o $(OBJDIR)/workflow/wfe_advance.o \
-                                    $(OBJDIR)/workflow/wfe_enforce.o $(OBJDIR)/workflow/wfe_externalization.o \
+                                    $(OBJDIR)/modules/workflows/wfe_advance_exec.o $(OBJDIR)/modules/workflows/wfe_advance.o \
+                                    $(OBJDIR)/modules/workflows/wfe_enforce.o $(OBJDIR)/modules/workflows/wfe_externalization.o \
                                     $(OBJDIR)/db1/wfe_binding.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1645,81 +1645,81 @@ $(TESTPREFIX)/unit-test-aimee-ir-stream: $(OBJDIR)/tests/test_aimee_ir_stream.o 
 
 # S1 router catalog I/O (enumerates $AIMEE_HOME workflows + built-in lanes).
 $(TESTPREFIX)/unit-test-wfe-router-catalog: $(OBJDIR)/tests/test_wfe_router_catalog.o \
-                                    $(OBJDIR)/workflow/wfe_router_catalog.o $(OBJDIR)/workflow/wfe_router.o \
+                                    $(OBJDIR)/modules/workflows/wfe_router_catalog.o $(OBJDIR)/modules/workflows/wfe_router.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/posix/platform_path.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Integration: the manager executors driven through the real engine (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-manager-flow: $(OBJDIR)/tests/test_wfe_manager_flow.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Config-extensible blocks + safety blocks share the blocks/engine/registry deps.
 $(TESTPREFIX)/unit-test-wfe-custom: $(OBJDIR)/tests/test_wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-safety: $(OBJDIR)/tests/test_wfe_safety.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-failure-taxonomy: $(OBJDIR)/tests/test_wfe_failure_taxonomy.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-wfe-delegate-seam: $(OBJDIR)/tests/test_wfe_delegate_seam.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-scheduler: $(OBJDIR)/tests/test_wfe_scheduler.o \
-                                    $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
+                                    $(OBJDIR)/modules/workflows/wfe_scheduler.o $(OBJDIR)/modules/workflows/wfe_autonomy.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_approval.o \
-                                    $(OBJDIR)/workflow/wfe_verdict.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_approval.o \
+                                    $(OBJDIR)/modules/workflows/wfe_verdict.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Human-gate reject routing (retry_on_reject): pure def-query, no DB.
 $(TESTPREFIX)/unit-test-wfe-gate-reject: $(OBJDIR)/tests/test_wfe_gate_reject.o \
-                                    $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
-                                    $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
-                                    $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
+                                    $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                    $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1748,9 +1748,9 @@ $(TESTPREFIX)/unit-test-workflow-gate-caps: $(OBJDIR)/tests/test_workflow_gate_c
 $(TESTPREFIX)/unit-test-wfe-webapi: $(OBJDIR)/tests/test_wfe_webapi.o \
                                     $(OBJDIR)/server/server_workflow_api.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                     $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o \
                                     $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o \
                                     $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o \
@@ -1763,22 +1763,22 @@ $(TESTPREFIX)/unit-test-wfe-webapi: $(OBJDIR)/tests/test_wfe_webapi.o \
 
 # Workflow engine W4: HMAC approval signer + gate.human.
 $(TESTPREFIX)/unit-test-wfe-approval: $(OBJDIR)/tests/test_wfe_approval.o \
-                                      $(OBJDIR)/workflow/wfe_approval.o $(OBJDIR)/workflow/wfe_engine.o \
+                                      $(OBJDIR)/modules/workflows/wfe_approval.o $(OBJDIR)/modules/workflows/wfe_engine.o \
                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                      $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                      $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                      $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                      $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                      $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                      $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                       $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Workflow engine W5: roundtable verdict rule + gate.roundtable (mock panel).
 $(TESTPREFIX)/unit-test-wfe-roundtable: $(OBJDIR)/tests/test_wfe_roundtable.o \
-                                        $(OBJDIR)/workflow/wfe_roundtable.o \
-                                        $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/workflow/wfe_engine.o \
+                                        $(OBJDIR)/modules/workflows/wfe_roundtable.o \
+                                        $(OBJDIR)/modules/workflows/wfe_verdict.o $(OBJDIR)/modules/workflows/wfe_engine.o \
                                         $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                        $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                        $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                        $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                        $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                        $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                        $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                         $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/tests/support/log_stub.o \
                                         $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1786,39 +1786,39 @@ $(TESTPREFIX)/unit-test-wfe-roundtable: $(OBJDIR)/tests/test_wfe_roundtable.o \
 # foreach.workflow fan-in aggregation (DB parent<->child linkage) via the engine +
 # a mock child-spawn provider.
 $(TESTPREFIX)/unit-test-wfe-foreach: $(OBJDIR)/tests/test_wfe_foreach.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
-                                    $(OBJDIR)/workflow/wfe_autonomy.o $(OBJDIR)/workflow/wfe_approval.o \
-                                    $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_verdict.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_autonomy.o $(OBJDIR)/modules/workflows/wfe_approval.o \
+                                    $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_verdict.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Live panel: verified roundtable items -> per-lens wfe verdicts (pure mapper).
 $(TESTPREFIX)/unit-test-wfe-panel-roundtable: $(OBJDIR)/tests/test_wfe_panel_roundtable.o \
-                                    $(OBJDIR)/server/wfe_panel_roundtable.o \
-                                    $(OBJDIR)/workflow/wfe_verdict.o
+                                    $(OBJDIR)/modules/workflows/wfe_panel_roundtable.o \
+                                    $(OBJDIR)/modules/workflows/wfe_verdict.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Live panel: the worktree-grounded evidence-replay backend.
 $(TESTPREFIX)/unit-test-wfe-replay-worktree: $(OBJDIR)/tests/test_wfe_replay_worktree.o \
-                              $(OBJDIR)/server/wfe_replay_worktree.o $(OBJDIR)/server/evidence_replay.o
+                              $(OBJDIR)/modules/workflows/wfe_replay_worktree.o $(OBJDIR)/server/evidence_replay.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Live foreach spawner: a split packet-plan -> child slice work items (parent linkage).
 $(TESTPREFIX)/unit-test-wfe-foreach-spawn: $(OBJDIR)/tests/test_wfe_foreach_spawn.o \
-                                    $(OBJDIR)/server/wfe_live_foreach.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_live_foreach.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_deliver.o $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_deliver.o $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1826,21 +1826,21 @@ $(TESTPREFIX)/unit-test-wfe-foreach-spawn: $(OBJDIR)/tests/test_wfe_foreach_spaw
 # Sliced-lifecycle build workflow: branch.open / foreach.workflow catalog typing +
 # parent/child graph validation + version stability (pure def/validator; no engine).
 $(TESTPREFIX)/unit-test-wfe-sliced-build: $(OBJDIR)/tests/test_wfe_sliced_build.o \
-                                        $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
-                                        $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
-                                        $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                        $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
+                                        $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                        $(OBJDIR)/modules/workflows/wfe_custom.o $(OBJDIR)/aimee_home.o \
                                         $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Workflow engine W6: autonomy driver + gate-override.
 $(TESTPREFIX)/unit-test-wfe-autonomy: $(OBJDIR)/tests/test_wfe_autonomy.o \
-                                      $(OBJDIR)/workflow/wfe_autonomy.o $(OBJDIR)/workflow/wfe_approval.o \
+                                      $(OBJDIR)/modules/workflows/wfe_autonomy.o $(OBJDIR)/modules/workflows/wfe_approval.o \
                                       $(OBJDIR)/tests/support/log_stub.o \
-                                      $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_verdict.o \
-                                      $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/db1/db1_init.o \
+                                      $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_verdict.o \
+                                      $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/db1/db1_init.o \
                                       $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/wfe_store.o \
-                                      $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
-                                      $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                      $(OBJDIR)/modules/workflows/wfe_def.o $(OBJDIR)/modules/workflows/wfe_iface.o \
+                                      $(OBJDIR)/modules/workflows/wfe_validate.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
                                       $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                       $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                                       $(OBJDIR)/cJSON.o
@@ -2342,16 +2342,16 @@ $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
 # and the real autonomy scheduler drives it to terminal (stub executors only).
 $(TESTPREFIX)/unit-test-trigger-e2e: $(OBJDIR)/tests/test_trigger_e2e.o \
                                     $(OBJDIR)/modules/workflows/gw_orch_workflows.o $(OBJDIR)/pipeline/gw_orchestration_seam.o \
-                                    $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
+                                    $(OBJDIR)/modules/workflows/wfe_scheduler.o $(OBJDIR)/modules/workflows/wfe_autonomy.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
+                                    $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
-                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
-                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_approval.o \
-                                    $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/workflow/wfe_deliver.o \
-                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_def.o \
+                                    $(OBJDIR)/modules/workflows/wfe_iface.o $(OBJDIR)/modules/workflows/wfe_validate.o \
+                                    $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/modules/workflows/wfe_custom.o \
+                                    $(OBJDIR)/modules/workflows/wfe_roundtable.o $(OBJDIR)/modules/workflows/wfe_approval.o \
+                                    $(OBJDIR)/modules/workflows/wfe_verdict.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
+                                    $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2368,7 +2368,7 @@ $(OBJDIR)/tests/test_trigger.o: tests/test_trigger.c server/trigger_scheduler.c
 
 $(TESTPREFIX)/unit-test-kb-maintenance: $(OBJDIR)/tests/test_kb_maintenance.o \
                              $(OBJDIR)/db2/kb_maintenance.o \
-                             $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                             $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                              $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
                              $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                              $(TEST_CORE_OBJS)
@@ -2378,7 +2378,7 @@ $(TESTPREFIX)/unit-test-kb-mining: $(OBJDIR)/tests/test_kb_mining.o \
                              $(OBJDIR)/kb/kb_mining.o $(OBJDIR)/kb/kb_background.o \
                              $(OBJDIR)/kb/kb_mdl.o \
                              $(OBJDIR)/kb/kb_reasoning.o \
-                             $(OBJDIR)/db2/mining.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                             $(OBJDIR)/db2/mining.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                              $(OBJDIR)/db2/feature_rows.o \
                              $(OBJDIR)/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
                              $(OBJDIR)/db2/learning.o \
@@ -2679,7 +2679,7 @@ $(TESTPREFIX)/unit-test-fact-ingest: $(OBJDIR)/tests/test_fact_ingest.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-audit-worm: $(OBJDIR)/tests/test_kb_audit_worm.o \
-                               $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                               $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2776,7 +2776,7 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(OBJDIR)/kb/kb_curator_extract.o \
                                        $(OBJDIR)/kb/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/kb_curator_grounding.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2789,7 +2789,7 @@ $(TESTPREFIX)/unit-test-curator-resolve-entities: \
                                        $(OBJDIR)/tests/test_curator_resolve_entities.o \
                                        $(OBJDIR)/kb/kb_curator_resolve_entities.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2801,7 +2801,7 @@ $(TESTPREFIX)/unit-test-curator-resolve-entities: \
 $(TESTPREFIX)/unit-test-curator-index-narrative: \
                                        $(OBJDIR)/tests/test_curator_index_narrative.o \
                                        $(OBJDIR)/kb/kb_curator_index_narrative.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2813,7 +2813,7 @@ $(TESTPREFIX)/unit-test-curator-index-narrative: \
 $(TESTPREFIX)/unit-test-curator-index-claims: \
                                        $(OBJDIR)/tests/test_curator_index_claims.o \
                                        $(OBJDIR)/kb/kb_curator_index_claims.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2825,7 +2825,7 @@ $(TESTPREFIX)/unit-test-curator-index-claims: \
 $(TESTPREFIX)/unit-test-curator-contradictions: \
                                        $(OBJDIR)/tests/test_curator_contradictions.o \
                                        $(OBJDIR)/kb/kb_curator_contradictions.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2839,7 +2839,7 @@ $(TESTPREFIX)/unit-test-curator-index-code-unit: \
                                        $(OBJDIR)/kb/kb_curator_index_code_unit.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/tests/support/kb_txn_stub.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2857,7 +2857,7 @@ $(TESTPREFIX)/unit-test-curator-pipeline: \
                                        $(OBJDIR)/tests/support/kb_txn_stub.o \
                                        $(OBJDIR)/kb/kb_curator_link_artifacts.o \
                                        $(OBJDIR)/kb/kb_curator_serve.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2878,7 +2878,7 @@ $(TESTPREFIX)/unit-test-curator-serve: \
 $(TESTPREFIX)/unit-test-curator-link-artifacts: \
                                        $(OBJDIR)/tests/test_curator_link_artifacts.o \
                                        $(OBJDIR)/kb/kb_curator_link_artifacts.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2924,7 +2924,7 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2944,7 +2944,7 @@ $(TESTPREFIX)/unit-test-kb-reflection: \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -2957,7 +2957,7 @@ $(TESTPREFIX)/unit-test-kb-reflection: \
 $(TESTPREFIX)/unit-test-curator-promote: \
                                        $(OBJDIR)/tests/test_curator_promote.o \
                                        $(OBJDIR)/kb/kb_curator_promote.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
@@ -3600,7 +3600,7 @@ $(TESTPREFIX)/unit-test-kb: $(OBJDIR)/tests/test_kb.o $(OBJDIR)/kb/kb.o $(OBJDIR
                               $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
                              $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o \
                              $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o $(OBJDIR)/kb/kb_mdl.o \
-                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                              $(OBJDIR)/db2/calibration.o \
                              $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
@@ -3614,7 +3614,7 @@ $(TESTPREFIX)/unit-test-memory-retrieval-eval: $(OBJDIR)/kb/kb_bandit.o $(OBJDIR
                              $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/sketch.o $(OBJDIR)/db2/sketch.o \
                              $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o $(DB1_OBJS) \
                              $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o \
-                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                              $(OBJDIR)/db2/calibration.o \
                              $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
@@ -3858,7 +3858,7 @@ $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
 $(TESTPREFIX)/unit-test-working-profile: $(OBJDIR)/tests/test_working_profile.o \
                      $(OBJDIR)/working_profile.o \
                      $(OBJDIR)/db2/calibration.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4033,7 +4033,7 @@ $(TESTPREFIX)/unit-test-kb-export: $(OBJDIR)/tests/test_kb_export.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-artifacts: $(OBJDIR)/tests/test_artifacts.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
@@ -4050,7 +4050,7 @@ $(TESTPREFIX)/unit-test-artifacts: $(OBJDIR)/tests/test_artifacts.o \
 $(TESTPREFIX)/unit-test-evidence-embed: $(OBJDIR)/tests/test_evidence_embed.o \
                      $(OBJDIR)/kb/kb_evidence_embed.o \
                      $(OBJDIR)/db2/evidence_vectors.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4060,7 +4060,7 @@ $(TESTPREFIX)/unit-test-evidence-embed: $(OBJDIR)/tests/test_evidence_embed.o \
 $(TESTPREFIX)/unit-test-learning-bundle: $(OBJDIR)/tests/test_learning_bundle.o \
                      $(OBJDIR)/learning_bundle.o \
                      $(OBJDIR)/db2/evidence_vectors.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4072,7 +4072,7 @@ $(TESTPREFIX)/unit-test-learning-synth: $(OBJDIR)/tests/test_learning_synth.o \
                      $(OBJDIR)/learning_bundle.o \
                      $(OBJDIR)/db2/evidence_vectors.o \
                      $(OBJDIR)/db2/learning_synth_ops.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4086,7 +4086,7 @@ $(TESTPREFIX)/unit-test-learning-version: $(OBJDIR)/tests/test_learning_version.
                      $(OBJDIR)/db2/evidence_vectors.o \
                      $(OBJDIR)/db2/learning_synth_ops.o \
                      $(OBJDIR)/db2/kb_runtime_state.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4097,7 +4097,7 @@ $(TESTPREFIX)/unit-test-corpus-structural: $(OBJDIR)/tests/test_corpus_structura
                      $(OBJDIR)/db2/corpus_structural.o \
                      $(OBJDIR)/db2/corpus_jobs.o \
                      $(OBJDIR)/db2/kb_docs.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                      $(TEST_CORE_OBJS)
@@ -4110,7 +4110,7 @@ $(TESTPREFIX)/unit-test-corpus-jobs: $(OBJDIR)/tests/test_corpus_jobs.o \
                      $(OBJDIR)/db2/corpus_structural.o \
                      $(OBJDIR)/db2/curiosity.o \
                      $(OBJDIR)/db2/kb_docs.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                      $(TEST_CORE_OBJS)
@@ -4123,7 +4123,7 @@ $(TESTPREFIX)/unit-test-corpus-terms-gaps: $(OBJDIR)/tests/test_corpus_terms_gap
                      $(OBJDIR)/db2/corpus_jobs.o \
                      $(OBJDIR)/db2/curiosity.o \
                      $(OBJDIR)/db2/kb_docs.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                      $(TEST_CORE_OBJS)
@@ -4132,7 +4132,7 @@ $(TESTPREFIX)/unit-test-corpus-terms-gaps: $(OBJDIR)/tests/test_corpus_terms_gap
 $(TESTPREFIX)/unit-test-calibration: $(OBJDIR)/tests/test_calibration.o \
                      $(OBJDIR)/kb/kb_calibrate.o \
                      $(OBJDIR)/db2/calibration.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4142,7 +4142,7 @@ $(TESTPREFIX)/unit-test-calibration: $(OBJDIR)/tests/test_calibration.o \
 $(TESTPREFIX)/unit-test-demotion: $(OBJDIR)/tests/test_demotion.o \
                      $(OBJDIR)/db2/demotion.o \
                      $(OBJDIR)/db2/memory_payload.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4156,7 +4156,7 @@ $(TESTPREFIX)/unit-test-features: $(OBJDIR)/tests/test_features.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/db2/sketch.o \
                      $(OBJDIR)/sketch.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/calibration.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4171,7 +4171,7 @@ $(TESTPREFIX)/unit-test-ranker-fit: $(OBJDIR)/tests/test_ranker_fit.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/db2/sketch.o \
                      $(OBJDIR)/sketch.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                      $(TEST_CORE_OBJS)
@@ -4198,7 +4198,7 @@ $(TESTPREFIX)/unit-test-report-enrichments: $(OBJDIR)/tests/test_report_enrichme
 
 $(TESTPREFIX)/unit-test-reasoning: $(OBJDIR)/tests/test_reasoning.o \
                      $(OBJDIR)/kb/kb_reasoning.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4209,7 +4209,7 @@ $(TESTPREFIX)/unit-test-bandit: $(OBJDIR)/tests/test_bandit.o \
                      $(OBJDIR)/kb/kb_bandit.o \
                      $(OBJDIR)/kb/kb_bandit_registry.o \
                      $(OBJDIR)/db2/bandit.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4218,7 +4218,7 @@ $(TESTPREFIX)/unit-test-bandit: $(OBJDIR)/tests/test_bandit.o \
 
 $(TESTPREFIX)/unit-test-planner: $(OBJDIR)/tests/test_planner.o \
                      $(OBJDIR)/kb/kb_planner.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                      $(TEST_CORE_OBJS)
@@ -4226,7 +4226,7 @@ $(TESTPREFIX)/unit-test-planner: $(OBJDIR)/tests/test_planner.o \
 
 $(TESTPREFIX)/unit-test-roadmap: $(OBJDIR)/tests/test_roadmap.o \
                      $(OBJDIR)/kb/roadmap.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4243,7 +4243,7 @@ $(TESTPREFIX)/unit-test-kb-releases-db: $(OBJDIR)/tests/test_kb_releases_db.o \
 $(TESTPREFIX)/unit-test-roadmap-decompose: $(OBJDIR)/tests/test_roadmap_decompose.o \
                      $(OBJDIR)/roadmap_decompose.o \
                      $(OBJDIR)/kb/roadmap.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
@@ -4370,7 +4370,7 @@ $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/tests/test_agent_ir_parse.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OBJDIR)/server/agent_cli_shell.o \
-                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/workflow/wfe_canonical.o \
+                      $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
                       $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/modules/delegates/delegate_driver.o \
                       $(OBJDIR)/modules/delegates/delegate_openai.o $(OBJDIR)/modules/delegates/delegate_xml_fallback.o $(OBJDIR)/modules/delegates/delegate_role.o \
