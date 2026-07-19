@@ -450,6 +450,13 @@ static const vault_custody_provider_t file_custody = {
 
 static const vault_custody_provider_t *g_custody = &file_custody;
 
+/* Rebind the active custody provider (P7 profile composition / tests). NULL
+ * restores the built-in file provider. See vault_internal.h. */
+void vault_custody_set_provider(const vault_custody_provider_t *provider)
+{
+   g_custody = provider ? provider : &file_custody;
+}
+
 int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
 {
    return g_custody->get_kek(g_custody->ctx, kek);

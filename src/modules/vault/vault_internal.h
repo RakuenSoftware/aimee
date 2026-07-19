@@ -74,4 +74,15 @@ typedef struct
                  char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen);
 } vault_custody_provider_t;
 
+/* ── Backend binders ──────────────────────────────────────────────────────────
+ * Rebind the active backend/provider — the mechanism P7's kb profile uses to
+ * compose {postgres store, external-anchor custody} without editing the core, and
+ * the mechanism a test uses to drive the public facade against a mock. Passing
+ * NULL restores the built-in default (jsonfile / file). These are the ONLY way the
+ * file-static default pointers change; the defaults make the server profile work
+ * with no binder call at all (behavior-preserving). Not thread-safe against
+ * concurrent facade calls — bind at construction/startup, not mid-flight. */
+void vault_store_set_backend(const vault_store_backend_t *backend);
+void vault_custody_set_provider(const vault_custody_provider_t *provider);
+
 #endif /* DEC_VAULT_INTERNAL_H */

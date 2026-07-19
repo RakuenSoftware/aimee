@@ -10,6 +10,7 @@
  *       jsonfile backend without that backend being exported. */
 #include "vault_store.h"
 #include "vault_crypto.h"
+#include "vault_server_key.h"
 #include "vault_internal.h"
 #include <assert.h>
 #include <stdio.h>
@@ -33,9 +34,19 @@ typedef struct
 {
    void *seen_ctx;
    int get_or_create_salt_calls;
+   int salt_readonly_calls;
+   int unlock_check_calls;
    int set_calls;
+   int set_dual_calls;
+   int set_server_calls;
+   int get_server_calls;
+   int add_server_wraps_calls;
    int get_calls;
+   int has_entry_calls;
+   int list_calls;
    int delete_calls;
+   int rekey_calls;
+   int rekey_field_calls;
    int list_principals_calls;
    char last_principal[256];
 } mock_state_t;
@@ -217,6 +228,249 @@ static void test_facade_dispatches_to_real_backend(void)
    printf("  PASS: test_facade_dispatches_to_real_backend\n");
 }
 
+/* ── (3) Public facade dispatches through the REBOUND backend (real swap) ─────
+ * The findings that matter most: without a binder, "swappable" is unproven and
+ * P7 can't compose a profile. These mock ops cover every vault_store_* slot so we
+ * can bind a full mock, drive the PUBLIC facade, and assert each call reached the
+ * mock (with ctx threaded) — then restore the default and confirm jsonfile is
+ * back. This is the genuine swappability + facade-forwarding proof. */
+
+static int fm_salt_readonly(void *ctx, const char *p, uint8_t salt[VAULT_SALT_LEN])
+{
+   g_mock.seen_ctx = ctx;
+   g_mock.salt_readonly_calls++;
+   snprintf(g_mock.last_principal, sizeof(g_mock.last_principal), "%s", p);
+   memset(salt, 0x33, VAULT_SALT_LEN);
+   return 0;
+}
+static int fm_unlock_check(void *ctx, const char *p, const uint8_t kek[VAULT_KEK_LEN])
+{
+   (void)p;
+   (void)kek;
+   g_mock.seen_ctx = ctx;
+   g_mock.unlock_check_calls++;
+   return 0;
+}
+static int fm_set_dual(void *ctx, const char *p, const uint8_t kek[VAULT_KEK_LEN],
+                       const uint8_t skek[VAULT_KEK_LEN], const char *a, const char *c,
+                       const char *s)
+{
+   (void)p;
+   (void)kek;
+   (void)skek;
+   (void)a;
+   (void)c;
+   (void)s;
+   g_mock.seen_ctx = ctx;
+   g_mock.set_dual_calls++;
+   return 0;
+}
+static int fm_set_server(void *ctx, const char *p, const uint8_t skek[VAULT_KEK_LEN], const char *a,
+                         const char *c, const char *s)
+{
+   (void)p;
+   (void)skek;
+   (void)a;
+   (void)c;
+   (void)s;
+   g_mock.seen_ctx = ctx;
+   g_mock.set_server_calls++;
+   return 0;
+}
+static int fm_get_server(void *ctx, const char *p, const uint8_t skek[VAULT_KEK_LEN], const char *a,
+                         const char *c, char *out, size_t out_len)
+{
+   (void)p;
+   (void)skek;
+   (void)a;
+   (void)c;
+   g_mock.seen_ctx = ctx;
+   g_mock.get_server_calls++;
+   snprintf(out, out_len, "canned-server");
+   return 0;
+}
+static int fm_add_server_wraps(void *ctx, const char *p, const uint8_t ukek[VAULT_KEK_LEN],
+                               const uint8_t skek[VAULT_KEK_LEN])
+{
+   (void)p;
+   (void)ukek;
+   (void)skek;
+   g_mock.seen_ctx = ctx;
+   g_mock.add_server_wraps_calls++;
+   return 0;
+}
+static int fm_has_entry(void *ctx, const char *p, const char *a, const char *c)
+{
+   (void)p;
+   (void)a;
+   (void)c;
+   g_mock.seen_ctx = ctx;
+   g_mock.has_entry_calls++;
+   return 1;
+}
+static int fm_list(void *ctx, const char *p, vault_store_entry_t *out, int max)
+{
+   (void)p;
+   (void)out;
+   (void)max;
+   g_mock.seen_ctx = ctx;
+   g_mock.list_calls++;
+   return 0;
+}
+static int fm_rekey(void *ctx, const char *p, const uint8_t o[VAULT_KEK_LEN],
+                    const uint8_t n[VAULT_KEK_LEN])
+{
+   (void)p;
+   (void)o;
+   (void)n;
+   g_mock.seen_ctx = ctx;
+   g_mock.rekey_calls++;
+   return 0;
+}
+static int fm_rekey_field(void *ctx, const char *p, const char *field, const uint8_t o[VAULT_KEK_LEN],
+                          const uint8_t n[VAULT_KEK_LEN])
+{
+   (void)p;
+   (void)field;
+   (void)o;
+   (void)n;
+   g_mock.seen_ctx = ctx;
+   g_mock.rekey_field_calls++;
+   return 0;
+}
+
+static void test_facade_swaps_to_mock_backend(void)
+{
+   memset(&g_mock, 0, sizeof(g_mock));
+   const vault_store_backend_t full_mock = {
+       .name = "full-mock",
+       .ctx = &g_ctx_marker,
+       .get_or_create_salt = mock_get_or_create_salt,
+       .salt_readonly = fm_salt_readonly,
+       .unlock_check = fm_unlock_check,
+       .set = mock_set,
+       .set_dual = fm_set_dual,
+       .set_server = fm_set_server,
+       .get_server = fm_get_server,
+       .add_server_wraps = fm_add_server_wraps,
+       .get = mock_get,
+       .has_entry = fm_has_entry,
+       .list = fm_list,
+       .delete = mock_delete,
+       .rekey = fm_rekey,
+       .rekey_field = fm_rekey_field,
+       .list_principals = mock_list_principals,
+   };
+
+   vault_store_set_backend(&full_mock); /* the binder under test */
+
+   uint8_t salt[VAULT_SALT_LEN], kek[VAULT_KEK_LEN], skek[VAULT_KEK_LEN];
+   make_kek(kek, 3);
+   make_kek(skek, 4);
+   char out[64];
+   vault_store_entry_t entries[2];
+   char principals[2][VAULT_PRINCIPAL_MAX];
+
+   /* Every PUBLIC facade call must now land on the mock, with ctx threaded. */
+   assert(vault_store_get_or_create_salt("uid:9", salt) == 0);
+   assert(vault_store_salt_readonly("uid:9", salt) == 0);
+   assert(vault_store_unlock_check("uid:9", kek) == 0);
+   assert(vault_store_set("uid:9", kek, "a", "c", "s") == 0);
+   assert(vault_store_set_dual("uid:9", kek, skek, "a", "c", "s") == 0);
+   assert(vault_store_set_server("uid:9", skek, "a", "c", "s") == 0);
+   assert(vault_store_get_server("uid:9", skek, "a", "c", out, sizeof(out)) == 0);
+   assert(vault_store_add_server_wraps("uid:9", kek, skek) == 0);
+   assert(vault_store_get("uid:9", kek, "a", "c", out, sizeof(out)) == 0);
+   assert(vault_store_has_entry("uid:9", "a", "c") == 1);
+   assert(vault_store_list("uid:9", entries, 2) == 0);
+   assert(vault_store_delete("uid:9", "a", "c") == 0);
+   assert(vault_store_rekey("uid:9", kek, skek) == 0);
+   assert(vault_store_rekey_field("uid:9", "wrapped_dek", kek, skek) == 0);
+   assert(vault_store_list_principals(principals, 2) == 0);
+
+   assert(g_mock.get_or_create_salt_calls == 1 && g_mock.salt_readonly_calls == 1);
+   assert(g_mock.unlock_check_calls == 1 && g_mock.set_calls == 1);
+   assert(g_mock.set_dual_calls == 1 && g_mock.set_server_calls == 1);
+   assert(g_mock.get_server_calls == 1 && g_mock.add_server_wraps_calls == 1);
+   assert(g_mock.get_calls == 1 && g_mock.has_entry_calls == 1 && g_mock.list_calls == 1);
+   assert(g_mock.delete_calls == 1 && g_mock.rekey_calls == 1 && g_mock.rekey_field_calls == 1);
+   assert(g_mock.list_principals_calls == 1);
+   assert(g_mock.seen_ctx == &g_ctx_marker); /* the mock's ctx, not jsonfile's NULL */
+
+   /* Restore the default and confirm jsonfile is genuinely back (a real op the
+    * mock would have swallowed now round-trips on disk). */
+   vault_store_set_backend(NULL);
+   uint8_t rk[VAULT_KEK_LEN];
+   make_kek(rk, 9);
+   assert(vault_store_get_or_create_salt("uid:restored", salt) == 0);
+   assert(vault_store_unlock_check("uid:restored", rk) == 0);
+   assert(vault_store_set("uid:restored", rk, "claude", "api_key", "restored-secret") == 0);
+   assert(vault_store_get("uid:restored", rk, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "restored-secret") == 0); /* jsonfile really handled it */
+   printf("  PASS: test_facade_swaps_to_mock_backend\n");
+}
+
+/* ── (4) Custody seam: the public KEK path dispatches through the provider ──── */
+
+static struct
+{
+   void *seen_ctx;
+   int get_kek_calls;
+   int rotate_calls;
+} g_custody_mock;
+
+static int cm_get_kek(void *ctx, uint8_t kek[VAULT_KEK_LEN])
+{
+   g_custody_mock.seen_ctx = ctx;
+   g_custody_mock.get_kek_calls++;
+   memset(kek, 0x77, VAULT_KEK_LEN); /* canned KEK through the seam */
+   return 0;
+}
+static int cm_rotate(void *ctx, const char *sp, int *op, int *oc, char *bp, size_t bpl, char *eb,
+                     size_t el)
+{
+   (void)sp;
+   (void)bp;
+   (void)bpl;
+   (void)eb;
+   (void)el;
+   g_custody_mock.seen_ctx = ctx;
+   g_custody_mock.rotate_calls++;
+   if (op)
+      *op = 0;
+   if (oc)
+      *oc = 0;
+   return 0;
+}
+
+static void test_custody_facade_dispatches_through_provider(void)
+{
+   memset(&g_custody_mock, 0, sizeof(g_custody_mock));
+   static int custody_marker;
+   const vault_custody_provider_t mock = {
+       .name = "mock-custody",
+       .ctx = &custody_marker,
+       .get_kek = cm_get_kek,
+       .rotate = cm_rotate,
+   };
+   vault_custody_set_provider(&mock);
+
+   uint8_t kek[VAULT_KEK_LEN];
+   assert(vault_server_kek(kek) == 0); /* public facade -> provider->get_kek */
+   assert(g_custody_mock.get_kek_calls == 1);
+   assert(g_custody_mock.seen_ctx == &custody_marker); /* ctx threaded */
+   assert(kek[0] == 0x77);
+
+   int np = -1, nc = -1;
+   char backup[256] = {0}, err[128] = {0};
+   assert(vault_server_key_rotate("server", &np, &nc, backup, sizeof(backup), err, sizeof(err)) == 0);
+   assert(g_custody_mock.rotate_calls == 1);
+   assert(g_custody_mock.seen_ctx == &custody_marker);
+
+   vault_custody_set_provider(NULL); /* restore the file provider */
+   printf("  PASS: test_custody_facade_dispatches_through_provider\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-seam-test-%d", (int)getpid());
@@ -228,6 +482,8 @@ int main(void)
    test_mock_dispatch_through_vtable();
    test_two_local_backends_are_independent();
    test_facade_dispatches_to_real_backend();
+   test_facade_swaps_to_mock_backend();
+   test_custody_facade_dispatches_through_provider();
 
    char rm[320];
    snprintf(rm, sizeof(rm), "rm -rf %s", g_home);

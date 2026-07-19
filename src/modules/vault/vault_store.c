@@ -991,6 +991,13 @@ static const vault_store_backend_t jsonfile_backend = {
 
 static const vault_store_backend_t *g_store_backend = &jsonfile_backend;
 
+/* Rebind the active storage backend (P7 profile composition / tests). NULL
+ * restores the built-in jsonfile backend. See vault_internal.h. */
+void vault_store_set_backend(const vault_store_backend_t *backend)
+{
+   g_store_backend = backend ? backend : &jsonfile_backend;
+}
+
 int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SALT_LEN])
 {
    return g_store_backend->get_or_create_salt(g_store_backend->ctx, principal, salt);
