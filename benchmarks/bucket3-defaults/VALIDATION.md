@@ -131,5 +131,23 @@ against the `pos*` controls. Green + repeatable ⇒ `memory_negation_enabled` gr
 Bucket 3 to a default-on candidate.
 
 The remaining flags graduate the same way as their corpora are built out (status column above).
-Deterministic ones (`guardrails_blast_radius_advisory`, `delegate_graph_context`) are the next
-cheapest to finish because they need no LLM and no baseline drift management.
+
+## Running the deterministic harness (blast_radius + delegate_graph)
+
+The two deterministic corpora have a runnable harness: **`aimee-blast-radius-eval`**
+(`src/tests/blast_radius_eval_main.c`, `make ../aimee-blast-radius-eval`). It loads each
+fixture into an ISOLATED throwaway schema in a disposable Postgres (the eval temp-store, gated
+on `AIMEE_DB2_EVAL_URL` — never the production DSN), runs the REAL `db2_code_index_blast_radius`,
+and scores precision/recall against the corpus ground truth. delegate_graph reuses the same
+computation (its `expected_neighbours` = dependents + dependencies of the referenced file).
+
+```
+AIMEE_DB2_EVAL_URL=postgres://<owner>@<host>/<db> \
+  ./aimee-blast-radius-eval benchmarks/bucket3-defaults/blast_radius_corpus.json \
+                            benchmarks/bucket3-defaults/delegate_graph_corpus.json
+```
+
+**Result (real pgvector integration Postgres):** blast_radius 6/6 cases —
+dependents recall=1.000 precision=1.000, dependencies 3/3; delegate_graph 4/4;
+**PASS**. Both `guardrails_blast_radius_advisory_enabled` and `delegate_graph_context_enabled`
+now have a green, repeatable A/B ⇒ default-on candidates.

@@ -942,6 +942,13 @@ $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDI
 ../aimee-negation-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/kb/modules/agent_eval/agent_eval.o $(OBJDIR)/kb/modules/agent_eval/agent_eval_memory_support.o $(OBJDIR)/kb/modules/agent_eval/agent_eval_baseline.o $(OBJDIR)/tests/mem_negation_eval_main.o $(OBJDIR)/tests/support/agent_runtime_eval_stub.o
 	$(CC) -o $@ $^ $(L_KB)
 
+# Deterministic Bucket-3 code-graph harness (dev tool, not part of `all`): loads a
+# code-graph fixture into an isolated temp schema and runs the real
+# db2_code_index_blast_radius. Same libpq object set as aimee-negation-eval, minus the
+# agent_eval/memory objects (not needed). Build: make ../aimee-blast-radius-eval
+../aimee-blast-radius-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/tests/support/agent_runtime_eval_stub.o $(OBJDIR)/tests/blast_radius_eval_main.o
+	$(CC) -o $@ $^ $(L_KB)
+
 # aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
 # the dependency-free remote-target accessors; --gc-sections drops the transport.
 $(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o
