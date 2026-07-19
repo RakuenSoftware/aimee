@@ -391,6 +391,12 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/curiosity.c
     ${AIMEE_SRC_DIR}/db2/decision_log.c
     ${AIMEE_SRC_DIR}/db2/enrollments.c
+    ${AIMEE_SRC_DIR}/db2/db2_tenant.c
+    ${AIMEE_SRC_DIR}/db2/team.c
+    ${AIMEE_SRC_DIR}/db2/project.c
+    ${AIMEE_SRC_DIR}/db2/membership.c
+    ${AIMEE_SRC_DIR}/db2/admin_grant.c
+    ${AIMEE_SRC_DIR}/db2/oidc_jwks.c
     ${AIMEE_SRC_DIR}/db2/entity_edges.c
     ${AIMEE_SRC_DIR}/db2/entity_profiles.c
     ${AIMEE_SRC_DIR}/db2/epistemic_directives.c
@@ -485,6 +491,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/config/config_save.c
     ${AIMEE_SRC_DIR}/util.c
     ${AIMEE_SRC_DIR}/util_url.c
+    ${AIMEE_SRC_DIR}/kb/kb_identity.c
     ${AIMEE_SRC_DIR}/modules/audit/audit_action.c
     ${AIMEE_SRC_DIR}/modules/audit/audit_ledger.c
     ${AIMEE_SRC_DIR}/report_enrichment.c
