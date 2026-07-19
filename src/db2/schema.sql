@@ -1774,18 +1774,37 @@ BEGIN
 END
 $$;
 
--- Bootstrap / identity policies: a principal reads ONLY its own rows. This breaks
--- the RLS circularity (resolve teams before a team GUC exists) WITHOUT letting a
--- SET aimee.principal read every team's membership.
+-- POLICIES ARE READ-ONLY (FOR SELECT). Writes to tenant tables have NO permissive
+-- policy, so under FORCE RLS every INSERT/UPDATE/DELETE by the runtime role is
+-- DENIED at the DB layer — a runtime role that holds table-level DML grants still
+-- cannot self-enroll into a team or self-grant admin. Authorized writes (team/
+-- project/member creation) land in a later slice as admin-gated SECURITY DEFINER
+-- paths that validate the org-admin capability before writing; they are the only
+-- way rows are created, and they run with a checked authorization, not on the bare
+-- runtime role's own-row predicate.
+--
+-- TRUST BOUNDARY (documented): the RLS predicates read current_setting('aimee.*'),
+-- which the runtime role can set directly in SQL. RLS therefore defends against a
+-- mis-written JOIN / injected predicate leaking cross-tenant rows — it does NOT
+-- defend against a caller that can already execute arbitrary SQL as the runtime
+-- role (such a caller has fully compromised the app tier). The tenant GUCs are set
+-- ONLY from the authenticated principal by the C choke point (set_tenant_context,
+-- fed a verifier-produced kb_principal_t — never a request string). RLS + "GUCs set
+-- only by vetted code" together are the isolation control.
+
+-- Bootstrap / identity policies: a principal reads ONLY its own rows (FOR SELECT).
+-- This breaks the RLS circularity (resolve teams before a team GUC exists) WITHOUT
+-- letting a SET aimee.principal read every team's membership, and without allowing
+-- self-write (no WITH CHECK / write policy exists).
 DROP POLICY IF EXISTS p_member_self ON kb_team_membership;
 CREATE POLICY p_member_self ON kb_team_membership
-  USING (identity_key = current_setting('aimee.principal', true));
+  FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
 DROP POLICY IF EXISTS p_projmember_self ON kb_project_membership;
 CREATE POLICY p_projmember_self ON kb_project_membership
-  USING (identity_key = current_setting('aimee.principal', true));
+  FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
 DROP POLICY IF EXISTS p_admingrant_self ON kb_admin_grant;
 CREATE POLICY p_admingrant_self ON kb_admin_grant
-  USING (identity_key = current_setting('aimee.principal', true));
+  FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
 
 -- Tenant-data policies: a caller sees a team/project ONLY when the row's team is in
 -- the principal's own memberships. These do NOT trust aimee.team for read scope
@@ -1794,11 +1813,11 @@ CREATE POLICY p_admingrant_self ON kb_admin_grant
 -- billing/attribution (P3/P4).
 DROP POLICY IF EXISTS p_team_member ON kb_team;
 CREATE POLICY p_team_member ON kb_team
-  USING (id IN (SELECT team FROM kb_team_membership
+  FOR SELECT USING (id IN (SELECT team FROM kb_team_membership
                 WHERE identity_key = current_setting('aimee.principal', true)));
 DROP POLICY IF EXISTS p_project_member ON kb_project;
 CREATE POLICY p_project_member ON kb_project
-  USING (parent IN (SELECT team FROM kb_team_membership
+  FOR SELECT USING (parent IN (SELECT team FROM kb_team_membership
                     WHERE identity_key = current_setting('aimee.principal', true)));
 
 -- The context setter is never exposed to PUBLIC. This is role-free and safe on

@@ -4,7 +4,7 @@
 #include "db_postgres.h"
 #include "log.h"
 
-#include <ctype.h>
+#include <libpq-fe.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,41 +15,33 @@ int db2_hardening_enabled(void)
    return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
 }
 
-/* Extract the effective sslmode from a libpq URL or keyword/value DSN. Returns a
- * lowercased copy in out[cap]; empty string when unspecified. Handles both
- * "sslmode=..." (keyword DSN and URL query) forms. */
-static void dsn_sslmode(const char *url, char *out, size_t cap)
-{
-   out[0] = '\0';
-   if (!url)
-      return;
-   const char *p = url;
-   while ((p = strstr(p, "sslmode")) != NULL)
-   {
-      const char *q = p + 7; /* past "sslmode" */
-      while (*q == ' ')
-         ++q;
-      if (*q != '=')
-      {
-         p = q;
-         continue;
-      }
-      ++q;
-      while (*q == ' ' || *q == '\'')
-         ++q;
-      size_t n = 0;
-      while (*q && *q != '&' && *q != ' ' && *q != '\'' && n + 1 < cap)
-         out[n++] = (char)tolower((unsigned char)*q++);
-      out[n] = '\0';
-      return;
-   }
-}
-
 int db2_hardening_dsn_verify_full(const char *libpq_url)
 {
-   char mode[32];
-   dsn_sslmode(libpq_url, mode, sizeof(mode));
-   return strcmp(mode, "verify-full") == 0;
+   if (!libpq_url || !libpq_url[0])
+      return 0;
+   /* Use libpq's own parser so we read the EFFECTIVE sslmode exactly as the driver
+    * would — not a handwritten scan that a value like password='sslmode=...' or a
+    * duplicate parameter could fool. PQconninfoParse handles URL and keyword/value
+    * forms and last-wins duplicates. */
+   char *errmsg = NULL;
+   PQconninfoOption *opts = PQconninfoParse(libpq_url, &errmsg);
+   if (!opts)
+   {
+      if (errmsg)
+         PQfreemem(errmsg);
+      return 0; /* unparseable DSN — fail closed */
+   }
+   int ok = 0;
+   for (PQconninfoOption *o = opts; o->keyword; ++o)
+   {
+      if (strcmp(o->keyword, "sslmode") == 0)
+      {
+         ok = (o->val && strcmp(o->val, "verify-full") == 0);
+         break;
+      }
+   }
+   PQconninfoFree(opts);
+   return ok;
 }
 
 int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
@@ -62,11 +54,16 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
       return 1;
    }
    char e[256] = "";
-   /* current_user privileges: bypassrls, superuser, and CREATE on public. */
+   /* current_user privileges: bypassrls, superuser, CREATE on public, AND whether
+    * current_user is a member (directly or transitively) of any superuser/
+    * BYPASSRLS role — an inherited or SET ROLE-able privileged membership defeats
+    * RLS just as a direct attribute would, so it is rejected too. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "SELECT r.rolbypassrls, r.rolsuper, "
-       "has_schema_privilege(current_user,'public','CREATE') "
+       "has_schema_privilege(current_user,'public','CREATE'), "
+       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls) FROM pg_roles m "
+       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false) "
        "FROM pg_roles r WHERE r.rolname = current_user",
        e, sizeof(e));
    if (!st)
@@ -80,6 +77,7 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
       int bypassrls = aimee_pg_column_int(st, 0);
       int super = aimee_pg_column_int(st, 1);
       int create_pub = aimee_pg_column_int(st, 2);
+      int priv_member = aimee_pg_column_int(st, 3);
       if (bypassrls)
       {
          snprintf(err, errlen, "runtime role has BYPASSRLS (defeats tenant RLS)");
@@ -94,6 +92,13 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
       {
          snprintf(err, errlen, "runtime role holds CREATE on public (must be DML-only)");
          rc = 5;
+      }
+      else if (priv_member)
+      {
+         snprintf(
+             err, errlen,
+             "runtime role is a member of a superuser/BYPASSRLS role (can SET ROLE to bypass RLS)");
+         rc = 7;
       }
    }
    else

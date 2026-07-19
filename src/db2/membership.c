@@ -91,7 +91,8 @@ int db2_membership_list_for_identity(const char *identity_key, db2_membership_ro
       return -1;
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT " MEMBERSHIP_COLS " FROM kb_team_membership WHERE identity_key = ?1 ORDER BY id",
+       conn,
+       "SELECT " MEMBERSHIP_COLS " FROM kb_team_membership WHERE identity_key = ?1 ORDER BY id",
        err, sizeof(err));
    if (!st)
       return -1;
@@ -140,8 +141,8 @@ int db2_membership_default_team(const char *identity_key, int64_t *out_team)
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT team FROM kb_team_membership WHERE identity_key = ?1 AND is_default = 1 LIMIT 1", err,
-       sizeof(err));
+       "SELECT team FROM kb_team_membership WHERE identity_key = ?1 AND is_default = 1 LIMIT 1",
+       err, sizeof(err));
    if (!st)
       return -1;
    int rc = -1;

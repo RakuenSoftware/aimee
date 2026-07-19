@@ -16,34 +16,79 @@
 #include <stdio.h>
 
 /* --- stubs: force the shim backend; accessors are unreachable on this path --- */
-int aimee_pg_is_shim(void) { return 1; }
-void *db2_conn(void) { return NULL; }
-void db2_lease_begin(void) {}
-void db2_lease_end(void) {}
+int aimee_pg_is_shim(void)
+{
+   return 1;
+}
+void *db2_conn(void)
+{
+   return NULL;
+}
+void db2_lease_begin(void)
+{
+}
+void db2_lease_end(void)
+{
+}
 aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
 {
-   (void)c; (void)s; (void)e; (void)n; return NULL;
+   (void)c;
+   (void)s;
+   (void)e;
+   (void)n;
+   return NULL;
 }
-void aimee_pg_finalize(aimee_pg_stmt_t *s) { (void)s; }
+void aimee_pg_finalize(aimee_pg_stmt_t *s)
+{
+   (void)s;
+}
 aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *e, size_t n)
 {
-   (void)s; (void)e; (void)n; return AIMEE_PG_ERR;
+   (void)s;
+   (void)e;
+   (void)n;
+   return AIMEE_PG_ERR;
 }
 int aimee_pg_bind_text(aimee_pg_stmt_t *s, const char *k, const char *v)
 {
-   (void)s; (void)k; (void)v; return 0;
+   (void)s;
+   (void)k;
+   (void)v;
+   return 0;
 }
 int aimee_pg_bind_int64(aimee_pg_stmt_t *s, const char *k, int64_t v)
 {
-   (void)s; (void)k; (void)v; return 0;
+   (void)s;
+   (void)k;
+   (void)v;
+   return 0;
 }
 int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
 {
-   (void)c; (void)s; (void)e; (void)n; return 0;
+   (void)c;
+   (void)s;
+   (void)e;
+   (void)n;
+   return 0;
 }
-int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int c) { (void)s; (void)c; return 0; }
-int aimee_pg_column_int(aimee_pg_stmt_t *s, int c) { (void)s; (void)c; return 0; }
-const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c) { (void)s; (void)c; return ""; }
+int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return 0;
+}
+int aimee_pg_column_int(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return 0;
+}
+const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return "";
+}
 
 static int fails = 0;
 #define REQUIRES_PG(call, name)                                                                    \

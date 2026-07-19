@@ -74,10 +74,10 @@ int db2_admin_grant_revoke(const char *identity_key)
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "UPDATE kb_admin_grant SET revoked_at=pg_now_text() "
-             "WHERE identity_key=?1 AND revoked_at=''",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "UPDATE kb_admin_grant SET revoked_at=pg_now_text() "
+                                          "WHERE identity_key=?1 AND revoked_at=''",
+                                          err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", identity_key);

@@ -6,14 +6,14 @@
 #include <stdio.h>
 
 static int fails = 0;
-#define CHECK(cond, msg)                                                                            \
-   do                                                                                               \
-   {                                                                                                \
-      if (!(cond))                                                                                  \
-      {                                                                                             \
-         printf("FAIL: %s\n", msg);                                                                 \
-         fails++;                                                                                   \
-      }                                                                                             \
+#define CHECK(cond, msg)                                                                           \
+   do                                                                                              \
+   {                                                                                               \
+      if (!(cond))                                                                                 \
+      {                                                                                            \
+         printf("FAIL: %s\n", msg);                                                                \
+         fails++;                                                                                  \
+      }                                                                                            \
    } while (0)
 
 int main(void)
@@ -25,8 +25,8 @@ int main(void)
          "kv dsn verify-full accepted");
    CHECK(db2_hardening_dsn_verify_full("host=h dbname=db sslmode='verify-full'") == 1,
          "quoted verify-full accepted");
-   CHECK(db2_hardening_dsn_verify_full("postgres://u:p@h/db?sslmode=verify-full&connect_timeout=5") ==
-             1,
+   CHECK(db2_hardening_dsn_verify_full(
+             "postgres://u:p@h/db?sslmode=verify-full&connect_timeout=5") == 1,
          "verify-full with trailing params accepted");
 
    /* Reject weaker or absent modes — these must fail closed on a hardened tier. */

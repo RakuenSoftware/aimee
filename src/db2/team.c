@@ -112,8 +112,8 @@ int db2_team_get_by_name(const char *name, db2_team_row_t *out)
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT " TEAM_COLS " FROM kb_team WHERE name = ?1", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT " TEAM_COLS " FROM kb_team WHERE name = ?1",
+                                          err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", name);

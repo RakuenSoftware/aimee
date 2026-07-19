@@ -78,6 +78,25 @@ BEGIN
   IF n <> 0 THEN RAISE EXCEPTION 'FAIL guc-spoof: alice read beta via forged aimee.team'; END IF;
 END $$;
 
+-- Self-escalation is denied: read-only (FOR SELECT) policies mean the runtime role
+-- cannot INSERT its own membership into a team, nor self-grant admin, even though
+-- it holds table-level INSERT. Under FORCE RLS an INSERT with no permissive write
+-- policy raises. (Fixtures were seeded as superuser; the runtime role must not be
+-- able to add its own rows.)
+SET ROLE aimee_kb_runtime;
+SELECT set_config('aimee.principal', 'oidc:test:alice', true);
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO kb_team_membership(identity_key, team) VALUES ('oidc:test:alice', 900002);
+    RAISE EXCEPTION 'FAIL: runtime self-enrolled into a team (RLS write not denied)';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;  -- expected: RLS denies
+  BEGIN
+    INSERT INTO kb_admin_grant(identity_key, source) VALUES ('oidc:test:alice', 'oidc');
+    RAISE EXCEPTION 'FAIL: runtime self-granted admin (RLS write not denied)';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;  -- expected: RLS denies
+END $$;
+
 RESET ROLE;
 ROLLBACK;
 

@@ -28,11 +28,11 @@ extern "C"
    enum
    {
       DB2_TENANT_OK = 0,
-      DB2_ERR_TENANT_REQUIRES_PG = -100, /* tenant op attempted on the SQLite shim */
+      DB2_ERR_TENANT_REQUIRES_PG = -100,     /* tenant op attempted on the SQLite shim */
       DB2_ERR_TENANT_UNAUTHENTICATED = -101, /* principal not verifier-produced */
       DB2_ERR_TENANT_NO_CONN = -102,
-      DB2_ERR_TENANT_BEGIN = -103,       /* BEGIN / set_tenant_context failed */
-      DB2_ERR_TENANT_DENIED = -104,      /* team not in principal memberships */
+      DB2_ERR_TENANT_BEGIN = -103,  /* BEGIN / set_tenant_context failed */
+      DB2_ERR_TENANT_DENIED = -104, /* team not in principal memberships */
    };
 
    /* Fail-closed guard: 0 when the live backend is Postgres (RLS-enforcing),

@@ -7,14 +7,14 @@
 #include <string.h>
 
 static int fails = 0;
-#define CHECK(cond, msg)                                                                            \
-   do                                                                                               \
-   {                                                                                                \
-      if (!(cond))                                                                                  \
-      {                                                                                             \
-         printf("FAIL: %s\n", msg);                                                                 \
-         fails++;                                                                                   \
-      }                                                                                             \
+#define CHECK(cond, msg)                                                                           \
+   do                                                                                              \
+   {                                                                                               \
+      if (!(cond))                                                                                 \
+      {                                                                                            \
+         printf("FAIL: %s\n", msg);                                                                \
+         fails++;                                                                                  \
+      }                                                                                            \
    } while (0)
 
 static void test_serial_normalize(void)
@@ -26,7 +26,8 @@ static void test_serial_normalize(void)
          "0x prefix + leading zeros stripped");
    CHECK(kb_cert_serial_normalize("00:00:00", out, sizeof(out)) == 0 && strcmp(out, "0") == 0,
          "all-zero collapses to single 0");
-   CHECK(kb_cert_serial_normalize("DEADbeef", out, sizeof(out)) == 0 && strcmp(out, "deadbeef") == 0,
+   CHECK(kb_cert_serial_normalize("DEADbeef", out, sizeof(out)) == 0 &&
+             strcmp(out, "deadbeef") == 0,
          "case-folded");
    /* Two serials that differ only in separators/leading-zeros map to one key. */
    char a[128], b[128];

@@ -53,11 +53,15 @@ int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
    char err[256] = "";
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
    {
+      /* No GUCs were set, but reset defensively in case a prior unit left session
+       * state on this pooled connection, then release the lease fail-closed. */
+      tenant_reset_gucs(conn);
       db2_lease_end();
       return DB2_ERR_TENANT_BEGIN;
    }
 
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT set_tenant_context(?1, ?2)", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT set_tenant_context(?1, ?2)", err, sizeof(err));
    if (!st)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -89,6 +93,10 @@ int db2_tenant_scope_commit(void)
    {
       char err[256] = "";
       rc = aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
+      if (rc != 0)
+         /* COMMIT failed (e.g. serialization/deadlock): force the transaction
+          * out so the pooled connection never returns mid-transaction. */
+         (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       tenant_reset_gucs(conn);
    }
    db2_lease_end();
