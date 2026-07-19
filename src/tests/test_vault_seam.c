@@ -327,8 +327,8 @@ static int fm_rekey(void *ctx, const char *p, const uint8_t o[VAULT_KEK_LEN],
    g_mock.rekey_calls++;
    return 0;
 }
-static int fm_rekey_field(void *ctx, const char *p, const char *field, const uint8_t o[VAULT_KEK_LEN],
-                          const uint8_t n[VAULT_KEK_LEN])
+static int fm_rekey_field(void *ctx, const char *p, const char *field,
+                          const uint8_t o[VAULT_KEK_LEN], const uint8_t n[VAULT_KEK_LEN])
 {
    (void)p;
    (void)field;
@@ -463,7 +463,8 @@ static void test_custody_facade_dispatches_through_provider(void)
 
    int np = -1, nc = -1;
    char backup[256] = {0}, err[128] = {0};
-   assert(vault_server_key_rotate("server", &np, &nc, backup, sizeof(backup), err, sizeof(err)) == 0);
+   assert(vault_server_key_rotate("server", &np, &nc, backup, sizeof(backup), err, sizeof(err)) ==
+          0);
    assert(g_custody_mock.rotate_calls == 1);
    assert(g_custody_mock.seen_ctx == &custody_marker);
 

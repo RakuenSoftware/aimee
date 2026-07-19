@@ -804,8 +804,7 @@ static int kek_check_set(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
    return 0;
 }
 
-static int jsonfile_unlock_check(void *ctx, const char *principal,
-                                 const uint8_t kek[VAULT_KEK_LEN])
+static int jsonfile_unlock_check(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
    if (!principal || !kek)
       return -1;

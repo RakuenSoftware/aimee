@@ -465,6 +465,6 @@ int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
 int vault_server_key_rotate(const char *server_principal, int *out_principals, int *out_creds,
                             char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen)
 {
-   return g_custody->rotate(g_custody->ctx, server_principal, out_principals, out_creds, backup_path,
-                            backup_path_len, errbuf, errlen);
+   return g_custody->rotate(g_custody->ctx, server_principal, out_principals, out_creds,
+                            backup_path, backup_path_len, errbuf, errlen);
 }
