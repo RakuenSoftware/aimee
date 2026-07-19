@@ -6,6 +6,11 @@
 #include "db2/code_index.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
+#include "kb_identity.h"
+#include "db2_tenant.h"
+#include "team.h"
+#include "membership.h"
+#include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
 #include "kb_tls.h"
@@ -466,11 +471,138 @@ static int kb_run_fusion_probe(const char *query)
    return 0;
 }
 
+/* Operator-facing tenancy CLI on the kb host (P1 slice 4):
+ *   aimee-kb team create <name>
+ *   aimee-kb team list
+ *   aimee-kb team add-member <team_id> <identity_key> [--default]
+ *   aimee-kb team remove-member <team_id> <identity_key>
+ *   aimee-kb project create <team_id> <name> [team-open|restricted]
+ *   aimee-kb project list [team_id]
+ * Runs in-process against DB2 as the 'owner' (bootstrap) principal, so an operator
+ * with the kb DB credential can manage tenancy without a running listener. (The
+ * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
+static int kb_cmd_tenancy_init_db2(void)
+{
+   config_t cfg;
+   config_load(&cfg);
+   config_apply_db2_url_env_override(&cfg);
+   if (!cfg.db2_url[0])
+   {
+      fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
+      return -1;
+   }
+   db2_set_embedding_dim(cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024);
+   if (db2_init(cfg.db2_url) != 0)
+   {
+      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
+      return -1;
+   }
+   return 0;
+}
+
+static int kb_cmd_tenancy(int argc, char **argv)
+{
+   const char *group = argv[1]; /* "team" | "project" */
+   const char *sub = argc > 2 ? argv[2] : "";
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+
+   /* Act as the install owner (bootstrap admin). */
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+      return 1;
+
+   int rc_http = 1;
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   if (strcmp(group, "team") == 0 && strcmp(sub, "create") == 0 && argc >= 4)
+   {
+      int64_t id = 0;
+      if (db2_team_create(argv[3], "cli", &id) == 0)
+      {
+         printf("{\"id\":%lld,\"name\":\"%s\"}\n", (long long)id, argv[3]);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "create failed (not authorized or duplicate)\n");
+   }
+   else if (strcmp(group, "team") == 0 && strcmp(sub, "list") == 0)
+   {
+      db2_team_row_t rows[256];
+      int n = db2_team_list(rows, 256);
+      for (int i = 0; i < n; i++)
+         printf("%lld\t%s\n", (long long)rows[i].id, rows[i].name);
+      rc_http = (n < 0) ? 1 : 0;
+   }
+   else if (strcmp(group, "team") == 0 && strcmp(sub, "add-member") == 0 && argc >= 5)
+   {
+      int is_default = (argc >= 6 && strcmp(argv[5], "--default") == 0) ? 1 : 0;
+      int64_t id = 0;
+      rc_http =
+          db2_membership_add(argv[4], strtoll(argv[3], NULL, 10), is_default, &id) == 0 ? 0 : 1;
+      if (rc_http == 0)
+         printf("ok\n");
+      else
+         fprintf(stderr, "add-member failed (not authorized)\n");
+   }
+   else if (strcmp(group, "team") == 0 && strcmp(sub, "remove-member") == 0 && argc >= 5)
+   {
+      rc_http = db2_membership_remove(argv[4], strtoll(argv[3], NULL, 10)) == 0 ? 0 : 1;
+      if (rc_http == 0)
+         printf("ok\n");
+      else
+         fprintf(stderr, "remove-member failed (not authorized)\n");
+   }
+   else if (strcmp(group, "project") == 0 && strcmp(sub, "create") == 0 && argc >= 5)
+   {
+      const char *mode = argc >= 6 ? argv[5] : "team-open";
+      int64_t id = 0;
+      if (db2_project_create(strtoll(argv[3], NULL, 10), argv[4], mode, "cli", &id) == 0)
+      {
+         printf("{\"id\":%lld,\"parent\":%s,\"name\":\"%s\"}\n", (long long)id, argv[3], argv[4]);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "project create failed (not authorized or bad access_mode)\n");
+   }
+   else if (strcmp(group, "project") == 0 && strcmp(sub, "list") == 0)
+   {
+      int64_t parent = argc >= 4 ? strtoll(argv[3], NULL, 10) : 0;
+      db2_project_row_t rows[256];
+      int n = db2_project_list(parent, rows, 256);
+      for (int i = 0; i < n; i++)
+         printf("%lld\t%lld\t%s\t%s\n", (long long)rows[i].id, (long long)rows[i].parent,
+                rows[i].name, rows[i].access_mode);
+      rc_http = (n < 0) ? 1 : 0;
+   }
+   else
+   {
+      fprintf(stderr, "Usage: aimee-kb team create|list|add-member|remove-member ...\n"
+                      "       aimee-kb project create|list ...\n");
+   }
+
+   if (rc_http == 0)
+      db2_tenant_scope_commit();
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc_http;
+}
+
 int main(int argc, char **argv)
 {
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);
+   if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0))
+      return kb_cmd_tenancy(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;
