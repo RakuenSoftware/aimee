@@ -22,6 +22,87 @@
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
 
+#include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
+
+/* db2 accessor stubs: this test links the kb router but not the DB2 stack. The
+ * tenancy routes hard-fail on the shim (aimee_pg_is_shim()=1) inside
+ * db2_tenant_require_pg BEFORE any accessor runs, so these are unreachable at
+ * runtime and exist only to satisfy the linker (proves the auth->actor->handler->
+ * tenant-guard chain reaches 503; real RLS is proven by the Postgres gate). */
+int aimee_pg_is_shim(void)
+{
+   return 1;
+}
+void *db2_conn(void)
+{
+   return NULL;
+}
+void db2_lease_begin(void)
+{
+}
+void db2_lease_end(void)
+{
+}
+int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
+{
+   (void)c;
+   (void)s;
+   (void)e;
+   (void)n;
+   return 0;
+}
+aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
+{
+   (void)c;
+   (void)s;
+   (void)e;
+   (void)n;
+   return NULL;
+}
+void aimee_pg_finalize(aimee_pg_stmt_t *s)
+{
+   (void)s;
+}
+aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *e, size_t n)
+{
+   (void)s;
+   (void)e;
+   (void)n;
+   return AIMEE_PG_ERR;
+}
+int aimee_pg_bind_text(aimee_pg_stmt_t *s, const char *k, const char *v)
+{
+   (void)s;
+   (void)k;
+   (void)v;
+   return 0;
+}
+int aimee_pg_bind_int64(aimee_pg_stmt_t *s, const char *k, int64_t v)
+{
+   (void)s;
+   (void)k;
+   (void)v;
+   return 0;
+}
+int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return 0;
+}
+int aimee_pg_column_int(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return 0;
+}
+const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return "";
+}
+
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
@@ -1653,6 +1734,40 @@ static void test_mint_scope_restriction(void)
       assert(s == cases[i].want);
    }
    printf("  PASS: console-admin mint scope restriction (owner/privileged -> 403)\n");
+}
+
+/* P1 slice 4: the /v1/team HTTP glue — auth -> actor construction -> tenant scope.
+ * On the SQLite test shim tenant ops hard-fail (503), so this proves the router
+ * builds the actor and reaches the DB tenant guard; the real RLS gating is proven
+ * by the Postgres RLS gate. */
+static void test_team_routes(void)
+{
+   char buf[4096];
+   int s;
+   /* No auth configured -> open mode manufactures NO actor -> a tenancy mutation
+    * requires a real principal -> 401 (never an anonymous admin write). */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, NULL, NULL, "{\"name\":\"t\"}", 12, buf,
+                        sizeof(buf));
+   assert(s == 401);
+   /* Unscoped owner bearer -> owner actor built -> team handler -> tenant scope ->
+    * shim hard-fail -> 503 (the chain reached the DB tenant guard). */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret",
+                        "{\"name\":\"t\"}", 12, buf, sizeof(buf));
+   assert(s == 503);
+   /* A SCOPED kb-token is not a tenancy actor -> no actor -> 401. */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer scope:project:x:secret",
+                        "scope:project:x:secret", "{\"name\":\"t\"}", 12, buf, sizeof(buf));
+   assert(s == 401);
+   /* Missing name -> 400 before any DB work (owner bearer). */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret", "{}", 2,
+                        buf, sizeof(buf));
+   assert(s == 400);
+   /* An X-Aimee-* identity header never reaches route_ex (stripped at the ingress
+    * seam) — verified by the kb_ingress unit test; here we confirm a normal team
+    * path is not our concern for headers. Non-tenancy path falls through: */
+   s = kb_http_route_ex("GET", "/v1/team", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 401); /* open mode, no actor */
+   printf("  PASS: /v1/team HTTP glue (auth -> actor -> tenant scope; 401/503/400)\n");
 }
 
 static void test_governance_routes(void)
@@ -4586,6 +4701,7 @@ int main(void)
    test_console_overview();
    test_accounts_routes();
    test_mint_scope_restriction();
+   test_team_routes();
    test_governance_routes();
    test_intelligence_calibration_readiness();
    test_intelligence_demotion_check();
