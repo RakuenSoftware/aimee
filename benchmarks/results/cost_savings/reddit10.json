@@ -1,0 +1,110 @@
+{
+  "provenance": {
+    "aimee_commit": "38d1516ef00560d7ab2dc58787ee35499adad891",
+    "primary_agent": "codex",
+    "primary_model": "gpt-5.6-sol",
+    "pool": [
+      "MiniMax-M3",
+      "claude"
+    ],
+    "n": 2,
+    "instances": [
+      "django__django-11179",
+      "django__django-12908",
+      "django__django-13447",
+      "django__django-15814",
+      "pytest-dev__pytest-11143",
+      "pytest-dev__pytest-6116",
+      "scikit-learn__scikit-learn-13439",
+      "scikit-learn__scikit-learn-13584",
+      "sympy__sympy-13480",
+      "sympy__sympy-20212"
+    ],
+    "single_shot": true,
+    "fleet_ssh": "admin@192.168.1.254",
+    "fleet_db": "/mnt/media/.plugins/aimee-server/home/aimee.db",
+    "ledger_windows": {
+      "primary": [
+        30396,
+        30406
+      ],
+      "supervised": [
+        30406,
+        30416
+      ]
+    }
+  },
+  "raw_tokens": {
+    "primary": {
+      "realized_prompt": 102674,
+      "realized_completion": 2580,
+      "avoided_prompt": 0,
+      "avoided_completion": 0
+    },
+    "supervised": {
+      "realized_prompt": 24246,
+      "realized_completion": 1945,
+      "avoided_prompt": 0,
+      "avoided_completion": 0
+    }
+  },
+  "candidate_counts": {
+    "django__django-11179": 2,
+    "django__django-12908": 2,
+    "django__django-13447": 2,
+    "django__django-15814": 2,
+    "pytest-dev__pytest-11143": 2,
+    "pytest-dev__pytest-6116": 2,
+    "scikit-learn__scikit-learn-13439": 2,
+    "scikit-learn__scikit-learn-13584": 2,
+    "sympy__sympy-13480": 2,
+    "sympy__sympy-20212": 2
+  },
+  "summary": {
+    "price_per_mtok": {
+      "input_per_mtok": 1.25,
+      "output_per_mtok": 10.0
+    },
+    "levels": {
+      "default": {
+        "tokens": 105254,
+        "input": 102674,
+        "output": 2580,
+        "usd": 0.1541
+      },
+      "aimee_economized": {
+        "tokens": 105254,
+        "input": 102674,
+        "output": 2580,
+        "usd": 0.1541
+      },
+      "aimee_delegates": {
+        "tokens": 26191,
+        "input": 24246,
+        "output": 1945,
+        "usd": 0.0498
+      }
+    },
+    "savings": {
+      "economizer": {
+        "tokens": 0,
+        "usd": 0.0,
+        "pct_of_default": 0.0
+      },
+      "delegates": {
+        "tokens": 79063,
+        "usd": 0.1043,
+        "pct_of_economized": 75.1
+      },
+      "total": {
+        "tokens": 79063,
+        "usd": 0.1043,
+        "pct_of_default": 75.1
+      }
+    },
+    "wall_seconds": {
+      "default": 36.5,
+      "aimee_delegates": 36.7
+    }
+  }
+}

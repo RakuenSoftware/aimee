@@ -44,8 +44,36 @@ from benchmarks.coding import supervised_report
 
 _FAKE = os.environ.get("AIMEE_BENCH_FAKE_AGENT") == "1"
 _FAKE_GRADER = os.environ.get("AIMEE_BENCH_FAKE_GRADER") == "1"
-_POLL_WORKERS = 16
+_POLL_WORKERS = int(os.environ.get("AIMEE_BENCH_POLL_WORKERS", "16"))
+_POLL_PERIOD = float(os.environ.get("AIMEE_BENCH_POLL_PERIOD", "2"))
 _SCHEMA_VERSION = 2
+
+# When set, append a unique marker to every dispatched prompt so the server-side
+# draft/summarize/format result cache (keyed on (role, prompt), model-agnostic)
+# never returns a shared hit. Required for a truthful cold best-of-N cost/time
+# run: without it, Arm S's worker candidates collapse onto Arm P's cached codex
+# drafts (and onto each other), so the cheap workers never actually run.
+_CACHE_BUST = os.environ.get("AIMEE_BENCH_CACHE_BUST") == "1"
+
+
+def _cb(prompt: str, tag: str) -> str:
+    return f"{prompt}\n\n<!-- cachebust:{tag} -->" if _CACHE_BUST else prompt
+
+
+def _ts_delta(created: str, updated: str):
+    """Server-side job duration in seconds from status timestamps ('YYYY-MM-DD HH:MM:SS').
+    Returns None if either is missing/unparseable. Second-granularity but per-job and
+    load-independent -- unlike client poll arrival, which is quantized to the poll period
+    and synchronized across a batch."""
+    from datetime import datetime
+    fmt = "%Y-%m-%d %H:%M:%S"
+    try:
+        c = datetime.strptime(created[:19], fmt)
+        u = datetime.strptime(updated[:19], fmt)
+        d = (u - c).total_seconds()
+        return round(d, 1) if d >= 0 else None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- prompts -----
@@ -106,10 +134,12 @@ class Fleet:
         self.timeout_s = timeout_s
 
     def _dispatch1(self, worker: str, prompt: str):
+        # Prompt via stdin, not argv -- multi-file solve prompts run to hundreds of KB
+        # and overflow the OS argument-length limit (Errno 7) when passed positionally.
         p = subprocess.run(
-            [self.aimee, "--json", "delegate", "draft", prompt, "--via", worker,
+            [self.aimee, "--json", "delegate", "draft", "--prompt-stdin", "--via", worker,
              "--persona", "engineer", "--no-tools", "--background"],
-            capture_output=True, text=True, timeout=90)
+            input=prompt, capture_output=True, text=True, timeout=90)
         try:
             return json.loads(p.stdout).get("job_id")
         except Exception:
@@ -126,28 +156,38 @@ class Fleet:
                            capture_output=True, text=True, timeout=30)
         try:
             d = json.loads(p.stdout)
-            return d.get("job_status", ""), d.get("result", "")
+            return (d.get("job_status", ""), d.get("result", ""),
+                    d.get("created_at", ""), d.get("updated_at", ""))
         except Exception:
-            return "", ""
+            return "", "", "", ""
 
-    def collect(self, jobs: dict) -> dict:
+    def collect(self, jobs: dict, t0: float | None = None) -> dict:
         """jobs: {key: job_id}. Poll concurrently until all terminal/timeout. Returns
-        {key: (result_or_'', ok_bool)} where ok=True only for a `done` terminal."""
+        {key: (result_or_'', ok_bool)} where ok=True only for a `done` terminal.
+
+        Records per-key wall arrival time (seconds since t0, default: collect start)
+        into self.arrivals for every key that reaches a terminal state, so callers can
+        recover time-to-first-viable-response. Arrival granularity == the poll period."""
+        t0 = time.time() if t0 is None else t0
+        self.arrivals = {}
+        self.durations = {}  # per-key server-side duration (updated_at - created_at), seconds
         pending = {k: (j, time.time()) for k, j in jobs.items() if j}
         out = {}
         while pending:
             with ThreadPoolExecutor(max_workers=_POLL_WORKERS) as ex:
                 sts = dict(zip(pending, ex.map(lambda k: self._status(pending[k][0]), pending)))
-            for k, (st, res) in sts.items():
+            for k, (st, res, cat, uat) in sts.items():
                 jid, td = pending[k]
                 if st in self._TERMINAL:
                     out[k] = (res if st == self._SUCCESS else "", st == self._SUCCESS)
+                    self.arrivals[k] = round(time.time() - t0, 2)
+                    self.durations[k] = _ts_delta(cat, uat)
                     del pending[k]
                 elif time.time() - td > self.timeout_s:
                     out[k] = ("", False)
                     del pending[k]
             if pending:
-                time.sleep(2)
+                time.sleep(_POLL_PERIOD)
         for k in jobs:
             out.setdefault(k, ("", False))
         return out
@@ -172,12 +212,16 @@ def _primary_tokens(db, model, job_ids):
 
 # ------------------------------------------------------------- arms -----------
 def run_arm_A(insts, fleet, primary):
-    items = [(i["instance_id"], primary, _solve_prompt(i)) for i in insts]
+    items = [(i["instance_id"], primary, _cb(_solve_prompt(i), f"P:{i['instance_id']}")) for i in insts]
     t0 = time.perf_counter()
+    tw0 = time.time()
     jobs = fleet.dispatch_all(items)
-    res = fleet.collect(jobs)
+    res = fleet.collect(jobs, tw0)
     wall = round(time.perf_counter() - t0, 1)
-    recs = {iid: {"diff": _extract_diff(r) if ok else ""} for iid, (r, ok) in res.items()}
+    arr = dict(fleet.arrivals)
+    # solve_s: wall time from dispatch to this instance's single-shot solve completing.
+    recs = {iid: {"diff": _extract_diff(r) if ok else "", "solve_s": arr.get(iid)}
+            for iid, (r, ok) in res.items()}
     return recs, wall, [j for j in jobs.values() if j]
 
 
@@ -189,23 +233,44 @@ def _pick_workers(pool, n, seed):
     return p[:min(n, len(p))]
 
 
-def run_arm_C(insts, fleet, primary, pool, n, seed):
+def run_arm_C_candidates(insts, fleet, pool, n, seed):
+    """Phase 1 of the supervised arm: N workers race to draft a candidate per instance.
+    Returns (cand, first_viable_s, wall, jobs). Worker tokens are NOT the manager cost
+    (they belong to the cheap pool -- even when a worker happens to be the same model as
+    the manager), so bench_cost_savings brackets this phase's ledger window separately
+    and does NOT count it toward cost. first_viable_s is the delegate runtime metric."""
     t0 = time.perf_counter()
+    tw0 = time.time()
     items, order = [], {}
-    for idx, i in enumerate(insts):
+    for i in insts:
         for k, w in enumerate(_pick_workers(pool, n, f"{seed}:{i['instance_id']}")):
             key = (i["instance_id"], k)
             order[key] = w
-            items.append((key, w, _solve_prompt(i)))
-    ares = fleet.dispatch_all(items)
-    ares = fleet.collect(ares)
+            items.append((key, w, _cb(_solve_prompt(i), f"S:{i['instance_id']}:{k}")))
+    ajobs = fleet.dispatch_all(items)
+    ares = fleet.collect(ajobs, tw0)
+    cand_arr = dict(fleet.arrivals)  # (iid,k) -> wall seconds from candidate dispatch
     cand = {i["instance_id"]: [] for i in insts}
+    first_viable = {i["instance_id"]: None for i in insts}
     for (iid, k), (r, ok) in ares.items():
         d = _extract_diff(r) if ok else ""
         if d:
             cand[iid].append((order[(iid, k)], d))
+            a = cand_arr.get((iid, k))
+            if a is not None and (first_viable[iid] is None or a < first_viable[iid]):
+                first_viable[iid] = a
+    wall = round(time.perf_counter() - t0, 1)
+    return cand, first_viable, wall, [j for j in ajobs.values() if j]
+
+
+def run_arm_C_select(insts, fleet, primary, cand):
+    """Phase 2: the MANAGER (primary) selects among each instance's candidates. This is
+    the ONLY phase whose primary-model tokens count as the delegate cost. Returns
+    (recs, wall, jobs)."""
+    t0 = time.perf_counter()
     byid = {i["instance_id"]: i for i in insts}
-    sel_items = [(iid, primary, _select_prompt(byid[iid], cs)) for iid, cs in cand.items() if cs]
+    sel_items = [(iid, primary, _cb(_select_prompt(byid[iid], cs), f"Ssel:{iid}"))
+                 for iid, cs in cand.items() if cs]
     sjobs = fleet.dispatch_all(sel_items)
     sres = fleet.collect(sjobs)
     recs = {}
@@ -215,6 +280,17 @@ def run_arm_C(insts, fleet, primary, pool, n, seed):
         recs[iid] = {"diff": _extract_diff(r) if ok else "", "n_candidates": len(cand[iid])}
     wall = round(time.perf_counter() - t0, 1)
     return recs, wall, [j for j in sjobs.values() if j]
+
+
+def run_arm_C(insts, fleet, primary, pool, n, seed):
+    """Full supervised arm = candidates + manager selection (single ledger bracket).
+    bench_cost_savings calls the two phases directly so it can bracket the manager
+    window separately; other callers use this convenience wrapper."""
+    cand, first_viable, w1, _ = run_arm_C_candidates(insts, fleet, pool, n, seed)
+    recs, w2, sjobs = run_arm_C_select(insts, fleet, primary, cand)
+    for iid in recs:
+        recs[iid]["first_viable_s"] = first_viable.get(iid)
+    return recs, round(w1 + w2, 1), sjobs
 
 
 # ------------------------------------------------------------- grading -------
