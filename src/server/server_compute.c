@@ -1026,6 +1026,7 @@ void delegate_worker(void *arg)
     * (worktree path/git_root/work_name are hoisted for delegate_fail: cleanup.) */
    int delegate_worktree_attempted = 0;
    int delegate_shared_worktree = 0;
+   int delegate_dedicated_worktree = 0;
    {
       delegate_worktree_t wt;
       delegate_resolve_worktree(cwd, deleg_id, branch, delegate_allows_writes,
@@ -1035,6 +1036,7 @@ void delegate_worker(void *arg)
       snprintf(delegate_work_name, sizeof(delegate_work_name), "%s", wt.work_name);
       delegate_worktree_attempted = wt.attempted;
       delegate_shared_worktree = wt.shared;
+      delegate_dedicated_worktree = wt.dedicated;
    }
 
    if (delegate_allows_writes && delegate_worktree_attempted && !delegate_worktree_path[0])
@@ -1320,9 +1322,13 @@ void delegate_worker(void *arg)
     * bearing alone. */
    const char *container_ws = NULL;
    int container_ws_ro = 1;
-   if (delegate_worktree_path[0] && !delegate_shared_worktree)
+   if (delegate_worktree_path[0] && (delegate_dedicated_worktree || !delegate_shared_worktree))
    {
-      container_ws = delegate_worktree_path; /* this delegate's own tree */
+      /* This delegate's own tree — a sibling worktree, or a WFE per-slice tree it
+       * owns exclusively (dedicated). Either way nothing else looks at it, so mount
+       * it read-WRITE: the delegate's edits land in the tree the engine then diffs
+       * and commits. */
+      container_ws = delegate_worktree_path;
       container_ws_ro = 0;
    }
    else if (cwd[0] == '/' && !delegate_allows_writes)
@@ -1357,11 +1363,11 @@ void delegate_worker(void *arg)
     * above: the intent there is to run IN-PROCESS under the write guard, NOT to hand
     * the delegate a scratch sandbox. Binding with a NULL workspace mints an EMPTY
     * scratch tree and mounts THAT, so the delegate edits files the engine never sees
-    * ("write role reported success but produced no diff") — which stalls every WFE
-    * implement slice (its cwd already IS a dedicated worktree; it needs no sibling
-    * tree, so delegate_needs_worktree is false and container_ws stays NULL). Only
-    * bind a container when there is a real tree to mount; otherwise run in-process in
-    * cwd so writes land where the engine diffs and commits them. */
+    * ("write role reported success but produced no diff"). A WFE implement slice is
+    * NOT this case: its cwd already IS a dedicated per-slice worktree it owns, so
+    * delegate_resolve_worktree marks it dedicated and container_ws points at that
+    * tree read-write (above). Only bind a container when there is a real tree to
+    * mount; otherwise run in-process in cwd so writes land where the engine diffs. */
    int container_bound =
        (detached_bound || !container_ws || !container_ws[0])
            ? 0
@@ -1380,6 +1386,16 @@ void delegate_worker(void *arg)
    }
    else
    {
+      /* Inside a container the mount IS the isolation boundary: the delegate's
+       * writes go through the provider into its own RW-mounted tree, which nothing
+       * else on the host can see. The host-side parent-write guard exists only for
+       * the in-process (same-host) path; here it is redundant and would only risk
+       * blocking a legitimate write, so drop it once a container is actually bound. */
+      if (container_bound > 0)
+      {
+         agent_tools_parent_write_guard_clear();
+         parent_write_guard_active = 0;
+      }
       server_delegate_heartbeat_begin(cctx->background_job_id);
       rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                               max_tokens, force_tools, delegate_allows_writes,

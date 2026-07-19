@@ -35,6 +35,11 @@ typedef struct
    char work_name[32];
    int attempted; /* a sibling worktree creation was attempted */
    int shared;    /* the delegate shares the parent/session worktree */
+   int dedicated; /* the delegate EXCLUSIVELY owns this pre-existing worktree (a WFE
+                   * per-slice tree, $AIMEE_HOME/wfe-worktrees/wi_<id>): mount it
+                   * read-WRITE in a container and apply no host write guard — nothing
+                   * else looks at that tree. Distinct from a sibling worktree (which
+                   * has a git_root for apply-back) and from shared (read-only). */
 } delegate_worktree_t;
 
 /* Decide and (for write delegates that need isolation) create the delegate's
