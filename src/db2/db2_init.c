@@ -38,6 +38,9 @@ typedef struct sqlite3 sqlite3;
 
 void db1_stmt_cache_clear_for_sqlite(sqlite3 *db) __attribute__((weak));
 
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
+/* Only the sqlite-shim eval store closes a raw sqlite handle; the libpq build
+ * has no such handle, so this would be an unused static there. */
 static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
 {
    if (!db)
@@ -45,6 +48,7 @@ static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
    if (db1_stmt_cache_clear_for_sqlite)
       db1_stmt_cache_clear_for_sqlite(db);
 }
+#endif
 
 static void *g_conn = NULL;
 static char g_pg_url[512] = "";
@@ -988,7 +992,9 @@ void db2_shutdown(void)
    pthread_mutex_unlock(&g_init_lock);
 }
 
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
 static sqlite3 *g_eval_temp_store_handle = NULL;
+#endif
 
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
 /* ---- Real-Postgres eval scratch store (libpq build; no sqlite shim here) ----------

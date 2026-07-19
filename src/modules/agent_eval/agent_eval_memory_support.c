@@ -11,6 +11,7 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "config.h"
+#include "config_database.h"
 #include "memory.h"
 #include "lifecycle.h"
 #include "eval_support.h"
@@ -1251,6 +1252,17 @@ void mem_eval_close_temp_db(void)
 
 int mem_eval_open_temp_db(void)
 {
+   /* Pin the embedding dim BEFORE the temp store applies its schema: the scratch
+    * store's vector columns are sized by db2_embedding_dim(), and the corpus is
+    * embedded via config_embedding_command (builtin => 384-dim when no embedder is
+    * configured). Without this, db2_embedding_dim()'s 1024 default disagrees with
+    * the builtin embed and every vector insert fails. Mirrors bootstrap_db2's pin.
+    * (The sqlite shim ignores vector dim, so this only bites the real-libpq store.) */
+   config_t dim_cfg;
+   config_load(&dim_cfg);
+   db2_set_embedding_dim(config_resolve_embedding_dim(&dim_cfg));
+   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&dim_cfg));
+
    if (db2_eval_open_temp_store() != 0)
    {
       fprintf(stderr, "mem_eval_open_temp_db: open/schema apply failed\n");
