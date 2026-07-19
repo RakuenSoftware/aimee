@@ -10,6 +10,7 @@
 #include "server.h"
 #include "server_compute_impl.h"
 #include "gw_orch_delegates.h"
+#include "delegate_role.h" /* delegate_role_is_write — force tools for coord write tasks */
 #include "config.h"
 #include "db1.h"
 #include "log.h"
@@ -47,7 +48,19 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
    cJSON *req = cJSON_CreateObject();
    if (!req)
       return -1;
-   cJSON_AddStringToObject(req, "role", role && role[0] ? role : "execute");
+   const char *req_role = role && role[0] ? role : "execute";
+   cJSON_AddStringToObject(req, "role", req_role);
+   /* A coord WRITE task (code/refactor/...) is agentic worktree work: it must edit
+    * files IN PLACE via the Write/Edit tools. Force tools on. Unlike the CLI
+    * single-shot `aimee delegate code` (which returns a diff as text for the caller
+    * to apply), a coord write delegate has no one to apply a text diff — so without
+    * tools it mutates nothing, the run is flagged "produced no diff", and a WFE
+    * implement slice loops to max_iters and never lands a change. Forcing tools
+    * also makes the router require a tool-capable model (MODEL_CAP_TOOLS). Read
+    * roles already opt in via delegate_role_enable_tools_by_default; a caller can
+    * still pass tools:false explicitly, which server_compute honors. */
+   if (delegate_role_is_write(req_role))
+      cJSON_AddTrueToObject(req, "tools");
    cJSON_AddStringToObject(req, "prompt", brief ? brief : "");
    /* Persona (the delegate's identity, required for every delegate) is carried on
     * the coord task now — the orchestrator that enqueued it (coord planner or the
