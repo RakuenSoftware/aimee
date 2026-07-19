@@ -61,6 +61,11 @@ typedef struct
 /* Human label for the reload class, for the config.set / Settings verdict. */
 const char *config_field_reload_verdict(const config_field_t *f);
 
+/* Surface-group name ("runtime" | "deploy" | "advanced" | "dev") for a field,
+ * so config.show can advertise which keys sit off the everyday surface and the
+ * Settings GUI can hide them by default. */
+const char *config_field_group_name(const config_field_t *f);
+
 /* NULL-key-terminated allowlist. */
 extern const config_field_t config_fields[];
 

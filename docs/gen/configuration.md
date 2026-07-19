@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (165)
+## CLI-settable keys (134)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -32,7 +32,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
 | `autonomous` | bool | Run autonomously (auto-advance machine gates; human gates always park) vs interactive. |
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
-| `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
 | `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs — Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
@@ -41,11 +40,8 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `code_hybrid_weight_graph` | float | RRF weight for the structural call-graph signal in /v1/code/hybrid (default 1.0; <=0 disables it). |
 | `code_hybrid_weight_memory` | float | RRF weight for the cross-session knowledge-graph signal in /v1/code/hybrid (default 1.0; <=0 disables it; symbol-anchored, empty without an entity graph). |
 | `code_hybrid_weight_vector` | float | RRF weight for the embedding-similarity signal in /v1/code/hybrid (default 1.0; <=0 disables it; auto-skips when no dim-matched embedder). |
-| `code_span_max_lines` | int | Max line span the code_span_get recovery resolver returns per call (default 400). |
-| `code_surprising_precision_floor` | float | §4 self-suppress: when the LLM-judge-sampled precision of surprising-link candidates falls below this floor, an unjudged /v1/code/graph/surprising request returns no candidates (default 0 = disabled). |
 | `code_trust_actuation_enabled` | bool | — |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
-| `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
 | `cost_reward_ref_usd_milli` | int | Reference cost (USD-milli) normalizing the cost reward. |
 | `cross_verify` | bool | Enable cross-model verification of outputs. |
 | `css_render_command` | string | Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar). |
@@ -59,13 +55,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
 | `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. Only meaningful when `delegate_sandbox` is on. |
 | `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker being unavailable, or a failed acquire. |
-| `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
-| `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |
-| `dogfood_autolabel_repeat_question` | bool | Auto-label repeated-question turns. |
-| `dogfood_commit_raw` | bool | Commit raw (unredacted) dogfood transcripts. |
-| `dogfood_enabled` | bool | Capture sessions as dogfood training/eval data. |
-| `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
-| `dogfood_log_dir` | string | Directory for dogfood logs. |
 | `economizer` | string (off\|safe\|aggressive) | Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md. |
 | `embedding_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedding_dim` | int | Embedding vector dimension. |
@@ -76,16 +65,12 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
 | `guardrail_mode` | string | Guardrail enforcement mode (off / warn / block). |
 | `guardrails_blast_radius_advisory_enabled` | bool | Surface a structural blast-radius advisory (graph-impacted files) before an edit (advisory, fail-open). |
-| `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_command` | string | External semantic-guardrail classifier command. |
 | `guardrails_semantic_mode` | string | — |
-| `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
-| `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
 | `identity_working_profile_injection_enabled` | bool | Inject the working-profile identity into prompts. |
 | `ingress_audit_async` | bool | Audit ingress requests asynchronously. |
 | `ingress_cache_placement_enabled` | bool | Append the <aimee-context> envelope after the stable instructions prefix (not before) so provider prefix caches survive (default on). |
 | `ingress_compress_enabled` | bool | Enable ingress envelope compression: span-enrich code hits and fold code entries into recoverable `file:line` references (recover via code_span_get). Default on (~48% prompt reduction on code turns); turn off (or send `X-Aimee-Compress: 0`) for agentic ingress where the agent re-opens folded code so recovery round-trips can erase the saving. |
-| `ingress_compress_min_chars` | int | Minimum code-snippet length (chars) before it is folded to a file:line reference (default 80). |
 | `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |
 | `ingress_preinject_anthropic_enabled` | bool | Inject the `<aimee-context>` envelope on the Anthropic-native /v1/messages passthrough too (default off). |
 | `ingress_preinject_assembly_budget` | int | Token budget for ingress context pre-injection. |
@@ -125,12 +110,10 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `kb_pdf_assets_enabled` | bool | Render structured-PDF figure/table crops to the content-addressed blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm). |
 | `kb_pdf_blob_dir` | string | Override the structured-PDF blob store root (default <kb-config-dir>/kb-blobs). |
 | `kb_pdf_blob_orphan_alarm_mb` | int | Warn when reclaimable orphan blob bytes exceed this many MB (default 1024; <=0 disables the alarm). |
-| `kb_pdf_blob_recon_secs` | int | Interval (seconds) for the orphan-blob reconciliation sweep (default 3600; <=0 disables it). |
 | `kb_pdf_ingest_enabled` | bool | Route PDF uploads through the structured geometry extractor (kb_doc_pdf) instead of plain pdftotext (default off). |
 | `kb_pdf_ocr_enabled` | bool | OCR a scanned / no-text-layer PDF via the OCR sidecar at ingest so its text + geometry feed the normal citation path (default off; without it a scanned PDF is ingested asset-only). |
 | `kb_pdf_tsr_enabled` | bool | Run the table-structure-recognition (TSR) sidecar at PDF ingest to turn table regions into structured kb_table_cells, surfaced via lookup_table (default off; degrades to text-only when the sidecar is absent). |
 | `kb_pdf_vector_enabled` | bool | Embed structured-PDF chunks into the isolated kb_pdf_embeddings relation and add the vector candidate leg to search_chunks (default off; degrades to lexical-only when the embedder is absent). |
-| `kb_search_max_results` | int | Default max results for KB search. |
 | `learning_implicit_citation_continuation` | bool | Implicit-learning signal: citation on continuation. |
 | `learning_implicit_citation_repair` | bool | Implicit-learning signal: citation on repair. |
 | `learning_implicit_repeat_question` | bool | Implicit-learning signal: repeated question. |
@@ -144,37 +127,24 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `max_iterations_delegate` | int | Per-turn iteration cap for delegate sessions (default 25). |
 | `memory_abstain_enabled` | bool | Allow memory recall to abstain on low confidence. |
 | `memory_abstain_gate` | float | Confidence gate for memory abstention. |
-| `memory_bm25_weight` | float | BM25 (lexical) weight in hybrid memory recall. |
-| `memory_chunk_min_confidence` | float | Minimum confidence to keep a memory chunk. |
 | `memory_coref_mode` | string | Coreference-resolution mode for memory. |
-| `memory_coref_window` | int | Coreference lookback window. |
-| `memory_fetch_budget_base` | int | Base token budget for memory fetch. |
 | `memory_fetch_budget_enabled` | bool | Enable token-budgeted memory fetch. |
 | `memory_fetch_budget_shape_aware` | bool | Shape-aware memory fetch budgeting. |
 | `memory_hard_negative_log` | string | Path to the hard-negative recall log file (empty = disabled). |
 | `memory_improve_dedupe_enabled` | bool | Dedupe during memory-improve. |
 | `memory_improve_summarise_enabled` | bool | Summarise during memory-improve. |
-| `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
-| `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
 | `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
-| `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
-| `memory_profile_cards_stale_secs` | int | Profile-card staleness (seconds). |
 | `memory_query_expansion_k` | int | Number of expanded queries for recall. |
 | `memory_query_expansion_mode` | string | Query-expansion mode. |
 | `memory_rerank_command` | string | External reranker command. |
 | `memory_rerank_enabled` | bool | Enable cross-encoder reranking of recall. |
 | `memory_rerank_mode` | string | Reranker mode. |
-| `memory_rerank_top_k` | int | Top-K candidates to rerank. |
 | `memory_rewrite_command` | string | External query-rewrite command. |
 | `memory_rewrite_decompose` | bool | Decompose queries during rewrite. |
 | `memory_rewrite_enabled` | bool | Enable query rewriting for recall. |
 | `memory_rewrite_hyde` | bool | Use HyDE (hypothetical-document) rewrite. |
-| `memory_rewrite_max_subqueries` | int | Max sub-queries produced by rewrite. |
 | `memory_scenes_enabled` | bool | Cluster memories into scenes. |
-| `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
-| `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
-| `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
 | `ocr_command` | string | OCR sidecar endpoint/command for structured-PDF scanned-page recognition (resolves like embedding_command; AIMEE_OCR_URL env fallback). |
 | `openai_endpoint` | string | OpenAI-compatible endpoint URL. |
 | `openai_key_cmd` | string | Command that prints the OpenAI API key. |
@@ -184,7 +154,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_git` | bool | Block a delegate from running `git` or `gh` in a shell (reads included) and redirect git/forge work to aimee's `git_*` tools, which execute on aimee-server where the forge credential stays in-process; delegates are also spawned without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed SSH to any host) and neuters the global/system git config (default on). |
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
-| `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the context-economizer (aggressive tier) compresses older results to keep history bounded. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
@@ -217,6 +186,51 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_host` | string | — |
 | `llm_synth_model` | string | — |
 | `llm_synth_tier` | string | — |
+
+### Advanced tuning keys (24)
+
+Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
+| `code_span_max_lines` | int | Max line span the code_span_get recovery resolver returns per call (default 400). |
+| `code_surprising_precision_floor` | float | §4 self-suppress: when the LLM-judge-sampled precision of surprising-link candidates falls below this floor, an unjudged /v1/code/graph/surprising request returns no candidates (default 0 = disabled). |
+| `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
+| `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
+| `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
+| `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
+| `ingress_compress_min_chars` | int | Minimum code-snippet length (chars) before it is folded to a file:line reference (default 80). |
+| `kb_pdf_blob_recon_secs` | int | Interval (seconds) for the orphan-blob reconciliation sweep (default 3600; <=0 disables it). |
+| `kb_search_max_results` | int | Default max results for KB search. |
+| `memory_bm25_weight` | float | BM25 (lexical) weight in hybrid memory recall. |
+| `memory_chunk_min_confidence` | float | Minimum confidence to keep a memory chunk. |
+| `memory_coref_window` | int | Coreference lookback window. |
+| `memory_fetch_budget_base` | int | Base token budget for memory fetch. |
+| `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
+| `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
+| `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
+| `memory_profile_cards_stale_secs` | int | Profile-card staleness (seconds). |
+| `memory_rerank_top_k` | int | Top-K candidates to rerank. |
+| `memory_rewrite_max_subqueries` | int | Max sub-queries produced by rewrite. |
+| `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
+| `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
+| `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
+| `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the context-economizer (aggressive tier) compresses older results to keep history bounded. |
+
+### Dev-only keys (7)
+
+Internal dogfood/QA knobs; not part of the user surface.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
+| `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |
+| `dogfood_autolabel_repeat_question` | bool | Auto-label repeated-question turns. |
+| `dogfood_commit_raw` | bool | Commit raw (unredacted) dogfood transcripts. |
+| `dogfood_enabled` | bool | Capture sessions as dogfood training/eval data. |
+| `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
+| `dogfood_log_dir` | string | Directory for dogfood logs. |
 
 ## Config-file sections (52)
 
