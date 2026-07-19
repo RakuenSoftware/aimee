@@ -1751,6 +1751,12 @@ BEGIN
     RAISE EXCEPTION 'set_tenant_context: empty principal' USING ERRCODE = '42501';
   END IF;
   PERFORM set_config('aimee.principal', p_principal, true);  -- transaction-local
+  -- The install owner principal (identity_key 'owner', authenticated by the owner
+  -- bearer token) is the bootstrap operator: it may perform admin writes before any
+  -- admin grant exists (resolves the first-team / first-admin chicken-and-egg). This
+  -- flag is set ONLY here, from the verified principal — never from request input.
+  PERFORM set_config('aimee.bootstrap_owner', CASE WHEN p_principal = 'owner' THEN 'true'
+                                                   ELSE 'false' END, true);
   IF p_team IS NOT NULL AND p_team > 0 THEN
     IF NOT EXISTS (SELECT 1 FROM kb_team_membership
                    WHERE identity_key = p_principal AND team = p_team) THEN
@@ -1836,6 +1842,55 @@ CREATE POLICY p_project_member ON kb_project
     AND (access_mode = 'team-open'
          OR id IN (SELECT project FROM kb_project_membership
                    WHERE identity_key = current_setting('aimee.principal', true))));
+
+-- Admin-gated tenant WRITES (slice 4). Writes are permitted only when the current
+-- principal holds an active org-admin grant, OR is the bootstrap owner. The admin
+-- check keys on the principal's OWN grant row (own-rows policy on kb_admin_grant),
+-- so it cannot be spoofed by naming another principal; the bootstrap-owner flag is
+-- set only by set_tenant_context from the verified 'owner' principal. This keeps the
+-- capability enforced at the DB layer (not just the app) without a 4th DB role.
+CREATE OR REPLACE FUNCTION kb_principal_is_admin() RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT current_setting('aimee.bootstrap_owner', true) = 'true'
+      OR EXISTS (SELECT 1 FROM kb_admin_grant
+                 WHERE identity_key = current_setting('aimee.principal', true)
+                   AND revoked_at = '');
+$$;
+
+DROP POLICY IF EXISTS p_team_admin_write ON kb_team;
+CREATE POLICY p_team_admin_write ON kb_team FOR INSERT WITH CHECK (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_team_admin_mod ON kb_team;
+CREATE POLICY p_team_admin_mod ON kb_team FOR UPDATE USING (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_team_admin_del ON kb_team;
+CREATE POLICY p_team_admin_del ON kb_team FOR DELETE USING (kb_principal_is_admin());
+
+DROP POLICY IF EXISTS p_project_admin_write ON kb_project;
+CREATE POLICY p_project_admin_write ON kb_project FOR INSERT WITH CHECK (
+  kb_principal_is_admin()
+  AND parent IN (SELECT team FROM kb_team_membership
+                 WHERE identity_key = current_setting('aimee.principal', true))
+);
+DROP POLICY IF EXISTS p_project_admin_mod ON kb_project;
+CREATE POLICY p_project_admin_mod ON kb_project FOR UPDATE USING (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_project_admin_del ON kb_project;
+CREATE POLICY p_project_admin_del ON kb_project FOR DELETE USING (kb_principal_is_admin());
+
+-- Membership writes: admin-gated, and the target team must exist (FK enforces it).
+DROP POLICY IF EXISTS p_member_admin_write ON kb_team_membership;
+CREATE POLICY p_member_admin_write ON kb_team_membership FOR INSERT WITH CHECK (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_member_admin_del ON kb_team_membership;
+CREATE POLICY p_member_admin_del ON kb_team_membership FOR DELETE USING (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_projmember_admin_write ON kb_project_membership;
+CREATE POLICY p_projmember_admin_write ON kb_project_membership FOR INSERT WITH CHECK (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_projmember_admin_del ON kb_project_membership;
+CREATE POLICY p_projmember_admin_del ON kb_project_membership FOR DELETE USING (kb_principal_is_admin());
+
+-- Admin-grant writes: only an existing admin or the bootstrap owner can grant/revoke
+-- (the bootstrap owner mints the first admin grant, resolving the chicken-and-egg).
+DROP POLICY IF EXISTS p_admingrant_admin_write ON kb_admin_grant;
+CREATE POLICY p_admingrant_admin_write ON kb_admin_grant FOR INSERT WITH CHECK (kb_principal_is_admin());
+DROP POLICY IF EXISTS p_admingrant_admin_mod ON kb_admin_grant;
+CREATE POLICY p_admingrant_admin_mod ON kb_admin_grant FOR UPDATE USING (kb_principal_is_admin());
 
 -- The context setter is never exposed to PUBLIC. This is role-free and safe on
 -- every db2_init (dev + hardened). Runtime-role grants (which reference roles that

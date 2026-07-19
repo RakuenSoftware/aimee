@@ -141,6 +141,34 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;  -- expected: RLS denies
 END $$;
 
+-- Admin-gated writes (slice 4). The bootstrap OWNER can create a team and mint the
+-- first admin grant; a granted admin can then create teams; a non-admin cannot.
+SET ROLE aimee_kb_runtime;
+-- (a) owner bootstrap: create a team + grant alice admin
+SELECT set_tenant_context('owner', 0);
+INSERT INTO kb_team(id, name) VALUES (900100, 'owner_made');
+INSERT INTO kb_admin_grant(identity_key, source) VALUES ('oidc:test:alice', 'oidc');
+DO $$
+DECLARE n INT;
+BEGIN
+  SELECT count(*) INTO n FROM kb_team WHERE id = 900100;  -- owner sees its own write via... membership? no
+  -- owner is not a member, so RLS read hides it; assert the INSERT itself succeeded (no exception).
+  NULL;
+END $$;
+-- (b) alice is now an admin: she can create a team
+SELECT set_tenant_context('oidc:test:alice', 900001);
+INSERT INTO kb_team(id, name) VALUES (900101, 'alice_admin_made');
+-- (c) bob is NOT an admin: his team-create is denied by the WITH CHECK policy
+SELECT set_tenant_context('oidc:test:bob', 900002);
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO kb_team(id, name) VALUES (900102, 'bob_denied');
+    RAISE EXCEPTION 'FAIL: non-admin bob created a team';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;  -- expected: WITH CHECK denies
+  END;
+END $$;
+
 RESET ROLE;
 ROLLBACK;
 
