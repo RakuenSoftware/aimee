@@ -13,12 +13,9 @@ The model is the same on every developer machine: **the services run in Docker (
 
 ## Part 1, Run the server (in Docker)
 
-Two one-container ways in:
+You start **one container — `aimee-server`** — with the host Docker socket mounted. Everything else is handled in the browser: the setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres (DB2 + pgvector) for you, on CPU or GPU. There is no second compose command.
 
-- **One-command split stack** — `docker compose -f deploy/compose/aimee.yaml up -d`. Brings up `aimee-server` + `aimee-kb` + `aimee-llm` (CPU) + Postgres together. The setup wizard is short: add an agent, connect GitHub, pick workspaces — no KB/LLM/store questions. No Docker socket. Best for getting started fast.
-- **Self-deploying server** — the rest of this section. Deploy just `aimee-server` with the host Docker socket mounted; the wizard's **Deploy** step then brings up `aimee-kb`, `aimee-llm`, and Postgres (CPU or GPU). Best when you want the real split topology or a GPU.
-
-The self-deploying server: deploy one container — `aimee-server` — with the host Docker socket mounted. The setup wizard's **Deploy** step brings up `aimee-kb`, `aimee-llm`, and Postgres (DB2 + pgvector) from there.
+Advanced operators who prefer to run each service as its own long-lived container (the manual split stack — `deploy/compose/aimee.yaml` and friends) still can; see [1.5](#15-managing-the-stack) and [MANUAL.md](../MANUAL.md). This guide takes the self-deploying path.
 
 ### Prerequisites
 
@@ -39,11 +36,7 @@ Starts `aimee-server` only (webchat built in). `/v1` is on `:8743` (native TLS, 
 
 ### 1.2 Run the setup wizard
 
-Open **https://localhost:8443** (accept the self-signed cert) and log in as `aimee` / `aimee-local-dev`.
-
-The browser login is a real PAM account the container creates on startup from **`AIMEE_WEBCHAT_USER`** / **`AIMEE_WEBCHAT_PASSWORD`** (defaults `aimee` / `aimee-local-dev`) — set them in the compose file for anything past local dev. The username must be a valid Linux name: **lowercase letters, digits, `-`, `_`, and not starting with a digit** (so `admin` or `web-user`, not `Admin` or `bob.smith`). For more than one login, set `AIMEE_WEBCHAT_USERS` to a comma-separated `user:password` list. If a login is rejected, check the container logs for `[webchat]` lines — they report exactly which account was created or why it couldn't be.
-
-Each provisioned account is mirrored (username + its `/etc/shadow` hash, never the plaintext) to `AIMEE_HOME/webchat/logins` on the data volume and restored on every start, so browser logins survive a container rebuild or a host reboot even if the runtime stops re-injecting `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD`.
+Open **https://localhost:8443** (accept the self-signed cert) and log in as `aimee` / `aimee-local-dev`. That single account gates the whole browser experience — the setup wizard, webchat, and the dashboards.
 
 The wizard covers:
 
@@ -51,9 +44,16 @@ The wizard covers:
 - **Knowledge base** — a local one (default), or an existing remote `aimee-kb`.
 - **Deploy topology** — where the embedder / reranker / synthesizer run (CPU by default, or a GPU).
 - **Shared store** — the bundled Postgres (default; nothing to enter), or an existing database.
-- **Connection & workspaces** — sign in to your git hosts and clone repos.
+- **Connection** — connect a git host so aimee can clone your repos. Pick one auth method and the wizard shows only its fields: **OAuth sign-in** (GitHub, GitLab, Gitea/Forgejo), an **access token** (HTTPS, any host including Bitbucket), or an **SSH key** (private key for `git@host:owner/repo.git`). Public repos clone without any of them. Optional — you can connect a host later.
+- **Workspaces & projects** — point at an owner/org, list its repos, and bulk-clone them into a workspace.
 
 The final **Deploy** launches `aimee-kb` + `aimee-llm` + Postgres and shows their status. The first run pulls images and the CPU model weights (a few minutes); later boots are fast — state lives in named volumes.
+
+#### Your login account
+
+The browser login is a real PAM account the container creates on startup from **`AIMEE_WEBCHAT_USER`** / **`AIMEE_WEBCHAT_PASSWORD`** (defaults `aimee` / `aimee-local-dev`) — **set your own in the compose file for anything past local dev.** The username must be a valid Linux name: **lowercase letters, digits, `-`, `_`, and not starting with a digit** (so `admin` or `web-user`, not `Admin` or `bob.smith`). For more than one login, set `AIMEE_WEBCHAT_USERS` to a comma-separated `user:password` list. If a login is rejected, check the container logs for `[webchat]` lines — they report exactly which account was created or why it couldn't be.
+
+Each provisioned account is mirrored (username + its `/etc/shadow` hash, never the plaintext) to `AIMEE_HOME/webchat/logins` on the data volume and restored on every start, so browser logins survive a container rebuild or a host reboot even if the runtime stops re-injecting `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD`.
 
 ### 1.3 Verify it's healthy
 
@@ -138,13 +138,13 @@ Use your real bearer token instead of `aimee-local-dev` if you changed it. The s
 
 ### 2.3 Configure your AI coding tool
 
-From the cloned checkout, register aimee's hooks and MCP server for every detected tool (Claude Code, Codex CLI, Gemini CLI, GitHub Copilot):
+aimee wires itself into every detected tool (Claude Code, Codex CLI, Gemini CLI, GitHub Copilot) automatically — the first `aimee` command you run registers the SessionStart / PreToolUse / PostToolUse hooks (which call `aimee`) and the `aimee mcp-serve` MCP server into each tool's user config. To do it explicitly, or from the cloned checkout at install time, run:
 
 ```bash
 ./configure-hooks.sh
 ```
 
-This wires SessionStart / PreToolUse / PostToolUse hooks (which call `aimee`) and the `aimee mcp-serve` MCP server into each tool's config.
+Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or set `client_integrations_enabled: false` in `aimee.yaml`); per-project wiring via `aimee setup` still works.
 
 ### 2.4 Set up workspaces
 
@@ -222,13 +222,13 @@ Use your real bearer token instead of `aimee-local-dev` if you changed it. The s
 
 ### 3.3 Configure your AI coding tool
 
-From the cloned checkout, register aimee's hooks and MCP server for every detected tool (Claude Code, Codex CLI, Gemini CLI, GitHub Copilot):
+aimee wires itself into every detected tool (Claude Code, Codex CLI, Gemini CLI, GitHub Copilot) automatically — the first `aimee.exe` command registers the SessionStart / PreToolUse / PostToolUse hooks (which call `aimee.exe`) and the `aimee mcp-serve` MCP server into each tool's user config. To do it explicitly, run:
 
 ```powershell
 .\configure-hooks.ps1
 ```
 
-This wires SessionStart / PreToolUse / PostToolUse hooks (which call `aimee.exe`) and the `aimee mcp-serve` MCP server into each tool's config.
+Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or set `client_integrations_enabled: false` in `aimee.yaml`); per-project wiring via `aimee setup` still works.
 
 ### 3.4 Set up workspaces
 
@@ -315,11 +315,13 @@ Both the prebuilt universal binary and a source build speak `https://` with cert
 
 ### 4.3 Configure your AI coding tool
 
+aimee registers its hooks + MCP server into every detected tool (Claude Code, Codex CLI, Gemini CLI, GitHub Copilot) automatically on the first `aimee` command. To do it explicitly, run:
+
 ```bash
 ./configure-hooks.sh
 ```
 
-Registers aimee's hooks + MCP server for every detected tool (Claude Code, Codex CLI, Gemini CLI, GitHub Copilot).
+Opt out of the global registration with `AIMEE_NO_CLIENT_INTEGRATIONS=1` (or `client_integrations_enabled: false` in `aimee.yaml`); per-project wiring via `aimee setup` still works.
 
 ### 4.4 Set up workspaces
 

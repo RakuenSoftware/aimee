@@ -39,33 +39,35 @@ Core services are C. Hot paths run in single-digit milliseconds. Nothing phones 
 
 ## Get started
 
-Run the services in Docker, install the `aimee` CLI on each machine.
+One container to start. The browser wizard brings up the rest.
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 
-# Simplest: the split stack in one command — server + kb + llm + Postgres, all on
-# CPU, with a short setup wizard (add an agent, connect GitHub, pick workspaces).
-docker compose -f deploy/compose/aimee.yaml up -d
-
-# Or deploy just aimee-server and let the wizard's Deploy step bring up aimee-kb,
-# the LLM, and Postgres (CPU or GPU; mounts the host Docker socket to launch them):
-#   docker compose -f compose.server-managed.yaml up -d
-
-# Confirm it's live (default bearer: aimee-local-dev; -k for the self-signed cert)
-curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
+# Start aimee-server. It mounts the host Docker socket so the wizard can launch
+# aimee-kb, the LLM, and Postgres for you — CPU or GPU. No second compose command.
+docker compose -f compose.server-managed.yaml up -d
 ```
 
-Then point the client at the server and register your tool's hooks:
+Open <https://localhost:8443>, log in as `aimee` / `aimee-local-dev`, and run the setup
+wizard: pick a primary agent, choose CPU or GPU, connect a git host, pick workspaces. Its
+**Deploy** step brings up aimee-kb, the LLM, and Postgres. Change the login (`AIMEE_WEBCHAT_USER`
+/ `AIMEE_WEBCHAT_PASSWORD`) before you put it on a network.
+
+Then install the `aimee` CLI on each dev machine and point it at the server:
 
 ```bash
-aimee remote set https://host:8743 <token>   # set AIMEE_TLS_INSECURE=1 for the self-signed cert
-./configure-hooks.sh
+aimee remote set https://host:8743 <token>   # AIMEE_TLS_INSECURE=1 for the self-signed cert
+aimee status                                  # server, DB1, and kb health
 ```
+
+aimee wires its hooks and MCP server into your AI coding tools on first run — opt out with
+`AIMEE_NO_CLIENT_INTEGRATIONS=1`.
 
 [QUICKSTART.md](docs/QUICKSTART.md) walks the full setup. Every deployment topology and the
 from-source install live in [Deployment and operations](src/README.md#deployment-and-operations).
+Questions? Join the [Discord](https://discord.gg/FjGjvcgAqz).
 
 ```bash
 aimee memory store myhost "PVE at 10.0.0.1"   # a fact the AI keeps across sessions
