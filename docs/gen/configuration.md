@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (119)
+## CLI-settable keys (115)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -69,14 +69,10 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `guardrails_semantic_mode` | string | — |
 | `identity_working_profile_injection_enabled` | bool | Inject the working-profile identity into prompts. |
 | `ingress_audit_async` | bool | Audit ingress requests asynchronously. |
-| `ingress_cache_placement_enabled` | bool | Append the <aimee-context> envelope after the stable instructions prefix (not before) so provider prefix caches survive (default on). |
-| `ingress_compress_enabled` | bool | Enable ingress envelope compression: span-enrich code hits and fold code entries into recoverable `file:line` references (recover via code_span_get). Default on (~48% prompt reduction on code turns); turn off (or send `X-Aimee-Compress: 0`) for agentic ingress where the agent re-opens folded code so recovery round-trips can erase the saving. |
 | `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |
-| `ingress_preinject_anthropic_enabled` | bool | Inject the `<aimee-context>` envelope on the Anthropic-native /v1/messages passthrough too (default off). |
 | `ingress_preinject_assembly_budget` | int | Token budget for ingress context pre-injection. |
 | `ingress_preinject_enabled` | bool | Enable `<aimee-context>` pre-injection on ingress (memory/code preview envelope on primary ingress turns; default on). |
 | `ingress_trusted_proxy_secret` | string | Shared secret authenticating a trusted ingress proxy. |
-| `ingress_usage_accounting_enabled` | bool | Account token usage on ingress requests. |
 | `integrity_dry_run` | bool | Run integrity checks without enforcing. |
 | `integrity_enabled` | bool | Enable the integrity gate. |
 | `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
@@ -172,7 +168,7 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | — |
 | `llm_synth_tier` | string | — |
 
-### Advanced tuning keys (41)
+### Advanced tuning keys (45)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -185,7 +181,11 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
+| `ingress_cache_placement_enabled` | bool | Append the <aimee-context> envelope after the stable instructions prefix (not before) so provider prefix caches survive (default on). |
+| `ingress_compress_enabled` | bool | Enable ingress envelope compression: span-enrich code hits and fold code entries into recoverable `file:line` references (recover via code_span_get). Default on (~48% prompt reduction on code turns); turn off (or send `X-Aimee-Compress: 0`) for agentic ingress where the agent re-opens folded code so recovery round-trips can erase the saving. |
 | `ingress_compress_min_chars` | int | Minimum code-snippet length (chars) before it is folded to a file:line reference (default 80). |
+| `ingress_preinject_anthropic_enabled` | bool | Inject the `<aimee-context>` envelope on the Anthropic-native /v1/messages passthrough too (default off). |
+| `ingress_usage_accounting_enabled` | bool | Account token usage on ingress requests. |
 | `kb_curator_cross_repo_graph_enabled` | bool | — |
 | `kb_curator_detect_contradictions_enabled` | bool | — |
 | `kb_curator_extract_code_enabled` | bool | — |
