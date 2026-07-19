@@ -42,7 +42,74 @@ membership-bound policies) — this is an additive schema packet, no new auth mo
 7. **Tests:** unit (pricing version pin, cost calc, idempotency key); the RLS gate
    extended to prove cross-team `org_token_audit` read isolation on real PG17.
 
-## Decisions for the panel
+## v2 resolutions (round-1 panel)
+
+- **R1 — Pricing is NOT org-global-read.** `org_model_pricing` read is restricted to
+  **org-admins** and the **egress metering path** (a dedicated `set_config`-gated read
+  or SECURITY DEFINER cost function) — never all-authenticated (negotiated prices are
+  a competitive signal). Team-leads/members never read the price table. Pricing is
+  **platform-scoped** in P3a (one org per kb today); a per-org price dimension is a
+  documented non-goal here.
+- **R2 — Pricing rows are IMMUTABLE.** WORM triggers on `org_model_pricing` forbid
+  UPDATE/DELETE, so the `pricing_version` FK genuinely pins the price. A price change =
+  a NEW `(billable_model, version+1)` row; unique `(billable_model, version)`; version
+  is monotonic per model. `org_model_pricing_current(billable_model PK, version)` is
+  advanced in the SAME txn as the new row insert, under `SELECT … FOR UPDATE` on the
+  pointer row so two concurrent admins cannot fork a version.
+- **R3 — Seed from a FIXED static list in the repo** (`org_pricing_seed.sql` /
+  a checked-in table), NOT the server's DB1 `model_pricing` (crosses the tier
+  boundary, non-reproducible across environments). Deterministic version-1 seed.
+- **R4 — `org_token_audit` is a WORM ledger.** Triggers forbid DELETE and forbid
+  UPDATE of the immutable columns `(origin_cert_cn, request_id, team_id, project_id,
+  billable_model, pricing_version, actor_issuer, actor_subject)`; the ONLY legal
+  UPDATE is a state transition `started → settled_success|settled_denied|
+  settled_failed|indeterminate` plus setting `settled_at` + realized tokens/cost, and
+  `indeterminate → settled_*` (downward reconciliation). A second settle of an
+  already-terminal row is rejected. Unique `(origin_cert_cn, request_id)`; a replay
+  whose immutable triple `(team_id, project_id, pricing_version)` differs from the
+  bound row is **rejected**, not accepted.
+- **R5 — Writes come ONLY from the trusted egress path.** No human-principal (admin or
+  team-lead) write policy on `org_token_audit`/`org_spend_rollup`. The write/settle
+  API is a SECURITY DEFINER function owned by a dedicated writer role, callable only by
+  the egress metering path; team-leads/admins are READERS. Reads are gated
+  **`org_admin OR team_lead_of(requested_team)`** — P3a adds a `kb_team_lead(identity_key,
+  team)` grant (P1-style, RLS-constrained) + an `is_team_lead(team)` predicate.
+- **R6 — Full columns + constraints.** `org_token_audit`: request_id (NOT NULL),
+  origin_cert_cn (NOT NULL), actor_issuer/actor_subject (nullable — set only when a
+  kb-verified actor token was present), team_id (FK kb_team, NOT NULL), project_id (FK
+  kb_project, nullable), **billable_model** (the `token_billable_model` result, not the
+  requested/agent name) + served_model, prompt/completion/cache_read/cache_write_tokens
+  (each `CHECK >= 0`), estimated_cost_usd `NUMERIC(20,10)` (exact decimal, not REAL),
+  pricing_version FK `(billable_model, version) → org_model_pricing`, session_id,
+  delegation_id, state, created_at, settled_at. **project→team consistency** enforced
+  (a project's parent must equal the row's team_id) via a trigger/subquery check.
+- **R7 — Rollup fully specified + same-txn.** `org_spend_rollup(team_id, project_id,
+  billable_model, day, prompt_tokens, completion_tokens, cache_read_tokens,
+  cost_usd NUMERIC(20,10), row_count, updated_at)`, unique
+  `(team_id, COALESCE(project_id,0), billable_model, day)` (null-safe). The **settle API
+  upserts the rollup delta in the SAME DB2 transaction** as the ledger settle (`ON
+  CONFLICT … DO UPDATE SET prompt_tokens = rollup+excluded, …, row_count+1`), so the
+  rollup is always consistent with the ledger. (This is why P3a — not P3b — owns the
+  write/settle API.)
+- **R8 — P3a ships the write/settle + pricing API** (`db2_org_audit_start`,
+  `db2_org_audit_settle` [updates rollup in-txn], `db2_org_pricing_current(billable_model)
+  → {version, prices}`, `db2_org_pricing_add_version`, `db2_org_pricing_seed`,
+  `org_token_estimate_cost(billable_model, version, prompt, completion, cache_read,
+  cache_write) → NUMERIC`). Not dead code — it is the schema's contract that P2b calls.
+- **R9 — Primary-consistency (invariant #9) + guard semantics.** Access-gating reads
+  (membership/team-lead/pricing/revocation) use the primary connection (`db2_conn` — the
+  primary in the single-primary deployment; a replica-routing selector for reporting
+  reads is a documented future item, same posture as P1). `db2_tenant_require_pg()`
+  means "Postgres backend required (RLS can't run on the shim)"; `get_current_price`
+  needs the PG guard but no tenant-context (it is platform-scoped), documented at the
+  call.
+- **R10 — Tests.** Unit: pricing version-pin + immutability (UPDATE rejected), cost calc
+  incl. cache tokens, idempotency-key **replay across different origin CNs rejected**,
+  replay with changed immutable triple rejected, WORM (DELETE + double-settle rejected),
+  billable-vs-served model. RLS gate extended: `org_token_audit` cross-team read denied;
+  org_admin sees all, team_lead sees only their team, member/other-team denied.
+
+## Decisions for the panel (resolved above; confirming)
 
 1. **Version-pin mechanics.** `org_model_pricing_current(model)` holds the active
    version; `get_current_price(model)` reads it + the row atomically (single txn,
