@@ -412,6 +412,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-scope \
                $(TESTPREFIX)/unit-test-kb-identity \
                $(TESTPREFIX)/unit-test-kb-identity-resolve \
+               $(TESTPREFIX)/unit-test-kb-ingress \
                $(TESTPREFIX)/unit-test-db2-hardening \
                $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard \
                $(TESTPREFIX)/unit-test-kb-route-acl \
@@ -3963,6 +3964,10 @@ $(TESTPREFIX)/unit-test-kb-identity: $(OBJDIR)/tests/test_kb_identity.o \
 
 $(TESTPREFIX)/unit-test-kb-identity-resolve: $(OBJDIR)/tests/test_kb_identity_resolve.o \
                      $(OBJDIR)/kb/kb_identity.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-ingress: $(OBJDIR)/tests/test_kb_ingress.o \
+                     $(OBJDIR)/kb/http/kb_ingress.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db2-hardening: $(OBJDIR)/tests/test_db2_hardening.o \

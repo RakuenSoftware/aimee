@@ -8,6 +8,7 @@
 #include "kb_http.h"
 #include "kb_http_ws.h"
 #include "kb_verifier.h"
+#include "kb_ingress.h"
 #include "log.h"
 #include "kb/http/openapi_data.h"
 
@@ -66,6 +67,15 @@ void handle_connection(int fd)
    if (sscanf(buf, "%15s %511s", method, path) < 2)
    {
       send_response(fd, 400, "{\"error\":\"bad request\"}");
+      return;
+   }
+
+   /* B5: kb never honors a client-supplied identity header; reject fail-closed. */
+   if (kb_ingress_identity_header_present(buf))
+   {
+      LOG_WARN("kb.http",
+               "kb ingress: rejected request bearing a spoofable X-Aimee-* identity header");
+      send_response(fd, 400, "{\"error\":\"identity header not permitted\"}");
       return;
    }
 

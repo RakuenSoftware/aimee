@@ -18,6 +18,8 @@
 #include "cJSON.h"
 #include "kb_enroll.h"       /* KB_ENROLL_SCOPE_MAX */
 #include "kb_http.h"         /* kb_http_route_ex */
+#include "kb_ingress.h"      /* B5 identity-header ingress guard */
+#include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
 #include "kb_pki.h"          /* CA load + CSR signing for renew */
@@ -244,8 +246,17 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
        (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
 
    int status;
+   /* B5: kb never honors a client-supplied identity header; reject fail-closed
+    * before any route runs. */
+   if (kb_ingress_identity_header_present(buf))
+   {
+      LOG_WARN("kb.tls",
+               "kb ingress (mtls): rejected request bearing a spoofable X-Aimee-* identity header");
+      snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
+      status = 400;
+   }
    /* A revoked client cert is rejected before any route runs. */
-   if (cert_revoked)
+   else if (cert_revoked)
    {
       snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"client certificate has been revoked\"}");
       status = 401;
