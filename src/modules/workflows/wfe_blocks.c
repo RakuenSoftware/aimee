@@ -1035,8 +1035,29 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
          }
          free(o);
       }
-      if (wfe_delegate_dispatch(wd, "engineer", prompt, NULL, commit, &cost) < 0)
-         return with_cost(wfe_step_looped(), cost);
+      int impl_rc = wfe_delegate_dispatch(wd, "engineer", prompt, NULL, commit, &cost);
+      /* A dispatch that reports no new work (impl_rc < 0 — e.g. the write-role
+       * delegate produced no diff, flagged by delegate_detect_noop_write) is a
+       * FAILED attempt on a roundtable on_fail RETRY (feedback present): looping
+       * re-dispatches a different agent rather than re-running the panel on an
+       * unchanged tree. On the FIRST pass (no feedback) the SAME no-diff dispatch
+       * instead means a PRIOR implement iteration already committed the work and
+       * advanced HEAD, but the slice looped back here (e.g. a transient verify
+       * failure); this delegate correctly finds nothing left to do. Do NOT loop on
+       * that — fall through to the mandatory verify below so a now-passing committed
+       * tree advances instead of spinning to the attempt cap. A genuine no-op with
+       * no committed work still fails verify there and loops, so unverified work is
+       * never advanced. (Without this, once any iteration commits the artifact every
+       * later delegate no-ops -> impl_rc < 0 -> the slice loops forever, never
+       * reaching the verify that would let the committed tree pass — observed live.) */
+      if (impl_rc < 0)
+      {
+         if (feedback[0])
+            return with_cost(wfe_step_looped(), cost);
+         db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
+                                 "impl no-op dispatch (first pass): verifying committed tree", "",
+                                 cost);
+      }
       /* A dispatch that changed NOTHING (reply-only, no tool edits, so the
        * provider's add+commit no-opped and HEAD is unchanged) is a FAILED
        * attempt, not an advance: freezing the identical tree re-runs verify and
