@@ -70,6 +70,50 @@ int db2_memory_list_retryable_index_failures(int max_attempts, int limit, int64_
    return db2_vector_index_ops_list_retryable_memory_ids(max_attempts, limit, out, max);
 }
 
+/* Negation lexical recall via the Postgres-only memory_negation_fts_tsv column
+ * (a GENERATED tsvector over negation_tokens, GIN-indexed). Matches memories whose
+ * negation tokens overlap the query's synthetic "not_<token>" set, GIN-index-backed
+ * rather than the per-candidate semantic fallback. Postgres-only: the sqlite shim
+ * cannot represent a GENERATED tsvector, so it returns 0 and the caller keeps its
+ * synthetic-semantic path. `neg_tokens` is the extract_negation_tokens() output
+ * (space-separated "not_<token>"); plainto_tsquery tokenises it the same way the
+ * stored column was built, so the lexemes line up. */
+int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *out, int max)
+{
+   if (!neg_tokens || !neg_tokens[0] || !out || limit <= 0 || max <= 0)
+      return 0;
+   if (aimee_pg_is_shim())
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   static const char *sql =
+       "SELECT id, tier, kind, key, content, confidence, use_count,"
+       " last_used_at, created_at, updated_at, source_session, salience, provenance_category"
+       " FROM memories"
+       " WHERE memory_negation_fts_tsv @@ plainto_tsquery('simple', ?1)"
+       " ORDER BY ts_rank(memory_negation_fts_tsv, plainto_tsquery('simple', ?1)) DESC,"
+       "          use_count DESC, confidence DESC"
+       " LIMIT ?2";
+
+   char err[MQ_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", neg_tokens);
+   aimee_pg_bind_int(st, "?2", limit);
+
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      db2_fill_memory_12col_pg(st, &out[n]);
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int max)
 {
    if (!query || !out || limit <= 0 || max <= 0)

@@ -218,12 +218,25 @@ int memory_generate_candidates(const char *query, const char *norm_query,
             if (!scratch)
                return count;
             int cap = 64;
+
+            /* Lane 1: the negation FTS index (memory_negation_fts_tsv, GIN). A
+             * direct GIN-backed lexical match on the memories' stored negation
+             * tokens — exact where the semantic fallback below is fuzzy. Postgres
+             * only; returns 0 on the sqlite shim, which then relies on lane 2. */
+            int fts_got = db2_memory_negation_fts_search(neg_q, fetch_limit, scratch, cap);
+            for (int s = 0; s < fts_got && count < max; s++)
+            {
+               int before = count;
+               count = memory_append_unique(out, count, max, &scratch[s]);
+               memory_note_candidate_sources(source_stats, source_stats_count, 128, out, before,
+                                             count, MEM_SOURCE_LEXICAL);
+            }
+
+            /* Lane 2: semantic search of the synthetic "not_<token>" query, as a
+             * complement (and the sole negation lane on the shim). Recovers
+             * negatives phrased differently from the query that the literal FTS
+             * match misses. */
             const char *embed_cmd = config_embedding_command(&neg_cfg, NULL);
-            /* Negation tokens aren't in the vector payload yet, so this falls
-             * back to memory-level semantic search of the synthetic
-             * "not_<token>" query. Future work: add negation_tokens to the
-             * memory point payload and switch to a payload filter for the
-             * literal-token semantic the negation lexical index expects. */
             int got = memory_collect_memory_matches_via_vector(neg_q, embed_cmd, fetch_limit,
                                                                scratch, cap);
             for (int s = 0; s < got && count < max; s++)

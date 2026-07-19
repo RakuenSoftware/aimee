@@ -42,6 +42,11 @@ extern "C"
     * key-prefix, then tier (L3>L2>L1) and use_count. */
    int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int max);
 
+   /* Negation lexical recall over the Postgres-only memory_negation_fts_tsv GIN
+    * index. `neg_tokens` is the extract_negation_tokens() output. Returns 0 on the
+    * sqlite shim (GENERATED tsvector unsupported) so callers keep their fallback. */
+   int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *out, int max);
+
    /* List memory ids whose vector indexing failed but remains retryable.
     * Vector index status storage is DB2-internal; memory repair callers use
     * this domain helper instead of importing that table API directly. */
