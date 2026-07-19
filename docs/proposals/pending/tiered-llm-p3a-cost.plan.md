@@ -128,3 +128,44 @@ membership-bound policies) — this is an additive schema packet, no new auth mo
    P3a ships the schema + pricing + the write/settle db2 API, so P2b just calls it.
    Confirm P3a should include the db2 write API (used by P2b) even though no caller
    exists yet — or defer the write API to P2b?
+
+## v3 notes (round-2 panel → baked into implementation; verified in the code diff)
+
+- **Pricing read isolation is a REAL boundary, not set_config.** Team-leads/members
+  never touch `org_model_pricing`. The egress path gets cost via a SECURITY DEFINER
+  `org_token_estimate_cost(...)` owned by a role that can read pricing; it returns only
+  the computed **NUMERIC cost** (never raw prices). Org-admins may read the price table
+  via an admin-gated RLS SELECT policy (`kb_principal_is_admin()`). No set_config trust.
+- **Immutable vs. settle-writable columns.** IMMUTABLE (trigger-enforced, UPDATE rejected):
+  `origin_cert_cn, request_id, team_id, project_id, billable_model, pricing_version,
+  actor_issuer, actor_subject, created_at`. WRITABLE ONCE on `started→settled_*` (and
+  `indeterminate→settled_*`): `state, settled_at, prompt/completion/cache_read/
+  cache_write_tokens, estimated_cost_usd`. DELETE/TRUNCATE forbidden.
+- **Version monotonicity under concurrency.** `db2_org_pricing_add_version(model, …)`
+  takes `pg_advisory_xact_lock(hashtext('orgprice:'||model))`, computes
+  `COALESCE(max(version),0)+1`, inserts the row, and upserts the
+  `org_model_pricing_current(billable_model PK, version)` pointer — all in one txn, so
+  concurrent admins serialize and versions stay gap-free/monotonic.
+- **Idempotency/replay (corrected).** Unique `(origin_cert_cn, request_id)`. A SAME-key
+  re-`start` whose immutable triple differs from the bound row → **rejected** (the
+  insert is `ON CONFLICT (origin_cert_cn, request_id) DO NOTHING` then a read-back that
+  asserts the stored immutable fields match; a mismatch returns a typed conflict). A
+  DIFFERENT `origin_cert_cn` with the same `request_id` is a **distinct valid row** (the
+  reason the key is composite) — NOT a replay. (Corrects the r2 test wording.)
+- **project→team consistency** via a `BEFORE INSERT` trigger asserting
+  `(SELECT parent FROM kb_project WHERE id = NEW.project_id) = NEW.team_id` when
+  project_id is non-null (a plain FK can't express the cross-column rule).
+- **kb_team_lead grant.** `kb_team_lead(identity_key, team, granted_at, granted_by)`,
+  `identity_key` = the P1 canonical key (`oidc:/cert:/owner`), unique `(identity_key,
+  team)`; `is_team_lead(team) = EXISTS(… WHERE identity_key = current_setting('aimee.
+  principal') AND team = ?)`. Read policy on the org tables: `kb_principal_is_admin()
+  OR is_team_lead(team_id)`. Admin-gated write (like kb_admin_grant), never a human
+  write to the ledger.
+- **Rollup on terminal settle only.** The rollup delta (`+realized tokens/cost,
+  +1 row_count`) is applied once, in the settle txn, on the FIRST transition to a
+  terminal `settled_*`. `indeterminate` (P4 reserved-max) and its downward reconciliation
+  ride with P4 — P3a's rollup upsert is a pure additive delta on realized settle, so no
+  double-count. Documented as the P3a boundary.
+
+Plan CONVERGED (panel found no panel-level issues across 2 rounds; residual items are
+prove-in-code). Proceeding to implement; the slice diff returns to the roundtable.
