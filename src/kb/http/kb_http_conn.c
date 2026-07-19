@@ -9,6 +9,7 @@
 #include "kb_http_ws.h"
 #include "kb_verifier.h"
 #include "kb_ingress.h"
+#include "kb_reqctx.h"
 #include "log.h"
 #include "kb/http/openapi_data.h"
 
@@ -234,6 +235,7 @@ void handle_connection(int fd)
        kb_http_route_ex(method, clean_path, qs[0] ? qs : NULL, auth_val[0] ? auth_val : NULL,
                         g_bearer_token[0] ? g_bearer_token : NULL, req_body_ptr, req_body_len,
                         resp_heap, KB_HTTP_RESP_MAX);
+   kb_reqctx_clear(); /* drop the request's actor before the worker handles the next */
 
    aimee_log(LOG_INFO, "kb.http", "request_id=%s method=%s path=%s status=%d", request_id, method,
              clean_path, status);

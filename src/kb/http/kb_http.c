@@ -742,15 +742,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * auth below leaves no actor (fail-closed) for tenant-aware handlers. */
    kb_reqctx_clear();
    char vr_which[32] = "";
-   if (!bearer_token || !bearer_token[0])
-   {
-      /* Open auth (no owner token configured — dev only): owner-equivalent actor. */
-      kb_principal_t owner;
-      kb_verify_result_t ovr;
-      memset(&ovr, 0, sizeof(ovr));
-      if (kb_principal_from_verify(&ovr, "", &owner) == 0)
-         kb_reqctx_set_actor(&owner);
-   }
+   /* No owner actor is manufactured in auth-off mode: the tenancy mutation routes
+    * require a real authenticated principal, so an auth-off deployment cannot make
+    * anonymous admin writes. */
    if (bearer_token && bearer_token[0])
    {
       const char *presented =
@@ -770,13 +764,19 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          memset(&actor, 0, sizeof(actor));
          if (strcmp(vr_which, "oidc") == 0)
          {
+            /* OIDC: the issuer is required to form the issuer-scoped (iss,sub)
+             * identity — if it isn't configured or resolution fails, set no actor
+             * rather than a mis-scoped one. */
             char issuer[256] = "";
-            kb_oidc_configured_issuer(issuer, sizeof(issuer));
-            kb_principal_from_verify(&vr, issuer, &actor);
+            if (kb_oidc_configured_issuer(issuer, sizeof(issuer)) == 0 && issuer[0])
+               if (kb_principal_from_verify(&vr, issuer, &actor) != 0)
+                  memset(&actor, 0, sizeof(actor));
          }
          else if (!vr.scope_kind[0])
          {
-            kb_principal_from_verify(&vr, "", &actor); /* unscoped owner */
+            /* Unscoped kb-token = the install owner (bootstrap operator). */
+            if (kb_principal_from_verify(&vr, "", &actor) != 0)
+               memset(&actor, 0, sizeof(actor));
          }
          if (actor.authenticated)
             kb_reqctx_set_actor(&actor);

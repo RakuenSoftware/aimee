@@ -109,7 +109,8 @@ static int handle_team(const char *method, const char *body, char *out, int cap)
          db2_tenant_scope_rollback();
          return err(out, cap, 403, "not authorized to create a team");
       }
-      db2_tenant_scope_commit();
+      if (db2_tenant_scope_commit() != 0)
+         return err(out, cap, 500, "commit failed");
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "id", (double)id);
       cJSON_AddStringToObject(o, "name", nm);
@@ -122,7 +123,8 @@ static int handle_team(const char *method, const char *body, char *out, int cap)
          return http;
       db2_team_row_t rows[128];
       int n = db2_team_list(rows, (int)(sizeof(rows) / sizeof(rows[0])));
-      db2_tenant_scope_commit();
+      if (db2_tenant_scope_commit() != 0)
+         return err(out, cap, 500, "commit failed");
       if (n < 0)
          return err(out, cap, 500, "list failed");
       cJSON *arr = cJSON_CreateArray();
@@ -148,7 +150,14 @@ static int handle_member(const char *method, const char *body, char *out, int ca
       return err(out, cap, 400, "team (number) and identity_key required");
    }
    int64_t team_id = (int64_t)team->valuedouble;
-   char key[256];
+   /* identity_key may be up to 600 chars (kb_team_membership CHECK); reject an
+    * over-long key rather than truncate it to a DIFFERENT principal. */
+   if (strlen(idk->valuestring) > 600)
+   {
+      cJSON_Delete(b);
+      return err(out, cap, 400, "identity_key too long");
+   }
+   char key[640];
    snprintf(key, sizeof(key), "%s", idk->valuestring);
    int is_default = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(b, "default")) ? 1 : 0;
    cJSON_Delete(b);
@@ -176,7 +185,8 @@ static int handle_member(const char *method, const char *body, char *out, int ca
       db2_tenant_scope_rollback();
       return err(out, cap, 403, "not authorized to modify membership");
    }
-   db2_tenant_scope_commit();
+   if (db2_tenant_scope_commit() != 0)
+      return err(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "ok", 1);
    return emit(o, out, cap, 200);
@@ -203,6 +213,8 @@ static int handle_project(const char *method, const char *query_string, const ch
       snprintf(am, sizeof(am), "%s",
                (cJSON_IsString(mode) && mode->valuestring[0]) ? mode->valuestring : "team-open");
       cJSON_Delete(b);
+      if (strcmp(am, "team-open") != 0 && strcmp(am, "restricted") != 0)
+         return err(out, cap, 400, "access_mode must be 'team-open' or 'restricted'");
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
       int64_t id = 0;
@@ -212,7 +224,8 @@ static int handle_project(const char *method, const char *query_string, const ch
          db2_tenant_scope_rollback();
          return err(out, cap, 403, "not authorized to create a project");
       }
-      db2_tenant_scope_commit();
+      if (db2_tenant_scope_commit() != 0)
+         return err(out, cap, 500, "commit failed");
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "id", (double)id);
       cJSON_AddNumberToObject(o, "parent", (double)parent_id);
@@ -223,14 +236,34 @@ static int handle_project(const char *method, const char *query_string, const ch
    if (strcmp(method, "GET") == 0)
    {
       int64_t parent_id = 0;
-      const char *tq = query_string ? strstr(query_string, "team=") : NULL;
+      /* Parse ?team=<digits> strictly: only match at a parameter boundary (start or
+       * after '&'/'?'), require at least one digit, and reject trailing junk. */
+      const char *qs = query_string;
+      const char *tq = NULL;
+      for (const char *p = qs; p && *p;)
+      {
+         if ((p == qs || p[-1] == '&' || p[-1] == '?') && strncmp(p, "team=", 5) == 0)
+         {
+            tq = p + 5;
+            break;
+         }
+         const char *amp = strchr(p, '&');
+         p = amp ? amp + 1 : NULL;
+      }
       if (tq)
-         parent_id = (int64_t)strtoll(tq + 5, NULL, 10);
+      {
+         char *end = NULL;
+         long long v = strtoll(tq, &end, 10);
+         if (end == tq || (*end != '\0' && *end != '&') || v < 0)
+            return err(out, cap, 400, "invalid team parameter");
+         parent_id = (int64_t)v;
+      }
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
       db2_project_row_t rows[128];
       int n = db2_project_list(parent_id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
-      db2_tenant_scope_commit();
+      if (db2_tenant_scope_commit() != 0)
+         return err(out, cap, 500, "commit failed");
       if (n < 0)
          return err(out, cap, 500, "list failed");
       cJSON *arr = cJSON_CreateArray();

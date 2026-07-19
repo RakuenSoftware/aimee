@@ -16,9 +16,10 @@
 /* --- serve one mTLS connection (handshake + request + scoped routing) --- */
 
 #include "cJSON.h"
-#include "kb_enroll.h"       /* KB_ENROLL_SCOPE_MAX */
-#include "kb_http.h"         /* kb_http_route_ex */
-#include "kb_ingress.h"      /* B5 identity-header ingress guard */
+#include "kb_enroll.h"  /* KB_ENROLL_SCOPE_MAX */
+#include "kb_http.h"    /* kb_http_route_ex */
+#include "kb_ingress.h" /* B5 identity-header ingress guard */
+#include "kb_reqctx.h"
 #include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
@@ -297,6 +298,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       status = kb_http_route_ex(method, cpath, qs, authhdr[0] ? authhdr : NULL,
                                 synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
    }
+   kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
 
    char head[256];
    int hn = snprintf(head, sizeof(head),
