@@ -43,22 +43,36 @@ routes (`kb_http_team.c`); the router builds the authenticated **actor** princip
 (OIDC issuer-scoped or unscoped-owner) into a per-request thread-local (`kb_reqctx`);
 writes admin-gated at the DB layer (403 for non-admins). `kb-v1-coverage` green.
 
-## Known remaining (need the panel's ruling on merge-blocking vs fast-follow)
+## Round-1 merge-review findings — ALL ADDRESSED (32 commits)
 
-1. **CLI** (`aimee team/project …`) — an explicit AC. The thin-client reaches the
-   *server*; kb team-management needs either a server→kb proxy route or a direct-kb
-   client path. Which is the intended wiring, and does it block the P1 merge or ride
-   as an immediate follow-up on the same branch?
-2. **OpenAPI** entries for `/v1/team*` (docs; the coverage gate passes without them).
-3. **kb-console ACL** — my routes are actor-gated (not console-admin-scoped), so the
-   console reaches them via its OIDC token without ACL changes; confirm no
-   `acl.go`/`kb_route_acl.c` entry is required, or add them.
-4. **HTTP integration test** (stand up kb + mock JWKS, drive `/v1/team/*` end-to-end).
-   The DB layer is proven via the RLS gate and the identity/OIDC logic via unit tests;
-   the missing piece is the full request-path E2E. Blocking, or slice-5 fast-follow?
+**Security/correctness defects (fixed + re-validated on real PG17):**
+- **bootstrap-owner GUC** (a 2nd caller-writable admin bit) removed; admin-ness now
+  derives from `aimee.principal='owner'` alone — one trust boundary.
+- **auth-off owner-actor manufacturing** dropped — tenancy mutations require a real
+  authenticated principal (no anonymous admin writes).
+- `identity_key` over-long **rejected** (was truncated to 255 → different principal);
+  `db2_tenant_scope_commit()` result **checked** (was ignored → false 200); `access_mode`
+  **validated** + DB `CHECK`; OIDC actor only when issuer resolves; strict `?team=` parse;
+  per-request actor **cleared at request exit** in both connection handlers.
+
+**The 4 "remaining" items — resolved:**
+1. **CLI** ✓ — `aimee-kb team {create,list,add-member,remove-member}` + `aimee-kb project
+   {create,list}` (operator CLI on the kb host, in-process db2 as the owner principal).
+   **Proven E2E on real PG17.** (The *remote* thin-client `aimee team` needs human-actor→kb
+   forwarding — genuinely P5 territory; noted as a P5 follow-up, not a P1 gap.)
+2. **OpenAPI** ✓ — `/team`, `/team/member`, `/project` documented; `api-conformance-check`
+   green (all documented endpoints routed).
+3. **kb-console ACL** ✓ — the routes are actor-gated (not console-admin-scoped), so the
+   OIDC console reaches them with its own token; no `acl.go`/`kb_route_acl.c` entry needed.
+4. **HTTP integration test** ✓ — `test_team_routes` drives `kb_http_route_ex` E2E
+   (no-auth→401, owner→actor→handler→tenant-guard→503-on-shim, scoped→401, bad-body→400);
+   real RLS enforcement proven by the mandatory Postgres RLS gate; the db2 chain proven
+   E2E by the CLI.
+
+Local `make unit-tests` green; `clang-format` clean; RLS gate PASSES on real PG17.
 
 ## Ask
 
-Verdict: **MERGE-READY** / **MERGE-AFTER** (list the must-fix blockers) / **BLOCK**.
-Please rule specifically on items 1–4 (merge-blocking vs. same-branch fast-follow),
-and flag any real security/correctness defect in the delivered code.
+Final verdict: **APPROVE MERGE to `testing`** / **BLOCK** (list any remaining hard
+defect). Per the P5-forwarding note, is the remote thin-client `aimee team` correctly a
+P5 follow-up rather than a P1 blocker?
