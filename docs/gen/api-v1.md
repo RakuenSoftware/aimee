@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 62
+Total endpoints: 68
 
 ## Endpoints
 
@@ -688,6 +688,31 @@ Responses:
 - `405` — Method not allowed
 - `503` — Queue unavailable
 
+### `GET /v1/project`
+
+List projects (optionally filtered by ?team=)
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | no | integer |  |
+
+Responses:
+
+- `200` — Projects
+- `401` — Authentication required
+
+### `POST /v1/project`
+
+Create a project under a team (org-admin)
+
+Request body (`application/json`).
+
+Responses:
+
+- `201` — Project created
+- `401` — Authentication required
+- `403` — Not authorized
+
 ### `POST /v1/releases`
 
 Create a new corpus release
@@ -810,6 +835,53 @@ Responses:
 - `200` — Search results
 - `400` — Bad request (missing query)
 - `401` — Unauthorized
+
+### `GET /v1/team`
+
+List the caller's visible teams
+
+Responses:
+
+- `200` — Teams
+- `401` — Authentication required
+
+### `POST /v1/team`
+
+Create a team (org-admin or bootstrap owner)
+
+Creates an org team. The org-admin capability is enforced at the DB layer (RLS write policies); a non-admin caller receives 403.
+
+Request body (`application/json`).
+
+Responses:
+
+- `201` — Team created
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+
+### `POST /v1/team/member`
+
+Add a member to a team (org-admin)
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Member added
+- `401` — Authentication required
+- `403` — Not authorized
+
+### `DELETE /v1/team/member`
+
+Remove a member from a team (org-admin)
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Member removed
+- `401` — Authentication required
+- `403` — Not authorized
 
 ### `GET /v1/version`
 
