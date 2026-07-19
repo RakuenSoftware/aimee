@@ -91,23 +91,29 @@ harness exist) · **⬜ needed** (must be authored).
 - **Pass bar:** ≥ 0.9 precision on the labeled traces with no false-fire on the negative controls,
   per detector, before any is considered for default-on.
 
-## guardrails_blast_radius_advisory_enabled  — 🟡 partial (deterministic)
+## guardrails_blast_radius_advisory_enabled  — ✅ built (deterministic)
 
 - **What it gates:** surfaces the code-graph structural blast radius (dependent files) before an
   edit; advisory and fail-open.
-- **Corpus:** deterministic — a fixture repo + a set of `(edited file → expected dependent-file
-  set)` pairs. Extend `benchmarks/graph` / the code-audit graph fixtures.
+- **Corpus:** [`blast_radius_corpus.json`](blast_radius_corpus.json) — 4 fixtures / 6 cases, each a
+  small code graph (files with exports + imports) with the ground-truth `(edited file → expected
+  dependents + dependencies)`. Faithful to `db2_code_index_blast_radius` (src/db2/code_index.c):
+  covers the basic importer set, the `has_exports` gate (no exports ⇒ no dependents), the hub
+  threshold, and direct-vs-transitive (only direct importers advised).
 - **A/B / metric:** it either lists the true dependent set or not; **precision/recall of the
   advised dependent files** vs the graph ground truth. No LLM in the loop, so this is a clean
   deterministic gate.
 - **Pass bar:** recall = 1.0 (never miss a real dependent) with precision ≥ 0.8 (few spurious
   files) on the fixture set.
 
-## delegate_graph_context_enabled  — ⬜ needed (deterministic)
+## delegate_graph_context_enabled  — ✅ built (deterministic)
 
 - **What it gates:** prepends code-graph structural context to a delegate prompt; fail-open.
-- **Corpus:** deterministic — `(repo, target symbol/role) → expected structural context block`.
-  ~10 fixtures across a small sample repo.
+- **Corpus:** [`delegate_graph_corpus.json`](delegate_graph_corpus.json) — 2 fixtures / 4 cases.
+  `delegate_inject_graph_context` builds its block from the same `kb_client_index_blast_radius`
+  computation, so this shares the blast-radius graph: each case is a delegate prompt referencing a
+  file with the neighbours the injected block must contain, plus fail-open cases (isolated file /
+  no referenced path ⇒ no block) and a must-not-contain (transitive file) control.
 - **A/B / metric:** assert the injected context contains the true neighbours (callers/callees,
   defining file) and stays within the budget. Since it's fail-open and advisory, the gate is
   "context is correct + bounded", not a downstream quality metric.
