@@ -284,6 +284,22 @@ void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *mod
    (void)agent_name;
    (void)role;
 }
+void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
+                               const char *requested_model, const char *stop_reason,
+                               int prompt_tokens, int completion_tokens, int cache_write_tokens,
+                               int cache_read_tokens, const char *source, const char *kind)
+{
+   (void)agent_name;
+   (void)agent_model;
+   (void)requested_model;
+   (void)stop_reason;
+   (void)prompt_tokens;
+   (void)completion_tokens;
+   (void)cache_write_tokens;
+   (void)cache_read_tokens;
+   (void)source;
+   (void)kind;
+}
 /* Enable accounting in this unit so the tap/record path is exercised. */
 int agent_ingress_accounting_enabled(void)
 {

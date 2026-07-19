@@ -209,6 +209,28 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
    agent_record_token_audit_kind(result, role, source, "realized");
 }
 
+void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
+                               const char *requested_model, const char *stop_reason,
+                               int prompt_tokens, int completion_tokens, int cache_write_tokens,
+                               int cache_read_tokens, const char *source, const char *kind)
+{
+   agent_result_t ar;
+   memset(&ar, 0, sizeof(ar));
+   snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", agent_name ? agent_name : "");
+   snprintf(ar.model, sizeof(ar.model), "%s", agent_model ? agent_model : "");
+   snprintf(ar.requested_model, sizeof(ar.requested_model), "%s",
+            requested_model ? requested_model : "");
+   snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", stop_reason ? stop_reason : "");
+   ar.prompt_tokens = prompt_tokens;
+   ar.completion_tokens = completion_tokens;
+   ar.cache_write_tokens = cache_write_tokens;
+   ar.cache_read_tokens = cache_read_tokens;
+   if (kind)
+      agent_record_token_audit_kind(&ar, "", source, kind);
+   else
+      agent_record_token_audit(&ar, "", source);
+}
+
 void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
                                    const char *source, const char *usage_kind)
 {
