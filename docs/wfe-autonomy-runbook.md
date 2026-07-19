@@ -1,15 +1,16 @@
 # WFE Autonomy Runbook
 
-> The aimee Workflow Engine (WFE) runs autonomous work end-to-end: from a human-submitted proposal through planning, delegation, implementation, verification, and a merged pull request — server-owned and unattended, with every step recorded in a durable audit log. The runbook below is the operator's single reference for that lifecycle.
+The Workflow Engine (WFE) drives a proposal from human intake to a merged pull request without a human attending each step: a primary agent decomposes the work, delegates bounded units to sub-agents in isolated worktrees, verifies each unit, and only then advances the run. The end-to-end lifecycle is *proposal intake → plan → roundtable gate → implement per-slice → verify → PR open*, with the operator staying in the loop at approval gates rather than at every commit.
 
 ## Lifecycle stages
 
-- **Proposal intake** — A human submits a written proposal via the `/v1/proposals` surface; a work item is created and durably persisted before any execution begins.
-- **Plan & gate check** — The engine runs the proposal through the planner block and any required pre-flight gates (scope, budget, blast radius) before opening a worktree.
-- **Worktree & delegate dispatch** — A per-work-item worktree is created on a `wi_<id>.sN` branch; the plan is split into units and each unit is dispatched to an isolated delegate.
-- **Implement & verify** — Each delegate writes code, then `aimee git verify` exercises the unit's acceptance criteria; failures route back to a *different* delegate, never the same one twice.
-- **Review & accept** — The primary agent reviews the verified units, accepts the work, and commits it on the work-item branch.
-- **PR & merge** — A pull request is opened against the base branch, CI runs, and the engine merges on green (or routes back on failure).
-- **Audit & cleanup** — Every transition, tool call, and verification result is appended to the per-work-item audit log; the worktree is retained until the work item is closed.
+- **Proposal intake** — A human submits a written proposal (the run is always framed by a proposal; the engine never starts work on its own). The intake endpoint seeds a work item on a chosen workflow, typically the default `build` workflow.
+- **Plan** — The primary agent drafts a plan from the proposal: it decomposes the change into units, decides the verification shape per unit, and records the plan as the artifact the implementation steps will accept as typed input.
+- **Roundtable gate** — A roundtable review evaluates the plan before any code is written. The plan only advances on a passing verdict; a failing plan is sent back for revision rather than implemented as-is.
+- **Implement per-slice** — Each unit is dispatched to a delegate in an isolated worktree with a tight scope. Units are dispatched one at a time (or in the order the workflow specifies); each delegate writes only the files its scope authorizes.
+- **Verify** — Every unit is checked (`aimee git verify`) against its acceptance criteria before the run advances. Units that fail verification are re-dispatched; the run does not move to the next stage on a red unit.
+- **PR open** — Once all units pass, the primary opens a pull request against the target branch (autonomous merges target `testing`). The PR is the deliverable; the work item closes when the PR is opened and the merge gate (CI + reviewable diff) resolves.
 
 WFE_AUTONOMY_RUNBOOK_V1
+
+commit-e2e-1784479438
