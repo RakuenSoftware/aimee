@@ -1732,10 +1732,14 @@ ALTER TABLE kb_audit_event ADD COLUMN IF NOT EXISTS team_id BIGINT NOT NULL DEFA
 ALTER TABLE kb_audit_event ADD COLUMN IF NOT EXISTS selected_default_from TEXT NOT NULL DEFAULT '';
 
 -- set_tenant_context(principal, team): the ONLY runtime path that sets the tenant
--- GUCs. SECURITY DEFINER, EXECUTE granted to the runtime role only (B4/N4). It
--- sets aimee.principal first, then validates team membership UNDER that principal's
--- own-rows policy (so it needs no BYPASSRLS), then sets aimee.team. A team not in
--- the principal's memberships raises (insufficient_privilege), fail-closed.
+-- GUCs. SECURITY DEFINER, EXECUTE granted to the runtime role only (B4/N4). It sets
+-- aimee.principal first, then validates that the (principal, team) membership row
+-- exists, then sets aimee.team. A team not in the principal's memberships raises
+-- (insufficient_privilege), fail-closed. Provisioning MUST own this function by the
+-- non-superuser aimee_kb_owner role so the SECURITY DEFINER context is itself
+-- subject to RLS (least privilege); the membership existence check is correct in
+-- either case because it filters on the passed (principal, team) pair — a superuser
+-- owner would see all rows but still only answers "does THIS pair exist".
 CREATE OR REPLACE FUNCTION set_tenant_context(p_principal TEXT, p_team BIGINT)
 RETURNS void
 LANGUAGE plpgsql
@@ -1815,10 +1819,23 @@ DROP POLICY IF EXISTS p_team_member ON kb_team;
 CREATE POLICY p_team_member ON kb_team
   FOR SELECT USING (id IN (SELECT team FROM kb_team_membership
                 WHERE identity_key = current_setting('aimee.principal', true)));
+-- Project reads honor the full access model: (a) the parent team must be one of
+-- the principal's teams (isolation); (b) when a billing team is selected
+-- (aimee.team set) the row must belong to it, so a single-team request cannot read
+-- the caller's OTHER teams' projects even if a query omits the predicate; (c) a
+-- 'restricted' project is visible only to an explicit kb_project_membership member,
+-- while 'team-open' is visible to the whole parent team.
 DROP POLICY IF EXISTS p_project_member ON kb_project;
 CREATE POLICY p_project_member ON kb_project
-  FOR SELECT USING (parent IN (SELECT team FROM kb_team_membership
-                    WHERE identity_key = current_setting('aimee.principal', true)));
+  FOR SELECT USING (
+    parent IN (SELECT team FROM kb_team_membership
+               WHERE identity_key = current_setting('aimee.principal', true))
+    AND (current_setting('aimee.team', true) IS NULL
+         OR current_setting('aimee.team', true) = ''
+         OR parent = current_setting('aimee.team', true)::bigint)
+    AND (access_mode = 'team-open'
+         OR id IN (SELECT project FROM kb_project_membership
+                   WHERE identity_key = current_setting('aimee.principal', true))));
 
 -- The context setter is never exposed to PUBLIC. This is role-free and safe on
 -- every db2_init (dev + hardened). Runtime-role grants (which reference roles that

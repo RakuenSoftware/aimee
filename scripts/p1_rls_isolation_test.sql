@@ -16,11 +16,16 @@
 BEGIN;
 
 -- Isolated fixtures in a savepoint-free txn we roll back at the end.
-INSERT INTO kb_team(id, name) VALUES (900001, 'rls_alpha'), (900002, 'rls_beta');
+INSERT INTO kb_team(id, name) VALUES (900001, 'rls_alpha'), (900002, 'rls_beta'), (900003, 'rls_gamma');
+-- alice is a member of alpha (default) AND gamma; bob is beta only.
 INSERT INTO kb_team_membership(identity_key, team, is_default)
-  VALUES ('oidc:test:alice', 900001, 1), ('oidc:test:bob', 900002, 1);
-INSERT INTO kb_project(id, parent, name)
-  VALUES (900010, 900001, 'alpha_proj'), (900020, 900002, 'beta_proj');
+  VALUES ('oidc:test:alice', 900001, 1), ('oidc:test:alice', 900003, 0),
+         ('oidc:test:bob', 900002, 1);
+INSERT INTO kb_project(id, parent, name, access_mode)
+  VALUES (900010, 900001, 'alpha_proj', 'team-open'),
+         (900011, 900001, 'alpha_restricted', 'restricted'),  -- alice NOT a member
+         (900020, 900002, 'beta_proj', 'team-open'),
+         (900030, 900003, 'gamma_proj', 'team-open');
 
 -- B4: the runtime role must be non-owner, NOBYPASSRLS.
 DO $$
@@ -52,6 +57,45 @@ BEGIN
   SELECT string_agg(id::text, ',' ORDER BY id) INTO projs FROM kb_project WHERE id IN (900010,900020);
   IF teams IS DISTINCT FROM '900001' THEN RAISE EXCEPTION 'FAIL alice teams: got %', teams; END IF;
   IF projs IS DISTINCT FROM '900010' THEN RAISE EXCEPTION 'FAIL alice projects: got %', projs; END IF;
+END $$;
+
+-- Project access model under aimee.team=alpha: alice sees the team-open alpha
+-- project, but NOT the restricted alpha project (she is not a project member) and
+-- NOT her gamma project (a single-team request scoped to alpha must not read her
+-- OTHER team's rows).
+DO $$
+DECLARE projs TEXT;
+BEGIN
+  SELECT string_agg(id::text, ',' ORDER BY id) INTO projs FROM kb_project
+    WHERE id IN (900010, 900011, 900020, 900030);
+  IF projs IS DISTINCT FROM '900010' THEN
+    RAISE EXCEPTION 'FAIL project access model (aimee.team=alpha): expected 900010, got %', projs;
+  END IF;
+END $$;
+
+-- Switching the billing team to gamma reveals the gamma project (and only it).
+SELECT set_tenant_context('oidc:test:alice', 900003);
+DO $$
+DECLARE projs TEXT;
+BEGIN
+  SELECT string_agg(id::text, ',' ORDER BY id) INTO projs FROM kb_project
+    WHERE id IN (900010, 900011, 900020, 900030);
+  IF projs IS DISTINCT FROM '900030' THEN
+    RAISE EXCEPTION 'FAIL aimee.team scoping (=gamma): expected 900030, got %', projs;
+  END IF;
+END $$;
+SELECT set_tenant_context('oidc:test:alice', 900001);  -- restore alpha context
+
+-- A restricted project becomes visible once the caller is an explicit member.
+RESET ROLE;
+INSERT INTO kb_project_membership(project, identity_key) VALUES (900011, 'oidc:test:alice');
+SET ROLE aimee_kb_runtime;
+SELECT set_tenant_context('oidc:test:alice', 900001);
+DO $$
+DECLARE n INT;
+BEGIN
+  SELECT count(*) INTO n FROM kb_project WHERE id = 900011;
+  IF n <> 1 THEN RAISE EXCEPTION 'FAIL restricted project not visible to its member (got %)', n; END IF;
 END $$;
 
 -- Membership validation: alice cannot select beta as her billing team (raises).
