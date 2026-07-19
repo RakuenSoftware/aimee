@@ -210,6 +210,13 @@ jobs:
             sleep 2
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
+      - name: P1 tenancy RLS isolation gate (mandatory, non-skipping)
+        # Provisions the three-role split + full schema on the pgvector sidecar and
+        # asserts DB-layer cross-tenant isolation under the non-owner NOBYPASSRLS
+        # runtime role. RLS cannot be enforced on the SQLite shim, so this real-PG
+        # gate is the only proof of the cross-team-deny acceptance criterion. Any
+        # failed assertion exits non-zero — it never skips.
+        run: bash scripts/run-p1-rls-gate.sh "postgres://aimee:aimee@localhost:5432/postgres"
       - name: Unit tests
         run: cd src && make -j$(nproc) unit-tests
 

@@ -1801,25 +1801,9 @@ CREATE POLICY p_project_member ON kb_project
   USING (parent IN (SELECT team FROM kb_team_membership
                     WHERE identity_key = current_setting('aimee.principal', true)));
 
--- Grants to the runtime role are CONDITIONAL on the role existing: schema.sql is
--- applied on every db2_init, including dev/single-owner mode where the three-role
--- split is not provisioned (no aimee_kb_runtime). When the role is present
--- (hardened deploy), the runtime role gets DML on the tenant tables (created here,
--- after schema_roles.sql), INSERT/SELECT on the WORM audit store, sequence usage,
--- and EXECUTE on the context setter — never PUBLIC (N4). set_tenant_context is the
--- ONLY function the runtime role may use to set tenant GUCs.
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_runtime') THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON
-      kb_team, kb_project, kb_team_membership, kb_project_membership,
-      kb_admin_grant, kb_oidc_jwks TO aimee_kb_runtime;
-    GRANT INSERT, SELECT ON kb_audit_event TO aimee_kb_runtime;
-    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
-    REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
-    GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
-  END IF;
-  -- Never expose the context setter to PUBLIC regardless of role provisioning.
-  REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
-END
-$$;
+-- The context setter is never exposed to PUBLIC. This is role-free and safe on
+-- every db2_init (dev + hardened). Runtime-role grants (which reference roles that
+-- exist only on a hardened tier) live in schema_grants.sql, applied out of band
+-- AFTER this schema by the migration path — so schema.sql itself references no role
+-- and applies unchanged in dev/single-owner mode.
+REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;

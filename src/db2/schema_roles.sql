@@ -45,14 +45,8 @@ GRANT aimee_kb_owner TO aimee_kb_migrate;
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;
 
--- DML on existing + future tables for the runtime role. DDL (owner) is excluded.
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO aimee_kb_runtime;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_kb_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO aimee_kb_runtime;
-
--- The append-only WORM audit store: runtime may INSERT/SELECT only (no UPDATE/
--- DELETE), matching the existing kb_audit_event writer-role contract.
-REVOKE UPDATE, DELETE ON kb_audit_event FROM aimee_kb_runtime;
+-- NOTE: table/sequence/function GRANTs live in schema_grants.sql, applied AFTER
+-- schema.sql (the tables must exist first). Provisioning order is:
+--   1. schema_roles.sql  (this file — create roles + attributes)
+--   2. schema.sql        (DDL, as the migrate/owner role)
+--   3. schema_grants.sql  (runtime DML grants + WORM/function grants)
