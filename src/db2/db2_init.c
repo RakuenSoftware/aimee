@@ -19,6 +19,7 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <unistd.h> /* getpid (eval temp-store schema name) */
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
 typedef struct sqlite3 sqlite3;
 #else
@@ -989,10 +990,87 @@ void db2_shutdown(void)
 
 static sqlite3 *g_eval_temp_store_handle = NULL;
 
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+/* ---- Real-Postgres eval scratch store (libpq build; no sqlite shim here) ----------
+ * Instead of an in-memory sqlite, carve an ISOLATED throwaway SCHEMA in a DISPOSABLE
+ * Postgres, apply the full DB2 schema (incl. the memory_negation_fts_tsv FTS projection
+ * and pgvector columns) into it, and pin this process's db2 connection (g_conn -- what
+ * db2_conn() returns) at it. Lets the corpus-file retrieval eval exercise Postgres-only
+ * features (e.g. memory_negation) that the sqlite shim can't.
+ *
+ * SAFETY: (1) an eval requires an EXPLICIT AIMEE_DB2_EVAL_URL -- there is deliberately NO
+ * fallback to the production AIMEE_DB2_URL, so it can only hit a database an operator
+ * designated disposable. (2) search_path is the eval schema first; every aimee table is
+ * (re)created there, so a bare `memories`/etc. resolves to the eval copy and SHADOWS any
+ * same-named production table -- `public` remains on the path ONLY so pgvector/pg_trgm
+ * TYPES resolve. (3) the schema is DROP ... CASCADE'd on close. This takes over the
+ * global g_conn, so it is for a STANDALONE eval process only and must NEVER run inside
+ * the live multi-threaded server. */
+static char g_eval_pg_schema[64] = "";
+
+static void db2_eval_pg_drop_schema(void *conn, const char *schema)
+{
+   if (!conn || !schema || !schema[0])
+      return;
+   char sql[128], err[256] = {0};
+   snprintf(sql, sizeof(sql), "DROP SCHEMA IF EXISTS \"%s\" CASCADE", schema);
+   (void)aimee_pg_exec(conn, sql, err, sizeof(err));
+}
+
+static int db2_eval_open_temp_store_pg(void)
+{
+   const char *url = getenv("AIMEE_DB2_EVAL_URL");
+   if (!url || !url[0])
+   {
+      fprintf(stderr, "aimee: eval temp store needs AIMEE_DB2_EVAL_URL (a DISPOSABLE "
+                      "Postgres; never the production DSN)\n");
+      return -1;
+   }
+   char err[512] = {0};
+   static unsigned g_eval_seq = 0;
+   char schema[64];
+   snprintf(schema, sizeof(schema), "aimee_eval_%ld_%u", (long)getpid(), ++g_eval_seq);
+
+   void *conn = aimee_pg_open(url, err, sizeof(err));
+   if (!conn)
+   {
+      fprintf(stderr, "aimee: eval temp store: connect failed: %s\n", err);
+      return -1;
+   }
+   char sql[192];
+   snprintf(sql, sizeof(sql), "CREATE SCHEMA \"%s\"", schema);
+   if (aimee_pg_exec(conn, sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "aimee: eval temp store: CREATE SCHEMA failed: %s\n", err);
+      aimee_pg_close(conn);
+      return -1;
+   }
+   snprintf(sql, sizeof(sql), "SET search_path TO \"%s\", public", schema);
+   if (aimee_pg_exec(conn, sql, err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "aimee: eval temp store: SET search_path failed: %s\n", err);
+      db2_eval_pg_drop_schema(conn, schema);
+      aimee_pg_close(conn);
+      return -1;
+   }
+   if (db_apply_schema_postgres(conn, db2_embedding_dim(), err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "aimee: eval temp store: schema apply failed: %s\n", err);
+      db2_eval_pg_drop_schema(conn, schema);
+      aimee_pg_close(conn);
+      return -1;
+   }
+   g_conn = conn; /* memory ops via db2_conn() now resolve against the eval schema */
+   db2_set_ephemeral(1);
+   snprintf(g_eval_pg_schema, sizeof(g_eval_pg_schema), "%s", schema);
+   return 0;
+}
+#endif
+
 int db2_eval_open_temp_store(void)
 {
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-   return -1;
+   return db2_eval_open_temp_store_pg();
 #else
    db2_eval_close_temp_store();
    if (!sqlite3_open || !sqlite3_close || !sqlite3_exec)
@@ -1027,16 +1105,22 @@ int db2_eval_open_temp_store(void)
 
 void db2_eval_close_temp_store(void)
 {
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   /* Real-Postgres eval store: DROP the throwaway schema (CASCADE removes every table,
+    * index and the negation FTS projection) and close the dedicated connection. */
+   if (!g_eval_pg_schema[0])
+      return;
+   db2_set_ephemeral(0);
+   db2_eval_pg_drop_schema(g_conn, g_eval_pg_schema);
+   aimee_pg_close(g_conn);
+   g_conn = NULL;
+   g_eval_pg_schema[0] = '\0';
+#else
    if (!g_eval_temp_store_handle)
       return;
    /* Restore non-ephemeral when the eval scratch store goes away, so the flag
     * can never outlive the eval that set it. */
    db2_set_ephemeral(0);
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-   db2_maybe_clear_sqlite_cache(g_eval_temp_store_handle);
-   db2_register_shared_sqlite(NULL);
-   g_eval_temp_store_handle = NULL;
-#else
    if (aimee_pg_is_shim())
       db2_shutdown();
    db2_maybe_clear_sqlite_cache(g_eval_temp_store_handle);
