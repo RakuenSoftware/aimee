@@ -575,7 +575,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(MCP_GIT_OBJS) $
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 DEPS = $(ALL_OBJS:.o=.d)
 
-.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
+.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check p1-rls-gate-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(GATEWAY) $(FORWARDER)
 
@@ -1261,6 +1261,19 @@ lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check 
 # so a new entry can never silently run without RLS on the SQLite shim.
 p1-tenant-guard-check:
 	@python3 ../scripts/check-p1-tenant-guard.py
+
+# P1 mandatory DB-layer RLS isolation gate. Runs against a real Postgres when
+# AIMEE_TEST_PG_URL is set (the CI unit-tests job provides a pgvector sidecar) —
+# NON-skipping there; a local run without the URL is a no-op (RLS can't be tested
+# on the SQLite shim). Wired as a prerequisite of unit-tests so it runs in the same
+# CI job that already has Postgres, without a workflow-file change.
+p1-rls-gate-check:
+	@if [ -n "$$AIMEE_TEST_PG_URL" ]; then \
+	  echo "== P1 RLS isolation gate (AIMEE_TEST_PG_URL set) =="; \
+	  bash ../scripts/run-p1-rls-gate.sh "$$AIMEE_TEST_PG_URL"; \
+	else \
+	  echo "== P1 RLS isolation gate skipped (AIMEE_TEST_PG_URL unset; enforced in CI) =="; \
+	fi
 
 # aimee's own agents must not fall behind aimee's MCP surface. A tool added to the
 # MCP table reaches every external client (Claude Code, thin clients) and silently

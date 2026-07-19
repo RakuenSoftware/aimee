@@ -494,7 +494,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-credentials \
                $(TESTPREFIX)/unit-test-curator-fixtures \
                $(TESTPREFIX)/unit-test-substrate-fixtures
-unit-tests: $(BINARY) $(TEST_TARGETS)
+unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
 	@# ~/.config/aimee — the dir a running aimee-server reads agents.json, config
