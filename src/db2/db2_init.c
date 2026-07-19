@@ -603,8 +603,7 @@ int db2_init(const char *libpq_url)
       char herr[256] = "";
       if (!db2_hardening_dsn_verify_full(libpq_url))
       {
-         fprintf(stderr,
-                 "aimee-kb: hardened tier requires sslmode=verify-full in the DB2 DSN\n");
+         fprintf(stderr, "aimee-kb: hardened tier requires sslmode=verify-full in the DB2 DSN\n");
          aimee_pg_close(conn);
          pthread_mutex_unlock(&g_init_lock);
          return -1;
