@@ -35,7 +35,7 @@ target_blocks:
 dependencies:
   - build.split
 
-role: gate
+role: code
 
 # Absolute path the slice packet is materialized on. (For the gate
 # definition itself, this is the canonical location of this YAML.)
