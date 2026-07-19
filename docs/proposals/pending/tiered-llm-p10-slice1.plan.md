@@ -91,3 +91,34 @@ proving neither seam leaks concrete-backend assumptions into the core. This is t
 
 Not a file move; not a behavior or on-disk-format change; not the kb profile; not threading a
 `vault_t*` through callers. Pure structural seam introduction, behavior-preserving.
+
+## v2 refinements (roundtable-converged; baked into implementation)
+
+Panel found no blocking issues; these recurring design signals are folded in:
+
+- **Vtables carry `void *ctx` (self) as the first parameter of every fn.** A stateless
+  vtable would force P7's `postgres` storage backend and `kms`/`tpm2`/`pkcs11` custody
+  providers to keep connection/handle/config state in globals. `jsonfile`/`file` pass
+  `NULL` (they use `config_default_dir()` and are effectively stateless), but the SHAPE
+  now supports per-instance state — no churn when P7 lands.
+- **Custody seam = KEK-lifecycle operations, not raw root export.** The vtable is
+  `{ name; ctx; int get_kek(ctx, uint8_t kek[VAULT_KEK_LEN]); int rotate(ctx, …) }`,
+  mirroring today's `vault_server_kek()` (which derives and returns a KEK internally) and
+  `vault_server_key_rotate()`. This fits a non-exportable HSM/KMS provider (which never
+  exports the root — it derives/unwraps internally and returns only the KEK), unlike an
+  `unwrap(wrapped_root)->root` seam. The `hwm_read`/`hwm_cas` anti-rollback API is
+  **deferred to the external-anchor slice** (its attestation/token/CAS contract is not yet
+  concrete enough to encode a stable interface — declaring it now would bake in an
+  unusable contract).
+- **No `vault_profile_t` policy flags in slice 1.** Each seam has a file-static default
+  backend pointer (`g_store_backend = &jsonfile_backend`, `g_custody = &file_custody`);
+  P7's kb profile swaps the pointers in its own constructor. Policy (WORM, seal, mlock)
+  is a kb-profile concern and lands with P7, not conflated into a slice-1 struct. This
+  also removes any risk of the kb binary inheriting a by-value server profile.
+- **`test_vault_seam` drives the vtables directly** — it binds a mock
+  `vault_store_backend_t` and asserts (a) the facade dispatches to it and (b) the real
+  `jsonfile_backend` is reachable and behaves identically through the same vtable — no
+  mutable-global test override needed.
+- **Gate wording:** existing tests pass unchanged because `jsonfile` remains the default
+  backend and the executed code path is byte-identical (reached through one fn-pointer);
+  the tests are not modified.
