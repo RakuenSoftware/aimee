@@ -1120,6 +1120,7 @@ $(OBJDIR)/server/server_http.o: server/openapi_server_data.h
 docs-gen:
 	@python3 ../scripts/gen-api-docs.py
 	@python3 ../scripts/gen-reference-docs.py
+	@python3 ../scripts/gen-v1-route-descriptor.py
 
 # CI gate: fail if docs/gen is stale relative to the committed spec.
 docs-gen-check: docs-gen
