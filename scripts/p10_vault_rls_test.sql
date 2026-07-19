@@ -39,20 +39,22 @@ SELECT org_vault_put('team:940002:provider:anthropic', 940002, 'claude', 'api_ke
 SELECT org_vault_put('org:pki:ca-key', NULL, 'kb', 'ca_key', 1,
   '\xDEADBEEF'::bytea, '\x0102030405060708090A0B0C'::bytea, '\xAABBCC'::bytea, '\x1122334455667788'::bytea);
 
--- Schema posture: all three vault tables carry FORCE row security; runtime is NOBYPASSRLS.
+-- Schema posture: all three vault tables carry ENABLE row security (mirrors P3a — the
+-- owner-definer bypasses RLS, the non-owner runtime role's direct reads stay filtered);
+-- runtime is NOBYPASSRLS.
 DO $$
 BEGIN
   IF (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'aimee_kb_runtime') THEN
     RAISE EXCEPTION 'P10 FAIL: aimee_kb_runtime has BYPASSRLS';
   END IF;
-  IF (SELECT relforcerowsecurity FROM pg_class WHERE relname = 'org_vault_secret') IS NOT TRUE THEN
-    RAISE EXCEPTION 'P10 FAIL: org_vault_secret is not FORCE ROW LEVEL SECURITY';
+  IF (SELECT relrowsecurity FROM pg_class WHERE relname = 'org_vault_secret') IS NOT TRUE THEN
+    RAISE EXCEPTION 'P10 FAIL: org_vault_secret does not have ROW LEVEL SECURITY enabled';
   END IF;
-  IF (SELECT relforcerowsecurity FROM pg_class WHERE relname = 'org_vault_current') IS NOT TRUE THEN
-    RAISE EXCEPTION 'P10 FAIL: org_vault_current is not FORCE ROW LEVEL SECURITY';
+  IF (SELECT relrowsecurity FROM pg_class WHERE relname = 'org_vault_current') IS NOT TRUE THEN
+    RAISE EXCEPTION 'P10 FAIL: org_vault_current does not have ROW LEVEL SECURITY enabled';
   END IF;
-  IF (SELECT relforcerowsecurity FROM pg_class WHERE relname = 'org_vault_salt') IS NOT TRUE THEN
-    RAISE EXCEPTION 'P10 FAIL: org_vault_salt is not FORCE ROW LEVEL SECURITY';
+  IF (SELECT relrowsecurity FROM pg_class WHERE relname = 'org_vault_salt') IS NOT TRUE THEN
+    RAISE EXCEPTION 'P10 FAIL: org_vault_salt does not have ROW LEVEL SECURITY enabled';
   END IF;
 END $$;
 

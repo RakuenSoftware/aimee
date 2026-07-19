@@ -2264,21 +2264,20 @@ REVOKE ALL ON FUNCTION org_token_audit_settle(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,
 --     pointer advanced atomically inside a SECURITY DEFINER writer under an advisory
 --     xact lock), so rotation later is purely additive (no in-place mutate migration).
 --
--- RLS posture (deliberate, mirrors P3a's boundary = role+grant+SECURITY DEFINER, not
--- a caller-writable GUC): all three tables are FORCE ROW LEVEL SECURITY. Reads are
--- team-scoped (a tenant sees ONLY its own team's rows; platform-scoped rows —
--- team_id IS NULL, e.g. the slice-3 CA key — are NEVER a tenant read, only an admin
--- read). Writes have NO tenant DML path: the runtime role's direct INSERT/UPDATE/
--- DELETE is REVOKED (schema_grants.sql) and every write goes through the SECURITY
--- DEFINER functions below (owned by the schema owner). Those functions set a
--- transaction-local aimee.vault_writer marker used ONLY by the write-side WITH CHECK
--- policies (never by any SELECT policy, so a runtime session setting it cannot widen
--- its reads); the writer functions' own internal version-scan reads rely on the owner
--- role bypassing RLS exactly as P3a's metering writers do (superuser owner in the CI
--- RLS gate / dev tier). This slice stores NO keys — plumbing + tests only (P7 §3:
--- the file-custody kb vault is single-instance dev mode; the CA-key-in-vault activation
--- fails closed on a hardened/multi-instance deployment until the external-anchor + seal
--- slice lands).
+-- RLS posture: ENABLE (not FORCE) ROW LEVEL SECURITY — mirrors P3a. The owner-scoped
+-- SECURITY DEFINER functions bypass RLS to read/write; the non-owner NOBYPASSRLS
+-- runtime role's DIRECT table reads stay tenant-filtered (tenant sees only team_id IN
+-- its memberships; platform-scoped team_id IS NULL rows are admin-only) — this is the
+-- ciphertext-at-rest / invariant-#10 boundary (a DB dump or a direct runtime connection
+-- yields no cross-tenant plaintext, and org-key CONFIDENTIALITY ultimately rests on the
+-- custody KEK, which never enters Postgres). The SECURITY DEFINER function API is the
+-- trusted-service read/write path; per-REQUEST tenant authorization (which principal a
+-- given request may touch) is enforced at the service layer — the slice-3 kb_vault
+-- accessor and the later use-in-place primitive — NOT by these functions. This is the
+-- P7 model: crypto per-slot isolation + service-enforced access + ciphertext-at-rest
+-- RLS. This slice stores NO keys — plumbing + tests only (P7 §3: the file-custody kb
+-- vault is single-instance dev mode; the CA-key-in-vault activation fails closed on a
+-- hardened/multi-instance deployment until the external-anchor + seal slice lands).
 -- ============================================================================
 
 -- org_vault_salt: ONE row per vault principal. `salt` seeds the custody KEK; a single
@@ -2328,16 +2327,17 @@ CREATE TABLE IF NOT EXISTS org_vault_current (
     REFERENCES org_vault_secret(principal, agent, cred, version)
 );
 
--- FORCE RLS on all three: even the table owner is subject to the predicates (the
--- runtime role is non-owner + NOBYPASSRLS per schema_roles.sql). missing_ok=true on
--- current_setting yields NULL -> no rows (fail-closed) when a GUC is unset.
+-- ENABLE (not FORCE) RLS on all three, mirroring P3a: the owner-scoped SECURITY
+-- DEFINER functions bypass RLS to read/write, while the non-owner NOBYPASSRLS runtime
+-- role's DIRECT table reads stay tenant-filtered by the SELECT policies below.
+-- missing_ok=true on current_setting yields NULL -> no rows (fail-closed) when a GUC
+-- is unset.
 DO $$
 DECLARE t TEXT;
 BEGIN
   FOREACH t IN ARRAY ARRAY['org_vault_salt','org_vault_secret','org_vault_current']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
-    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
   END LOOP;
 END $$;
 
@@ -2355,47 +2355,20 @@ CREATE POLICY p_vault_secret_tenant_read ON org_vault_secret FOR SELECT
 DROP POLICY IF EXISTS p_vault_secret_admin_read ON org_vault_secret;
 CREATE POLICY p_vault_secret_admin_read ON org_vault_secret FOR SELECT
   USING (kb_principal_is_admin());
--- org_vault_secret writes: only the SECURITY DEFINER writer path. Runtime holds no
--- direct INSERT/UPDATE/DELETE grant (schema_grants.sql), so this WITH CHECK is reached
--- only by the owner-run definer, which sets aimee.vault_writer='1'. The GUC appears in
--- no SELECT policy, so a runtime session cannot set it to widen its reads.
-DROP POLICY IF EXISTS p_vault_secret_writer_ins ON org_vault_secret;
-CREATE POLICY p_vault_secret_writer_ins ON org_vault_secret FOR INSERT
-  WITH CHECK (current_setting('aimee.vault_writer', true) = '1');
-DROP POLICY IF EXISTS p_vault_secret_writer_upd ON org_vault_secret;
-CREATE POLICY p_vault_secret_writer_upd ON org_vault_secret FOR UPDATE
-  USING (current_setting('aimee.vault_writer', true) = '1')
-  WITH CHECK (current_setting('aimee.vault_writer', true) = '1');
-DROP POLICY IF EXISTS p_vault_secret_writer_del ON org_vault_secret;
-CREATE POLICY p_vault_secret_writer_del ON org_vault_secret FOR DELETE
-  USING (current_setting('aimee.vault_writer', true) = '1');
+-- org_vault_secret writes: no direct DML path. Under ENABLE-not-FORCE the owner-run
+-- SECURITY DEFINER writers bypass RLS, and the runtime role holds no direct INSERT/
+-- UPDATE/DELETE grant (schema_grants.sql REVOKE) — so no write policy is needed.
 
 -- org_vault_current + org_vault_salt: the pointer + salt/verifier carry no ciphertext,
 -- only version numbers / KEK-check bytes. Direct reads are admin-only (the backend
--- reads them through the SECURITY DEFINER helpers); writes are the definer path.
+-- reads them through the SECURITY DEFINER helpers); writes go through the owner-run
+-- definers, which bypass RLS under ENABLE — no write policy needed.
 DROP POLICY IF EXISTS p_vault_current_admin_read ON org_vault_current;
 CREATE POLICY p_vault_current_admin_read ON org_vault_current FOR SELECT
   USING (kb_principal_is_admin());
-DROP POLICY IF EXISTS p_vault_current_writer_ins ON org_vault_current;
-CREATE POLICY p_vault_current_writer_ins ON org_vault_current FOR INSERT
-  WITH CHECK (current_setting('aimee.vault_writer', true) = '1');
-DROP POLICY IF EXISTS p_vault_current_writer_upd ON org_vault_current;
-CREATE POLICY p_vault_current_writer_upd ON org_vault_current FOR UPDATE
-  USING (current_setting('aimee.vault_writer', true) = '1')
-  WITH CHECK (current_setting('aimee.vault_writer', true) = '1');
-DROP POLICY IF EXISTS p_vault_current_writer_del ON org_vault_current;
-CREATE POLICY p_vault_current_writer_del ON org_vault_current FOR DELETE
-  USING (current_setting('aimee.vault_writer', true) = '1');
 DROP POLICY IF EXISTS p_vault_salt_admin_read ON org_vault_salt;
 CREATE POLICY p_vault_salt_admin_read ON org_vault_salt FOR SELECT
   USING (kb_principal_is_admin());
-DROP POLICY IF EXISTS p_vault_salt_writer_ins ON org_vault_salt;
-CREATE POLICY p_vault_salt_writer_ins ON org_vault_salt FOR INSERT
-  WITH CHECK (current_setting('aimee.vault_writer', true) = '1');
-DROP POLICY IF EXISTS p_vault_salt_writer_upd ON org_vault_salt;
-CREATE POLICY p_vault_salt_writer_upd ON org_vault_salt FOR UPDATE
-  USING (current_setting('aimee.vault_writer', true) = '1')
-  WITH CHECK (current_setting('aimee.vault_writer', true) = '1');
 
 -- org_vault_salt_ensure: insert the principal's salt row if absent, return the effective
 -- salt (idempotent; the first writer wins so two concurrent unlocks converge on one salt).
@@ -2403,7 +2376,6 @@ CREATE OR REPLACE FUNCTION org_vault_salt_ensure(p_principal TEXT, p_salt BYTEA)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE s BYTEA;
 BEGIN
-  PERFORM set_config('aimee.vault_writer', '1', true);
   INSERT INTO org_vault_salt(principal, salt) VALUES (p_principal, p_salt)
     ON CONFLICT (principal) DO NOTHING;
   SELECT salt INTO s FROM org_vault_salt WHERE principal = p_principal;
@@ -2424,12 +2396,16 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT kek_check FROM org_vault_salt WHERE principal = p_principal;
 $$;
 
--- org_vault_kek_check_set: establish/rotate the KEK verifier for a principal.
+-- org_vault_kek_check_set: establish the KEK verifier for a principal on FIRST unlock.
+-- The UPDATE is conditional on kek_check still being '' (unset), so two concurrent
+-- first-unlocks cannot clobber each other — only the first writer, while the verifier
+-- is still empty, wins. The caller re-reads the stored verifier afterwards to confirm
+-- its KEK matches the winner's (see vault_pg_unlock_check).
 CREATE OR REPLACE FUNCTION org_vault_kek_check_set(p_principal TEXT, p_check BYTEA) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  PERFORM set_config('aimee.vault_writer', '1', true);
-  UPDATE org_vault_salt SET kek_check = p_check WHERE principal = p_principal;
+  UPDATE org_vault_salt SET kek_check = p_check
+   WHERE principal = p_principal AND kek_check = '';
 END; $$;
 
 -- org_vault_put: append an immutable version row + advance the pointer atomically. The
@@ -2445,7 +2421,6 @@ CREATE OR REPLACE FUNCTION org_vault_put(
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v BIGINT;
 BEGIN
-  PERFORM set_config('aimee.vault_writer', '1', true);
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:' || p_principal || '|' || p_agent || '|' || p_cred));
   SELECT COALESCE(max(version), 0) + 1 INTO v FROM org_vault_secret
     WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
@@ -2502,7 +2477,6 @@ $$;
 CREATE OR REPLACE FUNCTION org_vault_delete(p_principal TEXT, p_agent TEXT, p_cred TEXT) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  PERFORM set_config('aimee.vault_writer', '1', true);
   DELETE FROM org_vault_current WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
   DELETE FROM org_vault_secret  WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
 END; $$;
@@ -2526,7 +2500,6 @@ CREATE OR REPLACE FUNCTION org_vault_rewrap(
 ) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  PERFORM set_config('aimee.vault_writer', '1', true);
   UPDATE org_vault_secret SET wrapped_dek = p_wrapped_dek
    WHERE principal = p_principal AND agent = p_agent AND cred = p_cred AND version = p_version;
 END; $$;

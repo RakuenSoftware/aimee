@@ -19,6 +19,7 @@
 #include "log.h"
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,10 +39,12 @@ static const uint8_t VP_KEK_CHECK_SENTINEL[VAULT_DEK_LEN] = {
     0x61, 0x69, 0x6d, 0x65, 0x65, 0x2d, 0x76, 0x61, 0x75, 0x6c, 0x74, 0x2d, 0x6b, 0x65, 0x6b, 0x2d,
     0x63, 0x68, 0x65, 0x63, 0x6b, 0x2d, 0x76, 0x31, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 
-/* Derive the tenant team_id from a slot principal. A "team:<n>..." principal is a
- * team-scoped tenant secret (team_id = <n>); anything else is platform-scoped
- * (team_id NULL, e.g. the future org:pki:ca-key). Returns 1 and sets *team when
- * team-scoped, 0 for platform-scoped. */
+/* Derive the tenant team_id from a slot principal. A "team:<digits>" principal
+ * (optionally followed by a ':' separator) is a team-scoped tenant secret
+ * (team_id = <digits>); anything else is platform-scoped (team_id NULL, e.g. the
+ * future org:pki:ca-key). Returns 1 and sets *team when team-scoped, 0 for
+ * platform-scoped. Overflow, no digits, or trailing non-':' garbage (e.g.
+ * "team:123evil") is rejected fail-safe as platform-scoped (return 0). */
 static int principal_team_id(const char *principal, int64_t *team)
 {
    if (!principal || strncmp(principal, "team:", 5) != 0)
@@ -49,10 +52,14 @@ static int principal_team_id(const char *principal, int64_t *team)
    const char *p = principal + 5;
    if (*p < '0' || *p > '9')
       return 0;
-   int64_t v = 0;
-   for (; *p >= '0' && *p <= '9'; p++)
-      v = v * 10 + (*p - '0');
-   *team = v;
+   errno = 0;
+   char *end = NULL;
+   long long v = strtoll(p, &end, 10);
+   /* ERANGE => overflow; end==p => no digits; v<0 => defensive; a trailing char that
+    * is neither end-of-string nor a ':' slot separator => malformed (reject). */
+   if (errno == ERANGE || end == p || v < 0 || (*end != '\0' && *end != ':'))
+      return 0;
+   *team = (int64_t)v;
    return 1;
 }
 
@@ -247,7 +254,17 @@ static int vault_pg_unlock_check(void *ctx, const char *principal, const uint8_t
    if (st < 0)
       return -1; /* no salt row: unlock before salt establishment */
    if (st == 0)
-      return kek_check_set(conn, principal, kek); /* first unlock: establish verifier */
+   {
+      /* First unlock: try to establish the verifier. The set is conditional (only the
+       * first writer, while kek_check is still empty, wins), so a concurrent first-
+       * unlock with a DIFFERENT KEK may have won the row. Re-read the stored verifier
+       * and confirm OUR KEK matches it — fail-closed if a rival KEK won. */
+      if (kek_check_set(conn, principal, kek) != 0)
+         return -1;
+      if (kek_check_read(conn, principal, wrapped) != 1)
+         return -1;
+      return kek_check_matches(wrapped, kek) ? 0 : -1;
+   }
    return kek_check_matches(wrapped, kek) ? 0 : -1;
 }
 
