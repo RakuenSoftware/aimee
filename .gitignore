@@ -67,6 +67,7 @@ AGENTS.md
 
 # Workspace config and cloned repos (local to each machine)
 aimee.workspace.yaml
+/wfe-worktrees/
 /CivilizationBuilderCSharp
 /FSCMStrikesBack
 /SmoothNAS
