@@ -6,6 +6,7 @@
  * temp files are involved. TLS 1.2+ only. */
 #include "kb_tls.h"
 
+#include <openssl/bn.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include "cJSON.h"
@@ -131,6 +132,54 @@ int kb_tls_peer_fingerprint(SSL *ssl, char *hex_out, size_t cap)
          snprintf(hex_out + i * 2, 3, "%02x", md[i]);
       hex_out[64] = '\0';
       rc = 0;
+   }
+   X509_free(peer);
+   return rc;
+}
+
+/* Peer certificate issuer DN (RFC2253-ish oneline) — the immutable revocation key
+ * pairs (issuer, serial), CN being only a policy label (P1 I5). */
+int kb_tls_peer_issuer(SSL *ssl, char *out, size_t cap)
+{
+   if (!ssl || !out || cap == 0)
+      return -1;
+   X509 *peer = SSL_get1_peer_certificate(ssl);
+   if (!peer)
+      return -1;
+   char *dn = X509_NAME_oneline(X509_get_issuer_name(peer), NULL, 0);
+   int rc = -1;
+   if (dn)
+   {
+      snprintf(out, cap, "%s", dn);
+      OPENSSL_free(dn);
+      rc = 0;
+   }
+   X509_free(peer);
+   return rc;
+}
+
+/* Peer certificate serial as uppercase hex (no separators). Normalized downstream
+ * by kb_cert_serial_normalize into the stable revocation key. */
+int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
+{
+   if (!ssl || !out || cap == 0)
+      return -1;
+   X509 *peer = SSL_get1_peer_certificate(ssl);
+   if (!peer)
+      return -1;
+   int rc = -1;
+   ASN1_INTEGER *ser = X509_get_serialNumber(peer);
+   BIGNUM *bn = ser ? ASN1_INTEGER_to_BN(ser, NULL) : NULL;
+   if (bn)
+   {
+      char *hex = BN_bn2hex(bn);
+      if (hex)
+      {
+         snprintf(out, cap, "%s", hex);
+         OPENSSL_free(hex);
+         rc = 0;
+      }
+      BN_free(bn);
    }
    X509_free(peer);
    return rc;

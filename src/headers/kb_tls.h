@@ -40,6 +40,12 @@ extern "C"
     * hex_out (needs >=65 bytes). Matches kb_pki_ca_fingerprint. 0 on success. */
    int kb_tls_peer_fingerprint(SSL *ssl, char *hex_out, size_t cap);
 
+   /* Peer cert issuer DN + serial (uppercase hex) — the (issuer, serial) immutable
+    * revocation-key inputs for a transport (cert:CN) principal (P1 I5). Return 0 on
+    * success, -1 if no peer cert / extraction fails. */
+   int kb_tls_peer_issuer(SSL *ssl, char *out, size_t cap);
+   int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap);
+
    /* Serve ONE mTLS connection on `fd` using `ctx`: complete the handshake
     * (which REQUIRES + verifies a client cert), read the HTTP request, route it
     * with the scope taken from the client certificate's CN (verify-then-trust —
