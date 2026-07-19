@@ -664,6 +664,14 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
             "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
+   /* Negation-aware retrieval defaults ON: for negatively-polarised queries it
+    * promotes memories carrying the same negated concept (overlapping "not_<token>"
+    * sets) so a negated fact ranks above its affirmative near-twin. It runs ONLY on
+    * negative-polarity queries and is inert otherwise, and the deterministic
+    * reranking is store-independent. A/B on the negation validation corpus (real
+    * pgvector): negation/discrimination MRR 0.80 -> 0.91, positive controls and the
+    * gated golden corpus unchanged. An explicit config value always wins. */
+   cfg->memory_negation_enabled = 1;
    /* Typed-fact extraction runs fully OFFLINE (the memory_facts drain), so it costs
     * nothing per turn and defaults ON on every backend -- including the CPU-only
     * Gemma E4B/E2B fallback. HyDE query rewrite is still per-turn LLM work, so it
