@@ -1679,6 +1679,12 @@ typedef struct config
     * 3).
     */
    int kb_curator_extract_docs_enabled;
+   /* Curator pipeline preset: the everyday knob for the 12 kb_curator_*_enabled
+    * stage gates. "off" = no curation, "lite" = core extract+index only, "full"
+    * (default) = every stage. Drives the stage gates at config load; an explicit
+    * per-stage gate (kb.curator.stages.<stage>.enabled) still overrides. Empty =
+    * "full" (back-compat: pre-preset configs). */
+   char kb_curator_tier[16];
    /* Curator charter versioning (extract prompt + embed model). A bump to
     * either replays the affected pass on kb startup (kb_curator_version). */
    char kb_curator_extract_prompt_version[64];
