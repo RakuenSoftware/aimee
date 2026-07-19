@@ -139,6 +139,19 @@ Key consequences of the split:
   appears in the server or a `db1_*`/`sqlite3_*` symbol appears in KB.
   `scripts/check_tier_deps.sh` enforces that code outside a tier calls only the
   typed public API, never a tier's storage handles.
+- **One sanctioned cross-tier code edge: the WORM hash chain.** The append-only
+  audit chain must produce byte-identical row hashes and checkpoint MACs whether
+  a row is written by the server's SQLite store (`src/modules/audit/audit_worm.c`)
+  or the KB's Postgres store (`src/db2/kb_audit_worm.c`). Both therefore share the
+  engine-agnostic hash primitives in `src/modules/audit/audit_worm_chain.{c,h}` —
+  a deliberate `db2/ → modules/audit/` include edge that does **not** breach the
+  tier boundary. The edge is permitted **only as long as
+  `src/modules/audit/audit_worm_chain.{c,h}` stays pure hashing** — SHA-256 only,
+  no storage handle, `sqlite3`- and `libpq`-free, and header-self-contained.
+  Reintroducing a storage-engine dependency there would re-create the layering
+  violation this section exists to prevent, so it is forbidden.
+  `src/tests/test_audit_worm_chain.c` pins the cross-engine hash vector against
+  the real primitive so the two stores cannot silently drift.
 
 The server reaches DB2 exclusively through the **KB client** (`src/server/
 kb_client*.c`): a set of typed RPC wrappers that talk to `aimee-kb` over a Unix
