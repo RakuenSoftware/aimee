@@ -45,13 +45,14 @@ static void test_identity_key(void)
    kb_principal_t p;
    char key[600];
 
-   /* OIDC: oidc:<iss>:<sub> */
+   /* OIDC: oidc:<enc(iss)>:<enc(sub)> — the ':' in https:// is percent-encoded so
+    * the structural ':' delimiters are unambiguous. */
    CHECK(kb_principal_from_verify(&v, "https://idp.example", &p) == 0 && p.kind == KB_PRIN_OIDC &&
              p.authenticated,
          "oidc principal built");
    CHECK(kb_identity_key(&p, key, sizeof(key)) == 0 &&
-             strcmp(key, "oidc:https://idp.example:sub-123") == 0,
-         "oidc identity key");
+             strcmp(key, "oidc:https%3A//idp.example:sub-123") == 0,
+         "oidc identity key encodes issuer colon");
 
    /* Owner: no issuer -> owner principal, key "owner" */
    CHECK(kb_principal_from_verify(&v, "", &p) == 0 && p.kind == KB_PRIN_OWNER, "owner principal");
@@ -77,11 +78,53 @@ static void test_unauthenticated_rejected(void)
    CHECK(kb_identity_key(&p, key, sizeof(key)) == -1, "kind=NONE rejected even if flag set");
 }
 
+static void test_no_collision(void)
+{
+   /* (issuer "a:b", subject "c") and (issuer "a", subject "b:c") must NOT collide. */
+   kb_verify_result_t v1, v2;
+   memset(&v1, 0, sizeof(v1));
+   memset(&v2, 0, sizeof(v2));
+   snprintf(v1.subject, sizeof(v1.subject), "%s", "c");
+   snprintf(v2.subject, sizeof(v2.subject), "%s", "b:c");
+   kb_principal_t p1, p2;
+   char k1[600], k2[600];
+   kb_principal_from_verify(&v1, "a:b", &p1);
+   kb_principal_from_verify(&v2, "a", &p2);
+   CHECK(kb_identity_key(&p1, k1, sizeof(k1)) == 0, "k1 built");
+   CHECK(kb_identity_key(&p2, k2, sizeof(k2)) == 0, "k2 built");
+   CHECK(strcmp(k1, k2) != 0, "colon-in-component does not collide identities");
+}
+
+static void test_overlong_rejected(void)
+{
+   /* An issuer longer than the principal buffer must be REJECTED, not truncated. */
+   char big[1024];
+   memset(big, 'x', sizeof(big) - 1);
+   big[sizeof(big) - 1] = '\0';
+   kb_verify_result_t v;
+   memset(&v, 0, sizeof(v));
+   snprintf(v.subject, sizeof(v.subject), "%s", "s");
+   kb_principal_t p;
+   CHECK(kb_principal_from_verify(&v, big, &p) == -1,
+         "over-long issuer rejected (no silent trunc)");
+
+   /* A tiny output buffer must fail rather than emit a truncated (colliding) key. */
+   kb_verify_result_t v2;
+   memset(&v2, 0, sizeof(v2));
+   snprintf(v2.subject, sizeof(v2.subject), "%s", "subject-value");
+   kb_principal_t p2;
+   char tiny[8];
+   CHECK(kb_principal_from_verify(&v2, "issuer", &p2) == 0, "principal ok");
+   CHECK(kb_identity_key(&p2, tiny, sizeof(tiny)) == -1, "undersized key buffer rejected");
+}
+
 int main(void)
 {
    test_serial_normalize();
    test_identity_key();
    test_unauthenticated_rejected();
+   test_no_collision();
+   test_overlong_rejected();
    if (fails == 0)
       printf("test_kb_identity: all passed\n");
    return fails ? 1 : 0;

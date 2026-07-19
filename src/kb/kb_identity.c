@@ -37,6 +37,58 @@ int kb_cert_serial_normalize(const char *serial, char *out, size_t cap)
    return 0;
 }
 
+/* Copy src into dst[cap] but REJECT (return -1) rather than silently truncate — a
+ * truncated issuer/subject could collide two distinct identities into one key. */
+static int copy_strict(char *dst, size_t cap, const char *src)
+{
+   if (!src)
+   {
+      dst[0] = '\0';
+      return 0;
+   }
+   size_t n = strlen(src);
+   if (n >= cap)
+      return -1;
+   memcpy(dst, src, n + 1);
+   return 0;
+}
+
+/* Percent-encode a key component so the ':' delimiters in an identity_key are
+ * UNAMBIGUOUS: '%'->"%25" and ':'->"%3A", everything else verbatim. This makes
+ * (kind, issuer, subject) -> key injective, so issuer "a:b"+subject "c" can never
+ * collide with issuer "a"+subject "b:c". Returns 0, or -1 if the encoding would
+ * overflow out[cap]. */
+static int id_encode(const char *in, char *out, size_t cap)
+{
+   size_t o = 0;
+   for (const char *p = in; *p; ++p)
+   {
+      const char *rep = NULL;
+      if (*p == '%')
+         rep = "%25";
+      else if (*p == ':')
+         rep = "%3A";
+      if (rep)
+      {
+         if (o + 3 >= cap)
+            return -1;
+         out[o++] = rep[0];
+         out[o++] = rep[1];
+         out[o++] = rep[2];
+      }
+      else
+      {
+         if (o + 1 >= cap)
+            return -1;
+         out[o++] = *p;
+      }
+   }
+   if (o >= cap)
+      return -1;
+   out[o] = '\0';
+   return 0;
+}
+
 int kb_principal_from_verify(const kb_verify_result_t *v, const char *issuer, kb_principal_t *out)
 {
    if (!v || !out)
@@ -46,13 +98,16 @@ int kb_principal_from_verify(const kb_verify_result_t *v, const char *issuer, kb
    if (issuer && issuer[0])
    {
       out->kind = KB_PRIN_OIDC;
-      snprintf(out->issuer, sizeof(out->issuer), "%s", issuer);
-      snprintf(out->subject, sizeof(out->subject), "%s", v->subject);
+      if (copy_strict(out->issuer, sizeof(out->issuer), issuer) != 0 ||
+          copy_strict(out->subject, sizeof(out->subject), v->subject) != 0)
+         return -1;
    }
    else
    {
       out->kind = KB_PRIN_OWNER;
-      snprintf(out->subject, sizeof(out->subject), "%s", v->subject[0] ? v->subject : "owner");
+      if (copy_strict(out->subject, sizeof(out->subject), v->subject[0] ? v->subject : "owner") !=
+          0)
+         return -1;
    }
    out->authenticated = 1;
    return 0;
@@ -65,11 +120,12 @@ int kb_principal_from_cert(const char *cert_issuer, const char *cert_serial, con
       return -1;
    memset(out, 0, sizeof(*out));
    out->kind = KB_PRIN_CERT;
-   snprintf(out->issuer, sizeof(out->issuer), "%s", cert_issuer);
+   if (copy_strict(out->issuer, sizeof(out->issuer), cert_issuer) != 0)
+      return -1;
    if (kb_cert_serial_normalize(cert_serial, out->subject, sizeof(out->subject)) != 0)
       return -1;
-   if (cn)
-      snprintf(out->label, sizeof(out->label), "%s", cn);
+   if (cn && copy_strict(out->label, sizeof(out->label), cn) != 0)
+      return -1;
    out->authenticated = 1;
    return 0;
 }
@@ -78,21 +134,30 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
 {
    if (!p || !out || cap == 0 || !p->authenticated)
       return -1;
+   char eiss[3 * sizeof(p->issuer)];
+   char esub[3 * sizeof(p->subject)];
+   int n;
    switch (p->kind)
    {
    case KB_PRIN_OIDC:
       if (!p->issuer[0] || !p->subject[0])
          return -1;
-      snprintf(out, cap, "oidc:%s:%s", p->issuer, p->subject);
-      return 0;
+      if (id_encode(p->issuer, eiss, sizeof(eiss)) != 0 ||
+          id_encode(p->subject, esub, sizeof(esub)) != 0)
+         return -1;
+      n = snprintf(out, cap, "oidc:%s:%s", eiss, esub);
+      return (n > 0 && (size_t)n < cap) ? 0 : -1; /* reject truncation */
    case KB_PRIN_CERT:
       if (!p->issuer[0] || !p->subject[0])
          return -1;
-      snprintf(out, cap, "cert:%s:%s", p->issuer, p->subject);
-      return 0;
+      if (id_encode(p->issuer, eiss, sizeof(eiss)) != 0 ||
+          id_encode(p->subject, esub, sizeof(esub)) != 0)
+         return -1;
+      n = snprintf(out, cap, "cert:%s:%s", eiss, esub);
+      return (n > 0 && (size_t)n < cap) ? 0 : -1;
    case KB_PRIN_OWNER:
-      snprintf(out, cap, "owner");
-      return 0;
+      n = snprintf(out, cap, "owner");
+      return (n > 0 && (size_t)n < cap) ? 0 : -1;
    default:
       return -1;
    }

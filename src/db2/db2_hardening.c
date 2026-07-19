@@ -58,12 +58,23 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
     * current_user is a member (directly or transitively) of any superuser/
     * BYPASSRLS role — an inherited or SET ROLE-able privileged membership defeats
     * RLS just as a direct attribute would, so it is rejected too. */
+   /* Column 3 (priv_member) also flags membership in the owner/migration roles: a
+    * runtime role that can SET ROLE to a tenant-table OWNER can ALTER TABLE ...
+    * DISABLE ROW LEVEL SECURITY and defeat isolation without ever holding BYPASSRLS
+    * itself. Column 4 (owns_tenant) flags direct ownership of any tenant table for
+    * the same reason. Both are rejected. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "SELECT r.rolbypassrls, r.rolsuper, "
        "has_schema_privilege(current_user,'public','CREATE'), "
-       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls) FROM pg_roles m "
-       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false) "
+       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls "
+       "  OR m.rolname IN ('aimee_kb_owner','aimee_kb_migrate')) FROM pg_roles m "
+       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false), "
+       "COALESCE((SELECT bool_or(pg_get_userbyid(c.relowner) = current_user) "
+       "  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+       "  WHERE n.nspname = 'public' AND c.relname IN "
+       "  ('kb_team','kb_project','kb_team_membership','kb_project_membership','kb_admin_grant')), "
+       "false) "
        "FROM pg_roles r WHERE r.rolname = current_user",
        e, sizeof(e));
    if (!st)
@@ -78,6 +89,7 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
       int super = aimee_pg_column_int(st, 1);
       int create_pub = aimee_pg_column_int(st, 2);
       int priv_member = aimee_pg_column_int(st, 3);
+      int owns_tenant = aimee_pg_column_int(st, 4);
       if (bypassrls)
       {
          snprintf(err, errlen, "runtime role has BYPASSRLS (defeats tenant RLS)");
@@ -95,10 +107,16 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
       }
       else if (priv_member)
       {
-         snprintf(
-             err, errlen,
-             "runtime role is a member of a superuser/BYPASSRLS role (can SET ROLE to bypass RLS)");
+         snprintf(err, errlen,
+                  "runtime role is a member of a superuser/BYPASSRLS/owner role (can SET ROLE to "
+                  "bypass or disable RLS)");
          rc = 7;
+      }
+      else if (owns_tenant)
+      {
+         snprintf(err, errlen,
+                  "runtime role owns a tenant table (owner can DISABLE ROW LEVEL SECURITY)");
+         rc = 8;
       }
    }
    else
