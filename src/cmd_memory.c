@@ -255,10 +255,7 @@ void cmd_memory(app_ctx_t *ctx, int argc, char **argv)
    int needs_no_db = (strcmp(sub, "plan") == 0 || strcmp(sub, "pack") == 0);
    if (!needs_no_db)
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
-         fatal("cannot initialize DB1");
+      cmd_require_db1("cannot initialize DB1");
    }
 
    config_load(&s_mem_cfg);

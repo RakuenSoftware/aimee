@@ -220,10 +220,7 @@ const subcmd_t *get_cancel_subcmds(void)
 
 void cmd_cancel(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
-      fatal("cannot initialize DB1");
+   cmd_require_db1("cannot initialize DB1");
 
    /* No subcommand or flags starting with -- -> default to cancel_all */
    if (argc < 1 || (argv[0][0] == '-'))
