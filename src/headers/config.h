@@ -529,6 +529,11 @@ typedef struct config
    int kb_typed_facts_auto_promote_enabled; /* default on: auto-promote recurrent provisional
                                                relations */
    int kb_typed_facts_promote_threshold;    /* observations before auto-promote (default 3) */
+   /* structured-PDF pipeline preset: the everyday knob for the 5 kb_pdf_*_enabled
+    * stage gates. "off" (default) = plain pdftotext, "basic" = ingest + vector,
+    * "full" = every stage (ingest, vector, tsr, assets, ocr). Drives the gates at
+    * config load; an explicit per-stage gate still overrides. Empty = "off". */
+   char kb_pdf_tier[16];
    int kb_pdf_ingest_enabled;       /* structured-pdf: route PDF uploads through the geometry
                                        extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
    int kb_pdf_vector_enabled;       /* structured-pdf Phase A: embed PDF chunks into the isolated

@@ -882,6 +882,10 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "delegate_sandbox_learn_packages", 0);
    /* typed_facts_enabled is KB-owned: persisted as kb.typed_facts.enabled by
     * config_save_kb_curator (still parsed at root for backward compat). */
+   /* structured-PDF preset: persist the tier when non-default ("off"). Parse
+    * applies it before the per-stage gates, so on reload it re-derives them. */
+   if (cfg->kb_pdf_tier[0] && strcmp(cfg->kb_pdf_tier, "off") != 0)
+      cJSON_AddStringToObject(root, "kb_pdf_tier", cfg->kb_pdf_tier);
    if (cfg->kb_pdf_ingest_enabled) /* default-off: persist only when enabled */
       cJSON_AddBoolToObject(root, "kb_pdf_ingest_enabled", 1);
    if (cfg->kb_pdf_vector_enabled) /* default-off: persist only when enabled */

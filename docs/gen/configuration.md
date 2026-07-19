@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (123)
+## CLI-settable keys (119)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -96,13 +96,9 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `kb_mining_enabled` | bool | Enable background KB mining. |
 | `kb_mining_min_poll_s` | int | Minimum interval (s) between KB mining polls. |
 | `kb_mode` | string | — |
-| `kb_pdf_assets_enabled` | bool | Render structured-PDF figure/table crops to the content-addressed blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm). |
 | `kb_pdf_blob_dir` | string | Override the structured-PDF blob store root (default <kb-config-dir>/kb-blobs). |
 | `kb_pdf_blob_orphan_alarm_mb` | int | Warn when reclaimable orphan blob bytes exceed this many MB (default 1024; <=0 disables the alarm). |
-| `kb_pdf_ingest_enabled` | bool | Route PDF uploads through the structured geometry extractor (kb_doc_pdf) instead of plain pdftotext (default off). |
-| `kb_pdf_ocr_enabled` | bool | OCR a scanned / no-text-layer PDF via the OCR sidecar at ingest so its text + geometry feed the normal citation path (default off; without it a scanned PDF is ingested asset-only). |
-| `kb_pdf_tsr_enabled` | bool | Run the table-structure-recognition (TSR) sidecar at PDF ingest to turn table regions into structured kb_table_cells, surfaced via lookup_table (default off; degrades to text-only when the sidecar is absent). |
-| `kb_pdf_vector_enabled` | bool | Embed structured-PDF chunks into the isolated kb_pdf_embeddings relation and add the vector candidate leg to search_chunks (default off; degrades to lexical-only when the embedder is absent). |
+| `kb_pdf_tier` | string | Structured-PDF pipeline preset: off (plain pdftotext, default) | basic (ingest+vector) | full (all stages). |
 | `learning_implicit_citation_continuation` | bool | Implicit-learning signal: citation on continuation. |
 | `learning_implicit_citation_repair` | bool | Implicit-learning signal: citation on repair. |
 | `learning_implicit_repeat_question` | bool | Implicit-learning signal: repeated question. |
@@ -176,7 +172,7 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | — |
 | `llm_synth_tier` | string | — |
 
-### Advanced tuning keys (36)
+### Advanced tuning keys (41)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -202,7 +198,12 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `kb_curator_promote_entity_enabled` | bool | — |
 | `kb_curator_resolve_entities_enabled` | bool | — |
 | `kb_curator_synthesize_enabled` | bool | — |
+| `kb_pdf_assets_enabled` | bool | Render structured-PDF figure/table crops to the content-addressed blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm). |
 | `kb_pdf_blob_recon_secs` | int | Interval (seconds) for the orphan-blob reconciliation sweep (default 3600; <=0 disables it). |
+| `kb_pdf_ingest_enabled` | bool | Route PDF uploads through the structured geometry extractor (kb_doc_pdf) instead of plain pdftotext (default off). |
+| `kb_pdf_ocr_enabled` | bool | OCR a scanned / no-text-layer PDF via the OCR sidecar at ingest so its text + geometry feed the normal citation path (default off; without it a scanned PDF is ingested asset-only). |
+| `kb_pdf_tsr_enabled` | bool | Run the table-structure-recognition (TSR) sidecar at PDF ingest to turn table regions into structured kb_table_cells, surfaced via lookup_table (default off; degrades to text-only when the sidecar is absent). |
+| `kb_pdf_vector_enabled` | bool | Embed structured-PDF chunks into the isolated kb_pdf_embeddings relation and add the vector candidate leg to search_chunks (default off; degrades to lexical-only when the embedder is absent). |
 | `kb_search_max_results` | int | Default max results for KB search. |
 | `memory_bm25_weight` | float | BM25 (lexical) weight in hybrid memory recall. |
 | `memory_chunk_min_confidence` | float | Minimum confidence to keep a memory chunk. |

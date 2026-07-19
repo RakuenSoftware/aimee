@@ -647,6 +647,29 @@ int main(void)
       assert(!cfg2.kb_curator_synthesize_enabled && !cfg2.kb_curator_cross_repo_graph_enabled);
    }
 
+   /* --- kb_pdf preset: default "off" (all gates off), and a non-default tier
+    *     persists + re-derives the 5 gates on reload. --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      /* default: structured-PDF off (plain pdftotext). */
+      assert(strcmp(cfg.kb_pdf_tier, "off") == 0);
+      assert(!cfg.kb_pdf_ingest_enabled && !cfg.kb_pdf_vector_enabled && !cfg.kb_pdf_tsr_enabled &&
+             !cfg.kb_pdf_assets_enabled && !cfg.kb_pdf_ocr_enabled);
+
+      /* set the tier (as an operator would in aimee.yaml), save, reload. */
+      snprintf(cfg.kb_pdf_tier, sizeof(cfg.kb_pdf_tier), "basic");
+      assert(config_save(&cfg) == 0);
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(strcmp(cfg2.kb_pdf_tier, "basic") == 0);
+      assert(cfg2.kb_pdf_ingest_enabled && cfg2.kb_pdf_vector_enabled); /* basic core */
+      assert(!cfg2.kb_pdf_tsr_enabled && !cfg2.kb_pdf_assets_enabled &&
+             !cfg2.kb_pdf_ocr_enabled); /* heavy stages stay off */
+   }
+
    /* --- install.sh persists provider/openai/kb_client_* as plain top-level
     *     YAML scalars into aimee.yaml (the file config_load reads), matching
     *     aimee's own unquoted emit (cf. db2_url with colons). Regression guard
