@@ -33,6 +33,20 @@ typedef enum
    RELOAD_RESTART,     /* bound at startup with no live re-applier yet -> needs a restart */
 } reload_class_t;
 
+/* Surface classification, so the everyday config surface (CLI `config show`,
+ * the Settings GUI, the generated reference "CLI-settable keys" count) presents
+ * only the keys a normal user tunes. Non-RUNTIME keys stay fully get/set-able —
+ * they are just filed out of the presented surface. Omitted -> FGROUP_RUNTIME (0). */
+typedef enum
+{
+   FGROUP_RUNTIME = 0, /* everyday user-facing knob (default) */
+   FGROUP_DEPLOY,      /* deploy-time infra (LLM-container topology): consumed once by
+                          config_emit_deploy_env to stand up the aimee-llm container,
+                          never read at runtime. Set at deploy, not tuned day-to-day. */
+   FGROUP_ADVANCED,    /* expert tuning scalar with a good default; file-settable, off surface */
+   FGROUP_DEV,         /* dev/QA-only (e.g. dogfood_*); not part of the user surface */
+} config_field_group_t;
+
 typedef struct
 {
    const char *key;
@@ -40,7 +54,8 @@ typedef struct
    size_t size;
    int is_bool; /* 1 for bool fields */
    config_field_type_t type;
-   reload_class_t reload_class; /* omitted -> RELOAD_HOT (0) */
+   reload_class_t reload_class;  /* omitted -> RELOAD_HOT (0) */
+   config_field_group_t group;   /* omitted -> FGROUP_RUNTIME (0) */
 } config_field_t;
 
 /* Human label for the reload class, for the config.set / Settings verdict. */

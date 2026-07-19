@@ -384,7 +384,12 @@ def parse_config_fields():
         tm = re.search(r'(CFG_\w+)', chunk)
         if km and tm and km.group(1) not in seen:  # a key may be registered twice
             seen.add(km.group(1))
-            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1))))
+            # Surface group (config_field_group_t): FGROUP_RUNTIME (default) is the
+            # everyday user surface; FGROUP_DEPLOY/ADVANCED/DEV are settable but filed
+            # off the presented "CLI-settable keys" count into their own subsections.
+            gm = re.search(r'(FGROUP_\w+)', chunk)
+            group = gm.group(1) if gm else "FGROUP_RUNTIME"
+            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1)), group))
     return fields
 
 
@@ -467,18 +472,46 @@ def render_config(fields, sections, flat):
            "sections listed at the end.",
            ""]
 
-    undescribed = sorted(k for k, _ in fields if k not in CFG_KEY_DESC)
-    out.append(f"## CLI-settable keys ({len(fields)})")
+    runtime = [(k, t) for k, t, g in fields if g == "FGROUP_RUNTIME"]
+    deploy = [(k, t) for k, t, g in fields if g == "FGROUP_DEPLOY"]
+    advanced = [(k, t) for k, t, g in fields if g == "FGROUP_ADVANCED"]
+    dev = [(k, t) for k, t, g in fields if g == "FGROUP_DEV"]
+
+    undescribed = sorted(k for k, _ in runtime if k not in CFG_KEY_DESC)
+    out.append(f"## CLI-settable keys ({len(runtime)})")
+    out.append("")
+    out.append("The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only "
+               "keys are still `aimee config set`-able but are filed into their own "
+               "subsections below (and hidden from the Settings surface by default).")
     out.append("")
     out.append("| Key | Type | Description |")
     out.append("|-----|------|-------------|")
-    for key, typ in sorted(fields):
+    for key, typ in sorted(runtime):
         out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
     out.append("")
     if undescribed:
         out.append("> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): "
                    + ", ".join(f"`{k}`" for k in undescribed))
         out.append("")
+
+    for title, blurb, group in (
+        ("Deploy-time keys", "Consumed once by `config_emit_deploy_env` to stand up the "
+         "aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at "
+         "deploy, not tuned day-to-day.", deploy),
+        ("Advanced tuning keys", "Expert scalars with sensible defaults; settable in the "
+         "config file but off the everyday surface.", advanced),
+        ("Dev-only keys", "Internal dogfood/QA knobs; not part of the user surface.", dev),
+    ):
+        if group:
+            out.append(f"### {title} ({len(group)})")
+            out.append("")
+            out.append(blurb)
+            out.append("")
+            out.append("| Key | Type | Description |")
+            out.append("|-----|------|-------------|")
+            for key, typ in sorted(group):
+                out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
+            out.append("")
 
     out.append(f"## Config-file sections ({len(sections)})")
     out.append("")
@@ -1100,7 +1133,7 @@ def main():
     sections, flat = parse_config_sections()
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
     # "other top-level" key — subtract both so nothing is double-listed.
-    flat = flat - {k for k, _ in fields} - set(sections)
+    flat = flat - {k for k, _, _ in fields} - set(sections)
     cfg = render_config(fields, sections, flat)
     cfg = (cfg.rstrip() + "\n\n"
            + render_env(parse_env_vars()).rstrip() + "\n\n"
