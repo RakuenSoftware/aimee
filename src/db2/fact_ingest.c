@@ -5,7 +5,7 @@
 #include "fact_recall.h"             /* db2_fact_recall_in_query */
 #include "rel_types_store.h"         /* db2_fact_commit */
 #include "../headers/aimee.h"        /* config_t */
-#include "../headers/config.h"       /* config_load */
+#include "config.h"                  /* config_load */
 #include "memory_extract_patterns.h" /* memory_extract_patterns, retraction */
 #include "memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
 #include "../headers/log.h"          /* LOG_WARN */

@@ -10,7 +10,7 @@
 #define DEC_GUARDRAILS_SEMANTIC_H 1
 
 #include "cJSON.h"
-#include "headers/config.h"
+#include "config.h"
 #include <stddef.h>
 
 /* Byte caps for bounded sidecar inputs (per proposal). */

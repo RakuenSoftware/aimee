@@ -3,7 +3,7 @@
  * Feature gate: transport.cache_aware_rewrite.enabled (default false).
  */
 #include "headers/payload_rewrite.h"
-#include "headers/config.h"
+#include "config.h"
 #include "headers/log.h"
 #include <cJSON.h>
 #include <stdint.h>

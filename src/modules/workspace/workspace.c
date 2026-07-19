@@ -5,7 +5,7 @@
 #include "index.h"
 #include "kb_client.h"
 #include "headers/branch_ownership.h"
-#include "headers/config.h"
+#include "config.h"
 #include "headers/platform_path.h"
 #include "headers/util.h"
 #include "report_enrichment.h" /* report_subject_from_project_root — canonical repo identity */
