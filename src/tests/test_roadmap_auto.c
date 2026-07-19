@@ -22,8 +22,8 @@
 #include "db1.h"
 #include "db_schema.h"
 #include "db1/roadmap_runtime.h"
-#include "headers/roadmap_milestone.h"
-#include "headers/roadmap_reassess.h"
+#include "roadmap_milestone.h"
+#include "roadmap_reassess.h"
 
 static char g_db_path[256];
 

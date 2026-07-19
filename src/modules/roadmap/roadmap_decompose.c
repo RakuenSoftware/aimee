@@ -5,8 +5,8 @@
  * every result through roadmap_validate_decomposition.
  */
 
-#include "headers/roadmap_decompose.h"
-#include "headers/roadmap.h"
+#include "roadmap_decompose.h"
+#include "roadmap.h"
 #include "headers/dstr.h"
 
 #include <stdlib.h>

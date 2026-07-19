@@ -10,7 +10,7 @@
  * See docs/proposals/pending/spec-driven-roadmaps-and-autonomous-delegate-dispatch.md
  */
 
-#include "headers/roadmap.h"
+#include "roadmap.h"
 
 #include "db2/artifacts.h"
 #include "db2/db_postgres.h"
