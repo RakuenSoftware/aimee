@@ -8,6 +8,7 @@
 
 #include "aimee.h"
 #include "cmd_memory_internal.h"
+#include "commands.h"
 #include "memory_profile_pack.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -161,6 +162,14 @@ static void pack_use(app_ctx_t *ctx, int argc, char **argv)
    printf("active pack set to: %s\n", name);
 }
 
+static const subcmd_t mem_pack_subs[] = {
+    {"list", "list available packs", pack_list},
+    {"show", "show a pack", pack_show},
+    {"validate", "validate a pack file", pack_validate},
+    {"use", "activate a pack", pack_use},
+    {NULL, NULL, NULL},
+};
+
 void mem_pack(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -174,14 +183,6 @@ void mem_pack(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   if (strcmp(sub, "list") == 0)
-      pack_list(ctx, argc, argv);
-   else if (strcmp(sub, "show") == 0)
-      pack_show(ctx, argc, argv);
-   else if (strcmp(sub, "validate") == 0)
-      pack_validate(ctx, argc, argv);
-   else if (strcmp(sub, "use") == 0)
-      pack_use(ctx, argc, argv);
-   else
+   if (subcmd_dispatch(mem_pack_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown memory pack subcommand: %s", sub);
 }
