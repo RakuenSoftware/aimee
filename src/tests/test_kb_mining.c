@@ -1,7 +1,7 @@
 /* test_kb_mining.c: KB continuous mining scheduler/jobs. */
 
 #include "artifacts.h"
-#include "db2/learning.h"
+#include "db2/db2_learning.h"
 #include "db2_test_shim.h"
 #include "db_postgres.h"
 #include "db2_internal.h"

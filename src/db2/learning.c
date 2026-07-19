@@ -1,7 +1,7 @@
 /* db2/learning.c: learning_signals + learning_proposals primitives —
  * Postgres via libpq. */
 
-#include "learning.h"
+#include "db2_learning.h"
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
