@@ -1,0 +1,1 @@
+The autonomous WFE sandbox pipeline ran end to end on the network-none-fixed runtime daemon (overnight-e2e-run19-netnone-fixed-daemon), exercising the full delegate → verify → commit loop against the slice packet and producing the expected proof artifact without dropping back to a network-enabled host.
