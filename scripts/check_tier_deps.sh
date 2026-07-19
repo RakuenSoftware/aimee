@@ -107,7 +107,7 @@ path_scan '\\bdb2_(open|close)_shared_store\\b' \
   src/kb/kb_main.c
 path_scan '\\bdb2_(init|shutdown)\\b' \
   "aimee-kb request paths manage DB2 lifecycle outside daemon main" \
-  src/kb/kb.c src/kb/kb_service.c src/server/kb_client.c src/cmd_kb.c
+  src/kb/kb.c src/kb/kb_service.c src/modules/kb_client/kb_client.c src/cmd_kb.c
 path_scan 'DB2_FORK_SPEC_SHARED_STORE|DB2_FORK_SPEC_POSTGRES|db2_child_reopen_shared_store|db2_child_close_shared_store|db2_(open|close)_shared_store' \
   "non-DB2 code exposes legacy DB2 shared-store fork lifecycle" \
   src/posix/memory.c src/posix/cmd_hooks.c src/windows/cmd_hooks.c src/db2/db2.h src/db2/lifecycle.h
@@ -164,7 +164,7 @@ path_scan 'use sqlite|sqlite WAL' \
   src/server/server.c
 path_scan '\\bsqlite_(memories|units|chunks)\\b' \
   "SQLite-named vector verify row-count fields" \
-  src/kb/kb_service.c src/headers/kb_client.h
+  src/kb/kb_service.c src/modules/kb_client/kb_client.h
 path_scan '\\b([Pp]ostgres|pg_trgm|libpq)\\b' \
   "Postgres-named doctor DB surface outside src/db2" \
   src/cmd_doctor.c

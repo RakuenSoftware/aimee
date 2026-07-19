@@ -2,7 +2,7 @@
 #include "cmd_kb_export.h"
 #include "aimee.h"
 #include "headers/util.h"
-#include "headers/kb_client_memory_internal.h"
+#include "kb_client_memory_internal.h"
 #include "kb_export_obsidian.h"
 #include "kb_export_json.h"
 #include "cJSON.h"

@@ -321,7 +321,7 @@ char *kb_client_note_search_json(const char *query, int limit);
  * returns the heap-allocated JSON response string (caller frees), or NULL on a
  * transport failure. Roadmap data lives in DB2, owned by aimee-kb; the CLI and
  * server route every roadmap op through these wrappers and never touch DB2
- * directly. Defined in src/server/kb_client_roadmap.c. */
+ * directly. Defined in src/modules/kb_client/kb_client_roadmap.c. */
 /* Sends `roadmap.create_from_decomposition` with {decomposition} (the JSON
  * decomposition document). Response: {"status":"ok","roadmap_id":"..."}. */
 char *kb_client_roadmap_create_json(const char *decomposition_json);

@@ -1,5 +1,5 @@
 /* kb_client_mtls.h: aimee-server's distributed-mode mTLS transport to a remote
- * aimee-kb. Implemented in src/server/kb_client_mtls.c; selected by the kb_client
+ * aimee-kb. Implemented in src/modules/kb_client/kb_client_mtls.c; selected by the kb_client
  * v1 transports when AIMEE_KB_CONN names a remote kb. A kb_client_*.h bridge
  * header (server-includable). */
 #ifndef DEC_KB_CLIENT_MTLS_H
