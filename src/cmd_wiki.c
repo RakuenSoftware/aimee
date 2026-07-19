@@ -34,6 +34,11 @@ static void wiki_render_cmd(app_ctx_t *ctx, int argc, char **argv)
    printf("wiki written to %s\n", out_dir);
 }
 
+static const subcmd_t cmd_wiki_subs[] = {
+    {"render", "render the wiki to a directory", wiki_render_cmd},
+    {NULL, NULL, NULL},
+};
+
 void cmd_wiki(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -49,8 +54,6 @@ void cmd_wiki(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   if (strcmp(sub, "render") == 0)
-      wiki_render_cmd(ctx, argc, argv);
-   else
+   if (subcmd_dispatch(cmd_wiki_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown wiki subcommand: %s", sub);
 }
