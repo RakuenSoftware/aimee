@@ -71,6 +71,580 @@ static void print_mcp_response(cJSON *resp)
    }
 }
 
+static cJSON *git_sub_status(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return handle_git_status(args);
+}
+
+static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   int auto_msg = 0;
+   const char *msg = NULL;
+   int files_start = 0;
+
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--auto") == 0)
+         auto_msg = 1;
+      else if (!msg && argv[i][0] != '-')
+      {
+         msg = argv[i];
+         files_start = i + 1;
+      }
+   }
+
+   if (!msg && !auto_msg)
+   {
+      fprintf(stderr, "Usage: aimee git commit <message> [files...]\n");
+      fprintf(stderr, "       aimee git commit --auto [files...]\n");
+      return NULL;
+   }
+
+   if (auto_msg && !msg)
+   {
+      /* Generate message using delegate agent */
+      fprintf(stderr, "Generating commit message...\n");
+      cJSON *diff_args = cJSON_CreateObject();
+      cJSON_AddBoolToObject(diff_args, "stat_only", 0);
+      cJSON *diff_resp = handle_git_diff_summary(diff_args);
+      cJSON_Delete(diff_args);
+
+      char diff_text[4096] = "";
+      if (diff_resp && cJSON_IsArray(diff_resp))
+      {
+         cJSON *item = cJSON_GetArrayItem(diff_resp, 0);
+         cJSON *text = cJSON_GetObjectItem(item, "text");
+         if (cJSON_IsString(text))
+            snprintf(diff_text, sizeof(diff_text), "%s", text->valuestring);
+      }
+      cJSON_Delete(diff_resp);
+
+      char prompt[5120];
+      snprintf(prompt, sizeof(prompt),
+               "Generate a concise, one-line git commit message for these changes:\n\n%s\n\n"
+               "Output ONLY the message, no quotes or prefix.",
+               diff_text);
+
+      /* Try aux router first (cheap local model when configured) */
+      if (ctx->cfg)
+         msg = aux_call(ctx->cfg, "commit_message", prompt, 128);
+
+      /* Fall back to cheapest configured agent */
+      if (!msg)
+      {
+         agent_config_t acfg;
+         agent_result_t result;
+         memset(&result, 0, sizeof(result));
+         if (agent_load_config(&acfg) == 0)
+         {
+            agent_t *ag = &acfg.agents[0];
+            if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
+               msg = result.response;
+         }
+      }
+      if (msg)
+         fprintf(stderr, "Auto-message: %s\n", msg);
+      if (!msg)
+      {
+         fprintf(stderr, "Error: failed to generate commit message.\n");
+         return NULL;
+      }
+   }
+
+   cJSON_AddStringToObject(args, "message", msg);
+   if (files_start > 0 && files_start < argc)
+   {
+      cJSON *files = cJSON_CreateArray();
+      for (int i = files_start; i < argc; i++)
+      {
+         if (argv[i][0] != '-')
+            cJSON_AddItemToArray(files, cJSON_CreateString(argv[i]));
+      }
+      cJSON_AddItemToObject(args, "files", files);
+   }
+   cJSON *resp = handle_git_commit(args);
+   if (auto_msg)
+      free((void *)msg);
+
+   /* Trigger background re-indexing if commit succeeded */
+   if (resp && cJSON_IsArray(resp))
+   {
+      cJSON *item = cJSON_GetArrayItem(resp, 0);
+      cJSON *text = cJSON_GetObjectItem(item, "text");
+      if (cJSON_IsString(text) && strncmp(text->valuestring, "committed:", 10) == 0)
+      {
+         char cwd[MAX_PATH_LEN];
+         if (getcwd(cwd, sizeof(cwd)))
+         {
+            platform_infra_background_scan(cwd);
+         }
+      }
+   }
+   return resp;
+}
+
+static cJSON *git_sub_push(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0)
+         cJSON_AddBoolToObject(args, "force", 1);
+   }
+   return handle_git_push(args);
+}
+
+static cJSON *git_sub_verify(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   /* Unknown args must NOT fall through to a silent default, because the
+    * default action is `run` which spawns a fresh (slow, parallel) build.
+    * A typo like `aimee git verify --status 1` would otherwise kick off
+    * another verify instead of polling.  Reject anything we don't
+    * understand and print usage. */
+   int parse_err = 0;
+   for (int i = 0; i < argc && !parse_err; i++)
+   {
+      if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
+      {
+         fprintf(stderr, "Usage: aimee git verify [action=...] [key=value ...]\n"
+                         "       aimee git verify --status <job_id>   (poll a background job)\n"
+                         "Actions: run (default, async), status, check, env, conflicts,\n"
+                         "         prepare-pr, install-hook\n"
+                         "Flags:   --async=false  (force synchronous run)\n");
+         return NULL;
+      }
+
+      /* --status <id> / --status=<id>: convenience shortcut for
+       * action=status job_id=<id> */
+      if (strcmp(argv[i], "--status") == 0)
+      {
+         if (i + 1 >= argc)
+         {
+            fprintf(stderr, "aimee git verify: --status requires a job id\n");
+            parse_err = 1;
+            break;
+         }
+         cJSON_AddStringToObject(args, "action", "status");
+         cJSON_AddNumberToObject(args, "job_id", atoi(argv[++i]));
+         continue;
+      }
+
+      if (strncmp(argv[i], "--", 2) == 0)
+      {
+         char *eq = strchr(argv[i] + 2, '=');
+         if (!eq)
+         {
+            fprintf(stderr,
+                    "aimee git verify: flag '%s' requires a value "
+                    "(use '--flag=value' or 'key=value'). Run 'aimee git verify --help'.\n",
+                    argv[i]);
+            parse_err = 1;
+            break;
+         }
+         *eq = '\0';
+         const char *val = eq + 1;
+         if (strcmp(val, "true") == 0)
+            cJSON_AddBoolToObject(args, argv[i] + 2, 1);
+         else if (strcmp(val, "false") == 0)
+            cJSON_AddBoolToObject(args, argv[i] + 2, 0);
+         else if (isdigit((unsigned char)val[0]))
+            cJSON_AddNumberToObject(args, argv[i] + 2, atoi(val));
+         else
+            cJSON_AddStringToObject(args, argv[i] + 2, val);
+         *eq = '=';
+      }
+      else
+      {
+         char *eq = strchr(argv[i], '=');
+         if (!eq)
+         {
+            fprintf(stderr,
+                    "aimee git verify: unexpected positional arg '%s' "
+                    "(use 'key=value'). Run 'aimee git verify --help'.\n",
+                    argv[i]);
+            parse_err = 1;
+            break;
+         }
+         *eq = '\0';
+         const char *val = eq + 1;
+         if (strcmp(val, "true") == 0)
+            cJSON_AddBoolToObject(args, argv[i], 1);
+         else if (strcmp(val, "false") == 0)
+            cJSON_AddBoolToObject(args, argv[i], 0);
+         else if (isdigit((unsigned char)val[0]))
+            cJSON_AddNumberToObject(args, argv[i], atoi(val));
+         else
+            cJSON_AddStringToObject(args, argv[i], val);
+         *eq = '=';
+      }
+   }
+   if (parse_err)
+   {
+      return NULL;
+   }
+
+   /* This legacy command path is only safe as an in-process handler.  It
+    * stores async job state in process-local static arrays, so callers that
+    * need durable async verify status must use a typed server RPC instead.
+    * Keep this path synchronous until that port exists. */
+   if (!cJSON_GetObjectItem(args, "async"))
+      cJSON_AddBoolToObject(args, "async", 0);
+
+   /* CLI path: no server context available — verify_run_waves falls back
+    * to an ephemeral pool. The vast majority of verify invocations route
+    * through cli_v1_lookup and end up server-side via mcp.call (see
+    * cli_v1_routes.inc), so this branch is only hit when running aimee
+    * directly without a live server. */
+   return handle_git_verify(NULL, args, NULL);
+}
+
+static cJSON *git_sub_branch(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      cJSON_AddStringToObject(args, "action", "list");
+   }
+   else
+   {
+      const char *action = argv[0];
+      if (strcmp(action, "list") == 0)
+      {
+         cJSON_AddStringToObject(args, "action", "list");
+      }
+      else if (strcmp(action, "create") == 0 || strcmp(action, "switch") == 0 ||
+               strcmp(action, "delete") == 0)
+      {
+         if (argc < 2)
+         {
+            fprintf(stderr, "Usage: aimee git branch %s <name> [base]\n", action);
+            return NULL;
+         }
+         cJSON_AddStringToObject(args, "action", action);
+         cJSON_AddStringToObject(args, "name", argv[1]);
+         if (argc > 2 && strcmp(action, "create") == 0)
+            cJSON_AddStringToObject(args, "base", argv[2]);
+      }
+      else
+      {
+         /* Assume single arg is 'switch' */
+         cJSON_AddStringToObject(args, "action", "switch");
+         cJSON_AddStringToObject(args, "name", action);
+      }
+   }
+   return handle_git_branch(args);
+}
+
+static cJSON *git_sub_log(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   int count = 10;
+   const char *ref = NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      if (isdigit(argv[i][0]))
+         count = atoi(argv[i]);
+      else if (strcmp(argv[i], "--stat") == 0)
+         cJSON_AddBoolToObject(args, "diff_stat", 1);
+      else
+         ref = argv[i];
+   }
+   cJSON_AddNumberToObject(args, "count", count);
+   if (ref)
+      cJSON_AddStringToObject(args, "ref", ref);
+   return handle_git_log(args);
+}
+
+static cJSON *git_sub_diff(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   int summary = 1;
+   const char *ref = NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--full") == 0)
+         summary = 0;
+      else if (strcmp(argv[i], "--summary") == 0)
+         summary = 1;
+      else
+         ref = argv[i];
+   }
+   cJSON_AddBoolToObject(args, "stat_only", summary);
+   if (ref)
+      cJSON_AddStringToObject(args, "ref", ref);
+   return handle_git_diff_summary(args);
+}
+
+static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      cJSON_AddStringToObject(args, "action", "list");
+   }
+   else
+   {
+      const char *action = argv[0];
+      cJSON_AddStringToObject(args, "action", action);
+      if (strcmp(action, "create") == 0)
+      {
+         opt_parsed_t opts;
+         opt_parse(argc - 1, argv + 1, NULL, &opts);
+         const char *title = opt_get(&opts, "title");
+         const char *body = opt_get(&opts, "body");
+         const char *base = opt_get(&opts, "base");
+         if (!title)
+         {
+            fprintf(stderr, "Usage: aimee git pr create --title \"...\" [--body \"...\"] "
+                            "[--base \"...\"]\n");
+            return NULL;
+         }
+         cJSON_AddStringToObject(args, "title", title);
+         if (body)
+            cJSON_AddStringToObject(args, "body", body);
+         if (base)
+            cJSON_AddStringToObject(args, "base", base);
+      }
+      else if (strcmp(action, "edit") == 0)
+      {
+         opt_parsed_t opts;
+         opt_parse(argc - 2, argv + 2, NULL, &opts);
+         const char *title = opt_get(&opts, "title");
+         const char *body = opt_get(&opts, "body");
+         const char *base = opt_get(&opts, "base");
+
+         if (argc < 2)
+         {
+            fprintf(stderr, "Usage: aimee git pr edit <number> [--title \"...\"] [--body \"...\"] "
+                            "[--base \"...\"]\n");
+            return NULL;
+         }
+         if (!title && !body && !base)
+         {
+            fprintf(stderr, "Usage: aimee git pr edit <number> [--title \"...\"] [--body \"...\"] "
+                            "[--base \"...\"]\n");
+            return NULL;
+         }
+
+         cJSON_AddNumberToObject(args, "number", atoi(argv[1]));
+         if (title)
+            cJSON_AddStringToObject(args, "title", title);
+         if (body)
+            cJSON_AddStringToObject(args, "body", body);
+         if (base)
+            cJSON_AddStringToObject(args, "base", base);
+      }
+      else if (strcmp(action, "view") == 0 || strcmp(action, "merge_status") == 0 ||
+               strcmp(action, "checks") == 0 || strcmp(action, "watch") == 0 ||
+               strcmp(action, "wait") == 0)
+      {
+         const char *bool_flags[] = {"watch", "wait", NULL};
+         opt_parsed_t opts;
+         if (argc < 2)
+         {
+            fprintf(stderr, "Usage: aimee git pr %s <number>\n", action);
+            return NULL;
+         }
+         cJSON_AddNumberToObject(args, "number", atoi(argv[1]));
+         if (strcmp(action, "checks") == 0)
+         {
+            opt_parse(argc - 2, argv + 2, bool_flags, &opts);
+            if (opt_has(&opts, "watch"))
+               cJSON_AddBoolToObject(args, "watch", 1);
+            if (opt_has(&opts, "wait"))
+               cJSON_AddBoolToObject(args, "wait", 1);
+         }
+         else if (strcmp(action, "watch") == 0)
+         {
+            cJSON_AddBoolToObject(args, "watch", 1);
+         }
+         else if (strcmp(action, "wait") == 0)
+         {
+            cJSON_AddStringToObject(args, "action", "checks");
+            cJSON_AddBoolToObject(args, "wait", 1);
+         }
+      }
+   }
+   return handle_git_pr(args);
+}
+
+static cJSON *git_sub_issue(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      cJSON_AddStringToObject(args, "action", "list");
+   }
+   else
+   {
+      const char *action = argv[0];
+      cJSON_AddStringToObject(args, "action", action);
+      if (strcmp(action, "list") == 0)
+      {
+         opt_parsed_t opts;
+         opt_parse(argc - 1, argv + 1, NULL, &opts);
+         const char *state = opt_get(&opts, "state");
+         if (state)
+            cJSON_AddStringToObject(args, "state", state);
+      }
+      else
+      {
+         fprintf(stderr, "Usage: aimee git issue list [--state open|closed|all]\n");
+         return NULL;
+      }
+   }
+   return handle_git_issue(args);
+}
+
+static cJSON *git_sub_pull(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--rebase") == 0 || strcmp(argv[i], "-r") == 0)
+         cJSON_AddBoolToObject(args, "rebase", 1);
+   }
+   return handle_git_pull(args);
+}
+
+static cJSON *git_sub_fetch(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--prune") == 0 || strcmp(argv[i], "-p") == 0)
+         cJSON_AddBoolToObject(args, "prune", 1);
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "remote", argv[i]);
+   }
+   return handle_git_fetch(args);
+}
+
+static cJSON *git_sub_stash(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc >= 1)
+   {
+      cJSON_AddStringToObject(args, "action", argv[0]);
+      for (int i = 1; i < argc; i++)
+      {
+         if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
+            cJSON_AddStringToObject(args, "message", argv[++i]);
+         else if (isdigit(argv[i][0]))
+            cJSON_AddNumberToObject(args, "index", atoi(argv[i]));
+      }
+   }
+   else
+   {
+      cJSON_AddStringToObject(args, "action", "push");
+   }
+   return handle_git_stash(args);
+}
+
+static cJSON *git_sub_tag(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      cJSON_AddStringToObject(args, "action", "list");
+   }
+   else if (strcmp(argv[0], "list") == 0)
+   {
+      cJSON_AddStringToObject(args, "action", "list");
+   }
+   else if (strcmp(argv[0], "delete") == 0)
+   {
+      cJSON_AddStringToObject(args, "action", "delete");
+      if (argc > 1)
+         cJSON_AddStringToObject(args, "name", argv[1]);
+   }
+   else
+   {
+      /* aimee git tag <name> [-m message] [ref] */
+      cJSON_AddStringToObject(args, "action", "create");
+      cJSON_AddStringToObject(args, "name", argv[0]);
+      for (int i = 1; i < argc; i++)
+      {
+         if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
+            cJSON_AddStringToObject(args, "message", argv[++i]);
+         else if (argv[i][0] != '-')
+            cJSON_AddStringToObject(args, "ref", argv[i]);
+      }
+   }
+   return handle_git_tag(args);
+}
+
+static cJSON *git_sub_reset(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--soft") == 0)
+         cJSON_AddStringToObject(args, "mode", "soft");
+      else if (strcmp(argv[i], "--mixed") == 0)
+         cJSON_AddStringToObject(args, "mode", "mixed");
+      else if (strcmp(argv[i], "--hard") == 0)
+         cJSON_AddStringToObject(args, "mode", "hard");
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "ref", argv[i]);
+   }
+   return handle_git_reset(args);
+}
+
+static cJSON *git_sub_restore(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   cJSON *files = cJSON_CreateArray();
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--staged") == 0 || strcmp(argv[i], "-S") == 0)
+         cJSON_AddBoolToObject(args, "staged", 1);
+      else if (strcmp(argv[i], "--source") == 0 && i + 1 < argc)
+         cJSON_AddStringToObject(args, "source", argv[++i]);
+      else if (argv[i][0] != '-')
+         cJSON_AddItemToArray(files, cJSON_CreateString(argv[i]));
+   }
+   if (cJSON_GetArraySize(files) > 0)
+      cJSON_AddItemToObject(args, "files", files);
+   else
+      cJSON_Delete(files);
+   return handle_git_restore(args);
+}
+
+static cJSON *git_sub_clone(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      fprintf(stderr, "Usage: aimee git clone <url> [path] [-b branch] [--depth N]\n");
+      return NULL;
+   }
+   cJSON_AddStringToObject(args, "url", argv[0]);
+   for (int i = 1; i < argc; i++)
+   {
+      if ((strcmp(argv[i], "-b") == 0 || strcmp(argv[i], "--branch") == 0) && i + 1 < argc)
+         cJSON_AddStringToObject(args, "branch", argv[++i]);
+      else if (strcmp(argv[i], "--depth") == 0 && i + 1 < argc)
+         cJSON_AddNumberToObject(args, "depth", atoi(argv[++i]));
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "path", argv[i]);
+   }
+   return handle_git_clone(args);
+}
+
+typedef cJSON *(*git_sub_fn)(app_ctx_t *ctx, cJSON *args, int argc, char **argv);
+
+static const struct
+{
+   const char *name;
+   git_sub_fn fn;
+} git_subcmds[] = {
+    {"status", git_sub_status},
+    {"commit", git_sub_commit},
+    {"push", git_sub_push},
+    {"verify", git_sub_verify},
+    {"branch", git_sub_branch},
+    {"log", git_sub_log},
+    {"diff", git_sub_diff},
+    {"pr", git_sub_pr},
+    {"issue", git_sub_issue},
+    {"pull", git_sub_pull},
+    {"fetch", git_sub_fetch},
+    {"stash", git_sub_stash},
+    {"tag", git_sub_tag},
+    {"reset", git_sub_reset},
+    {"restore", git_sub_restore},
+    {"clone", git_sub_clone},
+    {NULL, NULL},
+};
+
 void cmd_git(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -91,556 +665,22 @@ void cmd_git(app_ctx_t *ctx, int argc, char **argv)
       cJSON_AddStringToObject(args, "path", cwd);
       run_cmd_set_cwd(cwd);
    }
+
+   git_sub_fn fn = NULL;
+   for (int i = 0; git_subcmds[i].name; i++)
+   {
+      if (strcmp(sub, git_subcmds[i].name) == 0)
+      {
+         fn = git_subcmds[i].fn;
+         break;
+      }
+   }
+
    cJSON *resp = NULL;
-
-   if (strcmp(sub, "status") == 0)
-   {
-      resp = handle_git_status(args);
-   }
-   else if (strcmp(sub, "commit") == 0)
-   {
-      int auto_msg = 0;
-      const char *msg = NULL;
-      int files_start = 0;
-
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--auto") == 0)
-            auto_msg = 1;
-         else if (!msg && argv[i][0] != '-')
-         {
-            msg = argv[i];
-            files_start = i + 1;
-         }
-      }
-
-      if (!msg && !auto_msg)
-      {
-         fprintf(stderr, "Usage: aimee git commit <message> [files...]\n");
-         fprintf(stderr, "       aimee git commit --auto [files...]\n");
-         cJSON_Delete(args);
-         return;
-      }
-
-      if (auto_msg && !msg)
-      {
-         /* Generate message using delegate agent */
-         fprintf(stderr, "Generating commit message...\n");
-         cJSON *diff_args = cJSON_CreateObject();
-         cJSON_AddBoolToObject(diff_args, "stat_only", 0);
-         cJSON *diff_resp = handle_git_diff_summary(diff_args);
-         cJSON_Delete(diff_args);
-
-         char diff_text[4096] = "";
-         if (diff_resp && cJSON_IsArray(diff_resp))
-         {
-            cJSON *item = cJSON_GetArrayItem(diff_resp, 0);
-            cJSON *text = cJSON_GetObjectItem(item, "text");
-            if (cJSON_IsString(text))
-               snprintf(diff_text, sizeof(diff_text), "%s", text->valuestring);
-         }
-         cJSON_Delete(diff_resp);
-
-         char prompt[5120];
-         snprintf(prompt, sizeof(prompt),
-                  "Generate a concise, one-line git commit message for these changes:\n\n%s\n\n"
-                  "Output ONLY the message, no quotes or prefix.",
-                  diff_text);
-
-         /* Try aux router first (cheap local model when configured) */
-         if (ctx->cfg)
-            msg = aux_call(ctx->cfg, "commit_message", prompt, 128);
-
-         /* Fall back to cheapest configured agent */
-         if (!msg)
-         {
-            agent_config_t acfg;
-            agent_result_t result;
-            memset(&result, 0, sizeof(result));
-            if (agent_load_config(&acfg) == 0)
-            {
-               agent_t *ag = &acfg.agents[0];
-               if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
-                  msg = result.response;
-            }
-         }
-         if (msg)
-            fprintf(stderr, "Auto-message: %s\n", msg);
-         if (!msg)
-         {
-            fprintf(stderr, "Error: failed to generate commit message.\n");
-            cJSON_Delete(args);
-            return;
-         }
-      }
-
-      cJSON_AddStringToObject(args, "message", msg);
-      if (files_start > 0 && files_start < argc)
-      {
-         cJSON *files = cJSON_CreateArray();
-         for (int i = files_start; i < argc; i++)
-         {
-            if (argv[i][0] != '-')
-               cJSON_AddItemToArray(files, cJSON_CreateString(argv[i]));
-         }
-         cJSON_AddItemToObject(args, "files", files);
-      }
-      resp = handle_git_commit(args);
-      if (auto_msg)
-         free((void *)msg);
-
-      /* Trigger background re-indexing if commit succeeded */
-      if (resp && cJSON_IsArray(resp))
-      {
-         cJSON *item = cJSON_GetArrayItem(resp, 0);
-         cJSON *text = cJSON_GetObjectItem(item, "text");
-         if (cJSON_IsString(text) && strncmp(text->valuestring, "committed:", 10) == 0)
-         {
-            char cwd[MAX_PATH_LEN];
-            if (getcwd(cwd, sizeof(cwd)))
-            {
-               platform_infra_background_scan(cwd);
-            }
-         }
-      }
-   }
-   else if (strcmp(sub, "push") == 0)
-   {
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0)
-            cJSON_AddBoolToObject(args, "force", 1);
-      }
-      resp = handle_git_push(args);
-   }
-   else if (strcmp(sub, "verify") == 0)
-   {
-      /* Unknown args must NOT fall through to a silent default, because the
-       * default action is `run` which spawns a fresh (slow, parallel) build.
-       * A typo like `aimee git verify --status 1` would otherwise kick off
-       * another verify instead of polling.  Reject anything we don't
-       * understand and print usage. */
-      int parse_err = 0;
-      for (int i = 0; i < argc && !parse_err; i++)
-      {
-         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
-         {
-            fprintf(stderr, "Usage: aimee git verify [action=...] [key=value ...]\n"
-                            "       aimee git verify --status <job_id>   (poll a background job)\n"
-                            "Actions: run (default, async), status, check, env, conflicts,\n"
-                            "         prepare-pr, install-hook\n"
-                            "Flags:   --async=false  (force synchronous run)\n");
-            cJSON_Delete(args);
-            return;
-         }
-
-         /* --status <id> / --status=<id>: convenience shortcut for
-          * action=status job_id=<id> */
-         if (strcmp(argv[i], "--status") == 0)
-         {
-            if (i + 1 >= argc)
-            {
-               fprintf(stderr, "aimee git verify: --status requires a job id\n");
-               parse_err = 1;
-               break;
-            }
-            cJSON_AddStringToObject(args, "action", "status");
-            cJSON_AddNumberToObject(args, "job_id", atoi(argv[++i]));
-            continue;
-         }
-
-         if (strncmp(argv[i], "--", 2) == 0)
-         {
-            char *eq = strchr(argv[i] + 2, '=');
-            if (!eq)
-            {
-               fprintf(stderr,
-                       "aimee git verify: flag '%s' requires a value "
-                       "(use '--flag=value' or 'key=value'). Run 'aimee git verify --help'.\n",
-                       argv[i]);
-               parse_err = 1;
-               break;
-            }
-            *eq = '\0';
-            const char *val = eq + 1;
-            if (strcmp(val, "true") == 0)
-               cJSON_AddBoolToObject(args, argv[i] + 2, 1);
-            else if (strcmp(val, "false") == 0)
-               cJSON_AddBoolToObject(args, argv[i] + 2, 0);
-            else if (isdigit((unsigned char)val[0]))
-               cJSON_AddNumberToObject(args, argv[i] + 2, atoi(val));
-            else
-               cJSON_AddStringToObject(args, argv[i] + 2, val);
-            *eq = '=';
-         }
-         else
-         {
-            char *eq = strchr(argv[i], '=');
-            if (!eq)
-            {
-               fprintf(stderr,
-                       "aimee git verify: unexpected positional arg '%s' "
-                       "(use 'key=value'). Run 'aimee git verify --help'.\n",
-                       argv[i]);
-               parse_err = 1;
-               break;
-            }
-            *eq = '\0';
-            const char *val = eq + 1;
-            if (strcmp(val, "true") == 0)
-               cJSON_AddBoolToObject(args, argv[i], 1);
-            else if (strcmp(val, "false") == 0)
-               cJSON_AddBoolToObject(args, argv[i], 0);
-            else if (isdigit((unsigned char)val[0]))
-               cJSON_AddNumberToObject(args, argv[i], atoi(val));
-            else
-               cJSON_AddStringToObject(args, argv[i], val);
-            *eq = '=';
-         }
-      }
-      if (parse_err)
-      {
-         cJSON_Delete(args);
-         return;
-      }
-
-      /* This legacy command path is only safe as an in-process handler.  It
-       * stores async job state in process-local static arrays, so callers that
-       * need durable async verify status must use a typed server RPC instead.
-       * Keep this path synchronous until that port exists. */
-      if (!cJSON_GetObjectItem(args, "async"))
-         cJSON_AddBoolToObject(args, "async", 0);
-
-      /* CLI path: no server context available — verify_run_waves falls back
-       * to an ephemeral pool. The vast majority of verify invocations route
-       * through cli_v1_lookup and end up server-side via mcp.call (see
-       * cli_v1_routes.inc), so this branch is only hit when running aimee
-       * directly without a live server. */
-      resp = handle_git_verify(NULL, args, NULL);
-   }
-   else if (strcmp(sub, "branch") == 0)
-   {
-      if (argc < 1)
-      {
-         cJSON_AddStringToObject(args, "action", "list");
-      }
-      else
-      {
-         const char *action = argv[0];
-         if (strcmp(action, "list") == 0)
-         {
-            cJSON_AddStringToObject(args, "action", "list");
-         }
-         else if (strcmp(action, "create") == 0 || strcmp(action, "switch") == 0 ||
-                  strcmp(action, "delete") == 0)
-         {
-            if (argc < 2)
-            {
-               fprintf(stderr, "Usage: aimee git branch %s <name> [base]\n", action);
-               cJSON_Delete(args);
-               return;
-            }
-            cJSON_AddStringToObject(args, "action", action);
-            cJSON_AddStringToObject(args, "name", argv[1]);
-            if (argc > 2 && strcmp(action, "create") == 0)
-               cJSON_AddStringToObject(args, "base", argv[2]);
-         }
-         else
-         {
-            /* Assume single arg is 'switch' */
-            cJSON_AddStringToObject(args, "action", "switch");
-            cJSON_AddStringToObject(args, "name", action);
-         }
-      }
-      resp = handle_git_branch(args);
-   }
-   else if (strcmp(sub, "log") == 0)
-   {
-      int count = 10;
-      const char *ref = NULL;
-      for (int i = 0; i < argc; i++)
-      {
-         if (isdigit(argv[i][0]))
-            count = atoi(argv[i]);
-         else if (strcmp(argv[i], "--stat") == 0)
-            cJSON_AddBoolToObject(args, "diff_stat", 1);
-         else
-            ref = argv[i];
-      }
-      cJSON_AddNumberToObject(args, "count", count);
-      if (ref)
-         cJSON_AddStringToObject(args, "ref", ref);
-      resp = handle_git_log(args);
-   }
-   else if (strcmp(sub, "diff") == 0)
-   {
-      int summary = 1;
-      const char *ref = NULL;
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--full") == 0)
-            summary = 0;
-         else if (strcmp(argv[i], "--summary") == 0)
-            summary = 1;
-         else
-            ref = argv[i];
-      }
-      cJSON_AddBoolToObject(args, "stat_only", summary);
-      if (ref)
-         cJSON_AddStringToObject(args, "ref", ref);
-      resp = handle_git_diff_summary(args);
-   }
-   else if (strcmp(sub, "pr") == 0)
-   {
-      if (argc < 1)
-      {
-         cJSON_AddStringToObject(args, "action", "list");
-      }
-      else
-      {
-         const char *action = argv[0];
-         cJSON_AddStringToObject(args, "action", action);
-         if (strcmp(action, "create") == 0)
-         {
-            opt_parsed_t opts;
-            opt_parse(argc - 1, argv + 1, NULL, &opts);
-            const char *title = opt_get(&opts, "title");
-            const char *body = opt_get(&opts, "body");
-            const char *base = opt_get(&opts, "base");
-            if (!title)
-            {
-               fprintf(stderr, "Usage: aimee git pr create --title \"...\" [--body \"...\"] "
-                               "[--base \"...\"]\n");
-               cJSON_Delete(args);
-               return;
-            }
-            cJSON_AddStringToObject(args, "title", title);
-            if (body)
-               cJSON_AddStringToObject(args, "body", body);
-            if (base)
-               cJSON_AddStringToObject(args, "base", base);
-         }
-         else if (strcmp(action, "edit") == 0)
-         {
-            opt_parsed_t opts;
-            opt_parse(argc - 2, argv + 2, NULL, &opts);
-            const char *title = opt_get(&opts, "title");
-            const char *body = opt_get(&opts, "body");
-            const char *base = opt_get(&opts, "base");
-
-            if (argc < 2)
-            {
-               fprintf(stderr,
-                       "Usage: aimee git pr edit <number> [--title \"...\"] [--body \"...\"] "
-                       "[--base \"...\"]\n");
-               cJSON_Delete(args);
-               return;
-            }
-            if (!title && !body && !base)
-            {
-               fprintf(stderr,
-                       "Usage: aimee git pr edit <number> [--title \"...\"] [--body \"...\"] "
-                       "[--base \"...\"]\n");
-               cJSON_Delete(args);
-               return;
-            }
-
-            cJSON_AddNumberToObject(args, "number", atoi(argv[1]));
-            if (title)
-               cJSON_AddStringToObject(args, "title", title);
-            if (body)
-               cJSON_AddStringToObject(args, "body", body);
-            if (base)
-               cJSON_AddStringToObject(args, "base", base);
-         }
-         else if (strcmp(action, "view") == 0 || strcmp(action, "merge_status") == 0 ||
-                  strcmp(action, "checks") == 0 || strcmp(action, "watch") == 0 ||
-                  strcmp(action, "wait") == 0)
-         {
-            const char *bool_flags[] = {"watch", "wait", NULL};
-            opt_parsed_t opts;
-            if (argc < 2)
-            {
-               fprintf(stderr, "Usage: aimee git pr %s <number>\n", action);
-               cJSON_Delete(args);
-               return;
-            }
-            cJSON_AddNumberToObject(args, "number", atoi(argv[1]));
-            if (strcmp(action, "checks") == 0)
-            {
-               opt_parse(argc - 2, argv + 2, bool_flags, &opts);
-               if (opt_has(&opts, "watch"))
-                  cJSON_AddBoolToObject(args, "watch", 1);
-               if (opt_has(&opts, "wait"))
-                  cJSON_AddBoolToObject(args, "wait", 1);
-            }
-            else if (strcmp(action, "watch") == 0)
-            {
-               cJSON_AddBoolToObject(args, "watch", 1);
-            }
-            else if (strcmp(action, "wait") == 0)
-            {
-               cJSON_AddStringToObject(args, "action", "checks");
-               cJSON_AddBoolToObject(args, "wait", 1);
-            }
-         }
-      }
-      resp = handle_git_pr(args);
-   }
-   else if (strcmp(sub, "issue") == 0)
-   {
-      if (argc < 1)
-      {
-         cJSON_AddStringToObject(args, "action", "list");
-      }
-      else
-      {
-         const char *action = argv[0];
-         cJSON_AddStringToObject(args, "action", action);
-         if (strcmp(action, "list") == 0)
-         {
-            opt_parsed_t opts;
-            opt_parse(argc - 1, argv + 1, NULL, &opts);
-            const char *state = opt_get(&opts, "state");
-            if (state)
-               cJSON_AddStringToObject(args, "state", state);
-         }
-         else
-         {
-            fprintf(stderr, "Usage: aimee git issue list [--state open|closed|all]\n");
-            cJSON_Delete(args);
-            return;
-         }
-      }
-      resp = handle_git_issue(args);
-   }
-   else if (strcmp(sub, "pull") == 0)
-   {
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--rebase") == 0 || strcmp(argv[i], "-r") == 0)
-            cJSON_AddBoolToObject(args, "rebase", 1);
-      }
-      resp = handle_git_pull(args);
-   }
-   else if (strcmp(sub, "fetch") == 0)
-   {
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--prune") == 0 || strcmp(argv[i], "-p") == 0)
-            cJSON_AddBoolToObject(args, "prune", 1);
-         else if (argv[i][0] != '-')
-            cJSON_AddStringToObject(args, "remote", argv[i]);
-      }
-      resp = handle_git_fetch(args);
-   }
-   else if (strcmp(sub, "stash") == 0)
-   {
-      if (argc >= 1)
-      {
-         cJSON_AddStringToObject(args, "action", argv[0]);
-         for (int i = 1; i < argc; i++)
-         {
-            if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
-               cJSON_AddStringToObject(args, "message", argv[++i]);
-            else if (isdigit(argv[i][0]))
-               cJSON_AddNumberToObject(args, "index", atoi(argv[i]));
-         }
-      }
-      else
-      {
-         cJSON_AddStringToObject(args, "action", "push");
-      }
-      resp = handle_git_stash(args);
-   }
-   else if (strcmp(sub, "tag") == 0)
-   {
-      if (argc < 1)
-      {
-         cJSON_AddStringToObject(args, "action", "list");
-      }
-      else if (strcmp(argv[0], "list") == 0)
-      {
-         cJSON_AddStringToObject(args, "action", "list");
-      }
-      else if (strcmp(argv[0], "delete") == 0)
-      {
-         cJSON_AddStringToObject(args, "action", "delete");
-         if (argc > 1)
-            cJSON_AddStringToObject(args, "name", argv[1]);
-      }
-      else
-      {
-         /* aimee git tag <name> [-m message] [ref] */
-         cJSON_AddStringToObject(args, "action", "create");
-         cJSON_AddStringToObject(args, "name", argv[0]);
-         for (int i = 1; i < argc; i++)
-         {
-            if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
-               cJSON_AddStringToObject(args, "message", argv[++i]);
-            else if (argv[i][0] != '-')
-               cJSON_AddStringToObject(args, "ref", argv[i]);
-         }
-      }
-      resp = handle_git_tag(args);
-   }
-   else if (strcmp(sub, "reset") == 0)
-   {
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--soft") == 0)
-            cJSON_AddStringToObject(args, "mode", "soft");
-         else if (strcmp(argv[i], "--mixed") == 0)
-            cJSON_AddStringToObject(args, "mode", "mixed");
-         else if (strcmp(argv[i], "--hard") == 0)
-            cJSON_AddStringToObject(args, "mode", "hard");
-         else if (argv[i][0] != '-')
-            cJSON_AddStringToObject(args, "ref", argv[i]);
-      }
-      resp = handle_git_reset(args);
-   }
-   else if (strcmp(sub, "restore") == 0)
-   {
-      cJSON *files = cJSON_CreateArray();
-      for (int i = 0; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--staged") == 0 || strcmp(argv[i], "-S") == 0)
-            cJSON_AddBoolToObject(args, "staged", 1);
-         else if (strcmp(argv[i], "--source") == 0 && i + 1 < argc)
-            cJSON_AddStringToObject(args, "source", argv[++i]);
-         else if (argv[i][0] != '-')
-            cJSON_AddItemToArray(files, cJSON_CreateString(argv[i]));
-      }
-      if (cJSON_GetArraySize(files) > 0)
-         cJSON_AddItemToObject(args, "files", files);
-      else
-         cJSON_Delete(files);
-      resp = handle_git_restore(args);
-   }
-   else if (strcmp(sub, "clone") == 0)
-   {
-      if (argc < 1)
-      {
-         fprintf(stderr, "Usage: aimee git clone <url> [path] [-b branch] [--depth N]\n");
-         cJSON_Delete(args);
-         return;
-      }
-      cJSON_AddStringToObject(args, "url", argv[0]);
-      for (int i = 1; i < argc; i++)
-      {
-         if ((strcmp(argv[i], "-b") == 0 || strcmp(argv[i], "--branch") == 0) && i + 1 < argc)
-            cJSON_AddStringToObject(args, "branch", argv[++i]);
-         else if (strcmp(argv[i], "--depth") == 0 && i + 1 < argc)
-            cJSON_AddNumberToObject(args, "depth", atoi(argv[++i]));
-         else if (argv[i][0] != '-')
-            cJSON_AddStringToObject(args, "path", argv[i]);
-      }
-      resp = handle_git_clone(args);
-   }
+   if (fn)
+      resp = fn(ctx, args, argc, argv);
    else
-   {
       fprintf(stderr, "Unknown git subcommand: %s\n", sub);
-   }
 
    if (resp)
    {
