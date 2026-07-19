@@ -16,6 +16,72 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
+void config_kb_curator_defaults(config_t *cfg);
+int config_parse_kb_curator(config_t *cfg, const cJSON *root);
+
+/* kb_curator preset: the tier drives the 12 stage gates, an explicit per-stage
+ * gate still overrides, and "off" disables everything. Pure (no file I/O). */
+static void test_kb_curator_tier(void)
+{
+   /* default -> "full": every stage on (the historical all-on default). */
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   config_kb_curator_defaults(&cfg);
+   assert(strcmp(cfg.kb_curator_tier, "full") == 0);
+   assert(cfg.kb_curator_extract_docs_enabled && cfg.kb_curator_synthesize_enabled &&
+          cfg.kb_curator_cross_repo_graph_enabled && cfg.kb_curator_detect_contradictions_enabled);
+
+   /* "lite" -> core extract+index on, heavy stages off. */
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "lite");
+      assert(config_parse_kb_curator(&cfg, root) == 0);
+      assert(strcmp(cfg.kb_curator_tier, "lite") == 0);
+      assert(cfg.kb_curator_extract_docs_enabled && cfg.kb_curator_extract_code_enabled &&
+             cfg.kb_curator_resolve_entities_enabled && cfg.kb_curator_index_narrative_enabled &&
+             cfg.kb_curator_index_claims_enabled);
+      assert(!cfg.kb_curator_synthesize_enabled && !cfg.kb_curator_detect_contradictions_enabled &&
+             !cfg.kb_curator_cross_repo_graph_enabled && !cfg.kb_curator_projection_graph_enabled &&
+             !cfg.kb_curator_link_artifacts_enabled && !cfg.kb_curator_promote_entity_enabled &&
+             !cfg.kb_curator_index_code_unit_enabled);
+      cJSON_Delete(root);
+   }
+
+   /* "off" -> every stage off. */
+   {
+      config_t c2;
+      memset(&c2, 0, sizeof(c2));
+      config_kb_curator_defaults(&c2);
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "off");
+      assert(config_parse_kb_curator(&c2, root) == 0);
+      assert(!c2.kb_curator_extract_docs_enabled && !c2.kb_curator_synthesize_enabled &&
+             !c2.kb_curator_resolve_entities_enabled);
+      cJSON_Delete(root);
+   }
+
+   /* explicit per-stage gate overrides the tier (applied after it). */
+   {
+      config_t c3;
+      memset(&c3, 0, sizeof(c3));
+      config_kb_curator_defaults(&c3);
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "lite");
+      cJSON *syn = cJSON_AddObjectToObject(cur, "synthesize");
+      cJSON_AddBoolToObject(syn, "enabled", 1);
+      assert(config_parse_kb_curator(&c3, root) == 0);
+      assert(c3.kb_curator_synthesize_enabled == 1);   /* override wins over lite */
+      assert(!c3.kb_curator_cross_repo_graph_enabled); /* rest still lite */
+      cJSON_Delete(root);
+   }
+}
+
 static void assert_disposition(const config_t *cfg, int index, const char *name, double value,
                                config_disposition_source_t source)
 {
@@ -30,6 +96,7 @@ static void assert_disposition(const config_t *cfg, int index, const char *name,
 int main(void)
 {
    printf("config: ");
+   test_kb_curator_tier();
 
    /* Use isolated temp HOME */
    char tmpdir[512];
@@ -555,6 +622,29 @@ int main(void)
              strcmp(cfg2.lsp_servers[0].args[0], "--background-index") == 0);
       assert(cfg2.lsp_servers[0].extension_count == 1 &&
              strcmp(cfg2.lsp_servers[0].extensions[0], "c") == 0);
+   }
+
+   /* --- kb_curator preset round-trip: a non-"full" tier persists and re-derives
+    *     the 12 stage gates on reload (the persistence subtlety: save records the
+    *     tier, parse applies it before any per-stage override). --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "lite"); /* drive stages via the parser */
+      config_parse_kb_curator(&cfg, root);
+      cJSON_Delete(root);
+      assert(config_save(&cfg) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(strcmp(cfg2.kb_curator_tier, "lite") == 0);
+      assert(cfg2.kb_curator_extract_docs_enabled && cfg2.kb_curator_index_claims_enabled);
+      assert(!cfg2.kb_curator_synthesize_enabled && !cfg2.kb_curator_cross_repo_graph_enabled);
    }
 
    /* --- install.sh persists provider/openai/kb_client_* as plain top-level

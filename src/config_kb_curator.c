@@ -20,14 +20,53 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Preset -> stage membership. LITE is the cheap, high-value core: pull facts
+ * (extract_docs/extract_code), index them (narrative/claims), resolve entities.
+ * FULL adds the heavier synthesis/graph/contradiction/promotion stages. OFF
+ * disables all curation. Unknown tier -> FULL (fail-open, matches the historical
+ * all-on default). */
+static int kb_curator_tier_stage_on(const char *tier, int lite_member)
+{
+   if (!tier || !tier[0] || strcmp(tier, "full") == 0)
+      return 1;
+   if (strcmp(tier, "off") == 0)
+      return 0;
+   if (strcmp(tier, "lite") == 0)
+      return lite_member;
+   return 1; /* unknown -> full */
+}
+
+/* Drive the 12 kb_curator_*_enabled stage gates from the preset tier. Reader-free:
+ * every consumer keeps reading cfg->kb_curator_<stage>_enabled; only its default
+ * source changes. An explicit per-stage gate in the config still overrides, since
+ * config_parse_kb_curator applies the tier first and the per-stage keys after. */
+static void kb_curator_apply_tier(config_t *cfg, const char *tier)
+{
+   cfg->kb_curator_extract_docs_enabled = kb_curator_tier_stage_on(tier, 1);
+   cfg->kb_curator_extract_code_enabled = kb_curator_tier_stage_on(tier, 1);
+   cfg->kb_curator_resolve_entities_enabled = kb_curator_tier_stage_on(tier, 1);
+   cfg->kb_curator_index_narrative_enabled = kb_curator_tier_stage_on(tier, 1);
+   cfg->kb_curator_index_claims_enabled = kb_curator_tier_stage_on(tier, 1);
+   cfg->kb_curator_detect_contradictions_enabled = kb_curator_tier_stage_on(tier, 0);
+   cfg->kb_curator_index_code_unit_enabled = kb_curator_tier_stage_on(tier, 0);
+   cfg->kb_curator_link_artifacts_enabled = kb_curator_tier_stage_on(tier, 0);
+   cfg->kb_curator_projection_graph_enabled = kb_curator_tier_stage_on(tier, 0);
+   cfg->kb_curator_synthesize_enabled = kb_curator_tier_stage_on(tier, 0);
+   cfg->kb_curator_promote_entity_enabled = kb_curator_tier_stage_on(tier, 0);
+   cfg->kb_curator_cross_repo_graph_enabled = kb_curator_tier_stage_on(tier, 0);
+}
+
 void config_kb_curator_defaults(config_t *cfg)
 {
    /* The deep-curator (larger LLM) pipeline is default-ON: it drains the backlog
     * continuously in the background (no artificial rate cap) and refines what the
     * 0.6B embedder already indexed. Every stage degrades to a no-op when its
     * prerequisite (a configured curator/judge/synthesize command, or upstream
-    * curator rows) is absent, so default-on is safe on a bare deploy. */
-   cfg->kb_curator_extract_docs_enabled = 1;
+    * curator rows) is absent, so default-on is safe on a bare deploy. The 12 stage
+    * gates are driven by the kb_curator_tier preset (default "full" = every stage,
+    * i.e. the historical all-on default); see kb_curator_apply_tier. */
+   snprintf(cfg->kb_curator_tier, sizeof(cfg->kb_curator_tier), "full");
+   kb_curator_apply_tier(cfg, cfg->kb_curator_tier);
    cfg->kb_curator_extract_prompt_version[0] = '\0';
    cfg->kb_curator_embed_model_version[0] = '\0';
    cfg->kb_curator_invalidation_notify_socket[0] = '\0';
@@ -35,18 +74,8 @@ void config_kb_curator_defaults(config_t *cfg)
     * provisional relations by default so novel-tail facts become durable. */
    cfg->kb_typed_facts_auto_promote_enabled = 1;
    cfg->kb_typed_facts_promote_threshold = 3;
-   cfg->kb_curator_extract_code_enabled = 1;
    cfg->kb_curator_extract_code_workers = 1;
    cfg->kb_curator_extract_docs_workers = 1;
-   cfg->kb_curator_resolve_entities_enabled = 1;
-   cfg->kb_curator_index_narrative_enabled = 1;
-   cfg->kb_curator_index_claims_enabled = 1;
-   cfg->kb_curator_detect_contradictions_enabled = 1;
-   cfg->kb_curator_index_code_unit_enabled = 1;
-   cfg->kb_curator_link_artifacts_enabled = 1;
-   cfg->kb_curator_projection_graph_enabled = 1;
-   cfg->kb_curator_synthesize_enabled = 1;
-   cfg->kb_curator_promote_entity_enabled = 1;
    cfg->kb_curator_promote_min_sources = 3;
    cfg->kb_curator_extract_command[0] = '\0';
    cfg->kb_curator_stage_order[0] = '\0';
@@ -65,8 +94,8 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_tier_b_api_key[0] = '\0';
    cfg->kb_evidence_embed_enabled = 1;
    cfg->kb_evidence_embed_batch = 32;
-   /* Cross-repo dependency graph — initial calibration (re-tuned vs S8 fixtures). */
-   cfg->kb_curator_cross_repo_graph_enabled = 1;
+   /* Cross-repo dependency graph — initial calibration (re-tuned vs S8 fixtures).
+    * The _enabled gate is driven by kb_curator_tier (applied above). */
    cfg->kb_curator_cross_repo_distinctiveness_v = 1;
    cfg->kb_curator_cross_repo_k = 5;
    cfg->kb_curator_cross_repo_m = 8;
@@ -158,6 +187,16 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       return 0;
    if (!cJSON_IsObject(curator))
       return config_issue("\"kb.curator\" expected object, got %s", jo_type_name(curator));
+
+   /* Preset: kb.curator.tier drives all 12 stage gates. Applied FIRST so the
+    * per-stage `enabled` keys below still override it (back-compat with configs
+    * that pin individual stages). */
+   const cJSON *tier = cJSON_GetObjectItemCaseSensitive(curator, "tier");
+   if (tier && cJSON_IsString(tier) && tier->valuestring[0])
+   {
+      snprintf(cfg->kb_curator_tier, sizeof(cfg->kb_curator_tier), "%s", tier->valuestring);
+      kb_curator_apply_tier(cfg, cfg->kb_curator_tier);
+   }
 
    const cJSON *extract_docs = cJSON_GetObjectItemCaseSensitive(curator, "extract_docs");
    if (extract_docs)
@@ -513,7 +552,11 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_cross_repo_max_candidates != 50000 ||
        cfg->kb_curator_cross_repo_query_timeout_ms != 5000 ||
        cfg->kb_curator_cross_repo_review_queue_max != 5000;
-   curator_any = curator_any || cross_repo_nondefault;
+   /* The preset itself is non-default state: a non-"full" tier must persist even
+    * when it turns every stage OFF (in which case the gate writes below emit
+    * nothing). Parse applies the tier first, so on reload it re-derives the gates. */
+   int tier_nondefault = cfg->kb_curator_tier[0] && strcmp(cfg->kb_curator_tier, "full") != 0;
+   curator_any = curator_any || cross_repo_nondefault || tier_nondefault;
    int evidence_any = !cfg->kb_evidence_embed_enabled || cfg->kb_evidence_embed_batch != 32;
    int typed_facts_any = cfg->typed_facts_enabled || !cfg->kb_typed_facts_auto_promote_enabled ||
                          cfg->kb_typed_facts_promote_threshold != 3;
@@ -549,6 +592,8 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
       cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
       if (cur)
       {
+         if (tier_nondefault)
+            cJSON_AddStringToObject(cur, "tier", cfg->kb_curator_tier);
          kb_curator_save_gate(cur, "extract_docs", cfg->kb_curator_extract_docs_enabled);
          kb_curator_save_gate(cur, "extract_code", cfg->kb_curator_extract_code_enabled);
          kb_curator_save_gate(cur, "resolve_entities", cfg->kb_curator_resolve_entities_enabled);

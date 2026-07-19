@@ -101,6 +101,8 @@ CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_F
 # surface). A key in the generated table with no entry here renders "—" and is
 # counted as undescribed so the gap is visible (see render_config).
 CFG_KEY_DESC = {
+    "kb_curator_tier": "KB curator pipeline preset: off | lite (core extract+index) | full (all stages, default).",
+
     "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
     "economizer": "Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md.",
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",

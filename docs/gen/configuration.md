@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (134)
+## CLI-settable keys (123)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -83,22 +83,11 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
 | `kb_client_bearer_token` | string | — |
 | `kb_client_url` | string | — |
-| `kb_curator_cross_repo_graph_enabled` | bool | — |
 | `kb_curator_custom_stages` | string | — |
-| `kb_curator_detect_contradictions_enabled` | bool | — |
-| `kb_curator_extract_code_enabled` | bool | — |
 | `kb_curator_extract_code_workers` | int | — |
-| `kb_curator_extract_docs_enabled` | bool | — |
 | `kb_curator_extract_docs_workers` | int | — |
-| `kb_curator_index_claims_enabled` | bool | — |
-| `kb_curator_index_code_unit_enabled` | bool | — |
-| `kb_curator_index_narrative_enabled` | bool | — |
-| `kb_curator_link_artifacts_enabled` | bool | — |
-| `kb_curator_projection_graph_enabled` | bool | — |
-| `kb_curator_promote_entity_enabled` | bool | — |
-| `kb_curator_resolve_entities_enabled` | bool | — |
 | `kb_curator_stage_order` | string | — |
-| `kb_curator_synthesize_enabled` | bool | — |
+| `kb_curator_tier` | string | KB curator pipeline preset: off | lite (core extract+index) | full (all stages, default). |
 | `kb_curator_user_presets` | string | — |
 | `kb_evidence_embed_enabled` | bool | — |
 | `kb_evidence_emit_enabled` | bool | Emit evidence records from KB ingest. |
@@ -163,7 +152,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | — |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `guardrails_semantic_mode`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_cross_repo_graph_enabled`, `kb_curator_custom_stages`, `kb_curator_detect_contradictions_enabled`, `kb_curator_extract_code_enabled`, `kb_curator_extract_code_workers`, `kb_curator_extract_docs_enabled`, `kb_curator_extract_docs_workers`, `kb_curator_index_claims_enabled`, `kb_curator_index_code_unit_enabled`, `kb_curator_index_narrative_enabled`, `kb_curator_link_artifacts_enabled`, `kb_curator_projection_graph_enabled`, `kb_curator_promote_entity_enabled`, `kb_curator_resolve_entities_enabled`, `kb_curator_stage_order`, `kb_curator_synthesize_enabled`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `wfe_proposals_autoscan_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `guardrails_semantic_mode`, `kb_client_bearer_token`, `kb_client_url`, `kb_curator_custom_stages`, `kb_curator_extract_code_workers`, `kb_curator_extract_docs_workers`, `kb_curator_stage_order`, `kb_curator_user_presets`, `kb_evidence_embed_enabled`, `kb_mode`, `wfe_proposals_autoscan_enabled`
 
 ### Deploy-time keys (15)
 
@@ -187,7 +176,7 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | — |
 | `llm_synth_tier` | string | — |
 
-### Advanced tuning keys (24)
+### Advanced tuning keys (36)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -201,6 +190,18 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
 | `ingress_compress_min_chars` | int | Minimum code-snippet length (chars) before it is folded to a file:line reference (default 80). |
+| `kb_curator_cross_repo_graph_enabled` | bool | — |
+| `kb_curator_detect_contradictions_enabled` | bool | — |
+| `kb_curator_extract_code_enabled` | bool | — |
+| `kb_curator_extract_docs_enabled` | bool | — |
+| `kb_curator_index_claims_enabled` | bool | — |
+| `kb_curator_index_code_unit_enabled` | bool | — |
+| `kb_curator_index_narrative_enabled` | bool | — |
+| `kb_curator_link_artifacts_enabled` | bool | — |
+| `kb_curator_projection_graph_enabled` | bool | — |
+| `kb_curator_promote_entity_enabled` | bool | — |
+| `kb_curator_resolve_entities_enabled` | bool | — |
+| `kb_curator_synthesize_enabled` | bool | — |
 | `kb_pdf_blob_recon_secs` | int | Interval (seconds) for the orphan-blob reconciliation sweep (default 3600; <=0 disables it). |
 | `kb_search_max_results` | int | Default max results for KB search. |
 | `memory_bm25_weight` | float | BM25 (lexical) weight in hybrid memory recall. |
