@@ -261,10 +261,7 @@ const subcmd_t *get_ensemble_subcmds(void)
 
 void cmd_ensemble(app_ctx_t *ctx, int argc, char **argv)
 {
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
-      fatal("ensemble: could not initialize DB1");
+   cmd_require_db1("ensemble: could not initialize DB1");
 
    const char *sub = (argc > 0) ? argv[0] : NULL;
    if (argc > 0)

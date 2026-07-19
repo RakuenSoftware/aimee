@@ -233,13 +233,7 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
       return 200;
    }
    cJSON_Delete(out);
-   cJSON *e = cJSON_CreateObject();
-   cJSON_AddStringToObject(e, "error", err[0] ? err : "submit failed");
-   char *s = cJSON_PrintUnformatted(e);
-   snprintf(resp, cap, "%s", s ? s : "{\"error\":\"submit failed\"}");
-   free(s);
-   cJSON_Delete(e);
-   return st;
+   return err_json(resp, cap, st, err[0] ? err : "submit failed");
 }
 
 /* Loop-back retry cap for operator rejects on a `retry_on_reject` gate: bounds an
@@ -289,14 +283,12 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    const char *id = rq->id;
    if (!id || !id[0])
    {
-      snprintf(resp, cap, "{\"error\":\"missing work item id\"}");
-      return 400;
+      return err_json(resp, cap, 400, "missing work item id");
    }
    db1_work_item_t wi;
    if (db1_work_item_get(id, &wi) != 1)
    {
-      snprintf(resp, cap, "{\"error\":\"no such work item\"}");
-      return 404;
+      return err_json(resp, cap, 404, "no such work item");
    }
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    cJSON *jdec = body ? cJSON_GetObjectItemCaseSensitive(body, "decision") : NULL;
@@ -321,16 +313,15 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    if (jgate && cJSON_IsString(jgate) && jgate->valuestring[0] &&
        strcmp(jgate->valuestring, gate) != 0)
    {
+      char msg[192];
+      snprintf(msg, sizeof msg, "run is parked at gate '%s', not '%s'", gate, jgate->valuestring);
       cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"run is parked at gate '%s', not '%s'\"}", gate,
-               jgate->valuestring);
-      return 409;
+      return err_json(resp, cap, 409, msg);
    }
    if (strcmp(decision, "approve") != 0 && strcmp(decision, "reject") != 0)
    {
       cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"decision must be 'approve' or 'reject'\"}");
-      return 400;
+      return err_json(resp, cap, 400, "decision must be 'approve' or 'reject'");
    }
    /* Approving a ROUNDTABLE gate is refused, mirroring wfe_gate_override's rail
     * (a human must not force-pass a panel): previously this endpoint recorded a
@@ -349,12 +340,13 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
          wfe_def_free(gdef);
       if (is_rt)
       {
-         cJSON_Delete(body);
-         snprintf(resp, cap,
-                  "{\"error\":\"'%s' is a roundtable gate — a human cannot force-pass a panel. "
-                  "Resume re-runs the panel; reject terminates.\"}",
+         char msg[256];
+         snprintf(msg, sizeof msg,
+                  "'%s' is a roundtable gate — a human cannot force-pass a panel. "
+                  "Resume re-runs the panel; reject terminates.",
                   wi.current_stage);
-         return 409;
+         cJSON_Delete(body);
+         return err_json(resp, cap, 409, msg);
       }
    }
 
@@ -370,15 +362,13 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
       if (!present && wfe_approval_record(id, gate, wi.content_hash, actor) != 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"could not record approval\"}");
-         return 500;
+         return err_json(resp, cap, 500, "could not record approval");
       }
       int g = db1_work_item_gate_apply(id, wi.current_stage, wi.content_hash, NULL, NULL);
       if (g < 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"gate apply failed\"}");
-         return 500;
+         return err_json(resp, cap, 500, "gate apply failed");
       }
       if (g == 0)
       {
@@ -392,8 +382,7 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
                      gate);
             return 200;
          }
-         snprintf(resp, cap, "{\"error\":\"run not parked at this gate (state changed)\"}");
-         return 409;
+         return err_json(resp, cap, 409, "run not parked at this gate (state changed)");
       }
       /* No detail: the audit row's gate column already carries the stage. */
    }
@@ -435,14 +424,12 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
       if (g < 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"gate apply failed\"}");
-         return 500;
+         return err_json(resp, cap, 500, "gate apply failed");
       }
       if (g == 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"run not parked at this gate (state changed)\"}");
-         return 409;
+         return err_json(resp, cap, 409, "run not parked at this gate (state changed)");
       }
       if (new_stage)
          snprintf(detail, sizeof detail, "from=%s to=%s", gate, new_stage);
@@ -521,8 +508,7 @@ static int rh_shadow_subscribe(const route_req_t *rq, char *resp, int cap)
 {
    if (!shadow_mirror_publish_enabled())
    {
-      snprintf(resp, cap, "{\"error\":\"shadow publishing disabled\"}");
-      return 403;
+      return err_json(resp, cap, 403, "shadow publishing disabled");
    }
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    const cJSON *ju = body ? cJSON_GetObjectItemCaseSensitive(body, "url") : NULL;
@@ -533,8 +519,7 @@ static int rh_shadow_subscribe(const route_req_t *rq, char *resp, int cap)
    cJSON_Delete(body);
    if (rc != 0)
    {
-      snprintf(resp, cap, "{\"error\":\"subscribe failed (missing url or table full)\"}");
-      return 400;
+      return err_json(resp, cap, 400, "subscribe failed (missing url or table full)");
    }
    snprintf(resp, cap, "{\"status\":\"subscribed\",\"subscribers\":%d}",
             shadow_mirror_subscriber_count());

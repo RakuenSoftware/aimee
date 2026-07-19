@@ -1,9 +1,9 @@
-/* db2/learning.h: learning_signals + learning_proposals primitives.
+/* db2/db2_learning.h: learning_signals + learning_proposals primitives.
  *
  * Owns SQL for the explicit-signal-capture / proposal-gate pipeline
  * documented in docs/proposals/done/learning-signals-router-phase-*.
  * The learning_signal_input_t / learning_proposal_t types live in
- * modules/learning/learning.h (shared basename; see the note there); callers
+ * modules/learning/learning.h (the ensemble-learning types); callers
  * include "learning.h" before this. */
 #ifndef DEC_DB2_LEARNING_H
 #define DEC_DB2_LEARNING_H 1

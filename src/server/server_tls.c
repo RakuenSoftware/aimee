@@ -260,11 +260,6 @@ int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial
    return ok;
 }
 
-int server_tls_enabled(void)
-{
-   return g_ctx != NULL;
-}
-
 SSL *server_tls_accept(int fd)
 {
    if (fd < 0)

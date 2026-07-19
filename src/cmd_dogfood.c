@@ -590,6 +590,13 @@ static void dogfood_sub_report(app_ctx_t *ctx, int argc, char **argv)
 
 /* --- dispatch --- */
 
+static const subcmd_t cmd_dogfood_subs[] = {
+    {"tag", "tag a record with outcome/richness", dogfood_sub_tag},
+    {"review", "review a month's dogfood log", dogfood_sub_review},
+    {"report", "report on a month's dogfood outcomes", dogfood_sub_report},
+    {NULL, NULL, NULL},
+};
+
 void cmd_dogfood(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -597,12 +604,6 @@ void cmd_dogfood(app_ctx_t *ctx, int argc, char **argv)
    const char *sub = argv[0];
    argc--;
    argv++;
-   if (strcmp(sub, "tag") == 0)
-      dogfood_sub_tag(ctx, argc, argv);
-   else if (strcmp(sub, "review") == 0)
-      dogfood_sub_review(ctx, argc, argv);
-   else if (strcmp(sub, "report") == 0)
-      dogfood_sub_report(ctx, argc, argv);
-   else
+   if (subcmd_dispatch(cmd_dogfood_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown dogfood subcommand: %s", sub);
 }

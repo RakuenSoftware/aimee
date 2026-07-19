@@ -92,7 +92,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Imodules/learning -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/delegates -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/audit -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/delegates -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/audit -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -575,7 +575,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(MCP_GIT_OBJS) $
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 DEPS = $(ALL_OBJS:.o=.d)
 
-.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
+.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(GATEWAY) $(FORWARDER)
 
@@ -942,6 +942,13 @@ $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDI
 ../aimee-negation-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/kb/modules/agent_eval/agent_eval.o $(OBJDIR)/kb/modules/agent_eval/agent_eval_memory_support.o $(OBJDIR)/kb/modules/agent_eval/agent_eval_baseline.o $(OBJDIR)/tests/mem_negation_eval_main.o $(OBJDIR)/tests/support/agent_runtime_eval_stub.o
 	$(CC) -o $@ $^ $(L_KB)
 
+# Deterministic Bucket-3 code-graph harness (dev tool, not part of `all`): loads a
+# code-graph fixture into an isolated temp schema and runs the real
+# db2_code_index_blast_radius. Same libpq object set as aimee-negation-eval, minus the
+# agent_eval/memory objects (not needed). Build: make ../aimee-blast-radius-eval
+../aimee-blast-radius-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/tests/support/agent_runtime_eval_stub.o $(OBJDIR)/tests/blast_radius_eval_main.o
+	$(CC) -o $@ $^ $(L_KB)
+
 # aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
 # the dependency-free remote-target accessors; --gc-sections drops the transport.
 $(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o
@@ -1113,6 +1120,7 @@ $(OBJDIR)/server/server_http.o: server/openapi_server_data.h
 docs-gen:
 	@python3 ../scripts/gen-api-docs.py
 	@python3 ../scripts/gen-reference-docs.py
+	@python3 ../scripts/gen-v1-route-descriptor.py
 
 # CI gate: fail if docs/gen is stale relative to the committed spec.
 docs-gen-check: docs-gen
@@ -1143,6 +1151,13 @@ v1-method-coverage-check:
 # client keeps calling first-class routes instead of regressing to /v1/rpc.
 cli-v1-routes-check:
 	@python3 ../scripts/check-cli-v1-routes.py
+
+# CI gate: the /v1 route table's first-match dispatch stays order-correct — a
+# more-specific route (e.g. the exact /v1/workflow/items/all) must never be
+# shadowed by a later generic prefix ({id}) route. Makes the ordering constraint
+# explicit and is the prerequisite for safely generating g_v1_routes.
+v1-route-order-check:
+	@python3 ../scripts/check-v1-route-order.py
 
 # CI gate: every routed thin-client command has a client_help[] entry, so
 # `aimee help <cmd>` cannot answer "Unknown command" for a command that works.
@@ -1240,7 +1255,7 @@ clean:
 # you genuinely need a different binary.
 CLANG_FORMAT ?= clang-format-19
 
-lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check
+lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check
 
 # P1 (N1): every tenant-scoped db2 entrypoint must call db2_tenant_require_pg(),
 # so a new entry can never silently run without RLS on the SQLite shim.

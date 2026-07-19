@@ -91,23 +91,29 @@ harness exist) · **⬜ needed** (must be authored).
 - **Pass bar:** ≥ 0.9 precision on the labeled traces with no false-fire on the negative controls,
   per detector, before any is considered for default-on.
 
-## guardrails_blast_radius_advisory_enabled  — 🟡 partial (deterministic)
+## guardrails_blast_radius_advisory_enabled  — ✅ built (deterministic)
 
 - **What it gates:** surfaces the code-graph structural blast radius (dependent files) before an
   edit; advisory and fail-open.
-- **Corpus:** deterministic — a fixture repo + a set of `(edited file → expected dependent-file
-  set)` pairs. Extend `benchmarks/graph` / the code-audit graph fixtures.
+- **Corpus:** [`blast_radius_corpus.json`](blast_radius_corpus.json) — 4 fixtures / 6 cases, each a
+  small code graph (files with exports + imports) with the ground-truth `(edited file → expected
+  dependents + dependencies)`. Faithful to `db2_code_index_blast_radius` (src/db2/code_index.c):
+  covers the basic importer set, the `has_exports` gate (no exports ⇒ no dependents), the hub
+  threshold, and direct-vs-transitive (only direct importers advised).
 - **A/B / metric:** it either lists the true dependent set or not; **precision/recall of the
   advised dependent files** vs the graph ground truth. No LLM in the loop, so this is a clean
   deterministic gate.
 - **Pass bar:** recall = 1.0 (never miss a real dependent) with precision ≥ 0.8 (few spurious
   files) on the fixture set.
 
-## delegate_graph_context_enabled  — ⬜ needed (deterministic)
+## delegate_graph_context_enabled  — ✅ built (deterministic)
 
 - **What it gates:** prepends code-graph structural context to a delegate prompt; fail-open.
-- **Corpus:** deterministic — `(repo, target symbol/role) → expected structural context block`.
-  ~10 fixtures across a small sample repo.
+- **Corpus:** [`delegate_graph_corpus.json`](delegate_graph_corpus.json) — 2 fixtures / 4 cases.
+  `delegate_inject_graph_context` builds its block from the same `kb_client_index_blast_radius`
+  computation, so this shares the blast-radius graph: each case is a delegate prompt referencing a
+  file with the neighbours the injected block must contain, plus fail-open cases (isolated file /
+  no referenced path ⇒ no block) and a must-not-contain (transitive file) control.
 - **A/B / metric:** assert the injected context contains the true neighbours (callers/callees,
   defining file) and stays within the budget. Since it's fail-open and advisory, the gate is
   "context is correct + bounded", not a downstream quality metric.
@@ -125,5 +131,23 @@ against the `pos*` controls. Green + repeatable ⇒ `memory_negation_enabled` gr
 Bucket 3 to a default-on candidate.
 
 The remaining flags graduate the same way as their corpora are built out (status column above).
-Deterministic ones (`guardrails_blast_radius_advisory`, `delegate_graph_context`) are the next
-cheapest to finish because they need no LLM and no baseline drift management.
+
+## Running the deterministic harness (blast_radius + delegate_graph)
+
+The two deterministic corpora have a runnable harness: **`aimee-blast-radius-eval`**
+(`src/tests/blast_radius_eval_main.c`, `make ../aimee-blast-radius-eval`). It loads each
+fixture into an ISOLATED throwaway schema in a disposable Postgres (the eval temp-store, gated
+on `AIMEE_DB2_EVAL_URL` — never the production DSN), runs the REAL `db2_code_index_blast_radius`,
+and scores precision/recall against the corpus ground truth. delegate_graph reuses the same
+computation (its `expected_neighbours` = dependents + dependencies of the referenced file).
+
+```
+AIMEE_DB2_EVAL_URL=postgres://<owner>@<host>/<db> \
+  ./aimee-blast-radius-eval benchmarks/bucket3-defaults/blast_radius_corpus.json \
+                            benchmarks/bucket3-defaults/delegate_graph_corpus.json
+```
+
+**Result (real pgvector integration Postgres):** blast_radius 6/6 cases —
+dependents recall=1.000 precision=1.000, dependencies 3/3; delegate_graph 4/4;
+**PASS**. Both `guardrails_blast_radius_advisory_enabled` and `delegate_graph_context_enabled`
+now have a green, repeatable A/B ⇒ default-on candidates.

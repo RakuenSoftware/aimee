@@ -98,6 +98,8 @@ static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t
  * commit, so out_commit_sha is left empty here. The block's `role` arg is the
  * delegate PERSONA (architect/engineer/...); the delegate ROLE (read vs write) is
  * derived from whether the block named a captured artifact_path — see below. */
+static void wfe_commit_worktree_changes(const char *workdir);
+
 static int wfe_live_delegate_run(const char *workdir, const char *role, const char *prompt,
                                  const char *artifact_path, char out_commit_sha[64], char *err,
                                  size_t errlen)
@@ -145,6 +147,13 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
    if (wfe_coord_task_wait(job_id, task_id, result, sizeof result, err, errlen) != 0)
       return -1;
 
+   /* A worktree-mutating (implement/decompose/tdd/document) delegate edits the
+    * dedicated per-slice worktree in place; stage + commit its work here so the
+    * verify gate records a diff and the PR carries it. Produce-via-reply (read)
+    * blocks touch no files, so this is skipped for them. */
+   if (!produce_via_reply)
+      wfe_commit_worktree_changes(workdir);
+
    /* Text-artifact blocks (author.proposal/plan): persist the delegate's reply as
     * the artifact if it did not itself write the file, so the next gate has
     * content. Pure orchestration glue — not delegate execution. */
@@ -169,6 +178,50 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
       }
    }
    return 0;
+}
+
+/* Stage and commit whatever an implement-style delegate wrote directly into the
+ * work-item worktree, on its current (work-item) branch. A WFE per-slice tree is
+ * DEDICATED: the delegate edits `workdir` in place, so unlike a sibling-worktree
+ * delegate there is no isolated checkout whose diff the delegate system applies
+ * back (and commits) for us — the change would otherwise sit untracked, the
+ * verify gate would see no recorded diff, the implement block would loop to its
+ * cap, and the eventual PR would carry nothing. Commit runs server-side (host):
+ * the repo object store is writable here even though the delegate's container
+ * mounts it read-only. A true no-op (clean tree, or a delegate that committed
+ * itself) stages nothing and this is skipped. The author is a fixed WFE identity
+ * with no AI attribution, per repo policy. */
+static void wfe_commit_worktree_changes(const char *workdir)
+{
+   if (!workdir || !workdir[0])
+      return;
+   char cmd[MAX_PATH_LEN + 256];
+   int rc = 0;
+   snprintf(cmd, sizeof cmd, "git -C '%s' add -A 2>&1", workdir);
+   free(run_cmd(cmd, &rc));
+   if (rc != 0)
+   {
+      aimee_log(LOG_WARN, "wfe-delegate", "implement commit: git add failed in %s", workdir);
+      return;
+   }
+   /* `git diff --cached --quiet` exits 0 when nothing is staged, 1 when there is
+    * a staged change to commit. Skip the commit (and its noisy "nothing to
+    * commit" failure) on a clean tree. */
+   snprintf(cmd, sizeof cmd, "git -C '%s' diff --cached --quiet", workdir);
+   free(run_cmd(cmd, &rc));
+   if (rc == 0)
+      return; /* nothing staged: a genuine no-op or an already-committing delegate */
+   snprintf(cmd, sizeof cmd,
+            "git -C '%s' -c user.name='aimee-wfe' -c user.email='wfe@aimee.local' commit -q "
+            "-m 'wfe: apply implement changes' 2>&1",
+            workdir);
+   char *out = run_cmd(cmd, &rc);
+   if (rc != 0)
+      aimee_log(LOG_WARN, "wfe-delegate", "implement commit failed in %s: %s", workdir,
+                out ? out : "");
+   else
+      aimee_log(LOG_INFO, "wfe-delegate", "committed implement changes in %s", workdir);
+   free(out);
 }
 
 static const wfe_delegate_provider_t WFE_LIVE_DELEGATE = {wfe_live_delegate_run};

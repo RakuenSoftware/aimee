@@ -11,7 +11,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "db2/artifacts.h"
-#include "db2/learning.h"
+#include "db2/db2_learning.h"
 #include "learning.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"

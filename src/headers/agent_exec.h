@@ -147,6 +147,16 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
  * dropping them when the provider stream errors mid-flight. */
 void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
                                    const char *source, const char *usage_kind);
+/* Build a token-audit row for a provider ingress path from raw usage counts and
+ * record it, folding the memset+snprintf+field-copy boilerplate the provider
+ * ingress handlers otherwise repeat per call site. requested_model/stop_reason
+ * tolerate NULL (stored as ""). kind==NULL records via agent_record_token_audit
+ * (i.e. "realized"); a non-NULL kind ("realized"/"partial"/...) routes through
+ * agent_record_token_audit_kind. The caller owns the enable/threshold guard. */
+void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
+                               const char *requested_model, const char *stop_reason,
+                               int prompt_tokens, int completion_tokens, int cache_write_tokens,
+                               int cache_read_tokens, const char *source, const char *kind);
 /* Record a context-economizer ledger row (usage_kind="avoided", FORECAST-only —
  * see context_reduce.h). Forward-declared struct so this broad header need not
  * pull in context_reduce.h; the caller includes it for the full type. */

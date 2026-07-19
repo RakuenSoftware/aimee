@@ -93,107 +93,180 @@ static const char *find_from_arg(int argc, char **argv)
    return NULL;
 }
 
-void cmd_roadmap(app_ctx_t *ctx, int argc, char **argv)
+static void cmd_roadmap_new(app_ctx_t *ctx, int argc, char **argv)
+{
+   const char *from = find_from_arg(argc, argv);
+   char *decomp_json = NULL;
+
+   if (from)
+   {
+      /* Manual path: read a pre-authored decomposition JSON document. */
+      decomp_json = read_whole_file(from);
+      if (!decomp_json)
+         fatal("roadmap new: failed to read --from %s", from);
+   }
+   else
+   {
+      /* Delegate path: first positional arg is the bare goal string. */
+      if (argc < 1)
+         fatal("roadmap new requires a goal (\"aimee roadmap new \\\"<goal>\\\"\") "
+               "or --from <file> for a pre-authored decomposition document");
+      const char *goal = argv[0];
+
+      /* Deduce optional flags after the goal: --depth, --profile. */
+      const char *depth = NULL, *profile = NULL;
+      for (int i = 1; i < argc; i++)
+      {
+         if (strcmp(argv[i], "--depth") == 0 && i + 1 < argc)
+            depth = argv[++i];
+         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc)
+            profile = argv[++i];
+      }
+
+      agent_config_t cfg;
+      if (agent_load_config(&cfg) != 0 || cfg.agent_count == 0)
+         fatal("roadmap new: no agents configured");
+
+      agent_http_init();
+      char decomp_err[256] = "";
+      int rc = roadmap_decompose_run(goal, depth, profile, roadmap_model_via_agent, &cfg, 3,
+                                     &decomp_json, decomp_err, sizeof(decomp_err));
+      agent_http_cleanup();
+
+      if (rc != 0 || !decomp_json)
+         fatal("roadmap new: decomposition failed: %s", decomp_err);
+   }
+
+   char *json = kb_client_roadmap_create_json(decomp_json);
+   free(decomp_json);
+
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+
+   if (!resp)
+      fatal("roadmap new: parse failed");
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
+   {
+      cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      const char *errstr = cJSON_IsString(err)
+                               ? err->valuestring
+                               : (cJSON_IsString(msg) ? msg->valuestring : "unknown error");
+      fprintf(stderr, "error: %s\n", errstr);
+      cJSON_Delete(resp);
+      exit(1);
+   }
+
+   cJSON *id = cJSON_GetObjectItemCaseSensitive(resp, "roadmap_id");
+   const char *idstr = cJSON_IsString(id) ? id->valuestring : "";
+
+   if (ctx->json_output)
+   {
+      emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      printf("created roadmap %s\n", idstr);
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_roadmap_show(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
-      fatal("roadmap requires a subcommand: new, show, list, status, rebuild, validate, report");
+      fatal("roadmap show requires an id");
 
-   const char *sub = argv[0];
-   argc--;
-   argv++;
+   const char *id = argv[0];
+   char *json = kb_client_roadmap_show_json(id);
 
-   if (strcmp(sub, "new") == 0)
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+
+   if (!resp)
+      fatal("roadmap show: parse failed");
+
+   if (ctx->json_output)
    {
-      const char *from = find_from_arg(argc, argv);
-      char *decomp_json = NULL;
-
-      if (from)
-      {
-         /* Manual path: read a pre-authored decomposition JSON document. */
-         decomp_json = read_whole_file(from);
-         if (!decomp_json)
-            fatal("roadmap new: failed to read --from %s", from);
-      }
-      else
-      {
-         /* Delegate path: first positional arg is the bare goal string. */
-         if (argc < 1)
-            fatal("roadmap new requires a goal (\"aimee roadmap new \\\"<goal>\\\"\") "
-                  "or --from <file> for a pre-authored decomposition document");
-         const char *goal = argv[0];
-
-         /* Deduce optional flags after the goal: --depth, --profile. */
-         const char *depth = NULL, *profile = NULL;
-         for (int i = 1; i < argc; i++)
-         {
-            if (strcmp(argv[i], "--depth") == 0 && i + 1 < argc)
-               depth = argv[++i];
-            else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc)
-               profile = argv[++i];
-         }
-
-         agent_config_t cfg;
-         if (agent_load_config(&cfg) != 0 || cfg.agent_count == 0)
-            fatal("roadmap new: no agents configured");
-
-         agent_http_init();
-         char decomp_err[256] = "";
-         int rc = roadmap_decompose_run(goal, depth, profile, roadmap_model_via_agent, &cfg, 3,
-                                        &decomp_json, decomp_err, sizeof(decomp_err));
-         agent_http_cleanup();
-
-         if (rc != 0 || !decomp_json)
-            fatal("roadmap new: decomposition failed: %s", decomp_err);
-      }
-
-      char *json = kb_client_roadmap_create_json(decomp_json);
-      free(decomp_json);
-
-      cJSON *resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-
-      if (!resp)
-         fatal("roadmap new: parse failed");
-
-      cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-      if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-      {
-         cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
-         cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         const char *errstr = cJSON_IsString(err)
-                                  ? err->valuestring
-                                  : (cJSON_IsString(msg) ? msg->valuestring : "unknown error");
-         fprintf(stderr, "error: %s\n", errstr);
-         cJSON_Delete(resp);
-         exit(1);
-      }
-
-      cJSON *id = cJSON_GetObjectItemCaseSensitive(resp, "roadmap_id");
-      const char *idstr = cJSON_IsString(id) ? id->valuestring : "";
-
-      if (ctx->json_output)
-      {
-         emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("created roadmap %s\n", idstr);
-      }
-      cJSON_Delete(resp);
+      emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
    }
-   else if (strcmp(sub, "show") == 0)
+   else
    {
-      if (argc < 1)
-         fatal("roadmap show requires an id");
+      cJSON *rm = cJSON_GetObjectItemCaseSensitive(resp, "roadmap");
+      cJSON *units = cJSON_GetObjectItemCaseSensitive(resp, "units");
+      cJSON *sid = cJSON_GetObjectItemCaseSensitive(resp, "id");
+      const char *ids = cJSON_IsString(sid) ? sid->valuestring : id;
 
+      printf("roadmap %s\n", ids);
+      if (cJSON_IsObject(rm))
+      {
+         cJSON *goal = cJSON_GetObjectItemCaseSensitive(rm, "goal");
+         if (cJSON_IsString(goal) && goal->valuestring[0])
+            printf("goal: %s\n", goal->valuestring);
+      }
+      if (cJSON_IsArray(units))
+      {
+         cJSON *item;
+         cJSON_ArrayForEach(item, units)
+         {
+            cJSON *st = cJSON_GetObjectItemCaseSensitive(item, "state");
+            cJSON *lv = cJSON_GetObjectItemCaseSensitive(item, "level");
+            cJSON *ti = cJSON_GetObjectItemCaseSensitive(item, "title");
+            const char *state = cJSON_IsString(st) ? st->valuestring : "";
+            const char *level = cJSON_IsString(lv) ? lv->valuestring : "";
+            const char *title = cJSON_IsString(ti) ? ti->valuestring : "";
+            printf("- [%s] %s: %s\n", state, level, title);
+         }
+      }
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_roadmap_list(app_ctx_t *ctx, int argc, char **argv)
+{
+   char *json = kb_client_roadmap_list_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+
+   if (!resp)
+      fatal("roadmap list: parse failed");
+
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "roadmaps");
+   if (ctx->json_output)
+   {
+      cJSON *out = cJSON_IsArray(arr) ? cJSON_DetachItemViaPointer(resp, arr) : cJSON_CreateArray();
+      emit_json_ctx(out, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      if (cJSON_IsArray(arr))
+      {
+         cJSON *item;
+         cJSON_ArrayForEach(item, arr)
+         {
+            cJSON *sid = cJSON_GetObjectItemCaseSensitive(item, "id");
+            cJSON *goal = cJSON_GetObjectItemCaseSensitive(item, "goal");
+            const char *ids = cJSON_IsString(sid) ? sid->valuestring : "";
+            const char *gs = cJSON_IsString(goal) ? goal->valuestring : "";
+            printf("%s  %s\n", ids, gs);
+         }
+      }
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_roadmap_status(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc >= 1)
+   {
       const char *id = argv[0];
       char *json = kb_client_roadmap_show_json(id);
-
       cJSON *resp = json ? cJSON_Parse(json) : NULL;
       free(json);
 
       if (!resp)
-         fatal("roadmap show: parse failed");
+         fatal("roadmap status: parse failed");
 
       if (ctx->json_output)
       {
@@ -230,14 +303,14 @@ void cmd_roadmap(app_ctx_t *ctx, int argc, char **argv)
       }
       cJSON_Delete(resp);
    }
-   else if (strcmp(sub, "list") == 0)
+   else
    {
       char *json = kb_client_roadmap_list_json();
       cJSON *resp = json ? cJSON_Parse(json) : NULL;
       free(json);
 
       if (!resp)
-         fatal("roadmap list: parse failed");
+         fatal("roadmap status: parse failed");
 
       cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "roadmaps");
       if (ctx->json_output)
@@ -263,211 +336,153 @@ void cmd_roadmap(app_ctx_t *ctx, int argc, char **argv)
       }
       cJSON_Delete(resp);
    }
-   else if (strcmp(sub, "status") == 0)
+}
+
+static void cmd_roadmap_rebuild(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 1)
+      fatal("roadmap rebuild requires an id");
+
+   const char *id = argv[0];
+   char *json = kb_client_roadmap_rebuild_json(id);
+
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+
+   if (!resp)
+      fatal("roadmap rebuild: parse failed");
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
    {
-      if (argc >= 1)
-      {
-         const char *id = argv[0];
-         char *json = kb_client_roadmap_show_json(id);
-         cJSON *resp = json ? cJSON_Parse(json) : NULL;
-         free(json);
-
-         if (!resp)
-            fatal("roadmap status: parse failed");
-
-         if (ctx->json_output)
-         {
-            emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
-         }
-         else
-         {
-            cJSON *rm = cJSON_GetObjectItemCaseSensitive(resp, "roadmap");
-            cJSON *units = cJSON_GetObjectItemCaseSensitive(resp, "units");
-            cJSON *sid = cJSON_GetObjectItemCaseSensitive(resp, "id");
-            const char *ids = cJSON_IsString(sid) ? sid->valuestring : id;
-
-            printf("roadmap %s\n", ids);
-            if (cJSON_IsObject(rm))
-            {
-               cJSON *goal = cJSON_GetObjectItemCaseSensitive(rm, "goal");
-               if (cJSON_IsString(goal) && goal->valuestring[0])
-                  printf("goal: %s\n", goal->valuestring);
-            }
-            if (cJSON_IsArray(units))
-            {
-               cJSON *item;
-               cJSON_ArrayForEach(item, units)
-               {
-                  cJSON *st = cJSON_GetObjectItemCaseSensitive(item, "state");
-                  cJSON *lv = cJSON_GetObjectItemCaseSensitive(item, "level");
-                  cJSON *ti = cJSON_GetObjectItemCaseSensitive(item, "title");
-                  const char *state = cJSON_IsString(st) ? st->valuestring : "";
-                  const char *level = cJSON_IsString(lv) ? lv->valuestring : "";
-                  const char *title = cJSON_IsString(ti) ? ti->valuestring : "";
-                  printf("- [%s] %s: %s\n", state, level, title);
-               }
-            }
-         }
-         cJSON_Delete(resp);
-      }
-      else
-      {
-         char *json = kb_client_roadmap_list_json();
-         cJSON *resp = json ? cJSON_Parse(json) : NULL;
-         free(json);
-
-         if (!resp)
-            fatal("roadmap status: parse failed");
-
-         cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "roadmaps");
-         if (ctx->json_output)
-         {
-            cJSON *out =
-                cJSON_IsArray(arr) ? cJSON_DetachItemViaPointer(resp, arr) : cJSON_CreateArray();
-            emit_json_ctx(out, ctx->json_fields, ctx->response_profile);
-         }
-         else
-         {
-            if (cJSON_IsArray(arr))
-            {
-               cJSON *item;
-               cJSON_ArrayForEach(item, arr)
-               {
-                  cJSON *sid = cJSON_GetObjectItemCaseSensitive(item, "id");
-                  cJSON *goal = cJSON_GetObjectItemCaseSensitive(item, "goal");
-                  const char *ids = cJSON_IsString(sid) ? sid->valuestring : "";
-                  const char *gs = cJSON_IsString(goal) ? goal->valuestring : "";
-                  printf("%s  %s\n", ids, gs);
-               }
-            }
-         }
-         cJSON_Delete(resp);
-      }
-   }
-   else if (strcmp(sub, "rebuild") == 0)
-   {
-      if (argc < 1)
-         fatal("roadmap rebuild requires an id");
-
-      const char *id = argv[0];
-      char *json = kb_client_roadmap_rebuild_json(id);
-
-      cJSON *resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-
-      if (!resp)
-         fatal("roadmap rebuild: parse failed");
-
-      cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-      if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-      {
-         cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
-         cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         const char *errstr = cJSON_IsString(err)
-                                  ? err->valuestring
-                                  : (cJSON_IsString(msg) ? msg->valuestring : "unknown error");
-         fprintf(stderr, "error: %s\n", errstr);
-         cJSON_Delete(resp);
-         exit(1);
-      }
-
-      if (ctx->json_output)
-      {
-         emit_ok_ctx(ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("rebuilt projections for %s\n", id);
-      }
+      cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      const char *errstr = cJSON_IsString(err)
+                               ? err->valuestring
+                               : (cJSON_IsString(msg) ? msg->valuestring : "unknown error");
+      fprintf(stderr, "error: %s\n", errstr);
       cJSON_Delete(resp);
+      exit(1);
    }
-   else if (strcmp(sub, "validate") == 0)
+
+   if (ctx->json_output)
    {
-      const char *from = find_from_arg(argc, argv);
-      if (!from)
-         fatal("roadmap validate requires --from <file> (a decomposition JSON document)");
-
-      char *buf = read_whole_file(from);
-      if (!buf)
-         fatal("roadmap validate: failed to read --from %s", from);
-
-      char *json = kb_client_roadmap_validate_json(buf);
-      free(buf);
-
-      cJSON *resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-
-      if (!resp)
-         fatal("roadmap validate: parse failed");
-
-      if (ctx->json_output)
-      {
-         emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid");
-         cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "reason");
-         int is_valid = cJSON_IsBool(v) && cJSON_IsTrue(v);
-         const char *reasonstr = cJSON_IsString(reason) ? reason->valuestring : "";
-         if (is_valid)
-            printf("valid\n");
-         else
-            printf("invalid: %s\n", reasonstr);
-      }
-      cJSON_Delete(resp);
-   }
-   else if (strcmp(sub, "report") == 0)
-   {
-      if (argc < 1)
-         fatal("roadmap report requires an id");
-
-      const char *id = argv[0];
-      const char *output_path = NULL;
-      int is_html = 0;
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--html") == 0)
-            is_html = 1;
-         else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc)
-            output_path = argv[++i];
-      }
-      (void)is_html; /* flag reserved; HTML is the only format for now */
-
-      char *json = kb_client_roadmap_report_json(id, output_path);
-      cJSON *resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-
-      if (!resp)
-         fatal("roadmap report: parse failed");
-
-      cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-      if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-      {
-         cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
-         cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         const char *errstr = cJSON_IsString(err)
-                                  ? err->valuestring
-                                  : (cJSON_IsString(msg) ? msg->valuestring : "unknown error");
-         fprintf(stderr, "error: %s\n", errstr);
-         cJSON_Delete(resp);
-         exit(1);
-      }
-
-      if (ctx->json_output)
-      {
-         emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         cJSON *rpath = cJSON_GetObjectItemCaseSensitive(resp, "report_path");
-         printf("report written: %s\n", cJSON_IsString(rpath) ? rpath->valuestring : "(unknown)");
-      }
-      cJSON_Delete(resp);
+      emit_ok_ctx(ctx->json_fields, ctx->response_profile);
    }
    else
    {
+      printf("rebuilt projections for %s\n", id);
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_roadmap_validate(app_ctx_t *ctx, int argc, char **argv)
+{
+   const char *from = find_from_arg(argc, argv);
+   if (!from)
+      fatal("roadmap validate requires --from <file> (a decomposition JSON document)");
+
+   char *buf = read_whole_file(from);
+   if (!buf)
+      fatal("roadmap validate: failed to read --from %s", from);
+
+   char *json = kb_client_roadmap_validate_json(buf);
+   free(buf);
+
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+
+   if (!resp)
+      fatal("roadmap validate: parse failed");
+
+   if (ctx->json_output)
+   {
+      emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid");
+      cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "reason");
+      int is_valid = cJSON_IsBool(v) && cJSON_IsTrue(v);
+      const char *reasonstr = cJSON_IsString(reason) ? reason->valuestring : "";
+      if (is_valid)
+         printf("valid\n");
+      else
+         printf("invalid: %s\n", reasonstr);
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_roadmap_report(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 1)
+      fatal("roadmap report requires an id");
+
+   const char *id = argv[0];
+   const char *output_path = NULL;
+   int is_html = 0;
+   for (int i = 1; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--html") == 0)
+         is_html = 1;
+      else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc)
+         output_path = argv[++i];
+   }
+   (void)is_html; /* flag reserved; HTML is the only format for now */
+
+   char *json = kb_client_roadmap_report_json(id, output_path);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+
+   if (!resp)
+      fatal("roadmap report: parse failed");
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
+   {
+      cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      const char *errstr = cJSON_IsString(err)
+                               ? err->valuestring
+                               : (cJSON_IsString(msg) ? msg->valuestring : "unknown error");
+      fprintf(stderr, "error: %s\n", errstr);
+      cJSON_Delete(resp);
+      exit(1);
+   }
+
+   if (ctx->json_output)
+   {
+      emit_json_ctx(resp, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      cJSON *rpath = cJSON_GetObjectItemCaseSensitive(resp, "report_path");
+      printf("report written: %s\n", cJSON_IsString(rpath) ? rpath->valuestring : "(unknown)");
+   }
+   cJSON_Delete(resp);
+}
+
+static const subcmd_t cmd_roadmap_subs[] = {
+    {"new", "create a roadmap from a goal or decomposition", cmd_roadmap_new},
+    {"show", "show a roadmap", cmd_roadmap_show},
+    {"list", "list roadmaps", cmd_roadmap_list},
+    {"status", "show roadmap status", cmd_roadmap_status},
+    {"rebuild", "rebuild roadmap projections", cmd_roadmap_rebuild},
+    {"validate", "validate a decomposition document", cmd_roadmap_validate},
+    {"report", "generate a roadmap report", cmd_roadmap_report},
+    {NULL, NULL, NULL},
+};
+
+void cmd_roadmap(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 1)
+      fatal("roadmap requires a subcommand: new, show, list, status, rebuild, validate, report");
+
+   const char *sub = argv[0];
+   argc--;
+   argv++;
+
+   if (subcmd_dispatch(cmd_roadmap_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown roadmap subcommand: %s (new, show, list, status, rebuild, validate, report)",
             sub);
-   }
 }

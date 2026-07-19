@@ -9,14 +9,6 @@
 #include "log.h"
 #include <stdio.h>
 #include <string.h>
-static cJSON *build_tool(const char *name, const char *desc, cJSON *schema)
-{
-   cJSON *t = cJSON_CreateObject();
-   cJSON_AddStringToObject(t, "name", name);
-   cJSON_AddStringToObject(t, "description", desc);
-   cJSON_AddItemToObject(t, "inputSchema", schema);
-   return t;
-}
 static int tools_array_has_name(cJSON *tools, const char *name)
 {
    cJSON *tool = NULL;
@@ -32,32 +24,32 @@ static void add_session_context_tools(cJSON *tools)
 {
    cJSON_AddItemToArray(tools, session_search_mcp_tool());
    cJSON_AddItemToArray(
-       tools, build_tool("session_context_search",
-                         "Search tool-chain stubs from the current session. Returns compacted "
-                         "summaries matching the query. Requires virtual_context.enabled=true.",
-                         cJSON_Parse("{\"type\":\"object\",\"properties\":{"
-                                     "\"query\":{\"type\":\"string\","
-                                     "\"description\":\"Substring to search over stubs\"},"
-                                     "\"limit\":{\"type\":\"integer\","
-                                     "\"description\":\"Maximum results (default 10)\"}},"
-                                     "\"required\":[\"query\"]}")));
+       tools, mcp_tool_new("session_context_search",
+                           "Search tool-chain stubs from the current session. Returns compacted "
+                           "summaries matching the query. Requires virtual_context.enabled=true.",
+                           cJSON_Parse("{\"type\":\"object\",\"properties\":{"
+                                       "\"query\":{\"type\":\"string\","
+                                       "\"description\":\"Substring to search over stubs\"},"
+                                       "\"limit\":{\"type\":\"integer\","
+                                       "\"description\":\"Maximum results (default 10)\"}},"
+                                       "\"required\":[\"query\"]}")));
    cJSON_AddItemToArray(
-       tools, build_tool("session_context_expand",
-                         "Expand a tool-chain stub to full raw tool events. Use after "
-                         "session_context_search. Requires virtual_context.enabled=true.",
-                         cJSON_Parse("{\"type\":\"object\",\"properties\":{"
-                                     "\"chain_id\":{\"type\":\"integer\","
-                                     "\"description\":\"Chain id from session_context_search\"}},"
-                                     "\"required\":[\"chain_id\"]}")));
+       tools, mcp_tool_new("session_context_expand",
+                           "Expand a tool-chain stub to full raw tool events. Use after "
+                           "session_context_search. Requires virtual_context.enabled=true.",
+                           cJSON_Parse("{\"type\":\"object\",\"properties\":{"
+                                       "\"chain_id\":{\"type\":\"integer\","
+                                       "\"description\":\"Chain id from session_context_search\"}},"
+                                       "\"required\":[\"chain_id\"]}")));
    cJSON_AddItemToArray(
-       tools, build_tool("session_context_status",
-                         "Virtual context assembly status: enabled flag, event/chain counts.",
-                         cJSON_Parse("{\"type\":\"object\",\"properties\":{}}")));
+       tools, mcp_tool_new("session_context_status",
+                           "Virtual context assembly status: enabled flag, event/chain counts.",
+                           cJSON_Parse("{\"type\":\"object\",\"properties\":{}}")));
    cJSON_AddItemToArray(
-       tools, build_tool("payload_rewrite_status",
-                         "Prompt-cache-aware rewrite status: enabled flag, payload epoch, "
-                         "deferred/forced counts, bytes saved pending forced rewrite.",
-                         cJSON_Parse("{\"type\":\"object\",\"properties\":{}}")));
+       tools, mcp_tool_new("payload_rewrite_status",
+                           "Prompt-cache-aware rewrite status: enabled flag, payload epoch, "
+                           "deferred/forced counts, bytes saved pending forced rewrite.",
+                           cJSON_Parse("{\"type\":\"object\",\"properties\":{}}")));
    mcp_add_gateway_tools(tools);
 }
 /* `collapse` folds coherent families (index, memory, lsp, ...) into one multiplexed
@@ -82,12 +74,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               "Omit to get the topic index.");
       cJSON_AddItemToArray(
           tools,
-          build_tool("get_help",
-                     "CALL THIS TOOL FIRST at the start of every session before doing any work. "
-                     "With no args, returns a compact topic index. Pass a topic name to get "
-                     "details for that section only (e.g. 'work queue', 'mcp tools', "
-                     "'delegate', 'memory', 'build', 'conventions').",
-                     s));
+          mcp_tool_new("get_help",
+                       "CALL THIS TOOL FIRST at the start of every session before doing any work. "
+                       "With no args, returns a compact topic index. Pass a topic name to get "
+                       "details for that section only (e.g. 'work queue', 'mcp tools', "
+                       "'delegate', 'memory', 'build', 'conventions').",
+                       s));
    }
    mcp_add_skill_tools(tools);
    /* search_memory */
@@ -107,10 +99,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("search_memory",
-                            "Search aimee's knowledge base for stored facts and memories. "
-                            "Returns matching L2/L3 facts by keyword.",
-                            s));
+          tools, mcp_tool_new("search_memory",
+                              "Search aimee's knowledge base for stored facts and memories. "
+                              "Returns matching L2/L3 facts by keyword.",
+                              s));
    }
 
    /* search_graph */
@@ -130,8 +122,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("search_graph",
-                     "Search aimee's episode and relationship graph for matching evidence.", s));
+          mcp_tool_new("search_graph",
+                       "Search aimee's episode and relationship graph for matching evidence.", s));
    }
 
    /* get_episode */
@@ -146,7 +138,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("episode_key"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("get_episode", "Fetch a memory episode by key or source session.", s));
+          tools,
+          mcp_tool_new("get_episode", "Fetch a memory episode by key or source session.", s));
    }
 
    /* get_entity */
@@ -161,8 +154,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("entity"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools,
-          build_tool("get_entity",
+          tools, mcp_tool_new(
+                     "get_entity",
                      "Fetch a memory-backed entity profile with counts and summary evidence.", s));
    }
 
@@ -180,8 +173,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("entity"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, build_tool("get_entity_edges",
-                                             "Fetch graph relations connected to an entity.", s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("get_entity_edges",
+                                               "Fetch graph relations connected to an entity.", s));
    }
 
    /* get_context_block */
@@ -203,8 +196,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("get_context_block",
-                            "Assemble a deterministic memory context block for a query.", s));
+          tools, mcp_tool_new("get_context_block",
+                              "Assemble a deterministic memory context block for a query.", s));
    }
 
    /* memory_get */
@@ -219,7 +212,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(h, "type", "string");
       cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
       cJSON_AddItemToArray(
-          tools, build_tool("memory_get", "Fetch a full memory by id or memory:<id> handle.", s));
+          tools, mcp_tool_new("memory_get", "Fetch a full memory by id or memory:<id> handle.", s));
    }
 
    /* list_facts */
@@ -228,8 +221,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(s, "type", "object");
       cJSON_AddObjectToObject(s, "properties");
       cJSON_AddItemToArray(
-          tools, build_tool("list_facts",
-                            "List all stored facts in aimee's long-term memory (L2 tier).", s));
+          tools, mcp_tool_new("list_facts",
+                              "List all stored facts in aimee's long-term memory (L2 tier).", s));
    }
 
    /* memory_briefing */
@@ -243,11 +236,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               "Approximate character/token budget for the returned bundle "
                               "(default 1500). Lower sections are truncated first.");
       cJSON_AddItemToArray(
-          tools, build_tool("memory_briefing",
-                            "Return a deterministic start-of-session context bundle: "
-                            "top key facts, recent session activity, and active entities. "
-                            "Pure DB queries, no LLM calls.",
-                            s));
+          tools, mcp_tool_new("memory_briefing",
+                              "Return a deterministic start-of-session context bundle: "
+                              "top key facts, recent session activity, and active entities. "
+                              "Pure DB queries, no LLM calls.",
+                              s));
    }
 
    /* get_identity */
@@ -256,12 +249,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(s, "type", "object");
       cJSON_AddObjectToObject(s, "properties");
       cJSON_AddItemToArray(
-          tools, build_tool("get_identity",
-                            "Return the operator-authored charter (immutable) and the learned "
-                            "working-profile state (committed-only) as structured JSON. Useful "
-                            "when the agent is asked to explain its own constraints or "
-                            "preferences.",
-                            s));
+          tools, mcp_tool_new("get_identity",
+                              "Return the operator-authored charter (immutable) and the learned "
+                              "working-profile state (committed-only) as structured JSON. Useful "
+                              "when the agent is asked to explain its own constraints or "
+                              "preferences.",
+                              s));
    }
 
    /* list_curiosity_items */
@@ -278,11 +271,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(lim, "type", "integer");
       cJSON_AddStringToObject(lim, "description", "Maximum rows to return (default 20).");
       cJSON_AddItemToArray(
-          tools, build_tool("list_curiosity_items",
-                            "Return the durable curiosity backlog — knowledge gaps, "
-                            "contradictions, stale facts, weak-coverage entities, and unverified "
-                            "assumptions. Inspection-only; no scoring or action routing yet.",
-                            s));
+          tools, mcp_tool_new("list_curiosity_items",
+                              "Return the durable curiosity backlog — knowledge gaps, "
+                              "contradictions, stale facts, weak-coverage entities, and unverified "
+                              "assumptions. Inspection-only; no scoring or action routing yet.",
+                              s));
    }
 
    /* create_prospective_memory */
@@ -318,10 +311,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("action_text"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("create_prospective_memory",
-                            "Arm a prospective memory (\"when X, surface Y\") that the pre-turn "
-                            "matcher will fire on future sessions until completed or expired.",
-                            s));
+          tools, mcp_tool_new("create_prospective_memory",
+                              "Arm a prospective memory (\"when X, surface Y\") that the pre-turn "
+                              "matcher will fire on future sessions until completed or expired.",
+                              s));
    }
 
    /* list_prospective_memories */
@@ -337,11 +330,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *l = cJSON_AddObjectToObject(p, "limit");
       cJSON_AddStringToObject(l, "type", "integer");
       cJSON_AddStringToObject(l, "description", "Max rows to return (default 50, cap 256).");
-      cJSON_AddItemToArray(tools,
-                           build_tool("list_prospective_memories",
-                                      "List prospective memories (reminders) ordered newest-first. "
-                                      "Optionally filter by state.",
-                                      s));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("list_prospective_memories",
+                              "List prospective memories (reminders) ordered newest-first. "
+                              "Optionally filter by state.",
+                              s));
    }
 
    /* complete_prospective_memory */
@@ -356,8 +349,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("complete_prospective_memory",
-                            "Mark a prospective memory as completed so it no longer surfaces.", s));
+          tools,
+          mcp_tool_new("complete_prospective_memory",
+                       "Mark a prospective memory as completed so it no longer surfaces.", s));
    }
 
    /* memory_alerts */
@@ -371,11 +365,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               "Optional ISO-8601 timestamp — bound the newly-superseded "
                               "section. Empty means \"last 7 days\".");
       cJSON_AddItemToArray(
-          tools, build_tool("memory_alerts",
-                            "Surface stale pending commitments, unresolved contradictions, "
-                            "and newly superseded memories as a single bundle so the agent "
-                            "can act on issues without having to think to ask.",
-                            s));
+          tools, mcp_tool_new("memory_alerts",
+                              "Surface stale pending commitments, unresolved contradictions, "
+                              "and newly superseded memories as a single bundle so the agent "
+                              "can act on issues without having to think to ask.",
+                              s));
    }
 
    /* memory_recall */
@@ -397,12 +391,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(lt, "description",
                               "Character/token budget for the rendered bundle. 0 = default "
                               "(1800 session, 600 per-turn).");
-      cJSON_AddItemToArray(tools,
-                           build_tool("memory_recall",
-                                      "Return a six-section proactive-recall bundle (identity, "
-                                      "preferences, active_context, open_commitments, reminders, "
-                                      "directives) suitable for prompt injection. Pure DB queries.",
-                                      s));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("memory_recall",
+                              "Return a six-section proactive-recall bundle (identity, "
+                              "preferences, active_context, open_commitments, reminders, "
+                              "directives) suitable for prompt injection. Pure DB queries.",
+                              s));
    }
 
    /* list_epistemic_directives */
@@ -424,11 +418,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(limit, "type", "integer");
       cJSON_AddStringToObject(limit, "description", "Max rows to return (default 50, max 256).");
       cJSON_AddItemToArray(
-          tools, build_tool("list_epistemic_directives",
-                            "List epistemic directives ordered by priority DESC.  Durable "
-                            "\"ask the user when relevant\" records auto-created from "
-                            "contradictions and retrieval failures.",
-                            s));
+          tools, mcp_tool_new("list_epistemic_directives",
+                              "List epistemic directives ordered by priority DESC.  Durable "
+                              "\"ask the user when relevant\" records auto-created from "
+                              "contradictions and retrieval failures.",
+                              s));
    }
 
    /* create_epistemic_directive */
@@ -458,10 +452,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(vu, "description", "ISO-8601 expiry. Empty = never expires.");
       cJSON *req = cJSON_AddArrayToObject(s, "required");
       cJSON_AddItemToArray(req, cJSON_CreateString("question"));
-      cJSON_AddItemToArray(tools, build_tool("create_epistemic_directive",
-                                             "Create a new open directive. Dedup-safe via unique "
-                                             "indexes on (cause, topic) and (cause, memory pair).",
-                                             s));
+      cJSON_AddItemToArray(tools,
+                           mcp_tool_new("create_epistemic_directive",
+                                        "Create a new open directive. Dedup-safe via unique "
+                                        "indexes on (cause, topic) and (cause, memory pair).",
+                                        s));
    }
 
    /* resolve_epistemic_directive */
@@ -483,10 +478,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(suppress, "description", "If true, suppress instead of resolve.");
       cJSON *req = cJSON_AddArrayToObject(s, "required");
       cJSON_AddItemToArray(req, cJSON_CreateString("id"));
-      cJSON_AddItemToArray(tools, build_tool("resolve_epistemic_directive",
-                                             "Transition an open directive to resolved (with "
-                                             "optional linking memory) or suppressed.",
-                                             s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("resolve_epistemic_directive",
+                                               "Transition an open directive to resolved (with "
+                                               "optional linking memory) or suppressed.",
+                                               s));
    }
 
    /* memory_maintain */
@@ -507,10 +502,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(fc, "type", "boolean");
       cJSON_AddStringToObject(fc, "description", "Bypass the idle-guard so the cycle always runs.");
       cJSON_AddItemToArray(
-          tools, build_tool("memory_maintain",
-                            "Run a memory maintenance cycle (replay/compact/prune/summarize) and "
-                            "return the summary. Idempotent; idle cycles short-circuit.",
-                            s));
+          tools, mcp_tool_new("memory_maintain",
+                              "Run a memory maintenance cycle (replay/compact/prune/summarize) and "
+                              "return the summary. Idempotent; idle cycles short-circuit.",
+                              s));
    }
 
    /* get_host */
@@ -524,11 +519,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("name"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools,
-                           build_tool("get_host",
-                                      "Look up a specific host by name from the network inventory. "
-                                      "Returns IP, port, user, and description.",
-                                      s));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("get_host",
+                              "Look up a specific host by name from the network inventory. "
+                              "Returns IP, port, user, and description.",
+                              s));
    }
 
    /* list_hosts */
@@ -537,8 +532,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(s, "type", "object");
       cJSON_AddObjectToObject(s, "properties");
       cJSON_AddItemToArray(
-          tools, build_tool("list_hosts",
-                            "List all hosts and networks in the infrastructure inventory.", s));
+          tools, mcp_tool_new("list_hosts",
+                              "List all hosts and networks in the infrastructure inventory.", s));
    }
 
    /* find_symbol */
@@ -553,11 +548,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("identifier"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools,
-                           build_tool("find_symbol",
-                                      "Find a code symbol (function, class, variable) across all "
-                                      "indexed projects. Returns file path, line number, and kind.",
-                                      s));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("find_symbol",
+                              "Find a code symbol (function, class, variable) across all "
+                              "indexed projects. Returns file path, line number, and kind.",
+                              s));
    }
 
    /* ast_grep_search */
@@ -585,18 +580,19 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("lang"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("ast_grep_search",
-                            "AST-aware structural code search using ast-grep. Finds code patterns "
-                            "by structure rather than text, using meta-variables ($VAR, $$$). "
-                            "More precise than regex for language-aware queries. "
-                            "Falls back to a clear error if the ast-grep binary is unavailable.",
-                            s));
+          tools,
+          mcp_tool_new("ast_grep_search",
+                       "AST-aware structural code search using ast-grep. Finds code patterns "
+                       "by structure rather than text, using meta-variables ($VAR, $$$). "
+                       "More precise than regex for language-aware queries. "
+                       "Falls back to a clear error if the ast-grep binary is unavailable.",
+                       s));
    }
    /* delegate */
    {
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "delegate",
               "Delegate a task to an aimee delegate agent instead of provider-native "
               "sub-agent tools (spawn_agent/Agent). Always async: returns a job_id; "
@@ -619,19 +615,19 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
    /* delegate_status */
    {
       cJSON_AddItemToArray(
-          tools, build_tool("delegate_status",
-                            "Check a background delegate job launched by the delegate tool.",
-                            cJSON_Parse("{\"type\":\"object\",\"properties\":{\"job_id\":{"
-                                        "\"type\":\"integer\",\"description\":\"Background "
-                                        "delegate job_id returned by delegate with "
-                                        "background=true.\"}},\"required\":[\"job_id\"]}")));
+          tools, mcp_tool_new("delegate_status",
+                              "Check a background delegate job launched by the delegate tool.",
+                              cJSON_Parse("{\"type\":\"object\",\"properties\":{\"job_id\":{"
+                                          "\"type\":\"integer\",\"description\":\"Background "
+                                          "delegate job_id returned by delegate with "
+                                          "background=true.\"}},\"required\":[\"job_id\"]}")));
    }
 
    /* ensemble_review */
    {
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "ensemble_review",
               "Run the multi-agent roundtable in review mode against caller-provided diff "
               "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
@@ -666,7 +662,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
    {
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "pipeline_start",
               "Start a roundtable authoring pipeline from a one-line idea. Creates a dedicated "
               "proposal branch/worktree in repo_root and enters drafting. Returns the pipeline_id.",
@@ -693,7 +689,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
 
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "pipeline_advance",
               "Drive one tick of the pipeline loop: submit a DRAFT/REVIEW roundtable pass, decide "
               "the captured pass (pass/revise/retry/escalate), open a PR + surface a gate when the "
@@ -707,8 +703,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                   "\"required\":[\"pipeline_id\"]}")));
 
       cJSON_AddItemToArray(
-          tools,
-          build_tool("pipeline_status",
+          tools, mcp_tool_new(
+                     "pipeline_status",
                      "Show a pipeline's state, phase, latest review digest, gate, panel diversity, "
                      "and economics.",
                      cJSON_Parse("{\"type\":\"object\",\"properties\":{"
@@ -716,14 +712,15 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                  "id.\"}},\"required\":[\"pipeline_id\"]}")));
 
       cJSON_AddItemToArray(
-          tools, build_tool("pipeline_list", "List roundtable authoring pipelines.",
-                            cJSON_Parse("{\"type\":\"object\",\"properties\":{"
-                                        "\"state\":{\"type\":\"string\",\"description\":\"Optional "
-                                        "state filter; omit for all non-terminal.\"}}}")));
+          tools,
+          mcp_tool_new("pipeline_list", "List roundtable authoring pipelines.",
+                       cJSON_Parse("{\"type\":\"object\",\"properties\":{"
+                                   "\"state\":{\"type\":\"string\",\"description\":\"Optional "
+                                   "state filter; omit for all non-terminal.\"}}}")));
 
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "pipeline_gate",
               "Resolve a human gate (pass|fail). REQUIRES an enrolled local operator principal — a "
               "delegate-driving session cannot pass its own gate. pass merges the PR (drift-safe) "
@@ -741,7 +738,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
 
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "pipeline_resume",
               "Resume a pipeline from the durable ledger across sessions/restarts; optionally "
               "repair repo/workspace metadata (repo_root/remote/head_branch/worktree_path) after "
@@ -754,8 +751,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                   "\"required\":[\"pipeline_id\"]}")));
 
       cJSON_AddItemToArray(
-          tools,
-          build_tool("pipeline_cancel",
+          tools, mcp_tool_new(
+                     "pipeline_cancel",
                      "Cancel/abandon a pipeline; requests cancellation of any in-flight roundtable "
                      "child run.",
                      cJSON_Parse("{\"type\":\"object\",\"properties\":{"
@@ -782,10 +779,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("paths"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("preview_blast_radius",
-                            "Preview the blast radius of proposed file changes before starting "
-                            "work. Returns affected files, severity, and warnings.",
-                            s));
+          tools, mcp_tool_new("preview_blast_radius",
+                              "Preview the blast radius of proposed file changes before starting "
+                              "work. Returns affected files, severity, and warnings.",
+                              s));
    }
 
    /* delegate_reply */
@@ -803,11 +800,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("delegation_id"));
       cJSON_AddItemToArray(req, cJSON_CreateString("content"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, build_tool("delegate_reply",
-                                             "Reply to a delegate that has requested input. "
-                                             "The delegate will receive this as the response "
-                                             "to its request_input call.",
-                                             s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("delegate_reply",
+                                               "Reply to a delegate that has requested input. "
+                                               "The delegate will receive this as the response "
+                                               "to its request_input call.",
+                                               s));
    }
 
    /* record_attempt */
@@ -832,10 +829,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("approach"));
       cJSON_AddItemToArray(req, cJSON_CreateString("outcome"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, build_tool("record_attempt",
-                                             "Record a failed approach so that delegates can avoid "
-                                             "repeating the same mistake. Stored per-session.",
-                                             s));
+      cJSON_AddItemToArray(tools,
+                           mcp_tool_new("record_attempt",
+                                        "Record a failed approach so that delegates can avoid "
+                                        "repeating the same mistake. Stored per-session.",
+                                        s));
    }
 
    /* list_attempts */
@@ -847,10 +845,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(f, "type", "string");
       cJSON_AddStringToObject(f, "description",
                               "Optional keyword to filter attempts by task_context or approach");
-      cJSON_AddItemToArray(tools, build_tool("list_attempts",
-                                             "List previously recorded failed approaches for the "
-                                             "current session. Helps avoid repeating mistakes.",
-                                             s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("list_attempts",
+                                               "List previously recorded failed approaches for the "
+                                               "current session. Helps avoid repeating mistakes.",
+                                               s));
    }
 
    /* store_workflow */
@@ -877,11 +875,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("rule"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("store_workflow",
-                            "Store a project workflow rule learned from the current interaction. "
-                            "Deduplicated per (project, signal_type). Use for branch strategy, "
-                            "test commands, deploy procedures, or merge conventions.",
-                            s));
+          tools, mcp_tool_new("store_workflow",
+                              "Store a project workflow rule learned from the current interaction. "
+                              "Deduplicated per (project, signal_type). Use for branch strategy, "
+                              "test commands, deploy procedures, or merge conventions.",
+                              s));
    }
 
    /* learning_propose */
@@ -919,11 +917,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("signal_type"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("learning_propose",
-                            "Inject an explicit learning signal into the router. The router "
-                            "writes append-only signals, opens gated proposals, and only commits "
-                            "durable sinks after corroboration or explicit accept.",
-                            s));
+          tools, mcp_tool_new("learning_propose",
+                              "Inject an explicit learning signal into the router. The router "
+                              "writes append-only signals, opens gated proposals, and only commits "
+                              "durable sinks after corroboration or explicit accept.",
+                              s));
    }
 
    /* learning_review */
@@ -943,8 +941,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(limit, "description", "Maximum proposals to return (default 20).");
       cJSON_AddItemToArray(
           tools,
-          build_tool("learning_review",
-                     "List learning proposals with evidence refs and current gate state.", s));
+          mcp_tool_new("learning_review",
+                       "List learning proposals with evidence refs and current gate state.", s));
    }
 
    /* --- Note tools --- */
@@ -969,11 +967,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("content"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("create_note",
-                            "Create or append to an investigation note. Notes capture findings, "
-                            "hypotheses, and reasoning during debugging. If a note with the same "
-                            "title already exists, the new content is appended.",
-                            s));
+          tools, mcp_tool_new("create_note",
+                              "Create or append to an investigation note. Notes capture findings, "
+                              "hypotheses, and reasoning during debugging. If a note with the same "
+                              "title already exists, the new content is appended.",
+                              s));
    }
 
    /* list_notes */
@@ -988,10 +986,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(lm, "type", "integer");
       cJSON_AddStringToObject(lm, "description", "Maximum notes to return (default 20)");
       cJSON_AddItemToArray(tools,
-                           build_tool("list_notes",
-                                      "List investigation notes, optionally filtered by tag. "
-                                      "Returns titles, tags, and creation dates.",
-                                      s));
+                           mcp_tool_new("list_notes",
+                                        "List investigation notes, optionally filtered by tag. "
+                                        "Returns titles, tags, and creation dates.",
+                                        s));
    }
 
    /* search_notes */
@@ -1005,10 +1003,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, build_tool("search_notes",
-                                             "Search investigation notes by content or title. "
-                                             "Returns matching notes with their content.",
-                                             s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("search_notes",
+                                               "Search investigation notes by content or title. "
+                                               "Returns matching notes with their content.",
+                                               s));
    }
 
    /* --- Git (single multiplexed tool; replaces the former git_* family). The
@@ -1099,7 +1097,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
 
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "git",
               "Git + GitHub operations (use instead of the 'git'/'gh' CLIs via Bash). Set "
               "'command' to one of: status, commit, push, pull, fetch, branch, log, "
@@ -1125,11 +1123,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("plan_id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("job_start",
-                            "Queue a coordinated job from an execution plan. The queue records "
-                            "per-task file ownership and conflict prevention; use job_status to "
-                            "inspect claims and progress.",
-                            s));
+          tools, mcp_tool_new("job_start",
+                              "Queue a coordinated job from an execution plan. The queue records "
+                              "per-task file ownership and conflict prevention; use job_status to "
+                              "inspect claims and progress.",
+                              s));
    }
 
    /* job_status */
@@ -1144,10 +1142,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("job_id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("job_status",
-                            "Get status of a coordinated parallel job, including per-task progress "
-                            "and file conflict information.",
-                            s));
+          tools,
+          mcp_tool_new("job_status",
+                       "Get status of a coordinated parallel job, including per-task progress "
+                       "and file conflict information.",
+                       s));
    }
 
    /* autopilot */
@@ -1182,11 +1181,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("autopilot",
-                     "Autonomous end-to-end pipeline. Manages classify→clarify→plan→execute→qa→"
-                     "validate phases with circuit breakers. Use 'start' to create a pipeline, "
-                     "'advance' to move it forward, 'status' to check progress.",
-                     s));
+          mcp_tool_new("autopilot",
+                       "Autonomous end-to-end pipeline. Manages classify→clarify→plan→execute→qa→"
+                       "validate phases with circuit breakers. Use 'start' to create a pipeline, "
+                       "'advance' to move it forward, 'status' to check progress.",
+                       s));
    }
 
    /* run_background_process */
@@ -1204,11 +1203,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("command"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools,
-                           build_tool("run_background_process",
-                                      "Start a shell command in the background. Returns a process "
-                                      "ID. Use get_background_output to read output.",
-                                      s));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("run_background_process",
+                              "Start a shell command in the background. Returns a process "
+                              "ID. Use get_background_output to read output.",
+                              s));
    }
 
    /* get_background_output */
@@ -1226,8 +1225,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("get_background_output",
-                            "Get recent stdout/stderr output from a background process.", s));
+          tools, mcp_tool_new("get_background_output",
+                              "Get recent stdout/stderr output from a background process.", s));
    }
 
    /* kill_background_process */
@@ -1241,8 +1240,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("id"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, build_tool("kill_background_process",
-                                             "Send SIGTERM to a running background process.", s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("kill_background_process",
+                                               "Send SIGTERM to a running background process.", s));
    }
 
    /* list_background_processes */
@@ -1252,8 +1251,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddObjectToObject(s, "properties");
       cJSON_AddItemToArray(
           tools,
-          build_tool("list_background_processes",
-                     "List all background processes with their status, PID, and exit code.", s));
+          mcp_tool_new("list_background_processes",
+                       "List all background processes with their status, PID, and exit code.", s));
    }
 
    /* rules_propose */
@@ -1272,10 +1271,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("text"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("rules_propose",
-                            "Propose a new collaborative rule for human approval. Rules coordinate "
-                            "behavior across all agents in this workspace. Max 10 active rules.",
-                            s));
+          tools,
+          mcp_tool_new("rules_propose",
+                       "Propose a new collaborative rule for human approval. Rules coordinate "
+                       "behavior across all agents in this workspace. Max 10 active rules.",
+                       s));
    }
 
    /* rules_list */
@@ -1284,10 +1284,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(s, "type", "object");
       cJSON_AddObjectToObject(s, "properties");
       cJSON_AddItemToArray(
-          tools, build_tool("rules_list",
-                            "List all collaborative rules (proposed, active, rejected, retired) "
-                            "with their current epoch number.",
-                            s));
+          tools, mcp_tool_new("rules_list",
+                              "List all collaborative rules (proposed, active, rejected, retired) "
+                              "with their current epoch number.",
+                              s));
    }
 
    /* clarify_start */
@@ -1303,11 +1303,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("description"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("clarify_start",
-                            "Start a structured clarification session for a vague task. Returns "
-                            "a session id and the first targeted question for the weakest "
-                            "ambiguity dimension.",
-                            s));
+          tools, mcp_tool_new("clarify_start",
+                              "Start a structured clarification session for a vague task. Returns "
+                              "a session id and the first targeted question for the weakest "
+                              "ambiguity dimension.",
+                              s));
    }
 
    /* clarify_answer */
@@ -1326,11 +1326,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("answer"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("clarify_answer",
-                            "Record an answer for the current open question in a clarification "
-                            "session. If the clarity score reaches the threshold, returns the "
-                            "crystallized task spec. Otherwise returns the next question.",
-                            s));
+          tools, mcp_tool_new("clarify_answer",
+                              "Record an answer for the current open question in a clarification "
+                              "session. If the clarity score reaches the threshold, returns the "
+                              "crystallized task spec. Otherwise returns the next question.",
+                              s));
    }
 
    /* diagnose_start */
@@ -1345,10 +1345,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("symptom"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("diagnose_start",
-                            "Start a structured evidence-driven diagnosis session. Returns a "
-                            "diagnosis_id used to record observations, hypotheses, and evidence.",
-                            s));
+          tools, mcp_tool_new("diagnose_start",
+                              "Start a structured evidence-driven diagnosis session. Returns a "
+                              "diagnosis_id used to record observations, hypotheses, and evidence.",
+                              s));
    }
 
    /* diagnose_observe */
@@ -1368,8 +1368,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("content"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("diagnose_observe",
-                            "Record an observation (symptom fact) against a diagnosis.", s));
+          tools, mcp_tool_new("diagnose_observe",
+                              "Record an observation (symptom fact) against a diagnosis.", s));
    }
 
    /* diagnose_hypothesize */
@@ -1385,8 +1385,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("diagnosis_id"));
       cJSON_AddItemToArray(req, cJSON_CreateString("content"));
       cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools, build_tool("diagnose_hypothesize",
-                                             "Add a candidate hypothesis to a diagnosis.", s));
+      cJSON_AddItemToArray(tools, mcp_tool_new("diagnose_hypothesize",
+                                               "Add a candidate hypothesis to a diagnosis.", s));
    }
 
    /* diagnose_evidence */
@@ -1417,9 +1417,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("diagnose_evidence",
-                     "Attach evidence for or against a hypothesis, with an evidence-strength rank.",
-                     s));
+          mcp_tool_new(
+              "diagnose_evidence",
+              "Attach evidence for or against a hypothesis, with an evidence-strength rank.", s));
    }
 
    /* diagnose_status */
@@ -1433,8 +1433,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("diagnosis_id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("diagnose_status",
-                            "Return full state of a diagnosis with ranked hypotheses (JSON).", s));
+          tools,
+          mcp_tool_new("diagnose_status",
+                       "Return full state of a diagnosis with ranked hypotheses (JSON).", s));
    }
 
    /* search_docs */
@@ -1454,7 +1455,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "search_docs",
               "Search project documentation for relevant context. Use when you need to "
               "understand project architecture, APIs, design decisions, or domain concepts. "
@@ -1481,12 +1482,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               "(omit to get all workspace diagnostics)");
       cJSON_AddItemToArray(
           tools,
-          build_tool("lsp_diagnostics",
-                     "Return current LSP diagnostics (errors and warnings) for a file or the "
-                     "entire workspace. Requires an LSP server to be configured in aimee.yaml "
-                     "lsp_servers. Returns structured diagnostics with file, line, column, "
-                     "severity, and message.",
-                     s));
+          mcp_tool_new("lsp_diagnostics",
+                       "Return current LSP diagnostics (errors and warnings) for a file or the "
+                       "entire workspace. Requires an LSP server to be configured in aimee.yaml "
+                       "lsp_servers. Returns structured diagnostics with file, line, column, "
+                       "severity, and message.",
+                       s));
    }
 
    /* lsp_definition */
@@ -1513,10 +1514,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("lsp_definition",
-                     "Go to the definition of a symbol at a given file position. Returns the "
-                     "target file and line number. Faster and more precise than grep heuristics.",
-                     s));
+          mcp_tool_new("lsp_definition",
+                       "Go to the definition of a symbol at a given file position. Returns the "
+                       "target file and line number. Faster and more precise than grep heuristics.",
+                       s));
    }
 
    /* lsp_references */
@@ -1543,11 +1544,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("lsp_references",
-                     "Find all references to the symbol at a given file position across the "
-                     "workspace. Returns a list of file:line locations. Useful before renaming "
-                     "or removing a symbol.",
-                     s));
+          mcp_tool_new("lsp_references",
+                       "Find all references to the symbol at a given file position across the "
+                       "workspace. Returns a list of file:line locations. Useful before renaming "
+                       "or removing a symbol.",
+                       s));
    }
 
    /* ensemble_start */
@@ -1577,22 +1578,22 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool("ensemble_start",
-                     "Start a templated multi-agent ensemble (code-review, debate, "
-                     "planning, ...). Returns the structured session state including the first "
-                     "expected agent and prompt.",
-                     s));
+          mcp_tool_new("ensemble_start",
+                       "Start a templated multi-agent ensemble (code-review, debate, "
+                       "planning, ...). Returns the structured session state including the first "
+                       "expected agent and prompt.",
+                       s));
    }
 
    /* ensemble_status */
    cJSON_AddItemToArray(
-       tools, build_tool("ensemble_status",
-                         "Fetch the current state of an ensemble: phase, turn, "
-                         "expected participant, pause reason, and recent context excerpt.",
-                         cJSON_Parse("{\"type\":\"object\","
-                                     "\"properties\":{\"id\":{\"type\":\"integer\","
-                                     "\"description\":\"Ensemble id\"}},"
-                                     "\"required\":[\"id\"]}")));
+       tools, mcp_tool_new("ensemble_status",
+                           "Fetch the current state of an ensemble: phase, turn, "
+                           "expected participant, pause reason, and recent context excerpt.",
+                           cJSON_Parse("{\"type\":\"object\","
+                                       "\"properties\":{\"id\":{\"type\":\"integer\","
+                                       "\"description\":\"Ensemble id\"}},"
+                                       "\"required\":[\"id\"]}")));
 
    /* ensemble_pause */
    {
@@ -1609,7 +1610,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("id"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("ensemble_pause", "Pause an ensemble with an optional reason.", s));
+          tools, mcp_tool_new("ensemble_pause", "Pause an ensemble with an optional reason.", s));
    }
 
    /* ensemble_advance */
@@ -1634,20 +1635,20 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("speaker"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(tools,
-                           build_tool("ensemble_advance",
-                                      "Record a turn in an ensemble and advance to the next "
-                                      "expected participant. Returns the updated session state.",
-                                      s));
+                           mcp_tool_new("ensemble_advance",
+                                        "Record a turn in an ensemble and advance to the next "
+                                        "expected participant. Returns the updated session state.",
+                                        s));
    }
 
    /* ensemble_list */
    cJSON_AddItemToArray(
-       tools, build_tool("ensemble_list",
-                         "List every stored ensemble with its template, channel, status, "
-                         "phase, and expected participant.",
-                         cJSON_Parse("{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":"
-                                     "\"integer\",\"description\":\"Maximum sessions to return "
-                                     "(default 20, max 100).\"}}}")));
+       tools, mcp_tool_new("ensemble_list",
+                           "List every stored ensemble with its template, channel, status, "
+                           "phase, and expected participant.",
+                           cJSON_Parse("{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":"
+                                       "\"integer\",\"description\":\"Maximum sessions to return "
+                                       "(default 20, max 100).\"}}}")));
 
    /* workflow_run */
    {
@@ -1673,18 +1674,19 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("proposal_md"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, build_tool("workflow_run",
-                            "Start a saved workflow-engine run from a written proposal (async): "
-                            "the run advances server-side through its review/gate/approval steps. "
-                            "Returns the work_item_id to watch. This is the workflow ENGINE, not a "
-                            "multi-agent ensemble (see ensemble_start for that).",
-                            s));
+          tools,
+          mcp_tool_new("workflow_run",
+                       "Start a saved workflow-engine run from a written proposal (async): "
+                       "the run advances server-side through its review/gate/approval steps. "
+                       "Returns the work_item_id to watch. This is the workflow ENGINE, not a "
+                       "multi-agent ensemble (see ensemble_start for that).",
+                       s));
    }
 
    /* mutate */
    cJSON_AddItemToArray(
        tools,
-       build_tool(
+       mcp_tool_new(
            "mutate",
            "Perform a typed memory mutation. Verbs: store (write new fact), update "
            "(replace content in place), supersede (replace with version lineage), "
@@ -1756,7 +1758,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                   pt->description[0] ? pt->description : pt->name,
                   plugin_permission_name(pt->permission));
 
-         cJSON_AddItemToArray(tools, build_tool(namespaced, desc, schema));
+         cJSON_AddItemToArray(tools, mcp_tool_new(namespaced, desc, schema));
       }
    }
 

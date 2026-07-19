@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "flag": "guardrails_blast_radius_advisory_enabled",
+  "description": "Deterministic validation corpus for the code-graph blast-radius advisory (db2_code_index_blast_radius, src/db2/code_index.c). No LLM in the loop: each fixture is a small code graph (files with their exports + imports), and each case is an edited file with the ground-truth dependent + dependency sets. A harness loads a fixture into an isolated temp schema (INSERT into files / file_exports / file_imports), runs db2_code_index_blast_radius(project, edited_file), and scores precision/recall of the advised dependents against `expected_dependents`.",
+  "computation_notes": [
+    "DEPENDENTS = other files whose file_imports.name LIKE '%<edited_file_path>%', but ONLY when the edited file itself has >=1 row in file_exports (the has_exports gate). A file with no exports yields NO dependents even if others import it.",
+    "The edited file is excluded from its own dependent list.",
+    "DEPENDENCIES = DISTINCT file_imports.name for the edited file (raw import strings, not resolved to files).",
+    "Import names are matched by substring against the edited path, so an import must contain the edited file's path to count as a dependent edge."
+  ],
+  "pass_bar": "recall(dependents) = 1.0 (never miss a real dependent) AND precision(dependents) >= 0.8, aggregated across all cases.",
+  "fixtures": [
+    {
+      "project": "br_basic",
+      "description": "core.c is imported by api.c and cli.c (dependents); it imports util.h (dependency). util.c has exports but nobody imports 'src/util.c'. lonely.c is isolated.",
+      "files": [
+        {"path": "src/core.c", "exports": ["core_init", "core_run"], "imports": ["src/util.h"]},
+        {"path": "src/api.c", "exports": ["api_serve"], "imports": ["src/core.c", "src/util.h"]},
+        {"path": "src/cli.c", "exports": ["cli_main"], "imports": ["src/core.c"]},
+        {"path": "src/util.c", "exports": ["util_help"], "imports": []},
+        {"path": "src/lonely.c", "exports": ["lonely"], "imports": []}
+      ],
+      "cases": [
+        {"edited": "src/core.c", "expected_dependents": ["src/api.c", "src/cli.c"], "expected_dependencies": ["src/util.h"], "notes": "two importers; one dependency"},
+        {"edited": "src/lonely.c", "expected_dependents": [], "expected_dependencies": [], "notes": "isolated: no importers, no imports"},
+        {"edited": "src/api.c", "expected_dependents": [], "expected_dependencies": ["src/core.c", "src/util.h"], "notes": "a leaf consumer: imported by nobody, imports two"}
+      ]
+    },
+    {
+      "project": "br_no_exports_gate",
+      "description": "helper.c has NO exports but IS imported by two files. The has_exports gate must suppress its dependents (advisory only fires for files that export a public surface).",
+      "files": [
+        {"path": "src/helper.c", "exports": [], "imports": []},
+        {"path": "src/one.c", "exports": ["one"], "imports": ["src/helper.c"]},
+        {"path": "src/two.c", "exports": ["two"], "imports": ["src/helper.c"]}
+      ],
+      "cases": [
+        {"edited": "src/helper.c", "expected_dependents": [], "expected_dependencies": [], "notes": "no exports -> gate suppresses dependents despite two importers"}
+      ]
+    },
+    {
+      "project": "br_hub",
+      "description": "shared.c is a hub imported by six files -> exercises the BR_ADVISORY_HUB_THRESHOLD 'hub' note in the formatter.",
+      "files": [
+        {"path": "src/shared.c", "exports": ["shared_api"], "imports": []},
+        {"path": "src/m1.c", "exports": ["m1"], "imports": ["src/shared.c"]},
+        {"path": "src/m2.c", "exports": ["m2"], "imports": ["src/shared.c"]},
+        {"path": "src/m3.c", "exports": ["m3"], "imports": ["src/shared.c"]},
+        {"path": "src/m4.c", "exports": ["m4"], "imports": ["src/shared.c"]},
+        {"path": "src/m5.c", "exports": ["m5"], "imports": ["src/shared.c"]},
+        {"path": "src/m6.c", "exports": ["m6"], "imports": ["src/shared.c"]}
+      ],
+      "cases": [
+        {"edited": "src/shared.c", "expected_dependents": ["src/m1.c", "src/m2.c", "src/m3.c", "src/m4.c", "src/m5.c", "src/m6.c"], "expected_dependencies": [], "expected_hub": true, "notes": "6 dependents -> hub advisory"}
+      ]
+    },
+    {
+      "project": "br_transitive",
+      "description": "Confirms the advisory is DIRECT-importers only (not transitive). db.c is imported by store.c; store.c is imported by app.c. Editing db.c must advise store.c ONLY, not app.c (app.c imports store.c, not db.c).",
+      "files": [
+        {"path": "src/db.c", "exports": ["db_open"], "imports": []},
+        {"path": "src/store.c", "exports": ["store_get"], "imports": ["src/db.c"]},
+        {"path": "src/app.c", "exports": ["app_main"], "imports": ["src/store.c"]}
+      ],
+      "cases": [
+        {"edited": "src/db.c", "expected_dependents": ["src/store.c"], "expected_dependencies": [], "notes": "direct importer only; app.c is transitive and must NOT appear"}
+      ]
+    }
+  ]
+}

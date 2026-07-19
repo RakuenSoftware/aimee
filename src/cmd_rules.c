@@ -8,6 +8,63 @@
 
 /* --- cmd_rules --- */
 
+static void cmd_rules_list(app_ctx_t *ctx, int argc, char **argv)
+{
+   char *json = kb_client_rules_list_json(256);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   cJSON *arr = resp ? cJSON_GetObjectItemCaseSensitive(resp, "rules") : NULL;
+   if (ctx->json_output)
+   {
+      cJSON *out = arr ? cJSON_DetachItemViaPointer(resp, arr) : cJSON_CreateArray();
+      emit_json_ctx(out, ctx->json_fields, ctx->response_profile);
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_rules_generate(app_ctx_t *ctx, int argc, char **argv)
+{
+   char *json = kb_client_rules_generate_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   cJSON *content = resp ? cJSON_GetObjectItemCaseSensitive(resp, "content") : NULL;
+   const char *md = cJSON_IsString(content) ? content->valuestring : "";
+   if (ctx->json_output)
+   {
+      cJSON *j = cJSON_CreateObject();
+      cJSON_AddStringToObject(j, "content", md);
+      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
+   }
+   else if (md[0])
+   {
+      printf("%s", md);
+   }
+   cJSON_Delete(resp);
+}
+
+static void cmd_rules_delete(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 1)
+      fatal("rules delete requires an id");
+   int id = atoi(argv[0]);
+   kb_client_rules_delete(id);
+   if (ctx->json_output)
+      emit_ok_ctx(ctx->json_fields, ctx->response_profile);
+}
+
+static void cmd_rules_review(app_ctx_t *ctx, int argc, char **argv)
+{
+   cmd_review_surface("rule", ctx, argc, argv);
+}
+
+static const subcmd_t cmd_rules_subs[] = {
+    {"list", "list rules", cmd_rules_list},
+    {"generate", "generate a rules digest", cmd_rules_generate},
+    {"delete", "delete a rule by id", cmd_rules_delete},
+    {"review", "review surfaced rules", cmd_rules_review},
+    {NULL, NULL, NULL},
+};
+
 void cmd_rules(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -17,55 +74,8 @@ void cmd_rules(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   if (strcmp(sub, "list") == 0)
-   {
-      char *json = kb_client_rules_list_json(256);
-      cJSON *resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-      cJSON *arr = resp ? cJSON_GetObjectItemCaseSensitive(resp, "rules") : NULL;
-      if (ctx->json_output)
-      {
-         cJSON *out = arr ? cJSON_DetachItemViaPointer(resp, arr) : cJSON_CreateArray();
-         emit_json_ctx(out, ctx->json_fields, ctx->response_profile);
-      }
-      cJSON_Delete(resp);
-   }
-   else if (strcmp(sub, "generate") == 0)
-   {
-      char *json = kb_client_rules_generate_json();
-      cJSON *resp = json ? cJSON_Parse(json) : NULL;
-      free(json);
-      cJSON *content = resp ? cJSON_GetObjectItemCaseSensitive(resp, "content") : NULL;
-      const char *md = cJSON_IsString(content) ? content->valuestring : "";
-      if (ctx->json_output)
-      {
-         cJSON *j = cJSON_CreateObject();
-         cJSON_AddStringToObject(j, "content", md);
-         emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-      }
-      else if (md[0])
-      {
-         printf("%s", md);
-      }
-      cJSON_Delete(resp);
-   }
-   else if (strcmp(sub, "delete") == 0)
-   {
-      if (argc < 1)
-         fatal("rules delete requires an id");
-      int id = atoi(argv[0]);
-      kb_client_rules_delete(id);
-      if (ctx->json_output)
-         emit_ok_ctx(ctx->json_fields, ctx->response_profile);
-   }
-   else if (strcmp(sub, "review") == 0)
-   {
-      cmd_review_surface("rule", ctx, argc, argv);
-   }
-   else
-   {
+   if (subcmd_dispatch(cmd_rules_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown rules subcommand: %s", sub);
-   }
 }
 
 /* --- cmd_feedback --- */

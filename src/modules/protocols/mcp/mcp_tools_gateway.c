@@ -1,16 +1,8 @@
 /* mcp_tools_gateway.c: MCP tool registrations for the ambient-presence gateway. */
 #include "mcp_tools_gateway.h"
+#include "mcp_tools.h"
 #include <cJSON.h>
 #include <string.h>
-
-static cJSON *build_tool(const char *name, const char *desc, cJSON *schema)
-{
-   cJSON *t = cJSON_CreateObject();
-   cJSON_AddStringToObject(t, "name", name);
-   cJSON_AddStringToObject(t, "description", desc);
-   cJSON_AddItemToObject(t, "inputSchema", schema);
-   return t;
-}
 
 void mcp_add_gateway_tools(cJSON *tools)
 {
@@ -31,7 +23,7 @@ void mcp_add_gateway_tools(cJSON *tools)
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
           tools,
-          build_tool(
+          mcp_tool_new(
               "send_message",
               "Send a text message to a delivery target (telegram:<chat_id>, ntfy:<topic>, "
               "webhook:<url>, or origin) without waiting for a reply. Use to deliver findings "
@@ -59,8 +51,8 @@ void mcp_add_gateway_tools(cJSON *tools)
       cJSON_AddItemToArray(req, cJSON_CreateString("question"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools,
-          build_tool("ask_user",
+          tools, mcp_tool_new(
+                     "ask_user",
                      "Present a question to the operator on the originating messaging channel. "
                      "Formats up to 4 numbered choices; an implicit 'Other (type your answer)' is "
                      "always appended. The agent's turn ends after delivery; the operator's next "

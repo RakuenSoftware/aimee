@@ -877,13 +877,6 @@ void presence_emit_turn_done(const char *session_id, const char *turn_id)
    presence_publish(session_id, PRESENCE_EV_TURN, "turn_done", d);
 }
 
-void presence_emit_busy(const char *session_id, const char *inflight_turn_id)
-{
-   char d[96];
-   snprintf(d, sizeof(d), "{\"turn_id\":\"%s\"}", inflight_turn_id ? inflight_turn_id : "");
-   presence_publish(session_id, PRESENCE_EV_TURN, "busy", d);
-}
-
 /* ====================================================================== */
 /* Outbound routing                                                       */
 /* ====================================================================== */

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "flag": "delegate_graph_context_enabled",
+  "description": "Deterministic validation corpus for graph-informed delegation (delegate_inject_graph_context, src/modules/delegates/delegate_prompt.c). It prepends a structural-context block built ONLY from the deterministic code graph (kb_client_index_blast_radius) — the callers/callees of files the prompt references. No LLM in the loop. Each fixture is a small code graph (shared with blast_radius_corpus.json); each case is a delegate prompt that references a file, plus the ground-truth structural neighbours the injected block must contain and the budget it must not exceed. Harness: load the fixture graph into an isolated temp schema, call delegate_inject_graph_context(prompt, cwd), assert the returned block contains every expected neighbour and stays within budget; fail-open (NULL) is correct only when there are no referenced indexed paths.",
+  "computation_notes": [
+    "The injected neighbours for a referenced file are its blast-radius dependents + dependencies (see blast_radius_corpus.json computation_notes: dependents gated on has_exports; dependencies are the file's imports).",
+    "FAIL-OPEN: NULL block is expected when the flag is off, the prompt references no indexed path, or the file has no structural edges. A case with expect_block=false asserts the fail-open path.",
+    "The block is bounded; assert length <= budget_chars (the configured assembly budget) so a hub file cannot blow the prompt."
+  ],
+  "pass_bar": "For every expect_block=true case the injected block contains ALL expected_neighbours and never exceeds budget_chars; every expect_block=false case returns no block (fail-open). 100% on both.",
+  "shared_graph": "Reuses the br_basic / br_transitive fixtures from blast_radius_corpus.json.",
+  "fixtures": [
+    {
+      "project": "dg_basic",
+      "files": [
+        {"path": "src/core.c", "exports": ["core_init", "core_run"], "imports": ["src/util.h"]},
+        {"path": "src/api.c", "exports": ["api_serve"], "imports": ["src/core.c", "src/util.h"]},
+        {"path": "src/cli.c", "exports": ["cli_main"], "imports": ["src/core.c"]},
+        {"path": "src/util.c", "exports": ["util_help"], "imports": []},
+        {"path": "src/isolated.c", "exports": ["iso"], "imports": []}
+      ],
+      "cases": [
+        {"id": "dg01", "prompt": "Refactor the retry logic in src/core.c to use exponential backoff.", "references": "src/core.c", "expect_block": true, "expected_neighbours": ["src/api.c", "src/cli.c", "src/util.h"], "notes": "dependents api.c/cli.c + dependency util.h"},
+        {"id": "dg02", "prompt": "Update src/isolated.c to fix the off-by-one.", "references": "src/isolated.c", "expect_block": false, "notes": "no structural edges -> fail-open, no block"},
+        {"id": "dg03", "prompt": "Add a health endpoint (no file referenced yet).", "references": null, "expect_block": false, "notes": "no indexed path referenced -> fail-open"}
+      ]
+    },
+    {
+      "project": "dg_transitive",
+      "files": [
+        {"path": "src/db.c", "exports": ["db_open"], "imports": []},
+        {"path": "src/store.c", "exports": ["store_get"], "imports": ["src/db.c"]},
+        {"path": "src/app.c", "exports": ["app_main"], "imports": ["src/store.c"]}
+      ],
+      "cases": [
+        {"id": "dg04", "prompt": "Change the connection pooling in src/db.c.", "references": "src/db.c", "expect_block": true, "expected_neighbours": ["src/store.c"], "must_not_contain": ["src/app.c"], "notes": "direct importer store.c only; app.c is transitive and must NOT be injected"}
+      ]
+    }
+  ]
+}

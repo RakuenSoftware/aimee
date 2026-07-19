@@ -244,10 +244,7 @@ void cmd_autopilot(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
-      fatal("autopilot: could not initialize DB1");
+   cmd_require_db1("autopilot: could not initialize DB1");
 
    if (!is_subcmd)
    {

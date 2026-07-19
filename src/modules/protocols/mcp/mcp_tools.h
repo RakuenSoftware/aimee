@@ -4,6 +4,20 @@
 #include "cJSON.h"
 #include <stddef.h>
 
+/* Build one MCP tool descriptor object: {name, description, inputSchema:schema}.
+ * Takes ownership of `schema` (added to the returned object). The shared builder
+ * for every mcp_*_tools.c source — the tool wire shape lives here, once. Inline
+ * so a minimal TU (e.g. mcp_tools_gateway.o in a unit test) needs no extra link
+ * dependency, matching the json_fluent.h leaf-helper pattern. */
+static inline cJSON *mcp_tool_new(const char *name, const char *desc, cJSON *schema)
+{
+   cJSON *t = cJSON_CreateObject();
+   cJSON_AddStringToObject(t, "name", name);
+   cJSON_AddStringToObject(t, "description", desc);
+   cJSON_AddItemToObject(t, "inputSchema", schema);
+   return t;
+}
+
 /* Build the complete MCP tools list (core + git tools).
  * Returns a cJSON array suitable for tools/list responses. */
 cJSON *mcp_build_tools_list(void);

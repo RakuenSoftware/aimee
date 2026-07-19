@@ -21,23 +21,3 @@ fact_gate_verdict_t memory_fact_gate_check(memory_node_kind_t head_kind, const c
       return FACT_GATE_REJECT_KIND;
    return FACT_GATE_ACCEPT;
 }
-
-const char *fact_gate_verdict_to_text(fact_gate_verdict_t v)
-{
-   switch (v)
-   {
-   case FACT_GATE_ACCEPT:
-      return "accept";
-   case FACT_GATE_REJECT_KIND:
-      return "reject_kind";
-   case FACT_GATE_NOVEL:
-      return "novel";
-   case FACT_GATE_BADARG:
-      return "bad_argument";
-   case FACT_GATE_DEFER:
-      return "defer";
-   case FACT_GATE_REJECT_SENSITIVE:
-      return "reject_sensitive";
-   }
-   return "unknown";
-}

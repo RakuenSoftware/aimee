@@ -1043,10 +1043,21 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
        * a full 4-seat panel on a diff the panel already rejected. Observed
        * live: whole review rounds burned on byte-identical artifacts. Loop so
        * the retry re-dispatches (a $random re-roll picks a different agent). */
-      if (pre_head[0] && commit[0] && strcmp(pre_head, commit) == 0)
+      if (pre_head[0] && commit[0] && strcmp(pre_head, commit) == 0 && feedback[0])
       {
+         /* A no-op is a failed attempt only on a roundtable on_fail RETRY (feedback
+          * present): re-advancing the identical, already-rejected diff would re-run
+          * the 4-seat panel on a byte-identical artifact forever. On the FIRST pass
+          * (no feedback) a no-op instead means a PRIOR implement iteration already
+          * committed the work and advanced HEAD, but its mechanical verify failed
+          * transiently (e.g. the sandbox could not acquire a container) and looped
+          * back; this iteration's delegate correctly finds nothing left to do. Do
+          * NOT loop on that — fall through to the mandatory verify below so a
+          * now-passing committed tree can advance instead of spinning to the attempt
+          * cap. A genuine no-op with no committed work still fails verify there and
+          * loops, so this never advances unverified work. */
          db1_lifecycle_event_add(wfe_ctx_work_item(ctx), node->id, "loop", "engine",
-                                 "impl no-op: delegate made no edits", "", cost);
+                                 "impl no-op: delegate made no edits (post-review)", "", cost);
          return with_cost(wfe_step_looped(), cost);
       }
    }

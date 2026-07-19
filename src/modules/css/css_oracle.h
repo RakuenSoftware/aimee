@@ -56,9 +56,6 @@ extern "C"
 
    void css_oracle_result_free(css_oracle_result_t *r);
 
-   /* The limitation banner text (also reachable via result->limitation). */
-   const char *css_oracle_limitation_banner(void);
-
 #ifdef __cplusplus
 }
 #endif

@@ -68,15 +68,21 @@ const input: React.CSSProperties = {
 export default function Settings() {
   const [values, setValues] = useState<Record<string, Val>>({});
   const [draft, setDraft] = useState<Record<string, Val>>({});
+  // Surface group per NON-runtime key ("deploy" | "advanced" | "dev"), as advertised
+  // by config.show. Runtime keys are absent from this map. Drives the default-hidden
+  // "advanced" surface so the everyday page shows only the operator-facing options.
+  const [fieldGroups, setFieldGroups] = useState<Record<string, string>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
 
   const refresh = useCallback(() => {
-    getJSON<{ config?: Record<string, Val> }>("/api/config")
+    getJSON<{ config?: Record<string, Val>; groups?: Record<string, string> }>("/api/config")
       .then((d) => {
         setValues(d.config || {});
         setDraft(d.config || {});
+        setFieldGroups(d.groups || {});
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -109,6 +115,9 @@ export default function Settings() {
     const q = filter.trim().toLowerCase();
     const keys = Object.keys(values)
       .filter((k) => {
+        // Everyday surface: hide deploy/advanced/dev keys unless the operator opts in.
+        // A search term reveals matching off-surface keys regardless (so they stay findable).
+        if (!showAdvanced && !q && fieldGroups[k]) return false;
         if (!q) return true;
         const cat = category(k);
         // Match the key, its label, its help line, and its section (name + intro)
@@ -125,19 +134,41 @@ export default function Settings() {
     const byCat: Record<string, string[]> = {};
     for (const k of keys) (byCat[category(k)] ||= []).push(k);
     return Object.entries(byCat).sort(([a], [b]) => a.localeCompare(b));
-  }, [values, filter]);
+  }, [values, filter, fieldGroups, showAdvanced]);
+
+  // How many keys are currently hidden as off-surface (for the toggle label).
+  const hiddenCount = useMemo(
+    () => (showAdvanced ? 0 : Object.keys(values).filter((k) => fieldGroups[k]).length),
+    [values, fieldGroups, showAdvanced],
+  );
+  const runtimeCount = useMemo(
+    () => Object.keys(values).filter((k) => !fieldGroups[k]).length,
+    [values, fieldGroups],
+  );
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 18 }}>Settings</strong>
-        <Badge label={`${Object.keys(values).length}`} variant="neutral" />
+        <Badge
+          label={showAdvanced ? `${Object.keys(values).length}` : `${runtimeCount}`}
+          variant="neutral"
+        />
         <input
           placeholder="filter settings…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           style={{ ...input, fontFamily: "system-ui", minWidth: 220 }}
         />
+        {(showAdvanced || hiddenCount > 0) && (
+          <Button
+            size="sm"
+            onClick={() => setShowAdvanced((v) => !v)}
+            title="Deploy-time, advanced-tuning, and dev-only options are hidden by default. They are still settable — this reveals them."
+          >
+            {showAdvanced ? "Hide advanced" : `Show advanced (${hiddenCount})`}
+          </Button>
+        )}
         <Button size="sm" onClick={refresh}>
           Reload
         </Button>
@@ -165,7 +196,9 @@ export default function Settings() {
       </div>
       <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
         Changes persist to <code>aimee.yaml</code> and take effect on the next turn, unless a row is
-        marked <em>restart</em>. Most options are off by default; each is described below.
+        marked <em>restart</em>. The everyday runtime options are shown by default; deploy-time,
+        advanced-tuning, and dev-only options are hidden behind <em>Show advanced</em> (still
+        settable, and any of them surfaces when you search). Each option is described below.
       </p>
 
       {!loaded && <div style={{ color: "#888" }}>loading…</div>}
@@ -188,6 +221,7 @@ export default function Settings() {
                   fieldKey={k}
                   value={draft[k]}
                   dirty={draft[k] !== values[k]}
+                  group={fieldGroups[k]}
                   onChange={(v) => setDraft((p) => ({ ...p, [k]: v }))}
                   onSave={() => save(k)}
                   onReset={() => setDraft((p) => ({ ...p, [k]: values[k] }))}
@@ -205,6 +239,7 @@ function SettingRow({
   fieldKey,
   value,
   dirty,
+  group,
   onChange,
   onSave,
   onReset,
@@ -212,18 +247,40 @@ function SettingRow({
   fieldKey: string;
   value: Val;
   dirty: boolean;
+  group?: string;
   onChange: (v: Val) => void;
   onSave: () => void;
   onReset: () => void;
 }) {
   const help = FIELD_HELP[fieldKey];
   const needsRestart = RESTART_KEYS.has(fieldKey);
+  // Off-surface classification badge (deploy/advanced/dev); runtime keys carry none.
+  const groupTitle: Record<string, string> = {
+    deploy: "Deploy-time: set once when standing up the aimee-llm container; not tuned day-to-day.",
+    advanced: "Advanced tuning: has a sensible default; rarely changed.",
+    dev: "Dev-only: internal QA/dogfood knob.",
+  };
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
       <div style={{ flex: "1 1 300px", minWidth: 220 }}>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} title={fieldKey}>
           {humanize(fieldKey)}
           <span style={{ color: "#aaa", fontSize: 11 }}>{fieldKey}</span>
+          {group && (
+            <span
+              style={{
+                fontSize: 10,
+                color: "#555",
+                background: "#eef0f4",
+                border: "1px solid #d5d9e0",
+                borderRadius: 4,
+                padding: "0 5px",
+              }}
+              title={groupTitle[group] || group}
+            >
+              {group}
+            </span>
+          )}
           {needsRestart && (
             <span
               style={{

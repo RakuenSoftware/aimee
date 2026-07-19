@@ -33,9 +33,6 @@ extern "C"
    int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
                                 size_t serial_len);
 
-   /* 1 once server_tls_init has succeeded, else 0. */
-   int server_tls_enabled(void);
-
    /* Run the TLS handshake on an accepted fd. Returns a new SSL* (caller owns it:
     * SSL_shutdown + SSL_free) on success, or NULL on handshake failure. */
    SSL *server_tls_accept(int fd);

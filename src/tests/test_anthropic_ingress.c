@@ -558,6 +558,9 @@ static void test_emit_message_as_sse_replays_text_only(void)
    assert(strstr(cap.data[2], "\"hello\"") != NULL);
    /* message_delta carries stop_reason verbatim from parsed (end_turn). */
    assert(strstr(cap.data[4], "\"stop_reason\":\"end_turn\"") != NULL);
+   /* stop_sequence is null (not "") when no stop sequence triggered — matches
+    * the Anthropic API and the live streaming path (xlate_finish). */
+   assert(strstr(cap.data[4], "\"stop_sequence\":null") != NULL);
    /* message_start carries input_tokens = 17, output_tokens not yet (it's
     * in message_delta). */
    assert(strstr(cap.data[0], "\"input_tokens\":17") != NULL);

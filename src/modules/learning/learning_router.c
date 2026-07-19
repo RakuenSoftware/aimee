@@ -4,7 +4,7 @@
 #include "db1.h"
 #include "db2/artifacts.h"
 #include "db2/collab_rules.h"
-#include "db2/learning.h"
+#include "db2/db2_learning.h"
 #include "dogfood.h"
 #endif
 #include "cJSON.h"

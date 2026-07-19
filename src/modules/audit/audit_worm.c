@@ -122,14 +122,6 @@ static int worm_open_locked_default(void)
    return worm_open_locked(path);
 }
 
-int audit_worm_init(void)
-{
-   pthread_mutex_lock(&g_worm_mu);
-   int rc = worm_open_locked_default();
-   pthread_mutex_unlock(&g_worm_mu);
-   return rc;
-}
-
 int audit_worm_init_at(const char *db_path)
 {
    if (!db_path || !db_path[0])
