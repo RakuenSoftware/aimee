@@ -22,7 +22,7 @@
 #include "agent_config.h"
 
 /* The sentinel a seat's model carries to mean "any role-capable agent". Kept in
- * sync with the GUI seat editor and wfe_delegate_resolve.c's delegate sentinel. */
+ * sync with the GUI seat editor. */
 #define RT_SEAT_RANDOM "$random"
 
 typedef enum

@@ -129,7 +129,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-failure-taxonomy \
                $(TESTPREFIX)/unit-test-wfe-delegate-seam \
                $(TESTPREFIX)/unit-test-wfe-scheduler \
-               $(TESTPREFIX)/unit-test-wfe-random-delegate \
                $(TESTPREFIX)/unit-test-wfe-gate-reject \
                $(TESTPREFIX)/unit-test-wfe-gate-apply \
                $(TESTPREFIX)/unit-test-wfe-submitter \
@@ -1715,10 +1714,6 @@ $(TESTPREFIX)/unit-test-wfe-scheduler: $(OBJDIR)/tests/test_wfe_scheduler.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-wfe-random-delegate: $(OBJDIR)/tests/test_wfe_random_delegate.o \
-                                    $(OBJDIR)/server/wfe_delegate_resolve.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # Human-gate reject routing (retry_on_reject): pure def-query, no DB.
 $(TESTPREFIX)/unit-test-wfe-gate-reject: $(OBJDIR)/tests/test_wfe_gate_reject.o \
