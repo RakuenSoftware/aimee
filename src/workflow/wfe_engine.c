@@ -356,11 +356,31 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       const char *pr = pause_name(r.pause_reason);
       if (!pr[0])
          pr = "unspecified";
-      WFE_CKW(db1_work_item_set_pause(work_item_id, pr, node->id));
-      db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", pr, r.content_hash,
-                              r.cost_usd);
-      out->pause_reason = r.pause_reason;
-      snprintf(out->next_stage, sizeof out->next_stage, "%s", node->id);
+      /* An AUTONOMOUS run has no operator to satisfy a pending_human wait, so a
+       * block parking pending_human at anything OTHER than a real human gate
+       * (gate.human) is a terminal dead-end — a failed slice, an unrecoverable
+       * escalation. Parking would leave the run 'active' forever (the stale-park
+       * reaper never reaps a human wait), piling up zombie runs. Terminate it
+       * (abandoned) with an audit trail instead. A real gate.human still parks (its
+       * whole purpose is the operator decision); interactive runs are unchanged. */
+      if (r.pause_reason == WFE_PAUSE_PENDING_HUMAN && strcmp(wi.mode, "autonomous") == 0 &&
+          node->block != WFE_BLK_GATE_HUMAN)
+      {
+         WFE_CKW(db1_work_item_set_terminal(work_item_id, "abandoned"));
+         db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine",
+                                 "abandoned: autonomous dead-end (no human to escalate to)", "",
+                                 r.cost_usd);
+         out->terminal = 1;
+         snprintf(out->state, sizeof out->state, "abandoned");
+      }
+      else
+      {
+         WFE_CKW(db1_work_item_set_pause(work_item_id, pr, node->id));
+         db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", pr, r.content_hash,
+                                 r.cost_usd);
+         out->pause_reason = r.pause_reason;
+         snprintf(out->next_stage, sizeof out->next_stage, "%s", node->id);
+      }
    }
    else if (r.status == WFE_STEP_FAILED)
    {
@@ -454,7 +474,25 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
                   wfe_def_free(def);
                   return 0;
                }
-               /* WFE_ON_MAX_HUMAN (default): pause for a human. */
+               /* WFE_ON_MAX_HUMAN (default): pause for a human — but an AUTONOMOUS
+                * run has no human to escalate to, so an exhausted loop cap is a
+                * terminal dead-end, not a wait. Parking pending_human would leave it
+                * 'active' forever (the reaper never reaps a human wait) — the very
+                * zombie-accumulation this avoids. Terminate it (abandoned) with an
+                * audit trail; an interactive run still parks for its operator. */
+               if (strcmp(wi.mode, "autonomous") == 0)
+               {
+                  WFE_CKW(db1_work_item_set_terminal(work_item_id, "abandoned"));
+                  db1_lifecycle_event_add(
+                      work_item_id, node->id, "terminal", "engine",
+                      "abandoned: max_iters reached (autonomous, no human to escalate to)", "",
+                      r.cost_usd);
+                  out->terminal = 1;
+                  snprintf(out->state, sizeof out->state, "abandoned");
+                  db1_lifecycle_txn_commit();
+                  wfe_def_free(def);
+                  return 0;
+               }
                WFE_CKW(db1_work_item_set_pause(work_item_id, "pending_human", next));
                db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "max_iters", "",
                                        r.cost_usd);

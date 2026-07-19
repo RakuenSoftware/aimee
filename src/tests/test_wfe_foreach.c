@@ -6,7 +6,8 @@
  *   - no children + spawner returns 0    -> advance (no packets, nothing to do)
  *   - no children + no spawner           -> park (fail closed)
  *   - all children accepted              -> advance (every slice merged)
- *   - a child rejected or abandoned      -> park pending_human (a slice will not merge)
+ *   - a child rejected or abandoned      -> autonomous: abandon (dead-end, no human);
+ *                                           interactive: park pending_human
  */
 #include "wfe_test_home.h"
 #include <assert.h>
@@ -122,11 +123,12 @@ int main(void)
    run_fe("r/zero", "p/zero", &wi, NULL);
    assert(strcmp(wi.state, "accepted") == 0);
 
-   /* (3) no spawn provider + no children -> fail closed (park). */
+   /* (3) no spawn provider + no children -> fail closed. An AUTONOMOUS run has no
+    * human to escalate the fail-closed park to, so it terminates (abandoned)
+    * rather than lingering 'active' at pending_human forever. */
    wfe_set_foreach_provider(NULL);
    run_fe("r/none", "p/none", &wi, NULL);
-   assert(strcmp(wi.state, "active") == 0);
-   assert(strcmp(wi.pause_reason, "pending_human") == 0);
+   assert(strcmp(wi.state, "abandoned") == 0);
 
    /* (4) all children accepted BEFORE foreach runs -> advance (every slice merged).
     * Pre-seed children so the executor sees total>0 and never calls spawn. */
@@ -151,8 +153,10 @@ int main(void)
       assert(g_spawned == 0); /* aggregation used the DB, not a re-spawn */
    }
 
-   /* (5)+(6) a child that reached a terminal state OTHER than accepted (rejected, and
-    * separately abandoned) -> the slice will never merge -> park for a human. */
+   /* (5)+(6) a child that reached a terminal state OTHER than accepted (rejected,
+    * and separately abandoned) -> the slice will never merge. An AUTONOMOUS run
+    * has no human to resolve it, so the parent terminates (abandoned); an
+    * INTERACTIVE run parks pending_human for its operator (case 6b below). */
    {
       const char *term[] = {"rejected", "abandoned"};
       const char *repos[] = {"r/rej", "r/aband"};
@@ -170,9 +174,26 @@ int main(void)
          assert(db1_work_item_set_terminal(cid, term[c]) == 0);
          assert(wfe_engine_run(id, err, sizeof err) == 0);
          assert(db1_work_item_get(id, &wi) == 1);
-         assert(strcmp(wi.state, "active") == 0);
-         assert(strcmp(wi.pause_reason, "pending_human") == 0);
+         assert(strcmp(wi.state, "abandoned") == 0);
       }
+   }
+
+   /* (6b) the same failed-slice case but INTERACTIVE: a human CAN resolve it, so
+    * the parent parks pending_human (the autonomous-terminate rule must not fire). */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("fe", "r/rej-i", "p/rej-i", "interactive", id, err, sizeof err) ==
+             0);
+      char cid[80];
+      snprintf(cid, sizeof cid, "%s.k0", id);
+      assert(db1_work_item_create(cid, "r/rej-i", "fp/rej-i/0", "slice", "v1", "impl",
+                                  "interactive") == 0);
+      assert(db1_work_item_set_parent(cid, id) == 0);
+      assert(db1_work_item_set_terminal(cid, "rejected") == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
    }
 
    /* (7) GAP-2: a foreach parent parked slices_running while its children run is
@@ -221,9 +242,9 @@ int main(void)
       assert(rd == 1); /* exactly one redrive: the all-merged transition */
    }
 
-   /* (7b) a slices_running parent CONVERTS to a pending_human park the moment a
-    * slice fails: the driveable wait becomes a human gate so an operator resolves
-    * the dead slice. Exercises the slices_running arm's failed>0 fall-through. */
+   /* (7b) a slices_running parent TERMINATES (abandoned) the moment a slice fails
+    * on an AUTONOMOUS run: the driveable wait resolves to a dead-end with no human
+    * to escalate to. Exercises the slices_running arm's failed>0 fall-through. */
    {
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("fe", "r/g2x", "p/g2x", "autonomous", id, err, sizeof err) == 0);
@@ -242,17 +263,16 @@ int main(void)
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.pause_reason, "slices_running") == 0);
-      /* one slice fails -> the next sweep converts the wait to a human park. */
+      /* one slice fails -> the next sweep abandons the run (autonomous dead-end). */
       assert(db1_work_item_set_terminal(c0, "rejected") == 0);
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.state, "active") == 0);
-      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      assert(strcmp(wi.state, "abandoned") == 0);
    }
 
-   /* (8) GAP-2 guard: a foreach parent with a FAILED child stays parked for a
-    * human (a slice that will not merge). The auto-resume must NOT fire while any
-    * child is non-accepted. */
+   /* (8) GAP-2 guard: a foreach parent with a FAILED child does NOT auto-resume
+    * while any child is non-accepted. On an AUTONOMOUS run that dead-end
+    * terminates (abandoned) rather than parking for a human. */
    {
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("fe", "r/g2f", "p/g2f", "autonomous", id, err, sizeof err) == 0);
@@ -270,12 +290,11 @@ int main(void)
 
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.state, "active") == 0);
-      assert(strcmp(wi.pause_reason, "pending_human") == 0);
-      /* a further sweep must not auto-clear it either (rejected slice persists). */
+      assert(strcmp(wi.state, "abandoned") == 0);
+      /* a further sweep must not resurrect a terminal run. */
       assert(wfe_autonomy_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
-      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+      assert(strcmp(wi.state, "abandoned") == 0);
    }
 
    /* (9) GAP-1 give-up bound: a ci_pending park whose poll budget is exhausted
