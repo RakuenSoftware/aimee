@@ -379,6 +379,198 @@ static void cmd_config_dispositions_print_json(const config_t *cfg)
    free(json);
 }
 
+static void cmd_config_show(app_ctx_t *ctx, int argc, char **argv)
+{
+   config_t cfg;
+   if (config_load(&cfg) < 0)
+   {
+      fprintf(stderr, "Failed to load config\n");
+      return;
+   }
+   if (access(config_default_path(), F_OK) != 0)
+      config_save(&cfg); /* ensure file exists only when missing */
+
+   /* Read and print the file directly for faithful JSON output */
+   FILE *fp = fopen(config_default_path(), "r");
+   if (!fp)
+   {
+      fprintf(stderr, "Cannot read %s\n", config_default_path());
+      return;
+   }
+   char buf[4096];
+   size_t n;
+   while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
+      fwrite(buf, 1, n, stdout);
+   fclose(fp);
+   (void)ctx;
+   return;
+}
+
+static void cmd_config_dispositions(app_ctx_t *ctx, int argc, char **argv)
+{
+   int json_output = 0;
+   for (int i = 1; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--json") == 0)
+         json_output = 1;
+      else
+      {
+         fprintf(stderr, "Usage: aimee config dispositions [--json]\n");
+         return;
+      }
+   }
+
+   config_t cfg;
+   if (config_load(&cfg) < 0)
+   {
+      fprintf(stderr, "Failed to load config\n");
+      return;
+   }
+
+   if (json_output)
+      cmd_config_dispositions_print_json(&cfg);
+   else
+      cmd_config_dispositions_print_text(&cfg);
+   (void)ctx;
+   return;
+}
+
+static void cmd_config_deploy_env(app_ctx_t *ctx, int argc, char **argv)
+{
+   /* Emit the compose env for the page-2 backend record. Sourced by the deploy
+    * wrapper: `eval "$(aimee config deploy-env)" && docker compose up -d`. */
+   config_t cfg;
+   if (config_load(&cfg) < 0)
+   {
+      fprintf(stderr, "Failed to load config\n");
+      return;
+   }
+   char env[2048];
+   config_emit_deploy_env(&cfg, env, sizeof(env));
+   fputs(env, stdout);
+   (void)ctx;
+   return;
+}
+
+static void cmd_config_get(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 2)
+   {
+      fprintf(stderr, "Usage: aimee config get <key>\n");
+      return;
+   }
+   const char *key = argv[1];
+   const config_field_t *f = config_field_lookup(key);
+   if (!f)
+   {
+      fprintf(stderr, "Unknown config key: %s\n", key);
+      return;
+   }
+
+   config_t cfg;
+   if (config_load(&cfg) < 0)
+   {
+      fprintf(stderr, "Failed to load config\n");
+      return;
+   }
+
+   if (f->is_bool || f->type == CFG_BOOL)
+   {
+      int val = *(int *)((char *)&cfg + f->offset);
+      printf("%s\n", val ? "true" : "false");
+   }
+   else if (f->type == CFG_INT)
+   {
+      int val = *(int *)((char *)&cfg + f->offset);
+      printf("%d\n", val);
+   }
+   else if (f->type == CFG_FLOAT)
+   {
+      double val = *(double *)((char *)&cfg + f->offset);
+      printf("%g\n", val);
+   }
+   else
+   {
+      const char *val = (const char *)&cfg + f->offset;
+      printf("%s\n", val[0] ? val : "(unset)");
+   }
+   (void)ctx;
+   return;
+}
+
+static void cmd_config_set(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 3)
+   {
+      fprintf(stderr, "Usage: aimee config set <key> <value>\n");
+      return;
+   }
+   const char *key = argv[1];
+   const char *value = argv[2];
+   const config_field_t *f = config_field_lookup(key);
+   if (!f)
+   {
+      fprintf(stderr, "Unknown config key: %s\n", key);
+      return;
+   }
+
+   config_t cfg;
+   if (config_load(&cfg) < 0)
+   {
+      fprintf(stderr, "Failed to load config\n");
+      return;
+   }
+
+   if (f->is_bool || f->type == CFG_BOOL)
+   {
+      int *ptr = (int *)((char *)&cfg + f->offset);
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0)
+         *ptr = 1;
+      else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0)
+         *ptr = 0;
+      else
+      {
+         fprintf(stderr, "Invalid boolean value: %s (use true/false)\n", value);
+         return;
+      }
+   }
+   else if (f->type == CFG_INT)
+   {
+      int *ptr = (int *)((char *)&cfg + f->offset);
+      *ptr = atoi(value);
+   }
+   else if (f->type == CFG_FLOAT)
+   {
+      double *ptr = (double *)((char *)&cfg + f->offset);
+      *ptr = atof(value);
+   }
+   else
+   {
+      char *ptr = (char *)&cfg + f->offset;
+      snprintf(ptr, f->size, "%s", value);
+   }
+
+   if (config_save(&cfg) < 0)
+   {
+      fprintf(stderr, "Failed to save config\n");
+      return;
+   }
+   fprintf(stderr, "%s = %s\n", key, value);
+
+   /* Provider is now config-only, no manifest to update */
+   (void)ctx;
+   return;
+}
+
+static const subcmd_t cmd_config_subs[] = {
+    {"show", "show all config as JSON", cmd_config_show},
+    {"dispositions", "show effective disposition traits", cmd_config_dispositions},
+    {"deploy-env", "emit the compose env for the backend record", cmd_config_deploy_env},
+    {"get", "get a config value", cmd_config_get},
+    {"set", "set a config value", cmd_config_set},
+    {NULL, NULL, NULL},
+};
+
 void cmd_config(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -400,191 +592,9 @@ void cmd_config(app_ctx_t *ctx, int argc, char **argv)
 
    const char *sub = argv[0];
 
-   if (strcmp(sub, "show") == 0)
-   {
-      config_t cfg;
-      if (config_load(&cfg) < 0)
-      {
-         fprintf(stderr, "Failed to load config\n");
-         return;
-      }
-      if (access(config_default_path(), F_OK) != 0)
-         config_save(&cfg); /* ensure file exists only when missing */
-
-      /* Read and print the file directly for faithful JSON output */
-      FILE *fp = fopen(config_default_path(), "r");
-      if (!fp)
-      {
-         fprintf(stderr, "Cannot read %s\n", config_default_path());
-         return;
-      }
-      char buf[4096];
-      size_t n;
-      while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
-         fwrite(buf, 1, n, stdout);
-      fclose(fp);
-      (void)ctx;
-      return;
-   }
-
-   if (strcmp(sub, "dispositions") == 0)
-   {
-      int json_output = 0;
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--json") == 0)
-            json_output = 1;
-         else
-         {
-            fprintf(stderr, "Usage: aimee config dispositions [--json]\n");
-            return;
-         }
-      }
-
-      config_t cfg;
-      if (config_load(&cfg) < 0)
-      {
-         fprintf(stderr, "Failed to load config\n");
-         return;
-      }
-
-      if (json_output)
-         cmd_config_dispositions_print_json(&cfg);
-      else
-         cmd_config_dispositions_print_text(&cfg);
-      (void)ctx;
-      return;
-   }
-
-   if (strcmp(sub, "deploy-env") == 0)
-   {
-      /* Emit the compose env for the page-2 backend record. Sourced by the deploy
-       * wrapper: `eval "$(aimee config deploy-env)" && docker compose up -d`. */
-      config_t cfg;
-      if (config_load(&cfg) < 0)
-      {
-         fprintf(stderr, "Failed to load config\n");
-         return;
-      }
-      char env[2048];
-      config_emit_deploy_env(&cfg, env, sizeof(env));
-      fputs(env, stdout);
-      (void)ctx;
-      return;
-   }
-
-   if (strcmp(sub, "get") == 0)
-   {
-      if (argc < 2)
-      {
-         fprintf(stderr, "Usage: aimee config get <key>\n");
-         return;
-      }
-      const char *key = argv[1];
-      const config_field_t *f = config_field_lookup(key);
-      if (!f)
-      {
-         fprintf(stderr, "Unknown config key: %s\n", key);
-         return;
-      }
-
-      config_t cfg;
-      if (config_load(&cfg) < 0)
-      {
-         fprintf(stderr, "Failed to load config\n");
-         return;
-      }
-
-      if (f->is_bool || f->type == CFG_BOOL)
-      {
-         int val = *(int *)((char *)&cfg + f->offset);
-         printf("%s\n", val ? "true" : "false");
-      }
-      else if (f->type == CFG_INT)
-      {
-         int val = *(int *)((char *)&cfg + f->offset);
-         printf("%d\n", val);
-      }
-      else if (f->type == CFG_FLOAT)
-      {
-         double val = *(double *)((char *)&cfg + f->offset);
-         printf("%g\n", val);
-      }
-      else
-      {
-         const char *val = (const char *)&cfg + f->offset;
-         printf("%s\n", val[0] ? val : "(unset)");
-      }
-      (void)ctx;
-      return;
-   }
-
-   if (strcmp(sub, "set") == 0)
-   {
-      if (argc < 3)
-      {
-         fprintf(stderr, "Usage: aimee config set <key> <value>\n");
-         return;
-      }
-      const char *key = argv[1];
-      const char *value = argv[2];
-      const config_field_t *f = config_field_lookup(key);
-      if (!f)
-      {
-         fprintf(stderr, "Unknown config key: %s\n", key);
-         return;
-      }
-
-      config_t cfg;
-      if (config_load(&cfg) < 0)
-      {
-         fprintf(stderr, "Failed to load config\n");
-         return;
-      }
-
-      if (f->is_bool || f->type == CFG_BOOL)
-      {
-         int *ptr = (int *)((char *)&cfg + f->offset);
-         if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0)
-            *ptr = 1;
-         else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0)
-            *ptr = 0;
-         else
-         {
-            fprintf(stderr, "Invalid boolean value: %s (use true/false)\n", value);
-            return;
-         }
-      }
-      else if (f->type == CFG_INT)
-      {
-         int *ptr = (int *)((char *)&cfg + f->offset);
-         *ptr = atoi(value);
-      }
-      else if (f->type == CFG_FLOAT)
-      {
-         double *ptr = (double *)((char *)&cfg + f->offset);
-         *ptr = atof(value);
-      }
-      else
-      {
-         char *ptr = (char *)&cfg + f->offset;
-         snprintf(ptr, f->size, "%s", value);
-      }
-
-      if (config_save(&cfg) < 0)
-      {
-         fprintf(stderr, "Failed to save config\n");
-         return;
-      }
-      fprintf(stderr, "%s = %s\n", key, value);
-
-      /* Provider is now config-only, no manifest to update */
-      (void)ctx;
-      return;
-   }
-
-   fprintf(stderr, "Unknown subcommand: %s\nUsage: aimee config <show|get|set|dispositions>\n",
-           sub);
+   if (subcmd_dispatch(cmd_config_subs, sub, ctx, argc, argv) != 0)
+      fprintf(stderr, "Unknown subcommand: %s\nUsage: aimee config <show|get|set|dispositions>\n",
+              sub);
 }
 
 /* --- db subcmds (moved from cmd_core.c) --- */
