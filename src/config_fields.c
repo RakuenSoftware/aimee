@@ -162,7 +162,6 @@ const config_field_t config_fields[] = {
      CFG_FLOAT},
     {"autonomous", offsetof(config_t, autonomous), sizeof(int), 1, CFG_BOOL},
     {"cross_verify", offsetof(config_t, cross_verify), sizeof(int), 1, CFG_BOOL},
-    {"ecomode", offsetof(config_t, ecomode), sizeof(int), 1, CFG_BOOL},
     {"max_iterations", offsetof(config_t, max_iterations), sizeof(int), 0, CFG_INT},
     {"max_iterations_delegate", offsetof(config_t, max_iterations_delegate), sizeof(int), 0,
      CFG_INT},

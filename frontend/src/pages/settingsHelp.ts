@@ -109,7 +109,6 @@ export const FIELD_HELP: Record<string, string> = {
   llm_synth_endpoint: "Endpoint URL for an external synthesizer.",
   llm_synth_model: "Model name the synthesizer serves.",
 
-  ecomode: "Always route to the cheapest capable agent instead of the default one. Off by default.",
   delegate_graph_context_enabled:
     "Prepend the callers and dependencies of the files a delegate task mentions to its prompt. Advisory, off by default.",
 

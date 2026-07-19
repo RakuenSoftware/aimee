@@ -1145,10 +1145,6 @@ int config_save(const config_t *cfg)
    if (cfg->delegate_prompt_tier[0])
       cJSON_AddStringToObject(root, "delegate_prompt_tier", cfg->delegate_prompt_tier);
 
-   /* Ecomode (only save when explicitly enabled) */
-   if (cfg->ecomode)
-      cJSON_AddBoolToObject(root, "ecomode", 1);
-
    /* Rewind settings (only save non-default values) */
    if (cfg->rewind_auto_snapshot)
    {
