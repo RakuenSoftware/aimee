@@ -1119,28 +1119,42 @@ static void webchat_status(void)
    free(out);
 }
 
+static void webchat_enable_cmd(app_ctx_t *ctx, int argc, char **argv)
+{
+   webchat_enable();
+}
+
+static void webchat_disable_cmd(app_ctx_t *ctx, int argc, char **argv)
+{
+   webchat_disable();
+}
+
+static void webchat_status_cmd(app_ctx_t *ctx, int argc, char **argv)
+{
+   webchat_status();
+}
+
+static const subcmd_t cmd_webchat_subs[] = {
+    {"enable", "enable webchat", webchat_enable_cmd},
+    {"disable", "disable webchat", webchat_disable_cmd},
+    {"status", "show webchat status", webchat_status_cmd},
+    {NULL, NULL, NULL},
+};
+
 void cmd_webchat(app_ctx_t *ctx, int argc, char **argv)
 {
-   (void)ctx;
-
-   if (argc >= 1 && strcmp(argv[0], "enable") == 0)
+   const char *sub = argc > 0 ? argv[0] : NULL;
+   if (argc > 0)
    {
-      webchat_enable();
-      return;
-   }
-   if (argc >= 1 && strcmp(argv[0], "disable") == 0)
-   {
-      webchat_disable();
-      return;
-   }
-   if (argc >= 1 && strcmp(argv[0], "status") == 0)
-   {
-      webchat_status();
-      return;
+      argc--;
+      argv++;
    }
 
-   fprintf(stderr, "usage: aimee webchat <enable|disable|status>\n");
-   fprintf(stderr, "       to run the server directly: aimee-webchat --port <port>\n");
+   if (!sub || subcmd_dispatch(cmd_webchat_subs, sub, ctx, argc, argv) != 0)
+   {
+      fprintf(stderr, "usage: aimee webchat <enable|disable|status>\n");
+      fprintf(stderr, "       to run the server directly: aimee-webchat --port <port>\n");
+   }
 }
 
 /* --- cmd_env --- */
@@ -1430,6 +1444,13 @@ static void workspace_cmd_remove(app_ctx_t *ctx, int argc, char **argv)
       fprintf(stderr, "workspace: removed %s\n", target);
 }
 
+static const subcmd_t cmd_workspace_subs[] = {
+    {"add", "add a workspace", workspace_cmd_add},
+    {"list", "list workspaces", workspace_cmd_list},
+    {"remove", "remove a workspace", workspace_cmd_remove},
+    {NULL, NULL, NULL},
+};
+
 void cmd_workspace(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -1442,13 +1463,7 @@ void cmd_workspace(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   if (strcmp(sub, "add") == 0)
-      workspace_cmd_add(ctx, argc, argv);
-   else if (strcmp(sub, "list") == 0)
-      workspace_cmd_list(ctx, argc, argv);
-   else if (strcmp(sub, "remove") == 0)
-      workspace_cmd_remove(ctx, argc, argv);
-   else
+   if (subcmd_dispatch(cmd_workspace_subs, sub, ctx, argc, argv) != 0)
    {
       fprintf(stderr, "Unknown workspace subcommand: %s\n", sub);
       fprintf(stderr, "Usage: aimee workspace <add|list|remove> [options]\n");
