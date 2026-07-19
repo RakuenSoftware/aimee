@@ -565,6 +565,22 @@ int config_sandbox_package_access_valid(const char *s)
 }
 int config_parse_computer_use(config_t *cfg, const cJSON *root);
 
+/* Drive the 5 kb_pdf_*_enabled stage gates from the kb_pdf_tier preset. Reader-free
+ * (consumers keep reading the individual gates). "off" (default) = plain pdftotext,
+ * "basic" = ingest + vector, "full" = every stage. Unknown -> "off" (fail-closed to
+ * the historical default). config_load_file applies the tier before the per-stage
+ * keys, so an explicit gate still overrides. */
+static void kb_pdf_apply_tier(config_t *cfg, const char *tier)
+{
+   int basic = tier && strcmp(tier, "basic") == 0;
+   int full = tier && strcmp(tier, "full") == 0;
+   cfg->kb_pdf_ingest_enabled = basic || full;
+   cfg->kb_pdf_vector_enabled = basic || full;
+   cfg->kb_pdf_tsr_enabled = full;
+   cfg->kb_pdf_assets_enabled = full;
+   cfg->kb_pdf_ocr_enabled = full;
+}
+
 static void config_set_defaults(config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -655,6 +671,10 @@ static void config_set_defaults(config_t *cfg)
     * for an accelerated backend. An explicit config value always wins. HyDE mode
     * defaults on so the rewrite, once enabled, generates a hypothetical answer. */
    cfg->typed_facts_enabled = 1;
+   /* structured-PDF pipeline defaults OFF (plain pdftotext); the tier drives the 5
+    * stage gates. See kb_pdf_apply_tier. */
+   snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "off");
+   kb_pdf_apply_tier(cfg, cfg->kb_pdf_tier);
    cfg->memory_rewrite_enabled = 0;
    cfg->memory_rewrite_hyde = 1;
    /* Replayable-evidence roundtable verification (Part A): default-on. config_t
@@ -1362,6 +1382,15 @@ int config_load_file(config_t *cfg)
     * historically lacked a file parse, so a value set in aimee.yaml never loaded back on a
     * fresh process. Parse them here as top-level bools so both the Phase-1/2 ingest gate
     * and the Phase-A vector gate are durably configurable. */
+   /* Preset first: kb_pdf_tier drives all 5 gates; the per-stage keys below still
+    * override it (back-compat with configs that pin individual stages). */
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_tier");
+   if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
+   {
+      snprintf(cfg->kb_pdf_tier, sizeof(cfg->kb_pdf_tier), "%s", item->valuestring);
+      kb_pdf_apply_tier(cfg, cfg->kb_pdf_tier);
+   }
+
    item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_ingest_enabled");
    if (cJSON_IsBool(item))
       cfg->kb_pdf_ingest_enabled = cJSON_IsTrue(item);
