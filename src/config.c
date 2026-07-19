@@ -759,14 +759,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->ingress_trusted_proxy_secret[0] = '\0';
    cfg->dedup_window_seconds = 5;
    cfg->cache_min_chars = 0;
-   cfg->guardrails_semantic_enabled = 0;
-   cfg->guardrails_semantic_dry_run = 1;
-   cfg->guardrails_semantic_advisory_only = 1;
+   snprintf(cfg->guardrails_semantic_mode, sizeof(cfg->guardrails_semantic_mode), "off");
    cfg->guardrails_semantic_command[0] = '\0';
    cfg->guardrails_semantic_warn_threshold = 0.40;
    cfg->guardrails_semantic_prompt_threshold = 0.70;
    cfg->guardrails_semantic_block_threshold = 0.90;
-   cfg->guardrails_semantic_allow_ml_only_block = 0;
    cfg->guardrails_blast_radius_advisory_enabled = 0;
    cfg->kb_api_http_port = 0;
    cfg->kb_api_bearer_token[0] = '\0';
@@ -953,6 +950,35 @@ int econ_tier_parse(const char *s)
    if (s && (strcasecmp(s, "aggressive") == 0 || strcasecmp(s, "aggro") == 0))
       return ECON_TIER_AGGRESSIVE;
    return ECON_TIER_SAFE; /* default / "safe" / unknown -> lossless */
+}
+
+const char *guardrails_semantic_mode_name(int mode)
+{
+   switch (mode)
+   {
+   case GSEM_MODE_DRY_RUN:
+      return "dry_run";
+   case GSEM_MODE_ADVISORY:
+      return "advisory";
+   case GSEM_MODE_ENFORCE:
+      return "enforce";
+   case GSEM_MODE_OFF:
+   default:
+      return "off";
+   }
+}
+
+int guardrails_semantic_mode_parse(const char *s)
+{
+   if (!s)
+      return GSEM_MODE_OFF;
+   if (strcasecmp(s, "dry_run") == 0 || strcasecmp(s, "dryrun") == 0)
+      return GSEM_MODE_DRY_RUN;
+   if (strcasecmp(s, "advisory") == 0)
+      return GSEM_MODE_ADVISORY;
+   if (strcasecmp(s, "enforce") == 0)
+      return GSEM_MODE_ENFORCE;
+   return GSEM_MODE_OFF; /* "off"/"0"/"false"/unknown -> fail-safe off */
 }
 
 int econ_reduction_master_on(const config_t *cfg)

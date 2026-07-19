@@ -499,19 +499,15 @@ int config_save(const config_t *cfg)
       if (cfg->ingress_trusted_proxy_secret[0])
          cJSON_AddStringToObject(ing, "trusted_proxy_secret", cfg->ingress_trusted_proxy_secret);
    }
-   if (cfg->guardrails_semantic_enabled || !cfg->guardrails_semantic_dry_run ||
-       !cfg->guardrails_semantic_advisory_only || cfg->guardrails_semantic_command[0] ||
+   int gsem_mode = guardrails_semantic_mode_parse(cfg->guardrails_semantic_mode);
+   if (gsem_mode != GSEM_MODE_OFF || cfg->guardrails_semantic_command[0] ||
        cfg->guardrails_semantic_warn_threshold != 0.40 ||
        cfg->guardrails_semantic_prompt_threshold != 0.70 ||
-       cfg->guardrails_semantic_block_threshold != 0.90 ||
-       cfg->guardrails_semantic_allow_ml_only_block)
+       cfg->guardrails_semantic_block_threshold != 0.90)
    {
       cJSON *guardrails = cJSON_AddObjectToObject(root, "guardrails");
       cJSON *semantic = cJSON_AddObjectToObject(guardrails, "semantic");
-      cJSON_AddBoolToObject(semantic, "enabled", cfg->guardrails_semantic_enabled ? 1 : 0);
-      cJSON_AddBoolToObject(semantic, "dry_run", cfg->guardrails_semantic_dry_run ? 1 : 0);
-      cJSON_AddBoolToObject(semantic, "advisory_only",
-                            cfg->guardrails_semantic_advisory_only ? 1 : 0);
+      cJSON_AddStringToObject(semantic, "mode", guardrails_semantic_mode_name(gsem_mode));
       if (cfg->guardrails_semantic_command[0])
          cJSON_AddStringToObject(semantic, "command", cfg->guardrails_semantic_command);
       cJSON_AddNumberToObject(semantic, "warn_threshold", cfg->guardrails_semantic_warn_threshold);
@@ -519,8 +515,6 @@ int config_save(const config_t *cfg)
                               cfg->guardrails_semantic_prompt_threshold);
       cJSON_AddNumberToObject(semantic, "block_threshold",
                               cfg->guardrails_semantic_block_threshold);
-      cJSON_AddBoolToObject(semantic, "allow_ml_only_block",
-                            cfg->guardrails_semantic_allow_ml_only_block ? 1 : 0);
    }
    if (cfg->guardrails_blast_radius_advisory_enabled)
    {

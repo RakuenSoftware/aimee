@@ -67,7 +67,7 @@ int main(void)
       assert(cfg.wfe_live_forge_enabled == 0);
       assert(cfg.wfe_proposals_autoscan_enabled == 0);
       assert(cfg.db1_path[0] != '\0');
-      assert(cfg.guardrails_semantic_advisory_only == 1);
+      assert(strcmp(cfg.guardrails_semantic_mode, "off") == 0); /* default */
       assert(cfg.skills_review_nudge_interval == 10);
       assert(cfg.skills_curator_interval_hours == 168);
       assert(cfg.skills_stale_after_days == 30);
@@ -171,15 +171,12 @@ int main(void)
       cfg.cache_aware_rewrite_enabled = 1;
       cfg.cache_aware_rewrite_min_savings_tokens = 321;
       cfg.cache_aware_rewrite_hard_context_threshold = 0.72;
-      cfg.guardrails_semantic_enabled = 1;
-      cfg.guardrails_semantic_dry_run = 0;
-      cfg.guardrails_semantic_advisory_only = 0;
+      snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "enforce");
       snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
                "semantic-sidecar --json");
       cfg.guardrails_semantic_warn_threshold = 0.35;
       cfg.guardrails_semantic_prompt_threshold = 0.65;
       cfg.guardrails_semantic_block_threshold = 0.95;
-      cfg.guardrails_semantic_allow_ml_only_block = 1;
       cfg.skills_review_nudge_interval = 12;
       cfg.skills_curator_interval_hours = 240;
       cfg.skills_stale_after_days = 45;
@@ -434,14 +431,11 @@ int main(void)
       assert(cfg2.cache_aware_rewrite_enabled == 1);
       assert(cfg2.cache_aware_rewrite_min_savings_tokens == 321);
       assert(fabs(cfg2.cache_aware_rewrite_hard_context_threshold - 0.72) < 0.0001);
-      assert(cfg2.guardrails_semantic_enabled == 1);
-      assert(cfg2.guardrails_semantic_dry_run == 0);
-      assert(cfg2.guardrails_semantic_advisory_only == 0);
+      assert(strcmp(cfg2.guardrails_semantic_mode, "enforce") == 0);
       assert(strcmp(cfg2.guardrails_semantic_command, "semantic-sidecar --json") == 0);
       assert(fabs(cfg2.guardrails_semantic_warn_threshold - 0.35) < 0.0001);
       assert(fabs(cfg2.guardrails_semantic_prompt_threshold - 0.65) < 0.0001);
       assert(fabs(cfg2.guardrails_semantic_block_threshold - 0.95) < 0.0001);
-      assert(cfg2.guardrails_semantic_allow_ml_only_block == 1);
       assert(cfg2.skills_review_nudge_interval == 12);
       assert(cfg2.skills_curator_interval_hours == 240);
       assert(cfg2.skills_stale_after_days == 45);
@@ -854,23 +848,35 @@ int main(void)
       snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
       FILE *f = fopen(cpath, "w");
       assert(f);
-      fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    advisory_only: false\n");
+      /* legacy quad (enabled + dry_run:false + advisory_only:false + allow_ml_only_block:true)
+       * maps onto the "enforce" mode. */
+      fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    enabled: true\n    dry_run: "
+                 "false\n    advisory_only: false\n    allow_ml_only_block: true\n");
       fclose(f);
 
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       platform_setenv("AIMEE_NO_CACHE", "1");
       assert(config_load(&cfg) == 0);
-      assert(cfg.guardrails_semantic_advisory_only == 0);
+      assert(strcmp(cfg.guardrails_semantic_mode, "enforce") == 0);
 
+      /* legacy `enabled: true` alone -> dry_run (dry_run defaults on when enabled). */
       f = fopen(cpath, "w");
       assert(f);
       fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    enabled: true\n");
       fclose(f);
       memset(&cfg, 0, sizeof(cfg));
       assert(config_load(&cfg) == 0);
-      assert(cfg.guardrails_semantic_enabled == 1);
-      assert(cfg.guardrails_semantic_advisory_only == 1);
+      assert(strcmp(cfg.guardrails_semantic_mode, "dry_run") == 0);
+
+      /* canonical string form wins. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    mode: advisory\n");
+      fclose(f);
+      memset(&cfg, 0, sizeof(cfg));
+      assert(config_load(&cfg) == 0);
+      assert(strcmp(cfg.guardrails_semantic_mode, "advisory") == 0);
       platform_unsetenv("AIMEE_NO_CACHE");
    }
 

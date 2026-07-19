@@ -1301,24 +1301,23 @@ typedef struct config
    int cache_min_chars;
 
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
-    * semantic_enabled: 0 = off (default), 1 = on.
-    * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome
-    *   (default 1; always start here).
+    * semantic_mode: the single escalation control. One of GSEM_MODE_* names:
+    *   "off"      — no assessment runs (default).
+    *   "dry_run"  — shadow mode: score is logged/stored but never changes the outcome.
+    *   "advisory" — enforce warn/prompt advisories, but a "block" recommendation is
+    *                downgraded to "prompt" (never a hard block).
+    *   "enforce"  — a "block" recommendation hard-blocks the tool.
+    * (Replaces the former enabled/dry_run/advisory_only/allow_ml_only_block quad, which
+    * encoded exactly this off->dry_run->advisory->enforce ladder.)
     * semantic_command: external sidecar command (stdin: JSON request, stdout: JSON response).
     *   Empty (default) disables sidecar invocation; no assessment runs when empty.
-    * semantic_advisory_only: 1 = semantic prompt/block scores produce warnings only
-    *   (default 1; Phase 3 explicit confirmation/blocking remains gated).
     * semantic_warn_threshold, prompt_threshold, block_threshold: score bands.
-    * semantic_allow_ml_only_block: false by default; requires positive precision evidence.
     * See docs/proposals/accepted/neural-assisted-guardrails.md. */
-   int guardrails_semantic_enabled;
-   int guardrails_semantic_dry_run;
-   int guardrails_semantic_advisory_only;
+   char guardrails_semantic_mode[16];
    char guardrails_semantic_command[512];
    double guardrails_semantic_warn_threshold;
    double guardrails_semantic_prompt_threshold;
    double guardrails_semantic_block_threshold;
-   int guardrails_semantic_allow_ml_only_block;
    /* §7 code-graph actuation: surface a structural blast-radius advisory (the
     * graph-impacted dependent files) before an edit. Advisory + fail-open;
     * default off (opt-in). See docs/proposals/pending/code-graph-intelligence.md §7. */
@@ -2029,6 +2028,18 @@ int econ_tier(const config_t *cfg);
 const char *econ_tier_name(int tier); /* "off"/"safe"/"aggressive" */
 int econ_tier_parse(const char *s);   /* string -> ECON_TIER_* (default SAFE on unknown) */
 
+/* Semantic-guardrails escalation mode — the single control that replaced the
+ * enabled/dry_run/advisory_only/allow_ml_only_block quad. */
+enum
+{
+   GSEM_MODE_OFF = 0,  /* no assessment runs */
+   GSEM_MODE_DRY_RUN,  /* shadow: scored + logged, never changes the outcome */
+   GSEM_MODE_ADVISORY, /* warn/prompt advisories; a "block" is downgraded to "prompt" */
+   GSEM_MODE_ENFORCE   /* a "block" recommendation hard-blocks the tool */
+};
+const char *guardrails_semantic_mode_name(int mode); /* "off"/"dry_run"/"advisory"/"enforce" */
+int guardrails_semantic_mode_parse(const char *s);   /* string -> GSEM_MODE_* (OFF on unknown) */
+
 /* Economizer resolution — compute EFFECTIVE gates from the tier without mutating config_t
  * (so config_save round-trips the raw user value). */
 int econ_reduction_master_on(const config_t *cfg); /* tier != off */
@@ -2056,11 +2067,11 @@ int config_module_enabled(int config_tristate, int env_default);
  * aggressive live-mutation path. Pure: reads cfg only. */
 typedef struct
 {
-   int history_fold;                   /* fold old history (SAFE + AGGRESSIVE) */
-   int compress;                       /* lossy tool-result body shrink (AGGRESSIVE) */
-   int command_filter;                 /* deterministic tool-output condensation (SAFE + AGGRESSIVE) */
-   int freeze_guard_horizon;           /* break-even reuse horizon for the fold freeze guard */
-   int gateway_seam;                   /* live inbound /v1 mutation seam active (AGGRESSIVE) */
+   int history_fold;         /* fold old history (SAFE + AGGRESSIVE) */
+   int compress;             /* lossy tool-result body shrink (AGGRESSIVE) */
+   int command_filter;       /* deterministic tool-output condensation (SAFE + AGGRESSIVE) */
+   int freeze_guard_horizon; /* break-even reuse horizon for the fold freeze guard */
+   int gateway_seam;         /* live inbound /v1 mutation seam active (AGGRESSIVE) */
    int gateway_session_disable_ttl_ms; /* circuit-breaker TTL (ms) for the live mutator */
 } econ_preset_t;
 

@@ -1946,13 +1946,15 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
                state->hook_call_count);
    }
    /* Semantic scoring (Phase 0/1): runs after all deterministic checks.
-    * Default: enabled=false, dry_run=true — no behavioral change until opted in.
-    * When dry_run=true, scores are logged and stored but never affect msg_buf or rc. */
+    * Default mode "off" — no behavioral change until opted in. In "dry_run" scores are
+    * logged and stored but never affect msg_buf or rc. In "advisory" a block is downgraded
+    * to a prompt; only "enforce" lets a block hard-block. */
    {
       config_t scfg;
       config_load(&scfg);
       gsem_apply_strictness_arm(&scfg);
-      if (scfg.guardrails_semantic_enabled && scfg.guardrails_semantic_command[0] &&
+      int gmode = guardrails_semantic_mode_parse(scfg.guardrails_semantic_mode);
+      if (gmode != GSEM_MODE_OFF && scfg.guardrails_semantic_command[0] &&
           is_write_intent(tool_name, root))
       {
          gsem_input_t sin;
@@ -1962,18 +1964,17 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
          const char *action = gsem_policy(&sout, scfg.guardrails_semantic_warn_threshold,
                                           scfg.guardrails_semantic_prompt_threshold,
                                           scfg.guardrails_semantic_block_threshold);
+         int dry_run = (gmode == GSEM_MODE_DRY_RUN);
          const char *final_action = action;
-         if (!scfg.guardrails_semantic_dry_run && strcmp(action, "block") == 0 &&
-             (scfg.guardrails_semantic_advisory_only ||
-              !scfg.guardrails_semantic_allow_ml_only_block))
+         /* Only the "enforce" mode lets a block through; dry_run/advisory downgrade it. */
+         if (!dry_run && strcmp(action, "block") == 0 && gmode != GSEM_MODE_ENFORCE)
             final_action = "prompt";
-         const char *logged_action = scfg.guardrails_semantic_dry_run ? "dry_run" : final_action;
-         gsem_record(session_id(), &sin, &sout, logged_action, scfg.guardrails_semantic_dry_run);
-         LOG_DEBUG("guardrails.semantic",
-                   "tool=%s overall=%.2f rec=%s final=%s dry_run=%d advisory_only=%d", tool_name,
+         const char *logged_action = dry_run ? "dry_run" : final_action;
+         gsem_record(session_id(), &sin, &sout, logged_action, dry_run);
+         LOG_DEBUG("guardrails.semantic", "tool=%s overall=%.2f rec=%s final=%s mode=%s", tool_name,
                    sout.overall, sout.recommendation, logged_action,
-                   scfg.guardrails_semantic_dry_run, scfg.guardrails_semantic_advisory_only);
-         if (!scfg.guardrails_semantic_dry_run && msg_buf[0] == '\0')
+                   guardrails_semantic_mode_name(gmode));
+         if (!dry_run && msg_buf[0] == '\0')
          {
             if (strcmp(final_action, "warn") == 0 || strcmp(final_action, "prompt") == 0)
             {
