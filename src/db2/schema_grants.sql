@@ -35,5 +35,32 @@ BEGIN
   -- the runtime role only, never PUBLIC (N4).
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
+
+  -- P3a cost attribution. The ledger, rollup, and price tables are WRITTEN ONLY by
+  -- the SECURITY DEFINER metering functions (owned by aimee_kb_owner, which bypasses
+  -- ENABLE-not-FORCE RLS). Runtime therefore gets SELECT (RLS-filtered: admin OR
+  -- team-lead) but its direct write grant from the ALL TABLES line above is REVOKED,
+  -- so a compromised runtime session cannot forge or mutate cost rows out of band.
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
+    org_model_pricing, org_model_pricing_current, org_token_audit, org_spend_rollup
+    FROM aimee_kb_runtime;
+  GRANT SELECT ON
+    org_model_pricing, org_model_pricing_current, org_token_audit, org_spend_rollup
+    TO aimee_kb_runtime;
+  -- kb_team_lead is an admin-written grant (RLS gates writes to admins), same posture
+  -- as kb_admin_grant: runtime holds DML, RLS constrains it.
+  GRANT SELECT, INSERT, UPDATE, DELETE ON kb_team_lead TO aimee_kb_runtime;
+
+  -- The metering functions are the ONLY write path; EXECUTE to runtime, never PUBLIC.
+  REVOKE ALL ON FUNCTION org_pricing_add_version(TEXT,TEXT,NUMERIC,NUMERIC,NUMERIC,NUMERIC) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_pricing_current_version(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_token_estimate_cost(TEXT,BIGINT,BIGINT,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_token_audit_start(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,BIGINT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_token_audit_settle(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BIGINT,BIGINT,NUMERIC,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_pricing_add_version(TEXT,TEXT,NUMERIC,NUMERIC,NUMERIC,NUMERIC) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_pricing_current_version(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_token_estimate_cost(TEXT,BIGINT,BIGINT,BIGINT,BIGINT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_token_audit_start(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_token_audit_settle(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BIGINT,BIGINT,NUMERIC,TEXT) TO aimee_kb_runtime;
 END
 $$;
