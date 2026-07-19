@@ -1,13 +1,5 @@
 #include "mcp_skill_tools.h"
-
-static cJSON *skill_tool(const char *name, const char *desc, cJSON *schema)
-{
-   cJSON *t = cJSON_CreateObject();
-   cJSON_AddStringToObject(t, "name", name);
-   cJSON_AddStringToObject(t, "description", desc);
-   cJSON_AddItemToObject(t, "inputSchema", schema);
-   return t;
-}
+#include "mcp_tools.h"
 
 void mcp_add_skill_tools(cJSON *tools)
 {
@@ -28,9 +20,9 @@ void mcp_add_skill_tools(cJSON *tools)
    cJSON_AddItemToArray(req, cJSON_CreateString("name"));
    cJSON_AddItemToObject(s, "required", req);
    cJSON_AddItemToArray(
-       tools, skill_tool("skill_manage",
-                         "Create, patch, edit, archive, or write support files for project "
-                         "skills. Skills are never deleted; archive moves them aside and pinned "
-                         "skills are protected.",
-                         s));
+       tools, mcp_tool_new("skill_manage",
+                           "Create, patch, edit, archive, or write support files for project "
+                           "skills. Skills are never deleted; archive moves them aside and pinned "
+                           "skills are protected.",
+                           s));
 }
