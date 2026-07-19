@@ -987,6 +987,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_ingest_workers.c
     ${AIMEE_SRC_DIR}/kb/kb_service_kb.c
     ${AIMEE_SRC_DIR}/kb/kb_identity_resolve.c
+    ${AIMEE_SRC_DIR}/kb/kb_oidc_jwks_fleet.c
     ${AIMEE_SRC_DIR}/kb/kb_service_memory.c
     ${AIMEE_SRC_DIR}/kb/kb_service_css.c
     ${AIMEE_SRC_DIR}/kb/kb_service_agent.c

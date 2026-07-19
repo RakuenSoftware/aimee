@@ -338,8 +338,16 @@ int kb_oidc_verify_jwt(const char *jwt, const kb_oidc_config_t *cfg, long now,
 static kb_oidc_config_t g_oidc_cfg;
 static int g_oidc_cfg_set = 0;
 static pthread_mutex_t g_oidc_lock = PTHREAD_MUTEX_INITIALIZER;
+static kb_oidc_fleet_resolver_fn g_fleet_resolver = NULL;
 
 #include <time.h>
+
+void kb_oidc_set_fleet_resolver(kb_oidc_fleet_resolver_fn fn)
+{
+   pthread_mutex_lock(&g_oidc_lock);
+   g_fleet_resolver = fn;
+   pthread_mutex_unlock(&g_oidc_lock);
+}
 
 static int oidc_verify_fn(const char *presented, const char *configured, kb_verify_result_t *out,
                           void *ctx)
@@ -347,6 +355,7 @@ static int oidc_verify_fn(const char *presented, const char *configured, kb_veri
    (void)configured;
    (void)ctx;
    kb_oidc_config_t cfg;
+   kb_oidc_fleet_resolver_fn fleet;
    pthread_mutex_lock(&g_oidc_lock);
    if (!g_oidc_cfg_set)
    {
@@ -354,7 +363,19 @@ static int oidc_verify_fn(const char *presented, const char *configured, kb_veri
       return 0;
    }
    cfg = g_oidc_cfg;
+   fleet = g_fleet_resolver;
    pthread_mutex_unlock(&g_oidc_lock);
+
+   /* Fleet-wide JWKS (I10): when a resolver is registered and an issuer is
+    * configured, prefer the shared Postgres key set so the fleet agrees on trusted
+    * keys and IdP rotation converges; the file cfg.jwks_json is the fallback used
+    * only when the resolver reports no fleet keys. */
+   if (fleet && cfg.issuer[0])
+   {
+      char fleet_jwks[sizeof(cfg.jwks_json)];
+      if (fleet(cfg.issuer, fleet_jwks, sizeof(fleet_jwks)) == 0 && fleet_jwks[0])
+         snprintf(cfg.jwks_json, sizeof(cfg.jwks_json), "%s", fleet_jwks);
+   }
    return kb_oidc_verify_jwt(presented, &cfg, (long)time(NULL), out);
 }
 

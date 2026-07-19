@@ -5,6 +5,7 @@
 #include "css_render_cmd.h"
 #include "db2/code_index.h"
 #include "kb_auth_oidc.h"
+#include "kb_oidc_jwks_fleet.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
 #include "kb_tls.h"
@@ -679,6 +680,10 @@ int main(int argc, char **argv)
     * Additive: the owner kb-token verifier stays active regardless. */
    if (kb_oidc_register_from_env() != 0)
       LOG_WARN("kb_http", "OIDC verifier config present but invalid; OIDC auth disabled");
+   /* Fleet-wide JWKS (I10): prefer the shared Postgres key set over the per-instance
+    * file so all stateless kb instances agree on trusted keys and IdP rotation
+    * converges within the bounded refresh. Falls back to the file when no PG rows. */
+   kb_oidc_jwks_fleet_enable();
    if (kb_http_start(http_port, kb_cfg.kb_api_bearer_token) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
