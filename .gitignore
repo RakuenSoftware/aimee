@@ -29,6 +29,7 @@ session-state.json
 
 # Per-project aimee state (local/environment-specific, never committed)
 .aimee/
+!.aimee/project.yaml  # aimee's own committed delegate-sandbox toolchain declaration
 .aimee-rules
 
 # IDE
