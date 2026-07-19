@@ -638,61 +638,41 @@ void cmd_skill(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   if (strcmp(sub, "list") == 0)
-      skill_cmd_list(ctx, argc, argv);
-   else if (strcmp(sub, "show") == 0)
-      skill_cmd_show(ctx, argc, argv);
-   else if (strcmp(sub, "lint") == 0)
-      skill_cmd_lint(ctx, argc, argv);
-   else if (strcmp(sub, "eval") == 0)
-      skill_cmd_eval(ctx, argc, argv);
-   else if (strcmp(sub, "create") == 0)
-      skill_cmd_create(ctx, argc, argv);
-   else if (strcmp(sub, "edit") == 0)
-      skill_cmd_edit(ctx, argc, argv);
-   else if (strcmp(sub, "patch") == 0)
-      skill_cmd_patch(ctx, argc, argv);
-   else if (strcmp(sub, "archive") == 0)
-      skill_cmd_archive(ctx, argc, argv);
-   else if (strcmp(sub, "export") == 0)
-      skill_cmd_export(ctx, argc, argv);
-   else if (strcmp(sub, "import") == 0)
-      skill_cmd_import(ctx, argc, argv);
-   else if (strcmp(sub, "rollback") == 0)
-      skill_cmd_rollback(ctx, argc, argv);
-   else if (strcmp(sub, "lifecycle") == 0)
-      skill_cmd_lifecycle(ctx, argc, argv);
-   else if (strcmp(sub, "autostub") == 0)
-      skill_cmd_autostub(ctx, argc, argv);
-   else if (strcmp(sub, "pin") == 0)
-      skill_cmd_pin(ctx, argc, argv, 1);
-   else if (strcmp(sub, "unpin") == 0)
-      skill_cmd_pin(ctx, argc, argv, 0);
-   else
+   if (subcmd_dispatch(get_skill_subcmds(), sub, ctx, argc, argv) != 0)
    {
       fprintf(stderr, "Unknown skill subcommand: %s\n\n", sub);
       skill_print_help();
    }
 }
 
+static void skill_cmd_pin_sub(app_ctx_t *ctx, int argc, char **argv)
+{
+   skill_cmd_pin(ctx, argc, argv, 1);
+}
+
+static void skill_cmd_unpin_sub(app_ctx_t *ctx, int argc, char **argv)
+{
+   skill_cmd_pin(ctx, argc, argv, 0);
+}
+
 const subcmd_t *get_skill_subcmds(void)
 {
    static const subcmd_t skill_subcmds[] = {
-       {"list", "List available skills", NULL},
-       {"show", "Print a skill body or support file", NULL},
-       {"lint", "Lint skill frontmatter and authoring conventions", NULL},
-       {"eval", "Run skill compliance eval fixtures", NULL},
-       {"create", "Create a project skill from a markdown file", NULL},
-       {"edit", "Replace a project skill from a markdown file", NULL},
-       {"patch", "Patch a project skill by string replacement", NULL},
-       {"archive", "Archive a project skill", NULL},
-       {"export", "Export a skill as SKILL.md markdown", NULL},
-       {"import", "Import a frontmatter SKILL.md markdown file", NULL},
-       {"rollback", "Restore project skills from a snapshot", NULL},
-       {"lifecycle", "Apply stale/archive lifecycle transitions", NULL},
-       {"autostub", "Propose capability skills for uncovered tools", NULL},
-       {"pin", "Pin a skill against automation", NULL},
-       {"unpin", "Unpin a skill", NULL},
+       {"list", "List available skills", skill_cmd_list},
+       {"show", "Print a skill body or support file", skill_cmd_show},
+       {"lint", "Lint skill frontmatter and authoring conventions", skill_cmd_lint},
+       {"eval", "Run skill compliance eval fixtures", skill_cmd_eval},
+       {"create", "Create a project skill from a markdown file", skill_cmd_create},
+       {"edit", "Replace a project skill from a markdown file", skill_cmd_edit},
+       {"patch", "Patch a project skill by string replacement", skill_cmd_patch},
+       {"archive", "Archive a project skill", skill_cmd_archive},
+       {"export", "Export a skill as SKILL.md markdown", skill_cmd_export},
+       {"import", "Import a frontmatter SKILL.md markdown file", skill_cmd_import},
+       {"rollback", "Restore project skills from a snapshot", skill_cmd_rollback},
+       {"lifecycle", "Apply stale/archive lifecycle transitions", skill_cmd_lifecycle},
+       {"autostub", "Propose capability skills for uncovered tools", skill_cmd_autostub},
+       {"pin", "Pin a skill against automation", skill_cmd_pin_sub},
+       {"unpin", "Unpin a skill", skill_cmd_unpin_sub},
        {NULL, NULL, NULL},
    };
    return skill_subcmds;
