@@ -1008,14 +1008,10 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_team.c
     ${AIMEE_SRC_DIR}/kb/http/kb_route_acl.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_http.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_http_team.console.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_console.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_accounts.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_governance.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_http.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_http_team.code.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_code.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ingest.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_jobs.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ws.c
