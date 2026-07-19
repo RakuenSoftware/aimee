@@ -867,7 +867,9 @@ static cJSON *make_message_delta(const parsed_response_t *p, int n_calls)
    cJSON_AddStringToObject(o, "type", "message_delta");
    cJSON *delta = cJSON_AddObjectToObject(o, "delta");
    cJSON_AddStringToObject(delta, "stop_reason", stop);
-   cJSON_AddStringToObject(delta, "stop_sequence", "");
+   /* null (not "") when no stop sequence triggered — matches the Anthropic API and
+    * the streaming path's message_delta (xlate_finish emits null here too). */
+   cJSON_AddNullToObject(delta, "stop_sequence");
    u = cJSON_AddObjectToObject(o, "usage");
    cJSON_AddNumberToObject(u, "output_tokens", p ? p->completion_tokens : 0);
    if (p && p->cache_read_tokens > 0)
