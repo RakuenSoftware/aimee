@@ -3,6 +3,7 @@
  * the detached provider + its runner queue (registry), via the thread-local
  * active-provider seam the file/exec tools resolve through. */
 #include "workspace_turn.h"
+#include "aimee_home.h" /* aimee_home — authorize aimee's own managed worktrees */
 #include "config.h"
 #include "forge_credentials.h"
 #include "git_cred_inject.h"
@@ -319,6 +320,32 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
       LOG_ERROR("delegate-sandbox", "workspace '%s' does not resolve (%s)", workspace,
                 strerror(errno));
       return 0;
+   }
+   /* Aimee's OWN managed worktrees — a WFE per-slice tree under
+    * $AIMEE_HOME/wfe-worktrees, or a session worktree under $AIMEE_HOME/.aimee/
+    * worktrees — are isolation trees aimee itself created to hand a delegate, not an
+    * operator directory that must be pre-registered. Authorize a path that resolves
+    * under one of those aimee-owned roots (checked against the canonical AIMEE_HOME,
+    * so an unrelated operator path merely CONTAINING the marker is not authorized),
+    * so a write-capable WFE slice delegate runs in a container instead of falling
+    * back to the in-process host path. */
+   {
+      const char *home = aimee_home();
+      char home_real[MAX_PATH_LEN];
+      if (home && home[0] && realpath(home, home_real))
+      {
+         static const char *const aimee_roots[] = {"wfe-worktrees", ".aimee/worktrees"};
+         for (size_t i = 0; i < sizeof(aimee_roots) / sizeof(aimee_roots[0]); i++)
+         {
+            char root[MAX_PATH_LEN];
+            snprintf(root, sizeof(root), "%s/%s", home_real, aimee_roots[i]);
+            if (cwd_in_workspace(real, root))
+            {
+               snprintf(out, out_cap, "%s", real);
+               return 1;
+            }
+         }
+      }
    }
    config_t cfg;
    config_load(&cfg);

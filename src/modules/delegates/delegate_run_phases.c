@@ -333,6 +333,14 @@ void delegate_resolve_worktree(const char *cwd, const char *deleg_id, const char
       }
       else
       {
+         /* An aimee worktree with no managed git-root marker is a WFE per-slice
+          * tree ($AIMEE_HOME/wfe-worktrees/wi_<id>): the delegate OWNS it
+          * exclusively (one implement delegate per slice tree, nothing else looks
+          * at it). It is NOT a shared session tree, so it must be mounted
+          * read-WRITE in a container and carry no host write guard — mark it
+          * DEDICATED. git_root stays empty: the engine reads the delegate's tree
+          * directly, so apply-back/sibling-cleanup are skipped exactly as for the
+          * shared case. */
          char wt_cmd[MAX_PATH_LEN + 64];
          snprintf(wt_cmd, sizeof(wt_cmd), "git -C '%s' rev-parse --show-toplevel 2>/dev/null",
                   anchor);
@@ -343,8 +351,8 @@ void delegate_resolve_worktree(const char *cwd, const char *deleg_id, const char
             wt_out[strcspn(wt_out, "\r\n")] = '\0';
             snprintf(out->worktree_path, sizeof(out->worktree_path), "%s", wt_out);
             out->git_root[0] = '\0';
-            out->shared = 1;
-            aimee_log(LOG_INFO, "delegate", "delegate sharing session worktree %s",
+            out->dedicated = 1;
+            aimee_log(LOG_INFO, "delegate", "delegate owns dedicated worktree %s (read-write)",
                       out->worktree_path);
          }
          free(wt_out);
