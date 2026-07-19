@@ -271,7 +271,6 @@ extern "C"
    void presence_emit_turn_delta(const char *session_id, const char *turn_id,
                                  const char *delta_json);
    void presence_emit_turn_done(const char *session_id, const char *turn_id);
-   void presence_emit_busy(const char *session_id, const char *inflight_turn_id);
 
    /* ====================================================================== */
    /* Outbound routing — the presence speaks first                           */

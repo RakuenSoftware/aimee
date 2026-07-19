@@ -186,17 +186,6 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv);
 /* cmd_sweep.c — `aimee sweep [project]`: server-side deepening sweep (analysis-only) */
 void cmd_sweep(app_ctx_t *ctx, int argc, char **argv);
 
-/* Sync pending/claimed work items against the filesystem state of their source
- * proposals. If a proposal has moved from pending/ into done/ or accepted/, the
- * item is marked 'done'. If it moved into deferred/ or rejected/, the item is
- * 'cancelled'. Items whose source file is still present or whose source is not
- * a proposal are left alone.
- *
- * proposals_base is the directory containing pending/, done/, etc. (e.g.
- * "docs/proposals"). Pass NULL to resolve from cwd.
- * Returns 0 on success. out_closed/out_cancelled receive counts (may be NULL). */
-int work_sync_proposals(const char *proposals_base, int *out_closed, int *out_cancelled);
-
 /* cmd_job.c */
 void cmd_job(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_job_subcmds(void);

@@ -58,9 +58,6 @@ extern "C"
     * without a registry entry (still bounded by token/deadline limits). */
    turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id);
 
-   /* Record the worker's child subprocess pid (CLI path, after fork). */
-   void turn_registry_set_child(turn_entry_t *e, pid_t pid);
-
    /* Request cancellation of session_id's in-flight turn. `owner_principal`, when
     * non-NULL/non-empty, must match the session's presence owner or the cancel
     * is refused (cross-principal protection); pass NULL to bypass the check for

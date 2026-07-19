@@ -9,12 +9,6 @@ extern "C"
 
    struct cJSON;
 
-   /* Return a newly allocated, valid JSON-string representation of an
-    * assistant tool_call's function.arguments field. Defaults to "{}" when
-    * the input is missing, not a string, or not parseable as JSON. Caller
-    * frees. */
-   char *tool_call_copy_valid_arguments(struct cJSON *fn_args);
-
    /* Force the indexed tool_call's function.arguments field to be the given
     * JSON-encoded string. Adds the field when absent, replaces otherwise. */
    void tool_call_normalize_assistant_arguments(struct cJSON *assistant_message, int index,

@@ -65,9 +65,6 @@ extern "C"
    /* List all registered providers. Returns count; fills up to max. */
    int model_provider_list(model_provider_t **out, int max);
 
-   /* Register all built-in provider profiles. Called lazily on first get/list. */
-   void model_providers_init(void);
-
 #ifdef __cplusplus
 }
 #endif

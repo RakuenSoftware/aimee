@@ -51,12 +51,6 @@ extern "C"
       ROADMAP_POLICY_EXECUTION = 2 /* write owned_files; full delegation */
    } roadmap_tool_policy_t;
 
-   /* String <-> enum helpers (stable spellings used in payload JSON and the
-    * markdown projections). Return a static string; never NULL. */
-   const char *roadmap_level_name(roadmap_level_t level);
-   const char *roadmap_unit_state_name(roadmap_unit_state_t state);
-   const char *roadmap_tool_policy_name(roadmap_tool_policy_t policy);
-
    /* plan_unit payload contract (carried in artifacts.payload as JSON):
     *   level            milestone | slice | task
     *   parent_id        artifact id of the containing unit ("" for milestones)

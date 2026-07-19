@@ -30,11 +30,6 @@ static void register_builtins(void)
    model_provider_register(&minimax_provider);
 }
 
-void model_providers_init(void)
-{
-   pthread_once(&g_once, register_builtins);
-}
-
 void model_provider_register(model_provider_t *p)
 {
    if (!p || !p->name)

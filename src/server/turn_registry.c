@@ -79,16 +79,6 @@ turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id)
    return slot;
 }
 
-void turn_registry_set_child(turn_entry_t *e, pid_t pid)
-{
-   if (!e)
-      return;
-   pthread_mutex_lock(&g_lock);
-   if (e->in_use)
-      e->child_pid = pid;
-   pthread_mutex_unlock(&g_lock);
-}
-
 int turn_registry_cancel(const char *session_id, const char *owner_principal)
 {
    /* Authz (cross-principal protection) is decided OUTSIDE the registry lock —

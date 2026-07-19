@@ -47,8 +47,6 @@ extern "C"
                                               memory_node_kind_t tail_kind,
                                               const rel_type_def_t **matched);
 
-   const char *fact_gate_verdict_to_text(fact_gate_verdict_t v);
-
 #ifdef __cplusplus
 }
 #endif
