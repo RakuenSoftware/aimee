@@ -123,7 +123,7 @@ public_header_scan '\\bdb2_is_ephemeral\\b' \
   "DB2 public lifecycle header exposes backend-mode probe"
 path_scan '\\bdb2_(open|close)_ephemeral_store\\b' \
   "legacy DB2 ephemeral-store lifecycle exposed outside DB2" \
-  src/agent_eval_memory_support.c src/db2/db2.h src/db2/lifecycle.h
+  src/modules/agent_eval/agent_eval_memory_support.c src/db2/db2.h src/db2/lifecycle.h
 scan '\\b(DB2_FORK_SPEC_SHIM|db2_shim_|db2_is_shim|db2_pg_url)\\b' \
   "DB2 shim lifecycle API outside src/db2"
 public_header_scan '\\b(DB2_FORK_SPEC_SHIM|db2_shim_|db2_is_shim|db2_pg_url|[Ss][Hh][Ii][Mm])\\b' \
@@ -137,7 +137,7 @@ path_scan 'legacy db handle|server-side db handle|legacy DB1 tables' \
   src/cmd_index.c src/tasks.c src/cmd_memory_core.c src/headers/memory.h
 path_scan 'server-side database handle|database handle|db handle|DB handle|DB handles|database handles|DB1 tool registry|Collaborative rules live in DB1|DB1'\''s rules table|Per-connection DB handles|shared DB handle' \
   "caller-owned DB handle vocabulary or wrong tier ownership comments" \
-  docs/BENCHMARKS.md src/README.md src/agent_coord.c src/agent_eval.c \
+  docs/BENCHMARKS.md src/README.md src/agent_coord.c src/modules/agent_eval/agent_eval.c \
   src/agent_tasks.c src/headers/agent_coord.h \
   src/headers/agent_tasks.h src/headers/aimee.h src/headers/commands.h \
   src/posix/cmd_hooks.c
