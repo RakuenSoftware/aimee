@@ -1087,6 +1087,134 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /team:
+    post:
+      operationId: createTeam
+      summary: Create a team (org-admin or bootstrap owner)
+      description: >
+        Creates an org team. The org-admin capability is enforced at the DB layer
+        (RLS write policies); a non-admin caller receives 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "201":
+          description: Team created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  name: { type: string }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+    get:
+      operationId: listTeams
+      summary: List the caller's visible teams
+      responses:
+        "200":
+          description: Teams
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items: { type: object }
+        "401": { description: Authentication required }
+  /team/member:
+    post:
+      operationId: addTeamMember
+      summary: Add a member to a team (org-admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, identity_key]
+              properties:
+                team: { type: integer }
+                identity_key: { type: string }
+                default: { type: boolean }
+      responses:
+        "200": { description: Member added }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized }
+    delete:
+      operationId: removeTeamMember
+      summary: Remove a member from a team (org-admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, identity_key]
+              properties:
+                team: { type: integer }
+                identity_key: { type: string }
+      responses:
+        "200": { description: Member removed }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized }
+  /project:
+    post:
+      operationId: createProject
+      summary: Create a project under a team (org-admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parent, name]
+              properties:
+                parent: { type: integer }
+                name: { type: string }
+                access_mode: { type: string, enum: [team-open, restricted] }
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  parent: { type: integer }
+                  name: { type: string }
+                  access_mode: { type: string }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized }
+    get:
+      operationId: listProjects
+      summary: List projects (optionally filtered by ?team=)
+      parameters:
+        - name: team
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items: { type: object }
+        "401": { description: Authentication required }
   /enrollments:
     get:
       operationId: listEnrollments
