@@ -175,3 +175,73 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
       return -1;
    }
 }
+
+/* ---- Composite identity resolution (slice 2, I7) ------------------------- */
+
+static int teams_contains(const int64_t *a, int n, int64_t v)
+{
+   for (int i = 0; i < n; ++i)
+      if (a[i] == v)
+         return 1;
+   return 0;
+}
+
+kb_resolve_status_t kb_identity_combine(const int64_t *tteams, int n_t, int64_t tdefault,
+                                        int has_transport, const int64_t *ateams, int n_a,
+                                        int64_t adefault, int has_actor, int64_t named_team,
+                                        int64_t *out_teams, int *out_n, int64_t *out_billing)
+{
+   if (out_n)
+      *out_n = 0;
+   if (out_billing)
+      *out_billing = 0;
+   if (!out_teams || !out_n || !out_billing)
+      return KB_RESOLVE_CONFLICT;
+   if (!has_transport && !has_actor)
+      return KB_RESOLVE_NO_PRINCIPAL;
+
+   int n = 0;
+   if (has_transport && has_actor)
+   {
+      /* The billing team must be valid for BOTH principals: intersect. */
+      for (int i = 0; i < n_t && n < KB_MAX_TEAMS; ++i)
+         if (teams_contains(ateams, n_a, tteams[i]))
+            out_teams[n++] = tteams[i];
+      if (n == 0)
+         return KB_RESOLVE_CONFLICT; /* both present, empty intersection: reject */
+   }
+   else
+   {
+      const int64_t *src = has_transport ? tteams : ateams;
+      int ns = has_transport ? n_t : n_a;
+      for (int i = 0; i < ns && n < KB_MAX_TEAMS; ++i)
+         out_teams[n++] = src[i];
+      /* A single principal with an empty team set is OK-with-no-teams (deny
+       * downstream), not a conflict. */
+   }
+   *out_n = n;
+
+   if (named_team != 0)
+   {
+      if (!teams_contains(out_teams, n, named_team))
+         return KB_RESOLVE_CONFLICT; /* named a team outside the resolved set */
+      *out_billing = named_team;
+      return KB_RESOLVE_OK;
+   }
+
+   /* No team named: fall back to a default. */
+   if (has_transport && has_actor)
+   {
+      /* Composite default only when both defaults agree AND lie in the set. */
+      if (tdefault != 0 && tdefault == adefault && teams_contains(out_teams, n, tdefault))
+      {
+         *out_billing = tdefault;
+         return KB_RESOLVE_OK;
+      }
+      return KB_RESOLVE_AMBIGUOUS_DEFAULT; /* defaults differ: must name a team */
+   }
+   int64_t d = has_transport ? tdefault : adefault;
+   if (d != 0 && teams_contains(out_teams, n, d))
+      *out_billing = d;
+   return KB_RESOLVE_OK;
+}

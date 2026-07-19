@@ -19,6 +19,7 @@
 #define DEC_KB_IDENTITY_H 1
 
 #include <stddef.h>
+#include <stdint.h>
 #include "kb_verifier.h"
 
 #ifdef __cplusplus
@@ -66,6 +67,35 @@ extern "C"
     * 0x, lowercase hex, drop leading zeros (but keep a single "0"). Returns 0 on
     * success. Used for the immutable (cert_issuer, cert_serial_norm) key (I5). */
    int kb_cert_serial_normalize(const char *serial, char *out, size_t cap);
+
+   /* ---- Composite identity resolution (slice 2, I7) ---------------------------
+    * A request carries up to two authenticated principals: the mTLS transport
+    * (cert:CN) and the actor (OIDC/owner). Resolution combines them FAIL-CLOSED:
+    * the billing team must be valid for EVERY principal present (the intersection
+    * of their team sets), a named team must lie in that set, and a composite
+    * default is auto-selected only when both principals' defaults agree. */
+
+#define KB_MAX_TEAMS 64
+
+   typedef enum
+   {
+      KB_RESOLVE_OK = 0,
+      KB_RESOLVE_NO_PRINCIPAL,      /* neither transport nor actor present */
+      KB_RESOLVE_CONFLICT,          /* empty intersection, or named team not in it */
+      KB_RESOLVE_AMBIGUOUS_DEFAULT, /* both present, no named team, defaults differ */
+   } kb_resolve_status_t;
+
+   /* Pure combination step (no DB): given each present principal's team set + its
+    * default team (0 = none) and a named team (0 = none named), compute the
+    * resolved team set (the intersection when both principals are present) and the
+    * billing team, fail-closed. `out_teams` must hold KB_MAX_TEAMS. A single
+    * principal with an empty team set resolves OK with 0 teams (deny downstream),
+    * NOT a conflict; only a non-empty-vs-non-empty EMPTY intersection, or a named
+    * team outside the resolved set, is KB_RESOLVE_CONFLICT. */
+   kb_resolve_status_t kb_identity_combine(const int64_t *tteams, int n_t, int64_t tdefault,
+                                           int has_transport, const int64_t *ateams, int n_a,
+                                           int64_t adefault, int has_actor, int64_t named_team,
+                                           int64_t *out_teams, int *out_n, int64_t *out_billing);
 
 #ifdef __cplusplus
 }
