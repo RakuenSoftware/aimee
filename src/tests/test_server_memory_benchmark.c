@@ -144,6 +144,24 @@ static void test_live_corpus_suite(void)
    reset_capture();
 }
 
+/* A --corpus FILE passed to a live-memory suite must be REJECTED, not silently
+ * dropped (which used to make the caller think they benchmarked their file when
+ * they benchmarked live memory). */
+static void test_live_suite_rejects_corpus_file(void)
+{
+   server_ctx_t ctx = {0};
+   server_conn_t conn = {0};
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "suite", "memory-retrieval");
+   cJSON_AddStringToObject(req, "corpus", "/tmp/some_corpus.json");
+   assert(handle_memory_benchmark(&ctx, &conn, req) == 0);
+   assert(g_last_error[0] != '\0');                /* errored loudly ... */
+   assert(g_last_response == NULL);                /* ... instead of emitting an ok result */
+   assert(strstr(g_last_error, "corpus") != NULL); /* actionable message */
+   cJSON_Delete(req);
+   reset_capture();
+}
+
 static void test_code_graph_suite(void)
 {
    server_ctx_t ctx = {0};
@@ -194,6 +212,7 @@ int main(void)
 {
    printf("server_memory_benchmark: ");
    test_live_corpus_suite();
+   test_live_suite_rejects_corpus_file();
    test_code_graph_suite();
    test_async_only_and_unknown();
    printf("all tests passed\n");
