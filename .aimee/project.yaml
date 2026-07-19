@@ -1,0 +1,25 @@
+# aimee's own delegate-sandbox toolchain.
+#
+# When a server-executed delegate (an autonomous implement/verify step) runs on
+# this repo, aimee resolves its --network none sandbox image from this file
+# (docs/DELEGATE_SANDBOX.md). Declaring the toolchain per project — rather than a
+# global delegate_sandbox_image — is what keeps the sandbox language-appropriate:
+# aimee BUILDS a project-dedicated image once (FROM base + these apt packages,
+# content-tag cached) and the learned toolchain layers on anything a build/verify
+# step later apt-installs.
+#
+# These packages mirror Dockerfile.server's build stage — the exact deps needed to
+# `make -C src` the server/CLI — so the mechanical verify can actually compile the
+# change instead of failing on a missing compiler.
+sandbox:
+  from: debian:bookworm-slim
+  packages:
+    - build-essential
+    - ca-certificates
+    - libpq-dev
+    - libsqlite3-dev
+    - libssl-dev
+    - libzstd-dev
+    - pkg-config
+    - python3
+    - zlib1g-dev
