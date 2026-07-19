@@ -60,6 +60,33 @@ int main(void)
       assert(strncmp(small, "0123456789abcdef", sizeof(small) - 1) == 0);
    }
 
+   /* overflow evicts the OLDEST entry (FIFO), not always slot 0. Fill the store
+    * to capacity, then insert past it and confirm the earliest ids drop out in
+    * insertion order while later ids stay retrievable. */
+   {
+      openai_responses_store_reset();
+      const int cap = 256; /* OPENAI_RESPONSES_STORE_MAX */
+      char id[32];
+      for (int i = 0; i < cap; i++)
+      {
+         snprintf(id, sizeof(id), "of_%04d", i);
+         openai_responses_store_put(id, "x");
+      }
+      /* full: every id 0..cap-1 is present */
+      assert(openai_responses_store_get("of_0000", buf, sizeof(buf)) == 1);
+      assert(openai_responses_store_get("of_0255", buf, sizeof(buf)) == 1);
+      /* one more insert evicts the oldest (of_0000), keeps the rest + the new one */
+      openai_responses_store_put("of_0256", "x");
+      assert(openai_responses_store_get("of_0000", buf, sizeof(buf)) == 0);
+      assert(openai_responses_store_get("of_0001", buf, sizeof(buf)) == 1);
+      assert(openai_responses_store_get("of_0256", buf, sizeof(buf)) == 1);
+      /* next insert evicts the next-oldest (of_0001), in order */
+      openai_responses_store_put("of_0257", "x");
+      assert(openai_responses_store_get("of_0001", buf, sizeof(buf)) == 0);
+      assert(openai_responses_store_get("of_0002", buf, sizeof(buf)) == 1);
+      assert(openai_responses_store_get("of_0257", buf, sizeof(buf)) == 1);
+   }
+
    /* reset drops everything */
    {
       openai_responses_store_reset();

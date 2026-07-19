@@ -14,6 +14,7 @@ static struct
    char *transcript;
 } g_entries[OPENAI_RESPONSES_STORE_MAX];
 static int g_count = 0;
+static int g_evict = 0; /* next slot to reuse once full (oldest-first, round-robin) */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void openai_responses_store_put(const char *resp_id, const char *transcript)
@@ -31,13 +32,23 @@ void openai_responses_store_put(const char *resp_id, const char *transcript)
          return;
       }
    }
-   int slot = (g_count < OPENAI_RESPONSES_STORE_MAX) ? g_count++ : 0;
-   if (slot < OPENAI_RESPONSES_STORE_MAX)
+   int slot;
+   if (g_count < OPENAI_RESPONSES_STORE_MAX)
    {
-      free(g_entries[slot].transcript);
-      snprintf(g_entries[slot].id, sizeof(g_entries[slot].id), "%s", resp_id);
-      g_entries[slot].transcript = strdup(transcript);
+      slot = g_count++;
    }
+   else
+   {
+      /* Full: evict the oldest entry (round-robin in insertion order), matching
+       * openai_runs_store's oldest-slot reuse. Previously every insert past the
+       * cap clobbered slot 0, so slots 1..MAX-1 went permanently stale and only
+       * the newest transcript plus the 255 oldest stayed retrievable. */
+      slot = g_evict;
+      g_evict = (g_evict + 1) % OPENAI_RESPONSES_STORE_MAX;
+   }
+   free(g_entries[slot].transcript);
+   snprintf(g_entries[slot].id, sizeof(g_entries[slot].id), "%s", resp_id);
+   g_entries[slot].transcript = strdup(transcript);
    pthread_mutex_unlock(&g_lock);
 }
 
@@ -73,5 +84,6 @@ void openai_responses_store_reset(void)
       g_entries[i].id[0] = '\0';
    }
    g_count = 0;
+   g_evict = 0;
    pthread_mutex_unlock(&g_lock);
 }
