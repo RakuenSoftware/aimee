@@ -392,6 +392,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/decision_log.c
     ${AIMEE_SRC_DIR}/db2/enrollments.c
     ${AIMEE_SRC_DIR}/db2/db2_tenant.c
+    ${AIMEE_SRC_DIR}/db2/db2_hardening.c
     ${AIMEE_SRC_DIR}/db2/team.c
     ${AIMEE_SRC_DIR}/db2/project.c
     ${AIMEE_SRC_DIR}/db2/membership.c

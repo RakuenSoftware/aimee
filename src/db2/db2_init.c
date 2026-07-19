@@ -8,6 +8,7 @@
  */
 
 #include "db2.h"
+#include "db2_hardening.h"
 #include "db2_internal.h"
 
 #include "db2_pool.h"
@@ -590,6 +591,31 @@ int db2_init(const char *libpq_url)
    {
       pthread_mutex_unlock(&g_init_lock);
       return -1;
+   }
+
+   /* Hardened multi-tenant tier: fail closed at boot unless kb↔Postgres is
+    * verify-full TLS (I1) and the connected runtime role is non-owner, non-super,
+    * NOBYPASSRLS, no-CREATE (B4) — otherwise the team-scoped RLS is defeated. The
+    * dev/personal profile (AIMEE_KB_HARDENED unset) skips these, like the file
+    * vault-custody dev mode that holds no live secrets. */
+   if (db2_hardening_enabled() && !aimee_pg_is_shim())
+   {
+      char herr[256] = "";
+      if (!db2_hardening_dsn_verify_full(libpq_url))
+      {
+         fprintf(stderr,
+                 "aimee-kb: hardened tier requires sslmode=verify-full in the DB2 DSN\n");
+         aimee_pg_close(conn);
+         pthread_mutex_unlock(&g_init_lock);
+         return -1;
+      }
+      if (db2_hardening_assert_runtime_role(conn, herr, sizeof(herr)) != 0)
+      {
+         fprintf(stderr, "aimee-kb: hardened tier runtime-role check failed: %s\n", herr);
+         aimee_pg_close(conn);
+         pthread_mutex_unlock(&g_init_lock);
+         return -1;
+      }
    }
 
    /* The deployment runs a single embedder (0.6b=1024 / 4b=2560); the configured
