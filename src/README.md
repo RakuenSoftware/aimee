@@ -177,8 +177,8 @@ The largest source files are tracked for decomposition in waves (split the bigge
 |------|-------|-------------|
 | `server/server_mcp.c` | ~1999 | Wave 3, split remaining MCP tool families from dispatch |
 | `server/agent_tools.c` | ~1825 | Wave 2, split schema generation from tool execution |
-| `server/kb_client.c` | ~1781 | Wave 4, split remaining KB client families |
-| `server/kb_client_memory.c` | ~1457 | Wave 4, split remaining memory RPC wrappers |
+| `modules/kb_client/kb_client.c` | ~1781 | Wave 4, split remaining KB client families |
+| `modules/kb_client/kb_client_memory.c` | ~1457 | Wave 4, split remaining memory RPC wrappers |
 | `memory_advanced.c` | ~1079 |, (single responsibility, acceptable size) |
 | `posix/cli_client.c` | ~1073 |, (single responsibility, acceptable size) |
 
@@ -1242,7 +1242,7 @@ reference for the separate KB API (`api/openapi-v1.yaml`). See the
 ## The KB split
 
 `aimee-server` owns no DB2 SQL. It reaches DB2 through the **KB client**
-(`src/server/kb_client*.c`), typed wrappers (memory, index, docs, agent,
+(`src/modules/kb_client/kb_client*.c`), typed wrappers (memory, index, docs, agent,
 dashboard, roadmap, notes, curiosity, status) that call `aimee-kb` over its
 HTTP `/v1` API (`AIMEE_KB_API_URL`, port 8741). The legacy Unix-socket transport
 was retired in #2747; HTTP is now the only KB transport. DB1 remains local to the server;

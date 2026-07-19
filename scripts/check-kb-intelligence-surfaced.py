@@ -10,7 +10,7 @@ cmd_kb handler).
 This check enforces, for each `/v1/intelligence/<...>` route served by
 kb_http.c, that aimee-server has a client path to it:
 
-  1. src/server/kb_client.c has a wrapper whose body contains the route path, and
+  1. src/modules/kb_client/kb_client.c has a wrapper whose body contains the route path, and
   2. that wrapper function is CALLED from a server handler (src/server/*.c other
      than kb_client.c) — i.e. it is actually surfaced, not just defined.
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 KB_HTTP = ROOT / "src" / "kb" / "http" / "kb_http.c"
-KB_CLIENT = ROOT / "src" / "server" / "kb_client.c"
+KB_CLIENT = ROOT / "src" / "modules" / "kb_client" / "kb_client.c"
 SERVER_DIR = ROOT / "src" / "server"
 
 ROUTE_RE = re.compile(r'strcmp\(\s*path\s*,\s*"(/v1/intelligence/[^"]+)"\s*\)')
@@ -84,7 +84,7 @@ def main():
         fn = wrapper_for_path(path)
         if not fn:
             failures.append(f"{path}: no kb_client wrapper references it "
-                            f"(add one in src/server/kb_client.c, or mark the route kb-direct)")
+                            f"(add one in src/modules/kb_client/kb_client.c, or mark the route kb-direct)")
             continue
         if not wrapper_is_called(fn):
             failures.append(f"{path}: wrapper {fn}() is never called by an aimee-server "
