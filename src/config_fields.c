@@ -428,6 +428,22 @@ const char *config_field_reload_verdict(const config_field_t *f)
    }
 }
 
+const char *config_field_group_name(const config_field_t *f)
+{
+   switch (f ? f->group : FGROUP_RUNTIME)
+   {
+   case FGROUP_DEPLOY:
+      return "deploy";
+   case FGROUP_ADVANCED:
+      return "advanced";
+   case FGROUP_DEV:
+      return "dev";
+   case FGROUP_RUNTIME:
+   default:
+      return "runtime";
+   }
+}
+
 cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
 {
    if (!cfg || !f)

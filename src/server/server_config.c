@@ -22,12 +22,23 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    cJSON *obj = cJSON_CreateObject();
+   /* Advertise the surface group of every non-runtime key so the Settings GUI can
+    * hide deploy/advanced/dev keys by default. Additive + non-breaking: the flat
+    * `config` map still carries EVERY key's value, so `aimee config show` and any
+    * existing consumer are unchanged; a client that ignores `groups` sees all. */
+   cJSON *groups = cJSON_CreateObject();
    for (int i = 0; config_fields[i].key; i++)
+   {
       cJSON_AddItemToObject(obj, config_fields[i].key,
                             config_field_value_json(&cfg, &config_fields[i]));
+      if (config_fields[i].group != FGROUP_RUNTIME)
+         cJSON_AddStringToObject(groups, config_fields[i].key,
+                                 config_field_group_name(&config_fields[i]));
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "config", obj);
+   cJSON_AddItemToObject(resp, "groups", groups);
    return server_send_ok(conn, resp);
 }
 
