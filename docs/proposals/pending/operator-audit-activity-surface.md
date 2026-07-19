@@ -25,7 +25,7 @@ already exist, with no new write path.
 - **Provenance columns.** `operator_id` is on shareable rows across
   `src/db2/` (`fidelity.c`, `corpus_structural.c`, `artifacts.c`, memory rows,
   …), alongside `content_hash` + timestamps.
-- **WORM ledger.** `src/audit_ledger.c` + `src/db2/kb_audit_worm.c` record
+- **WORM ledger.** `src/modules/audit/audit_ledger.c` + `src/db2/kb_audit_worm.c` record
   privileged/append-only actions with a verify chain.
 - **The CLI verb exists but is integrity-only.** `cmd_audit`
   (`{"audit", "Verify/checkpoint the WORM audit store …"}`) has `verify` +
