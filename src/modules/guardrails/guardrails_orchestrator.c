@@ -14,6 +14,7 @@
 #include "guardrails_semantic.h"
 #include "guardrails_blast_radius.h"
 #include "workspace_provider.h" /* skip worktree enforcement for a detached (client) workspace */
+#include "workspace_turn.h" /* workspace_turn_container_bound — relax file guards for a container delegate */
 #include "config.h"
 #include "git_verify.h"
 #include "skill.h"
@@ -1763,11 +1764,22 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       }
    }
 
+   /* A delegate bound to its OWN container has no host-oriented file limitations:
+    * its writes land in the container's mounted worktree (its private sandbox), and
+    * the operator directive is that a container delegate may do whatever it needs to
+    * that tree. The on-disk-state write/edit guards below (read-before-write,
+    * truncating-rewrite, stale-edit) are host-safety heuristics that otherwise stall
+    * an autonomous delegate mid-task — e.g. a delegate creating a proof file a prior
+    * retry already left on disk is blocked as a "blind overwrite". Skip them for a
+    * container-bound turn; the predicate is only true on that delegate's turn thread,
+    * so interactive/host turns keep every guard. */
+   const int container_delegate = workspace_turn_container_bound();
+
    /* Read-before-write guard: block Write to an existing file that has not been
     * read in this session. Agents must read a file before overwriting it so they
     * work from current content, not a stale or imagined version. New files (those
     * that do not yet exist on disk) are always allowed through. */
-   if (strcmp(tool_name, "Write") == 0 && state && fp && cJSON_IsString(fp))
+   if (!container_delegate && strcmp(tool_name, "Write") == 0 && state && fp && cJSON_IsString(fp))
    {
       normalize_path(fp->valuestring, effective_cwd, norm, sizeof(norm));
       struct stat st;
@@ -1793,7 +1805,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
     * mid-stream (turn/length exhaustion) leaves the file truncated, and that
     * collapsed file then propagates. Targeted Edit/MultiEdit cannot truncate a
     * file this way, so require them for large shrinks. */
-   if (strcmp(tool_name, "Write") == 0 && fp && cJSON_IsString(fp))
+   if (!container_delegate && strcmp(tool_name, "Write") == 0 && fp && cJSON_IsString(fp))
    {
       normalize_path(fp->valuestring, effective_cwd, norm, sizeof(norm));
       struct stat st;
@@ -1823,7 +1835,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
     * appears verbatim. When the anchor survives the on-disk change, the
     * edit is safe — allowing it avoids spurious blocks for concurrent
     * changes in unrelated regions of the same file. */
-   if (strcmp(tool_name, "Edit") == 0 && state && fp && cJSON_IsString(fp))
+   if (!container_delegate && strcmp(tool_name, "Edit") == 0 && state && fp && cJSON_IsString(fp))
    {
       normalize_path(fp->valuestring, effective_cwd, norm, sizeof(norm));
       uint64_t stored_hash = session_file_hash(state, norm);
