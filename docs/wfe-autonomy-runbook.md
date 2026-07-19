@@ -1,8 +1,8 @@
-# Runbook: the autonomous WFE lifecycle
+# WFE Autonomy Runbook
 
-The autonomous Work-Item Framing Engine (WFE) takes a single human-authored work item from intake to a merged pull request without any manual intervention between stages: it parses the scope, drafts and ratifies a plan against acceptance criteria, gates the work behind a roundtable sanity check, drives implementation as a sequence of atomic per-slice edits, and only opens a PR once every slice has been verified end-to-end. The marker fix-validate-1784468081 anchors this runbook to the slice that produced it so downstream tooling can prove provenance.
+The autonomous Work-For-Everyone (WFE) lifecycle drives a change from a free-form proposal all the way to a merged pull request without manual intervention: a proposal is ingested, a deterministic plan is drafted and gated by a multi-agent roundtable, the work is executed in self-contained per-slice units that each get verified and reviewed independently, and the accepted work is committed and pushed as a PR.
 
-The end-to-end pipeline is:
+Stages:
 
 - proposal intake
 - plan
@@ -10,3 +10,5 @@ The end-to-end pipeline is:
 - implement per-slice
 - verify
 - PR open
+
+fix-validate-1784468081
