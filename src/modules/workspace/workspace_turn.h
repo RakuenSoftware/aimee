@@ -56,6 +56,15 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
 int workspace_turn_bind_container(const char *task_id, const char *image, const char *workspace,
                                   int workspace_read_only);
 
+/* Returns 1 when this thread's turn is bound to a delegate's OWN container
+ * (workspace_turn_bind_container succeeded and has not yet been unbound), 0
+ * otherwise. Callers use it to relax host-oriented restrictions that do not
+ * apply once file/exec run inside the delegate's isolated sandbox — e.g. the
+ * shell-git gate, whose purpose is to keep raw git off aimee-server's own
+ * filesystem, is moot when git runs against the container's mounted worktree.
+ * Valid only between bind and unbind, on the binding thread. */
+int workspace_turn_container_bound(void);
+
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
 void workspace_turn_unbind_active(void);

@@ -1976,6 +1976,20 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
 {
    if (!command || !command[0] || !wfe_shell_invokes_git("bash", command))
       return 0; /* not a git command — the overwhelmingly common case, stays silent */
+   /* The gate exists to keep raw shell git off aimee-server's OWN filesystem and
+    * push it through the credential-holding git_* tools. A delegate bound to its
+    * own container runs its shell — including git — INSIDE that sandbox, against
+    * the container's mounted worktree, not the host: the delegate is meant to
+    * commit there and aimee collects the diff (push/PR still go through aimee at
+    * the deliver stage). Blocking its local git is the "limitation on a container
+    * delegate" this seam must not impose; allow it. */
+   if (workspace_turn_container_bound())
+   {
+      aimee_log(LOG_DEBUG, "shell-git-gate",
+                "allow: delegate is container-bound — git runs in its sandbox worktree, not on "
+                "the host");
+      return 0;
+   }
    config_t cfg;
    if (config_load(&cfg) == 0 && !cfg.require_aimee_git)
    {

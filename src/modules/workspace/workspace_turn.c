@@ -464,6 +464,11 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    return 1;
 }
 
+int workspace_turn_container_bound(void)
+{
+   return t_turn_container_backend != NULL;
+}
+
 void workspace_turn_unbind_active(void)
 {
    if (t_turn_bound)

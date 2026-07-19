@@ -205,11 +205,15 @@ int main(void)
          c.delegate_sandbox = 1;
          assert(config_save(&c) == 0);
          g_acquires = g_releases = 0;
+         assert(workspace_turn_container_bound() == 0); /* nothing bound yet */
          assert(workspace_turn_bind_container("deleg-2", NULL, NULL, 0) == 1);
          assert(g_acquires == 1);
          const workspace_provider_t *p = workspace_provider_active();
          assert(p != shared);
          assert(p->kind == WS_PROVIDER_CONTAINER);
+         /* The container-bound predicate the shell-git gate keys off: true while
+          * bound, false once released. */
+         assert(workspace_turn_container_bound() == 1);
 
          /* Unbind must RELEASE the container, not just drop the pointer: a leaked
           * container outlives its turn and pins its workspace. And the active
@@ -218,6 +222,7 @@ int main(void)
          workspace_turn_unbind_active();
          assert(g_releases == 1);
          assert(workspace_provider_active() == shared);
+         assert(workspace_turn_container_bound() == 0); /* cleared on unbind */
       }
 
       /* The tree reaches the backend. Without this the backend mints an EMPTY
