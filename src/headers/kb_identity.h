@@ -97,6 +97,32 @@ extern "C"
                                            int64_t adefault, int has_actor, int64_t named_team,
                                            int64_t *out_teams, int *out_n, int64_t *out_billing);
 
+   /* The authenticated request context kb_identity_resolve returns — never a
+    * single collapsed principal. transport/actor are copied in with their
+    * has_* flag; teams[] is the resolved (intersection) set and billing_team the
+    * resolved attribution team (0 = none resolved). */
+   typedef struct
+   {
+      kb_principal_t transport;
+      kb_principal_t actor;
+      int has_transport;
+      int has_actor;
+      int64_t teams[KB_MAX_TEAMS];
+      int n_teams;
+      int64_t billing_team;
+   } kb_request_context_t;
+
+   /* DB-backed resolution (slice 2). For each present principal it runs an
+    * identity-bootstrap scope (sets aimee.principal, reads that principal's own
+    * memberships under RLS), then applies kb_identity_combine. `named_team` = 0
+    * when the request names none. Requires the Postgres backend (hard-fails on the
+    * SQLite shim like every tenant op). Returns the combine status; *out is filled
+    * on KB_RESOLVE_OK (and carries the principals/teams on the reject stats too for
+    * auditing). */
+   kb_resolve_status_t kb_identity_resolve(const kb_principal_t *transport,
+                                           const kb_principal_t *actor, int64_t named_team,
+                                           kb_request_context_t *out);
+
 #ifdef __cplusplus
 }
 #endif
