@@ -30,6 +30,10 @@
 #include "kb_http_governance.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
+#include "kb_auth_oidc.h"
+#include "kb_identity.h"
+#include "kb_reqctx.h"
+#include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
 #include "db2/pgvec_kb_service.h"
@@ -734,14 +738,48 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * owner-only routes (e.g. /v1/enroll) tell an unscoped owner credential from a scoped one. */
    kb_verify_result_t vr;
    memset(&vr, 0, sizeof(vr));
+   /* Reset any prior request's actor on this worker thread; a request that fails
+    * auth below leaves no actor (fail-closed) for tenant-aware handlers. */
+   kb_reqctx_clear();
+   char vr_which[32] = "";
+   if (!bearer_token || !bearer_token[0])
+   {
+      /* Open auth (no owner token configured — dev only): owner-equivalent actor. */
+      kb_principal_t owner;
+      kb_verify_result_t ovr;
+      memset(&ovr, 0, sizeof(ovr));
+      if (kb_principal_from_verify(&ovr, "", &owner) == 0)
+         kb_reqctx_set_actor(&owner);
+   }
    if (bearer_token && bearer_token[0])
    {
       const char *presented =
           (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
-      if (!kb_verifier_authenticate(presented, bearer_token, &vr, NULL, 0))
+      if (!kb_verifier_authenticate(presented, bearer_token, &vr, vr_which, sizeof(vr_which)))
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unauthorized\"}");
          return 401;
+      }
+
+      /* Build the request's authenticated ACTOR principal for tenant-aware handlers
+       * (P1 slice 4). OIDC -> issuer-scoped (iss,sub); an UNSCOPED kb-token is the
+       * install owner (the bootstrap operator); a scoped kb-token is a limited
+       * service credential, not a tenancy actor, so no actor is set. */
+      {
+         kb_principal_t actor;
+         memset(&actor, 0, sizeof(actor));
+         if (strcmp(vr_which, "oidc") == 0)
+         {
+            char issuer[256] = "";
+            kb_oidc_configured_issuer(issuer, sizeof(issuer));
+            kb_principal_from_verify(&vr, issuer, &actor);
+         }
+         else if (!vr.scope_kind[0])
+         {
+            kb_principal_from_verify(&vr, "", &actor); /* unscoped owner */
+         }
+         if (actor.authenticated)
+            kb_reqctx_set_actor(&actor);
       }
 
       /* Scoped token: deny cross-scope access when the request names a scope. */
@@ -770,6 +808,16 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   method, path);
          return 403;
       }
+   }
+
+   /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
+    * authenticated caller; the org-admin capability for writes is enforced at the
+    * DB layer (RLS write policies), and reads are RLS-scoped to the caller's teams.
+    * The handler returns -1 for non-tenancy paths so the router falls through. */
+   {
+      int tr = kb_http_team_route(method, path, query_string, body, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
    }
 
    /* Console + accounts routes. Served only to the owner (unscoped credential) or

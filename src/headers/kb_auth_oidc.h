@@ -84,6 +84,10 @@ extern "C"
    typedef int (*kb_oidc_fleet_resolver_fn)(const char *issuer, char *out, size_t cap);
    void kb_oidc_set_fleet_resolver(kb_oidc_fleet_resolver_fn fn);
 
+   /* The configured OIDC issuer (for building the issuer-scoped actor principal
+    * when the 'oidc' verifier fired). Returns 0 + fills out[cap], -1 if unset. */
+   int kb_oidc_configured_issuer(char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

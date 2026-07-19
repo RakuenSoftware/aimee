@@ -988,6 +988,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_service_kb.c
     ${AIMEE_SRC_DIR}/kb/kb_identity_resolve.c
     ${AIMEE_SRC_DIR}/kb/kb_oidc_jwks_fleet.c
+    ${AIMEE_SRC_DIR}/kb/kb_reqctx.c
     ${AIMEE_SRC_DIR}/kb/kb_service_memory.c
     ${AIMEE_SRC_DIR}/kb/kb_service_css.c
     ${AIMEE_SRC_DIR}/kb/kb_service_agent.c
@@ -1005,13 +1006,16 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_mining.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_team.c
     ${AIMEE_SRC_DIR}/kb/http/kb_route_acl.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_ingress.console.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_team.console.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_accounts.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_governance.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
-    ${AIMEE_SRC_DIR}/kb/http/kb_ingress.code.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_team.code.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ingest.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_jobs.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ws.c

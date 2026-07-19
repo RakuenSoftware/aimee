@@ -349,6 +349,19 @@ void kb_oidc_set_fleet_resolver(kb_oidc_fleet_resolver_fn fn)
    pthread_mutex_unlock(&g_oidc_lock);
 }
 
+int kb_oidc_configured_issuer(char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   pthread_mutex_lock(&g_oidc_lock);
+   int ok = (g_oidc_cfg_set && g_oidc_cfg.issuer[0]);
+   if (ok)
+      snprintf(out, cap, "%s", g_oidc_cfg.issuer);
+   pthread_mutex_unlock(&g_oidc_lock);
+   return ok ? 0 : -1;
+}
+
 static int oidc_verify_fn(const char *presented, const char *configured, kb_verify_result_t *out,
                           void *ctx)
 {
