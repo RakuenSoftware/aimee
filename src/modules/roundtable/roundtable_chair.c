@@ -1,6 +1,6 @@
 /* roundtable_chair.c: the reasoning-refutation pass. See roundtable_chair.h. */
 
-#include "aimee.h" /* MAX_PATH_LEN (pulled by delegate_ensemble.h -> agent_types.h) */
+#include "aimee.h" /* MAX_PATH_LEN */
 
 #include "roundtable_chair.h"
 

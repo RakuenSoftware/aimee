@@ -17,7 +17,7 @@
  * rationale). This bounds the risk of adding a second fallible model to the very step
  * meant to curb fallible over-flagging. */
 
-#include "delegate_ensemble.h" /* roundtable_result_t */
+#include "roundtable_types.h" /* roundtable_result_t */
 
 /* Build the chair adjudication prompt from the surviving items in `out` (an items
  * digest + the demote/drop-only contract). Returns a malloc'd string (caller frees),
