@@ -44,6 +44,19 @@ static int err(char *out, int cap, int status, const char *msg)
    return status;
 }
 
+/* A team/project name is printable text of bounded length: reject control chars,
+ * DEL, and over-length so a name can't smuggle control bytes into stored state. */
+static int name_is_clean(const char *s)
+{
+   size_t n = strlen(s);
+   if (n == 0 || n > 100)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+      if ((unsigned char)s[i] < 0x20 || (unsigned char)s[i] == 0x7f)
+         return 0;
+   return 1;
+}
+
 /* Map a tenant-scope/db2 return into an HTTP status. */
 static int tenant_http_status(int rc)
 {
@@ -100,6 +113,8 @@ static int handle_team(const char *method, const char *body, char *out, int cap)
       char nm[128];
       snprintf(nm, sizeof(nm), "%s", name->valuestring);
       cJSON_Delete(b);
+      if (!name_is_clean(nm))
+         return err(out, cap, 400, "invalid team name (printable, 1-100 chars)");
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
       int64_t id = 0;
@@ -213,6 +228,8 @@ static int handle_project(const char *method, const char *query_string, const ch
       snprintf(am, sizeof(am), "%s",
                (cJSON_IsString(mode) && mode->valuestring[0]) ? mode->valuestring : "team-open");
       cJSON_Delete(b);
+      if (!name_is_clean(nm))
+         return err(out, cap, 400, "invalid project name (printable, 1-100 chars)");
       if (strcmp(am, "team-open") != 0 && strcmp(am, "restricted") != 0)
          return err(out, cap, 400, "access_mode must be 'team-open' or 'restricted'");
       if (begin_actor_scope(out, cap, &http) != 0)

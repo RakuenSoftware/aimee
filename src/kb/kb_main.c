@@ -589,7 +589,13 @@ static int kb_cmd_tenancy(int argc, char **argv)
    }
 
    if (rc_http == 0)
-      db2_tenant_scope_commit();
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc_http = 1;
+      }
+   }
    else
       db2_tenant_scope_rollback();
    db2_shutdown();
