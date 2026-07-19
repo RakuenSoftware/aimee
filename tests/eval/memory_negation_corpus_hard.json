@@ -1,0 +1,1504 @@
+{
+  "version": 1,
+  "description": "HARD validation corpus for memory_negation. Each of 16 negation facts (nNNN) is paired with a lexically near-identical POSITIVE twin (n1NN) that differs only in polarity, so a bag-of-words/hash-embedding retriever cannot separate the pair -- discrimination depends entirely on negation-awareness. 120 topically-adjacent distractors make top-k selective. Watch MRR / recall@1 on the `dis` cases: that is where negation ON should beat OFF once the query path can REORDER (Ai), not just append. Positive controls (pos) must not regress. Not part of the gated golden.",
+  "fixtures": [
+    {
+      "fid": "n001",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "redis-persistence negative",
+      "content": "Redis in the checkout service is configured without on-disk persistence, so keys are not written to disk."
+    },
+    {
+      "fid": "n101",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "redis-persistence positive",
+      "content": "Redis in the checkout service is configured with on-disk persistence, so keys are written to disk."
+    },
+    {
+      "fid": "n002",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "postgres-ssl negative",
+      "content": "The reporting database connection does not use SSL and sends traffic unencrypted over the socket."
+    },
+    {
+      "fid": "n102",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "postgres-ssl positive",
+      "content": "The reporting database connection does use SSL and sends traffic encrypted over the socket."
+    },
+    {
+      "fid": "n003",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "metrics-auth negative",
+      "content": "The internal metrics endpoint requires no authentication and is served without any token check."
+    },
+    {
+      "fid": "n103",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "metrics-auth positive",
+      "content": "The internal metrics endpoint requires authentication and is served with a token check."
+    },
+    {
+      "fid": "n004",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "job-retry negative",
+      "content": "Failed indexing jobs in the pipeline are never retried automatically and must be requeued by hand."
+    },
+    {
+      "fid": "n104",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "job-retry positive",
+      "content": "Failed indexing jobs in the pipeline are always retried automatically by the scheduler on failure."
+    },
+    {
+      "fid": "n005",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "cdn-purge negative",
+      "content": "The image CDN cache is not purged on deploy and entries expire only by TTL."
+    },
+    {
+      "fid": "n105",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "cdn-purge positive",
+      "content": "The image CDN cache is purged on deploy and entries are refreshed immediately."
+    },
+    {
+      "fid": "n006",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "staging-email negative",
+      "content": "The preview environment mailer does not send real email and captures messages in a local sink."
+    },
+    {
+      "fid": "n106",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "staging-email positive",
+      "content": "The preview environment mailer does send real email and delivers messages to real inboxes."
+    },
+    {
+      "fid": "n007",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "embedder-gpu negative",
+      "content": "The sentence embedder worker uses no GPU and runs entirely on CPU cores."
+    },
+    {
+      "fid": "n107",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "embedder-gpu positive",
+      "content": "The sentence embedder worker uses a GPU and offloads work from CPU cores."
+    },
+    {
+      "fid": "n008",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "backup-encryption negative",
+      "content": "The nightly volume backups are not encrypted and sit in plaintext on the disk."
+    },
+    {
+      "fid": "n108",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "backup-encryption positive",
+      "content": "The nightly volume backups are encrypted and sit as ciphertext on the disk."
+    },
+    {
+      "fid": "n009",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "api-ratelimit negative",
+      "content": "The partner search API is not rate limited and accepts unbounded request bursts."
+    },
+    {
+      "fid": "n109",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "api-ratelimit positive",
+      "content": "The partner search API is rate limited and rejects request bursts past the cap."
+    },
+    {
+      "fid": "n010",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "ws-compression negative",
+      "content": "The realtime websocket channel does not use compression and sends frames uncompressed."
+    },
+    {
+      "fid": "n110",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "ws-compression positive",
+      "content": "The realtime websocket channel does use compression and sends frames compressed."
+    },
+    {
+      "fid": "n011",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "audit-logging negative",
+      "content": "Configuration changes in the console are not written to the audit log and leave no trail."
+    },
+    {
+      "fid": "n111",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "audit-logging positive",
+      "content": "Configuration changes in the console are written to the audit log and leave a full trail."
+    },
+    {
+      "fid": "n012",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "request-tracing negative",
+      "content": "The gateway request path has no distributed tracing and emits no spans."
+    },
+    {
+      "fid": "n112",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "request-tracing positive",
+      "content": "The gateway request path has distributed tracing and emits detailed spans."
+    },
+    {
+      "fid": "n013",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "auto-migrate negative",
+      "content": "Database schema migrations at boot are not applied automatically and wait for a manual run."
+    },
+    {
+      "fid": "n113",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "auto-migrate positive",
+      "content": "Database schema migrations at boot are applied automatically by the boot sequence itself."
+    },
+    {
+      "fid": "n014",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "flag-cache negative",
+      "content": "The feature flag values are not cached and are read fresh on every request."
+    },
+    {
+      "fid": "n114",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "flag-cache positive",
+      "content": "The feature flag values are cached and are reused across requests."
+    },
+    {
+      "fid": "n015",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "cors-policy negative",
+      "content": "The public asset host does not allow cross-origin requests from third-party sites."
+    },
+    {
+      "fid": "n115",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "cors-policy positive",
+      "content": "The public asset host does allow cross-origin requests from third-party sites."
+    },
+    {
+      "fid": "n016",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "read-replica negative",
+      "content": "The orders database tier has no read replicas and serves all reads from the primary."
+    },
+    {
+      "fid": "n116",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "read-replica positive",
+      "content": "The orders database tier has read replicas and serves reads off the replicas."
+    },
+    {
+      "fid": "d001",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 1",
+      "content": "Service 1 health checks run every 12 seconds against the readiness probe."
+    },
+    {
+      "fid": "d002",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 2",
+      "content": "Service 2 health checks run every 19 seconds against the readiness probe."
+    },
+    {
+      "fid": "d003",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 3",
+      "content": "Service 3 health checks run every 26 seconds against the readiness probe."
+    },
+    {
+      "fid": "d004",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 4",
+      "content": "Service 4 health checks run every 33 seconds against the readiness probe."
+    },
+    {
+      "fid": "d005",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 5",
+      "content": "Service 5 health checks run every 40 seconds against the readiness probe."
+    },
+    {
+      "fid": "d006",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 6",
+      "content": "Service 6 health checks run every 47 seconds against the readiness probe."
+    },
+    {
+      "fid": "d007",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 7",
+      "content": "Service 7 health checks run every 54 seconds against the readiness probe."
+    },
+    {
+      "fid": "d008",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 8",
+      "content": "Service 8 health checks run every 61 seconds against the readiness probe."
+    },
+    {
+      "fid": "d009",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 9",
+      "content": "The billing worker pool scales to 68 replicas under sustained load."
+    },
+    {
+      "fid": "d010",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 10",
+      "content": "The search worker pool scales to 75 replicas under sustained load."
+    },
+    {
+      "fid": "d011",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 11",
+      "content": "The auth worker pool scales to 82 replicas under sustained load."
+    },
+    {
+      "fid": "d012",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 12",
+      "content": "The notify worker pool scales to 89 replicas under sustained load."
+    },
+    {
+      "fid": "d013",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 13",
+      "content": "The ledger worker pool scales to 6 replicas under sustained load."
+    },
+    {
+      "fid": "d014",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 14",
+      "content": "The media worker pool scales to 13 replicas under sustained load."
+    },
+    {
+      "fid": "d015",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 15",
+      "content": "The graph worker pool scales to 20 replicas under sustained load."
+    },
+    {
+      "fid": "d016",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 16",
+      "content": "The sync worker pool scales to 27 replicas under sustained load."
+    },
+    {
+      "fid": "d017",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 17",
+      "content": "Cache tier 17 evicts entries with a least-recently-used policy at 34 megabytes."
+    },
+    {
+      "fid": "d018",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 18",
+      "content": "Cache tier 18 evicts entries with a least-recently-used policy at 41 megabytes."
+    },
+    {
+      "fid": "d019",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 19",
+      "content": "Cache tier 19 evicts entries with a least-recently-used policy at 48 megabytes."
+    },
+    {
+      "fid": "d020",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 20",
+      "content": "Cache tier 20 evicts entries with a least-recently-used policy at 55 megabytes."
+    },
+    {
+      "fid": "d021",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 21",
+      "content": "Cache tier 21 evicts entries with a least-recently-used policy at 62 megabytes."
+    },
+    {
+      "fid": "d022",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 22",
+      "content": "Cache tier 22 evicts entries with a least-recently-used policy at 69 megabytes."
+    },
+    {
+      "fid": "d023",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 23",
+      "content": "Cache tier 23 evicts entries with a least-recently-used policy at 76 megabytes."
+    },
+    {
+      "fid": "d024",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 24",
+      "content": "Cache tier 24 evicts entries with a least-recently-used policy at 83 megabytes."
+    },
+    {
+      "fid": "d025",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 25",
+      "content": "The billing queue drains in batches of 90 messages per poll."
+    },
+    {
+      "fid": "d026",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 26",
+      "content": "The search queue drains in batches of 7 messages per poll."
+    },
+    {
+      "fid": "d027",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 27",
+      "content": "The auth queue drains in batches of 14 messages per poll."
+    },
+    {
+      "fid": "d028",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 28",
+      "content": "The notify queue drains in batches of 21 messages per poll."
+    },
+    {
+      "fid": "d029",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 29",
+      "content": "The ledger queue drains in batches of 28 messages per poll."
+    },
+    {
+      "fid": "d030",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 30",
+      "content": "The media queue drains in batches of 35 messages per poll."
+    },
+    {
+      "fid": "d031",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 31",
+      "content": "The graph queue drains in batches of 42 messages per poll."
+    },
+    {
+      "fid": "d032",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 32",
+      "content": "The sync queue drains in batches of 49 messages per poll."
+    },
+    {
+      "fid": "d033",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 33",
+      "content": "Connection pool 33 caps out at 56 concurrent database sessions."
+    },
+    {
+      "fid": "d034",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 34",
+      "content": "Connection pool 34 caps out at 63 concurrent database sessions."
+    },
+    {
+      "fid": "d035",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 35",
+      "content": "Connection pool 35 caps out at 70 concurrent database sessions."
+    },
+    {
+      "fid": "d036",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 36",
+      "content": "Connection pool 36 caps out at 77 concurrent database sessions."
+    },
+    {
+      "fid": "d037",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 37",
+      "content": "Connection pool 37 caps out at 84 concurrent database sessions."
+    },
+    {
+      "fid": "d038",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 38",
+      "content": "Connection pool 38 caps out at 91 concurrent database sessions."
+    },
+    {
+      "fid": "d039",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 39",
+      "content": "Connection pool 39 caps out at 8 concurrent database sessions."
+    },
+    {
+      "fid": "d040",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 40",
+      "content": "Connection pool 40 caps out at 15 concurrent database sessions."
+    },
+    {
+      "fid": "d041",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 41",
+      "content": "The billing cron job compacts old partitions once every 22 hours."
+    },
+    {
+      "fid": "d042",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 42",
+      "content": "The search cron job compacts old partitions once every 29 hours."
+    },
+    {
+      "fid": "d043",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 43",
+      "content": "The auth cron job compacts old partitions once every 36 hours."
+    },
+    {
+      "fid": "d044",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 44",
+      "content": "The notify cron job compacts old partitions once every 43 hours."
+    },
+    {
+      "fid": "d045",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 45",
+      "content": "The ledger cron job compacts old partitions once every 50 hours."
+    },
+    {
+      "fid": "d046",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 46",
+      "content": "The media cron job compacts old partitions once every 57 hours."
+    },
+    {
+      "fid": "d047",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 47",
+      "content": "The graph cron job compacts old partitions once every 64 hours."
+    },
+    {
+      "fid": "d048",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 48",
+      "content": "The sync cron job compacts old partitions once every 71 hours."
+    },
+    {
+      "fid": "d049",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 49",
+      "content": "Region 49 replicates object storage to a cold tier after 78 days."
+    },
+    {
+      "fid": "d050",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 50",
+      "content": "Region 50 replicates object storage to a cold tier after 85 days."
+    },
+    {
+      "fid": "d051",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 51",
+      "content": "Region 51 replicates object storage to a cold tier after 92 days."
+    },
+    {
+      "fid": "d052",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 52",
+      "content": "Region 52 replicates object storage to a cold tier after 9 days."
+    },
+    {
+      "fid": "d053",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 53",
+      "content": "Region 53 replicates object storage to a cold tier after 16 days."
+    },
+    {
+      "fid": "d054",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 54",
+      "content": "Region 54 replicates object storage to a cold tier after 23 days."
+    },
+    {
+      "fid": "d055",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 55",
+      "content": "Region 55 replicates object storage to a cold tier after 30 days."
+    },
+    {
+      "fid": "d056",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 56",
+      "content": "Region 56 replicates object storage to a cold tier after 37 days."
+    },
+    {
+      "fid": "d057",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 57",
+      "content": "The billing sidecar exports prometheus metrics on port 44."
+    },
+    {
+      "fid": "d058",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 58",
+      "content": "The search sidecar exports prometheus metrics on port 51."
+    },
+    {
+      "fid": "d059",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 59",
+      "content": "The auth sidecar exports prometheus metrics on port 58."
+    },
+    {
+      "fid": "d060",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 60",
+      "content": "The notify sidecar exports prometheus metrics on port 65."
+    },
+    {
+      "fid": "d061",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 61",
+      "content": "The ledger sidecar exports prometheus metrics on port 72."
+    },
+    {
+      "fid": "d062",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 62",
+      "content": "The media sidecar exports prometheus metrics on port 79."
+    },
+    {
+      "fid": "d063",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 63",
+      "content": "The graph sidecar exports prometheus metrics on port 86."
+    },
+    {
+      "fid": "d064",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 64",
+      "content": "The sync sidecar exports prometheus metrics on port 93."
+    },
+    {
+      "fid": "d065",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 65",
+      "content": "Index 65 is rebuilt nightly and holds about 10 thousand documents."
+    },
+    {
+      "fid": "d066",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 66",
+      "content": "Index 66 is rebuilt nightly and holds about 17 thousand documents."
+    },
+    {
+      "fid": "d067",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 67",
+      "content": "Index 67 is rebuilt nightly and holds about 24 thousand documents."
+    },
+    {
+      "fid": "d068",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 68",
+      "content": "Index 68 is rebuilt nightly and holds about 31 thousand documents."
+    },
+    {
+      "fid": "d069",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 69",
+      "content": "Index 69 is rebuilt nightly and holds about 38 thousand documents."
+    },
+    {
+      "fid": "d070",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 70",
+      "content": "Index 70 is rebuilt nightly and holds about 45 thousand documents."
+    },
+    {
+      "fid": "d071",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 71",
+      "content": "Index 71 is rebuilt nightly and holds about 52 thousand documents."
+    },
+    {
+      "fid": "d072",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 72",
+      "content": "Index 72 is rebuilt nightly and holds about 59 thousand documents."
+    },
+    {
+      "fid": "d073",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 73",
+      "content": "The billing rollout uses a canary of 66 percent before full release."
+    },
+    {
+      "fid": "d074",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 74",
+      "content": "The search rollout uses a canary of 73 percent before full release."
+    },
+    {
+      "fid": "d075",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 75",
+      "content": "The auth rollout uses a canary of 80 percent before full release."
+    },
+    {
+      "fid": "d076",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 76",
+      "content": "The notify rollout uses a canary of 87 percent before full release."
+    },
+    {
+      "fid": "d077",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 77",
+      "content": "The ledger rollout uses a canary of 94 percent before full release."
+    },
+    {
+      "fid": "d078",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 78",
+      "content": "The media rollout uses a canary of 11 percent before full release."
+    },
+    {
+      "fid": "d079",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 79",
+      "content": "The graph rollout uses a canary of 18 percent before full release."
+    },
+    {
+      "fid": "d080",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 80",
+      "content": "The sync rollout uses a canary of 25 percent before full release."
+    },
+    {
+      "fid": "d081",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 81",
+      "content": "Shard 81 keeps a hot working set of roughly 32 gigabytes in memory."
+    },
+    {
+      "fid": "d082",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 82",
+      "content": "Shard 82 keeps a hot working set of roughly 39 gigabytes in memory."
+    },
+    {
+      "fid": "d083",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 83",
+      "content": "Shard 83 keeps a hot working set of roughly 46 gigabytes in memory."
+    },
+    {
+      "fid": "d084",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 84",
+      "content": "Shard 84 keeps a hot working set of roughly 53 gigabytes in memory."
+    },
+    {
+      "fid": "d085",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 85",
+      "content": "Shard 85 keeps a hot working set of roughly 60 gigabytes in memory."
+    },
+    {
+      "fid": "d086",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 86",
+      "content": "Shard 86 keeps a hot working set of roughly 67 gigabytes in memory."
+    },
+    {
+      "fid": "d087",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 87",
+      "content": "Shard 87 keeps a hot working set of roughly 74 gigabytes in memory."
+    },
+    {
+      "fid": "d088",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 88",
+      "content": "Shard 88 keeps a hot working set of roughly 81 gigabytes in memory."
+    },
+    {
+      "fid": "d089",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 89",
+      "content": "The billing token issuer rotates signing keys every 88 days."
+    },
+    {
+      "fid": "d090",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 90",
+      "content": "The search token issuer rotates signing keys every 5 days."
+    },
+    {
+      "fid": "d091",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 91",
+      "content": "The auth token issuer rotates signing keys every 12 days."
+    },
+    {
+      "fid": "d092",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 92",
+      "content": "The notify token issuer rotates signing keys every 19 days."
+    },
+    {
+      "fid": "d093",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 93",
+      "content": "The ledger token issuer rotates signing keys every 26 days."
+    },
+    {
+      "fid": "d094",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 94",
+      "content": "The media token issuer rotates signing keys every 33 days."
+    },
+    {
+      "fid": "d095",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 95",
+      "content": "The graph token issuer rotates signing keys every 40 days."
+    },
+    {
+      "fid": "d096",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 96",
+      "content": "The sync token issuer rotates signing keys every 47 days."
+    },
+    {
+      "fid": "d097",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 97",
+      "content": "Bucket 97 lifecycle rules archive logs older than 54 weeks."
+    },
+    {
+      "fid": "d098",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 98",
+      "content": "Bucket 98 lifecycle rules archive logs older than 61 weeks."
+    },
+    {
+      "fid": "d099",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 99",
+      "content": "Bucket 99 lifecycle rules archive logs older than 68 weeks."
+    },
+    {
+      "fid": "d100",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 100",
+      "content": "Bucket 100 lifecycle rules archive logs older than 75 weeks."
+    },
+    {
+      "fid": "d101",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 101",
+      "content": "Bucket 101 lifecycle rules archive logs older than 82 weeks."
+    },
+    {
+      "fid": "d102",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 102",
+      "content": "Bucket 102 lifecycle rules archive logs older than 89 weeks."
+    },
+    {
+      "fid": "d103",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 103",
+      "content": "Bucket 103 lifecycle rules archive logs older than 6 weeks."
+    },
+    {
+      "fid": "d104",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 104",
+      "content": "Bucket 104 lifecycle rules archive logs older than 13 weeks."
+    },
+    {
+      "fid": "d105",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 105",
+      "content": "The billing ingest path validates payloads against schema version 20."
+    },
+    {
+      "fid": "d106",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 106",
+      "content": "The search ingest path validates payloads against schema version 27."
+    },
+    {
+      "fid": "d107",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 107",
+      "content": "The auth ingest path validates payloads against schema version 34."
+    },
+    {
+      "fid": "d108",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 108",
+      "content": "The notify ingest path validates payloads against schema version 41."
+    },
+    {
+      "fid": "d109",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 109",
+      "content": "The ledger ingest path validates payloads against schema version 48."
+    },
+    {
+      "fid": "d110",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 110",
+      "content": "The media ingest path validates payloads against schema version 55."
+    },
+    {
+      "fid": "d111",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 111",
+      "content": "The graph ingest path validates payloads against schema version 62."
+    },
+    {
+      "fid": "d112",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 112",
+      "content": "The sync ingest path validates payloads against schema version 69."
+    },
+    {
+      "fid": "d113",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 113",
+      "content": "Timer 113 flushes buffered writes to durable storage each 76 seconds."
+    },
+    {
+      "fid": "d114",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 114",
+      "content": "Timer 114 flushes buffered writes to durable storage each 83 seconds."
+    },
+    {
+      "fid": "d115",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 115",
+      "content": "Timer 115 flushes buffered writes to durable storage each 90 seconds."
+    },
+    {
+      "fid": "d116",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 116",
+      "content": "Timer 116 flushes buffered writes to durable storage each 7 seconds."
+    },
+    {
+      "fid": "d117",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 117",
+      "content": "Timer 117 flushes buffered writes to durable storage each 14 seconds."
+    },
+    {
+      "fid": "d118",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 118",
+      "content": "Timer 118 flushes buffered writes to durable storage each 21 seconds."
+    },
+    {
+      "fid": "d119",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 119",
+      "content": "Timer 119 flushes buffered writes to durable storage each 28 seconds."
+    },
+    {
+      "fid": "d120",
+      "tier": "L2",
+      "kind": "fact",
+      "key": "distractor 120",
+      "content": "Timer 120 flushes buffered writes to durable storage each 35 seconds."
+    }
+  ],
+  "cases": [
+    {
+      "id": "neg01",
+      "query": "which service runs redis without on-disk persistence",
+      "expected": [
+        "n001"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: redis-persistence"
+    },
+    {
+      "id": "dis01",
+      "query": "the checkout redis that does not write keys to disk",
+      "expected": [
+        "n001"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n001 (neg) from n101 (pos twin)"
+    },
+    {
+      "id": "pos01",
+      "query": "the checkout redis that writes keys to disk",
+      "expected": [
+        "n101"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: redis-persistence"
+    },
+    {
+      "id": "neg02",
+      "query": "reporting database connection that does not use ssl",
+      "expected": [
+        "n002"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: postgres-ssl"
+    },
+    {
+      "id": "dis02",
+      "query": "reporting db link with no ssl on the socket",
+      "expected": [
+        "n002"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n002 (neg) from n102 (pos twin)"
+    },
+    {
+      "id": "pos02",
+      "query": "reporting db link with ssl on the socket",
+      "expected": [
+        "n102"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: postgres-ssl"
+    },
+    {
+      "id": "neg03",
+      "query": "metrics endpoint that requires no authentication",
+      "expected": [
+        "n003"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: metrics-auth"
+    },
+    {
+      "id": "dis03",
+      "query": "internal metrics route with no token check",
+      "expected": [
+        "n003"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n003 (neg) from n103 (pos twin)"
+    },
+    {
+      "id": "pos03",
+      "query": "internal metrics route with a token check",
+      "expected": [
+        "n103"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: metrics-auth"
+    },
+    {
+      "id": "neg04",
+      "query": "indexing jobs that are never retried automatically",
+      "expected": [
+        "n004"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: job-retry"
+    },
+    {
+      "id": "dis04",
+      "query": "pipeline indexing jobs not retried without a human",
+      "expected": [
+        "n004"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n004 (neg) from n104 (pos twin)"
+    },
+    {
+      "id": "pos04",
+      "query": "pipeline indexing jobs retried automatically",
+      "expected": [
+        "n104"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: job-retry"
+    },
+    {
+      "id": "neg05",
+      "query": "image cdn cache that is not purged on deploy",
+      "expected": [
+        "n005"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: cdn-purge"
+    },
+    {
+      "id": "dis05",
+      "query": "image cdn that does not purge on deploy",
+      "expected": [
+        "n005"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n005 (neg) from n105 (pos twin)"
+    },
+    {
+      "id": "pos05",
+      "query": "image cdn that purges on deploy",
+      "expected": [
+        "n105"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: cdn-purge"
+    },
+    {
+      "id": "neg06",
+      "query": "preview mailer that does not send real email",
+      "expected": [
+        "n006"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: staging-email"
+    },
+    {
+      "id": "dis06",
+      "query": "preview environment that never sends real mail",
+      "expected": [
+        "n006"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n006 (neg) from n106 (pos twin)"
+    },
+    {
+      "id": "pos06",
+      "query": "preview environment that sends real mail",
+      "expected": [
+        "n106"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: staging-email"
+    },
+    {
+      "id": "neg07",
+      "query": "embedder worker that uses no gpu",
+      "expected": [
+        "n007"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: embedder-gpu"
+    },
+    {
+      "id": "dis07",
+      "query": "sentence embedder running without a gpu",
+      "expected": [
+        "n007"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n007 (neg) from n107 (pos twin)"
+    },
+    {
+      "id": "pos07",
+      "query": "sentence embedder running with a gpu",
+      "expected": [
+        "n107"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: embedder-gpu"
+    },
+    {
+      "id": "neg08",
+      "query": "nightly backups that are not encrypted",
+      "expected": [
+        "n008"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: backup-encryption"
+    },
+    {
+      "id": "dis08",
+      "query": "nightly volume backups without encryption",
+      "expected": [
+        "n008"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n008 (neg) from n108 (pos twin)"
+    },
+    {
+      "id": "pos08",
+      "query": "nightly volume backups with encryption",
+      "expected": [
+        "n108"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: backup-encryption"
+    },
+    {
+      "id": "neg09",
+      "query": "partner search api that is not rate limited",
+      "expected": [
+        "n009"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: api-ratelimit"
+    },
+    {
+      "id": "dis09",
+      "query": "partner api with no rate limit on bursts",
+      "expected": [
+        "n009"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n009 (neg) from n109 (pos twin)"
+    },
+    {
+      "id": "pos09",
+      "query": "partner api with a rate limit on bursts",
+      "expected": [
+        "n109"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: api-ratelimit"
+    },
+    {
+      "id": "neg10",
+      "query": "websocket channel that does not use compression",
+      "expected": [
+        "n010"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: ws-compression"
+    },
+    {
+      "id": "dis10",
+      "query": "realtime channel sending frames without compression",
+      "expected": [
+        "n010"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n010 (neg) from n110 (pos twin)"
+    },
+    {
+      "id": "pos10",
+      "query": "realtime channel sending frames with compression",
+      "expected": [
+        "n110"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: ws-compression"
+    },
+    {
+      "id": "neg11",
+      "query": "console changes that are not written to the audit log",
+      "expected": [
+        "n011"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: audit-logging"
+    },
+    {
+      "id": "dis11",
+      "query": "console config edits with no audit trail",
+      "expected": [
+        "n011"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n011 (neg) from n111 (pos twin)"
+    },
+    {
+      "id": "pos11",
+      "query": "console config edits with an audit trail",
+      "expected": [
+        "n111"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: audit-logging"
+    },
+    {
+      "id": "neg12",
+      "query": "gateway path that has no distributed tracing",
+      "expected": [
+        "n012"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: request-tracing"
+    },
+    {
+      "id": "dis12",
+      "query": "gateway requests emitting no trace spans",
+      "expected": [
+        "n012"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n012 (neg) from n112 (pos twin)"
+    },
+    {
+      "id": "pos12",
+      "query": "gateway requests emitting trace spans",
+      "expected": [
+        "n112"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: request-tracing"
+    },
+    {
+      "id": "neg13",
+      "query": "schema migrations that are not applied automatically",
+      "expected": [
+        "n013"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: auto-migrate"
+    },
+    {
+      "id": "dis13",
+      "query": "boot migrations not applied without a human",
+      "expected": [
+        "n013"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n013 (neg) from n113 (pos twin)"
+    },
+    {
+      "id": "pos13",
+      "query": "boot migrations applied automatically",
+      "expected": [
+        "n113"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: auto-migrate"
+    },
+    {
+      "id": "neg14",
+      "query": "feature flags that are not cached per request",
+      "expected": [
+        "n014"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: flag-cache"
+    },
+    {
+      "id": "dis14",
+      "query": "feature flag reads with no caching",
+      "expected": [
+        "n014"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n014 (neg) from n114 (pos twin)"
+    },
+    {
+      "id": "pos14",
+      "query": "feature flag reads with caching",
+      "expected": [
+        "n114"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: flag-cache"
+    },
+    {
+      "id": "neg15",
+      "query": "asset host that does not allow cross-origin requests",
+      "expected": [
+        "n015"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: cors-policy"
+    },
+    {
+      "id": "dis15",
+      "query": "public assets with no cross origin access",
+      "expected": [
+        "n015"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n015 (neg) from n115 (pos twin)"
+    },
+    {
+      "id": "pos15",
+      "query": "public assets with cross origin access",
+      "expected": [
+        "n115"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: cors-policy"
+    },
+    {
+      "id": "neg16",
+      "query": "orders database that has no read replicas",
+      "expected": [
+        "n016"
+      ],
+      "difficulty": "hard",
+      "notes": "negation recall: read-replica"
+    },
+    {
+      "id": "dis16",
+      "query": "orders tier serving reads without replicas",
+      "expected": [
+        "n016"
+      ],
+      "difficulty": "hard",
+      "notes": "discriminate n016 (neg) from n116 (pos twin)"
+    },
+    {
+      "id": "pos16",
+      "query": "orders tier serving reads from replicas",
+      "expected": [
+        "n116"
+      ],
+      "difficulty": "easy",
+      "notes": "positive control: read-replica"
+    }
+  ]
+}

@@ -841,6 +841,37 @@ static const char *memory_cross_encoder_command(const config_t *cfg)
    return cfg->memory_rerank_command;
 }
 
+/* Count shared whitespace-delimited tokens between two token strings (as produced
+ * by extract_negation_tokens, e.g. "not_disk not_written"). Used by the
+ * negation-aware rerank to measure how strongly a candidate's negated concept
+ * overlaps the query's. O(a*b) over the few negation tokens each carries. */
+static int neg_token_overlap(const char *a, const char *b)
+{
+   if (!a || !a[0] || !b || !b[0])
+      return 0;
+   int shared = 0;
+   char abuf[1024];
+   snprintf(abuf, sizeof(abuf), "%s", a);
+   for (char *sa = strtok(abuf, " "); sa; sa = strtok(NULL, " "))
+   {
+      /* word-boundary search for sa within b */
+      const char *p = b;
+      size_t la = strlen(sa);
+      while ((p = strstr(p, sa)) != NULL)
+      {
+         int left_ok = (p == b) || p[-1] == ' ';
+         int right_ok = (p[la] == '\0' || p[la] == ' ');
+         if (left_ok && right_ok)
+         {
+            shared++;
+            break;
+         }
+         p += la;
+      }
+   }
+   return shared;
+}
+
 int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, int limit,
                           const int64_t *semantic_ids, const double *semantic_scores,
                           int semantic_hit_count, const memory_candidate_source_t *source_stats,
@@ -1008,6 +1039,58 @@ int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, i
                double shift = 0.18 + gap * 0.22;
                scores[newer_idx] += shift;
                scores[older_idx] -= shift;
+            }
+         }
+      }
+   }
+
+   /* Negation-aware reranking (memory_negation_enabled): when the query is
+    * negatively polarised, promote candidates whose content carries the SAME
+    * negated concept as the query -- i.e. whose extracted "not_<token>" set
+    * overlaps the query's. A negated fact and its affirmative near-twin score
+    * near-identically under bag-of-words / hash-embedding retrieval; the twin
+    * emits NO negation tokens, so only the correctly-negated fact is boosted and
+    * it rises above the twin. Deterministic and store-agnostic (operates on the
+    * candidate text already in hand), so it holds on both the sqlite shim and
+    * libpq. Complements the FTS candidate-generation lane (memory_negation_fts_tsv)
+    * which widens RECALL at scale; this fixes RANKING. */
+   {
+      config_t neg_cfg;
+      if (config_load(&neg_cfg) == 0 && neg_cfg.memory_negation_enabled &&
+          memory_query_polarity(raw_query) == POLARITY_NEGATIVE)
+      {
+         char qneg[1024];
+         int qn = extract_negation_tokens(raw_query, qneg, sizeof(qneg));
+         if (qn > 0 && qneg[0])
+         {
+            int neg_top = count > 32 ? 32 : count;
+            for (int i = 0; i < neg_top; i++)
+            {
+               if (!matches[i].content[0])
+                  continue;
+               char combined[3072];
+               snprintf(combined, sizeof(combined), "%s %s", matches[i].key, matches[i].content);
+               char cneg[2048];
+               int cn = extract_negation_tokens(combined, cneg, sizeof(cneg));
+               if (cn <= 0)
+                  continue;
+               int shared = neg_token_overlap(qneg, cneg);
+               if (shared > 0)
+               {
+                  /* Boost by the strength of the negated-concept overlap (per
+                   * shared "not_<token>"), scaled by the fraction of the query's
+                   * negation matched so a candidate that covers MORE of the query
+                   * wins over one sharing a single incidental token. Capped so a
+                   * strong polarity match reliably flips a near-tie with an
+                   * affirmative twin without swamping the whole ranking. */
+                  double frac = (double)shared / (double)qn;
+                  if (frac > 1.0)
+                     frac = 1.0;
+                  double boost = 3.0 * (double)shared * (0.5 + 0.5 * frac);
+                  if (boost > 10.0)
+                     boost = 10.0;
+                  scores[i] += boost;
+               }
             }
          }
       }
