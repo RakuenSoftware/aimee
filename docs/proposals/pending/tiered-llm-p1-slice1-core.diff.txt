@@ -233,10 +233,10 @@ index 00000000..78ef75c5
 +echo "== P1 RLS gate: PASSED =="
 diff --git a/src/db2/db2_hardening.c b/src/db2/db2_hardening.c
 new file mode 100644
-index 00000000..62f75904
+index 00000000..257208dc
 --- /dev/null
 +++ b/src/db2/db2_hardening.c
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,129 @@
 +/* db2/db2_hardening.c: hardened-tier boot assertions. See db2_hardening.h. */
 +
 +#include "db2_hardening.h"
@@ -297,12 +297,23 @@ index 00000000..62f75904
 +    * current_user is a member (directly or transitively) of any superuser/
 +    * BYPASSRLS role — an inherited or SET ROLE-able privileged membership defeats
 +    * RLS just as a direct attribute would, so it is rejected too. */
++   /* Column 3 (priv_member) also flags membership in the owner/migration roles: a
++    * runtime role that can SET ROLE to a tenant-table OWNER can ALTER TABLE ...
++    * DISABLE ROW LEVEL SECURITY and defeat isolation without ever holding BYPASSRLS
++    * itself. Column 4 (owns_tenant) flags direct ownership of any tenant table for
++    * the same reason. Both are rejected. */
 +   aimee_pg_stmt_t *st = aimee_pg_prepare(
 +       conn,
 +       "SELECT r.rolbypassrls, r.rolsuper, "
 +       "has_schema_privilege(current_user,'public','CREATE'), "
-+       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls) FROM pg_roles m "
-+       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false) "
++       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls "
++       "  OR m.rolname IN ('aimee_kb_owner','aimee_kb_migrate')) FROM pg_roles m "
++       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false), "
++       "COALESCE((SELECT bool_or(pg_get_userbyid(c.relowner) = current_user) "
++       "  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
++       "  WHERE n.nspname = 'public' AND c.relname IN "
++       "  ('kb_team','kb_project','kb_team_membership','kb_project_membership','kb_admin_grant')), "
++       "false) "
 +       "FROM pg_roles r WHERE r.rolname = current_user",
 +       e, sizeof(e));
 +   if (!st)
@@ -317,6 +328,7 @@ index 00000000..62f75904
 +      int super = aimee_pg_column_int(st, 1);
 +      int create_pub = aimee_pg_column_int(st, 2);
 +      int priv_member = aimee_pg_column_int(st, 3);
++      int owns_tenant = aimee_pg_column_int(st, 4);
 +      if (bypassrls)
 +      {
 +         snprintf(err, errlen, "runtime role has BYPASSRLS (defeats tenant RLS)");
@@ -334,10 +346,16 @@ index 00000000..62f75904
 +      }
 +      else if (priv_member)
 +      {
-+         snprintf(
-+             err, errlen,
-+             "runtime role is a member of a superuser/BYPASSRLS role (can SET ROLE to bypass RLS)");
++         snprintf(err, errlen,
++                  "runtime role is a member of a superuser/BYPASSRLS/owner role (can SET ROLE to "
++                  "bypass or disable RLS)");
 +         rc = 7;
++      }
++      else if (owns_tenant)
++      {
++         snprintf(err, errlen,
++                  "runtime role owns a tenant table (owner can DISABLE ROW LEVEL SECURITY)");
++         rc = 8;
 +      }
 +   }
 +   else
@@ -852,10 +870,10 @@ index 00000000..7ae90097
 +#endif /* DEC_KB_IDENTITY_H */
 diff --git a/src/kb/kb_identity.c b/src/kb/kb_identity.c
 new file mode 100644
-index 00000000..8e511a26
+index 00000000..f290bea3
 --- /dev/null
 +++ b/src/kb/kb_identity.c
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,164 @@
 +/* kb_identity.c: the authenticated principal handle + canonical identity key.
 + * See kb_identity.h. Composite resolution (kb_identity_resolve) lands in slice 2. */
 +
@@ -895,6 +913,58 @@ index 00000000..8e511a26
 +   return 0;
 +}
 +
++/* Copy src into dst[cap] but REJECT (return -1) rather than silently truncate — a
++ * truncated issuer/subject could collide two distinct identities into one key. */
++static int copy_strict(char *dst, size_t cap, const char *src)
++{
++   if (!src)
++   {
++      dst[0] = '\0';
++      return 0;
++   }
++   size_t n = strlen(src);
++   if (n >= cap)
++      return -1;
++   memcpy(dst, src, n + 1);
++   return 0;
++}
++
++/* Percent-encode a key component so the ':' delimiters in an identity_key are
++ * UNAMBIGUOUS: '%'->"%25" and ':'->"%3A", everything else verbatim. This makes
++ * (kind, issuer, subject) -> key injective, so issuer "a:b"+subject "c" can never
++ * collide with issuer "a"+subject "b:c". Returns 0, or -1 if the encoding would
++ * overflow out[cap]. */
++static int id_encode(const char *in, char *out, size_t cap)
++{
++   size_t o = 0;
++   for (const char *p = in; *p; ++p)
++   {
++      const char *rep = NULL;
++      if (*p == '%')
++         rep = "%25";
++      else if (*p == ':')
++         rep = "%3A";
++      if (rep)
++      {
++         if (o + 3 >= cap)
++            return -1;
++         out[o++] = rep[0];
++         out[o++] = rep[1];
++         out[o++] = rep[2];
++      }
++      else
++      {
++         if (o + 1 >= cap)
++            return -1;
++         out[o++] = *p;
++      }
++   }
++   if (o >= cap)
++      return -1;
++   out[o] = '\0';
++   return 0;
++}
++
 +int kb_principal_from_verify(const kb_verify_result_t *v, const char *issuer, kb_principal_t *out)
 +{
 +   if (!v || !out)
@@ -904,13 +974,16 @@ index 00000000..8e511a26
 +   if (issuer && issuer[0])
 +   {
 +      out->kind = KB_PRIN_OIDC;
-+      snprintf(out->issuer, sizeof(out->issuer), "%s", issuer);
-+      snprintf(out->subject, sizeof(out->subject), "%s", v->subject);
++      if (copy_strict(out->issuer, sizeof(out->issuer), issuer) != 0 ||
++          copy_strict(out->subject, sizeof(out->subject), v->subject) != 0)
++         return -1;
 +   }
 +   else
 +   {
 +      out->kind = KB_PRIN_OWNER;
-+      snprintf(out->subject, sizeof(out->subject), "%s", v->subject[0] ? v->subject : "owner");
++      if (copy_strict(out->subject, sizeof(out->subject), v->subject[0] ? v->subject : "owner") !=
++          0)
++         return -1;
 +   }
 +   out->authenticated = 1;
 +   return 0;
@@ -923,11 +996,12 @@ index 00000000..8e511a26
 +      return -1;
 +   memset(out, 0, sizeof(*out));
 +   out->kind = KB_PRIN_CERT;
-+   snprintf(out->issuer, sizeof(out->issuer), "%s", cert_issuer);
++   if (copy_strict(out->issuer, sizeof(out->issuer), cert_issuer) != 0)
++      return -1;
 +   if (kb_cert_serial_normalize(cert_serial, out->subject, sizeof(out->subject)) != 0)
 +      return -1;
-+   if (cn)
-+      snprintf(out->label, sizeof(out->label), "%s", cn);
++   if (cn && copy_strict(out->label, sizeof(out->label), cn) != 0)
++      return -1;
 +   out->authenticated = 1;
 +   return 0;
 +}
@@ -936,21 +1010,30 @@ index 00000000..8e511a26
 +{
 +   if (!p || !out || cap == 0 || !p->authenticated)
 +      return -1;
++   char eiss[3 * sizeof(p->issuer)];
++   char esub[3 * sizeof(p->subject)];
++   int n;
 +   switch (p->kind)
 +   {
 +   case KB_PRIN_OIDC:
 +      if (!p->issuer[0] || !p->subject[0])
 +         return -1;
-+      snprintf(out, cap, "oidc:%s:%s", p->issuer, p->subject);
-+      return 0;
++      if (id_encode(p->issuer, eiss, sizeof(eiss)) != 0 ||
++          id_encode(p->subject, esub, sizeof(esub)) != 0)
++         return -1;
++      n = snprintf(out, cap, "oidc:%s:%s", eiss, esub);
++      return (n > 0 && (size_t)n < cap) ? 0 : -1; /* reject truncation */
 +   case KB_PRIN_CERT:
 +      if (!p->issuer[0] || !p->subject[0])
 +         return -1;
-+      snprintf(out, cap, "cert:%s:%s", p->issuer, p->subject);
-+      return 0;
++      if (id_encode(p->issuer, eiss, sizeof(eiss)) != 0 ||
++          id_encode(p->subject, esub, sizeof(esub)) != 0)
++         return -1;
++      n = snprintf(out, cap, "cert:%s:%s", eiss, esub);
++      return (n > 0 && (size_t)n < cap) ? 0 : -1;
 +   case KB_PRIN_OWNER:
-+      snprintf(out, cap, "owner");
-+      return 0;
++      n = snprintf(out, cap, "owner");
++      return (n > 0 && (size_t)n < cap) ? 0 : -1;
 +   default:
 +      return -1;
 +   }
