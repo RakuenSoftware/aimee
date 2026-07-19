@@ -37,6 +37,16 @@ int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out);
  * short-TTL in-process cache over the DB (revoked_at is the source of truth). */
 int db2_enrollment_is_revoked(const char *fingerprint);
 
+/* Per-request revocation by the immutable (cert_issuer, cert_serial_norm) key
+ * (P1 I5/I6): reads the source of truth each call (no cache), so a revoked cert
+ * stops authorizing on the next request even over a keep-alive connection.
+ * Returns 1 revoked, 0 active/unknown. */
+int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm);
+
+/* Eager one-time backfill of cert_issuer/cert_serial_norm on legacy enrollments
+ * (P1 I5), so revocation-by-key has no key-less window. Returns rows updated or -1. */
+int db2_enrollment_backfill_cert_keys(const char *ca_issuer_dn);
+
 /* Best-effort, debounced "cert was used" write: bumps last_seen, and if the cert
  * predates this table (issued before S2a) backfills a legacy row for `scope` so
  * it becomes listable/revocable. Debounced so hot auth paths do not storm the DB.

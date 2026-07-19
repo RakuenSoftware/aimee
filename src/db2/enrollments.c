@@ -4,6 +4,7 @@
 #include "enrollments.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "kb_identity.h" /* kb_cert_serial_normalize for the (issuer,serial) key */
 #include "log.h"
 
 #include <pthread.h>
@@ -256,6 +257,103 @@ int db2_enrollment_is_revoked(const char *fingerprint)
    aimee_pg_finalize(st);
    revcache_put(fingerprint, revoked);
    return revoked;
+}
+
+/* Per-request revocation by the IMMUTABLE (cert_issuer, cert_serial_norm) key
+ * (P1 I5/I6). Unlike the fingerprint check this does NOT consult the local cache:
+ * the invariant requires each request re-read revocation from the source of truth
+ * (the primary), so a revoked cert stops authorizing on the very next request even
+ * over a pooled/keep-alive mTLS connection. Returns 1 revoked, 0 active/unknown.
+ * Fail-open on DB outage (matching db2_enrollment_is_revoked), throttled-logged. */
+int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm)
+{
+   if (!cert_issuer || !cert_issuer[0] || !cert_serial_norm || !cert_serial_norm[0])
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+   {
+      revcache_warn_failopen(cert_serial_norm, "db unavailable");
+      return 0;
+   }
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT state FROM kb_enrollments WHERE cert_issuer=?1 AND cert_serial_norm=?2", err,
+       sizeof(err));
+   if (!st)
+   {
+      revcache_warn_failopen(cert_serial_norm, err);
+      return 0;
+   }
+   aimee_pg_bind_text(st, "?1", cert_issuer);
+   aimee_pg_bind_text(st, "?2", cert_serial_norm);
+   int revoked = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *state = aimee_pg_column_text(st, 0);
+      revoked = (state && strcmp(state, "revoked") == 0) ? 1 : 0;
+   }
+   aimee_pg_finalize(st);
+   return revoked;
+}
+
+/* Eager one-time backfill of the immutable revocation key on legacy enrollments
+ * (P1 I5): populate cert_issuer + cert_serial_norm for every active row that has a
+ * serial but no normalized key yet, so revocation-by-key works immediately — no
+ * window where a legacy cert has no revocation key. `ca_issuer_dn` is the
+ * enrollment CA's issuer DN (the single issuer for all enrolled certs). Returns
+ * the number of rows updated, or -1 on error. */
+int db2_enrollment_backfill_cert_keys(const char *ca_issuer_dn)
+{
+   if (!ca_issuer_dn || !ca_issuer_dn[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *sel = aimee_pg_prepare(
+       conn, "SELECT id, serial FROM kb_enrollments WHERE cert_serial_norm='' AND serial<>''", err,
+       sizeof(err));
+   if (!sel)
+      return -1;
+   /* Collect first (id, normalized-serial), then update — avoid nested statements
+    * on one connection. */
+   struct
+   {
+      int64_t id;
+      char norm[128];
+   } rows[512];
+   int nrows = 0;
+   while (nrows < (int)(sizeof(rows) / sizeof(rows[0])) &&
+          aimee_pg_step(sel, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      int64_t id = aimee_pg_column_int64(sel, 0);
+      const char *serial = aimee_pg_column_text(sel, 1);
+      char norm[128];
+      if (serial && kb_cert_serial_normalize(serial, norm, sizeof(norm)) == 0 && norm[0])
+      {
+         rows[nrows].id = id;
+         snprintf(rows[nrows].norm, sizeof(rows[nrows].norm), "%s", norm);
+         nrows++;
+      }
+   }
+   aimee_pg_finalize(sel);
+
+   int updated = 0;
+   for (int i = 0; i < nrows; ++i)
+   {
+      aimee_pg_stmt_t *up = aimee_pg_prepare(
+          conn, "UPDATE kb_enrollments SET cert_issuer=?1, cert_serial_norm=?2 WHERE id=?3", err,
+          sizeof(err));
+      if (!up)
+         return -1;
+      aimee_pg_bind_text(up, "?1", ca_issuer_dn);
+      aimee_pg_bind_text(up, "?2", rows[i].norm);
+      aimee_pg_bind_int64(up, "?3", rows[i].id);
+      if (aimee_pg_step(up, err, sizeof(err)) != AIMEE_PG_ERR)
+         updated++;
+      aimee_pg_finalize(up);
+   }
+   return updated;
 }
 
 /* --- debounced last-seen --- */
