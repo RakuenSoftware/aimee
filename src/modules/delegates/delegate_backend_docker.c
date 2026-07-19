@@ -462,28 +462,62 @@ static int docker_build_mounts(docker_state_t *st, const char *real, int read_on
    memcpy(repo, gitdir, rlen);
    repo[rlen] = '\0';
 
-   /* The worktree and its gitdir must live under that repo root, or the nested
-    * overlay does not apply and we would be mounting unrelated trees. */
+   /* Is the worktree physically nested under its repo root? A normal delegate
+    * sibling worktree (under <repo>/.aimee/worktrees/) is; a WFE per-slice
+    * worktree is NOT — it lives outside the repo, under $AIMEE_HOME/wfe-worktrees.
+    * Nesting is not actually required by the mounts below: docker binds each of
+    * the three paths at its own absolute host path, so when they are disjoint they
+    * are simply separate mounts rather than an overlay. What nesting DID provide,
+    * for free, was evidence that the worktree belongs to the repo. For the disjoint
+    * case we cannot lean on physical containment, so prove the two-way git link
+    * explicitly before mounting an out-of-repo tree: the repo's per-worktree admin
+    * dir carries a `gitdir` file that must point back at <real>/.git. Together with
+    * the forward gitlink read above (real/.git -> gitdir under <repo>/.git/worktrees)
+    * this defeats a spoofed .git aimed at an unrelated repo. (`real` is already
+    * realpath-canonicalized and workspace-authorized by the caller.) */
    size_t plen = strlen(repo);
-   if (strncmp(real, repo, plen) != 0 || (real[plen] != '/' && real[plen] != '\0'))
+   int nested = (strncmp(real, repo, plen) == 0 && (real[plen] == '/' || real[plen] == '\0'));
+   if (!nested)
    {
-      aimee_log(LOG_ERROR, "delegate-backend-docker",
-                "workspace '%s' is not inside its repo root '%s'; refusing (the nested "
-                "read-only overlay would not apply)",
-                real, repo);
-      return -1;
+      char backlink[MAX_PATH_LEN], expect[MAX_PATH_LEN], got[MAX_PATH_LEN] = "";
+      if ((size_t)snprintf(backlink, sizeof(backlink), "%s/gitdir", gitdir) >= sizeof(backlink) ||
+          (size_t)snprintf(expect, sizeof(expect), "%s/.git", real) >= sizeof(expect))
+         return -1;
+      FILE *bf = fopen(backlink, "r");
+      if (bf)
+      {
+         if (fgets(got, sizeof(got), bf))
+         {
+            size_t n = strlen(got);
+            while (n && (got[n - 1] == '\n' || got[n - 1] == '\r' || got[n - 1] == ' ' ||
+                         got[n - 1] == '\t'))
+               got[--n] = '\0';
+         }
+         fclose(bf);
+      }
+      if (strcmp(got, expect) != 0)
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s' is outside repo root '%s' and its worktree backlink '%s' does "
+                   "not point back to it (got '%s', want '%s'); refusing",
+                   real, repo, backlink, got[0] ? got : "<none>", expect);
+         return -1;
+      }
    }
 
    snprintf(st->workdir, sizeof(st->workdir), "%s", real);
-   /* Order matters: the repo first, then the writable parts nested over it. */
+   /* Order matters when nested: the repo first (read-only base + object store),
+    * then the writable worktree and its gitdir over it. When disjoint the order is
+    * immaterial, but the same three mounts apply. git commit inside still writes to
+    * the :ro object store and fails — intended: commits run server-side. */
    if (docker_add_mount(st, repo, repo, 1) != 0 ||
        docker_add_mount(st, real, real, read_only) != 0 ||
        docker_add_mount(st, gitdir, gitdir, read_only) != 0)
       return -1;
    aimee_log(LOG_INFO, "delegate-backend-docker",
-             "linked worktree '%s': mounting repo '%s' read-only with the worktree and its gitdir "
-             "%s over it",
-             real, repo, read_only ? "read-only" : "writable");
+             "%s worktree '%s': mounting repo '%s' read-only with the worktree and its gitdir %s",
+             nested ? "linked" : "disjoint linked (verified backlink)", real, repo,
+             read_only ? "read-only" : "writable");
    return 0;
 }
 
