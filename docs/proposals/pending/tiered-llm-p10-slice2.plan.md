@@ -107,3 +107,50 @@ org vendor keys (P2b).
 Not hardened (no seal/anchor/use-in-place/WORM/rotation); handles no org vendor keys; not
 a rewrite of the server profile; the server-dual-wrap ops are intentionally unsupported on
 the pg backend.
+
+## v2 corrections (roundtable-converged; two critical + forward-compat)
+
+Panel found no blocking issue, but these repeated signals are baked in:
+
+- **CRITICAL — platform-scoped rows are NEVER a tenant read.** The v1 predicate
+  `team_id ∈ principal's teams OR team_id IS NULL` leaks every `team_id IS NULL` row
+  (the CA key) to every tenant. Corrected RLS:
+  - tenant SELECT policy: `team_id IS NOT NULL AND team_id ∈ principal's teams`
+    (via the P1 membership subquery on `aimee.principal`).
+  - platform-scoped (`team_id IS NULL`) rows are readable ONLY by
+    `kb_principal_is_admin()` and written/read by the SECURITY DEFINER vault-service
+    path — never by an ordinary tenant session. The CA key (slice 3) is such a row and
+    is thus invisible to tenants at the DB layer.
+  - `org_vault_secret` uses `FORCE ROW LEVEL SECURITY`; writes go through a SECURITY
+    DEFINER writer function (like P3a's metering fns), no direct tenant DML.
+- **CRITICAL — sequencing / P7 §3.** Slice 2 stores **no keys** — it is plumbing +
+  tests only. Storing the kb CA key (slice 3) or any org vendor key under **bare file
+  custody** is what P7 §3 forbids on a key-holding kb. Therefore: (a) the file-custody
+  kb vault is explicitly **single-instance dev mode**; (b) slice 3's CA-key-in-vault
+  **fails closed** on a hardened/multi-instance deployment until the external-anchor +
+  seal slice lands, keeping today's plaintext-PEM path only on an explicit dev box; (c)
+  the external-anchor + seal/unseal slice is reordered to land **before or with** the
+  CA-key-in-vault activation on any non-dev deployment. Slice 2 merging a keyless vault
+  is a coherent intermediate under this gate.
+- **Version-pointer schema (no rotation migration).** Adopt the proven P3a pattern
+  instead of `UNIQUE(principal,agent,cred)` + upsert-in-place (which the panel flagged
+  as mutable-in-place forcing a disruptive rotation migration):
+  `org_vault_secret UNIQUE(principal, agent, cred, version)` (immutable rows) +
+  `org_vault_current(principal, agent, cred → version)` pointer advanced atomically.
+  Slice 2 writes version 1 and reads via the pointer; rotation later is purely additive.
+- **AAD binds version.** AAD = `principal|agent|cred|version` (not just
+  `principal|agent|cred`), so a restored older-version ciphertext cannot be presented as
+  current — the AAD itself refuses it. Cheap now, essential for the rotation/anti-rollback
+  slice.
+- **Single `kek_check` verifier, not per-secret.** The per-deployment KEK verifier lives
+  as ONE row in `org_vault_salt(principal, salt, kek_check)` (or a dedicated verifier
+  row), not duplicated per `org_vault_secret` row — removes the guess-a-KEK oracle the
+  panel flagged.
+- **Typed unsupported error.** The four server-dual-wrap ops return
+  `VAULT_ERR_UNSUPPORTED_OP` (a distinct code), so the kb vault service fails loud/clear,
+  not conflated with a crypto/storage error.
+- **kb_vault accessor** (`modules/vault/kb_vault.{c,h}` or `kb/kb_vault.*`) enforces the
+  principal→team_id mapping: it refuses to `set` a `team:<N>` principal whose team_id
+  diverges from the active tenant context. Named + specified in slice 3.
+- **Build check named:** `server/server_vault*.o` staying out of the kb link is enforced
+  by `kb-target-isolation-check` (the `server/` FORBIDDEN prefix) + `check-linking`.
