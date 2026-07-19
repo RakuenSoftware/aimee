@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /* b64url-encode bytes into a fresh malloc'd NUL-terminated string. */
@@ -89,6 +90,17 @@ static char *make_jwt(EVP_PKEY *pkey, const char *header_json, const char *paylo
 static const long NOW = 1780000000L;
 static const char *HDR = "{\"alg\":\"RS256\",\"kid\":\"test-key\"}";
 
+/* Mint a JWT from `payload` and verify it against cfg at NOW; returns the verify
+ * result (1 accept / 0 reject). */
+static int verify_pl(EVP_PKEY *key, const kb_oidc_config_t *cfg, const char *payload)
+{
+   char *jwt = make_jwt(key, HDR, payload);
+   kb_verify_result_t r;
+   int rc = kb_oidc_verify_jwt(jwt, cfg, NOW, &r);
+   free(jwt);
+   return rc;
+}
+
 static void test_accept_and_scope(EVP_PKEY *key, const char *jwks)
 {
    kb_oidc_config_t cfg;
@@ -102,8 +114,8 @@ static void test_accept_and_scope(EVP_PKEY *key, const char *jwks)
    char payload[512];
    sprintf(payload,
            "{\"iss\":\"https://idp.example.com\",\"aud\":\"aimee-kb\",\"sub\":\"user-42\","
-           "\"project\":\"alpha\",\"exp\":%ld}",
-           NOW + 3600);
+           "\"project\":\"alpha\",\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 3600);
    char *jwt = make_jwt(key, HDR, payload);
 
    kb_verify_result_t r;
@@ -117,8 +129,8 @@ static void test_accept_and_scope(EVP_PKEY *key, const char *jwks)
    char payload2[512];
    sprintf(payload2,
            "{\"iss\":\"https://idp.example.com\",\"aud\":[\"other\",\"aimee-kb\"],"
-           "\"sub\":\"u\",\"exp\":%ld}",
-           NOW + 10);
+           "\"sub\":\"u\",\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 10);
    char *jwt2 = make_jwt(key, HDR, payload2);
    assert(kb_oidc_verify_jwt(jwt2, &cfg, NOW, &r) == 1);
    /* No "project" claim -> unscoped identity. */
@@ -147,15 +159,17 @@ static void test_reject_paths(EVP_PKEY *key, const char *jwks)
    free(jwt);
 
    /* wrong issuer */
-   sprintf(payload, "{\"iss\":\"https://evil.example.com\",\"aud\":\"aimee-kb\",\"exp\":%ld}",
-           NOW + 3600);
+   sprintf(payload,
+           "{\"iss\":\"https://evil.example.com\",\"aud\":\"aimee-kb\",\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 3600);
    jwt = make_jwt(key, HDR, payload);
    assert(kb_oidc_verify_jwt(jwt, &cfg, NOW, &r) == 0);
    free(jwt);
 
    /* wrong audience */
-   sprintf(payload, "{\"iss\":\"https://idp.example.com\",\"aud\":\"someone-else\",\"exp\":%ld}",
-           NOW + 3600);
+   sprintf(payload,
+           "{\"iss\":\"https://idp.example.com\",\"aud\":\"someone-else\",\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 3600);
    jwt = make_jwt(key, HDR, payload);
    assert(kb_oidc_verify_jwt(jwt, &cfg, NOW, &r) == 0);
    free(jwt);
@@ -224,7 +238,8 @@ static void test_seam_registration(EVP_PKEY *key, const char *jwks)
    assert(kb_oidc_verifier_register(&cfg) == 0);
 
    char payload[256];
-   sprintf(payload, "{\"aud\":\"aimee-kb\",\"sub\":\"u\",\"exp\":%ld}", (long)2000000000L);
+   sprintf(payload, "{\"aud\":\"aimee-kb\",\"sub\":\"u\",\"iat\":%ld,\"exp\":%ld}",
+           (long)time(NULL), (long)2000000000L);
    char *jwt = make_jwt(key, HDR, payload);
 
    kb_verify_result_t r;
@@ -264,8 +279,8 @@ static void test_register_from_file(EVP_PKEY *key, const char *jwks)
    char payload[512];
    sprintf(payload,
            "{\"iss\":\"https://idp.example.com\",\"aud\":\"aimee-kb\",\"sub\":\"u9\","
-           "\"project\":\"beta\",\"exp\":%ld}",
-           (long)2000000000L);
+           "\"project\":\"beta\",\"iat\":%ld,\"exp\":%ld}",
+           (long)time(NULL), (long)2000000000L);
    char *jwt = make_jwt(key, HDR, payload);
 
    kb_verify_result_t r;
@@ -275,8 +290,9 @@ static void test_register_from_file(EVP_PKEY *key, const char *jwks)
    assert(strcmp(r.subject, "u9") == 0);
    assert(strcmp(r.scope_kind, "project") == 0 && strcmp(r.scope_id, "beta") == 0);
    /* A JWT with the wrong issuer is rejected (policy came from the file load). */
-   sprintf(payload, "{\"iss\":\"https://evil.example.com\",\"aud\":\"aimee-kb\",\"exp\":%ld}",
-           (long)2000000000L);
+   sprintf(payload,
+           "{\"iss\":\"https://evil.example.com\",\"aud\":\"aimee-kb\",\"iat\":%ld,\"exp\":%ld}",
+           (long)time(NULL), (long)2000000000L);
    char *bad = make_jwt(key, HDR, payload);
    assert(kb_verifier_authenticate(bad, "owner-tok", &r, which, sizeof(which)) == 0);
 
@@ -309,6 +325,43 @@ static void test_register_from_file(EVP_PKEY *key, const char *jwks)
    printf("  register_from_file: ok\n");
 }
 
+/* P1 I9: the hard token-age ceiling (now - iat), enforced regardless of exp. */
+static void test_iat_ceiling(EVP_PKEY *key, const char *jwks)
+{
+   kb_oidc_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   snprintf(cfg.issuer, sizeof(cfg.issuer), "https://idp.example.com");
+   snprintf(cfg.audience, sizeof(cfg.audience), "aimee-kb");
+   snprintf(cfg.jwks_json, sizeof(cfg.jwks_json), "%s", jwks);
+   cfg.max_token_age_secs = 900; /* 15 min */
+   char pl[512];
+   const char *ISS_AUD = "\"iss\":\"https://idp.example.com\",\"aud\":\"aimee-kb\"";
+
+/* helper: mint {iss,aud,iat,exp} and verify at NOW */
+#define VERIFY_IAT(iat_v, exp_v)                                                                   \
+   (sprintf(pl, "{%s,\"iat\":%ld,\"exp\":%ld}", ISS_AUD, (long)(iat_v), (long)(exp_v)),            \
+    verify_pl(key, &cfg, pl))
+
+   /* fresh token: iat = now, exp far out -> accept */
+   assert(VERIFY_IAT(NOW, NOW + 3600) == 1);
+   /* exactly at the ceiling boundary (now - iat == 900) -> accept */
+   assert(VERIFY_IAT(NOW - 900, NOW + 3600) == 1);
+   /* OVER the ceiling (age 901) even though exp is far in the future -> reject */
+   assert(VERIFY_IAT(NOW - 901, NOW + 100000) == 0);
+   /* future iat beyond skew (now + 61) -> reject (no underflow) */
+   assert(VERIFY_IAT(NOW + 61, NOW + 3600) == 0);
+   /* future iat within skew (now + 60) -> accept */
+   assert(VERIFY_IAT(NOW + 60, NOW + 3600) == 1);
+   /* missing iat -> reject */
+   sprintf(pl, "{%s,\"exp\":%ld}", ISS_AUD, (long)(NOW + 3600));
+   assert(verify_pl(key, &cfg, pl) == 0);
+   /* malformed (string) iat -> reject */
+   sprintf(pl, "{%s,\"iat\":\"soon\",\"exp\":%ld}", ISS_AUD, (long)(NOW + 3600));
+   assert(verify_pl(key, &cfg, pl) == 0);
+#undef VERIFY_IAT
+   printf("  iat_ceiling: ok\n");
+}
+
 int main(void)
 {
    printf("kb_auth_oidc:\n");
@@ -318,6 +371,7 @@ int main(void)
 
    test_accept_and_scope(key, jwks);
    test_reject_paths(key, jwks);
+   test_iat_ceiling(key, jwks);
    test_seam_registration(key, jwks);
    test_register_from_file(key, jwks);
 

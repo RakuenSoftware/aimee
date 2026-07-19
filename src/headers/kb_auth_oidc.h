@@ -31,15 +31,17 @@ extern "C"
     * "do not check that claim" (an explicit operator choice). */
    typedef struct
    {
-      char issuer[256];     /* expected "iss"; "" = unchecked */
-      char audience[256];   /* expected "aud" (string, or one element of the
-                             * "aud" array); "" = unchecked */
-      char scope_claim[64]; /* payload claim mapped to scope_id (e.g. "project").
-                             * "" = the JWT yields an unscoped (owner-equivalent)
-                             * identity. */
-      char scope_kind[32];  /* scope kind paired with scope_claim (e.g. "project") */
-      char jwks_json[8192]; /* JWKS document: {"keys":[{"kty":"RSA","kid":..,
-                             * "n":..,"e":..}, ...]} */
+      char issuer[256];        /* expected "iss"; "" = unchecked */
+      char audience[256];      /* expected "aud" (string, or one element of the
+                                * "aud" array); "" = unchecked */
+      char scope_claim[64];    /* payload claim mapped to scope_id (e.g. "project").
+                                * "" = the JWT yields an unscoped (owner-equivalent)
+                                * identity. */
+      char scope_kind[32];     /* scope kind paired with scope_claim (e.g. "project") */
+      char jwks_json[8192];    /* JWKS document: {"keys":[{"kty":"RSA","kid":..,
+                                * "n":..,"e":..}, ...]} */
+      long max_token_age_secs; /* hard server-side ceiling on accepted token age
+                                * (now - iat); 0 = default (900s / 15 min). P1 I9. */
    } kb_oidc_config_t;
 
    /* Verify a compact JWS `jwt` (header.payload.signature) against cfg.
