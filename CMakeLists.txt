@@ -512,8 +512,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tools.c
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_skill_tools.c
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tools_gateway.c
-    ${AIMEE_SRC_DIR}/server/mcp_client.c
-    ${AIMEE_SRC_DIR}/server/mcp_client_registry.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client_registry.c
     ${AIMEE_SRC_DIR}/plugin.c
     ${AIMEE_SRC_DIR}/plugin_ctx.c
     ${AIMEE_SRC_DIR}/plugin_loader.c

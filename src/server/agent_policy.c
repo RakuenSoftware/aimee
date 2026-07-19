@@ -16,7 +16,7 @@
 #include "coord_closet.h"
 #include "computer_use.h"
 #include "config.h"
-#include "headers/mcp_client_registry.h"
+#include "mcp_client_registry.h"
 #include "log.h"
 #include "dstr.h"
 #include "otel.h"

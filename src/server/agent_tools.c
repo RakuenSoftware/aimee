@@ -10,7 +10,7 @@
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
-#include "headers/mcp_client_registry.h"
+#include "mcp_client_registry.h"
 #include "log.h"
 #include "toolset.h"
 #include "tool_schema_sanitizer.h"
