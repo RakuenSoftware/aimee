@@ -1245,18 +1245,11 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       /* Cost accounting: streaming /v1/responses runs the provider call directly.
        * agent_execute_messages returns a parsed_response_t (no model/agent name),
        * so synthesize the fields the audit needs from the served agent. */
-      agent_result_t ar;
-      memset(&ar, 0, sizeof(ar));
-      snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-      snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model);
-      ar.prompt_tokens = parsed.prompt_tokens;
-      ar.completion_tokens = parsed.completion_tokens;
-      ar.cache_write_tokens = parsed.cache_write_tokens;
-      ar.cache_read_tokens = parsed.cache_read_tokens;
-      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
       if (agent_ingress_accounting_enabled())
-         agent_record_token_audit(&ar, "", "openai-ingress");
+         agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                   parsed.prompt_tokens, parsed.completion_tokens,
+                                   parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                   "openai-ingress", NULL);
    }
 
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)

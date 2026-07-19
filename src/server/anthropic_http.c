@@ -635,20 +635,11 @@ static int messages_buffered(const char *body, char *resp, int cap)
       /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
        * proxy (no agent_log_call), so record this turn's spend, billed against
        * the served model and tagged as ingress. */
-      agent_result_t ar;
-      memset(&ar, 0, sizeof(ar));
-      snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-      snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-      /* Claude Code's requested model is recorded separately; aimee serves its
-       * configured primary, so requested and served typically differ. */
-      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-      ar.prompt_tokens = parsed.prompt_tokens;
-      ar.completion_tokens = parsed.completion_tokens;
-      ar.cache_write_tokens = parsed.cache_write_tokens;
-      ar.cache_read_tokens = parsed.cache_read_tokens;
       if (agent_ingress_accounting_enabled())
-         agent_record_token_audit(&ar, "", "anthropic-ingress");
+         agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                   parsed.prompt_tokens, parsed.completion_tokens,
+                                   parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                   "anthropic-ingress", NULL);
    }
 
    mint_msg_id(msg_id, sizeof(msg_id));
@@ -1064,19 +1055,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
             /* Cost accounting (mirror the buffered path). */
             if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
                 agent_ingress_accounting_enabled())
-            {
-               agent_result_t ar;
-               memset(&ar, 0, sizeof(ar));
-               snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-               snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-               snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-               snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-               ar.prompt_tokens = parsed.prompt_tokens;
-               ar.completion_tokens = parsed.completion_tokens;
-               ar.cache_write_tokens = parsed.cache_write_tokens;
-               ar.cache_read_tokens = parsed.cache_read_tokens;
-               agent_record_token_audit(&ar, "", "anthropic-ingress");
-            }
+               agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                         parsed.prompt_tokens, parsed.completion_tokens,
+                                         parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                         "anthropic-ingress", NULL);
             agent_free_parsed_response(&parsed);
          }
          else
@@ -1095,20 +1077,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                /* Cost accounting (mirror the buffered path). */
                if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
                    agent_ingress_accounting_enabled())
-               {
-                  agent_result_t ar;
-                  memset(&ar, 0, sizeof(ar));
-                  snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-                  snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-                  snprintf(ar.requested_model, sizeof(ar.requested_model), "%s",
-                           model ? model : "");
-                  snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-                  ar.prompt_tokens = parsed.prompt_tokens;
-                  ar.completion_tokens = parsed.completion_tokens;
-                  ar.cache_write_tokens = parsed.cache_write_tokens;
-                  ar.cache_read_tokens = parsed.cache_read_tokens;
-                  agent_record_token_audit(&ar, "", "anthropic-ingress");
-               }
+                  agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                            parsed.prompt_tokens, parsed.completion_tokens,
+                                            parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                            "anthropic-ingress", NULL);
                agent_free_parsed_response(&parsed);
             }
             else
@@ -1171,19 +1143,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        * aborted stream that still observed usage is recorded as partial so the
        * observed tokens are not silently lost. */
       if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_result_t ar;
-         memset(&ar, 0, sizeof(ar));
-         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-         ar.prompt_tokens = relay.input_tokens;
-         ar.completion_tokens = relay.output_tokens;
-         ar.cache_write_tokens = relay.cache_write_tokens;
-         ar.cache_read_tokens = relay.cache_read_tokens;
-         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
-                                       stream_status == 200 ? "realized" : "partial");
-      }
+         agent_ingress_record_cost(ag->name, ag->model, model, NULL, relay.input_tokens,
+                                   relay.output_tokens, relay.cache_write_tokens,
+                                   relay.cache_read_tokens, "anthropic-ingress",
+                                   stream_status == 200 ? "realized" : "partial");
       sse_parser_free(&relay.parser);
       free(relay.data);
       goto cleanup;
@@ -1237,17 +1200,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        * the legacy translator's estimate basis), output tapped from the IR
        * TURN_STOP delta. */
       if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_result_t ar;
-         memset(&ar, 0, sizeof(ar));
-         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-         ar.prompt_tokens = input_est;
-         ar.completion_tokens = (int)pc.ir_usage_out;
-         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
-                                       ir_status == 200 ? "realized" : "partial");
-      }
+         agent_ingress_record_cost(ag->name, ag->model, model, NULL, input_est,
+                                   (int)pc.ir_usage_out, 0, 0, "anthropic-ingress",
+                                   ir_status == 200 ? "realized" : "partial");
       goto cleanup;
    }
 
@@ -1279,16 +1234,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
       if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
       {
-         agent_result_t ar;
-         memset(&ar, 0, sizeof(ar));
-         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-         ar.prompt_tokens = in_tok;
-         ar.completion_tokens = out_tok;
-         ar.cache_read_tokens = cr_tok;
-         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
-                                       xlate_status == 200 ? "realized" : "partial");
+         agent_ingress_record_cost(ag->name, ag->model, model, NULL, in_tok, out_tok, 0, cr_tok,
+                                   "anthropic-ingress",
+                                   xlate_status == 200 ? "realized" : "partial");
       }
    }
 
