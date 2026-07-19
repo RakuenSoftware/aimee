@@ -128,6 +128,99 @@ static cJSON *learning_rpc_unwrap(char *resp_json, const char *what)
    return resp;
 }
 
+static void cmd_learning_list(app_ctx_t *ctx, int argc, char **argv)
+{
+   const char *state = argc >= 2 ? argv[1] : "pending";
+   int limit = argc >= 3 ? atoi(argv[2]) : 50;
+   if (limit < 1)
+      limit = 1;
+   if (limit > 64)
+      limit = 64;
+   cJSON *resp = learning_rpc_unwrap(kb_client_learning_list_proposals_json(state, NULL, limit),
+                                     "failed to list learning proposals");
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "proposals");
+   int count = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
+   learning_proposal_t rows[64];
+   int n = 0;
+   for (int i = 0; i < count && n < 64; i++)
+   {
+      cJSON *item = cJSON_GetArrayItem(arr, i);
+      if (learning_proposal_from_json(item, &rows[n]) == 0)
+         n++;
+   }
+   cJSON_Delete(resp);
+   learning_emit_list(ctx, rows, n);
+   return;
+}
+
+static void learning_proposal_action(app_ctx_t *ctx, int argc, char **argv, const char *sub)
+{
+   if (argc < 2)
+      fatal("learning %s requires a proposal id", sub);
+   int id = atoi(argv[1]);
+   char *(*rpc)(int) = strcmp(sub, "status") == 0
+                           ? kb_client_learning_get_proposal_json
+                           : (strcmp(sub, "accept") == 0 ? kb_client_learning_accept_proposal_json
+                                                         : kb_client_learning_reject_proposal_json);
+   char err[64];
+   snprintf(err, sizeof(err), "learning proposal %s failed", sub);
+   cJSON *resp = learning_rpc_unwrap(rpc(id), err);
+   cJSON *p = cJSON_GetObjectItemCaseSensitive(resp, "proposal");
+   learning_proposal_t proposal;
+   if (!p || learning_proposal_from_json(p, &proposal) != 0)
+   {
+      cJSON_Delete(resp);
+      fatal("learning proposal %s: unexpected response", sub);
+   }
+   cJSON_Delete(resp);
+
+   if (strcmp(sub, "status") == 0)
+   {
+      learning_emit_list(ctx, &proposal, 1);
+   }
+   else if (ctx->json_output)
+   {
+      cJSON *obj = learning_proposal_to_json(&proposal);
+      emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      printf("learning proposal #%d is %s\n", proposal.id, proposal.state);
+   }
+   return;
+}
+
+static void cmd_learning_metrics(app_ctx_t *ctx, int argc, char **argv)
+{
+   int window_days = argc >= 2 ? atoi(argv[1]) : 0;
+   learning_emit_metrics(ctx, window_days);
+   return;
+}
+
+static void cmd_learning_status(app_ctx_t *ctx, int argc, char **argv)
+{
+   learning_proposal_action(ctx, argc, argv, "status");
+}
+
+static void cmd_learning_accept(app_ctx_t *ctx, int argc, char **argv)
+{
+   learning_proposal_action(ctx, argc, argv, "accept");
+}
+
+static void cmd_learning_reject(app_ctx_t *ctx, int argc, char **argv)
+{
+   learning_proposal_action(ctx, argc, argv, "reject");
+}
+
+static const subcmd_t cmd_learning_subs[] = {
+    {"list", "list learning proposals", cmd_learning_list},
+    {"status", "show a proposal's status", cmd_learning_status},
+    {"accept", "accept a proposal", cmd_learning_accept},
+    {"reject", "reject a proposal", cmd_learning_reject},
+    {"metrics", "show learning metrics", cmd_learning_metrics},
+    {NULL, NULL, NULL},
+};
+
 void cmd_learning(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -135,75 +228,6 @@ void cmd_learning(app_ctx_t *ctx, int argc, char **argv)
 
    const char *sub = argv[0];
 
-   if (strcmp(sub, "list") == 0)
-   {
-      const char *state = argc >= 2 ? argv[1] : "pending";
-      int limit = argc >= 3 ? atoi(argv[2]) : 50;
-      if (limit < 1)
-         limit = 1;
-      if (limit > 64)
-         limit = 64;
-      cJSON *resp = learning_rpc_unwrap(kb_client_learning_list_proposals_json(state, NULL, limit),
-                                        "failed to list learning proposals");
-      cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "proposals");
-      int count = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
-      learning_proposal_t rows[64];
-      int n = 0;
-      for (int i = 0; i < count && n < 64; i++)
-      {
-         cJSON *item = cJSON_GetArrayItem(arr, i);
-         if (learning_proposal_from_json(item, &rows[n]) == 0)
-            n++;
-      }
-      cJSON_Delete(resp);
-      learning_emit_list(ctx, rows, n);
-      return;
-   }
-
-   if (strcmp(sub, "status") == 0 || strcmp(sub, "accept") == 0 || strcmp(sub, "reject") == 0)
-   {
-      if (argc < 2)
-         fatal("learning %s requires a proposal id", sub);
-      int id = atoi(argv[1]);
-      char *(*rpc)(int) =
-          strcmp(sub, "status") == 0
-              ? kb_client_learning_get_proposal_json
-              : (strcmp(sub, "accept") == 0 ? kb_client_learning_accept_proposal_json
-                                            : kb_client_learning_reject_proposal_json);
-      char err[64];
-      snprintf(err, sizeof(err), "learning proposal %s failed", sub);
-      cJSON *resp = learning_rpc_unwrap(rpc(id), err);
-      cJSON *p = cJSON_GetObjectItemCaseSensitive(resp, "proposal");
-      learning_proposal_t proposal;
-      if (!p || learning_proposal_from_json(p, &proposal) != 0)
-      {
-         cJSON_Delete(resp);
-         fatal("learning proposal %s: unexpected response", sub);
-      }
-      cJSON_Delete(resp);
-
-      if (strcmp(sub, "status") == 0)
-      {
-         learning_emit_list(ctx, &proposal, 1);
-      }
-      else if (ctx->json_output)
-      {
-         cJSON *obj = learning_proposal_to_json(&proposal);
-         emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("learning proposal #%d is %s\n", proposal.id, proposal.state);
-      }
-      return;
-   }
-
-   if (strcmp(sub, "metrics") == 0)
-   {
-      int window_days = argc >= 2 ? atoi(argv[1]) : 0;
-      learning_emit_metrics(ctx, window_days);
-      return;
-   }
-
-   fatal("unknown learning subcommand: %s", sub);
+   if (subcmd_dispatch(cmd_learning_subs, sub, ctx, argc, argv) != 0)
+      fatal("unknown learning subcommand: %s", sub);
 }
