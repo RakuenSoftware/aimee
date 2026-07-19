@@ -5,7 +5,7 @@ Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md   — every `aimee` CLI command + subcommands, from the
                                client help table (src/cli_help_data.h).
   docs/gen/configuration.md  — every config key: the `aimee config get/set`
-                               scalar allowlist (src/config_fields.c) plus the
+                               scalar allowlist (src/modules/config/config_fields.c) plus the
                                config-file (JSON) sections parsed by src/config*.c.
 
 The point is completeness: these are derived from the same tables the binary
@@ -92,7 +92,7 @@ def render_cli(entries):
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Config: CLI-settable scalars (src/config_fields.c) ───────────────────────
+# ─── Config: CLI-settable scalars (src/modules/config/config_fields.c) ───────────────────────
 
 CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float",
             "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
@@ -375,7 +375,7 @@ def parse_config_fields():
     # offsetof/sizeof macros embed commas, so match the key (first string before
     # offsetof) and the type (CFG_* before the closing brace) positionally — they
     # are 1:1 in source order.
-    text = (SRC / "config_fields.c").read_text(encoding="utf-8")
+    text = (SRC / "modules" / "config" / "config_fields.c").read_text(encoding="utf-8")
     # Bound to the config_fields[] initializer, then parse each `{...}` entry as a
     # unit (split on `},`) so the key and its CFG_* type are paired within one
     # entry — robust to CFG_* uses in helper functions below the table.
@@ -412,7 +412,7 @@ FOREACH_RE = re.compile(r'cJSON_ArrayForEach\(\s*(\w+)\s*,\s*(\w+)\s*\)')
 def parse_config_sections():
     sections = {}   # section name -> sorted set of keys
     flat = set()    # top-level scalar keys read straight off root
-    for cfile in sorted(SRC.glob("config*.c")):
+    for cfile in sorted((SRC / "modules" / "config").glob("config*.c")):
         text = cfile.read_text(encoding="utf-8")
         var_to_section = {}
         for m in ASSIGN_RE.finditer(text):
@@ -445,7 +445,7 @@ def render_config(fields, sections, flat):
     out = ["# Configuration Reference",
            "",
            "> Auto-generated from the canonical source tables by "
-           "`scripts/gen-reference-docs.py` — config keys from `src/config_fields.c` + "
+           "`scripts/gen-reference-docs.py` — config keys from `src/modules/config/config_fields.c` + "
            "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
            "workflow surface from `src/modules/workflows/`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",

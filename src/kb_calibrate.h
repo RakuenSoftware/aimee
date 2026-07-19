@@ -8,7 +8,7 @@
 #ifndef DEC_KB_CALIBRATE_H
 #define DEC_KB_CALIBRATE_H 1
 
-#include "headers/config.h"
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C"

@@ -10,7 +10,7 @@
  */
 #include "headers/conversation_context.h"
 #include "db1/conv_context.h"
-#include "headers/config.h"
+#include "config.h"
 #include "headers/log.h"
 #include <cJSON.h>
 #include <stdio.h>

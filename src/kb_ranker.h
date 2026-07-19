@@ -5,7 +5,7 @@
 #ifndef DEC_KB_RANKER_H
 #define DEC_KB_RANKER_H 1
 
-#include "headers/config.h"
+#include "config.h"
 #include "kb_features.h"
 
 #include <stdint.h>

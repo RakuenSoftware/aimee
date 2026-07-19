@@ -3,7 +3,7 @@
  * Parses keys that were excluded from config.c due to line-count constraints.
  * Called from server_main.c after config_load().
  */
-#include "headers/config.h"
+#include "config.h"
 #include "headers/aimee_home.h"
 #include "cJSON.h"
 #include <stdio.h>

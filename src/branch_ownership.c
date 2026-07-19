@@ -13,7 +13,7 @@
 
 #include "headers/aimee.h"
 #include "headers/branch_ownership.h"
-#include "headers/config.h"
+#include "config.h"
 #include "headers/util.h"
 #include "cJSON.h"
 

@@ -5,7 +5,7 @@
  */
 #include "headers/plugin_loader.h"
 #include "headers/log.h"
-#include "headers/config.h"
+#include "config.h"
 #include "headers/aimee_home.h"
 #include <dirent.h>
 #include <string.h>

@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #include "../headers/role_templates.h"
-#include "../headers/config.h" /* config_default_dir */
+#include "config.h" /* config_default_dir */
 
 /* --- Helpers --- */
 

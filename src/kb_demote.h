@@ -3,7 +3,7 @@
 #ifndef DEC_KB_DEMOTE_H
 #define DEC_KB_DEMOTE_H 1
 
-#include "headers/config.h"
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C"

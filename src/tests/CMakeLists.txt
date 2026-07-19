@@ -18,6 +18,7 @@ function(aimee_add_test test_name)
   target_include_directories(${test_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   aimee_enable_test_asserts(${test_name})
   if(WIN32)
@@ -37,6 +38,7 @@ add_executable(test_plugin_loader test_plugin_loader.c)
 target_include_directories(test_plugin_loader PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_plugin_loader)
 if(TARGET aimee-agent)
@@ -70,6 +72,7 @@ add_executable(test_git_org_repos test_git_org_repos.c
 target_include_directories(test_git_org_repos PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_org_repos)
 add_test(NAME test_git_org_repos COMMAND test_git_org_repos)
@@ -84,6 +87,7 @@ add_executable(test_git_oauth_device test_git_oauth_device.c
 target_include_directories(test_git_oauth_device PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_oauth_device)
 add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
@@ -99,6 +103,7 @@ if(NOT WIN32)
   target_include_directories(test_git_oauth_gh PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_git_oauth_gh PRIVATE Threads::Threads)
   aimee_enable_test_asserts(test_git_oauth_gh)
@@ -110,6 +115,7 @@ add_executable(test_context_engine test_context_engine.c)
 target_include_directories(test_context_engine PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_context_engine)
 if(TARGET aimee-agent)
@@ -130,7 +136,7 @@ aimee_add_test(test_audit_action_log test_audit_action_log.c)
 aimee_add_test(test_audit_ledger test_audit_ledger.c)
 aimee_add_test(test_db test_db.c)
 aimee_add_test(test_config test_config.c)
-aimee_add_test(test_cron_config test_cron_config.c ../config_trigger.c)
+aimee_add_test(test_cron_config test_cron_config.c ../modules/config/config_trigger.c)
 aimee_add_test(test_anchor_snapshot test_anchor_snapshot.c)
 aimee_add_test(test_agent_admission test_agent_admission.c ../server/agent_admission.c)
 aimee_add_test(test_edit_anchored test_edit_anchored.c)
@@ -165,6 +171,7 @@ add_executable(test_toolset test_toolset.c)
 target_include_directories(test_toolset PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_toolset)
 if(TARGET aimee-agent)
@@ -187,6 +194,7 @@ add_test(NAME test_db2_pool COMMAND test_db2_pool)
 target_include_directories(test_compute_pool PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_compute_pool)
 if(WIN32)
@@ -204,6 +212,7 @@ add_executable(test_turn_registry test_turn_registry.c ../server/turn_registry.c
 target_include_directories(test_turn_registry PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_turn_registry)
 target_link_libraries(test_turn_registry PRIVATE Threads::Threads)
@@ -216,6 +225,7 @@ add_executable(test_server_session_pools test_server_session_pools.c ../server/s
 target_include_directories(test_server_session_pools PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_server_session_pools)
 if(WIN32)
@@ -230,6 +240,7 @@ add_executable(test_cmd_table test_cmd_table.c)
 target_include_directories(test_cmd_table PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_cmd_table)
 target_link_libraries(test_cmd_table PRIVATE aimee-core)
@@ -243,6 +254,7 @@ add_executable(test_prompts test_prompts.c ../prompts.c ../dstr.c)
 target_include_directories(test_prompts PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_prompts)
 if(TARGET aimee-core)
@@ -261,6 +273,7 @@ add_executable(test_agent_http test_agent_http.c)
 target_include_directories(test_agent_http PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_agent_http)
 if(TARGET aimee-agent)
@@ -280,6 +293,7 @@ add_executable(test_kb_lab test_kb_lab.c ../kb/kb_lab.c)
 target_include_directories(test_kb_lab PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_kb_lab)
 target_link_libraries(test_kb_lab PRIVATE m)
@@ -289,10 +303,11 @@ set_tests_properties(test_kb_lab PROPERTIES
 
 # test_kb_mdl: MDL scoring for synthesis candidate selection.
 # Needs kb_mdl.c (aimee-data) + config_learning.c (aimee-core) + zstd.
-add_executable(test_kb_mdl test_kb_mdl.c ../kb/kb_mdl.c ../config_learning.c)
+add_executable(test_kb_mdl test_kb_mdl.c ../kb/kb_mdl.c ../modules/config/config_learning.c)
 target_include_directories(test_kb_mdl PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_kb_mdl)
 if(TARGET aimee-core)
@@ -315,6 +330,7 @@ add_executable(test_compact_prune test_compact_prune.c)
 target_include_directories(test_compact_prune PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_compact_prune)
 if(TARGET aimee-agent)
@@ -333,6 +349,7 @@ add_executable(test_session_compact_focused test_session_compact_focused.c)
 target_include_directories(test_session_compact_focused PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_session_compact_focused)
 if(TARGET aimee-agent)
@@ -351,6 +368,7 @@ add_executable(test_conversation_context test_conversation_context.c)
 target_include_directories(test_conversation_context PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_conversation_context)
 if(TARGET aimee-agent)

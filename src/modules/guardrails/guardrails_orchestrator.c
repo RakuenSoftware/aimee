@@ -14,7 +14,7 @@
 #include "guardrails_semantic.h"
 #include "guardrails_blast_radius.h"
 #include "workspace_provider.h" /* skip worktree enforcement for a detached (client) workspace */
-#include "headers/config.h"
+#include "config.h"
 #include "git_verify.h"
 #include "skill.h"
 #include "kb_client.h"

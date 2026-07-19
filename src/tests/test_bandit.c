@@ -18,8 +18,8 @@
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
-#include "../headers/config.h"
-#include "../headers/config_learning.h"
+#include "config.h"
+#include "config_learning.h"
 
 static void open_db(void)
 {

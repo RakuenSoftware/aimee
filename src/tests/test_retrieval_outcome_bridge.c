@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../headers/config.h"
+#include "config.h"
 #include "../server/retrieval_outcome_bridge.h"
 
 /* ---- test-controlled config ---- */

@@ -4,7 +4,7 @@
 #include "headers/agent_pipeline.h"
 #include "headers/agent_coord.h"
 #include "git_verify.h"
-#include "headers/config.h"
+#include "config.h"
 #include "headers/index.h"
 #include "kb_client.h"
 #include "lifecycle.h"
