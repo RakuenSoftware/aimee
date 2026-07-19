@@ -3585,7 +3585,7 @@ $(TESTPREFIX)/unit-test-json-fluent: $(OBJDIR)/tests/test_json_fluent.o $(OBJDIR
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/cmd_data.o \
-                                     $(TEST_CORE_OBJS)
+                                     $(OBJDIR)/cmd_util.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-table: $(OBJDIR)/tests/test_cmd_table.o
