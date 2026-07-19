@@ -718,6 +718,60 @@ static void test_docker_workspace_validation_refusals(void)
    free(log);
    b->release(b, state, 0);
 
+   /* A DISJOINT linked worktree — one that lives OUTSIDE its repo root, as a WFE
+    * per-slice worktree does ($AIMEE_HOME/wfe-worktrees/...) — is MOUNTED when its
+    * two-way git link checks out: the repo goes read-only at its own path, and the
+    * worktree and its gitdir are separate writable mounts (no nesting needed). */
+   char drepo[300], dwt[300];
+   snprintf(drepo, sizeof(drepo), "%s/drepo", base);
+   snprintf(dwt, sizeof(dwt), "%s/dwt", base); /* sibling of drepo, NOT nested under it */
+   char dwtadmin[500];
+   snprintf(dwtadmin, sizeof(dwtadmin), "%s/.git/worktrees/s0", drepo);
+   char dcmd[900];
+   snprintf(dcmd, sizeof(dcmd), "mkdir -p %s %s", dwtadmin, dwt);
+   (void)system(dcmd);
+   char dgit[400]; /* forward gitlink: <worktree>/.git -> admin dir under <repo>/.git */
+   snprintf(dgit, sizeof(dgit), "%s/.git", dwt);
+   FILE *dg = fopen(dgit, "w");
+   assert(dg != NULL);
+   fprintf(dg, "gitdir: %s\n", dwtadmin);
+   fclose(dg);
+   char dback[600]; /* backlink: <repo>/.git/worktrees/s0/gitdir -> <worktree>/.git */
+   snprintf(dback, sizeof(dback), "%s/gitdir", dwtadmin);
+   FILE *dbk = fopen(dback, "w");
+   assert(dbk != NULL);
+   fprintf(dbk, "%s\n", dgit);
+   fclose(dbk);
+
+   cfg.workspace = dwt;
+   cfg.workspace_read_only = 0;
+   assert(b->acquire(b, "task-disjoint", &cfg, &state) == 0);
+   {
+      char *l = read_fake_docker_create_argv();
+      assert(l != NULL);
+      char m_repo[700];
+      snprintf(m_repo, sizeof(m_repo), "%s:%s:ro", drepo, drepo);
+      assert(strstr(l, m_repo) != NULL); /* repo read-only at its own path */
+      char m_wt[700];
+      snprintf(m_wt, sizeof(m_wt), "%s:%s", dwt, dwt);
+      assert(strstr(l, m_wt) != NULL); /* worktree writable — a separate, non-nested mount */
+      char m_gd[900];
+      snprintf(m_gd, sizeof(m_gd), "%s:%s", dwtadmin, dwtadmin);
+      assert(strstr(l, m_gd) != NULL); /* per-worktree gitdir writable */
+      free(l);
+   }
+   b->release(b, state, 0);
+
+   /* The SAME disjoint worktree but with a BROKEN backlink (points elsewhere): the
+    * backend cannot prove the worktree belongs to the repo, so it refuses rather
+    * than mount an out-of-repo tree on a one-way gitlink alone. */
+   FILE *dbk2 = fopen(dback, "w");
+   assert(dbk2 != NULL);
+   fprintf(dbk2, "%s/somewhere-else/.git\n", base);
+   fclose(dbk2);
+   cfg.workspace = dwt;
+   assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) == -1);
+
    snprintf(cmd, sizeof(cmd), "rm -rf %s", base);
    (void)system(cmd);
    teardown_fake_docker();
