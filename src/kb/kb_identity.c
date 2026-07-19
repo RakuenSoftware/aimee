@@ -17,13 +17,17 @@ int kb_cert_serial_normalize(const char *serial, char *out, size_t cap)
    const char *s = serial;
    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
       s += 2;
-   /* collect lowercase hex, dropping ':' and whitespace separators */
+   /* collect lowercase hex, dropping ':' and whitespace separators. REJECT rather
+    * than truncate an over-long serial — a truncated serial could collide two
+    * distinct certificates onto one identity key. */
    char buf[512];
    size_t n = 0;
-   for (; *s && n + 1 < sizeof(buf); ++s)
+   for (; *s; ++s)
    {
       if (*s == ':' || *s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
          continue;
+      if (n + 1 >= sizeof(buf))
+         return -1; /* over-long serial: fail, never truncate */
       buf[n++] = (char)tolower((unsigned char)*s);
    }
    buf[n] = '\0';
@@ -33,7 +37,10 @@ int kb_cert_serial_normalize(const char *serial, char *out, size_t cap)
       ++p;
    if (p[0] == '\0')
       p = "0";
-   snprintf(out, cap, "%s", p);
+   size_t plen = strlen(p);
+   if (plen >= cap)
+      return -1; /* would not fit the output buffer: fail, never truncate */
+   memcpy(out, p, plen + 1);
    return 0;
 }
 
@@ -49,6 +56,12 @@ static int copy_strict(char *dst, size_t cap, const char *src)
    size_t n = strlen(src);
    if (n >= cap)
       return -1;
+   /* Reject control characters: a verified issuer/subject is printable text, and a
+    * control char in an identity key would be confusing at best and a smuggling
+    * vector at worst. */
+   for (size_t i = 0; i < n; ++i)
+      if ((unsigned char)src[i] < 0x20 || (unsigned char)src[i] == 0x7f)
+         return -1;
    memcpy(dst, src, n + 1);
    return 0;
 }

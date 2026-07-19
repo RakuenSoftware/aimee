@@ -116,6 +116,22 @@ static void test_overlong_rejected(void)
    char tiny[8];
    CHECK(kb_principal_from_verify(&v2, "issuer", &p2) == 0, "principal ok");
    CHECK(kb_identity_key(&p2, tiny, sizeof(tiny)) == -1, "undersized key buffer rejected");
+
+   /* An over-long certificate serial must be rejected, not truncated (else two
+    * distinct serials sharing a prefix would collapse to one identity). */
+   char bigserial[2048];
+   memset(bigserial, 'a', sizeof(bigserial) - 1);
+   bigserial[sizeof(bigserial) - 1] = '\0';
+   char norm[64];
+   CHECK(kb_cert_serial_normalize(bigserial, norm, sizeof(norm)) == -1,
+         "over-long cert serial rejected");
+   /* A control character in issuer/subject is rejected. */
+   kb_verify_result_t v3;
+   memset(&v3, 0, sizeof(v3));
+   snprintf(v3.subject, sizeof(v3.subject), "%s", "ab");
+   kb_principal_t p3;
+   CHECK(kb_principal_from_verify(&v3, "iss\nwith-newline", &p3) == -1,
+         "control char in issuer rejected");
 }
 
 int main(void)

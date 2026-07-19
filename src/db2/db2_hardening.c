@@ -67,9 +67,16 @@ int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
        conn,
        "SELECT r.rolbypassrls, r.rolsuper, "
        "has_schema_privilege(current_user,'public','CREATE'), "
-       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls "
-       "  OR m.rolname IN ('aimee_kb_owner','aimee_kb_migrate')) FROM pg_roles m "
-       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false), "
+       /* Name-independent: reject membership in ANY role that is super, BYPASSRLS,
+          or OWNS a tenant table (a table owner can DISABLE ROW LEVEL SECURITY),
+          regardless of what the owner/migration roles are named. */
+       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls OR EXISTS ("
+       "    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+       "    WHERE n.nspname = 'public' AND c.relowner = m.oid AND c.relname IN "
+       "    "
+       "('kb_team','kb_project','kb_team_membership','kb_project_membership','kb_admin_grant'))) "
+       "  FROM pg_roles m "
+       "  WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false), "
        "COALESCE((SELECT bool_or(pg_get_userbyid(c.relowner) = current_user) "
        "  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
        "  WHERE n.nspname = 'public' AND c.relname IN "
