@@ -76,8 +76,8 @@ int db2_memory_list_retryable_index_failures(int max_attempts, int limit, int64_
  * rather than the per-candidate semantic fallback. Postgres-only: the sqlite shim
  * cannot represent a GENERATED tsvector, so it returns 0 and the caller keeps its
  * synthetic-semantic path. `neg_tokens` is the extract_negation_tokens() output
- * (space-separated "not_<token>"); plainto_tsquery tokenises it the same way the
- * stored column was built, so the lexemes line up. */
+ * (space-separated "not_<token>"), OR'd via websearch_to_tsquery so a memory that
+ * shares ANY negated concept surfaces (recall) rather than only supersets. */
 int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *out, int max)
 {
    if (!neg_tokens || !neg_tokens[0] || !out || limit <= 0 || max <= 0)
@@ -88,12 +88,38 @@ int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *
    if (!conn)
       return 0;
 
+   /* OR the negation tokens so a memory sharing ANY negated concept surfaces
+    * (recall), not only one whose tokens are a superset of the query's. Each
+    * "not_<word>" lexes to the phrase 'not <-> word', so joining with " or " and
+    * using websearch_to_tsquery yields "('not'<->a) | ('not'<->b) | …".
+    * websearch_to_tsquery never syntax-errors on arbitrary input (unlike
+    * to_tsquery), so this stays valid for any token set. */
+   char orq[1600];
+   size_t op = 0;
+   for (const char *p = neg_tokens; *p;)
+   {
+      while (*p == ' ')
+         p++;
+      const char *s = p;
+      while (*p && *p != ' ')
+         p++;
+      if (p == s)
+         break;
+      if (op)
+         op += (size_t)snprintf(orq + op, sizeof(orq) - op, " or ");
+      op += (size_t)snprintf(orq + op, sizeof(orq) - op, "%.*s", (int)(p - s), s);
+      if (op >= sizeof(orq) - 8)
+         break;
+   }
+   if (!op)
+      return 0;
+
    static const char *sql =
        "SELECT id, tier, kind, key, content, confidence, use_count,"
        " last_used_at, created_at, updated_at, source_session, salience, provenance_category"
        " FROM memories"
-       " WHERE memory_negation_fts_tsv @@ plainto_tsquery('simple', ?1)"
-       " ORDER BY ts_rank(memory_negation_fts_tsv, plainto_tsquery('simple', ?1)) DESC,"
+       " WHERE memory_negation_fts_tsv @@ websearch_to_tsquery('simple', ?1)"
+       " ORDER BY ts_rank(memory_negation_fts_tsv, websearch_to_tsquery('simple', ?1)) DESC,"
        "          use_count DESC, confidence DESC"
        " LIMIT ?2";
 
@@ -101,7 +127,7 @@ int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
-   aimee_pg_bind_text(st, "?1", neg_tokens);
+   aimee_pg_bind_text(st, "?1", orq);
    aimee_pg_bind_int(st, "?2", limit);
 
    int n = 0;
