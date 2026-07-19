@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (115)
+## CLI-settable keys (109)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -106,16 +106,11 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `learning_router_enabled` | bool | Enable the learning router. |
 | `max_iterations` | int | Per-turn iteration cap for interactive chat (default 15). |
 | `max_iterations_delegate` | int | Per-turn iteration cap for delegate sessions (default 25). |
-| `memory_abstain_enabled` | bool | Allow memory recall to abstain on low confidence. |
 | `memory_abstain_gate` | float | Confidence gate for memory abstention. |
 | `memory_coref_mode` | string | Coreference-resolution mode for memory. |
-| `memory_fetch_budget_enabled` | bool | Enable token-budgeted memory fetch. |
 | `memory_fetch_budget_shape_aware` | bool | Shape-aware memory fetch budgeting. |
 | `memory_hard_negative_log` | string | Path to the hard-negative recall log file (empty = disabled). |
-| `memory_improve_dedupe_enabled` | bool | Dedupe during memory-improve. |
-| `memory_improve_summarise_enabled` | bool | Summarise during memory-improve. |
 | `memory_negation_enabled` | bool | Detect/handle negation in memory. |
-| `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
 | `memory_query_expansion_k` | int | Number of expanded queries for recall. |
 | `memory_query_expansion_mode` | string | Query-expansion mode. |
 | `memory_rerank_command` | string | External reranker command. |
@@ -125,7 +120,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `memory_rewrite_decompose` | bool | Decompose queries during rewrite. |
 | `memory_rewrite_enabled` | bool | Enable query rewriting for recall. |
 | `memory_rewrite_hyde` | bool | Use HyDE (hypothetical-document) rewrite. |
-| `memory_scenes_enabled` | bool | Cluster memories into scenes. |
 | `ocr_command` | string | OCR sidecar endpoint/command for structured-PDF scanned-page recognition (resolves like embedding_command; AIMEE_OCR_URL env fallback). |
 | `openai_endpoint` | string | OpenAI-compatible endpoint URL. |
 | `openai_key_cmd` | string | Command that prints the OpenAI API key. |
@@ -168,7 +162,7 @@ Consumed once by `config_emit_deploy_env` to stand up the aimee-llm container (`
 | `llm_synth_model` | string | — |
 | `llm_synth_tier` | string | — |
 
-### Advanced tuning keys (45)
+### Advanced tuning keys (51)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -205,16 +199,22 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `kb_pdf_tsr_enabled` | bool | Run the table-structure-recognition (TSR) sidecar at PDF ingest to turn table regions into structured kb_table_cells, surfaced via lookup_table (default off; degrades to text-only when the sidecar is absent). |
 | `kb_pdf_vector_enabled` | bool | Embed structured-PDF chunks into the isolated kb_pdf_embeddings relation and add the vector candidate leg to search_chunks (default off; degrades to lexical-only when the embedder is absent). |
 | `kb_search_max_results` | int | Default max results for KB search. |
+| `memory_abstain_enabled` | bool | Allow memory recall to abstain on low confidence. |
 | `memory_bm25_weight` | float | BM25 (lexical) weight in hybrid memory recall. |
 | `memory_chunk_min_confidence` | float | Minimum confidence to keep a memory chunk. |
 | `memory_coref_window` | int | Coreference lookback window. |
 | `memory_fetch_budget_base` | int | Base token budget for memory fetch. |
+| `memory_fetch_budget_enabled` | bool | Enable token-budgeted memory fetch. |
+| `memory_improve_dedupe_enabled` | bool | Dedupe during memory-improve. |
+| `memory_improve_summarise_enabled` | bool | Summarise during memory-improve. |
 | `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
 | `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
+| `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
 | `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
 | `memory_profile_cards_stale_secs` | int | Profile-card staleness (seconds). |
 | `memory_rerank_top_k` | int | Top-K candidates to rerank. |
 | `memory_rewrite_max_subqueries` | int | Max sub-queries produced by rewrite. |
+| `memory_scenes_enabled` | bool | Cluster memories into scenes. |
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
