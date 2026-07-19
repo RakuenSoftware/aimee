@@ -305,6 +305,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-crypto \
                $(TESTPREFIX)/unit-test-vault-kek-cache \
                $(TESTPREFIX)/unit-test-vault-store \
+               $(TESTPREFIX)/unit-test-vault-seam \
                $(TESTPREFIX)/unit-test-vault-service \
                $(TESTPREFIX)/unit-test-vault-master-rotate \
                $(TESTPREFIX)/unit-test-git-forge-vault \
@@ -3216,6 +3217,11 @@ $(TESTPREFIX)/unit-test-vault-kek-cache: $(OBJDIR)/tests/test_vault_kek_cache.o 
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-vault-store: $(OBJDIR)/tests/test_vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-seam: $(OBJDIR)/tests/test_vault_seam.o \
                               $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

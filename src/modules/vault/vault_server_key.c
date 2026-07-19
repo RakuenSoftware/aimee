@@ -2,6 +2,7 @@
  * See vault_server_key.h. Reuses the vault_crypto primitives — this file only
  * manages the 0600 master-key file and caches the derived server KEK. */
 #include "vault_server_key.h"
+#include "vault_internal.h" /* vault_custody_provider_t seam */
 #include "vault_crypto.h"
 #include "vault_store.h"   /* vault_store_list_principals, _rekey_field (D13) */
 #include "config.h"        /* config_default_dir */
@@ -165,7 +166,7 @@ static int derive_and_cache(void)
    return rc;
 }
 
-int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
+static int file_get_kek(void *ctx, uint8_t kek[VAULT_KEK_LEN])
 {
    if (!kek)
       return -1;
@@ -269,8 +270,8 @@ static int rot_copy_dir_flat(const char *src_dir, const char *dst_dir)
    return rc;
 }
 
-int vault_server_key_rotate(const char *server_principal, int *out_principals, int *out_creds,
-                            char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen)
+static int file_rotate(void *ctx, const char *server_principal, int *out_principals, int *out_creds,
+                       char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen)
 {
 #define ROT_FAIL(msg)                                                                              \
    do                                                                                              \
@@ -429,4 +430,34 @@ done:
    pthread_mutex_unlock(&g_kek_mu);
    return ret;
 #undef ROT_FAIL
+}
+
+/* ── Custody seam ─────────────────────────────────────────────────────────────
+ * The default "file" custody provider: derives the server KEK from the 0600
+ * .server-master.key file above and drives its rotation. Stateless (ctx==NULL) —
+ * the cached KEK lives in the module globals (g_kek/g_kek_ready), so
+ * vault_server_key_reset_for_test() keeps working unchanged. The public
+ * vault_server_kek() / vault_server_key_rotate() below are thin forwarders that
+ * dispatch through g_custody, passing g_custody->ctx as the first argument so a
+ * future stateful provider needs no globals. Signatures in vault_server_key.h
+ * are UNCHANGED. (hwm_read/hwm_cas are deferred to a later slice.) */
+static const vault_custody_provider_t file_custody = {
+    .name = "file",
+    .ctx = NULL,
+    .get_kek = file_get_kek,
+    .rotate = file_rotate,
+};
+
+static const vault_custody_provider_t *g_custody = &file_custody;
+
+int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
+{
+   return g_custody->get_kek(g_custody->ctx, kek);
+}
+
+int vault_server_key_rotate(const char *server_principal, int *out_principals, int *out_creds,
+                            char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen)
+{
+   return g_custody->rotate(g_custody->ctx, server_principal, out_principals, out_creds, backup_path,
+                            backup_path_len, errbuf, errlen);
 }

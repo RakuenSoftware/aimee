@@ -4,6 +4,7 @@
  * cannot traverse the path or collide with another principal. See vault_store.h.
  */
 #include "vault_store.h"
+#include "vault_internal.h" /* vault_store_backend_t seam */
 #include "vault_crypto.h"
 #include "config.h"        /* config_default_dir */
 #include "platform_path.h" /* platform_mkdir_p */
@@ -270,7 +271,8 @@ static int build_aad(const char *principal, const char *agent, const char *cred,
    return (n < 0 || (size_t)n >= cap) ? -1 : n;
 }
 
-int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SALT_LEN])
+static int jsonfile_get_or_create_salt(void *ctx, const char *principal,
+                                       uint8_t salt[VAULT_SALT_LEN])
 {
    if (!principal || !principal[0] || !salt)
       return -1;
@@ -418,23 +420,24 @@ out:
    return rc;
 }
 
-int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
-                    const char *cred, const char *secret)
+static int jsonfile_set(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                        const char *agent, const char *cred, const char *secret)
 {
    return vault_store_set_impl(principal, kek, NULL, agent, cred, secret);
 }
 
-int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
-                         const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
-                         const char *cred, const char *secret)
+static int jsonfile_set_dual(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                             const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                             const char *cred, const char *secret)
 {
    if (!server_kek)
       return -1;
    return vault_store_set_impl(principal, kek, server_kek, agent, cred, secret);
 }
 
-int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
-                           const char *agent, const char *cred, const char *secret)
+static int jsonfile_set_server(void *ctx, const char *principal,
+                               const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                               const char *cred, const char *secret)
 {
    if (!server_kek)
       return -1;
@@ -443,8 +446,8 @@ int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT
    return vault_store_set_impl(principal, NULL, server_kek, agent, cred, secret);
 }
 
-int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
-                    const char *cred, char *out, size_t out_len)
+static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                        const char *agent, const char *cred, char *out, size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
@@ -523,8 +526,9 @@ out:
    return rc;
 }
 
-int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
-                           const char *agent, const char *cred, char *out, size_t out_len)
+static int jsonfile_get_server(void *ctx, const char *principal,
+                               const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                               const char *cred, char *out, size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
@@ -609,8 +613,9 @@ out:
    return rc;
 }
 
-int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[VAULT_KEK_LEN],
-                                 const uint8_t server_kek[VAULT_KEK_LEN])
+static int jsonfile_add_server_wraps(void *ctx, const char *principal,
+                                     const uint8_t user_kek[VAULT_KEK_LEN],
+                                     const uint8_t server_kek[VAULT_KEK_LEN])
 {
    if (!principal || !user_kek || !server_kek)
       return -1;
@@ -660,9 +665,9 @@ int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[V
    return rc;
 }
 
-int vault_store_rekey_field(const char *principal, const char *field,
-                            const uint8_t old_kek[VAULT_KEK_LEN],
-                            const uint8_t new_kek[VAULT_KEK_LEN])
+static int jsonfile_rekey_field(void *ctx, const char *principal, const char *field,
+                                const uint8_t old_kek[VAULT_KEK_LEN],
+                                const uint8_t new_kek[VAULT_KEK_LEN])
 {
    if (!principal || !field || !field[0] || !old_kek || !new_kek)
       return -1;
@@ -714,7 +719,7 @@ int vault_store_rekey_field(const char *principal, const char *field,
    return rc == 0 ? rewrapped_count : -1;
 }
 
-int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
+static int jsonfile_list_principals(void *ctx, char (*out)[VAULT_PRINCIPAL_MAX], int max)
 {
    if (!out || max <= 0)
       return -1;
@@ -751,7 +756,7 @@ int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
    return count;
 }
 
-int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN])
+static int jsonfile_salt_readonly(void *ctx, const char *principal, uint8_t salt[VAULT_SALT_LEN])
 {
    if (!principal || !principal[0] || !salt)
       return -1;
@@ -799,7 +804,8 @@ static int kek_check_set(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
    return 0;
 }
 
-int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_LEN])
+static int jsonfile_unlock_check(void *ctx, const char *principal,
+                                 const uint8_t kek[VAULT_KEK_LEN])
 {
    if (!principal || !kek)
       return -1;
@@ -826,8 +832,8 @@ int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_
    return rc;
 }
 
-int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
-                      const uint8_t new_kek[VAULT_KEK_LEN])
+static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
+                          const uint8_t new_kek[VAULT_KEK_LEN])
 {
    if (!principal || !old_kek || !new_kek)
       return -1;
@@ -887,7 +893,7 @@ int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN
    return rc;
 }
 
-int vault_store_has_entry(const char *principal, const char *agent, const char *cred)
+static int jsonfile_has_entry(void *ctx, const char *principal, const char *agent, const char *cred)
 {
    if (!principal || !agent || !cred)
       return 0;
@@ -899,7 +905,7 @@ int vault_store_has_entry(const char *principal, const char *agent, const char *
    return has;
 }
 
-int vault_store_list(const char *principal, vault_store_entry_t *out, int max)
+static int jsonfile_list(void *ctx, const char *principal, vault_store_entry_t *out, int max)
 {
    if (!principal || (max > 0 && !out))
       return -1;
@@ -929,7 +935,7 @@ int vault_store_list(const char *principal, vault_store_entry_t *out, int max)
    return n;
 }
 
-int vault_store_delete(const char *principal, const char *agent, const char *cred)
+static int jsonfile_delete(void *ctx, const char *principal, const char *agent, const char *cred)
 {
    if (!principal || !agent || !cred)
       return -1;
@@ -954,4 +960,121 @@ int vault_store_delete(const char *principal, const char *agent, const char *cre
    cJSON_Delete(root);
    pthread_mutex_unlock(&g_vault_write_mu);
    return rc;
+}
+
+/* ── Backend seam ─────────────────────────────────────────────────────────────
+ * The default "jsonfile" backend: the 0600 per-principal JSON file store above.
+ * Stateless (ctx==NULL) — every op resolves its path from config_default_dir().
+ * Each public vault_store_<op>() below is a thin forwarder that dispatches
+ * through g_store_backend, passing g_store_backend->ctx as the first argument so
+ * a future stateful backend needs no globals. The public signatures in
+ * vault_store.h are UNCHANGED. */
+static const vault_store_backend_t jsonfile_backend = {
+    .name = "jsonfile",
+    .ctx = NULL,
+    .get_or_create_salt = jsonfile_get_or_create_salt,
+    .salt_readonly = jsonfile_salt_readonly,
+    .unlock_check = jsonfile_unlock_check,
+    .set = jsonfile_set,
+    .set_dual = jsonfile_set_dual,
+    .set_server = jsonfile_set_server,
+    .get_server = jsonfile_get_server,
+    .add_server_wraps = jsonfile_add_server_wraps,
+    .get = jsonfile_get,
+    .has_entry = jsonfile_has_entry,
+    .list = jsonfile_list,
+    .delete = jsonfile_delete,
+    .rekey = jsonfile_rekey,
+    .rekey_field = jsonfile_rekey_field,
+    .list_principals = jsonfile_list_principals,
+};
+
+static const vault_store_backend_t *g_store_backend = &jsonfile_backend;
+
+int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SALT_LEN])
+{
+   return g_store_backend->get_or_create_salt(g_store_backend->ctx, principal, salt);
+}
+
+int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN])
+{
+   return g_store_backend->salt_readonly(g_store_backend->ctx, principal, salt);
+}
+
+int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_LEN])
+{
+   return g_store_backend->unlock_check(g_store_backend->ctx, principal, kek);
+}
+
+int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
+                    const char *cred, const char *secret)
+{
+   return g_store_backend->set(g_store_backend->ctx, principal, kek, agent, cred, secret);
+}
+
+int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                         const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                         const char *cred, const char *secret)
+{
+   return g_store_backend->set_dual(g_store_backend->ctx, principal, kek, server_kek, agent, cred,
+                                    secret);
+}
+
+int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
+                           const char *agent, const char *cred, const char *secret)
+{
+   return g_store_backend->set_server(g_store_backend->ctx, principal, server_kek, agent, cred,
+                                      secret);
+}
+
+int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
+                           const char *agent, const char *cred, char *out, size_t out_len)
+{
+   return g_store_backend->get_server(g_store_backend->ctx, principal, server_kek, agent, cred, out,
+                                      out_len);
+}
+
+int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[VAULT_KEK_LEN],
+                                 const uint8_t server_kek[VAULT_KEK_LEN])
+{
+   return g_store_backend->add_server_wraps(g_store_backend->ctx, principal, user_kek, server_kek);
+}
+
+int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
+                    const char *cred, char *out, size_t out_len)
+{
+   return g_store_backend->get(g_store_backend->ctx, principal, kek, agent, cred, out, out_len);
+}
+
+int vault_store_has_entry(const char *principal, const char *agent, const char *cred)
+{
+   return g_store_backend->has_entry(g_store_backend->ctx, principal, agent, cred);
+}
+
+int vault_store_list(const char *principal, vault_store_entry_t *out, int max)
+{
+   return g_store_backend->list(g_store_backend->ctx, principal, out, max);
+}
+
+int vault_store_delete(const char *principal, const char *agent, const char *cred)
+{
+   return g_store_backend->delete(g_store_backend->ctx, principal, agent, cred);
+}
+
+int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
+                      const uint8_t new_kek[VAULT_KEK_LEN])
+{
+   return g_store_backend->rekey(g_store_backend->ctx, principal, old_kek, new_kek);
+}
+
+int vault_store_rekey_field(const char *principal, const char *field,
+                            const uint8_t old_kek[VAULT_KEK_LEN],
+                            const uint8_t new_kek[VAULT_KEK_LEN])
+{
+   return g_store_backend->rekey_field(g_store_backend->ctx, principal, field, old_kek, new_kek);
+}
+
+int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
+{
+   return g_store_backend->list_principals(g_store_backend->ctx, out, max);
 }
