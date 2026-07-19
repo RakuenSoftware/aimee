@@ -26,54 +26,6 @@
 
 #define ROADMAP_MAX_UNITS 512
 
-/* ── enum <-> string ─────────────────────────────────────────────────────── */
-
-const char *roadmap_level_name(roadmap_level_t level)
-{
-   switch (level)
-   {
-   case ROADMAP_LEVEL_MILESTONE:
-      return "milestone";
-   case ROADMAP_LEVEL_SLICE:
-      return "slice";
-   case ROADMAP_LEVEL_TASK:
-      return "task";
-   }
-   return "task";
-}
-
-const char *roadmap_unit_state_name(roadmap_unit_state_t state)
-{
-   switch (state)
-   {
-   case ROADMAP_UNIT_PENDING:
-      return "pending";
-   case ROADMAP_UNIT_ACTIVE:
-      return "active";
-   case ROADMAP_UNIT_DONE:
-      return "done";
-   case ROADMAP_UNIT_BLOCKED:
-      return "blocked";
-   case ROADMAP_UNIT_NEEDS_REVIEW:
-      return "needs_review";
-   }
-   return "pending";
-}
-
-const char *roadmap_tool_policy_name(roadmap_tool_policy_t policy)
-{
-   switch (policy)
-   {
-   case ROADMAP_POLICY_PLANNING:
-      return "planning";
-   case ROADMAP_POLICY_DOCS:
-      return "docs";
-   case ROADMAP_POLICY_EXECUTION:
-      return "execution";
-   }
-   return "execution";
-}
-
 /* ── small helpers ───────────────────────────────────────────────────────── */
 
 static int str_in_set(const char *v, const char *const *set)

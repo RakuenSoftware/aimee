@@ -39,11 +39,6 @@ extern "C"
 {
 #endif
 
-   /* Open (creating if needed) the WORM store at $AIMEE_HOME/audit/worm-live.db,
-    * apply the schema + WORM triggers, and cache the handle. Idempotent. Returns 0
-    * on success, -1 on failure. */
-   int audit_worm_init(void);
-
    /* Test/embedding entry point: open a store at an explicit path. */
    int audit_worm_init_at(const char *db_path);
 

@@ -61,10 +61,6 @@ extern "C"
     * oldest-inserted) when at capacity. */
    void msg_session_disable(const char *key, int ttl_ms, const char *reason);
 
-   /* Coarse maintenance sweep of expired entries. Internally rate-limited to at most
-    * once per 60s of wall-clock, so it is cheap to call on every request. */
-   void msg_session_sweep(void);
-
    /* Introspection / test support. */
    size_t msg_session_count(void); /* live (non-expired) entry count */
    void msg_session_reset(void);   /* clear the whole table + timers (test-only) */

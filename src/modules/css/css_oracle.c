@@ -13,11 +13,6 @@ static const char *CSS_ORACLE_BANNER =
     "are reported as changes (conservative). Use the full computed-style oracle "
     "for final sign-off.";
 
-const char *css_oracle_limitation_banner(void)
-{
-   return CSS_ORACLE_BANNER;
-}
-
 /* A resolved property entry after cascade collapse. */
 typedef struct
 {

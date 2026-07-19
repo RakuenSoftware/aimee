@@ -60,13 +60,6 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
 void agent_anthropic_set_system(struct cJSON *req, const char *system_prompt, int cache_marking,
                                 int min_chars);
 
-/* Build a Gemini generateContent request.
- * cache_name: "cachedContents/..." from gemini_prompt_cache_create(), or "" for uncached. */
-struct cJSON *agent_build_request_gemini(const agent_t *agent, struct cJSON *messages,
-                                         struct cJSON *tools, const char *system_prompt,
-                                         int max_tokens, double temperature,
-                                         const char *cache_name);
-
 /* Resolve the output-token cap for an outbound request: an explicit caller
  * `requested` (>0) wins, else the agent's pinned max_tokens (>0), else the
  * model's registry ceiling (model_max_output). Never returns 0 — request
