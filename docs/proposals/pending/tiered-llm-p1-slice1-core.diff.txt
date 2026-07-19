@@ -72,10 +72,10 @@ index 00000000..aa2ad866
 +    sys.exit(main())
 diff --git a/scripts/p1_rls_isolation_test.sql b/scripts/p1_rls_isolation_test.sql
 new file mode 100644
-index 00000000..0e9c360c
+index 00000000..9c9c570a
 --- /dev/null
 +++ b/scripts/p1_rls_isolation_test.sql
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,103 @@
 +-- p1_rls_isolation_test.sql: the mandatory DB-layer tenancy-isolation gate (I1-I4,
 +-- B4). Run against a Postgres that has had schema_roles.sql + schema.sql applied.
 +-- Proves cross-team isolation, fail-closed context, membership validation, the
@@ -156,6 +156,25 @@ index 00000000..0e9c360c
 +  IF n <> 0 THEN RAISE EXCEPTION 'FAIL guc-spoof: alice read beta via forged aimee.team'; END IF;
 +END $$;
 +
++-- Self-escalation is denied: read-only (FOR SELECT) policies mean the runtime role
++-- cannot INSERT its own membership into a team, nor self-grant admin, even though
++-- it holds table-level INSERT. Under FORCE RLS an INSERT with no permissive write
++-- policy raises. (Fixtures were seeded as superuser; the runtime role must not be
++-- able to add its own rows.)
++SET ROLE aimee_kb_runtime;
++SELECT set_config('aimee.principal', 'oidc:test:alice', true);
++DO $$
++BEGIN
++  BEGIN
++    INSERT INTO kb_team_membership(identity_key, team) VALUES ('oidc:test:alice', 900002);
++    RAISE EXCEPTION 'FAIL: runtime self-enrolled into a team (RLS write not denied)';
++  EXCEPTION WHEN insufficient_privilege THEN NULL; END;  -- expected: RLS denies
++  BEGIN
++    INSERT INTO kb_admin_grant(identity_key, source) VALUES ('oidc:test:alice', 'oidc');
++    RAISE EXCEPTION 'FAIL: runtime self-granted admin (RLS write not denied)';
++  EXCEPTION WHEN insufficient_privilege THEN NULL; END;  -- expected: RLS denies
++END $$;
++
 +RESET ROLE;
 +ROLLBACK;
 +
@@ -214,17 +233,17 @@ index 00000000..78ef75c5
 +echo "== P1 RLS gate: PASSED =="
 diff --git a/src/db2/db2_hardening.c b/src/db2/db2_hardening.c
 new file mode 100644
-index 00000000..ff80798f
+index 00000000..62f75904
 --- /dev/null
 +++ b/src/db2/db2_hardening.c
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,111 @@
 +/* db2/db2_hardening.c: hardened-tier boot assertions. See db2_hardening.h. */
 +
 +#include "db2_hardening.h"
 +#include "db_postgres.h"
 +#include "log.h"
 +
-+#include <ctype.h>
++#include <libpq-fe.h>
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <string.h>
@@ -235,41 +254,33 @@ index 00000000..ff80798f
 +   return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
 +}
 +
-+/* Extract the effective sslmode from a libpq URL or keyword/value DSN. Returns a
-+ * lowercased copy in out[cap]; empty string when unspecified. Handles both
-+ * "sslmode=..." (keyword DSN and URL query) forms. */
-+static void dsn_sslmode(const char *url, char *out, size_t cap)
-+{
-+   out[0] = '\0';
-+   if (!url)
-+      return;
-+   const char *p = url;
-+   while ((p = strstr(p, "sslmode")) != NULL)
-+   {
-+      const char *q = p + 7; /* past "sslmode" */
-+      while (*q == ' ')
-+         ++q;
-+      if (*q != '=')
-+      {
-+         p = q;
-+         continue;
-+      }
-+      ++q;
-+      while (*q == ' ' || *q == '\'')
-+         ++q;
-+      size_t n = 0;
-+      while (*q && *q != '&' && *q != ' ' && *q != '\'' && n + 1 < cap)
-+         out[n++] = (char)tolower((unsigned char)*q++);
-+      out[n] = '\0';
-+      return;
-+   }
-+}
-+
 +int db2_hardening_dsn_verify_full(const char *libpq_url)
 +{
-+   char mode[32];
-+   dsn_sslmode(libpq_url, mode, sizeof(mode));
-+   return strcmp(mode, "verify-full") == 0;
++   if (!libpq_url || !libpq_url[0])
++      return 0;
++   /* Use libpq's own parser so we read the EFFECTIVE sslmode exactly as the driver
++    * would — not a handwritten scan that a value like password='sslmode=...' or a
++    * duplicate parameter could fool. PQconninfoParse handles URL and keyword/value
++    * forms and last-wins duplicates. */
++   char *errmsg = NULL;
++   PQconninfoOption *opts = PQconninfoParse(libpq_url, &errmsg);
++   if (!opts)
++   {
++      if (errmsg)
++         PQfreemem(errmsg);
++      return 0; /* unparseable DSN — fail closed */
++   }
++   int ok = 0;
++   for (PQconninfoOption *o = opts; o->keyword; ++o)
++   {
++      if (strcmp(o->keyword, "sslmode") == 0)
++      {
++         ok = (o->val && strcmp(o->val, "verify-full") == 0);
++         break;
++      }
++   }
++   PQconninfoFree(opts);
++   return ok;
 +}
 +
 +int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen)
@@ -282,11 +293,16 @@ index 00000000..ff80798f
 +      return 1;
 +   }
 +   char e[256] = "";
-+   /* current_user privileges: bypassrls, superuser, and CREATE on public. */
++   /* current_user privileges: bypassrls, superuser, CREATE on public, AND whether
++    * current_user is a member (directly or transitively) of any superuser/
++    * BYPASSRLS role — an inherited or SET ROLE-able privileged membership defeats
++    * RLS just as a direct attribute would, so it is rejected too. */
 +   aimee_pg_stmt_t *st = aimee_pg_prepare(
 +       conn,
 +       "SELECT r.rolbypassrls, r.rolsuper, "
-+       "has_schema_privilege(current_user,'public','CREATE') "
++       "has_schema_privilege(current_user,'public','CREATE'), "
++       "COALESCE((SELECT bool_or(m.rolsuper OR m.rolbypassrls) FROM pg_roles m "
++       " WHERE m.rolname <> current_user AND pg_has_role(current_user, m.oid, 'MEMBER')), false) "
 +       "FROM pg_roles r WHERE r.rolname = current_user",
 +       e, sizeof(e));
 +   if (!st)
@@ -300,6 +316,7 @@ index 00000000..ff80798f
 +      int bypassrls = aimee_pg_column_int(st, 0);
 +      int super = aimee_pg_column_int(st, 1);
 +      int create_pub = aimee_pg_column_int(st, 2);
++      int priv_member = aimee_pg_column_int(st, 3);
 +      if (bypassrls)
 +      {
 +         snprintf(err, errlen, "runtime role has BYPASSRLS (defeats tenant RLS)");
@@ -315,6 +332,13 @@ index 00000000..ff80798f
 +         snprintf(err, errlen, "runtime role holds CREATE on public (must be DML-only)");
 +         rc = 5;
 +      }
++      else if (priv_member)
++      {
++         snprintf(
++             err, errlen,
++             "runtime role is a member of a superuser/BYPASSRLS role (can SET ROLE to bypass RLS)");
++         rc = 7;
++      }
 +   }
 +   else
 +   {
@@ -324,50 +348,6 @@ index 00000000..ff80798f
 +   aimee_pg_finalize(st);
 +   return rc;
 +}
-diff --git a/src/db2/db2_hardening.h b/src/db2/db2_hardening.h
-new file mode 100644
-index 00000000..b5ca2674
---- /dev/null
-+++ b/src/db2/db2_hardening.h
-@@ -0,0 +1,38 @@
-+/* db2/db2_hardening.h: hardened-tier boot assertions (I1 verify-full, B4 runtime
-+ * role privilege floor).
-+ *
-+ * The hardened kb tier (multi-tenant, holds team data) MUST connect to Postgres
-+ * over verify-full TLS under a non-owner, NOBYPASSRLS, no-DDL runtime role — else
-+ * the team-scoped RLS is defeated. These checks are activated when the deployment
-+ * opts into the hardened tier (AIMEE_KB_HARDENED=1); the dev/personal profile
-+ * (single-owner, plaintext local Postgres, no tenant data) runs without them, the
-+ * same dev-vs-hardened split the vault custody profiles use. A hardened kb that
-+ * fails either check fails closed at boot rather than run with defeated isolation. */
-+#ifndef DEC_DB2_HARDENING_H
-+#define DEC_DB2_HARDENING_H 1
-+
-+#include <stddef.h>
-+
-+#ifdef __cplusplus
-+extern "C"
-+{
-+#endif
-+
-+   /* 1 when hardened-tier boot checks are enabled (AIMEE_KB_HARDENED truthy). */
-+   int db2_hardening_enabled(void);
-+
-+   /* Pure DSN check (I1): 1 iff the libpq URL selects sslmode=verify-full. Rejects
-+    * a missing/weaker sslmode. Unit-testable without a live server. */
-+   int db2_hardening_dsn_verify_full(const char *libpq_url);
-+
-+   /* Runtime-role privilege floor (B4): queries the connected role and writes 0 on
-+    * success, or a nonzero code with a message into err when the role has
-+    * BYPASSRLS, is a superuser, or holds CREATE on the public schema (a runtime
-+    * role must be DML-only). `conn` is a db2 pg connection handle. */
-+   int db2_hardening_assert_runtime_role(void *conn, char *err, size_t errlen);
-+
-+#ifdef __cplusplus
-+}
-+#endif
-+
-+#endif /* DEC_DB2_HARDENING_H */
 diff --git a/src/db2/db2_init.c b/src/db2/db2_init.c
 index ce50b7d1..bcfce097 100644
 --- a/src/db2/db2_init.c
@@ -414,10 +394,10 @@ index ce50b7d1..bcfce097 100644
      * The dimension is supplied by db2_set_embedding_dim() at startup (the server
 diff --git a/src/db2/db2_tenant.c b/src/db2/db2_tenant.c
 new file mode 100644
-index 00000000..7c486dde
+index 00000000..c1b69d0e
 --- /dev/null
 +++ b/src/db2/db2_tenant.c
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,116 @@
 +/* db2/db2_tenant.c: per-request tenant context (I4). See db2_tenant.h. */
 +
 +#include "db2_tenant.h"
@@ -473,11 +453,15 @@ index 00000000..7c486dde
 +   char err[256] = "";
 +   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
 +   {
++      /* No GUCs were set, but reset defensively in case a prior unit left session
++       * state on this pooled connection, then release the lease fail-closed. */
++      tenant_reset_gucs(conn);
 +      db2_lease_end();
 +      return DB2_ERR_TENANT_BEGIN;
 +   }
 +
-+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT set_tenant_context(?1, ?2)", err, sizeof(err));
++   aimee_pg_stmt_t *st =
++       aimee_pg_prepare(conn, "SELECT set_tenant_context(?1, ?2)", err, sizeof(err));
 +   if (!st)
 +   {
 +      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -509,6 +493,10 @@ index 00000000..7c486dde
 +   {
 +      char err[256] = "";
 +      rc = aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
++      if (rc != 0)
++         /* COMMIT failed (e.g. serialization/deadlock): force the transaction
++          * out so the pooled connection never returns mid-transaction. */
++         (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
 +      tenant_reset_gucs(conn);
 +   }
 +   db2_lease_end();
@@ -526,80 +514,11 @@ index 00000000..7c486dde
 +   }
 +   db2_lease_end();
 +}
-diff --git a/src/db2/db2_tenant.h b/src/db2/db2_tenant.h
-new file mode 100644
-index 00000000..762c5a52
---- /dev/null
-+++ b/src/db2/db2_tenant.h
-@@ -0,0 +1,63 @@
-+/* db2/db2_tenant.h: per-request tenant context for the RLS-hardened tier (I4).
-+ *
-+ * The ONLY runtime path that sets the Postgres tenant GUCs. It opens a
-+ * transaction on the thread's leased connection, calls the SECURITY DEFINER
-+ * set_tenant_context(principal, team) (which validates team membership under the
-+ * principal's own-rows policy), and — on commit, rollback, error, OR connection
-+ * reset — RESETs aimee.principal / aimee.team before the connection returns to the
-+ * pool, so a pooled shared runtime role never leaks one request's tenant context
-+ * into the next. Every tenant GUC is transaction-local (SET LOCAL / set_config
-+ * with is_local=true), so correctness holds regardless of PgBouncer pooling mode.
-+ *
-+ * Tenant-scoped db2 entrypoints (kb_team_*, kb_project_*, kb_membership_*, ...)
-+ * must call db2_tenant_require_pg() first: RLS cannot be enforced on the SQLite
-+ * test shim, so a tenant op on the shim is a hard, typed failure — never a silent
-+ * unprotected read (B1/N1). */
-+#ifndef DEC_DB2_TENANT_H
-+#define DEC_DB2_TENANT_H 1
-+
-+#include <stdint.h>
-+#include "kb_identity.h"
-+
-+#ifdef __cplusplus
-+extern "C"
-+{
-+#endif
-+
-+   /* Typed tenancy return codes (negative). */
-+   enum
-+   {
-+      DB2_TENANT_OK = 0,
-+      DB2_ERR_TENANT_REQUIRES_PG = -100, /* tenant op attempted on the SQLite shim */
-+      DB2_ERR_TENANT_UNAUTHENTICATED = -101, /* principal not verifier-produced */
-+      DB2_ERR_TENANT_NO_CONN = -102,
-+      DB2_ERR_TENANT_BEGIN = -103,       /* BEGIN / set_tenant_context failed */
-+      DB2_ERR_TENANT_DENIED = -104,      /* team not in principal memberships */
-+   };
-+
-+   /* Fail-closed guard: 0 when the live backend is Postgres (RLS-enforcing),
-+    * DB2_ERR_TENANT_REQUIRES_PG when it is the SQLite shim or DB2 is down. Called
-+    * at the top of every tenant-scoped db2 entrypoint. */
-+   int db2_tenant_require_pg(void);
-+
-+   /* Open a tenant-scoped unit of work: leases a connection, BEGIN, and sets the
-+    * tenant context from the AUTHENTICATED principal (its identity_key) + team.
-+    * `team` may be 0 to set only the principal (bootstrap / identity resolution,
-+    * before a billing team is known). Rejects an unauthenticated principal
-+    * (DB2_ERR_TENANT_UNAUTHENTICATED) and a team the principal is not in
-+    * (DB2_ERR_TENANT_DENIED). Returns 0 on success; on any failure the context is
-+    * left clear and no transaction is held. Pairs with exactly one
-+    * db2_tenant_scope_commit() or db2_tenant_scope_rollback(). */
-+   int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team);
-+
-+   /* Commit / roll back the tenant-scoped unit. BOTH reset the tenant GUCs and
-+    * release the transaction before the connection returns to the pool. Safe to
-+    * call rollback on an already-aborted transaction. */
-+   int db2_tenant_scope_commit(void);
-+   void db2_tenant_scope_rollback(void);
-+
-+#ifdef __cplusplus
-+}
-+#endif
-+
-+#endif /* DEC_DB2_TENANT_H */
 diff --git a/src/db2/schema.sql b/src/db2/schema.sql
-index ea153baf..d8284f68 100644
+index ea153baf..29555dd0 100644
 --- a/src/db2/schema.sql
 +++ b/src/db2/schema.sql
-@@ -1681,3 +1681,129 @@ CREATE INDEX IF NOT EXISTS idx_css_render_snapshots_unit ON css_render_snapshots
+@@ -1681,3 +1681,148 @@ CREATE INDEX IF NOT EXISTS idx_css_render_snapshots_unit ON css_render_snapshots
  CREATE TABLE IF NOT EXISTS typed_facts (  id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,  subject TEXT NOT NULL DEFAULT '',  subject_kind TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  object_kind TEXT NOT NULL DEFAULT '',  confidence BIGINT NOT NULL DEFAULT 50,  source TEXT NOT NULL DEFAULT '',  asserted_at TEXT NOT NULL DEFAULT '',  active BIGINT NOT NULL DEFAULT 1,  superseded_by BIGINT NOT NULL DEFAULT -1);
  CREATE INDEX IF NOT EXISTS idx_typed_facts_subject ON typed_facts(subject, relation, active);
  CREATE INDEX IF NOT EXISTS idx_typed_facts_relation ON typed_facts(relation, active);
@@ -696,18 +615,37 @@ index ea153baf..d8284f68 100644
 +END
 +$$;
 +
-+-- Bootstrap / identity policies: a principal reads ONLY its own rows. This breaks
-+-- the RLS circularity (resolve teams before a team GUC exists) WITHOUT letting a
-+-- SET aimee.principal read every team's membership.
++-- POLICIES ARE READ-ONLY (FOR SELECT). Writes to tenant tables have NO permissive
++-- policy, so under FORCE RLS every INSERT/UPDATE/DELETE by the runtime role is
++-- DENIED at the DB layer — a runtime role that holds table-level DML grants still
++-- cannot self-enroll into a team or self-grant admin. Authorized writes (team/
++-- project/member creation) land in a later slice as admin-gated SECURITY DEFINER
++-- paths that validate the org-admin capability before writing; they are the only
++-- way rows are created, and they run with a checked authorization, not on the bare
++-- runtime role's own-row predicate.
++--
++-- TRUST BOUNDARY (documented): the RLS predicates read current_setting('aimee.*'),
++-- which the runtime role can set directly in SQL. RLS therefore defends against a
++-- mis-written JOIN / injected predicate leaking cross-tenant rows — it does NOT
++-- defend against a caller that can already execute arbitrary SQL as the runtime
++-- role (such a caller has fully compromised the app tier). The tenant GUCs are set
++-- ONLY from the authenticated principal by the C choke point (set_tenant_context,
++-- fed a verifier-produced kb_principal_t — never a request string). RLS + "GUCs set
++-- only by vetted code" together are the isolation control.
++
++-- Bootstrap / identity policies: a principal reads ONLY its own rows (FOR SELECT).
++-- This breaks the RLS circularity (resolve teams before a team GUC exists) WITHOUT
++-- letting a SET aimee.principal read every team's membership, and without allowing
++-- self-write (no WITH CHECK / write policy exists).
 +DROP POLICY IF EXISTS p_member_self ON kb_team_membership;
 +CREATE POLICY p_member_self ON kb_team_membership
-+  USING (identity_key = current_setting('aimee.principal', true));
++  FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
 +DROP POLICY IF EXISTS p_projmember_self ON kb_project_membership;
 +CREATE POLICY p_projmember_self ON kb_project_membership
-+  USING (identity_key = current_setting('aimee.principal', true));
++  FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
 +DROP POLICY IF EXISTS p_admingrant_self ON kb_admin_grant;
 +CREATE POLICY p_admingrant_self ON kb_admin_grant
-+  USING (identity_key = current_setting('aimee.principal', true));
++  FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
 +
 +-- Tenant-data policies: a caller sees a team/project ONLY when the row's team is in
 +-- the principal's own memberships. These do NOT trust aimee.team for read scope
@@ -716,11 +654,11 @@ index ea153baf..d8284f68 100644
 +-- billing/attribution (P3/P4).
 +DROP POLICY IF EXISTS p_team_member ON kb_team;
 +CREATE POLICY p_team_member ON kb_team
-+  USING (id IN (SELECT team FROM kb_team_membership
++  FOR SELECT USING (id IN (SELECT team FROM kb_team_membership
 +                WHERE identity_key = current_setting('aimee.principal', true)));
 +DROP POLICY IF EXISTS p_project_member ON kb_project;
 +CREATE POLICY p_project_member ON kb_project
-+  USING (parent IN (SELECT team FROM kb_team_membership
++  FOR SELECT USING (parent IN (SELECT team FROM kb_team_membership
 +                    WHERE identity_key = current_setting('aimee.principal', true)));
 +
 +-- The context setter is never exposed to PUBLIC. This is role-free and safe on
