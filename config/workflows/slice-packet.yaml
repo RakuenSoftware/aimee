@@ -1,0 +1,170 @@
+# Slice packet authoring/review gate (p1 of sliced-lifecycle).
+#
+# A "slice packet" is the per-unit work item produced by `split` in build.yaml
+# and consumed by the child `slice` workflow via foreach.workflow. This
+# workflow is the gate that validates, authors and reviews ONE incoming
+# packet before any implementation work is permitted on it.
+#
+# Two paths through this workflow:
+#   1. Well-formed packet -> validate -> author -> review -> accept -> done
+#   2. Malformed packet   -> validate -> reject (structured, terminal)
+#
+# The malformed path is a FIRST-CLASS node (`reject`), NOT an exception or
+# hard crash -- callers must be able to handle it as a structured outcome
+# with a reason and the offending fields.
+
+# --- Top-level keys (acceptance criteria for THIS workflow definition) ---
+
+packet_id: slice-packet
+
+summary: |
+  Validate, author, and human-review ONE slice packet before any
+  implementation is scheduled on it. Malformed packets are rejected
+  as structured outcomes, not crashes.
+
+# Required fields on the INCOMING slice packet (the contract that
+# `split.out` must satisfy and that `slice` consumes).
+target_blocks:
+  - validate
+  - author
+  - review
+  - accept
+  - reject
+
+# Packet IDs of upstream workflows this gate depends on (must land first).
+dependencies:
+  - build.split
+
+role: gate
+
+# Absolute path the slice packet is materialized on. (For the gate
+# definition itself, this is the canonical location of this YAML.)
+worktree_path: config/workflows/slice-packet.yaml
+
+# Testable, boolean acceptance criteria for this workflow.
+acceptance_criteria:
+  - id: AC1_file_is_valid_yaml
+    description: |
+      config/workflows/slice-packet.yaml exists and parses as valid YAML
+      (python yaml.safe_load returns a dict without raising).
+    verify: yaml.safe_load(open("config/workflows/slice-packet.yaml")) is not None
+
+  - id: AC2_top_level_keys_present
+    description: |
+      The packet schema (target packet fields this gate requires) names
+      packet_id, summary, target_blocks, dependencies, role, worktree_path
+      and acceptance_criteria as required keys on the incoming packet.
+    verify: |
+      set(packet_schema.required_fields) >=
+      {"packet_id","summary","target_blocks","dependencies","role","worktree_path"}
+
+  - id: AC3_role_constraint
+    description: |
+      The packet schema constrains `role` to the finite set
+      {code, docs, test, chore}; any other role value is rejected
+      as structured malformed-input.
+    verify: |
+      set(packet_schema.allowed_roles) == {"code","docs","test","chore"}
+
+  - id: AC4_malformed_input_is_structured_rejection
+    description: |
+      When the incoming packet is malformed (missing field, wrong type,
+      invalid role, empty packet_id or worktree_path), the workflow
+      terminates at the `reject` node with a structured reason -- not a
+      crash. The `reject` node lists every malformed reason it can emit.
+    verify: |
+      "malformed" in reject.reasons and
+      "reject" in [n.id for n in nodes] and
+      validate.on_fail == "reject"
+
+  - id: AC5_well_formed_path_has_human_review_gate
+    description: |
+      A well-formed packet passes `validate`, is `author`ed, then crosses
+      a single human `review` gate before `accept` and hand-off. There is
+      no automatic implement/merge path from this workflow.
+    verify: |
+      ids == {"validate","author","review","accept","reject"} and
+      review.on_pass == "accept" and
+      review.on_fail == "reject"
+
+# --- Workflow graph ---
+
+# Packet schema enforced by `validate`. Exposed here so callers (and the
+# acceptance_criteria above) can introspect the contract.
+packet_schema:
+  required_fields:
+    - packet_id
+    - summary
+    - target_blocks
+    - dependencies
+    - role
+    - worktree_path
+  allowed_roles:
+    - code
+    - docs
+    - test
+    - chore
+  non_empty_string:
+    - packet_id
+    - worktree_path
+  list_fields:
+    - target_blocks
+    - dependencies
+
+# Workflow nodes. The graph below is the same one the acceptance_criteria
+# above introspect, so AC4/AC5 stay in sync with the actual control flow.
+start: validate
+
+nodes:
+  - id: validate
+    block: validate.packet
+    in:
+      packet: in.packet
+    params:
+      schema: packet_schema
+    next: author
+    on_fail: reject
+
+  - id: author
+    block: author.proposal
+    in:
+      packet: validate.out
+    params:
+      with_user: false
+    next: review
+    on_fail: author
+
+  - id: review
+    block: gate.human
+    in:
+      src: author.out
+    params:
+      policy: pr_review
+      approver_role: maintainer
+    on_pass: accept
+    on_fail: reject
+
+  - id: accept
+    block: packet.accept
+    in:
+      packet: review.out
+    params:
+      state: accepted
+      emits: slices.in
+
+  - id: reject
+    block: packet.reject
+    in:
+      packet: validate.out
+    params:
+      reasons:
+        malformed:
+          - missing_required_field
+          - wrong_type
+          - empty_packet_id
+          - empty_worktree_path
+          - invalid_role
+        human_declined:
+          - review_rejected
+          - review_timeout
+      terminal: true
