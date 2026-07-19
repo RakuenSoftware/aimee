@@ -1,6 +1,22 @@
 /* cmd_util.c: command handler utilities (subcommand dispatch) */
 #include "aimee.h"
 #include "commands.h"
+#include "config.h"
+#include "db1.h"
+
+/* --- cmd_require_db1 --- */
+
+/* Load config and open DB1, aborting with `errmsg` on failure. Folds the
+ * config_t + config_load + db1_init + fatal prolog the CLI command handlers
+ * otherwise repeat verbatim; callers that also need the config keep their own
+ * config_load. */
+void cmd_require_db1(const char *errmsg)
+{
+   config_t cfg;
+   config_load(&cfg);
+   if (db1_init(cfg.db1_path) != 0)
+      fatal("%s", errmsg);
+}
 
 /* --- subcmd_usage --- */
 

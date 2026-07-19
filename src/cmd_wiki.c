@@ -43,10 +43,7 @@ void cmd_wiki(app_ctx_t *ctx, int argc, char **argv)
       exit(1);
    }
 
-   config_t cfg;
-   config_load(&cfg);
-   if (db1_init(cfg.db1_path) != 0)
-      fatal("cannot initialize DB1");
+   cmd_require_db1("cannot initialize DB1");
 
    const char *sub = argv[0];
    argc--;

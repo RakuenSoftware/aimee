@@ -244,10 +244,7 @@ void cmd_wm(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
-      fatal("cannot initialize DB1");
+   cmd_require_db1("cannot initialize DB1");
 
    if (subcmd_dispatch(wm_subcmds, sub, ctx, argc, argv) != 0)
       fatal("unknown wm subcommand: %s", sub);

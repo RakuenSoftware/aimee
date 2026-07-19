@@ -1373,10 +1373,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
    agent_http_init();
    {
-      config_t db1_cfg;
-      config_load(&db1_cfg);
-      if (db1_init(db1_cfg.db1_path) != 0)
-         fatal("cannot open database");
+      cmd_require_db1("cannot open database");
    }
 
    /* Create durable job record if requested */
