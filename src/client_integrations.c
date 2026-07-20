@@ -13,6 +13,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Injected by the CLI (client_integrations_set_delegate_probe): reports whether
+ * usable aimee delegates exist (1), none do (0), or the answer is unknown (-1,
+ * server unreachable). CORE must not make a /v1 call directly — it links into
+ * both the DB-free client and the server — so the CLI supplies the real probe. */
+static int (*g_delegate_probe)(void) = NULL;
+
+void client_integrations_set_delegate_probe(int (*probe)(void))
+{
+   g_delegate_probe = probe;
+}
+
+/* Defined further down; forward-declared for ensure_subagent_ban (which sits
+ * beside ensure_claude_code_hooks, above the definition). */
+static int client_config_bool(const char *key, int default_val);
+
 static void ensure_parent_dir(const char *path, mode_t mode)
 {
    char dir[MAX_PATH_LEN];
@@ -928,6 +943,120 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
    }
 }
 
+/* Remove any PreToolUse (or other event) hook entry whose command runs the given
+ * aimee subcommand — the inverse of ensure_aimee_event_hook, for un-installing a
+ * hook when its gate no longer holds. */
+static void remove_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
+                                    int *dirty)
+{
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
+   if (!cJSON_IsArray(arr))
+      return;
+   for (int i = cJSON_GetArraySize(arr) - 1; i >= 0; i--)
+   {
+      cJSON *hlist = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(arr, i), "hooks");
+      if (!cJSON_IsArray(hlist))
+         continue;
+      int match = 0;
+      for (int j = 0; j < cJSON_GetArraySize(hlist); j++)
+      {
+         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hlist, j), "command");
+         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, subcommand))
+         {
+            match = 1;
+            break;
+         }
+      }
+      if (match)
+      {
+         cJSON_DeleteItemFromArray(arr, i);
+         *dirty = 1;
+      }
+   }
+}
+
+/* Ensure root.permissions.deny[] contains `tool` (creating permissions/deny as
+ * needed). Idempotent; sets *dirty on any change. */
+static void ensure_permissions_deny_tool(cJSON *root, const char *tool, int *dirty)
+{
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+   if (!cJSON_IsObject(perms))
+   {
+      if (perms)
+         cJSON_DeleteItemFromObjectCaseSensitive(root, "permissions");
+      perms = cJSON_AddObjectToObject(root, "permissions");
+      *dirty = 1;
+   }
+   cJSON *deny = cJSON_GetObjectItemCaseSensitive(perms, "deny");
+   if (!cJSON_IsArray(deny))
+   {
+      if (deny)
+         cJSON_DeleteItemFromObjectCaseSensitive(perms, "deny");
+      deny = cJSON_AddArrayToObject(perms, "deny");
+      *dirty = 1;
+   }
+   for (int i = 0; i < cJSON_GetArraySize(deny); i++)
+   {
+      cJSON *e = cJSON_GetArrayItem(deny, i);
+      if (cJSON_IsString(e) && strcmp(e->valuestring, tool) == 0)
+         return; /* already denied */
+   }
+   cJSON_AddItemToArray(deny, cJSON_CreateString(tool));
+   *dirty = 1;
+}
+
+/* Remove `tool` from root.permissions.deny[] if present, leaving other entries
+ * (and other permissions) intact. */
+static void remove_permissions_deny_tool(cJSON *root, const char *tool, int *dirty)
+{
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+   if (!cJSON_IsObject(perms))
+      return;
+   cJSON *deny = cJSON_GetObjectItemCaseSensitive(perms, "deny");
+   if (!cJSON_IsArray(deny))
+      return;
+   for (int i = cJSON_GetArraySize(deny) - 1; i >= 0; i--)
+   {
+      cJSON *e = cJSON_GetArrayItem(deny, i);
+      if (cJSON_IsString(e) && strcmp(e->valuestring, tool) == 0)
+      {
+         cJSON_DeleteItemFromArray(deny, i);
+         *dirty = 1;
+      }
+   }
+}
+
+/* Materialize (or tear down) the sub-agent ban in the Claude Code settings.
+ * The gate is evaluated ONCE here at client setup: config `subagent_ban_enabled`
+ * (default on) AND the injected delegate probe reporting usable delegates. When
+ * the gate holds we install a dedicated `subagent-guard` PreToolUse hook (carries
+ * the actionable "use aimee delegate" message) PLUS a static permissions.deny
+ * [Task, Agent] backstop that blocks the spawn even if the hook fails to run.
+ * When the gate does not hold (config opt-out or no delegates) we remove both, so
+ * a config/delegate change un-installs on the next setup / session-start. A probe
+ * result of "unknown" (server unreachable) leaves settings untouched — we neither
+ * install nor tear down on a transient outage. */
+static void ensure_subagent_ban(cJSON *root, cJSON *hooks, int *dirty)
+{
+   int probe = g_delegate_probe ? g_delegate_probe() : -1; /* 1 avail, 0 none, -1 unknown */
+   if (probe < 0)
+      return;
+   int active = (probe == 1) && client_config_bool("subagent_ban_enabled", 1);
+   if (active)
+   {
+      ensure_aimee_event_hook(hooks, "PreToolUse", "subagent-guard",
+                              "Agent|Task|Subagent|spawn_agent", dirty);
+      ensure_permissions_deny_tool(root, "Task", dirty);
+      ensure_permissions_deny_tool(root, "Agent", dirty);
+   }
+   else
+   {
+      remove_aimee_event_hook(hooks, "PreToolUse", "subagent-guard", dirty);
+      remove_permissions_deny_tool(root, "Task", dirty);
+      remove_permissions_deny_tool(root, "Agent", dirty);
+   }
+}
+
 /* Ensure PostToolUse hooks include EnterWorktree|ExitWorktree so that
  * aimee's CWD tracking file gets updated when the session enters/exits
  * a worktree. Without this, MCP git tools won't follow worktree changes. */
@@ -1063,11 +1192,16 @@ static void ensure_claude_code_hooks(const char *settings_path)
    ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", NULL, &dirty);
    /* P3 attention guard: PreToolUse hook scoped to read/edit/destructive tools;
     * accrues per-file attention and blocks hard-destructive ops on files the
-    * session has actively touched. Task|Agent are included so the sub-agent
-    * interceptor fires on provider-native spawns (redirect to aimee delegates). */
+    * session has actively touched. It does NOT gate sub-agent tools — that is the
+    * dedicated `subagent-guard` hook installed by ensure_subagent_ban below (this
+    * matcher deliberately no longer lists Task|Agent). */
    ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
-                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob|Task|Agent",
-                           &dirty);
+                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob", &dirty);
+
+   /* Sub-agent ban (delegate-only): gated at setup on subagent_ban_enabled AND a
+    * one-shot delegate probe; installs/removes the subagent-guard hook + the
+    * permissions.deny [Task, Agent] backstop accordingly. */
+   ensure_subagent_ban(root, hooks, &dirty);
 
    if (dirty)
    {

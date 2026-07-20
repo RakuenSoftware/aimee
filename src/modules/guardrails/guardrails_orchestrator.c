@@ -1603,9 +1603,17 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
 
    /* Provider-native sub-agent tools must not escape the active session's
     * guardrails. Delegation should go through aimee's delegate subsystem,
-    * which re-enters the same policy path with inherited session state. */
+    * which re-enters the same policy path with inherited session state. Honors
+    * the config opt-out (subagent_ban_enabled: false) so the ban is a single
+    * switch across the harness guard, the gateway strip, and this path. */
    if (is_subagent_tool(tool_name))
    {
+      config_t sub_cfg;
+      if (config_load(&sub_cfg) == 0 && !sub_cfg.subagent_ban_enabled)
+      {
+         cJSON_Delete(root);
+         return 0; /* operator opted out: allow provider-native sub-agents */
+      }
       snprintf(msg_buf, msg_len,
                "BLOCKED: sub-agent tools (Task, Agent, spawn_agent, …) are outside aimee's "
                "guardrail model. Delegate instead: `aimee delegate <role> \"<task>\" "

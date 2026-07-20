@@ -474,6 +474,11 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    for (int i = 0; i < cfg.agent_count; i++)
       cJSON_AddItemToArray(arr, server_agent_to_json(&cfg.agents[i]));
    cJSON_AddItemToObject(resp, "agents", arr);
+   /* Whether at least one configured agent is enabled AND routable as a delegate
+    * right now. Lets a caller (e.g. the client-setup sub-agent-ban gate) decide
+    * with ONE round-trip whether redirecting sub-agents to `aimee delegate` is
+    * viable, without replicating the routability logic. */
+   cJSON_AddBoolToObject(resp, "any_delegate_available", agent_any_delegate_available());
    return server_send_ok(conn, resp);
 }
 

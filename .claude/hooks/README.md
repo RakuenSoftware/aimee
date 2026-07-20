@@ -38,23 +38,32 @@ Verify without spawning a sub-agent:
 (Never "test" it by actually invoking `Agent` — that spawns the banned sub-agent if
 the settings watcher hasn't reloaded. Open `/hooks` once, or restart, to load it.)
 
-## PROPOSED: team-wide auto-install via aimee's installer
+## Team-wide auto-install via aimee's installer (implemented)
 
-Because settings are gitignored, the script alone isn't auto-enforced on a fresh
-clone. The idiomatic fix mirrors how aimee already installs `attention-guard` /
-`hooks post` (see `src/client_integrations.c: ensure_claude_code_hooks` →
-`ensure_aimee_event_hook`, which wires `aimee <subcommand>` PreToolUse hooks into
-every client's settings, location-independently via `resolved_aimee_bin_path()`):
+`block_subagent.py` is now the **zero-dependency fallback**. The ban is auto-installed
+by aimee's standard client setup, with no gitignored-settings dependency, so a fresh
+clone is protected once `aimee` runs:
 
-1. Add an `aimee subagent-guard` subcommand that reads the PreToolUse hook JSON on
-   stdin and denies the call when `guardrails_canonical_tool_name(tool) == "Subagent"`
-   — reusing the **exact** predicate the gateway ban uses, so both layers agree.
-2. In `ensure_claude_code_hooks`, add:
-   `ensure_aimee_event_hook(hooks, "PreToolUse", "subagent-guard", "Agent|Task|Subagent|spawn_agent", &dirty);`
+1. `aimee subagent-guard` (a CLI subcommand — `src/cli_main.c: handle_subagent_guard`)
+   reads the PreToolUse hook JSON on stdin and denies the call for a sub-agent tool
+   (`client_tool_is_subagent`: `Task`/`Agent`/`spawn_agent`/`RemoteTrigger`/`Subagent`),
+   emitting the redirect-to-`aimee delegate` message. Allow = exit 0 with no output.
+2. `ensure_claude_code_hooks` → `ensure_subagent_ban` (`src/client_integrations.c`)
+   evaluates the gate ONCE at setup — config `subagent_ban_enabled` (default on) AND a
+   one-shot `agent.list` server probe reporting `any_delegate_available` — and, when it
+   holds, wires the `subagent-guard` PreToolUse hook **plus** a `permissions.deny
+   [Task, Agent]` backstop. When it does not hold (config opt-out or no usable
+   delegates), it removes both, so a config/delegate change un-installs on the next
+   setup / session-start. A "server unreachable" probe leaves settings untouched.
 
-Then `aimee`'s standard client setup installs the ban for everyone, regardless of
-where the `aimee` binary lives, with no gitignored-settings dependency. This script
-remains the zero-dependency fallback that works straight from a checkout.
+The gate is deliberately delegates-aware: the ban only engages when there is a delegate
+to redirect to. Set `subagent_ban_enabled: false` in `aimee.yaml` to opt out entirely
+(also disables the server-side guardrail block); the change takes effect at the next
+client setup.
+
+The hook's mere presence is the runtime gate, so it carries no per-call config read or
+server round-trip. `block_subagent.py` remains a hand-wired option for checkouts where
+`aimee` client setup has not run.
 
 ## `enforce_worktree.py` — keep edits out of the shared main clone
 

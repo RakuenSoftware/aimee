@@ -110,6 +110,7 @@ const config_field_t config_fields[] = {
      CFG_BOOL},
     {"require_aimee_memory", offsetof(config_t, require_aimee_memory), sizeof(int), 0, CFG_BOOL},
     {"require_aimee_git", offsetof(config_t, require_aimee_git), sizeof(int), 0, CFG_BOOL},
+    {"subagent_ban_enabled", offsetof(config_t, subagent_ban_enabled), sizeof(int), 0, CFG_BOOL},
     {"delegate_sandbox", offsetof(config_t, delegate_sandbox), sizeof(int), 0, CFG_BOOL},
     {"delegate_sandbox_package_access", offsetof(config_t, delegate_sandbox_package_access),
      sizeof(((config_t *)0)->delegate_sandbox_package_access), 0, CFG_STRING},

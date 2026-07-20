@@ -653,6 +653,78 @@ static int client_failopen_subagent_deny(const char *phase, const char *tool_nam
    return 2;
 }
 
+/* `aimee subagent-guard`: a dedicated PreToolUse hook that blocks the primary
+ * agent's OWN sub-agent tools (Task/Agent/spawn_agent/RemoteTrigger) and points
+ * the model at `aimee delegate`, so delegation stays inside aimee's guardrail +
+ * memory + KB model. Unlike the generic `permissions.deny` backstop installed
+ * alongside it, this carries the actionable redirect message.
+ *
+ * The config + delegates GATE is evaluated ONCE at client setup
+ * (ensure_claude_code_hooks: `subagent_ban_enabled` AND a one-shot server
+ * `agent.list` probe reporting usable delegates). This hook is installed only
+ * when the gate holds, so its mere presence IS the enforcement — no per-call
+ * config read or server round-trip. Config/delegate changes re-materialize the
+ * hook (and the deny list) at the next client setup / session-start. Allow =
+ * exit 0 with no output; deny = permissionDecision:deny (JSON clients) or exit 2. */
+static int handle_subagent_guard(void)
+{
+   char *stdin_data = read_stdin();
+   cJSON *json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
+   const char *tool_name = "";
+   if (json)
+   {
+      cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
+      if (cJSON_IsString(tn))
+         tool_name = tn->valuestring;
+   }
+
+   int rc = 0;
+   if (client_tool_is_subagent(tool_name))
+   {
+      const char *reason =
+          "BLOCKED: the primary agent must not spawn its own sub-agents (Task/Agent/"
+          "spawn_agent) — they escape this session's guardrails. Delegate instead so the child "
+          "inherits the session's guardrails, memory, and KB: `aimee delegate <role> \"<task>\" "
+          "--persona <persona>`, or `aimee delegate roundtable \"<task>\" --mode review` for a "
+          "multi-model panel.";
+      if (cli_hook_client_uses_pretool_json())
+      {
+         emit_pretool_deny_json(reason);
+      }
+      else
+      {
+         fprintf(stderr, "aimee: %s\n", reason);
+         rc = 2;
+      }
+   }
+
+   free(stdin_data);
+   cJSON_Delete(json);
+   return rc;
+}
+
+/* Delegate probe for the sub-agent-ban gate (registered into client_integrations
+ * so CORE can decide whether to materialize the ban without linking a /v1 call).
+ * One round-trip to agent.list; returns 1 if usable delegates exist, 0 if none,
+ * or -1 when the server is unreachable so setup leaves the ban settings untouched. */
+static int cli_delegate_probe(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "agent.list");
+   cJSON *resp = cli_v1_dispatch_local(req, 3000);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1; /* server unreachable / no route -> unknown */
+   int avail = -1;
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(resp, "any_delegate_available");
+   if (cJSON_IsBool(a))
+      avail = cJSON_IsTrue(a) ? 1 : 0;
+   cJSON_Delete(resp);
+   return avail;
+}
+
 /* Worktree isolation (client-side, server-independent — mirrors the sub-agent
  * guard above). aimee isolates its OWN work in worktrees, but the primary
  * session's harness Edit/Write never reach aimee's gateway, so the shared main
@@ -1588,7 +1660,12 @@ int main(int argc, char **argv)
     * long-lived server process. */
    if (cmd_start < argc && strcmp(argv[cmd_start], "mcp-serve") != 0 &&
        strcmp(argv[cmd_start], "acp-serve") != 0)
+   {
+      /* Supply the real delegate probe so the sub-agent-ban gate can consult the
+       * server once (agent.list) during client-integration setup. */
+      client_integrations_set_delegate_probe(cli_delegate_probe);
       ensure_client_integrations();
+   }
 
    if (cmd_start >= argc)
    {
@@ -1764,6 +1841,10 @@ int main(int argc, char **argv)
    /* Hooks: use dedicated server methods */
    if (strcmp(cmd, "hooks") == 0)
       return handle_hooks(sub_argc, sub_argv, json_output);
+
+   /* Sub-agent ban PreToolUse hook (delegate-only enforcement). */
+   if (strcmp(cmd, "subagent-guard") == 0)
+      return handle_subagent_guard();
 
    /* Code audit (P4): local file-health scan plus kb graph checks when available. */
    if (strcmp(cmd, "code") == 0)
