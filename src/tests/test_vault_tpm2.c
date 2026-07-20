@@ -73,6 +73,36 @@ static int bind_tpm2(void)
    return 0;
 }
 
+static int receipt_path(char *out, size_t cap)
+{
+   const char *blob = getenv("AIMEE_VAULT_TPM2_BLOB_PATH");
+   return blob && (size_t)snprintf(out, cap, "%s.test-receipt", blob) < cap ? 0 : -1;
+}
+
+static int receipt_save(const vault_tpm2_reseal_receipt_t *r)
+{
+   char path[1200];
+   if (receipt_path(path, sizeof(path)) != 0)
+      return -1;
+   FILE *f = fopen(path, "wb");
+   int ok = f && fwrite(r, 1, sizeof(*r), f) == sizeof(*r) && fflush(f) == 0;
+   if (f)
+      fclose(f);
+   return ok ? 0 : -1;
+}
+
+static int receipt_load(vault_tpm2_reseal_receipt_t *r)
+{
+   char path[1200];
+   if (receipt_path(path, sizeof(path)) != 0)
+      return -1;
+   FILE *f = fopen(path, "rb");
+   int ok = f && fread(r, 1, sizeof(*r), f) == sizeof(*r) && fgetc(f) == EOF;
+   if (f)
+      fclose(f);
+   return ok ? 0 : -1;
+}
+
 int main(int argc, char **argv)
 {
    if (argc < 2)
@@ -122,6 +152,49 @@ int main(int argc, char **argv)
       if (pr == 0)
          return die("reseal SUCCEEDED with wrong secret (NV auth not enforced)");
       printf("test_vault_tpm2: reseal-fail (wrong secret correctly refused) OK\n");
+      return 0;
+   }
+
+   if (strcmp(cmd, "prepared-prepare") == 0)
+   {
+      if (argc != 4 || hex_to_kek(argv[2], kek) != 0)
+         return die("prepared-prepare <newhexkek(64)> <secret>");
+      uint64_t gen = 0;
+      uint8_t operation_id[16] = {0x50, 0x37, 0x52, 0x53, 0x41, 0x2d, 0x54, 0x45,
+                                  0x53, 0x54, 0x2d, 0x4f, 0x50, 0x2d, 0x30, 0x31};
+      vault_tpm2_reseal_receipt_t receipt;
+      int pr = vault_custody_tpm2_nv_generation(argv[3], &gen);
+      if (pr == 0)
+         pr = vault_custody_tpm2_reseal_prepare(operation_id, gen, kek, argv[3], &receipt);
+      OPENSSL_cleanse(kek, sizeof(kek));
+      if (pr != VAULT_TPM2_RESEAL_OK || receipt_save(&receipt) != 0)
+         return die("prepared prepare failed");
+      printf("test_vault_tpm2: prepared-prepare OK gen=%llu\n", (unsigned long long)gen);
+      return 0;
+   }
+
+   if (strcmp(cmd, "prepared-status") == 0 || strcmp(cmd, "prepared-commit") == 0 ||
+       strcmp(cmd, "prepared-cleanup") == 0 || strcmp(cmd, "prepared-abort") == 0)
+   {
+      if (argc != 3)
+         return die("prepared-{status,commit,cleanup,abort} <secret>");
+      vault_tpm2_reseal_receipt_t receipt;
+      vault_tpm2_reseal_status_t status = VAULT_TPM2_RESEAL_CORRUPT;
+      if (receipt_load(&receipt) != 0)
+         return die("prepared receipt missing");
+      int pr;
+      if (strcmp(cmd, "prepared-status") == 0)
+         pr = vault_custody_tpm2_reseal_status(&receipt, argv[2], &status);
+      else if (strcmp(cmd, "prepared-commit") == 0)
+         pr = vault_custody_tpm2_reseal_commit(&receipt, argv[2], &status);
+      else if (strcmp(cmd, "prepared-abort") == 0)
+         pr = vault_custody_tpm2_reseal_abort(&receipt, argv[2]);
+      else
+         pr = vault_custody_tpm2_reseal_cleanup(&receipt, argv[2],
+                                                VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED);
+      if (pr != VAULT_TPM2_RESEAL_OK)
+         return die("prepared operation failed");
+      printf("test_vault_tpm2: %s OK status=%d\n", cmd, (int)status);
       return 0;
    }
 

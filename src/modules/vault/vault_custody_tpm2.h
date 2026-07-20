@@ -52,6 +52,60 @@ int vault_custody_tpm2_provision(const uint8_t kek[VAULT_KEK_LEN], const char *s
  * the tpm2 `rotate` vtable slot itself fails LOUD and defers to this flow. */
 int vault_custody_tpm2_reseal(const uint8_t new_kek[VAULT_KEK_LEN], const char *secret);
 
+/* P7-reseal-a: disabled-by-default prepared reseal foundation. The receipt is an
+ * in-memory view of the canonical on-disk bundle; it is never written as this C
+ * struct. These helpers do not re-wrap Postgres DEKs and therefore are not a
+ * complete/operator-safe whole-vault rotation API. */
+typedef enum
+{
+   VAULT_TPM2_RESEAL_ABSENT = 0,
+   VAULT_TPM2_RESEAL_PREPARED,
+   VAULT_TPM2_RESEAL_NV_ADVANCED,
+   VAULT_TPM2_RESEAL_INSTALLED,
+   VAULT_TPM2_RESEAL_CLEANED,
+   VAULT_TPM2_RESEAL_CONFLICT,
+   VAULT_TPM2_RESEAL_CORRUPT,
+} vault_tpm2_reseal_status_t;
+
+typedef enum
+{
+   VAULT_TPM2_RESEAL_OK = 0,
+   VAULT_TPM2_RESEAL_ERR = -1,
+   VAULT_TPM2_RESEAL_NOT_BUILT = -2,
+   VAULT_TPM2_RESEAL_BUSY = -3,
+   VAULT_TPM2_RESEAL_INTEGRITY = -4,
+} vault_tpm2_reseal_result_t;
+
+typedef enum
+{
+   VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED = 1,
+} vault_tpm2_cleanup_authorization_t;
+
+typedef struct
+{
+   uint8_t operation_id[16];
+   uint64_t old_generation;
+   uint64_t new_generation;
+   uint8_t predecessor_digest[32];
+   uint8_t capsule_digest[32];
+   uint8_t future_digest[32];
+   uint8_t new_kek_digest[32];
+   uint8_t manifest_digest[32];
+} vault_tpm2_reseal_receipt_t;
+
+int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
+                                      uint64_t expected_old_generation,
+                                      const uint8_t new_kek[VAULT_KEK_LEN], const char *secret,
+                                      vault_tpm2_reseal_receipt_t *out);
+int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
+                                     vault_tpm2_reseal_status_t *out);
+int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
+                                     vault_tpm2_reseal_status_t *out);
+int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt, const char *secret);
+int vault_custody_tpm2_reseal_cleanup(const vault_tpm2_reseal_receipt_t *receipt,
+                                      const char *secret,
+                                      vault_tpm2_cleanup_authorization_t authorization);
+
 /* P7-tpm2b introspection: read the current NV monotonic-counter generation (the
  * anti-rollback authority — the value a freshly (re)sealed blob is bound to). Requires
  * the operator `secret` (the NV index is AUTHREAD-gated by a secret-derived authValue,
