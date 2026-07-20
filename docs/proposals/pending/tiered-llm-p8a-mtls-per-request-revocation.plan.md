@@ -109,3 +109,45 @@ No client cert presentation, no ramp/auto-advance, no enrollment, no capability 
 issuer-compound-key, no integration handshake test, no bearer-floor set. Pure server-side
 per-request durable revocation/expiry re-check that closes the keep-alive-after-revoke gap
 for invariant #5, unit-tested offline.
+
+## v2 refinements (roundtable-converged; fail-closed completeness + honest framing)
+
+- **A distinct `PKI_CERT_ERROR` state — never conflate an unavailable authority with an
+  unknown cert.** The status enum becomes VALID / REVOKED / EXPIRED / UNKNOWN / **ERROR**
+  (a SQLite prepare/bind/step/lock failure). BOTH `UNKNOWN` and `ERROR` **fail closed** (the
+  request is refused 403 — a revocation authority that cannot answer must never fail open),
+  but they are **logged distinctly** so an operator can tell "cert not on this server's
+  roster" from "revocation store unavailable." (A transient DB error must not be reported as
+  a permanent, misleading UNKNOWN.)
+- **Q2, answered in the artifact (not deferred):** the fix is BOTH parts. The **load-bearing**
+  fix is re-checking PER REQUEST at all — `mtls_verify_cb` runs only at handshake and OpenSSL
+  cannot re-run it on a keep-alive connection, so without a per-request re-check a
+  post-handshake `cert.revoke` keeps authorizing. Reading the **durable source** (not the
+  `g_revoked[]` snapshot) is the **mandated correctness posture** (the proposal forbids "an
+  in-memory cache that could miss a just-revoked cert"): for a single process the snapshot
+  is usually current, but the durable read removes any snapshot-divergence assumption and is
+  authoritative under a DB-restore / future multi-reader. P8a does both.
+- **Serial-format consistency (implementation contract).** The serial passed to
+  `pki_cert_check` MUST be the exact `BN_bn2hex` form that `pki_issue` writes to
+  `pki_certs.serial` and that `mtls_verify_cb` / `pki_is_revoked` already use — i.e.
+  re-extract it via `server_tls_peer_identity` (same code path), so the DB `WHERE serial = ?`
+  lookup can never miss on a format mismatch (a format skew would silently fail OPEN as
+  UNKNOWN→refuse, which is safe, but must be avoided to not lock out valid certs).
+- **Expiry semantics + authority (documented).** The boundary rule is `expires_at > 0 AND
+  expires_at <= now → EXPIRED` (an unset/0 expires_at is not treated as expired). The DB
+  `expires_at` is the value recorded from the cert's signed `notAfter` at `pki_issue`; the
+  cert's signed `notAfter` remains the ultimate authority, and OpenSSL already rejects an
+  expired cert at handshake — the app-layer re-check exists ONLY to catch a keep-alive
+  connection that crosses the expiry boundary mid-session. (Cross-checking the live peer
+  cert's `notAfter` is a P8b nicety; P8a uses the recorded value, which equals it at issue.)
+- **Test harness decided: EXTEND `test_pki.c`** (its `unit-test-pki` recipe already links
+  `pki.o` + `$(DB1_OBJS)` — no new Rules.mk plumbing). No separate `unit-test-pki-reauth`.
+- **HTTP/1.1-only (no bypass concern).** aimee's /v1 server is hand-rolled HTTP/1.1 (ALPN
+  advertises h1 only), so there is no HTTP/2 multiplex/per-stream re-check subtlety; the
+  single re-check between identity-capture and route-dispatch covers every request. The
+  `pki_cert_check` call is a single prepared `SELECT` on a PK — cheap at single-server scale.
+
+### Gate additions
+
+- Test (g): `pki_cert_check` on a simulated DB-unavailable path returns `PKI_CERT_ERROR`
+  (and the handler would refuse) — the authority-down case fails closed, not open.
