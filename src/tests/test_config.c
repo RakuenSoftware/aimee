@@ -121,6 +121,9 @@ int main(void)
       /* Typed-fact extraction is offline, so it defaults ON on every backend. */
       assert(cfg.typed_facts_enabled == 1);
       assert(strcmp(cfg.guardrail_mode, "approve") == 0);
+      /* Sub-agent ban is an enforcement dial: defaults ON so a fresh install bans
+       * the primary agent's own sub-agents (when delegates exist). */
+      assert(cfg.subagent_ban_enabled == 1);
       /* §5 hybrid RRF weights + rank constant default to equal weights / k=60,
        * and the §7 blast-radius advisory is opt-in (off). */
       assert(fabs(cfg.code_hybrid_weight_code - 1.0) < 1e-9);
@@ -430,6 +433,7 @@ int main(void)
        * silently in the wrong state after every restart. */
       cfg.require_aimee_git = 0;
       cfg.delegate_sandbox = 1;
+      cfg.subagent_ban_enabled = 0; /* default-ON dial: opt-out must survive save+reload */
       config_save(&cfg);
 
       static config_t cfg2;
@@ -467,6 +471,9 @@ int main(void)
        * opposite ends; a round-trip is the only thing that catches either. */
       assert(cfg2.require_aimee_git == 0);
       assert(cfg2.delegate_sandbox == 1);
+      /* Same save-without-parse / parse-without-save class as require_aimee_git:
+       * subagent_ban_enabled is written only as the opt-out and must parse back. */
+      assert(cfg2.subagent_ban_enabled == 0);
       assert(cfg2.ingress_preinject_assembly_budget == 8192);
       assert(cfg2.ingress_max_raw_scans == 2);
       assert(cfg2.workspace_count == 3);

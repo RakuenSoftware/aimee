@@ -41,7 +41,8 @@ static int64_t slot_version(const char *principal, const char *agent, const char
    void *conn = db2_conn();
    assert(conn);
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT org_vault_has(?1, ?2, ?3)", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT org_vault_has(?1, ?2, ?3)", err, sizeof(err));
    assert(st);
    aimee_pg_bind_text(st, "?1", principal);
    aimee_pg_bind_text(st, "?2", agent);
@@ -69,8 +70,8 @@ static void run(void)
    /* Salt + verifier: establish, then a correct/incorrect KEK is caught by unlock. */
    uint8_t salt[VAULT_SALT_LEN];
    assert(vault_store_get_or_create_salt(principal, salt) == 0);
-   assert(vault_store_unlock_check(principal, kek) == 0); /* first unlock: establish */
-   assert(vault_store_unlock_check(principal, kek) == 0); /* matches thereafter */
+   assert(vault_store_unlock_check(principal, kek) == 0);   /* first unlock: establish */
+   assert(vault_store_unlock_check(principal, kek) == 0);   /* matches thereafter */
    assert(vault_store_unlock_check(principal, wrong) != 0); /* wrong KEK rejected */
    printf("  PASS: salt + kek_check verifier\n");
 

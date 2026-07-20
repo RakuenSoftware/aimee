@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (83)
+## CLI-settable keys (84)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -103,6 +103,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_git` | bool | Block a delegate from running `git` or `gh` in a shell (reads included) and redirect git/forge work to aimee's `git_*` tools, which execute on aimee-server where the forge credential stays in-process; delegates are also spawned without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed SSH to any host) and neuters the global/system git config (default on). |
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
+| `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |

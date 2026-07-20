@@ -215,8 +215,8 @@ static cJSON *group_array(const db2_org_spend_row_t *rows, int n, group_kind_t k
 }
 
 char *kb_insights_spend_json(int has_team, long long team, int has_project, long long project,
-                             const char *since, const char *until,
-                             const db2_org_spend_row_t *rows, int n)
+                             const char *since, const char *until, const db2_org_spend_row_t *rows,
+                             int n)
 {
    if (n < 0)
       n = 0;

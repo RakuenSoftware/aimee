@@ -287,6 +287,11 @@ typedef struct config
    char workspace_sandbox_image[64][256];
    int workspace_count;
    char guardrail_mode[16];
+   int subagent_ban_enabled;        /* default ON: when set AND usable delegates are configured,
+                                       block the primary agent's own sub-agent tools (Task/Agent/
+                                       spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
+                                       Explicit `subagent_ban_enabled: false` allows provider-native
+                                       sub-agents. */
    char provider[16];
    /* Durable default persona: the persona a fresh primary session starts as, and
     * the persona draft roundtable panelists author with when none is set. Width =
