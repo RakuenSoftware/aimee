@@ -629,6 +629,16 @@ static void config_set_defaults(config_t *cfg)
    cfg->autonomy_unit_retry = 2;
    cfg->autonomy_unit_max = 16;
    cfg->autonomy_ci_retry_max = 2;
+   /* Run caps + auto-resume: defaults match the historical AIMEE_AUTONOMY_* env defaults
+    * (max_turns 300, max_wall 1800s, stale-abandon 3600s, concurrency 8). Auto-resume of
+    * wall-cap parks defaults ON so a long autonomous run drives to completion in fresh
+    * wall windows instead of being reaped; bounded by max_resumes. */
+   cfg->autonomy_max_turns = 300;
+   cfg->autonomy_max_wall_secs = 1800;
+   cfg->autonomy_stale_abandon_secs = 3600;
+   cfg->autonomy_concurrency = 8;
+   cfg->autonomy_auto_resume_cap_parks = 1;
+   cfg->autonomy_max_resumes = 50;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
@@ -1953,10 +1963,22 @@ int config_autonomy_lookup(const char *env_name, long *out)
       snap = have ? c.autonomy_unit_max : 0;
    else if (strcmp(env_name, "AIMEE_AUTONOMY_CI_RETRY_MAX") == 0)
       snap = have ? c.autonomy_ci_retry_max : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_MAX_TURNS") == 0)
+      snap = have ? c.autonomy_max_turns : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_MAX_WALL_SECS") == 0)
+      snap = have ? c.autonomy_max_wall_secs : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_STALE_ABANDON_SECS") == 0)
+      snap = have ? c.autonomy_stale_abandon_secs : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_CONCURRENCY") == 0)
+      snap = have ? c.autonomy_concurrency : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_AUTO_RESUME_CAP_PARKS") == 0)
+      snap = have ? c.autonomy_auto_resume_cap_parks : 0, boolish = 1;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_MAX_RESUMES") == 0)
+      snap = have ? c.autonomy_max_resumes : 0;
    else
       is_autonomy = 0;
    if (!is_autonomy)
-      return 0; /* not a config-backed autonomy var (e.g. MAX_TURNS) -> caller falls back */
+      return 0; /* not a config-backed autonomy var (e.g. USD_PER_SEC) -> caller falls back */
 
    const char *e = getenv(env_name);
    if (e && e[0]) /* operator override — VALIDATED (a garbage value falls through to snapshot) */
