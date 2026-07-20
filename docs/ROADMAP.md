@@ -61,7 +61,7 @@ on its completion.
 
 Carve-out from the full curator work. Ships the MiniLM sidecar and
 `aimee kb repair` against the current KB pipeline. Target: raise
-`kb_search` mean P@5 from 0.268 → ≥ 0.45 on the 44-query POC set.
+`kb_search` mean P@5 from 0.268 → ≥ 0.45 on the 44-query POC set (measured against the `benchmarks/BASELINE.json` entry for `locomo_longmemeval_poc`; the `bench-drift-check` gate enforces ≤ ±0.005 drift on every PR/nightly run).
 Reversible in one config flip + repair. This is the single biggest
 near-term retrieval win.
 
