@@ -272,6 +272,33 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /management/action:
+    post:
+      summary: Execute an authenticated management control-plane action
+      description: >
+        Verifies the caller's management JWT, peer identity, capability, and
+        request digest before dispatching the management action.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Management action accepted
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Management action denied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Management control plane is not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /version:
     get:
       summary: Build version
