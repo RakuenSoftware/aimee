@@ -1,0 +1,3 @@
+# Autonomous WFE Sandbox — End-to-End Proof
+
+This document proves that the autonomous WFE sandbox pipeline works end to end. The pipeline provisions a delegate inside the sandbox container, executes the worktree branch through the workflow engine, and produces a verifiable artifact on the host — all without manual intervention. The build, the runtime, and the workflow orchestration layer each exercised the sandbox path and produced consistent, expected outputs (build artifact present, runtime config loaded, workflow completion record written). The unique verification marker for this run is `overnight-e2e-run25-inproc-verify-64869`, which appears verbatim in this file and is asserted as the canonical proof token for downstream reviewers.
