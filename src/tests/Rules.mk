@@ -1698,7 +1698,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-live: $(OBJDIR)/tests/test_kb_mgmt_live.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-kms: $(OBJDIR)/tests/test_vault_kms.o \
-                                  $(OBJDIR)/modules/vault/vault_custody_kms.o
+                                  $(OBJDIR)/modules/vault/vault_custody_kms.o \
+                                  $(OBJDIR)/modules/vault/vault_hwm.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Slice 3: IR shadow observer (pure — cJSON only).
@@ -3433,12 +3434,17 @@ $(TESTPREFIX)/unit-test-vault-master-rotate: $(OBJDIR)/tests/test_vault_master_r
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # P10/P7 slice 3b: the custody seal/unseal barrier + kb §3 live-key gate. Links the
-# seam (vault_server_key), the mock anchor, the KEK cache (seal flushes it), and the
-# kb-only policy (kb_vault_policy.o) — all OpenSSL-only, no PG needed (3b stores no keys).
+# seam (vault_server_key), every provider referenced by the kb-only policy, and the
+# KEK cache (seal flushes it) — all OpenSSL-only, no PG needed (3b stores no keys).
+VAULT_POLICY_PROVIDER_OBJS = $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
+                              $(OBJDIR)/modules/vault/vault_custody_kms.o \
+                              $(OBJDIR)/modules/vault/vault_custody_pkcs11.o \
+                              $(OBJDIR)/modules/vault/vault_hwm.o
+
 $(TESTPREFIX)/unit-test-vault-seal: $(OBJDIR)/tests/test_vault_seal.o \
                               $(OBJDIR)/kb/kb_vault_policy.o \
-                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
-                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
+                              $(VAULT_POLICY_PROVIDER_OBJS) \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
@@ -3451,8 +3457,7 @@ $(TESTPREFIX)/unit-test-vault-seal: $(OBJDIR)/tests/test_vault_seal.o \
 # so this links vault_custody_tpm2.o (the stub in a default build).
 $(TESTPREFIX)/unit-test-vault-tpm2-stub: $(OBJDIR)/tests/test_vault_tpm2_stub.o \
                               $(OBJDIR)/kb/kb_vault_policy.o \
-                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
-                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
+                              $(VAULT_POLICY_PROVIDER_OBJS) \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
