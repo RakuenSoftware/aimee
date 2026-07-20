@@ -2,6 +2,7 @@
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
+#include "server/server_mgmt_endpoint.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -76,6 +77,32 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
 server_ctx_t *server_active_ctx(void)
 {
    return NULL;
+}
+
+/* The HTTP router owns only the adapter around management authorization. The
+ * authorization/audit stack has its own tests, so keep this route test isolated. */
+int server_mgmt_endpoint_dispatch(const char *jwt, const char *jwks, const char *issuer,
+                                  const char *audience, const char *peer_cn,
+                                  const char *required_cap, const char *target,
+                                  const char *request_digest, server_mgmt_action_fn action,
+                                  void *ctx, char *actor, size_t actor_cap, char *jti,
+                                  size_t jti_cap)
+{
+   (void)jwt;
+   (void)jwks;
+   (void)issuer;
+   (void)audience;
+   (void)peer_cn;
+   (void)required_cap;
+   (void)target;
+   (void)request_digest;
+   (void)action;
+   (void)ctx;
+   (void)actor;
+   (void)actor_cap;
+   (void)jti;
+   (void)jti_cap;
+   return -1;
 }
 
 int main(void)
@@ -207,6 +234,16 @@ int main(void)
       openai_runs_store_reset();
       st = server_http_route("GET", "/v1/runs/run_xyz", NULL, 0, resp, sizeof(resp));
       assert(st == 404); /* unknown run */
+      st = server_http_route("GET", "/v1/runs/oprun_gprior_1700000000_1", NULL, 0, resp,
+                             sizeof(resp));
+      assert(st == 410);
+      assert(strstr(resp, "\"status\":\"interrupted\""));
+      char evicted_id[160];
+      snprintf(evicted_id, sizeof(evicted_id), "/v1/runs/oprun_%s_1700000000_1",
+               openai_runs_store_generation());
+      st = server_http_route("GET", evicted_id, NULL, 0, resp, sizeof(resp));
+      assert(st == 410);
+      assert(strstr(resp, "\"status\":\"evicted\""));
       openai_runs_store_create("run_xyz", "{\"id\":\"run_xyz\",\"object\":\"run\"}");
       st = server_http_route("GET", "/v1/runs/run_xyz", NULL, 0, resp, sizeof(resp));
       assert(st == 200);
@@ -914,6 +951,10 @@ int main(void)
       /* A self-contained public route dispatches through the table. */
       assert(server_http_route("GET", "/v1/health", NULL, 0, rb, sizeof(rb)) == 200);
       assert(strstr(rb, "aimee-server"));
+      char forensic[64 * 1024];
+      assert(server_http_route("GET", "/v1/server/forensics", NULL, 0, forensic,
+                               sizeof(forensic)) == 200);
+      assert(strstr(forensic, "\"recent_shutdowns\":"));
       /* An unknown path 404s. */
       assert(server_http_route("GET", "/v1/nope", NULL, 0, rb, sizeof(rb)) == 404);
       /* A wrong-verb known path 404s (no matching row). */

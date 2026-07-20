@@ -502,6 +502,13 @@ static void test_server_status_route_lookup(void)
    assert(strcmp(route.method, "server.health") == 0);
    assert(route.skip_subcmd == 1);
 
+   char *forensics_lookup[] = {"forensics"};
+   assert(cli_v1_lookup("doctor", 1, forensics_lookup, &route));
+   assert(strcmp(route.method, "doctor.forensics") == 0);
+   const char *verb = NULL;
+   assert(strcmp(cli_v1_route_for_method(route.method, &verb), "/v1/server/forensics") == 0);
+   assert(strcmp(verb, "GET") == 0);
+
    printf("  PASS: test_server_status_route_lookup\n");
 }
 

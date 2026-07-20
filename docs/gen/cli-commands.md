@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 59
+Total commands: 60
 
 ## Core commands
 
@@ -320,6 +320,16 @@ Subcommands:
   exec             Run a command through a backend
                    --backend X --task-id Y [--image I] [--host H]
                    [--no-hibernate] "<cmd>"
+```
+
+### `aimee doctor`
+
+Diagnose server runtime state.
+
+Subcommands:
+
+```
+  forensics       Show current process generation and interrupted async runs
 ```
 
 ### `aimee dogfood`

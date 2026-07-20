@@ -34,6 +34,66 @@ static int g_count = 0;
 static long g_seq = 0;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_once_t g_generation_once = PTHREAD_ONCE_INIT;
+static char g_generation[48];
+
+static void init_generation(void)
+{
+   struct timespec ts;
+   if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+   {
+      ts.tv_sec = time(NULL);
+      ts.tv_nsec = 0;
+   }
+   snprintf(g_generation, sizeof(g_generation), "g%llx%lx", (unsigned long long)ts.tv_sec,
+            (unsigned long)ts.tv_nsec);
+}
+
+const char *openai_runs_store_generation(void)
+{
+   pthread_once(&g_generation_once, init_generation);
+   return g_generation;
+}
+
+static int all_digits(const char *s, size_t n)
+{
+   if (!s || n == 0)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      if (s[i] < '0' || s[i] > '9')
+         return 0;
+   return 1;
+}
+
+openai_runs_missing_t openai_runs_store_classify_missing(const char *run_id)
+{
+   static const char prefix[] = "oprun_";
+   if (!run_id || strncmp(run_id, prefix, sizeof(prefix) - 1) != 0)
+      return OPENAI_RUNS_MISSING_UNKNOWN;
+   const char *token = run_id + sizeof(prefix) - 1;
+   const char *sep1 = strchr(token, '_');
+   const char *sep2 = sep1 ? strchr(sep1 + 1, '_') : NULL;
+   if (!sep1 || !sep1[1])
+      return OPENAI_RUNS_MISSING_UNKNOWN;
+   /* Pre-generation ids were oprun_<created>_<seq>. A replacement running this
+    * version cannot retain them, so a well-formed legacy handle is interrupted. */
+   if (!sep2)
+      return all_digits(token, (size_t)(sep1 - token)) && all_digits(sep1 + 1, strlen(sep1 + 1))
+                 ? OPENAI_RUNS_MISSING_INTERRUPTED
+                 : OPENAI_RUNS_MISSING_UNKNOWN;
+   if (!sep2[1] || strchr(sep2 + 1, '_'))
+      return OPENAI_RUNS_MISSING_UNKNOWN;
+   if (!all_digits(sep1 + 1, (size_t)(sep2 - sep1 - 1)) || !all_digits(sep2 + 1, strlen(sep2 + 1)))
+      return OPENAI_RUNS_MISSING_UNKNOWN;
+
+   size_t token_n = (size_t)(sep1 - token);
+   const char *current = openai_runs_store_generation();
+   if (token_n == strlen(current) && memcmp(token, current, token_n) == 0)
+      return OPENAI_RUNS_MISSING_EVICTED;
+   if (token[0] == 'g' && token_n > 1)
+      return OPENAI_RUNS_MISSING_INTERRUPTED;
+   return OPENAI_RUNS_MISSING_UNKNOWN;
+}
 
 const char *openai_run_status_str(openai_run_status_t status)
 {

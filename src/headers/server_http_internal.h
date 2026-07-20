@@ -139,6 +139,7 @@ int rh_git_oauth_github_web_start(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_github_web_callback(const route_req_t *rq, char *resp, int cap);
 int rh_deploy_apply(const route_req_t *rq, char *resp, int cap);
 int rh_deploy_status(const route_req_t *rq, char *resp, int cap);
+int rh_server_forensics(const route_req_t *rq, char *resp, int cap);
 
 /* Webchat git-surface route handlers — defined in server_http_routes_git.c
  * (relocated out of server_http_routes.c to stay under the line-check

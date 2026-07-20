@@ -68,25 +68,35 @@ int db2_server_registry_heartbeat(const char *id, const char *cn, const char *he
 
 int db2_server_registry_get(int64_t team, const char *id, db2_server_row_t *r)
 {
-   if (db2_tenant_require_pg() != 0 || !id || !r) return -1;
-   void *c = db2_conn(); if (!c) return -1;
+   if (db2_tenant_require_pg() != 0 || !id || !r)
+      return -1;
+   void *c = db2_conn();
+   if (!c)
+      return -1;
    char e[256];
-   aimee_pg_stmt_t *s = aimee_pg_prepare(c,
-      "SELECT server_id,cert_cn,mgmt_cert_cn,endpoint,status,health,version,team_id FROM kb_server_registry WHERE team_id=?1 AND server_id=?2",
-      e, sizeof(e));
-   if (!s) return -1;
-   aimee_pg_bind_int64(s, "?1", team); aimee_pg_bind_text(s, "?2", id);
+   aimee_pg_stmt_t *s = aimee_pg_prepare(
+       c,
+       "SELECT server_id,cert_cn,mgmt_cert_cn,endpoint,status,health,version,team_id FROM "
+       "kb_server_registry WHERE team_id=?1 AND server_id=?2",
+       e, sizeof(e));
+   if (!s)
+      return -1;
+   aimee_pg_bind_int64(s, "?1", team);
+   aimee_pg_bind_text(s, "?2", id);
    int rc = -1;
-   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW) {
+   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW)
+   {
       memset(r, 0, sizeof(*r));
-      cp(r->server_id,sizeof(r->server_id),aimee_pg_column_text(s,0));
-      cp(r->cert_cn,sizeof(r->cert_cn),aimee_pg_column_text(s,1));
-      cp(r->mgmt_cert_cn,sizeof(r->mgmt_cert_cn),aimee_pg_column_text(s,2));
-      cp(r->endpoint,sizeof(r->endpoint),aimee_pg_column_text(s,3));
-      cp(r->status,sizeof(r->status),aimee_pg_column_text(s,4));
-      cp(r->health,sizeof(r->health),aimee_pg_column_text(s,5));
-      cp(r->version,sizeof(r->version),aimee_pg_column_text(s,6));
-      r->team_id = aimee_pg_column_int64(s,7); rc = 0;
+      cp(r->server_id, sizeof(r->server_id), aimee_pg_column_text(s, 0));
+      cp(r->cert_cn, sizeof(r->cert_cn), aimee_pg_column_text(s, 1));
+      cp(r->mgmt_cert_cn, sizeof(r->mgmt_cert_cn), aimee_pg_column_text(s, 2));
+      cp(r->endpoint, sizeof(r->endpoint), aimee_pg_column_text(s, 3));
+      cp(r->status, sizeof(r->status), aimee_pg_column_text(s, 4));
+      cp(r->health, sizeof(r->health), aimee_pg_column_text(s, 5));
+      cp(r->version, sizeof(r->version), aimee_pg_column_text(s, 6));
+      r->team_id = aimee_pg_column_int64(s, 7);
+      rc = 0;
    }
-   aimee_pg_finalize(s); return rc;
+   aimee_pg_finalize(s);
+   return rc;
 }

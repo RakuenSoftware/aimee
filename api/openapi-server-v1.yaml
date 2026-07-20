@@ -272,6 +272,33 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /management/action:
+    post:
+      summary: Execute an authenticated management control-plane action
+      description: >
+        Verifies the caller's management JWT, peer identity, capability, and
+        request digest before dispatching the management action.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Management action accepted
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Management action denied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Management control plane is not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /version:
     get:
       summary: Build version
@@ -936,6 +963,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runs/{id}/events:
     get:
       summary: Stream a run's output as SSE (replay for completed runs)
@@ -949,6 +981,11 @@ paths:
           description: text/event-stream of response.output_text.delta events + a terminal done event
         "404":
           description: No such run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -968,6 +1005,11 @@ paths:
               schema: { type: object }
         "404":
           description: No such run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -2668,6 +2710,28 @@ paths:
     get:
       summary: Server health (RPC twin)
       responses: { "200": { description: Health, content: { application/json: { schema: { type: object } } } } }
+  /server/forensics:
+    get:
+      summary: Recent server shutdown forensics
+      description: >-
+        Privileged, read-only access to recent clean-signal and inferred unclean-exit
+        records from the server host. Capability: tool:execute.
+      responses:
+        "200":
+          description: Recent shutdown records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recent_shutdowns:
+                    type: array
+                    items: { type: object }
+        "403":
+          description: Insufficient capability
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /kb/build:
     post:
       summary: Build the knowledge base (async; poll GET /runs/{id})
