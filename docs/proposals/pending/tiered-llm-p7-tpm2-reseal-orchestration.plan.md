@@ -1,8 +1,28 @@
 # P7 whole-vault TPM2 reseal orchestration
 
-- **State:** proposed implementation slice.
+- **State:** staged umbrella plan; not enabled until all four slices merge.
 - **Depends on:** P7 TPM2 PolicyNV anti-rollback, signed-HWM rotation, and
   steady-state key-use admission.
+
+## Delivery split
+
+The design review found this protocol too broad to review safely as one change.
+Delivery is therefore fail-closed and ordered:
+
+1. `P7-reseal-a`: canonical TPM receipt and prepared artifact
+   `prepare/status/commit/cleanup`, provider-scoped process lock, and exhaustive
+   swtpm crash tests. No database or production caller uses the new API.
+2. `P7-reseal-b`: primary control-row barrier, complete protected-entry-point
+   inventory, privilege enforcement, and admission/mutation race tests. No TPM
+   generation changes.
+3. `P7-reseal-c`: bounded inventory/staging/promotion schema and transaction tests
+   against a mock custody provider. No TPM generation changes.
+4. `P7-reseal-d`: end-to-end start/resume/reconciliation, WORM checkpoints, real
+   TPM/PG17 kill matrix, and only then operator enablement.
+
+The legacy one-shot TPM reseal remains explicitly unsafe for whole-vault use and
+cannot bypass an in-progress prepared operation. Each slice has its own reviewed
+plan, adversarial branch review, target validation, and merge.
 
 ## Scope
 
