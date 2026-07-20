@@ -941,6 +941,23 @@ int main(void)
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA) == CAPS_AUTHENTICATED);
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL) == CAPS_ALL);
 
+      /* P8 thin-client posture is independent of the operator's generic TCP
+       * remote_writes setting: bearer fallback is query-only and a cert gains
+       * authenticated session capabilities, never CAPS_ALL. */
+      uint32_t fallback = CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 0) ==
+             fallback);
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1) ==
+             CAPS_AUTHENTICATED);
+      assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/memory/store",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/memory/store",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/chat/completions",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/chat/completions",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+
       /* UDS is always full, independent of the level. */
       assert(server_http_conn_caps(0, NULL, SERVER_REMOTE_WRITES_OFF) == CAPS_ALL);
    }

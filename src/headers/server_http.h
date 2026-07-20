@@ -110,6 +110,12 @@ extern "C"
    uint32_t server_http_route_caps(const char *method, const char *path);
    uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes);
 
+   /* Effective caps for a request after thin-client mTLS authentication. When
+    * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
+    * gets the authenticated (but not full-trust) set. */
+   uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
+                                            int mtls_mode, int mtls_authenticated);
+
    /* Parse one HTTP header value (case-insensitive name) from a raw request
     * buffer into out (NUL-terminated, bounded by n). Returns 1 when found, 0
     * otherwise. Shared with the request-context populator. */
@@ -125,6 +131,8 @@ extern "C"
                                              const char *path, uint32_t caps);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
+   int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method,
+                                      const char *path, int remote_writes);
 
    /* server_http_route_is_local_only: 1 iff the (method,path) route is a
     * data-plane write. Historical name retained: at remote_writes=off these

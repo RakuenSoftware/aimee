@@ -349,6 +349,18 @@ uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes
    return CAPS_AUTHENTICATED;
 }
 
+uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
+                                         int mtls_mode, int mtls_authenticated)
+{
+   if (!is_tcp || mtls_mode <= 0)
+      return server_http_conn_caps(is_tcp, bearer, remote_writes);
+   if (mtls_authenticated)
+      return CAPS_AUTHENTICATED;
+   /* Optional-mode bearer fallback is deliberately weaker than a client cert:
+    * query/session reads only, with no compute or mutation capability. */
+   return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
+}
+
 /* Routes deliberately reachable over the TCP listener regardless of
  * aimee.api.remote_writes (still capability-gated): the detached-workspace
  * reverse channel and registry mutations (workspace-resource-plane). The serving
@@ -366,8 +378,8 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
    return 0;
 }
 
-int server_http_route_allowed(int is_tcp, const char *bearer, const char *method, const char *path,
-                              int remote_writes)
+int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method, const char *path,
+                                   int remote_writes)
 {
    /* Over the TCP listener, a route that needs any capability beyond the read set
     * (CAPS_READ_ONLY) is "privileged" and denied unless the operator opts in via
@@ -395,8 +407,14 @@ int server_http_route_allowed(int is_tcp, const char *bearer, const char *method
       }
    }
    uint32_t need = server_http_route_caps(method, path);
-   uint32_t have = server_http_conn_caps(is_tcp, bearer, remote_writes);
    return (need & ~have) == 0;
+}
+
+int server_http_route_allowed(int is_tcp, const char *bearer, const char *method, const char *path,
+                              int remote_writes)
+{
+   return server_http_route_allowed_caps(
+       is_tcp, server_http_conn_caps(is_tcp, bearer, remote_writes), method, path, remote_writes);
 }
 
 void server_http_api_status_report(int http_port, int bearer_configured, int rate_limit_per_min,
@@ -1494,12 +1512,6 @@ void handle_conn(int fd, int is_tcp)
                              request_id, sizeof(request_id));
    }
 
-   /* Establish the per-request context (#3) for this worker thread before any
-    * handler runs. Overwritten on every request, so thread reuse cannot leak a
-    * prior request's identity. */
-   server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path,
-                                        server_http_conn_caps(is_tcp, g_bearer, g_remote_writes));
-
    /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
     * durable roster row before the bearer gate so required-mode clients do not
     * still depend on the shared bearer. This remains authentication only: the
@@ -1548,6 +1560,17 @@ void handle_conn(int fd, int is_tcp)
          }
       }
    }
+
+   int mtls_mode = server_tls_mtls_mode();
+   int effective_remote_writes =
+       is_tcp && mtls_mode > 0 ? SERVER_REMOTE_WRITES_OFF : g_remote_writes;
+   uint32_t effective_caps = server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
+                                                             mtls_mode, mtls_authenticated);
+
+   /* Establish the per-request context (#3) only after authenticating the
+    * durable certificate, so downstream dispatch sees the same effective caps
+    * as the outer route gate. */
+   server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
 
    /* Authorize before reading the body: TCP requires either the durably valid
     * client certificate above or a valid bearer; UDS relies on permissions. */
@@ -1625,7 +1648,8 @@ void handle_conn(int fd, int is_tcp)
     * must be a subset of the connection's effective set. UDS is same-user
     * trusted and exempt. A scoped bearer is read/query-only, so compute/write
     * routes return 403; an unscoped bearer holds CAPS_AUTHENTICATED. */
-   if (is_tcp && !server_http_route_allowed(is_tcp, g_bearer, method, path, g_remote_writes))
+   if (is_tcp && !server_http_route_allowed_caps(is_tcp, effective_caps, method, path,
+                                                 effective_remote_writes))
    {
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
@@ -1804,7 +1828,7 @@ void handle_conn(int fd, int is_tcp)
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
-      uint32_t have = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
+      uint32_t have = effective_caps;
       if ((need & ~have) != 0)
       {
          send_response(fd, 403, "{\"error\":\"forbidden: chat requires an unscoped credential\"}",
@@ -1885,7 +1909,7 @@ void handle_conn(int fd, int is_tcp)
    /* Expose this connection's effective caps to the dispatch routes (UDS =>
     * CAPS_ALL, TCP => bearer-scoped) so loopback_rpc / server_dispatch re-check
     * per-method capability. Reset to the read-only default afterward. */
-   g_rpc_conn_caps = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
+   g_rpc_conn_caps = effective_caps;
    /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
     * or a server.token-gated webuser assertion) into thread-locals, live until
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so

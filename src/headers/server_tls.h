@@ -46,6 +46,11 @@ extern "C"
     * to load keeps the current one. Returns 1 = reloaded, 0 = TLS not enabled, -1 = kept. */
    int server_tls_reload(void);
 
+   /* Current effective mTLS posture (0=off, 1=optional, 2=required). The value
+    * may advance at runtime, so callers use this accessor rather than caching
+    * startup configuration. */
+   int server_tls_mtls_mode(void);
+
    /* Build a fully validated required-mTLS context without publishing it. The
     * caller may durably commit its posture and then pass the context to
     * server_tls_activate_required, whose pointer swap is infallible. NULL means

@@ -226,6 +226,14 @@ int server_tls_reload(void)
    return 1;
 }
 
+int server_tls_mtls_mode(void)
+{
+   pthread_mutex_lock(&g_ctx_mu);
+   int mode = g_mtls_mode;
+   pthread_mutex_unlock(&g_ctx_mu);
+   return mode;
+}
+
 SSL_CTX *server_tls_prepare_required(void)
 {
    pthread_mutex_lock(&g_ctx_mu);
