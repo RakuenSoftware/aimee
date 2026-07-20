@@ -247,6 +247,33 @@ BEGIN
   IF EXISTS (SELECT 1 FROM org_model_catalog WHERE model_id = 'p6c-bypass') THEN
     RAISE EXCEPTION 'P6c FAIL: a bedrock row leaked through the plain upsert path';
   END IF;
+  -- (h2) case-/whitespace-variant provider must ALSO be rejected (no near-canonical sneak).
+  BEGIN
+    PERFORM org_catalog_upsert('p6c-bypass2', 'Sneak', 'Bedrock', 'anthropic', '', true);
+    RAISE EXCEPTION 'P6c FAIL: plain upsert accepted provider=Bedrock (case bypass OPEN)';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_catalog_upsert('p6c-bypass3', 'Sneak', '  bedrock  ', 'anthropic', '', true);
+    RAISE EXCEPTION 'P6c FAIL: plain upsert accepted provider=" bedrock " (ws bypass OPEN)';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  IF EXISTS (SELECT 1 FROM org_model_catalog WHERE model_id IN ('p6c-bypass2','p6c-bypass3')) THEN
+    RAISE EXCEPTION 'P6c FAIL: a case/ws-variant bedrock row leaked through the plain path';
+  END IF;
+END $$;
+
+-- (d2) an application-inference-profile (not only cross-region) with empty underlying_fm_arns
+-- -> REJECTED (both *-inference-profile target types fail closed).
+DO $$
+BEGIN
+  BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-appprofile-empty', 'AppProf', 'converse', 'anthropic',
+      'application-inference-profile', 'aws', '123456789012',
+      ARRAY['us-east-1'], NULL, '', true);
+    RAISE EXCEPTION 'P6c FAIL: application-inference-profile with empty fm-arns accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
 END $$;
 
 -- (i) A non-bedrock provider via the plain path still works; bedrock_* stay NULL.

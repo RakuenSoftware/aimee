@@ -2821,7 +2821,9 @@ BEGIN
   -- Close the bypass: a bedrock row (with its routing tuple + fail-closed adapter-registry
   -- validation) may be written ONLY via org_catalog_bedrock_upsert. The plain path can NOT
   -- be used to sneak a provider='bedrock' row in with NULL/unvalidated routing fields.
-  IF p_provider = 'bedrock' THEN
+  -- Case- and whitespace-insensitive so 'Bedrock' / 'BEDROCK' / ' bedrock ' cannot slip a
+  -- near-canonical provider past the gate (the companion always writes the exact 'bedrock').
+  IF lower(btrim(p_provider)) = 'bedrock' THEN
     RAISE EXCEPTION 'org_catalog_upsert: bedrock models must use org_catalog_bedrock_upsert'
       USING ERRCODE = '22023';
   END IF;
