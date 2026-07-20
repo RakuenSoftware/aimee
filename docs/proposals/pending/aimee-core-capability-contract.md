@@ -8,7 +8,7 @@
 
 ## Decision
 
-Aimee Core consists of seventeen required modules. Each owns a narrow public contract and one
+Aimee Core consists of eighteen required modules. Each owns a narrow public contract and one
 working reference implementation. None imports, links, loads, or requires an optional module.
 
 | Module | Required responsibility |
@@ -25,6 +25,7 @@ working reference implementation. None imports, links, loads, or requires an opt
 | `delegates` | agent execution, lifecycle, invocation, and cancellation |
 | `tools` | typed discovery, schema validation, authorization, dispatch, and result handling |
 | `workspace` | scoped resource access and a local coding-agent provider |
+| `git` | reads repository state and history and produces records through memory's public ingest boundary; memory retains schema, provenance, storage, indexing, retrieval, and code intelligence |
 | `skills` | procedural-memory discovery, validation, matching, application, provenance, snapshots, rollback |
 | `response-composition` | final canonical response, summary, and citations from ranked evidence and request context |
 | `vault` | principal-scoped secret custody, encryption, injection, and rotation |
@@ -45,6 +46,22 @@ generic service locator. The generated dependency graph is authoritative for bot
 Security boundaries are not optional. The vault backend, execution-policy implementation, audit
 ledger, workspace provider, and delegate executor may be replaced, but their contracts and a
 working local/software implementation remain in every core profile.
+
+Git is required because repository state and history are inputs to core workspace behavior and
+memory-owned code intelligence. This taxonomy amendment does not invent a new Git API, event
+schema, mutation path, or security model. Before the Git migration slice begins, the required
+forthcoming child proposal `git-core-contract.md` must define those contracts, non-Git behavior,
+workspace/memory seams, compatibility, security, and executable acceptance fixtures. At minimum,
+repository-derived records must be scoped to the vault/execution-policy principal authorizing
+ingest, bind signed producer and repository provenance, and be redacted for secrets before
+persistence. The child must include mechanical acceptance checks for those three properties. Until
+it is accepted, no proposal may introduce a functional Git implementation acceptance target or
+begin the Git migration slice. Taxonomy-only classification and inventory checks are explicitly
+allowed before the child. The migration slice begins with the first change that adds Git module
+source, registers `git` in a descriptor, build artifact, or generated profile, or reports Git
+readiness.
+The child may narrow responsibilities but may not make `git` optional or move code intelligence
+out of `memory` without amending this suite-level decision.
 
 Optional targets never introduce a core dependency. Routing declares a generic typed target-kind
 contract; the optional `workflows` module registers the `workflow` target kind when selected. With

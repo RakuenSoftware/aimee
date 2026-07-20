@@ -26,10 +26,17 @@ history, architecture facts, and blast-radius evidence live under memory ownersh
 parsers, OCR, proprietary extractors, additional model backends, and advanced analyzers may be
 optional providers; the operations and one working implementation are not.
 
-Code history is a core memory schema and query capability, not a dependency on the optional `git`
-module. Core memory accepts typed code-event/snapshot records from any producer and its reference
-fixture. The optional `git` module is one producer that translates repository history into that
-public ingest contract; core memory never imports Git headers, symbols, commands, or storage.
+Code history is a core memory schema and query capability. The required `git` module is a required
+producer of repository state/history through memory's public ingest boundary; memory retains code-
+event schema, provenance, storage, indexing, retrieval, and code-intelligence ownership. Non-Git
+producers may use the same generic ingest boundary but do not displace the required Git reference
+implementation. The required forthcoming `git-core-contract.md` child must define the record
+contract and security semantics before the Git migration slice begins. Memory may depend only on
+that generic ingest contract; it may not import Git headers, symbols, commands, or storage.
+Memory owns all tables, schemas, indices, persistence, and retrieval for repository-derived records;
+Git writes only through the public ingest boundary.
+Additional producers remain providers behind that contract. They become module IDs only by
+amending the canonical taxonomy in `core-substrate-and-source-module-boundaries.md`.
 
 Required readiness probes validate:
 
@@ -104,7 +111,7 @@ There is no mixed `agent-eval` module.
 ```yaml acceptance
 - {id: 1, tier: integration, check: "scripts/test_memory_inference_contract.sh --extraction-required --embedding-required --reranking-required --typed-readiness --signed-production-provider-manifest --forbid-fixture-objects-handles-descriptors-namespaces --nonce-challenges --require-input-sensitive-work-receipts --fail-canned-id-only-epsilon-providers"}
 - {id: 2, tier: integration, check: "scripts/test_memory_quality_fixture.sh --require-tier-a-schema-valid --require-tier-a-grammar-conformant --min-cosine-margin 0.10 --min-distinct-l2 1e-6 --require-rerank-order m3,m1,m2 --min-ndcg 0.95 && scripts/test_response_composition_contract.sh --ranked-evidence --canonical-ir --citations --no-memory-mutation"}
-- {id: 3, tier: mechanical, check: "scripts/check_code_intelligence_ownership.sh --owner memory --core-code-history-schema --generic-code-event-ingest --forbid-core-git-imports --forbid-parallel-registry --require-blast-radius-provider"}
+- {id: 3, tier: mechanical, check: "scripts/check_code_intelligence_ownership.sh --owner memory --core-code-history-schema --generic-code-event-ingest --forbid-core-git-imports --forbid-git-memory-storage-ownership --forbid-parallel-registry --require-blast-radius-provider"}
 - {id: 4, tier: integration, check: "scripts/test_learning_skills_contract.sh --outcome-evidence --privacy --typed-proposal --approval --snapshot --rollback --protected-skill-invariants --audit"}
 - {id: 5, tier: hardware, check: "scripts/test_kb_synthesis_readiness.sh --profiles control,full --when-selected --require-provider-capability kb-synthesis --require-resource-manifest --quality-fixture tests/kb_synthesis/readiness.json --write-contract memory.canonical-change --forbid-direct-memory-storage-access --require-revision-provenance-auth-audit-rollback --require-principal-signed-change-digest --verify-execution-policy-trust-root --forbid-self-authorization --typed-unavailable --absent-from-core"}
 - {id: 6, tier: mechanical, check: "scripts/check_module_names.sh --forbid memory-tier-b,agent-eval,evals,bare-synthesis --allow-compatibility-records"}

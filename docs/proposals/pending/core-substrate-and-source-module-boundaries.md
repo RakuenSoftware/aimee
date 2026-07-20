@@ -72,25 +72,61 @@ and runtime surface named by the suite's absence manifest.
 
 ## Canonical module taxonomy
 
-The required modules are:
+The required set contains exactly eighteen module IDs:
 
-`module-runtime`, `config`, `ir`, `translation`, `protocols`, `gateway`, `memory`, `learning`,
-`routing`, `delegates`, `tools`, `workspace`, `skills`, `response-composition`, `vault`,
-`execution-policy`, and `audit`.
+1. `module-runtime`
+2. `config`
+3. `ir`
+4. `translation`
+5. `protocols`
+6. `gateway`
+7. `memory`
+8. `learning`
+9. `routing`
+10. `delegates`
+11. `tools`
+12. `workspace`
+13. `git`
+14. `skills`
+15. `response-composition`
+16. `vault`
+17. `execution-policy`
+18. `audit`
 
 Core infrastructure that is not a feature module is limited to application composition roots,
 small base/value primitives, platform shims, and generated contracts.
 
-The initial optional set is:
+The initial optional set contains exactly eight concrete module IDs:
 
-`plugin-loader`, `governance`, `workflows` (including triggers), `roundtable`, `kb-synthesis`,
-`runtime-web`, `control-web`, `benchmarks`, `git`, specialist analyzers/extractors, additional
-delegate/workspace/vault providers, delivery channels, speech adapters, and advanced sandbox/policy
-providers.
+1. `plugin-loader`
+2. `governance`
+3. `workflows`
+4. `roundtable`
+5. `kb-synthesis`
+6. `runtime-web`
+7. `control-web`
+8. `benchmarks`
+
+`workflows` owns the `triggers`, `cron`, and `event-activation` capabilities; those are not
+additional module IDs.
+
+The two enumerations above define the inventory's bootstrap contents. Implementation creates
+`tests/baselines/modules/canonical-inventory.yaml` as the single normative build/runtime inventory
+with schema version 1 as the first taxonomy implementation step, directly transcribing these
+enumerations. Before the Git child is accepted, the enumerations and core responsibility table must
+have set equality with that artifact. After child acceptance, descriptors and generated profiles
+must also have set equality. List order is editorial; dependency and build order come only from
+descriptors. Unknown keys, aliases, count drift, and projection mismatch fail acceptance.
+Enforcement is owned by acceptance ids 8 and 9 in
+`module-runtime-source-ownership-and-build.md`; failure blocks profile generation, every child
+migration slice, and CI success.
 
 Individual skill packages are optional content, not architectural modules. MCP and ACP adapters
 are required protocol implementations. A channel, backend, or provider does not become core merely
-because its core contract requires one reference implementation.
+because its core contract requires one reference implementation. Extension categories and
+hypothetical future implementations are not modules. A provider or adapter may remain optional
+behind a required module contract without becoming a module ID; entering the module taxonomy
+requires a concrete ID and an amendment to the canonical inventory.
 
 ## Product boundary
 
@@ -128,7 +164,7 @@ rather than making that safety property optional.
 2. [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)
    establishes descriptors, dependency enforcement, generated builds, documentation gates, and
    the physical source boundary.
-3. [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) defines the seventeen
+3. [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) defines the eighteen
    required module contracts and executable core round trip.
 4. [`memory-learning-and-inference-boundaries.md`](memory-learning-and-inference-boundaries.md)
    owns code intelligence, required inference, adaptive learning, skills, response composition,
@@ -142,6 +178,11 @@ rather than making that safety property optional.
    governance feature design and depends on proposals 2–5's core/module/product boundaries.
 7. [`large-refactor-delivery-and-compatibility.md`](large-refactor-delivery-and-compatibility.md)
    sequences the moves and defines compatibility, cleanup, recovery, and completion gates.
+
+`git-core-contract.md` is a required forthcoming child of proposal 3 and must be accepted before
+the Git migration slice begins. It owns Git API, event-production, mutation, security,
+compatibility, workspace/memory seams, and executable fixtures; this suite decision owns only
+Git's required-core classification and memory's continued ownership of code intelligence.
 
 Proposals 2–5 may be reviewed in parallel; proposal 6 follows their boundary decisions, and
 implementation follows the dependency order recorded in proposal 7. Approval of one child does not
@@ -183,3 +224,10 @@ Post-approval terminology amendments renamed optional `evals` to `benchmarks` an
 approved both amendments after governance ownership, dependency direction, absent-module behavior,
 and the core safety boundary were made normative. These amendments therefore retain the suite's
 roundtable-approved state.
+
+A further focused amendment promoted `git` to required core, fixed the inventory at eighteen
+required and eight optional module IDs, and preserved code-intelligence ownership in `memory`.
+Technical-writing review approved the final phased wording. Roundtable review rejected the earlier
+mixed taxonomy/implementation gate, then approved the revision after pre-child taxonomy checks and
+post-child Git implementation checks were separated; its final artifact reported no issues, with
+zero surviving findings after replay verification.
