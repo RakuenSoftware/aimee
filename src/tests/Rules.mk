@@ -162,6 +162,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-backend \
                $(TESTPREFIX)/unit-test-aimee-backend-bedrock \
                $(TESTPREFIX)/unit-test-kb-bedrock-dispatch \
+               $(TESTPREFIX)/unit-test-kb-bedrock-live \
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
                $(TESTPREFIX)/unit-test-aimee-ir-stream \
@@ -1673,6 +1674,15 @@ $(TESTPREFIX)/unit-test-aimee-backend-bedrock: $(OBJDIR)/tests/test_aimee_backen
 
 $(TESTPREFIX)/unit-test-kb-bedrock-dispatch: $(OBJDIR)/tests/test_kb_bedrock_dispatch.o \
                                       $(OBJDIR)/kb/kb_bedrock_egress.o \
+                                      $(OBJDIR)/server/aimee_backend_bedrock.o \
+                                      $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
+                                      $(OBJDIR)/modules/aws/aws_sigv4.o \
+                                      $(OBJDIR)/modules/aws/aws_eventstream.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-bedrock-live: $(OBJDIR)/tests/test_kb_bedrock_live.o \
+                                      $(OBJDIR)/kb/kb_bedrock_egress.o \
+                                      $(OBJDIR)/kb/http/kb_tls.o \
                                       $(OBJDIR)/server/aimee_backend_bedrock.o \
                                       $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
                                       $(OBJDIR)/modules/aws/aws_sigv4.o \
