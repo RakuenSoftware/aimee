@@ -43,7 +43,7 @@ int main(void)
 
    /* Seed N=1 inside a short tenant transaction. */
    assert(db2_tenant_scope_begin(&caller, 0) == 0);
-   assert(scalar("SELECT org_vault_put('org:test:p7-live',NULL,'bedrock','primary',1," 
+   assert(scalar("SELECT org_vault_put('org:test:p7-live',NULL,'bedrock','primary',1,"
                  "'\\x0102','\\x0304','\\x0506','\\x0708')") == 1);
    assert(db2_tenant_scope_commit() == 0);
 
