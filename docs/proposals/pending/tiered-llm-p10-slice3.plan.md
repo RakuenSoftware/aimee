@@ -1,3 +1,8 @@
+> **DEFERRED (2026-07-20):** This CA-key-in-vault slice is premature. P7 §3 forbids a
+> file-custody kb from holding the CA private key (file custody = keyless dev; the CA key
+> requires an external anchor). The anchor/seal foundation must land first; this plan is
+> revisited as the CA-key-behind-anchor slice afterward. See tiered-llm-p10-slice3b-anchor.plan.md.
+
 # P10/P7 slice 3 implementation plan — kb CA key behind the vault (P7 §7)
 
 Slice 3 of P10+P7. Branch off `testing` (P1, P3a, P10 slice 1, P10/P7 slice 2 merged).
