@@ -14,18 +14,19 @@ which changes should trigger its own validation.
 
 ## Historical ordering
 
-The checker examines every commit reachable between the Slice 1 cutoff and the checked-out event
-revision in topological order. Each commit is compared with its first parent. This includes PR-side
-commits as well as their synthetic merge commit, so a signal remains visible when a later commit
-reverts it.
+The checker walks the checked-out revision's first-parent chain between the Slice 1 cutoff and
+`HEAD`, oldest first. Each commit is compared with its first parent. On a pull request, GitHub's
+synthetic merge commit therefore exposes the proposed branch as a net delta from the feature-branch
+parent. On the feature branch, a signal and its later revert remain separate first-parent commits,
+so the revert does not erase the earlier signal.
 
-Historical presence of `src/modules/git/` at the cutoff is not a signal. Any later add, modification,
-deletion, type change, rename, or copy whose source or destination lies under that tree is a
-migration signal. Exact descriptor, generated Make/CMake, generated profile, and readiness paths
-from the pinned contract are signals too. Git output is NUL-delimited with explicit rename and copy
-detection. Even low-similarity moves surface as add+delete pairs and trigger. This source-tree sweep
-remains the conservative migration boundary until the deferred descriptor and generated-profile
-checks activate.
+Historical presence of `src/modules/git/` at the cutoff is not a signal. Any later add,
+modification, deletion, type change, rename, or copy whose source or destination lies under that
+tree is a migration signal. Exact descriptor, generated Make/CMake, generated profile, and
+readiness paths from the pinned contract are signals too. Git output is NUL-delimited with explicit
+rename and copy detection. Even low-similarity moves surface as add+delete pairs and trigger. This
+source-tree sweep remains the conservative migration boundary until the deferred descriptor and
+generated-profile checks activate.
 
 Every signal commit must have the Slice 2 merge commit
 `a3c4d413b6ce5f674994a6e6c4589ae2383819a4` as an ancestor of its first parent. This requires
@@ -42,10 +43,11 @@ Currently it contains `git-runtime-ready`. Under a declared root, added whole li
 - JSON: indentation, the quoted exact claim, optional horizontal space, `:`, optional space,
   `true`, and an optional comma, for example `"git-runtime-ready": true,`.
 
-Modified lines are considered through their added side. Deleted claims do not newly assert
-readiness. Binary line diffs do not claim readiness, although a binary file at an exact path or
-under `src/modules/git/` remains a path signal. Prose, substrings, case variants, false values,
-commented markers, and lines outside declared roots are inert.
+Only `.yaml`, `.yml`, and `.json` files can emit status-claim signals. Modified lines are considered
+through their added side. Deleted claims do not newly assert readiness. Binary line diffs do not
+claim readiness, although a binary file at an exact path or under `src/modules/git/` remains a path
+signal. Markdown and other prose, substrings, case variants, false values, commented markers, and
+lines outside declared roots are inert.
 
 ## Event binding
 

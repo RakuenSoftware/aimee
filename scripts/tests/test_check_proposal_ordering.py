@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import os
 from pathlib import Path
@@ -99,12 +100,21 @@ class ProposalOrderingTests(unittest.TestCase):
     def test_added_claim_ignores_deletion_context_and_binary(self) -> None:
         patterns = ordering.claim_patterns({"git-runtime-ready"})
         self.assertTrue(
-            ordering.added_claim_signal(b"+git-runtime-ready: true\n", patterns)
+            ordering.added_claim_signal(
+                b"+++ b/status.yaml\n+git-runtime-ready: true\n", patterns
+            )
         )
         self.assertFalse(
-            ordering.added_claim_signal(b"-git-runtime-ready: true\n", patterns)
+            ordering.added_claim_signal(
+                b"+++ b/status.yaml\n-git-runtime-ready: true\n", patterns
+            )
         )
         self.assertFalse(ordering.added_claim_signal(b"\xff\x00", patterns))
+        self.assertFalse(
+            ordering.added_claim_signal(
+                b"+++ b/status.md\n+git-runtime-ready: true\n", patterns
+            )
+        )
 
     def test_history_records_source_signal_even_after_revert(self) -> None:
         tmp, repo, cutoff = self.make_repo()
@@ -120,18 +130,17 @@ class ProposalOrderingTests(unittest.TestCase):
                 cutoff,
                 head,
                 exact_paths=set(),
-                status_roots=set(),
-                claims=set(),
+                root_claims=[],
             )
             self.assertEqual(len(signals), 2)
-            self.assertTrue(signals[0][2][0].endswith("src/modules/git/example.c"))
+            self.assertTrue(signals[0][2][0][1].endswith("src/modules/git/example.c"))
         finally:
             tmp.cleanup()
 
     def test_history_records_claim_then_removal(self) -> None:
         tmp, repo, cutoff = self.make_repo()
         try:
-            doc = repo / "docs/modules/git.md"
+            doc = repo / "docs/modules/git.yaml"
             doc.parent.mkdir(parents=True)
             doc.write_text("git-runtime-ready: true\n", encoding="utf-8")
             self.commit(repo, "claim")
@@ -142,11 +151,51 @@ class ProposalOrderingTests(unittest.TestCase):
                 cutoff,
                 head,
                 exact_paths=set(),
-                status_roots={"docs/modules"},
-                claims={"git-runtime-ready"},
+                root_claims=[("docs/modules", "git-runtime-ready")],
             )
             self.assertEqual(len(signals), 1)
-            self.assertEqual(signals[0][2], ["status-claim"])
+            self.assertEqual(
+                signals[0][2], [("status-claim", "docs/modules:git-runtime-ready")]
+            )
+        finally:
+            tmp.cleanup()
+
+    def test_claim_remains_bound_to_its_declared_root(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            doc = repo / "docs/root-b/status.yaml"
+            doc.parent.mkdir(parents=True)
+            doc.write_text("claim-a: true\n", encoding="utf-8")
+            head = self.commit(repo, "wrong-root claim")
+            signals = ordering.scan_history(
+                repo,
+                cutoff,
+                head,
+                exact_paths=set(),
+                root_claims=[("docs/root-a", "claim-a"), ("docs/root-b", "claim-b")],
+            )
+            self.assertEqual(signals, [])
+        finally:
+            tmp.cleanup()
+
+    def test_path_and_claim_are_distinct_signal_classes(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("signal\n", encoding="utf-8")
+            claim = repo / "docs/modules/status.yaml"
+            claim.parent.mkdir(parents=True)
+            claim.write_text("git-runtime-ready: true\n", encoding="utf-8")
+            head = self.commit(repo, "two signals")
+            signals = ordering.scan_history(
+                repo,
+                cutoff,
+                head,
+                exact_paths=set(),
+                root_claims=[("docs/modules", "git-runtime-ready")],
+            )
+            self.assertEqual({item[0] for item in signals[0][2]}, {"path", "status-claim"})
         finally:
             tmp.cleanup()
 
@@ -162,8 +211,7 @@ class ProposalOrderingTests(unittest.TestCase):
                 cutoff,
                 head,
                 exact_paths={"src/modules/git/module.yaml"},
-                status_roots=set(),
-                claims=set(),
+                root_claims=[],
             )
             self.assertEqual(len(signals), 1)
         finally:
@@ -184,8 +232,7 @@ class ProposalOrderingTests(unittest.TestCase):
                 cutoff,
                 head,
                 exact_paths=set(),
-                status_roots=set(),
-                claims=set(),
+                root_claims=[],
             )
             ordering.enforce_signal_precedence(repo, anchor, signals)
             with self.assertRaisesRegex(ordering.OrderingError, "git-contract-ordering"):
@@ -209,11 +256,12 @@ class ProposalOrderingTests(unittest.TestCase):
                 cutoff,
                 head,
                 exact_paths=set(),
-                status_roots=set(),
-                claims=set(),
+                root_claims=[],
             )
             self.assertEqual(len(signals), 1)
-            self.assertTrue(any("src/modules/git/example.c" in item for item in signals[0][2]))
+            self.assertTrue(
+                any("src/modules/git/example.c" in item[1] for item in signals[0][2])
+            )
         finally:
             tmp.cleanup()
 
@@ -237,14 +285,50 @@ class ProposalOrderingTests(unittest.TestCase):
             clear=True,
         ), self.assertRaisesRegex(ordering.OrderingError, "event-ref"):
             ordering.validate_event(head)
+        for missing in ("GITHUB_SHA", "GITHUB_REF"):
+            env = {
+                "GITHUB_EVENT_NAME": "push",
+                "GITHUB_REF": "refs/heads/feature/core-modularization",
+                "GITHUB_SHA": head,
+            }
+            env.pop(missing)
+            expected = "event-head" if missing == "GITHUB_SHA" else "event-ref"
+            with (
+                self.subTest(missing=missing),
+                mock.patch.dict(os.environ, env, clear=True),
+                self.assertRaisesRegex(ordering.OrderingError, expected),
+            ):
+                ordering.validate_event(head)
+
+    def test_contract_checker_loader_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "checker.py"
+            target.write_text("pass\n", encoding="utf-8")
+            link = Path(tmp) / "link.py"
+            link.symlink_to(target)
+            with mock.patch.object(ordering, "CONTRACT_CHECKER", link), self.assertRaisesRegex(
+                ordering.OrderingError, "checker-load"
+            ):
+                ordering.load_contract_checker()
+
+    def test_git_execution_failure_is_fail_closed(self) -> None:
+        with mock.patch.object(ordering, "GIT", "/definitely/missing/git"), self.assertRaisesRegex(
+            ordering.OrderingError, "git-exec"
+        ):
+            ordering.git(REPO_ROOT, "status")
 
     def test_live_discovery_equals_immutable_slice2_blob(self) -> None:
         contract_checker = ordering.load_contract_checker()
-        pinned = ordering.canonical_contract(REPO_ROOT, contract_checker)
+        pinned, pinned_handoff = ordering.canonical_metadata(REPO_ROOT, contract_checker)
         live = contract_checker.load_validated_contract(
             REPO_ROOT, require_status="roundtable-approved", check_git=True
         )
-        self.assertEqual(ordering.discovery_view(live), ordering.discovery_view(pinned))
+        ordering.validate_discovery(live, pinned, pinned_handoff, pinned_handoff)
+
+        drifted_handoff = copy.deepcopy(pinned_handoff)
+        drifted_handoff["receiver"] = "changed"
+        with self.assertRaisesRegex(ordering.OrderingError, "discovery-drift"):
+            ordering.validate_discovery(live, pinned, drifted_handoff, pinned_handoff)
 
 
 if __name__ == "__main__":

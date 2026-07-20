@@ -93,6 +93,12 @@ jobs:
           python-version: "3.12"
       - name: Enforce Git proposal ordering
         run: python3 -I -S scripts/check_proposal_ordering.py
+      - name: Prove event revision binding
+        env:
+          GITHUB_EVENT_NAME: push
+          GITHUB_REF: refs/heads/feature/core-modularization
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 -I -S scripts/check_proposal_ordering.py
       - name: Enforce from a non-repository working directory
         run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_proposal_ordering.py"
       - name: Test proposal-ordering failure modes
