@@ -84,7 +84,7 @@ small base/value primitives, platform shims, and generated contracts.
 The initial optional set is:
 
 `plugin-loader`, `workflows` (including triggers), `roundtable`, `kb-synthesis`, `runtime-web`,
-`control-web`, `evals`, `git`, specialist analyzers/extractors, additional delegate/workspace/vault
+`control-web`, `benchmarks`, `git`, specialist analyzers/extractors, additional delegate/workspace/vault
 providers, delivery channels, speech adapters, and advanced sandbox/policy providers.
 
 Individual skill packages are optional content, not architectural modules. MCP and ACP adapters

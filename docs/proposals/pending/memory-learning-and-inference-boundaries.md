@@ -84,10 +84,11 @@ user-visible proposal, approval policy, audit event, snapshot, and rollback path
 If background skill curation is proposed again, this proposal owns its admission contract. A
 replacement must use real activation/outcome evidence, include project and user scope, use memory
 embedding/reranking, emit a typed user-visible proposal, require approval, snapshot and roll back
-changes, protect pinned/bundled/user skills, audit every mutation, pass offline evals, and have
+changes, protect pinned/bundled/user skills, audit every mutation, pass offline benchmarks, and have
 exactly one scheduler. The curator-deletion proposal does not authorize a replacement.
 
-Offline benchmarks, datasets, ablations, and regression runners belong to optional `evals`.
+Offline benchmark runners, datasets, ablations, and regression suites belong to optional
+`benchmarks`.
 Production adaptation belongs to `learning`; memory quality fixtures belong to memory test support.
 There is no mixed `agent-eval` module.
 
@@ -106,5 +107,5 @@ There is no mixed `agent-eval` module.
 - {id: 3, tier: mechanical, check: "scripts/check_code_intelligence_ownership.sh --owner memory --core-code-history-schema --generic-code-event-ingest --forbid-core-git-imports --forbid-parallel-registry --require-blast-radius-provider"}
 - {id: 4, tier: integration, check: "scripts/test_learning_skills_contract.sh --outcome-evidence --privacy --typed-proposal --approval --snapshot --rollback --protected-skill-invariants --audit"}
 - {id: 5, tier: hardware, check: "scripts/test_kb_synthesis_readiness.sh --profiles control,full --when-selected --require-provider-capability kb-synthesis --require-resource-manifest --quality-fixture tests/kb_synthesis/readiness.json --write-contract memory.canonical-change --forbid-direct-memory-storage-access --require-revision-provenance-auth-audit-rollback --require-principal-signed-change-digest --verify-execution-policy-trust-root --forbid-self-authorization --typed-unavailable --absent-from-core"}
-- {id: 6, tier: mechanical, check: "scripts/check_module_names.sh --forbid memory-tier-b,agent-eval,bare-synthesis --allow-compatibility-records"}
+- {id: 6, tier: mechanical, check: "scripts/check_module_names.sh --forbid memory-tier-b,agent-eval,evals,bare-synthesis --allow-compatibility-records"}
 ```
