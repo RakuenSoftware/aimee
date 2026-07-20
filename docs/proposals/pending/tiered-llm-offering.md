@@ -5,7 +5,7 @@
 
 ## Delivery status (as of 2026-07-20)
 
-20 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
+21 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
 `testing`. Completed per-slice implementation plans live in `docs/proposals/done/`.
 
 | P | Status | Merged slices | Remaining |
@@ -16,13 +16,13 @@
 | **P4** Budgets + rate limits | ✅ done | **P4a** budget reservation core, **P4b** keyed rate limiter (both concurrency-proven) | — |
 | **P5** OIDC control plane | 🟡 integration | authenticated management route, registry/heartbeat, mTLS client propagation | live two-node server↔kb topology + OIDC propagation |
 | **P6** Bedrock + vendor breadth | 🟡 pure cores done | **P6a** SigV4/STS auth, **P6b** eventstream decoder, **P6c-catalog** routing+validation, **P6c-ir** Converse↔IR, **P6c-stream** stream→delta | **P6c-egress** driver dispatch + native InvokeModel + pricing rows |
-| **P7** Hardened kb vault | 🟡 integration | seal/PolicyNV, PKCS#11, KMS helper, CA-key custody, DEK re-wrap, signed-HWM + crash-resumable rotation core, fenced provision/probe/revoke/retire driver, steady-state signed-HWM use-in-place + WORM admission, disabled prepared-TPM2 reseal helper | compromise admission barrier, TPM2 reseal DB staging/orchestration/reconciliation |
+| **P7** Hardened kb vault | 🟡 integration | seal/PolicyNV, PKCS#11, KMS helper, CA-key custody, DEK re-wrap, signed-HWM + crash-resumable rotation core, fenced provision/probe/revoke/retire driver, steady-state signed-HWM use-in-place + WORM admission, disabled prepared-TPM2 reseal helper, primary maintenance admission barrier | TPM2 reseal DB staging/orchestration/reconciliation |
 | **P8** thin-client mTLS | 🟡 partial | **P8a** per-request durable cert revocation (invariant #5) | **P8b/c** client-cert presentation + ramp + enrollment |
 | **P9** Telemetry tiering | 🟡 partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
 | **P10** Shared vault core | ✅ done | core extraction, kb Postgres store, custody selection + seal barrier | — (hardening tracked under P7) |
 
 Remaining work is integration/topology (P2b egress, P5 mgmt channel, P6c-egress, P8b/c) plus
-the remaining P7 compromise/reseal maintenance — validatable on the dedicated integration
+the remaining P7 reseal maintenance — validatable on the dedicated integration
 environment (a throwaway TPM2-equipped CT). The tpm2
 custody provider was validated against a software TPM2 (swtpm), which exercises the identical
 TPM2 2.0 API/semantics as silicon.

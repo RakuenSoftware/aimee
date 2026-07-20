@@ -1,6 +1,6 @@
 # P7-reseal-b primary vault maintenance barrier
 
-- **State:** proposed implementation slice.
+- **State:** delivered.
 - **Depends on:** signed-HWM steady-state admission and P7-reseal-a.
 
 ## Scope
