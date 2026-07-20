@@ -32,7 +32,8 @@ validated future object, then revalidates generation, policy, digest, and parent
 durability. Mutation failures never inherit an earlier successful status result.
 All entry and exit paths clear the cached KEK and leave the provider sealed.
 
-`abort` is accepted only for the exact PREPARED operation. `cleanup` requires the
+`abort` mutates only the exact PREPARED operation and idempotently repairs parent
+durability for the same receipt after removal. `cleanup` requires the
 typed terminal-completed authorization and an exact INSTALLED operation. Missing,
 unsafe, malformed, foreign, or generation-inconsistent artifacts fail closed as
 CORRUPT or CONFLICT; CLEANED is exact idempotent cleanup status and is not accepted

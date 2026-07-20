@@ -1361,6 +1361,15 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
       }
       if (nv == receipt->old_generation)
       {
+         uint8_t active[32];
+         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation,
+                                       active) != 0 ||
+             memcmp(active, receipt->predecessor_digest, 32) != 0 ||
+             fsync_parent(g_ctx.blob_path) != 0)
+         {
+            *out = VAULT_TPM2_RESEAL_CONFLICT;
+            return VAULT_TPM2_RESEAL_INTEGRITY;
+         }
          *out = VAULT_TPM2_RESEAL_ABSENT;
          return VAULT_TPM2_RESEAL_OK;
       }
@@ -1609,10 +1618,12 @@ int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt,
    reseal_mark_sealed();
    if (ensure_ready(&g_ctx) == 0 && ensure_primary(&g_ctx, 0) == 0 &&
        (lockfd = reseal_lock()) >= 0 &&
-       reseal_status_locked(receipt, secret, &st, NULL) == 0 && st == VAULT_TPM2_RESEAL_PREPARED)
+       reseal_status_locked(receipt, secret, &st, NULL) == 0 &&
+       (st == VAULT_TPM2_RESEAL_PREPARED || st == VAULT_TPM2_RESEAL_ABSENT))
    {
       char path[1152];
-      if (reseal_path(path, sizeof(path), ".reseal.bundle") == 0 && unlink(path) == 0)
+      if (reseal_path(path, sizeof(path), ".reseal.bundle") == 0 &&
+          (st == VAULT_TPM2_RESEAL_ABSENT || unlink(path) == 0))
       {
          rc = fsync_parent(path) == 0 ? VAULT_TPM2_RESEAL_OK : VAULT_TPM2_RESEAL_ERR;
       }
@@ -1666,8 +1677,9 @@ int vault_custody_tpm2_reseal(const uint8_t new_kek[VAULT_KEK_LEN], const char *
    if ((lockfd = reseal_lock()) < 0)
       goto out;
    char pending[1152];
+   struct stat pending_st;
    if (reseal_path(pending, sizeof(pending), ".reseal.bundle") != 0 ||
-       access(pending, F_OK) == 0)
+       lstat(pending, &pending_st) == 0 || errno != ENOENT)
       goto out; /* compatibility helper never bypasses a prepared operation */
    if (ensure_primary(&g_ctx, 0) != 0) /* the primary must already exist (provisioned) */
       goto out;
