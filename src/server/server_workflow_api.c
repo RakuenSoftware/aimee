@@ -956,6 +956,12 @@ int wf_api_item_stop(const char *id, int is_operator, char *resp, int cap)
       return err(resp, cap, 500, "could not stop run");
    db1_lifecycle_event_add(id, wi.current_stage, "abandon", wf_actor(), "stopped by operator", "",
                            0);
+   /* Cascade to foreach.workflow child slices: without this an orphaned `.sN`
+    * child keeps being scheduled and re-dispatches delegates forever. */
+   int abandoned_children = db1_work_item_abandon_children(id);
+   if (abandoned_children > 0)
+      db1_lifecycle_event_add(id, wi.current_stage, "abandon", wf_actor(),
+                              "cascade-abandoned child slices", "", 0);
    if (db1_work_item_get(id, &wi) != 1)
       return err(resp, cap, 500, "stopped but could not reload");
    return emit(item_to_json(&wi), resp, cap);
@@ -968,9 +974,11 @@ int wf_api_item_delete(const char *id, int is_operator, char *resp, int cap)
    if (rc)
       return rc;
    /* Auto-stop an in-flight run first: mark it terminal so the scheduler's
-    * orphan-sweep reclaims its worktree before the row disappears. */
+    * orphan-sweep reclaims its worktree before the row disappears. Cascade to
+    * child slices so none is left orphaned-but-active (re-dispatching forever). */
    if (!item_terminal(&wi))
       db1_work_item_set_terminal(id, "abandoned");
+   (void)db1_work_item_abandon_children(id);
 
    /* Best-effort unlink the server-minted proposal artifact, confined to
     * $AIMEE_HOME/workflows/proposals via a dirfd + a slash-free basename (same

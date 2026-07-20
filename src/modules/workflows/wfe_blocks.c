@@ -1568,6 +1568,8 @@ static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
    switch (st)
    {
    case WFE_CI_SUCCESS:
+   case WFE_CI_NO_CHECKS: /* forge reached, no checks configured on this branch -> nothing
+                           * to gate on, advance (an intermediate slice->feature PR). */
    {
       char h[80];
       snprintf(h, sizeof h, "%s.out", node->id);

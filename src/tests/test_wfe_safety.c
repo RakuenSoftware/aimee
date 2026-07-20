@@ -168,6 +168,20 @@ int main(void)
    g_ci = WFE_CI_PENDING;
    assert(run_fresh("c") == 2);
 
+   /* C2: forge reachable but NO checks configured on the branch (an intermediate
+    *     slice->feature PR no CI targets) -> nothing to gate on -> advances like a
+    *     green result -> accepted. Distinct from WFE_CI_NONE, which parks. */
+   g_ci = WFE_CI_NO_CHECKS;
+   g_mergeable = 1;
+   g_is_merged = 0;
+   g_merge = WFE_MERGE_OK;
+   assert(run_fresh("c2") == 1);
+
+   /* C3: genuinely undetermined CI (forge error / unreachable) -> park, never
+    *     advances on an unknown state. */
+   g_ci = WFE_CI_NONE;
+   assert(run_fresh("c3") == 2);
+
    /* D: merge conflict -> check.mergeable loops -> pending_human */
    g_ci = WFE_CI_SUCCESS;
    g_mergeable = 0;

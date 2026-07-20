@@ -418,6 +418,31 @@ int db1_work_item_set_terminal(const char *wi, const char *state)
    return rc == SQLITE_DONE ? 0 : -1;
 }
 
+int db1_work_item_abandon_children(const char *parent_id)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !parent_id || !parent_id[0])
+      return -1;
+   /* Terminating a parent build run must terminate its foreach.workflow child
+    * slices too: an orphaned non-terminal child keeps being scheduled and
+    * re-dispatches delegates forever (observed live — an abandoned parent whose
+    * `.s0` slice looped to no end, leaking a container per round). Mark every
+    * child not already terminal as 'abandoned'. Slices are leaf runs, so one
+    * level suffices. */
+   static const char *sql =
+       "UPDATE lifecycle_work_item SET state='abandoned', pause_reason='', paused_state='', "
+       "updated_at=datetime('now') "
+       "WHERE parent_id=? AND state NOT IN ('accepted','rejected','abandoned')";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, parent_id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(st);
+   return changed;
+}
+
 int db1_work_item_gate_apply(const char *wi, const char *expect_stage, const char *expect_hash,
                              const char *new_stage, const char *terminal_state)
 {

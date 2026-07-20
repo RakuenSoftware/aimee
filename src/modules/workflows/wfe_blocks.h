@@ -30,7 +30,12 @@ typedef enum
    WFE_CI_SUCCESS = 0, /* all checks green */
    WFE_CI_FAILURE,     /* any failed/error/cancelled/timed_out */
    WFE_CI_PENDING,     /* still running */
-   WFE_CI_NONE         /* no checks / unknown / unreachable -> fail closed */
+   WFE_CI_NONE,        /* unknown / unreachable / forge error -> fail closed (park) */
+   WFE_CI_NO_CHECKS    /* forge reached, but NO checks configured on this PR's branch
+                        * (e.g. an intermediate slice->feature PR CI never targets) ->
+                        * nothing to gate on, so advance (mirrors git_pr_ci_permits_merge,
+                        * which already treats GIT_PR_CI_NONE as mergeable). Distinct from
+                        * WFE_CI_NONE, which is a genuinely-undetermined state. */
 } wfe_ci_status_t;
 
 typedef enum

@@ -139,6 +139,12 @@ static wfe_ci_status_t live_ci_status(const char *repo, const char *pr)
       /* unknown -> NONE -> park (never advance) */
       return WFE_CI_NONE;
    case GIT_PR_CI_NONE:
+      /* The forge WAS reachable and reported zero checks on this PR's head — an
+       * intermediate slice->feature PR that no CI workflow targets. There is
+       * nothing to wait for, so this must not park forever; advance. The git layer
+       * already treats GIT_PR_CI_NONE as merge-permitting. Only a genuinely
+       * undetermined result (ERROR above, or forge disabled) fails closed. */
+      return WFE_CI_NO_CHECKS;
    default:
       return WFE_CI_NONE;
    }
