@@ -14,7 +14,12 @@ int kb_egress_bedrock_dispatch(const kb_egress_admission_t *a,const kb_bedrock_t
 int kb_egress_admit_dispatch(const kb_egress_admission_t *a, kb_egress_dispatch_fn fn, void *ctx,
                              char *out, size_t cap)
 {
-   if (!a || !fn || !a->origin_cn || !a->request_id || !a->model || !a->reserve_max || !out ||
+   /* The credential slot is authoritative catalog state.  Requiring it at
+    * admission prevents a caller from reaching a dispatch seam with an
+    * unbound/implicit credential (which would otherwise be easy to turn into
+    * a credential-redirection or SSRF bug in a future driver). */
+   if (!a || !fn || !a->origin_cn || !a->request_id || !a->model || !a->cred_slot ||
+       !a->cred_slot[0] || !a->reserve_max || !a->reserve_max[0] || !out ||
        !cap || !kb_vault_live_keys_allowed())
    {
       if (out && cap)
