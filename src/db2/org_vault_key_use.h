@@ -9,9 +9,11 @@
 #define DB2_VAULT_KEY_USE_ERROR          -1
 #define DB2_VAULT_KEY_USE_MISSING        -2
 #define DB2_VAULT_KEY_USE_INTEGRITY      -3
+#define DB2_VAULT_KEY_USE_SEALED         -4
 
 typedef struct
 {
+   int64_t seal_epoch;
    int64_t version;
    uint8_t wrapped_dek[40];
    uint8_t nonce[12];
@@ -27,7 +29,8 @@ int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *
                                 int64_t version, db2_vault_key_use_envelope_t *out);
 /* Candidate returns MISSING when no signed exact-current row exists. */
 
-/* Returns 1 for a new durable admission, 0 for an exact replay, -1 on error. */
+/* Returns 1 for a new durable admission, 0 for an exact replay, or a typed
+ * negative result. out->seal_epoch is populated for both success cases. */
 int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *authenticated_origin,
                             const char *use_id, const char *key_id, const char *principal,
                             const char *agent, const char *cred, int64_t version,

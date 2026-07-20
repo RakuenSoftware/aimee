@@ -16,6 +16,14 @@ BEGIN
 
   -- DML on existing + future tables; DDL (owner) excluded.
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO aimee_kb_runtime;
+  -- The primary maintenance barrier is owner-only even though the legacy grant
+  -- bootstrap is intentionally broad.  Keep this revoke adjacent so reapplication
+  -- can never restore a runtime mutation or observation path.
+  REVOKE ALL ON TABLE kb_vault_control FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
   ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_kb_runtime;
@@ -138,6 +146,11 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) TO aimee_kb_runtime;
   REVOKE SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON org_vault_key_use_intent FROM aimee_kb_runtime;
+  REVOKE ALL ON TABLE kb_vault_control FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) TO aimee_kb_runtime;
 

@@ -12,7 +12,8 @@ exposes no maintenance-start route or operator command.
 
 ## Control row and privilege boundary
 
-Add singleton `kb_vault_control` with a checked singleton key, `sealed`, positive
+Add singleton `kb_vault_control` with
+`singleton SMALLINT PRIMARY KEY DEFAULT 1 CHECK (singleton = 1)`, `sealed`, positive
 `seal_epoch`, `maintenance_kind`, `maintenance_id`, nonnegative `fencing_token`,
 and `updated_at`. An unsealed row cannot carry maintenance identity. Seed it
 idempotently. Enable RLS with no policy; revoke all table access from PUBLIC and
@@ -22,11 +23,20 @@ schema reapplication cannot restore runtime access.
 
 Add internal `org_vault_control_require_open() RETURNS bigint`, VOLATILE,
 SECURITY DEFINER, pinned `search_path`, revoked from PUBLIC and not granted to the
-runtime role. It selects the singleton `FOR SHARE`, returns `seal_epoch`, and raises
+runtime role. It first acquires the fixed-domain shared transaction advisory gate,
+then selects the singleton `FOR SHARE`, returns `seal_epoch`, and raises
 SQLSTATE 55000 with stable `org_vault_control: sealed` classification when the row
 is missing, sealed, or in maintenance. The row-share lock is retained until caller
 transaction commit and conflicts with the future orchestrator's control-row
 `FOR UPDATE` transition.
+
+Add owner/orchestrator-only `org_vault_control_lock_exclusive() RETURNS bigint`,
+also revoked from PUBLIC and runtime. It acquires the matching fixed 64-bit
+exclusive transaction advisory gate before locking the singleton `FOR UPDATE` and
+returns the observed epoch. It mutates nothing. Every later control-row transition
+must begin through this helper; direct control-row writes are schema-owner test
+fixtures only. Shared-to-exclusive lock upgrade is forbidden. The fixed advisory
+key is identical in both function definitions and pinned by schema introspection.
 
 Do not add maintenance begin/clear functions yet: P7-reseal-c/d must atomically
 bind the barrier to an operation and WORM intent. Tests may mutate the row only as
@@ -76,19 +86,24 @@ The initial complete inventory is:
 `org_vault_key_use_admit`.
 
 Normative lock order is: input validation; plain MVCC lookup needed for auth;
-control-row `FOR SHARE`; per-use/slot advisory lock; row locks; DML. Claimed
+control advisory gate; control-row lock; per-use/slot advisory lock; row locks;
+DML. Claimed
 rotation functions that currently lock before auth are changed to plain lookup
 and auth, barrier acquisition, then locked re-read. Claimed wrappers must not hold
 a rotation-row lock while delegating to a nested function that acquires a slot
 advisory lock: they authenticate from a plain snapshot, acquire the barrier, invoke
 the advisory-locking operation, and only then lock/re-read for their own mutation.
+That locked re-read must revalidate claim owner/token and expected state and raise
+on mismatch so the nested mutation and WORM append roll back atomically.
 This prevents deadlock with the future orchestrator, which takes control
 `FOR UPDATE` before inventory locks.
 
-The explicitly allowed read-only set includes `org_vault_rotation_get` along with
-salt/check reads, current/list/has/current-wraps, rotation authorization, and
-key-use candidate. These return ciphertext or metadata only and neither admit
-plaintext use nor mutate authoritative state.
+The explicitly allowed read-only set is `org_vault_salt_read`,
+`org_vault_kek_check_read`, `org_vault_get_current`, `org_vault_has`,
+`org_vault_list`, `org_vault_list_principals`, `org_vault_current_wraps`,
+`org_vault_rotation_authorized`, `org_vault_rotation_get`, and
+`org_vault_key_use_candidate`. These return ciphertext or metadata only and
+neither admit plaintext use nor mutate authoritative state.
 
 ## Validation
 
@@ -102,7 +117,11 @@ plaintext use nor mutate authoritative state.
   and WORM detail carry the exact epoch.
 - Schema introspection pins the exact 19-function protected set, asserts every
   member contains a direct helper call, pins the explicit read-only set, and scans
-  direct writers of vault authoritative tables for additions or omissions.
+  direct writers of vault authoritative tables for additions or omissions. It
+  also asserts the helper call text precedes every advisory lock, `FOR UPDATE`,
+  and authoritative DML token in each protected function definition.
+- The two control helpers are the only control functions; introspection pins their
+  identical fixed advisory key, ACLs, and advisory-before-row ordering.
 - Separate-session concurrency gate: an admitted transaction's `FOR SHARE` blocks
   barrier `FOR UPDATE` until commit; a committed barrier makes racing key-use and
   mutation calls wait then reject without side effects; a many-admitter race has
