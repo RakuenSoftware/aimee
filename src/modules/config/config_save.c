@@ -1124,9 +1124,13 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "economizer", econ_tier_name(cfg->economizer_tier));
 
    /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,
-    * unit_retry 2, unit_max 16, ci_retry_max 2). */
+    * unit_retry 2, unit_max 16, ci_retry_max 2; caps: max_turns 300, max_wall 1800,
+    * stale_abandon 3600, concurrency 8, auto_resume ON, max_resumes 50). */
    if (cfg->autonomy_skeptics != 0 || cfg->autonomy_fanout != 0 || cfg->autonomy_unit_retry != 2 ||
-       cfg->autonomy_unit_max != 16 || cfg->autonomy_ci_retry_max != 2)
+       cfg->autonomy_unit_max != 16 || cfg->autonomy_ci_retry_max != 2 ||
+       cfg->autonomy_max_turns != 300 || cfg->autonomy_max_wall_secs != 1800 ||
+       cfg->autonomy_stale_abandon_secs != 3600 || cfg->autonomy_concurrency != 8 ||
+       cfg->autonomy_auto_resume_cap_parks != 1 || cfg->autonomy_max_resumes != 50)
    {
       cJSON *autonomy = cJSON_AddObjectToObject(root, "autonomy");
       if (cfg->autonomy_skeptics != 0)
@@ -1139,6 +1143,19 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(autonomy, "unit_max", cfg->autonomy_unit_max);
       if (cfg->autonomy_ci_retry_max != 2)
          cJSON_AddNumberToObject(autonomy, "ci_retry_max", cfg->autonomy_ci_retry_max);
+      if (cfg->autonomy_max_turns != 300)
+         cJSON_AddNumberToObject(autonomy, "max_turns", cfg->autonomy_max_turns);
+      if (cfg->autonomy_max_wall_secs != 1800)
+         cJSON_AddNumberToObject(autonomy, "max_wall_secs", cfg->autonomy_max_wall_secs);
+      if (cfg->autonomy_stale_abandon_secs != 3600)
+         cJSON_AddNumberToObject(autonomy, "stale_abandon_secs", cfg->autonomy_stale_abandon_secs);
+      if (cfg->autonomy_concurrency != 8)
+         cJSON_AddNumberToObject(autonomy, "concurrency", cfg->autonomy_concurrency);
+      if (cfg->autonomy_auto_resume_cap_parks != 1)
+         cJSON_AddBoolToObject(autonomy, "auto_resume_cap_parks",
+                               cfg->autonomy_auto_resume_cap_parks);
+      if (cfg->autonomy_max_resumes != 50)
+         cJSON_AddNumberToObject(autonomy, "max_resumes", cfg->autonomy_max_resumes);
    }
 
    /* Session/worktree cleanup policy (only save if non-default) */
