@@ -118,3 +118,64 @@ No rotate/anti-rollback (tpm2b), no WORM key-use audit, no PCR policy, no pkcs11
 move, no use-in-place DEK crypto, no real-hardware TPM (swtpm is the complete API/semantics
 target). Pure `tpm2` seal-barrier custody provider, build-guarded, validated on swtpm, flipping
 `kb_vault_live_keys_allowed` on a genuine external anchor.
+
+## v2 refinements (roundtable-converged; TPM2/ESAPI correctness — the crux)
+
+- **Unseal auth = `userWithAuth` object authValue, NOT a PolicyAuthValue session.** The sealed
+  keyedhash has `userWithAuth=SET`, `authValue` = the operator UNSEAL SECRET. Unseal is
+  `Esys_Load` → `Esys_TR_SetAuth(esys, sealedObj, &authValue)` → `Esys_Unseal(esys, sealedObj,
+  <session>, ...)`. (The v1 "set the policy session's auth to the secret" was ESAPI-wrong — the
+  authValue is set ON THE OBJECT via Esys_TR_SetAuth; the session enforces the auth. Using
+  `userWithAuth` directly is simpler + correct and avoids a PolicyAuthValue-digest mismatch.
+  PCR-policy binding stays a documented tpm2b/later option.)
+- **Sealed keyedhash template pinned:** `type=KEYEDHASH`, scheme `TPM2_ALG_NULL` (no sign/no
+  decrypt — a pure sealed-data object), `objectAttributes = fixedTPM | fixedParent |
+  userWithAuth` (NO `sensitiveDataOrigin` — WE supply the KEK as `inSensitive.data`; NO
+  `adminWithPolicy`), and **`noDA` CLEAR so TPM dictionary-attack protection is ON**. `authPolicy`
+  empty. This forbids migrating the blob to another TPM/parent and enforces authValue-only use.
+- **The unseal SESSION is SALTED + response-parameter-ENCRYPTED.** `Esys_Unseal` returns the KEK
+  as a TPM response; an unsalted/unencrypted session would expose it in PLAINTEXT over the TCTI
+  transport (the swtpm TCP socket / a hardware bus). So unseal uses an **HMAC session salted to a
+  transient ECC key** (created in the NULL hierarchy or the primary) with
+  `TPMA_SESSION_encrypt` set on the response → the unsealed KEK is transport-encrypted TPM→caller.
+  (This is the load-bearing confidentiality control; the on-disk blob being sealed is NOT enough.)
+- **The operator secret is a HIGH-ENTROPY credential, not a password.** ≥256-bit, used directly
+  as the authValue (an HKDF domain-separation step is fine but is NOT password-hardening and none
+  is needed because it is not a human password). DA protection stays ON (bounds any online
+  guessing); because the secret is high-entropy, lockout is not an operational risk in practice —
+  document the recovery (`tpm2_dictionarylockout` with the lockout auth) for completeness.
+- **Persistent primary — VERIFIED idempotency, not blind reuse.** The primary is created from a
+  FIXED, deterministic template (Owner hierarchy, ECC P-256 or RSA-2048, fixed attributes, empty
+  unique) so its Name is deterministic. On init: `Esys_ReadPublic` the configured persistent
+  handle; recompute the expected Name from the fixed template and REQUIRE a match — a mismatched/
+  absent/attacker-provisioned object → FAIL CLOSED (never seal/unseal under an unknown parent).
+  Provisioning creates the primary + evicts it only if the handle is empty.
+- **Provisioning is STRICTLY CREATE-ONCE → no rollback surface in tpm2a.** Provision REFUSES if a
+  blob already exists (re-provision requires an explicit destroy). With exactly ONE valid blob
+  generation, restoring an "old" blob is a no-op (there is no older generation) — so the NV
+  monotonic-counter anti-rollback is genuinely only needed once ROTATE (multi-generation) lands
+  (tpm2b). This closes the Q6 rollback concern for this slice.
+- **Blob persistence is crash-safe + hostile-path-safe:** marshal `TPM2B_PUBLIC` + `TPM2B_PRIVATE`
+  (via `Tss2_MU_*`) to a temp file `O_CREAT|O_EXCL|O_NOFOLLOW` 0600, `fsync`, atomic `rename`;
+  load bounds-checks the file size + unmarshals defensively (reject truncated/oversized). The blob
+  is confidentiality/integrity-protected by the TPM (useless without this TPM's primary), so on-
+  disk storage is safe; a persistent-handle (in-TPM NV) alternative is a documented later option.
+- **Full ESAPI/TCTI lifecycle:** `Esys_FlushContext` every transient object + session on EVERY
+  path incl. errors; `Esys_TR_Close` persistent ESYS_TR references; `Esys_Free` every ESAPI-
+  allocated output; finalize order = `Esys_Finalize` BEFORE `Tss2_TctiLdr_Finalize`. (The swtpm
+  "out of memory for object contexts" error is precisely a leaked transient handle.)
+- **TCTI is exact + linked.** swtpm's `--server type=tcp,port=2321 --ctrl type=tcp,port=2322` is
+  the MSSIM protocol → the ESAPI TCTI string is `swtpm:host=127.0.0.1,port=2321` (tss2-tcti-swtpm)
+  or `mssim:host=127.0.0.1,port=2321`; init via `Tss2_TctiLdr_Initialize`. The kb link adds
+  `-ltss2-tctildr` (+ the tcti plugin is dlopen'd at runtime). The gate verifies the exact string
+  the CT's tss2 accepts (do NOT assume mssim/swtpm are interchangeable — probe both, use the one
+  that connects).
+
+### Gate additions
+
+- Test order FIXED so fail-closed is actually established: (a) boots SEALED (get_kek fails,
+  live_keys FALSE); (b) **wrong-secret unseal → refused, STAYS sealed** (on the still-sealed
+  provider, before any success); (c) correct-secret unseal → get_kek OK, live_keys TRUE; (d) seal
+  → sealed again; (e) fresh provider instance re-loads the blob + unseals (persistence);
+  (f) the KEK bytes never appear in the raw blob file; (g) re-provision while a blob exists →
+  REFUSED (create-once); (h) a tampered/truncated blob → load fails closed.
