@@ -1617,6 +1617,27 @@ void handle_conn(int fd, int is_tcp)
                 request_id);
             return;
          }
+         long ramp_now = (long)time(NULL);
+         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+            LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
+         else if (pki_mtls_ramp_ready(ramp_now) == 1)
+         {
+            SSL_CTX *prepared = server_tls_prepare_required();
+            if (!prepared)
+               LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
+            else
+            {
+               int advanced = pki_mtls_ramp_advance(ramp_now);
+               if (advanced == 1)
+                  server_tls_activate_required(prepared);
+               else
+               {
+                  server_tls_discard_prepared(prepared);
+                  if (advanced < 0)
+                     LOG_WARN("server.http", "mTLS ramp durable advance failed");
+               }
+            }
+         }
       }
    }
 

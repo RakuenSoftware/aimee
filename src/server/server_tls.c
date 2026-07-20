@@ -138,9 +138,10 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
       if (SSL_CTX_load_verify_locations(ctx, ca, NULL) != 1)
       {
          aimee_log(LOG_WARN, "server.tls",
-                   "mtls enabled but client CA %s not loadable: %s — "
-                   "mTLS DISABLED (client certs not verified)",
-                   ca, ERR_error_string(ERR_get_error(), NULL));
+                   "mtls enabled but client CA %s not loadable: %s — refusing TLS context", ca,
+                   ERR_error_string(ERR_get_error(), NULL));
+         SSL_CTX_free(ctx);
+         return NULL;
       }
       else
       {
@@ -225,6 +226,54 @@ int server_tls_reload(void)
    return 1;
 }
 
+SSL_CTX *server_tls_prepare_required(void)
+{
+   pthread_mutex_lock(&g_ctx_mu);
+   if (!g_ctx || g_mtls_mode >= 2)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      return NULL;
+   }
+   char cert[MAX_PATH_LEN], key[MAX_PATH_LEN], ca[MAX_PATH_LEN];
+   snprintf(cert, sizeof(cert), "%s", g_cert_path);
+   snprintf(key, sizeof(key), "%s", g_key_path);
+   snprintf(ca, sizeof(ca), "%s", g_client_ca_path);
+   pthread_mutex_unlock(&g_ctx_mu);
+   return tls_build_ctx(cert, key, 2, ca[0] ? ca : NULL);
+}
+
+int server_tls_activate_required(SSL_CTX *prepared)
+{
+   if (!prepared)
+      return -1;
+   pthread_mutex_lock(&g_ctx_mu);
+   if (!g_ctx)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      SSL_CTX_free(prepared);
+      return -1;
+   }
+   if (g_mtls_mode >= 2)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      SSL_CTX_free(prepared);
+      return 0;
+   }
+   SSL_CTX *old = g_ctx;
+   g_ctx = prepared;
+   g_mtls_mode = 2;
+   SSL_CTX_free(old);
+   pthread_mutex_unlock(&g_ctx_mu);
+   aimee_log(LOG_INFO, "server.tls", "mTLS ramp advanced to required");
+   return 1;
+}
+
+void server_tls_discard_prepared(SSL_CTX *prepared)
+{
+   if (prepared)
+      SSL_CTX_free(prepared);
+}
+
 int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
                              size_t serial_len)
 {
@@ -294,20 +343,25 @@ int server_tls_init_default(void)
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
    config_t cfg;
    config_load(&cfg);
+   int effective_mtls = pki_mtls_ramp_init(cfg.server_api_mtls);
+   if (effective_mtls == 1)
+      aimee_log(LOG_WARN, "server.tls",
+                "mTLS migration is optional: bearer-only clients remain accepted until the "
+                "durable roster is fully presented");
    /* Secure-by-default: when a tls_port is configured but no cert exists, the
     * server provisions a self-signed one rather than fall back to a plaintext
     * listener (the remote path now REQUIRES TLS — plaintext /v1 is loopback-only).
     * An operator-supplied cert at the same path is left untouched. mTLS still
     * needs an operator-issued client CA, so this self-signed path is server-TLS
     * only (mtls==0); when mTLS is required the operator must supply the cert. */
-   if (cfg.server_api_mtls == 0)
+   if (effective_mtls == 0)
       pki_ensure_self_signed_server_cert(cert, key);
    /* When mTLS is on, ensure aimee's client CA exists (create-or-load) and the
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */
-   if (cfg.server_api_mtls > 0)
-      pki_ca_ensure();
-   return server_tls_init(cert, key, cfg.server_api_mtls, cfg.server_api_mtls_client_ca);
+   if (effective_mtls > 0 && pki_ca_ensure() != 0)
+      return -1;
+   return server_tls_init(cert, key, effective_mtls, cfg.server_api_mtls_client_ca);
 }
 
 SSL *server_tls_begin(int fd)

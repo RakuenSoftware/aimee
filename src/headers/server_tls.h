@@ -46,6 +46,14 @@ extern "C"
     * to load keeps the current one. Returns 1 = reloaded, 0 = TLS not enabled, -1 = kept. */
    int server_tls_reload(void);
 
+   /* Build a fully validated required-mTLS context without publishing it. The
+    * caller may durably commit its posture and then pass the context to
+    * server_tls_activate_required, whose pointer swap is infallible. NULL means
+    * TLS is absent/already required, or validation failed. */
+   SSL_CTX *server_tls_prepare_required(void);
+   int server_tls_activate_required(SSL_CTX *prepared);
+   void server_tls_discard_prepared(SSL_CTX *prepared);
+
    /* Per-connection lifecycle for the conn worker: handshake an accepted fd and
     * register its SSL on the conn-io shim (NULL on failure — caller closes fd);
     * and the teardown (unregister + shutdown + free). */
