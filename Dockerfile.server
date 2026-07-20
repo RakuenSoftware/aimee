@@ -38,7 +38,7 @@ ARG AIMEE_VERSION=""
 # `aimee hooks pre` is the PreToolUse guard. Without the binary in the image a
 # delegate has no aimee tools and no guard can run — it gets a bare shell and its
 # own credentials, which is the opposite of the intent.
-RUN make -C src -j"$(nproc)" ../aimee-server ../aimee ../aimee-forwarder ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+RUN make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 # --- webchat frontend: build the React SPA into a single index.html ---
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.
