@@ -28,6 +28,7 @@
 #include "kb_http_console.h"
 #include "kb_http_accounts.h"
 #include "kb_http_governance.h"
+#include "kb_http_insights.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
@@ -828,6 +829,16 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int mr = kb_http_models_route(method, path, body, out_buf, out_cap);
       if (mr >= 0)
          return mr;
+   }
+
+   /* Org spend reporting (P3b): GET /v1/insights/spend. Any authenticated caller may
+    * ask; the org-admin-OR-team-lead authorization is enforced at the DB layer inside
+    * the SECURITY DEFINER org_spend_query() (a non-authorized caller surfaces as 403).
+    * Returns -1 for non-insights paths so the router falls through. */
+   {
+      int ir = kb_http_insights_route(method, path, query_string, out_buf, out_cap);
+      if (ir >= 0)
+         return ir;
    }
 
    /* Console + accounts routes. Served only to the owner (unscoped credential) or

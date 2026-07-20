@@ -1362,6 +1362,99 @@ paths:
         "200": { description: Entitlement revoked }
         "401": { description: Authentication required }
         "403": { description: Not authorized (not an org-admin) }
+  /insights/spend:
+    get:
+      operationId: getOrgSpend
+      summary: Authorized org spend report, grouped per model + per project (P3b)
+      description: >
+        Returns org spend aggregated over the settled rollup for day in [since, until],
+        broken down per billable model and per project with a reconciling total (the sum
+        of the per-model costs equals total.cost_usd exactly). Authorization is enforced
+        at the DB layer inside a SECURITY DEFINER aggregation function: the caller must be
+        an org-admin OR a lead of the requested team; a team-absent request is the
+        org-wide report and is admin-only. cost_usd is emitted as a NUMERIC string (never
+        a float) so finance export loses no precision. Read-only.
+      parameters:
+        - name: team
+          in: query
+          required: false
+          description: Team id. Absent = the org-wide (admin-only) report.
+          schema: { type: integer }
+        - name: project
+          in: query
+          required: false
+          description: Optional project filter.
+          schema: { type: integer }
+        - name: since
+          in: query
+          required: true
+          description: Inclusive start day, ISO YYYY-MM-DD.
+          schema: { type: string }
+        - name: until
+          in: query
+          required: true
+          description: Inclusive end day, ISO YYYY-MM-DD.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Spend report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team: { type: integer, nullable: true }
+                  project: { type: integer }
+                  since: { type: string }
+                  until: { type: string }
+                  total:
+                    type: object
+                    properties:
+                      prompt_tokens: { type: integer }
+                      completion_tokens: { type: integer }
+                      cache_read_tokens: { type: integer }
+                      cache_write_tokens: { type: integer }
+                      cost_usd: { type: string }
+                      calls: { type: integer }
+                  by_team:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        team_id: { type: integer }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cache_read_tokens: { type: integer }
+                        cache_write_tokens: { type: integer }
+                        cost_usd: { type: string }
+                        calls: { type: integer }
+                  by_model:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        billable_model: { type: string }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cache_read_tokens: { type: integer }
+                        cache_write_tokens: { type: integer }
+                        cost_usd: { type: string }
+                        calls: { type: integer }
+                  by_project:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project_id: { type: integer, nullable: true }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cache_read_tokens: { type: integer }
+                        cache_write_tokens: { type: integer }
+                        cost_usd: { type: string }
+                        calls: { type: integer }
+        "400": { description: Missing or malformed team/project/since/until }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (org-admin or team-lead required) }
   /enrollments:
     get:
       operationId: listEnrollments

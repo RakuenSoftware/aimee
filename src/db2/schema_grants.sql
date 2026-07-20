@@ -63,6 +63,13 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_token_audit_start(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_token_audit_settle(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BIGINT,BIGINT,NUMERIC,TEXT) TO aimee_kb_runtime;
 
+  -- P3b org spend reporting. The read-only aggregation definer enforces the admin/lead
+  -- predicate INTERNALLY (it IS the authz gate — SECURITY DEFINER bypasses RLS), so it
+  -- is the single authorized reporting path over org_spend_rollup; EXECUTE to runtime,
+  -- never PUBLIC.
+  REVOKE ALL ON FUNCTION org_spend_query(BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_spend_query(BIGINT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
+
   -- P10 kb credential vault. The ciphertext store is WRITTEN ONLY by the SECURITY
   -- DEFINER vault functions (owned by aimee_kb_owner, which bypasses RLS for its own
   -- internal version scan). Runtime therefore gets SELECT (RLS-filtered: own-team rows

@@ -329,6 +329,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
                $(TESTPREFIX)/unit-test-models-dev \
+               $(TESTPREFIX)/unit-test-p3b-spend \
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
                $(TESTPREFIX)/unit-test-agent-http \
@@ -4038,6 +4039,10 @@ $(TESTPREFIX)/unit-test-kb-route-acl: $(OBJDIR)/tests/test_kb_route_acl.o \
 # dependency — the entitled-resolution + admin-gate are proven by the real-PG RLS gate.
 $(TESTPREFIX)/unit-test-kb-models-validate: $(OBJDIR)/tests/test_kb_models_validate.o \
                      $(OBJDIR)/kb/http/kb_models_validate.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-p3b-spend: $(OBJDIR)/tests/test_p3b_spend.o \
+                     $(OBJDIR)/kb/http/kb_insights_util.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.o \

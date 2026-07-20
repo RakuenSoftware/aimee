@@ -10,7 +10,9 @@
 #include "db2_tenant.h"
 #include "team.h"
 #include "membership.h"
+#include "kb_insights_util.h"
 #include "org_model_catalog.h"
+#include "org_spend.h"
 #include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
@@ -503,6 +505,123 @@ static int kb_cmd_tenancy_init_db2(void)
    return 0;
 }
 
+/* Operator-facing spend reporting CLI (P3b):
+ *   aimee-kb spend --team X [--project Y] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json]
+ * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * SECURITY DEFINER org_spend_query()'s admin gate passes and --team may be omitted for
+ * the org-wide report). Read-only. cost_usd is a NUMERIC string, never a float. */
+static int kb_cmd_spend(int argc, char **argv)
+{
+   int has_team = 0, has_project = 0, want_json = 0;
+   int64_t team = 0, project = 0;
+   const char *since = NULL, *until = NULL;
+   for (int i = 1; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--team") == 0 && i + 1 < argc)
+      {
+         team = strtoll(argv[++i], NULL, 10);
+         has_team = 1;
+      }
+      else if (strcmp(argv[i], "--project") == 0 && i + 1 < argc)
+      {
+         project = strtoll(argv[++i], NULL, 10);
+         has_project = 1;
+      }
+      else if (strcmp(argv[i], "--since") == 0 && i + 1 < argc)
+         since = argv[++i];
+      else if (strcmp(argv[i], "--until") == 0 && i + 1 < argc)
+         until = argv[++i];
+      else if (strcmp(argv[i], "--json") == 0)
+         want_json = 1;
+   }
+   /* Default to a wide bounded window when unspecified (finance callers usually pass a
+    * range; the reporting surface stays usable without one). */
+   if (!since)
+      since = "0001-01-01";
+   if (!until)
+      until = "9999-12-31";
+   if (!kb_insights_date_valid(since) || !kb_insights_date_valid(until))
+   {
+      fprintf(stderr, "aimee-kb: --since/--until must be valid YYYY-MM-DD dates\n");
+      return 1;
+   }
+   if (strcmp(since, until) > 0)
+   {
+      fprintf(stderr, "aimee-kb: --since must be <= --until\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   db2_org_spend_row_t rows[512];
+   int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
+                               (int)(sizeof(rows) / sizeof(rows[0])));
+   if (n < 0)
+      db2_tenant_scope_rollback(); /* the definer RAISEd -> txn aborted */
+   else
+      db2_tenant_scope_commit();
+
+   int rc = 0;
+   if (n < 0)
+   {
+      if (n == DB2_SPEND_ERR_DENIED)
+         fprintf(stderr, "aimee-kb: not authorized (org-admin or team-lead required)\n");
+      else if (n == DB2_SPEND_ERR_BADDATE)
+         fprintf(stderr, "aimee-kb: invalid date range\n");
+      else
+         fprintf(stderr, "aimee-kb: spend query failed\n");
+      rc = 1;
+   }
+   else if (want_json)
+   {
+      char *json = kb_insights_spend_json(has_team, (long long)team, has_project,
+                                          (long long)project, since, until, rows, n);
+      if (json)
+      {
+         printf("%s\n", json);
+         free(json);
+      }
+      else
+      {
+         fprintf(stderr, "aimee-kb: response build failed\n");
+         rc = 1;
+      }
+   }
+   else
+   {
+      printf("team\tproject\tmodel\tprompt\tcompletion\tcache_read\tcache_write\tcost_usd\tcalls\n");
+      for (int i = 0; i < n; i++)
+      {
+         printf("%lld\t", (long long)rows[i].team_id);
+         if (rows[i].has_project)
+            printf("%lld", (long long)rows[i].project_id);
+         else
+            printf("-");
+         printf("\t%s\t%lld\t%lld\t%lld\t%lld\t%s\t%lld\n", rows[i].billable_model,
+                (long long)rows[i].prompt_tokens, (long long)rows[i].completion_tokens,
+                (long long)rows[i].cache_read_tokens, (long long)rows[i].cache_write_tokens,
+                rows[i].cost_usd, (long long)rows[i].calls);
+      }
+   }
+   db2_shutdown();
+   return rc;
+}
+
 static int kb_cmd_tenancy(int argc, char **argv)
 {
    const char *group = argv[1]; /* "team" | "project" */
@@ -686,6 +805,8 @@ int main(int argc, char **argv)
    if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0 ||
                     strcmp(argv[1], "models") == 0))
       return kb_cmd_tenancy(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "spend") == 0)
+      return kb_cmd_spend(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;

@@ -2243,6 +2243,81 @@ BEGIN
   RETURN true;
 END; $$;
 
+-- P3b ORG SPEND REPORTING (tiered-llm-p3b). Read-only authorized aggregation over
+-- org_spend_rollup — the authoritative reporting source (maintained in the P3a settle
+-- txn; rollup-ONLY, no ledger variant, so there is no rollup-vs-ledger drift contract).
+-- SECURITY DEFINER so it bypasses ENABLE-not-FORCE RLS to aggregate, but the admin/lead
+-- predicate is enforced INTERNALLY *before* any aggregate touches a row — the FUNCTION
+-- itself is the authz gate (the table RLS it bypasses is defense-in-depth for the
+-- runtime's direct SELECT, not for this path). Fail-closed order, one RAISE surface:
+--   (1) date validation: p_since/p_until must be ISO 'YYYY-MM-DD', cast validly to
+--       ::date (catches a well-formed-but-invalid calendar date like 2026-13-40), and
+--       p_since <= p_until, else RAISE 22007 with a 'bad date' message;
+--   (2) principal: p_team IS NULL (org-wide) requires kb_principal_is_admin() EXPLICITLY
+--       (never relying on is_team_lead(NULL) being false); a concrete p_team requires
+--       admin OR is_team_lead(p_team). Else RAISE 42501 'not authorized'.
+-- Only AFTER both gates pass does it aggregate. cost_usd stays NUMERIC end-to-end (the C
+-- layer reads it as TEXT, never a float) so finance export loses no precision. The C
+-- layer derives the total + per-project breakdown from these grouped rows (ONE authz
+-- path). NO org_spend_query_audit variant (deferred with an explicit watermark).
+CREATE OR REPLACE FUNCTION org_spend_query(
+  p_team BIGINT, p_project BIGINT, p_since TEXT, p_until TEXT
+) RETURNS TABLE(
+  team_id BIGINT, project_id BIGINT, billable_model TEXT,
+  prompt_tokens BIGINT, completion_tokens BIGINT,
+  cache_read_tokens BIGINT, cache_write_tokens BIGINT,
+  cost_usd NUMERIC, calls BIGINT
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  -- (1) Strict date validation FIRST — fail closed before authz or any aggregate.
+  IF p_since IS NULL OR p_until IS NULL
+     OR p_since !~ '^\d{4}-\d{2}-\d{2}$' OR p_until !~ '^\d{4}-\d{2}-\d{2}$' THEN
+    RAISE EXCEPTION 'org_spend_query: bad date format (want YYYY-MM-DD)' USING ERRCODE = '22007';
+  END IF;
+  -- Cast to ::date to reject a well-formed-but-invalid calendar date; normalize any
+  -- cast SQLSTATE (22007 invalid_datetime_format / 22008 datetime_field_overflow) onto
+  -- the single 'bad date' RAISE surface the C layer maps to the baddate sentinel.
+  BEGIN
+    PERFORM p_since::date, p_until::date;
+  EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN
+    RAISE EXCEPTION 'org_spend_query: bad date value' USING ERRCODE = '22007';
+  END;
+  IF p_since::date > p_until::date THEN
+    RAISE EXCEPTION 'org_spend_query: bad date range (since after until)' USING ERRCODE = '22007';
+  END IF;
+
+  -- (2) Principal authz. NULL team = org-wide -> admin ONLY (explicit); a concrete
+  -- team -> admin OR that team's lead. is_team_lead(NULL) returns false (documented),
+  -- but the NULL path never reaches it — admin is required explicitly.
+  IF p_team IS NULL THEN
+    IF NOT kb_principal_is_admin() THEN
+      RAISE EXCEPTION 'org_spend_query: not authorized (org-wide report is admin-only)'
+        USING ERRCODE = '42501';
+    END IF;
+  ELSE
+    IF NOT (kb_principal_is_admin() OR is_team_lead(p_team)) THEN
+      RAISE EXCEPTION 'org_spend_query: not authorized (not admin or lead of team %)', p_team
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- (3) Aggregate. Reached ONLY once both gates pass. Grouped by (team, project, model)
+  -- so an org-wide (p_team IS NULL) admin report preserves the team dimension — two
+  -- teams' rows for the same (project, model) never merge. 'calls' is the summed rollup
+  -- row_count. Lexicographic BETWEEN is valid for the zero-padded ISO 'day' TEXT column.
+  RETURN QUERY
+    SELECT r.team_id, r.project_id, r.billable_model,
+           SUM(r.prompt_tokens)::bigint, SUM(r.completion_tokens)::bigint,
+           SUM(r.cache_read_tokens)::bigint, SUM(r.cache_write_tokens)::bigint,
+           SUM(r.cost_usd)::numeric, SUM(r.row_count)::bigint
+      FROM org_spend_rollup r
+     WHERE r.day BETWEEN p_since AND p_until
+       AND (p_team IS NULL OR r.team_id = p_team)
+       AND (p_project IS NULL OR r.project_id = p_project)
+     GROUP BY r.team_id, r.project_id, r.billable_model;
+END; $$;
+
 -- These SECURITY DEFINER functions are never PUBLIC; EXECUTE is granted to the
 -- runtime role out of band in schema_grants.sql (hardened tier only).
 REVOKE ALL ON FUNCTION org_pricing_add_version(TEXT,TEXT,NUMERIC,NUMERIC,NUMERIC,NUMERIC) FROM PUBLIC;
@@ -2250,6 +2325,7 @@ REVOKE ALL ON FUNCTION org_pricing_current_version(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_token_estimate_cost(TEXT,BIGINT,BIGINT,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_token_audit_start(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,BIGINT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_token_audit_settle(TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BIGINT,BIGINT,NUMERIC,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_spend_query(BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
 
 -- ============================================================================
 -- P10 KB CREDENTIAL VAULT (tiered-llm-p10 slice 2). The kb org vault's ciphertext

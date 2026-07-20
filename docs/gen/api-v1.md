@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 74
+Total endpoints: 75
 
 ## Endpoints
 
@@ -513,6 +513,26 @@ Responses:
 - `401` — Unauthorized
 - `405` — Method not allowed
 - `503` — Ingest status unavailable
+
+### `GET /v1/insights/spend`
+
+Authorized org spend report, grouped per model + per project (P3b)
+
+Returns org spend aggregated over the settled rollup for day in [since, until], broken down per billable model and per project with a reconciling total (the sum of the per-model costs equals total.cost_usd exactly). Authorization is enforced at the DB layer inside a SECURITY DEFINER aggregation function: the caller must be an org-admin OR a lead of the requested team; a team-absent request is the org-wide report and is admin-only. cost_usd is emitted as a NUMERIC string (never a float) so finance export loses no precision. Read-only.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | no | integer | Team id. Absent = the org-wide (admin-only) report. |
+| `project` | query | no | integer | Optional project filter. |
+| `since` | query | yes | string | Inclusive start day, ISO YYYY-MM-DD. |
+| `until` | query | yes | string | Inclusive end day, ISO YYYY-MM-DD. |
+
+Responses:
+
+- `200` — Spend report
+- `400` — Missing or malformed team/project/since/until
+- `401` — Authentication required
+- `403` — Not authorized (org-admin or team-lead required)
 
 ### `POST /v1/intelligence/bandit/close`
 
