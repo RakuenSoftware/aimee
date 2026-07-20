@@ -89,6 +89,7 @@ typedef struct
    uint8_t predecessor_digest[32];
    uint8_t capsule_digest[32];
    uint8_t future_digest[32];
+   uint8_t new_kek_digest[32];
    uint8_t manifest_digest[32];
 } vault_tpm2_reseal_receipt_t;
 
