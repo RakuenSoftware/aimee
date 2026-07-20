@@ -3,7 +3,13 @@ name: Module inventory
 on:
   pull_request:
     branches: [feature/core-modularization]
+  push:
+    branches: [feature/core-modularization]
   workflow_dispatch:
+
+concurrency:
+  group: module-inventory-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -12,8 +18,12 @@ jobs:
   module-inventory:
     name: module-inventory
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Validate canonical inventory
         run: ./scripts/check_module_inventory.sh
       - name: Test inventory failure modes

@@ -15,7 +15,8 @@ Git source to the new module contract is re-decided only after `git-core-contrac
 ## Included
 
 - `tests/baselines/modules/canonical-inventory.yaml`
-- a CWD-independent, safe-JSON parser and shell entrypoint
+- a CWD-independent, standard-library JSON parser and shell entrypoint; the `.yaml` file is
+  intentionally restricted to JSON-compatible YAML and never loaded through a YAML object loader
 - mutation-focused failure tests without a second hard-coded module list
 - the `module-inventory` pull-request workflow for `feature/core-modularization`
 
@@ -31,3 +32,7 @@ The dedicated proposal-ordering checker is the next governance prerequisite and 
 any Git descriptor, build/profile registration, readiness, or source-migration slice. Branch
 protection for the `module-inventory` job is an external repository-administration step; this
 program independently refuses to merge a slice until the job is green.
+
+Relative inventory paths resolve against `--config-root`, then `AIMEE_CONFIG_ROOT`, then the
+repository root derived from the checker path. This ordering is independent of the caller's current
+working directory.
