@@ -330,7 +330,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
-                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c \
+                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c \
                   modules/vault/vault_capability.c
 KB_VAULT_OBJS = $(VAULT_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
@@ -345,6 +345,13 @@ KB_TPM2_LDLIBS := $(shell pkg-config --libs tss2-esys 2>/dev/null) -ltss2-mu -lt
 else
 KB_TPM2_CFLAGS :=
 KB_TPM2_LDLIBS :=
+endif
+ifeq ($(WITH_PKCS11),1)
+KB_PKCS11_CFLAGS := -DWITH_PKCS11 $(shell pkg-config --cflags p11-kit-1 2>/dev/null || echo -I/usr/include/p11-kit-1)
+KB_PKCS11_LDLIBS := -ldl
+else
+KB_PKCS11_CFLAGS :=
+KB_PKCS11_LDLIBS :=
 endif
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
@@ -964,7 +971,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # util (openssl + platform_random only), so the kb sidecar links it directly.
 $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
+	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
@@ -1033,7 +1040,7 @@ $(OBJDIR)/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 # kb object is harmless and keeps the WITH_TPM2 switch in one place (P7-tpm2a).
 $(OBJDIR)/kb/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
+	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) $(KB_PKCS11_CFLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
 
 $(OBJDIR)/server/%.o: %.c
 	@mkdir -p $(dir $@)

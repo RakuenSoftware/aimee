@@ -5,6 +5,7 @@
 #include "kb_vault_policy.h"
 #include "vault_custody_mock.h" /* vault_custody_mock_provider */
 #include "vault_custody_tpm2.h" /* vault_custody_tpm2_provider (real or stub) */
+#include "vault_custody_pkcs11.h"
 #include "vault_internal.h"     /* vault_custody_set_provider */
 #include "vault_server_key.h"   /* vault_is_sealed */
 #include <stdio.h>
@@ -75,6 +76,9 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
       return 0;
 
    case KB_CUSTODY_PKCS11:
+      vault_custody_set_provider(vault_custody_pkcs11_provider());
+      g_selected = KB_CUSTODY_PKCS11;
+      return 0;
    case KB_CUSTODY_KMS:
       /* Declared but unimplemented: fail closed — never silently fall back to a
        * plaintext/file root under a config that asked for an anchor. */
