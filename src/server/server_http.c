@@ -1500,9 +1500,57 @@ void handle_conn(int fd, int is_tcp)
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path,
                                         server_http_conn_caps(is_tcp, g_bearer, g_remote_writes));
 
-   /* Authorize before reading the body: TCP requires a valid bearer; the UDS
-    * relies on filesystem permissions. A session-scoping key without a
-    * configured bearer is refused on any transport. */
+   /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
+    * durable roster row before the bearer gate so required-mode clients do not
+    * still depend on the shared bearer. This remains authentication only: the
+    * normal route/capability gates below still deny remote-write surfaces. */
+   int mtls_authenticated = 0;
+   if (server_conn_io_has_ssl(fd))
+   {
+      char rc_cn[256] = "", rc_serial[80] = "";
+      if (server_tls_peer_identity(server_conn_io_get_ssl(fd), rc_cn, sizeof(rc_cn), rc_serial,
+                                   sizeof(rc_serial)) &&
+          rc_serial[0])
+      {
+         pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
+         if (cs != PKI_CERT_VALID)
+         {
+            LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
+                     path, pki_cert_status_str(cs), rc_serial, request_id);
+            send_response(
+                fd, 403,
+                "{\"error\":{\"message\":\"client certificate is no longer valid "
+                "(revoked, expired, or unrecognized)\",\"type\":\"authentication_error\"}}",
+                request_id);
+            return;
+         }
+         mtls_authenticated = 1;
+         long ramp_now = (long)time(NULL);
+         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+            LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
+         else if (pki_mtls_ramp_ready(ramp_now) == 1)
+         {
+            SSL_CTX *prepared = server_tls_prepare_required();
+            if (!prepared)
+               LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
+            else
+            {
+               int advanced = pki_mtls_ramp_advance(ramp_now);
+               if (advanced == 1)
+                  server_tls_activate_required(prepared);
+               else
+               {
+                  server_tls_discard_prepared(prepared);
+                  if (advanced < 0)
+                     LOG_WARN("server.http", "mTLS ramp durable advance failed");
+               }
+            }
+         }
+      }
+   }
+
+   /* Authorize before reading the body: TCP requires either the durably valid
+    * client certificate above or a valid bearer; UDS relies on permissions. */
    {
       char auth[512] = "";
       char api_key[512] = "";
@@ -1522,8 +1570,9 @@ void handle_conn(int fd, int is_tcp)
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
-      int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                     has_api_key ? api_key : NULL, has_skey);
+      int az = mtls_authenticated ? 0
+                                  : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                                          has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
          const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "
@@ -1584,61 +1633,6 @@ void handle_conn(int fd, int is_tcp)
                     request_id);
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;
-   }
-
-   /* P8a (invariant #5): per-request DURABLE client-cert revocation/expiry re-check.
-    * mtls_verify_cb runs ONLY at handshake — OpenSSL cannot re-run it on a keep-alive
-    * connection — so a cert revoked via cert.revoke AFTER its handshake would keep
-    * authorizing on the open connection. This MUST run BEFORE every data-serving
-    * dispatch (the SSE, native streaming-chat, shadow-mirror, and unary route paths
-    * all follow), so it is placed here, right after the auth/caps gates, NOT after
-    * the later identity-capture (which several streaming paths early-return before).
-    * Gate on the actual verified peer cert (server_tls_peer_identity yields a serial),
-    * independent of how identity is later resolved: a bearer/UDS conn has no client
-    * cert and is skipped; a verified client cert is re-checked against the DURABLE DB
-    * row (NOT the g_revoked snapshot) on EVERY request. Non-VALID (revoked/expired/
-    * unknown) or an unavailable authority (ERROR) -> 403 before any dispatch. */
-   if (server_conn_io_has_ssl(fd))
-   {
-      char rc_cn[256] = "", rc_serial[80] = "";
-      if (server_tls_peer_identity(server_conn_io_get_ssl(fd), rc_cn, sizeof(rc_cn), rc_serial,
-                                   sizeof(rc_serial)) &&
-          rc_serial[0])
-      {
-         pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
-         if (cs != PKI_CERT_VALID)
-         {
-            LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
-                     path, pki_cert_status_str(cs), rc_serial, request_id);
-            send_response(
-                fd, 403,
-                "{\"error\":{\"message\":\"client certificate is no longer valid "
-                "(revoked, expired, or unrecognized)\",\"type\":\"authentication_error\"}}",
-                request_id);
-            return;
-         }
-         long ramp_now = (long)time(NULL);
-         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
-            LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
-         else if (pki_mtls_ramp_ready(ramp_now) == 1)
-         {
-            SSL_CTX *prepared = server_tls_prepare_required();
-            if (!prepared)
-               LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
-            else
-            {
-               int advanced = pki_mtls_ramp_advance(ramp_now);
-               if (advanced == 1)
-                  server_tls_activate_required(prepared);
-               else
-               {
-                  server_tls_discard_prepared(prepared);
-                  if (advanced < 0)
-                     LOG_WARN("server.http", "mTLS ramp durable advance failed");
-               }
-            }
-         }
-      }
    }
 
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
