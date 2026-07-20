@@ -36,6 +36,7 @@ static void tpm2_set_err(char *errbuf, size_t errlen, const char *msg)
 #include "config.h"        /* config_load, config_default_dir, CONFIG_DEFAULT_VAULT_TPM2_TCTI */
 #include "platform_path.h" /* platform_mkdir_p */
 #include "vault_crypto.h"  /* vault_kek_derive, VAULT_ROOT_KEY_LEN, VAULT_SALT_LEN */
+#include <errno.h>
 #include <fcntl.h>
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <openssl/sha.h>    /* SHA256 */
@@ -622,8 +623,8 @@ static int raw_read(const char *path, uint8_t *buf, size_t cap, size_t *out_len)
    if (fd < 0)
       return -1;
    struct stat st;
-   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_size <= 0 ||
-       (uint64_t)st.st_size > cap)
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() || st.st_nlink != 1 ||
+       (st.st_mode & 0777) != 0600 || st.st_size <= 0 || (uint64_t)st.st_size > cap)
    {
       close(fd);
       return -1;
@@ -690,17 +691,6 @@ static int raw_write_atomic(const char *path, const uint8_t *buf, size_t len, in
    else if (fsync_parent(path) != 0)
       rc = -1;
    return rc;
-}
-
-static int file_digest(const char *path, uint8_t digest[32])
-{
-   uint8_t buf[TPM2_RESEAL_BUNDLE_MAX];
-   size_t len = 0;
-   if (raw_read(path, buf, sizeof(buf), &len) != 0)
-      return -1;
-   SHA256(buf, len, digest);
-   OPENSSL_cleanse(buf, sizeof(buf));
-   return 0;
 }
 
 /* Atomically persist the v2 sealed blob (magic "AIMTPM2B" | be64 generation | be32
@@ -836,6 +826,24 @@ static int blob_bytes_validate(tpm2_ctx_t *ctx, const uint8_t *buf, size_t len,
    OPENSSL_cleanse(&priv, sizeof(priv));
    OPENSSL_cleanse(&policy, sizeof(policy));
    return rc;
+}
+
+/* Read one active blob snapshot, validate its complete v2 encoding and freshly
+ * recomputed policy for the expected generation, then hash those same bytes. */
+static int blob_file_digest_validate(tpm2_ctx_t *ctx, const char *path,
+                                     uint64_t expected_generation, uint8_t digest[32])
+{
+   uint8_t buf[TPM2_BLOB_MAX];
+   size_t len = 0;
+   if (raw_read(path, buf, sizeof(buf), &len) != 0 ||
+       blob_bytes_validate(ctx, buf, len, expected_generation) != 0)
+   {
+      OPENSSL_cleanse(buf, sizeof(buf));
+      return -1;
+   }
+   SHA256(buf, len, digest);
+   OPENSSL_cleanse(buf, sizeof(buf));
+   return 0;
 }
 
 /* ── vtable ops ──────────────────────────────────────────────────────────────── */
@@ -1274,9 +1282,17 @@ static int bundle_load(reseal_bundle_t *b)
 {
    char path[1152];
    memset(b, 0, sizeof(*b));
-   if (reseal_path(path, sizeof(path), ".reseal.bundle") != 0 ||
-       raw_read(path, b->bytes, sizeof(b->bytes), &b->len) != 0)
-      return -1;
+   if (reseal_path(path, sizeof(path), ".reseal.bundle") != 0)
+      return -2;
+   if (raw_read(path, b->bytes, sizeof(b->bytes), &b->len) != 0)
+   {
+      struct stat st;
+      if (lstat(path, &st) != 0 && errno == ENOENT)
+         return -1;
+      /* An existing but unreadable, unsafe, empty, or concurrently replaced
+       * bundle is corruption, never the ABSENT state. */
+      return -2;
+   }
    if (b->len < TPM2_RESEAL_BUNDLE_HDR ||
        memcmp(b->bytes, TPM2_RESEAL_BUNDLE_MAGIC, 8) != 0)
       return -2;
@@ -1318,18 +1334,38 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
    }
    if (br != 0)
    {
-      if (receipt && nv == receipt->new_generation)
+      if (!receipt)
+      {
+         *out = VAULT_TPM2_RESEAL_ABSENT;
+         return VAULT_TPM2_RESEAL_OK;
+      }
+      if (receipt->old_generation == UINT64_MAX ||
+          receipt->new_generation != receipt->old_generation + 1)
+      {
+         *out = VAULT_TPM2_RESEAL_CONFLICT;
+         return VAULT_TPM2_RESEAL_INTEGRITY;
+      }
+      if (nv == receipt->new_generation)
       {
          uint8_t active[32];
-         if (file_digest(g_ctx.blob_path, active) == 0 &&
-             memcmp(active, receipt->future_digest, 32) == 0)
+         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->new_generation,
+                                       active) == 0 &&
+             memcmp(active, receipt->future_digest, 32) == 0 &&
+             fsync_parent(g_ctx.blob_path) == 0)
          {
             *out = VAULT_TPM2_RESEAL_CLEANED;
             return VAULT_TPM2_RESEAL_OK;
          }
+         *out = VAULT_TPM2_RESEAL_CONFLICT;
+         return VAULT_TPM2_RESEAL_INTEGRITY;
       }
-      *out = VAULT_TPM2_RESEAL_ABSENT;
-      return VAULT_TPM2_RESEAL_OK;
+      if (nv == receipt->old_generation)
+      {
+         *out = VAULT_TPM2_RESEAL_ABSENT;
+         return VAULT_TPM2_RESEAL_OK;
+      }
+      *out = VAULT_TPM2_RESEAL_CONFLICT;
+      return VAULT_TPM2_RESEAL_INTEGRITY;
    }
    if ((receipt && !receipt_equal(receipt, &b->receipt)) ||
        b->receipt.old_generation == UINT64_MAX ||
@@ -1339,18 +1375,22 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
       return VAULT_TPM2_RESEAL_INTEGRITY;
    }
    uint8_t active[32];
-   if (file_digest(g_ctx.blob_path, active) != 0)
-   {
-      *out = VAULT_TPM2_RESEAL_CORRUPT;
-      return VAULT_TPM2_RESEAL_INTEGRITY;
-   }
    if (nv == b->receipt.old_generation &&
+       blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.old_generation, active) == 0 &&
        memcmp(active, b->receipt.predecessor_digest, 32) == 0)
       *out = VAULT_TPM2_RESEAL_PREPARED;
    else if (nv == b->receipt.new_generation &&
+            blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.new_generation,
+                                      active) == 0 &&
             memcmp(active, b->receipt.future_digest, 32) == 0)
+   {
+      if (fsync_parent(g_ctx.blob_path) != 0)
+         return VAULT_TPM2_RESEAL_ERR;
       *out = VAULT_TPM2_RESEAL_INSTALLED;
+   }
    else if (nv == b->receipt.new_generation &&
+            blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.old_generation,
+                                      active) == 0 &&
             memcmp(active, b->receipt.predecessor_digest, 32) == 0)
       *out = VAULT_TPM2_RESEAL_NV_ADVANCED;
    else
@@ -1387,7 +1427,7 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
           memcmp(existing.receipt.operation_id, operation_id, 16) == 0 &&
           memcmp(existing.receipt.new_kek_digest, supplied_kek_digest, 32) == 0 &&
           reseal_status_locked(&existing.receipt, secret, &st, NULL) == 0 &&
-          st == VAULT_TPM2_RESEAL_PREPARED)
+          st == VAULT_TPM2_RESEAL_PREPARED && fsync_parent(g_ctx.blob_path) == 0)
       {
          *out = existing.receipt;
          rc = VAULT_TPM2_RESEAL_OK;
@@ -1404,7 +1444,7 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
    uint64_t nv = 0;
    uint8_t pred[32];
    if (nv_read(&g_ctx, &nv) != 0 || nv != expected_old_generation ||
-       file_digest(g_ctx.blob_path, pred) != 0)
+       blob_file_digest_validate(&g_ctx, g_ctx.blob_path, expected_old_generation, pred) != 0)
       goto out;
    char cap_path[1152], fut_path[1152], bundle_path[1152];
    if ((size_t)snprintf(cap_path, sizeof(cap_path), "%s.reseal.cap.%d", g_ctx.blob_path,
@@ -1499,8 +1539,22 @@ int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
       rc = VAULT_TPM2_RESEAL_OK;
       goto out;
    }
+   /* From this point onward success requires a final, verified INSTALLED
+    * classification. Never leak status()'s earlier OK across a failed TPM or
+    * filesystem mutation. */
+   rc = VAULT_TPM2_RESEAL_ERR;
    if (*out == VAULT_TPM2_RESEAL_PREPARED)
    {
+      uint64_t before = 0;
+      uint8_t active[32];
+      if (nv_read(&g_ctx, &before) != 0 || before != receipt->old_generation ||
+          blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation, active) != 0 ||
+          memcmp(active, receipt->predecessor_digest, 32) != 0)
+      {
+         *out = VAULT_TPM2_RESEAL_CONFLICT;
+         rc = VAULT_TPM2_RESEAL_INTEGRITY;
+         goto out;
+      }
       if (nv_increment(&g_ctx) != 0)
       {
          uint64_t observed = 0;
@@ -1515,9 +1569,19 @@ int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
    if (*out == VAULT_TPM2_RESEAL_NV_ADVANCED)
    {
       uint8_t active[32];
-      if (file_digest(g_ctx.blob_path, active) != 0 ||
-          memcmp(active, receipt->future_digest, 32) != 0)
+      int future_valid =
+          blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->new_generation, active) == 0 &&
+          memcmp(active, receipt->future_digest, 32) == 0;
+      if (!future_valid)
       {
+         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation, active) !=
+                 0 ||
+             memcmp(active, receipt->predecessor_digest, 32) != 0)
+         {
+            *out = VAULT_TPM2_RESEAL_CONFLICT;
+            rc = VAULT_TPM2_RESEAL_INTEGRITY;
+            goto out;
+         }
          if (raw_write_atomic(g_ctx.blob_path, b.future, b.future_len, 1) != 0)
             goto out;
       }
