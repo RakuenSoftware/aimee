@@ -585,6 +585,7 @@ static const struct
     {"cert.issue", "POST", "/v1/cert/issue"},
     {"cert.list", "POST", "/v1/cert/list"},
     {"cert.revoke", "POST", "/v1/cert/revoke"},
+    {"cert.sign", "POST", "/v1/cert/sign"},
     {"chat.interrupt", "POST", "/v1/chat/interrupt"},
     {"code.audit", "POST", "/v1/code/audit"},
     {"collab_rules.approve", "POST", "/v1/collab_rules/approve"},
