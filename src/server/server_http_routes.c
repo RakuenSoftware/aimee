@@ -883,7 +883,7 @@ static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
  * row's op-derived cap, gated before we enqueue. */
 typedef struct
 {
-   char run_id[64];
+   char run_id[128];
    char op[64];
    char *line;         /* dispatch body with method injected; owned by worker */
    uint32_t conn_caps; /* caps captured at enqueue time */
@@ -997,9 +997,9 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
 
    long created = (long)time(NULL);
    static atomic_ulong g_op_run_seq = 0;
-   char id[64];
+   char id[128];
    unsigned long seq = atomic_fetch_add_explicit(&g_op_run_seq, 1, memory_order_relaxed) + 1;
-   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, seq);
+   snprintf(id, sizeof(id), "oprun_%s_%ld_%lu", openai_runs_store_generation(), created, seq);
 
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
    cJSON_AddStringToObject(req, "__run_id", id);
@@ -1880,6 +1880,8 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_device_config},
     {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
     {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
+    {"GET", "/v1/server/forensics", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_server_forensics},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

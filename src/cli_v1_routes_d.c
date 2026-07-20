@@ -803,6 +803,7 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        {"rules.list", "GET", "/v1/rules"},
        {"notes.list", "GET", "/v1/notes"},
        {"notes.search", "POST", "/v1/notes/search"},
+       {"doctor.forensics", "GET", "/v1/server/forensics"},
    };
    for (size_t i = 0; i < sizeof(bespoke) / sizeof(bespoke[0]); i++)
    {

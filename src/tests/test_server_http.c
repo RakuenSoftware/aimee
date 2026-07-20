@@ -207,6 +207,16 @@ int main(void)
       openai_runs_store_reset();
       st = server_http_route("GET", "/v1/runs/run_xyz", NULL, 0, resp, sizeof(resp));
       assert(st == 404); /* unknown run */
+      st = server_http_route("GET", "/v1/runs/oprun_gprior_1700000000_1", NULL, 0, resp,
+                             sizeof(resp));
+      assert(st == 410);
+      assert(strstr(resp, "\"status\":\"interrupted\""));
+      char evicted_id[160];
+      snprintf(evicted_id, sizeof(evicted_id), "/v1/runs/oprun_%s_1700000000_1",
+               openai_runs_store_generation());
+      st = server_http_route("GET", evicted_id, NULL, 0, resp, sizeof(resp));
+      assert(st == 410);
+      assert(strstr(resp, "\"status\":\"evicted\""));
       openai_runs_store_create("run_xyz", "{\"id\":\"run_xyz\",\"object\":\"run\"}");
       st = server_http_route("GET", "/v1/runs/run_xyz", NULL, 0, resp, sizeof(resp));
       assert(st == 200);
@@ -914,6 +924,10 @@ int main(void)
       /* A self-contained public route dispatches through the table. */
       assert(server_http_route("GET", "/v1/health", NULL, 0, rb, sizeof(rb)) == 200);
       assert(strstr(rb, "aimee-server"));
+      char forensic[64 * 1024];
+      assert(server_http_route("GET", "/v1/server/forensics", NULL, 0, forensic,
+                               sizeof(forensic)) == 200);
+      assert(strstr(forensic, "\"recent_shutdowns\":"));
       /* An unknown path 404s. */
       assert(server_http_route("GET", "/v1/nope", NULL, 0, rb, sizeof(rb)) == 404);
       /* A wrong-verb known path 404s (no matching row). */

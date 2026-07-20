@@ -139,6 +139,7 @@ static const struct
    int timeout_ms;            /* 0 = CLIENT_DEFAULT_TIMEOUT_MS */
 } rpc_routes[] = {
     {"init", "", "init.run", NULL, NULL, 0},
+    {"doctor", "forensics", "doctor.forensics", NULL, NULL, 0},
     {"memory", "search", "memory.search", NULL, NULL, 60000},
     {"memory", "recall", "memory.recall", NULL, NULL, 60000},
     {"memory", "store", "memory.store", NULL, NULL, 60000},

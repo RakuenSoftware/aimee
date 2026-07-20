@@ -89,6 +89,7 @@ void send_response(int fd, int status, const char *body, const char *request_id)
                         : status == 401 ? "Unauthorized"
                         : status == 403 ? "Forbidden"
                         : status == 404 ? "Not Found"
+                        : status == 410 ? "Gone"
                         : status == 429 ? "Too Many Requests"
                         : status == 500 ? "Internal Server Error"
                         : status == 503 ? "Service Unavailable"
