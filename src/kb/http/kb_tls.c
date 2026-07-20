@@ -189,10 +189,11 @@ int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
 
 #include <netdb.h>
 
-int kb_tls_client_request(const char *host, int port, const char *ca_cert_pem,
-                          const char *client_cert_pem, const char *client_key_pem,
-                          const char *method, const char *path, const char *body, char *resp_out,
-                          size_t resp_cap, int *status_out)
+int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_pem,
+                               const char *client_cert_pem, const char *client_key_pem,
+                               const char *method, const char *path, const char *body,
+                               const char *authorization, char *resp_out, size_t resp_cap,
+                               int *status_out)
 {
    /* client_cert_pem/client_key_pem may be NULL for a cert-less server-auth
     * request (the enrollment bootstrap reaching /v1/enroll/redeem). */
@@ -249,14 +250,15 @@ int kb_tls_client_request(const char *host, int port, const char *ca_cert_pem,
    {
       const char *b = body ? body : "";
       size_t blen = strlen(b);
-      size_t cap = strlen(method) + strlen(path) + strlen(host) + blen + 128;
+      size_t cap = strlen(method) + strlen(path) + strlen(host) + blen +
+                   (authorization ? strlen(authorization) : 0) + 192;
       char *req = malloc(cap);
       if (!req)
          goto done;
       int rn = snprintf(req, cap,
-                        "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
+                        "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
                         "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                        method, path, host, blen, b);
+                        method, path, host, authorization ? authorization : "", blen, b);
       int wr = (rn > 0 && (size_t)rn < cap) ? SSL_write(ssl, req, rn) : -1;
       free(req);
       if (wr <= 0)
@@ -300,6 +302,15 @@ done:
    close(fd);
    SSL_CTX_free(ctx);
    return rc;
+}
+
+int kb_tls_client_request(const char *host, int port, const char *ca_cert_pem,
+                          const char *client_cert_pem, const char *client_key_pem,
+                          const char *method, const char *path, const char *body, char *resp_out,
+                          size_t resp_cap, int *status_out)
+{
+   return kb_tls_client_request_auth(host, port, ca_cert_pem, client_cert_pem, client_key_pem,
+                                     method, path, body, NULL, resp_out, resp_cap, status_out);
 }
 
 /* --- TOFU CA fetch (client bootstrap) --- */
