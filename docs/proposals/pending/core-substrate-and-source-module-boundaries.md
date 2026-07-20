@@ -1317,5 +1317,5 @@ contract; if a summary conflicts with a `check` string, the `check` string contr
 - {id: 12, tier: mechanical, check: "scripts/check_generated_module_builds.sh --descriptor-schema src/modules/module.schema.json --make src/generated/modules.mk --cmake cmake/generated/modules.cmake --ownership tests/baselines/modules/ownership.json --all-profiles --byte-equal --fail-drift"}
 - {id: 13, tier: integration, check: "scripts/check_plugin_abi.sh --baseline tests/baselines/modules/plugin-abi.json"}
 - {id: 14, tier: mechanical, check: "scripts/check_deletion_dispositions.sh --schema docs/audit/disposition.schema.json --compat-schema docs/audit/compatibility-record.schema.json --inventories build/inventory --core-trace build/core/core-round-trip-trace.json --independent-approval --complete-touch-set --rollback-owner --deadlines"}
-- {id: 15, tier: nightly, check: "scripts/test_module_profiles.sh --external-service-runtime --full-minus-one-every-optional && scripts/test_provider_readiness.sh --profile core --embedding memory.embedding.ready --reranking memory.reranking.ready"}
+- {id: 15, tier: hardware, check: "scripts/test_module_profiles.sh --external-service-runtime --full-minus-one-every-optional && scripts/test_provider_readiness.sh --profile core --embedding memory.embedding.ready --reranking memory.reranking.ready"}
 ```
