@@ -81,15 +81,20 @@ static void test_refuse_loose_key(void)
    assert(r == -1);
 }
 
-/* Cert present but key absent -> 0 (incomplete material, present nothing). */
-static void test_cert_without_key_is_none(void)
+/* Partial identity is a configuration error, never a bearer downgrade. */
+static void test_partial_identity_is_refused(void)
 {
    char crt[600], key[600], p[700];
    rm_material();
    snprintf(p, sizeof(p), "%s/tls/client.crt", g_home);
    write_file(p, 0600);
    int r = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
-   assert(r == 0);
+   assert(r == -1);
+   rm_material();
+   snprintf(p, sizeof(p), "%s/tls/client.key", g_home);
+   write_file(p, 0600);
+   r = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
+   assert(r == -1);
 }
 
 /* Key group-readable (0640) -> -1: pin the exact `& 077` boundary the gate
@@ -141,7 +146,7 @@ int main(void)
    test_refuse_loose_key();
    test_refuse_group_readable_key();
    test_refuse_symlinked_key();
-   test_cert_without_key_is_none();
+   test_partial_identity_is_refused();
    test_bad_home_is_none();
    rm_material();
    printf("aimee_tls_clientcert: all tests passed\n");

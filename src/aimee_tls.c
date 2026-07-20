@@ -38,9 +38,8 @@ int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, ch
       return 0;
    snprintf(crt, crt_n, "%s/tls/client.crt", home);
    snprintf(key, key_n, "%s/tls/client.key", home);
-   struct stat cs;
-   if (stat(crt, &cs) != 0)
-      return 0; /* no client-cert material configured */
+   struct stat cs, ks;
+   int have_crt = stat(crt, &cs) == 0;
 #ifndef _WIN32
    /* The key is this client's identity material: lstat it (do NOT follow a
     * symlink) and require a plain, owner-only regular file. This refuses a
@@ -49,35 +48,45 @@ int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, ch
     * so this gate targets accidental loose perms + symlink tricks, not an
     * attacker who already controls the directory — full TOCTOU-atomic loading
     * is therefore out of scope.) */
-   struct stat ks;
-   if (lstat(key, &ks) != 0)
-      return 0;
+   int have_key = lstat(key, &ks) == 0;
+   if (!have_crt && !have_key)
+      return 0; /* no client-cert material configured */
+   if (!have_crt || !have_key)
+      return -1; /* partial identity would silently downgrade */
    if (!S_ISREG(ks.st_mode))
       return -1; /* symlink / special file — refuse */
    if (ks.st_mode & 077)
       return -1; /* group/world-accessible — refuse */
 #else
-   struct stat ks;
-   if (stat(key, &ks) != 0)
+   int have_key = stat(key, &ks) == 0;
+   if (!have_crt && !have_key)
       return 0;
+   if (!have_crt || !have_key)
+      return -1;
 #endif
    return 1;
 }
 
 /* Present <aimee_home>/tls/client.{crt,key} as this client's certificate for
  * mutual TLS, when both files exist. Absent => plain client TLS (the server may
- * not require a client cert). A load failure leaves the ctx cert-less and the
- * handshake then fails at the mTLS server, which is the correct signal for a
- * broken/loose client cert. */
-static void aimee_tls_present_client_cert(SSL_CTX *ctx)
+ * not require a client cert). Once either identity file is configured, unsafe
+ * permissions, malformed PEM, or a key mismatch fail the connection closed. */
+static int aimee_tls_present_client_cert(SSL_CTX *ctx)
 {
    char crt[600], key[600];
-   if (aimee_tls_client_cert_eligible(aimee_home(), crt, sizeof(crt), key, sizeof(key)) != 1)
-      return;
+   int eligible = aimee_tls_client_cert_eligible(aimee_home(), crt, sizeof(crt), key, sizeof(key));
+   if (eligible == 0)
+      return 0;
+   if (eligible < 0)
+      return -1;
    if (SSL_CTX_use_certificate_chain_file(ctx, crt) != 1 ||
        SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1 ||
        SSL_CTX_check_private_key(ctx) != 1)
+   {
       ERR_clear_error();
+      return -1;
+   }
+   return 0;
 }
 
 /* Resolve <aimee_home>/remote-ca.pem — the pinned server certificate written by
@@ -163,7 +172,16 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       }
    }
 
-   aimee_tls_present_client_cert(ctx);
+   /* A configured identity is security policy, not a hint. Refuse to connect if
+    * it is unsafe, malformed, or mismatched; silently continuing would turn a
+    * broken mTLS deployment into bearer-only TLS during the optional ramp. */
+   if (aimee_tls_present_client_cert(ctx) != 0)
+   {
+      if (pinned)
+         X509_free(pinned);
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
 
    SSL *ssl = SSL_new(ctx);
    if (!ssl)
