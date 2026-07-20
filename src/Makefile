@@ -330,7 +330,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
-                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c \
+                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c modules/vault/vault_custody_kms.c \
                   modules/vault/vault_capability.c
 KB_VAULT_OBJS = $(VAULT_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
