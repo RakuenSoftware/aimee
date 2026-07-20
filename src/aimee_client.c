@@ -365,19 +365,17 @@ int aimee_client_remote_active_scheme(char *desc_out, unsigned long desc_sz, int
    char url[512], tok[256];
    if (!resolve_remote(url, sizeof(url), tok, sizeof(tok)))
       return 0;
-   if (desc_out && desc_sz)
+   char host[256], port[16];
+   int is_https = 0;
+   if (parse_url(url, host, sizeof(host), port, sizeof(port), &is_https) == 0)
    {
-      char host[256], port[16];
-      int is_https = 0;
-      if (parse_url(url, host, sizeof(host), port, sizeof(port), &is_https) == 0)
-      {
+      if (desc_out && desc_sz)
          snprintf(desc_out, desc_sz, "%s:%s", host, port);
-         if (is_https_out)
-            *is_https_out = is_https;
-      }
-      else
-         snprintf(desc_out, desc_sz, "%s", url);
+      if (is_https_out)
+         *is_https_out = is_https;
    }
+   else if (desc_out && desc_sz)
+      snprintf(desc_out, desc_sz, "%s", url);
    return 1;
 }
 

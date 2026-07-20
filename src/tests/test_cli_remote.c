@@ -97,6 +97,9 @@ static void test_https_set_restores_insecure_env(void)
    setenv("AIMEE_TLS_INSECURE", "1", 1);
    char *argv[] = {(char *)"set", (char *)"https://made-host.invalid:8799", (char *)"tok"};
    assert(cli_remote_cmd(3, argv, 1) == 0); /* set always persists config */
+   int is_https = 0;
+   assert(aimee_client_remote_active_scheme(NULL, 0, &is_https) == 1);
+   assert(is_https == 1); /* scheme reporting must not depend on requesting a description */
    const char *v = getenv("AIMEE_TLS_INSECURE");
    assert(v && strcmp(v, "1") == 0); /* restored, not clobbered */
    PASS("https remote set restores AIMEE_TLS_INSECURE");
