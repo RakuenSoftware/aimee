@@ -660,13 +660,13 @@ int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out)
    uint8_t kek[VAULT_KEK_LEN],nonce[VAULT_GCM_NONCE_LEN],tag[VAULT_GCM_TAG_LEN],ct[KB_PKI_KEY_PEM_MAX]; int rc=-1;
    size_t cn=strlen(c); if(unhx(n,strlen(n),nonce,sizeof(nonce))||unhx(t,strlen(t),tag,sizeof(tag))||unhx(c,cn,ct,sizeof(ct))||vault_server_kek(kek)!=0)goto done;
    if(vault_secret_decrypt(kek,(const uint8_t*)"aimee-kb-ca-key-v1",18,nonce,ct,cn/2,tag,(uint8_t*)out->key_pem)!=0)goto done;
-   rc=1; out->key_pem[cn/2]=0;
+   rc=0; out->key_pem[cn/2]=0;
 done: OPENSSL_cleanse(kek,sizeof(kek)); OPENSSL_cleanse(ct,sizeof(ct)); if(rc<0)OPENSSL_cleanse(out->key_pem,sizeof(out->key_pem)); return rc;
 }
 
 int kb_pki_ca_load_or_create_custodied(const char *dir, kb_pki_ca_t *out, int *created)
 {
-   int r=kb_pki_ca_load_custodied(dir,out); if(r==1){if(created)*created=0;return 0;}
+   int r=kb_pki_ca_load_custodied(dir,out); if(r==0){if(created)*created=0;return 0;}
    if(kb_pki_ca_generate(out)!=0||kb_pki_ca_save_custodied(dir,out)!=0){OPENSSL_cleanse(out,sizeof(*out));return -1;}
    if(created)*created=1;
    return 0;
