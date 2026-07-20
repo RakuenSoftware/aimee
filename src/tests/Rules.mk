@@ -160,6 +160,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-ir-metrics \
                $(TESTPREFIX)/unit-test-aimee-frontend \
                $(TESTPREFIX)/unit-test-aimee-backend \
+               $(TESTPREFIX)/unit-test-aimee-backend-bedrock \
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
                $(TESTPREFIX)/unit-test-aimee-ir-stream \
@@ -1654,6 +1655,13 @@ $(TESTPREFIX)/unit-test-aimee-backend: $(OBJDIR)/tests/test_aimee_backend.o \
                                       $(OBJDIR)/server/aimee_backend_responses.o \
                                       $(OBJDIR)/server/aimee_frontend_anthropic.o \
                                       $(OBJDIR)/server/aimee_frontend_openai.o \
+                                      $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
+                                      $(OBJDIR)/text.o $(OBJDIR)/util.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Slice P6c-ir: Bedrock Converse backend build/parse (pure — cJSON only).
+$(TESTPREFIX)/unit-test-aimee-backend-bedrock: $(OBJDIR)/tests/test_aimee_backend_bedrock.o \
+                                      $(OBJDIR)/server/aimee_backend_bedrock.o \
                                       $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
                                       $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
