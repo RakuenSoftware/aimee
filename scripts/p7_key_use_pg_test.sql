@@ -23,6 +23,28 @@ BEGIN
   PERFORM org_vault_rotation_finalize('owner',rid,'\xaabbcc'::bytea);
 END $$;
 
+DO $$
+DECLARE rid BIGINT;
+BEGIN
+  SELECT id INTO rid FROM org_vault_rotation WHERE key_id='team:970711|bedrock|primary';
+  UPDATE org_vault_current SET version=1 WHERE principal='team:970711:provider:bedrock' AND
+    agent='bedrock' AND cred='primary';
+  IF (SELECT count(*) FROM org_vault_key_use_candidate('owner',970711,
+      'team:970711|bedrock|primary','team:970711:provider:bedrock','bedrock','primary',2))<>0 THEN
+    RAISE EXCEPTION 'P7 key-use FAIL: restored old current pointer accepted newer anchor';
+  END IF;
+  UPDATE org_vault_current SET version=2 WHERE principal='team:970711:provider:bedrock' AND
+    agent='bedrock' AND cred='primary';
+  UPDATE org_vault_rotation SET state='activating' WHERE id=rid;
+  BEGIN
+    PERFORM * FROM org_vault_key_use_candidate('owner',970711,
+      'team:970711|bedrock|primary','team:970711:provider:bedrock','bedrock','primary',2);
+    RAISE EXCEPTION 'P7 key-use FAIL: activating rotation admitted';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+  UPDATE org_vault_rotation SET state='activated' WHERE id=rid;
+END $$;
+
 SET ROLE aimee_kb_runtime;
 SELECT set_tenant_context('oidc:test:p7usea',970711);
 
@@ -85,6 +107,38 @@ BEGIN
   IF (SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND
       subject='team:970711|bedrock|primary')<>1 THEN
     RAISE EXCEPTION 'P7 key-use FAIL: WORM audit cardinality mismatch';
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION p7_key_use_force_audit_failure() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN
+  IF NEW.action='vault.key_use' THEN RAISE EXCEPTION 'forced key-use WORM failure'; END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER p7_key_use_force_audit_failure BEFORE INSERT ON kb_audit_event
+FOR EACH ROW EXECUTE FUNCTION p7_key_use_force_audit_failure();
+
+SET ROLE aimee_kb_runtime;
+SELECT set_tenant_context('oidc:test:p7usea',970711);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM * FROM org_vault_key_use_admit('oidc:test:p7usea',970711,
+      'cert:test-ca:01','use-worm-fail','team:970711|bedrock|primary',
+      'team:970711:provider:bedrock','bedrock','primary',2,repeat('d',64),
+      'bedrock','anthropic.claude','invoke','\xaabbcc'::bytea);
+    RAISE EXCEPTION 'P7 key-use FAIL: forced WORM failure admitted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM='P7 key-use FAIL: forced WORM failure admitted' THEN RAISE; END IF;
+  END;
+END $$;
+RESET ROLE;
+DROP TRIGGER p7_key_use_force_audit_failure ON kb_audit_event;
+DROP FUNCTION p7_key_use_force_audit_failure();
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM org_vault_key_use_intent WHERE team_id=970711 AND
+      authenticated_origin='cert:test-ca:01' AND use_id='use-worm-fail') THEN
+    RAISE EXCEPTION 'P7 key-use FAIL: intent survived WORM rollback';
   END IF;
 END $$;
 

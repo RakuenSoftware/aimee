@@ -56,6 +56,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_rotation_ops_pg_test.sql"
 echo "== P7 signed-HWM steady-state key-use admission assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_key_use_pg_test.sql"
 
+echo "== P7 signed-HWM same-use concurrency gate =="
+"$ROOT/scripts/p7_key_use_concurrency.sh" "$DB_URL"
+
 echo "== P7 fenced vendor-operation multi-worker concurrency gate =="
 "$ROOT/scripts/p7_rotation_ops_concurrency.sh" "$DB_URL"
 

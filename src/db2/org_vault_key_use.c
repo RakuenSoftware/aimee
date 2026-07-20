@@ -8,6 +8,20 @@
 
 #define USE_ERR 256
 
+static int classified_error(const char *err)
+{
+   return err && (strstr(err, "org_vault_key_use_candidate: invalid input") ||
+                  strstr(err, "org_vault_key_use_candidate: not authorized") ||
+                  strstr(err, "org_vault_key_use_candidate: unstable key binding") ||
+                  strstr(err, "org_vault_key_use_admit: invalid input") ||
+                  strstr(err, "org_vault_key_use_admit: not authorized") ||
+                  strstr(err, "org_vault_key_use_admit: replay mismatch") ||
+                  strstr(err, "org_vault_key_use_admit: unstable key binding") ||
+                  strstr(err, "org_vault_key_use_admit: attestation mismatch"))
+              ? DB2_VAULT_KEY_USE_INTEGRITY
+              : DB2_VAULT_KEY_USE_ERROR;
+}
+
 static int valid_text(const char *s, size_t max)
 {
    return s && s[0] && strlen(s) <= max;
@@ -69,8 +83,9 @@ int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *
    aimee_pg_bind_text(st, "?6", cred);
    aimee_pg_bind_int64(st, "?7", version);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
-   int rc = step == AIMEE_PG_ROW ? read_envelope(st, 0, version, out)
-                                 : (step == AIMEE_PG_DONE ? -2 : -1);
+   int rc = step == AIMEE_PG_ROW
+                ? (read_envelope(st, 0, version, out) == 0 ? 0 : DB2_VAULT_KEY_USE_INTEGRITY)
+                : (step == AIMEE_PG_DONE ? DB2_VAULT_KEY_USE_MISSING : classified_error(err));
    aimee_pg_finalize(st);
    return rc;
 }
@@ -116,11 +131,22 @@ int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *auth
    if (step != AIMEE_PG_ROW)
    {
       aimee_pg_finalize(st);
-      return -1;
+      return classified_error(err);
    }
    const char *b = aimee_pg_column_text(st, 0);
-   int newly_admitted = b && (b[0] == 't' || b[0] == '1');
-   int rc = newly_admitted ? read_envelope(st, 1, version, out) : 0;
+   if (!b)
+   {
+      aimee_pg_finalize(st);
+      return DB2_VAULT_KEY_USE_INTEGRITY;
+   }
+   int newly_admitted = b[0] == 't' || b[0] == '1';
+   int rc = 0;
+   if (newly_admitted)
+      rc = read_envelope(st, 1, version, out) == 0 ? 0 : DB2_VAULT_KEY_USE_INTEGRITY;
+   else
+      for (int col = 1; col <= 5; col++)
+         if (!aimee_pg_column_is_null(st, col))
+            rc = DB2_VAULT_KEY_USE_INTEGRITY;
    aimee_pg_finalize(st);
-   return rc == 0 ? newly_admitted : -1;
+   return rc == 0 ? newly_admitted : rc;
 }

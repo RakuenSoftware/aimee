@@ -73,7 +73,7 @@ int main(void)
    uint8_t nonce[VAULT_GCM_NONCE_LEN], ciphertext[sizeof(secret) - 1], tag[VAULT_GCM_TAG_LEN];
    assert(vault_server_kek(kek) == 0 && vault_crypto_random(dek, sizeof(dek)) == 0 &&
           vault_dek_wrap(kek, dek, wrapped) == 0);
-   const char aad[] = "team:970713:provider:bedrock|bedrock|primary";
+   const char aad[] = "team:970713:provider:bedrock|bedrock|primary|2";
    assert(vault_secret_encrypt(dek, (const uint8_t *)aad, strlen(aad), secret, sizeof(secret) - 1,
                                nonce, ciphertext, tag) == 0);
 
@@ -107,6 +107,34 @@ int main(void)
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970713") == 1);
    assert(scalar("SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND "
                  "subject='team:970713|bedrock|primary'") == 1);
+   assert(db2_tenant_scope_commit() == 0);
+
+   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(scalar("WITH u AS (UPDATE org_vault_current SET version=1 WHERE "
+                 "principal='team:970713:provider:bedrock' AND agent='bedrock' AND "
+                 "cred='primary' RETURNING 1) SELECT count(*) FROM u") == 1);
+   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_vault_key_use(&caller, team_id, &transport, "live-use-rollback", key_id,
+                           "team:970713:provider:bedrock", "bedrock", "primary", digest, "bedrock",
+                           "anthropic.claude", "invoke", consume,
+                           NULL) == KB_VAULT_KEY_USE_UNATTESTED);
+   assert(callback_calls == 1);
+   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(scalar("WITH u AS (UPDATE org_vault_current SET version=2 WHERE "
+                 "principal='team:970713:provider:bedrock' AND agent='bedrock' AND "
+                 "cred='primary' RETURNING 1) SELECT count(*) FROM u") == 1);
+   assert(scalar("WITH u AS (UPDATE org_vault_secret SET hwm_attestation='\\xdead' WHERE "
+                 "principal='team:970713:provider:bedrock' AND agent='bedrock' AND "
+                 "cred='primary' AND version=2 RETURNING 1) SELECT count(*) FROM u") == 1);
+   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_vault_key_use(&caller, team_id, &transport, "live-use-bad-signature", key_id,
+                           "team:970713:provider:bedrock", "bedrock", "primary", digest, "bedrock",
+                           "anthropic.claude", "invoke", consume,
+                           NULL) == KB_VAULT_KEY_USE_UNATTESTED);
+   assert(callback_calls == 1);
+   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970713") == 1);
+   assert(scalar("SELECT count(*) FROM kb_audit_event WHERE detail LIKE '%AKIA_TEST%'") == 0);
    assert(db2_tenant_scope_commit() == 0);
 
    OPENSSL_cleanse(kek, sizeof(kek));

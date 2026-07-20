@@ -16,7 +16,7 @@
 #include <unistd.h>
 #endif
 
-#define KEY_USE_AAD_MAX 1113
+#define KEY_USE_AAD_MAX 1133
 
 typedef struct
 {
@@ -98,9 +98,10 @@ static int scope_finish(int rc)
 }
 
 static int aad_build(key_use_arena_t *arena, const char *principal, const char *agent,
-                     const char *cred, size_t *aad_len)
+                     const char *cred, int64_t version, size_t *aad_len)
 {
-   int n = snprintf(arena->aad, sizeof(arena->aad), "%s|%s|%s", principal, agent, cred);
+   int n = snprintf(arena->aad, sizeof(arena->aad), "%s|%s|%s|%lld", principal, agent, cred,
+                    (long long)version);
    if (n < 0 || (size_t)n >= sizeof(arena->aad))
       return -1;
    *aad_len = (size_t)n;
@@ -120,8 +121,10 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
        !bounded(use_id, 200, 0) || !bounded(key_id, 600, 0) || !bounded(principal, 600, 0) ||
        !bounded(agent, 255, 1) || !bounded(cred, 255, 1) || !digest_valid(request_digest) ||
        !bounded(provider, 64, 0) || !bounded(model, 255, 0) || !bounded(operation, 64, 0) ||
-       !callback || !kb_vault_live_keys_allowed())
+       !callback)
       return KB_VAULT_KEY_USE_INTEGRITY;
+   if (!kb_vault_live_keys_allowed())
+      return KB_VAULT_KEY_USE_SEALED;
 
    db2_vault_key_use_envelope_t candidate, admitted;
    memset(&candidate, 0, sizeof(candidate));
@@ -144,10 +147,16 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
       goto done;
    int rc = db2_vault_key_use_candidate(actor, team_id, key_id, principal, agent, cred,
                                         (int64_t)anchor_version, &candidate);
-   if (rc == -2)
+   if (rc == DB2_VAULT_KEY_USE_MISSING)
    {
       db2_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_UNATTESTED;
+      goto done;
+   }
+   if (rc == DB2_VAULT_KEY_USE_INTEGRITY)
+   {
+      db2_tenant_scope_rollback();
+      result = KB_VAULT_KEY_USE_INTEGRITY;
       goto done;
    }
    if (scope_finish(rc) < 0)
@@ -166,6 +175,7 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
    if (!arena)
       goto done;
    int old_cancel_state = PTHREAD_CANCEL_ENABLE;
+   int guard_held = 0;
    if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state) != 0)
    {
       arena_free(arena, mapped);
@@ -178,6 +188,12 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
        db2_vault_key_use_admit(actor, team_id, origin, use_id, key_id, principal, agent, cred,
                                (int64_t)anchor_version, request_digest, provider, model, operation,
                                candidate.hwm_attestation, candidate.hwm_attestation_len, &admitted);
+   if (rc == DB2_VAULT_KEY_USE_INTEGRITY)
+   {
+      db2_tenant_scope_rollback();
+      result = KB_VAULT_KEY_USE_INTEGRITY;
+      goto cleanup;
+   }
    rc = scope_finish(rc);
    if (rc < 0)
       goto cleanup;
@@ -200,9 +216,9 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
       result = vault_is_sealed() ? KB_VAULT_KEY_USE_SEALED : KB_VAULT_KEY_USE_RETRY;
       goto cleanup;
    }
-   int guard_held = 1;
+   guard_held = 1;
    size_t aad_len = 0;
-   if (aad_build(arena, principal, agent, cred, &aad_len) != 0 ||
+   if (aad_build(arena, principal, agent, cred, admitted.version, &aad_len) != 0 ||
        vault_dek_unwrap(arena->kek, admitted.wrapped_dek, arena->dek) != 0 ||
        vault_secret_decrypt(arena->dek, (const uint8_t *)arena->aad, aad_len, admitted.nonce,
                             admitted.ciphertext, admitted.ciphertext_len, admitted.tag,
@@ -212,12 +228,15 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
       result = callback(arena->plaintext, admitted.ciphertext_len, callback_ctx) == 0
                    ? KB_VAULT_KEY_USE_OK
                    : KB_VAULT_KEY_USE_CALLBACK_FAILED;
-   if (guard_held)
-      vault_use_end();
-
 cleanup:
    arena_free(arena, mapped);
+   if (guard_held)
+      vault_use_end();
+   OPENSSL_cleanse(&candidate, sizeof(candidate));
+   OPENSSL_cleanse(&admitted, sizeof(admitted));
+   OPENSSL_cleanse(fresh_att, sizeof(fresh_att));
    (void)pthread_setcancelstate(old_cancel_state, NULL);
+   return result;
 done:
    OPENSSL_cleanse(&candidate, sizeof(candidate));
    OPENSSL_cleanse(&admitted, sizeof(admitted));

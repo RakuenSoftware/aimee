@@ -4,6 +4,7 @@
 #include "modules/vault/vault_crypto.h"
 
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -16,6 +17,7 @@ static int g_sealed;
 static int g_callback_fail;
 static int g_callback_calls;
 static int g_scope_open;
+static int g_live = 1;
 static const unsigned char g_secret[] = "bedrock-secret";
 
 int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
@@ -28,7 +30,7 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
 
 int kb_vault_live_keys_allowed(void)
 {
-   return 1;
+   return g_live;
 }
 
 int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
@@ -142,8 +144,9 @@ int vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, s
    (void)nonce;
    (void)ciphertext;
    (void)tag;
-   if (!dek || dek[0] != 0x66 || !aad || aad_len != strlen("vault|bedrock|primary") ||
-       memcmp(aad, "vault|bedrock|primary", aad_len) != 0 || ciphertext_len != sizeof(g_secret) - 1)
+   if (!dek || dek[0] != 0x66 || !aad || aad_len != strlen("vault|bedrock|primary|2") ||
+       memcmp(aad, "vault|bedrock|primary|2", aad_len) != 0 ||
+       ciphertext_len != sizeof(g_secret) - 1)
       return -1;
    memcpy(plaintext, g_secret, sizeof(g_secret) - 1);
    return 0;
@@ -171,6 +174,7 @@ static void reset(void)
    g_hwm_fail = g_verify_fail = g_candidate_fail = g_begin_fail = g_sealed = 0;
    g_callback_fail = g_callback_calls = g_scope_open = 0;
    g_admit_result = 1;
+   g_live = 1;
 }
 
 int main(void)
@@ -193,14 +197,27 @@ int main(void)
    g_candidate_fail = 2;
    assert(run() == KB_VAULT_KEY_USE_UNATTESTED && g_callback_calls == 0);
    reset();
+   g_live = 0;
+   assert(run() == KB_VAULT_KEY_USE_SEALED && g_callback_calls == 0);
+   reset();
    g_admit_result = -1;
    assert(run() == KB_VAULT_KEY_USE_RETRY && g_callback_calls == 0);
+   reset();
+   g_admit_result = DB2_VAULT_KEY_USE_INTEGRITY;
+   assert(run() == KB_VAULT_KEY_USE_INTEGRITY && g_callback_calls == 0);
    reset();
    g_begin_fail = g_sealed = 1;
    assert(run() == KB_VAULT_KEY_USE_SEALED && g_callback_calls == 0);
    reset();
+   g_begin_fail = 1;
+   assert(run() == KB_VAULT_KEY_USE_RETRY && g_callback_calls == 0);
+   reset();
    g_callback_fail = 1;
    assert(run() == KB_VAULT_KEY_USE_CALLBACK_FAILED && g_callback_calls == 1);
+   int old_state = -1;
+   assert(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_state) == 0);
+   assert(old_state == PTHREAD_CANCEL_ENABLE);
+   assert(pthread_setcancelstate(old_state, NULL) == 0);
    puts("kb_vault_key_use: all tests passed");
    return 0;
 }
