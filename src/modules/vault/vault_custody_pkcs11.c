@@ -2,6 +2,7 @@
 #include "vault_crypto.h"
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 #ifdef WITH_PKCS11
 #include <dlfcn.h>
 #include <p11-kit/pkcs11.h>
