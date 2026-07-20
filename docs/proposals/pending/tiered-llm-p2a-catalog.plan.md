@@ -87,3 +87,61 @@ NO egress and NO keys.
 
 No egress, no vault, no org keys, no server-side roster merge, no budget. cred_slot_ref is
 inert. Pure catalog + entitlement + admin CRUD, tenant-isolated + WORM-audited.
+
+## v2 refinements (roundtable-converged; simpler + more correct)
+
+Panel found no blocking issue; these repeated signals reshape the slice — net effect is
+SIMPLER and more correct:
+
+- **DROP `cred_slot_ref` from P2a.** It is inert here and one-per-catalog-row can't
+  express per-team credentials. The org-key vault slot is keyed by `(team, provider)` (P7
+  §9), so P2b DERIVES it from the resolved billing team + the model's provider at egress —
+  no catalog column, no server-invisible field, no exposure surface. (Removes ~8 findings.)
+- **ADD `endpoint` (TEXT, may be empty→provider default) to `org_model_catalog`.** P2b's
+  strict-trust-boundary derives provider/wire/**endpoint**/cred exclusively from the
+  authoritative catalog — endpoint must be catalog-owned now to avoid a P2b migration and
+  to prevent the server ever supplying it.
+- **`org_catalog_entitled()` takes NO principal argument** — it reads
+  `current_setting('aimee.principal', true)` (the actor set by `set_tenant_context` /
+  `db2_tenant_scope_begin`), so a caller can never nominate another principal's
+  memberships (no confused-deputy on the owner-bypassing definer). It also **excludes
+  `enabled = false` rows**.
+- **REVOKE the runtime role's direct SELECT on `org_model_catalog`** (schema_grants.sql);
+  ALL catalog reads funnel through the definer functions. The RLS gate explicitly tests
+  "runtime has no direct SELECT on org_model_catalog". Entitlement direct reads stay
+  tenant-filtered (defense-in-depth).
+- **Atomic WORM audit.** Every catalog/entitlement mutation is a SECURITY DEFINER function
+  that appends the `kb_audit_event` (before/after, actor, action) INSIDE the same txn as
+  the mutation — if the audit append fails the mutation rolls back (never a mutation
+  without its audit). `org_catalog_remove` deletes the model's entitlements EXPLICITLY
+  (auditing the removal) rather than relying on a silent `ON DELETE CASCADE`.
+- **DROP the `billable_model` link.** P3 metering keys off its own derivation; a
+  catalog→pricing FK couples catalog evolution to pricing and adds migration ordering.
+  Omit from P2a; add if/when P3b needs it.
+- **Single-org (platform-scoped), like P3a.** aimee-kb IS the org tier; there is no
+  multi-org-in-one-kb, so NO `org_id` column. `UNIQUE(model_id)` is the org-global catalog.
+  "cross-org rejected" = a request naming a `team_id` NOT in the caller's resolved
+  memberships is rejected (the P1 resolver rule) — enforced by `org_catalog_entitled`
+  reading only the actor's teams. Documented as the P2a boundary (multi-org is a non-goal
+  here, same posture as P3a pricing).
+- **CLI writes go through the audited definer functions** (not raw owner INSERTs), so the
+  CLI is not a second unaudited write surface. Operator-in-process still sets
+  `aimee.principal='owner'` (admin) so `kb_principal_is_admin()` passes.
+- **Indexes:** `org_model_entitlement(team_id)`, `org_model_entitlement(model_id)`.
+
+### Revised schema (v2)
+
+`org_model_catalog(id, model_id TEXT UNIQUE NOT NULL, display_name TEXT, provider TEXT
+NOT NULL, wire TEXT NOT NULL CHECK (wire IN ('anthropic','openai','responses','gemini')),
+endpoint TEXT NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL DEFAULT true, created_at,
+updated_at)`. `org_model_entitlement(id, model_id TEXT REFERENCES org_model_catalog(model_id),
+team_id BIGINT REFERENCES kb_team(id), created_at, UNIQUE(model_id, team_id))`. No
+`cred_slot_ref`, no `billable_model`, no `org_id`.
+
+### Gate additions
+
+Negative tests: runtime role has NO direct SELECT on `org_model_catalog` (privilege
+denied); `org_catalog_entitled()` for actor A never returns B's non-shared entitled models
+and never returns `enabled=false` rows; a WORM audit row IS appended on each mutation (and
+the mutation rolls back if the audit append is made to fail); the entitled JSON surface
+contains no credential/endpoint-override field beyond the authoritative catalog columns.
