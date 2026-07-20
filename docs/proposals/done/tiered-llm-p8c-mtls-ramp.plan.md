@@ -70,3 +70,6 @@ enrollment protocol or grant network callers new capabilities.
 - CT260: enroll two clients in optional mode, present one (hold), present the
   second (advance), restart, prove bearer-only refusal and both cert handshakes;
   revoke one and prove next request refusal while the other remains accepted.
+- Final CT260 gate also proved cert-only authentication without the shared
+  bearer, invalid-bearer independence, network write denial, and required-mode
+  persistence across restart.
