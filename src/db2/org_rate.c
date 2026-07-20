@@ -38,8 +38,8 @@ int db2_org_rate_policy_set(const char *dim, const char *scope_key, int64_t wind
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT org_rate_policy_set(?1, ?2, ?3, ?4)", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT org_rate_policy_set(?1, ?2, ?3, ?4)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", dim);
@@ -56,8 +56,8 @@ int db2_org_rate_policy_set(const char *dim, const char *scope_key, int64_t wind
    return 0;
 }
 
-int db2_org_rate_policy_show(const char *dim, const char *scope_key,
-                             db2_org_rate_policy_t *out, int max)
+int db2_org_rate_policy_show(const char *dim, const char *scope_key, db2_org_rate_policy_t *out,
+                             int max)
 {
    int g = db2_tenant_require_pg();
    if (g)
@@ -114,9 +114,8 @@ int db2_org_rate_check(int64_t team, int has_project, int64_t project, const cha
       return -1;
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT admitted, binding_dim, reset_epoch FROM org_rate_check(?1, ?2, ?3, ?4)",
-       err, sizeof(err));
+       conn, "SELECT admitted, binding_dim, reset_epoch FROM org_rate_check(?1, ?2, ?3, ?4)", err,
+       sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", team);

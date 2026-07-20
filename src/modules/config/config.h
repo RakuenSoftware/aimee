@@ -57,6 +57,11 @@
  * "swtpm:host=127.0.0.1,port=2321". */
 #define CONFIG_DEFAULT_VAULT_TPM2_TCTI "device:/dev/tpmrm0"
 
+/* Default NV index for the tpm2 anti-rollback monotonic counter (vault.tpm2.nv_index,
+ * P7-tpm2b). A big-endian hex/decimal handle in the TPM2 NV space (0x01xxxxxx range).
+ * Parsed by the WITH_TPM2 build via strtoul(base 0). */
+#define CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX "0x01500001"
+
 /* Concurrency config: per-model and per-provider overrides */
 #define CONFIG_CONCURRENCY_KEY_LEN     128
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
@@ -282,6 +287,11 @@ typedef struct config
    char workspace_sandbox_image[64][256];
    int workspace_count;
    char guardrail_mode[16];
+   int subagent_ban_enabled;        /* default ON: when set AND usable delegates are configured,
+                                       block the primary agent's own sub-agent tools (Task/Agent/
+                                       spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
+                                       Explicit `subagent_ban_enabled: false` allows provider-native
+                                       sub-agents. */
    char provider[16];
    /* Durable default persona: the persona a fresh primary session starts as, and
     * the persona draft roundtable panelists author with when none is set. Width =
@@ -389,6 +399,10 @@ typedef struct config
     * Tss2_TctiLdr_Initialize (default "device:/dev/tpmrm0"; the swtpm CT sets
     * "swtpm:host=127.0.0.1,port=2321"). Only read by the WITH_TPM2 build. */
    char vault_tpm2_tcti[128];
+   /* vault.tpm2.nv_index: the TPM2 NV monotonic-counter index anchoring P7-tpm2b
+    * anti-rollback (default "0x01500001"). A hex/decimal handle string parsed via
+    * strtoul(base 0). Only read by the WITH_TPM2 build of vault_custody_tpm2.c. */
+   char vault_tpm2_nv_index[32];
    int memory_salience_enabled;
    double memory_salience_weight;
    int memory_salience_window_size;

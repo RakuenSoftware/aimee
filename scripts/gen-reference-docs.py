@@ -166,6 +166,8 @@ CFG_KEY_DESC = {
     "history bounded.",
     "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
     "(session-isolation guard; default off).",
+    "subagent_ban_enabled": "Prevent provider-native sub-agent tools when an aimee delegate is "
+    "available, and install the matching client guardrails (default on).",
     "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "
     "(~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory "
     "system via `aimee memory store` (default on).",

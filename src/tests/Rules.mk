@@ -20,7 +20,7 @@ TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/main
                  $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/modules/economizer/coord_closet.o $(OBJDIR)/modules/economizer/context_fold.o $(OBJDIR)/modules/economizer/context_reduce.o $(OBJDIR)/modules/economizer/tool_condense.o $(OBJDIR)/modules/economizer/fold_register.o $(OBJDIR)/modules/economizer/fold_recall.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
                  $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
-TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(DB1_OBJS) \
+TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) \
                              $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/modules/skill/skill_review.o $(OBJDIR)/modules/skill/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
@@ -500,7 +500,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-trajectory-batch \
                $(TESTPREFIX)/unit-test-delegate-credentials \
                $(TESTPREFIX)/unit-test-curator-fixtures \
-               $(TESTPREFIX)/unit-test-substrate-fixtures
+               $(TESTPREFIX)/unit-test-substrate-fixtures \
+               $(TESTPREFIX)/unit-test-org-telemetry \
+               $(TESTPREFIX)/unit-test-aws-auth \
+               $(TESTPREFIX)/unit-test-aws-eventstream
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -583,7 +586,6 @@ $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
 # validation, token sha256 + constant-time compare, content-free structural
 # check). Links only the dependency-light org_telemetry_fmt.o (+ OpenSSL for
 # sha256 via TEST_L_FLAGS); the DB-backed paths live in the real-PG gate.
-TEST_TARGETS += $(TESTPREFIX)/unit-test-org-telemetry
 $(OBJDIR)/tests/test_org_telemetry.o: schema_data.h
 $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
                                        $(OBJDIR)/db2/org_telemetry_fmt.o
@@ -594,7 +596,6 @@ $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
 # session policy, and STS session-cache isolation. Links only the kb-only
 # modules/aws/*.o + cJSON (JWT claim parse) + OpenSSL (HMAC/SHA256/JWT verify) via
 # TEST_L_FLAGS — no DB, no network (pure/offline).
-TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-auth
 $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
                                   $(OBJDIR)/modules/aws/aws_sigv4.o \
                                   $(OBJDIR)/modules/aws/aws_sts.o \
@@ -608,7 +609,6 @@ $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
 # rolling-buffer resume, BE->host integer swap, and the deterministic fuzz
 # sweep (memory-safety gate). Links ONLY aws_eventstream.o — CRC32 is
 # self-contained, so no OpenSSL/zlib/cJSON.
-TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-eventstream
 $(TESTPREFIX)/unit-test-aws-eventstream: $(OBJDIR)/tests/test_aws_eventstream.o \
                                          $(OBJDIR)/modules/aws/aws_eventstream.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1465,6 +1465,8 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
 $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev_cache.o $(OBJDIR)/models_dev.o \
+                               $(OBJDIR)/tests/support/vault_service_stub.o \
+                               $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
                                $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4139,6 +4141,7 @@ $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.
 $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/tests/support/corpus_jobs_http_stub.o \
                      $(OBJDIR)/tests/support/pdf_route_stubs.o \
+                     $(OBJDIR)/tests/support/kb_http_route_stubs.o \
                      $(OBJDIR)/kb/http/kb_http.o \
                      $(OBJDIR)/kb/http/kb_http_conn.o \
                      $(OBJDIR)/tests/support/kb_ws_stub.o \
@@ -4577,4 +4580,3 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
                                           $(OBJDIR)/server/tool_call_args.o \
                                           $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-

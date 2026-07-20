@@ -45,8 +45,8 @@ int db2_org_budget_set(int64_t team, int has_project, int64_t project, const cha
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT org_budget_set(?1, ?2, ?3, ?4, ?5)", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT org_budget_set(?1, ?2, ?3, ?4, ?5)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", team);
@@ -71,8 +71,8 @@ int db2_org_budget_set(int64_t team, int has_project, int64_t project, const cha
    return 0;
 }
 
-int db2_org_budget_show(int64_t team, int has_project, int64_t project,
-                        db2_org_budget_row_t *out, int max)
+int db2_org_budget_show(int64_t team, int has_project, int64_t project, db2_org_budget_row_t *out,
+                        int max)
 {
    int g = db2_tenant_require_pg();
    if (g)
@@ -83,11 +83,11 @@ int db2_org_budget_show(int64_t team, int has_project, int64_t project,
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT team_id, project_id, period, limit_usd, soft_limit_usd, period_id,"
-       " spend_usd, reserved_usd, remaining_usd FROM org_budget_show(?1, ?2)",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT team_id, project_id, period, limit_usd, soft_limit_usd, period_id,"
+                        " spend_usd, reserved_usd, remaining_usd FROM org_budget_show(?1, ?2)",
+                        err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", team);
@@ -191,8 +191,8 @@ int db2_org_budget_reserve(const char *origin_cn, const char *request_id, int64_
    return 0;
 }
 
-int db2_org_budget_settle(const char *origin_cn, const char *request_id,
-                          const char *realized_usd, int *out_settled)
+int db2_org_budget_settle(const char *origin_cn, const char *request_id, const char *realized_usd,
+                          int *out_settled)
 {
    int g = db2_tenant_require_pg();
    if (g)
@@ -222,8 +222,8 @@ int db2_org_budget_settle(const char *origin_cn, const char *request_id,
    return 0;
 }
 
-int db2_org_budget_heartbeat(const char *origin_cn, const char *request_id,
-                             int64_t lease_ttl_secs, int *out_ok)
+int db2_org_budget_heartbeat(const char *origin_cn, const char *request_id, int64_t lease_ttl_secs,
+                             int *out_ok)
 {
    int g = db2_tenant_require_pg();
    if (g)

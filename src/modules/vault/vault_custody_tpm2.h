@@ -37,6 +37,28 @@ const vault_custody_provider_t *vault_custody_tpm2_provider(void);
 int vault_custody_tpm2_provision(const uint8_t kek[VAULT_KEK_LEN], const char *secret, char *errbuf,
                                  size_t errlen);
 
+/* P7-tpm2b anti-rollback re-seal. Bumps the TPM2 NV monotonic counter to a new
+ * generation G', computes a PolicyNV(NV==G') authPolicy, seals `new_kek || be64(G')`
+ * under it (userWithAuth CLEAR, object authValue = the operator secret), and
+ * ATOMICALLY replaces the on-disk blob (temp+fsync+rename). INCREMENT-BEFORE-WRITE:
+ * a crash between the increment and the write leaves the OLD blob bound to a now-stale
+ * generation whose PolicyNV the TPM refuses (fail-closed; recovery = re-provision).
+ * Mutex-serialized. `secret` is the operator credential gating BOTH the NV counter
+ * (its authValue is secret-derived) and the sealed object. Returns 0 on success, -1
+ * on any failure (incl. the default stub build, which cannot seal).
+ *
+ * This is the custody-half PRIMITIVE the kb vault-rotate flow calls AFTER re-wrapping
+ * the DEKs under `new_kek`; a standalone custody KEK rotation would strand DEKs, so
+ * the tpm2 `rotate` vtable slot itself fails LOUD and defers to this flow. */
+int vault_custody_tpm2_reseal(const uint8_t new_kek[VAULT_KEK_LEN], const char *secret);
+
+/* P7-tpm2b introspection: read the current NV monotonic-counter generation (the
+ * anti-rollback authority — the value a freshly (re)sealed blob is bound to). Requires
+ * the operator `secret` (the NV index is AUTHREAD-gated by a secret-derived authValue,
+ * so a wrong/absent secret returns -1). Read-only; does not alter TPM state. Returns 0
+ * and *out_gen on success, -1 on any failure (incl. the default stub build). */
+int vault_custody_tpm2_nv_generation(const char *secret, uint64_t *out_gen);
+
 /* Re-seal + zeroize the singleton's cached KEK and drop its lazy-init state so a
  * fresh instance re-loads the on-disk blob (test reset / clean re-bind). */
 void vault_custody_tpm2_reset(void);
