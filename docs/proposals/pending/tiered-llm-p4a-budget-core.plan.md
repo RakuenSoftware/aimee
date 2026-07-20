@@ -111,3 +111,76 @@ mTLS (P5). P4a ships the algorithm + storage + admin, not the egress call.
 No egress wiring (P2b), no Redis, no console panel, no server-proxy CLI. Pure enforceable
 budget/reservation/rate core + admin, tenant-isolated, with the shared-counter concurrency
 invariant proven on real PG.
+
+## v2 refinements (roundtable-converged; correctness-critical)
+
+Panel found no blocking issue, but this is the most subtle slice — these reshape it:
+
+- **NARROW P4a to the BUDGET reservation core; DEFER the keyed rate limiter to P4b.**
+  The rate limiter needs its own authoritative rate-policy schema + admin (a caller must
+  NOT supply window_id/limit — window is DB-derived, limit is policy-driven), which is a
+  distinct sub-system. P4a = budgets only; `org_rate_window`/`org_rate_check` move to P4b.
+- **CRITICAL schema fix: no expression in a UNIQUE/PRIMARY-KEY column list.** PostgreSQL
+  rejects `UNIQUE(team_id, COALESCE(project_id,0), period)`. Use a surrogate `id BIGINT`
+  PK on every table + a partial/expression **UNIQUE INDEX**:
+  `CREATE UNIQUE INDEX ... ON org_budget(team_id, COALESCE(project_id,0), period)` (and
+  likewise for the counter's `(team_id, COALESCE(project_id,0), period, period_id)`).
+- **Money CHECKs + cap-preserving settle.** `limit_usd/soft_limit_usd/reserved_max/
+  realized >= 0` CHECKs. On settle, the amount charged is `LEAST(realized, reserved_max)`
+  per binding counter — never charge more than was reserved, so a buggy ceiling calc can't
+  break `Σreserved + spend ≤ limit`. `reserved_max` MUST be a true conservative ceiling
+  (realized ≤ reserved_max by construction of the per-provider max-cost function).
+- **Reservation → ALLOCATIONS model (cumulative caps done right).** A reservation may bind
+  MULTIPLE counters (team+project, and if both day and month caps exist, each). Add
+  `org_budget_reservation_alloc(reservation_id, counter_key TEXT, period_id TEXT,
+  reserved_usd NUMERIC)` — one row per counter the reserve bound. `org_budget_reserve`
+  computes the applicable set (every configured cap for the (team,project) at the
+  request's instant), reserves against EACH in a single txn under a **deterministic
+  counter_key order** (sort the keys — covers team-then-project AND day/month AND any
+  future dimension, a complete deadlock argument), rolls back ALL if any fails; settle
+  releases/charges EACH allocation. (A single-cap deployment has one alloc — the common
+  case stays simple.)
+- **Lease state machine (DB clock, row-locked, mutually exclusive).**
+  `lease_expires_at` is computed as `now() + :ttl` on the primary (never caller-supplied);
+  stored as TEXT via `pg_now_text`-style but compared by casting to timestamptz, or store
+  timestamptz — use a consistent comparable type. `org_budget_heartbeat(origin_cn,
+  request_id)` extends the lease `WHERE state='admitted'` (SELECT … FOR UPDATE).
+  `org_budget_settle(origin_cn, request_id, realized)` and `org_budget_settle_expired()`
+  both `SELECT … FOR UPDATE` the reservation and transition `admitted → settled` /
+  `admitted → expired_settled` — mutually exclusive; a second settle of a terminal row is
+  an idempotent no-op (a LATE reconcile after expiry adjusts spend DOWNWARD only, never
+  up). `org_budget_settle_expired()` derives `now()` internally (no caller time).
+- **Idempotency = read-back on the composite key** (P3a pattern). A same-`(origin_cert_cn,
+  request_id)` re-reserve whose immutable triple (team, project, pricing_version,
+  reserved_max) differs from the bound row is **rejected** (not silently re-reserved);
+  an identical retry returns the existing reservation. Refused requests are not persisted
+  (only granted reservations occupy `reserved`).
+- **period_id = UTC, explicit.** `org_budget_period_id(period)` =
+  `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')` for day / `'YYYY-MM'` for month — the
+  single canonical clock; settlement never recomputes (uses the reservation's pinned id).
+- **RLS hardening (ENABLE-not-FORCE, documented).** Every definer `SET search_path =
+  public`; `REVOKE ALL … FROM PUBLIC` + `GRANT EXECUTE` to runtime only; the runtime role
+  is non-owner NOBYPASSRLS and cannot `SET ROLE` the owner (P1 schema_roles) — so owner
+  bypass is a protected trust boundary. Budget reads (`org_budget_show`) actor-bound
+  (admin OR is_team_lead).
+- **Concurrency gate = genuinely parallel connections.** The real-PG gate proves
+  over-commit-safety with N PARALLEL psql connections each calling `org_budget_reserve`
+  against ONE team's balance (a sequential test can't exercise the lost-update race):
+  seed a limit that admits exactly K of M concurrent reserves; assert exactly K succeed,
+  M−K refuse, and `spend + Σreserved ≤ limit` holds. Driven by a shell harness firing
+  concurrent `psql -c` in the background + a wait. Plus sequential checks: settle
+  reconcile + idempotency, expired→reserved_max, team+project cumulative (both alloc rows),
+  read RLS, retroactive-reduction reject.
+
+## P2b integration contract (frozen by P4a, so P2b integrates cleanly)
+
+- **Admit:** `org_budget_reserve(origin_cn, request_id, team, project?, pricing_version,
+  reserved_max_usd) → {granted | refused:<typed reason>}` — call in T1 BEFORE dispatch.
+- **Heartbeat:** `org_budget_heartbeat(origin_cn, request_id)` — the serving instance
+  renews while the stream is active.
+- **Settle:** `org_budget_settle(origin_cn, request_id, realized_usd)` — after the vendor
+  response; idempotent; charges `LEAST(realized, reserved_max)`.
+- **Ambiguous/crash:** no call → the lease expires → `org_budget_settle_expired()` (a
+  periodic sweeper) charges reserved_max; a late `org_budget_settle` adjusts down only.
+- **Cancel mid-stream:** `org_budget_settle` with realized-so-far.
+P2b owns calling these around `/v1/llm/egress`; P4a owns the functions + their guarantees.
