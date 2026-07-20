@@ -1,0 +1,87 @@
+name: Benchmark Nightly
+
+on:
+  schedule:
+    # Nightly at 04:00 UTC (after day-1 PR merges settle)
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      max_samples:
+        description: "Per-dataset sample cap (0 = full)"
+        required: false
+        default: "0"
+  push:
+    branches: [main, testing]
+    paths:
+      - "benchmarks/**"
+      - "scripts/download-*.sh"
+      - ".github/workflows/bench-nightly.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: aimee memory benchmarks (LLM)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      AIMEE_BENCH_RESULTS_DIR: /tmp/bench-results/nightly
+      AIMEE_BENCH_MAX_SAMPLES: ${{ github.event.inputs.max_samples || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Install aimee (server + client)
+        run: |
+          pip install -e .
+          pip install -e ./aimee
+
+      - name: Download memory benchmark datasets (LocOMo + LongMemEval-S)
+        run: ./scripts/download-memory-benchmarks.sh
+
+      - name: Run aimee vs LocOMo (LLM track)
+        run: ./benchmarks/run-llm.sh locomo
+
+      - name: Run aimee vs LongMemEval-S (LLM track)
+        run: ./benchmarks/run-llm.sh longmemeval
+
+      - name: Verify result scores
+        run: |
+          set -euo pipefail
+          RESULTS_DIR="${AIMEE_BENCH_RESULTS_DIR}"
+          shopt -s nullglob
+          RESULTS=("${RESULTS_DIR}"/*_llm_v*.json)
+          if [ "${#RESULTS[@]}" -eq 0 ]; then
+            echo "No result files produced under ${RESULTS_DIR}" >&2
+            exit 1
+          fi
+          PYTHONPATH="${GITHUB_WORKSPACE}" python3 benchmarks/verify_scores.py "${RESULTS[@]}"
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-nightly-results
+          path: /tmp/bench-results/nightly/
+          if-no-files-found: warn
+          retention-days: 30
