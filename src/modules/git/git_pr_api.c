@@ -509,7 +509,7 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d/merge", number);
    char *resp = NULL;
-   int st = gh_put(&cx, path, "{\"merge_method\":\"squash\"}", &resp);
+   int st = gh_put(&cx, path, GIT_PR_SQUASH_MERGE_JSON, &resp);
    gh_ctx_done(&cx);
    int res;
    if (st >= 200 && st < 300)
