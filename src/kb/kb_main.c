@@ -11,6 +11,7 @@
 #include "team.h"
 #include "membership.h"
 #include "kb_insights_util.h"
+#include "org_budget.h"
 #include "org_model_catalog.h"
 #include "org_spend.h"
 #include "project.h"
@@ -626,6 +627,136 @@ static int kb_cmd_spend(int argc, char **argv)
    return rc;
 }
 
+/* Operator-facing budget admin CLI (P4a):
+ *   aimee-kb budget set --team X [--project Y] --period day|month --limit USD [--soft USD]
+ *   aimee-kb budget show --team X [--project Y]
+ * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * SECURITY DEFINER org_budget_set/show admin gate passes). Money is a NUMERIC string,
+ * never a float. BUDGET ONLY (the rate limiter is P4b; the egress wiring is P2b). */
+static int kb_cmd_budget(int argc, char **argv)
+{
+   const char *sub = argc > 2 ? argv[2] : "";
+   int has_project = 0;
+   int64_t team = 0, project = 0;
+   const char *period = NULL, *limit = NULL, *soft = NULL;
+   int has_team = 0;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--team") == 0 && i + 1 < argc)
+      {
+         team = strtoll(argv[++i], NULL, 10);
+         has_team = 1;
+      }
+      else if (strcmp(argv[i], "--project") == 0 && i + 1 < argc)
+      {
+         project = strtoll(argv[++i], NULL, 10);
+         has_project = 1;
+      }
+      else if (strcmp(argv[i], "--period") == 0 && i + 1 < argc)
+         period = argv[++i];
+      else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc)
+         limit = argv[++i];
+      else if (strcmp(argv[i], "--soft") == 0 && i + 1 < argc)
+         soft = argv[++i];
+   }
+   if (strcmp(sub, "set") != 0 && strcmp(sub, "show") != 0)
+   {
+      fprintf(stderr,
+              "Usage: aimee-kb budget set --team X [--project Y] --period day|month "
+              "--limit USD [--soft USD]\n"
+              "       aimee-kb budget show --team X [--project Y]\n");
+      return 1;
+   }
+   if (!has_team || team <= 0)
+   {
+      fprintf(stderr, "aimee-kb: --team (positive integer) is required\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   int rc = 1;
+   if (strcmp(sub, "set") == 0)
+   {
+      if (!period || (strcmp(period, "day") != 0 && strcmp(period, "month") != 0) || !limit)
+      {
+         fprintf(stderr, "aimee-kb: budget set needs --period day|month and --limit USD\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      int64_t id = 0;
+      int r = db2_org_budget_set(team, has_project, project, period, limit, soft, &id);
+      if (r == 0)
+      {
+         printf("{\"id\":%lld,\"team\":%lld,", (long long)id, (long long)team);
+         if (has_project)
+            printf("\"project\":%lld,", (long long)project);
+         printf("\"period\":\"%s\",\"limit_usd\":\"%s\"}\n", period, limit);
+         rc = 0;
+      }
+      else if (r == DB2_BUDGET_ERR_DENIED)
+         fprintf(stderr, "budget set failed (not authorized — org-admin required)\n");
+      else if (r == DB2_BUDGET_ERR_RETRO)
+         fprintf(stderr, "budget set failed (retroactive reduction below committed spend+reserved)\n");
+      else
+         fprintf(stderr, "budget set failed\n");
+   }
+   else /* show */
+   {
+      db2_org_budget_row_t rows[DB2_BUDGET_MAX_ROWS];
+      int n = db2_org_budget_show(team, has_project, project, rows, DB2_BUDGET_MAX_ROWS);
+      if (n >= 0)
+      {
+         printf("team\tproject\tperiod\tperiod_id\tlimit_usd\tsoft_usd\tspend_usd\treserved_usd\tremaining_usd\n");
+         for (int i = 0; i < n; i++)
+         {
+            printf("%lld\t", (long long)rows[i].team_id);
+            if (rows[i].has_project)
+               printf("%lld", (long long)rows[i].project_id);
+            else
+               printf("-");
+            printf("\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rows[i].period, rows[i].period_id,
+                   rows[i].limit_usd, rows[i].soft_limit_usd[0] ? rows[i].soft_limit_usd : "-",
+                   rows[i].spend_usd, rows[i].reserved_usd, rows[i].remaining_usd);
+         }
+         rc = 0;
+      }
+      else if (n == DB2_BUDGET_ERR_DENIED)
+         fprintf(stderr, "budget show failed (not authorized — org-admin or team-lead required)\n");
+      else
+         fprintf(stderr, "budget show failed\n");
+   }
+
+   if (rc == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc;
+}
+
 static int kb_cmd_tenancy(int argc, char **argv)
 {
    const char *group = argv[1]; /* "team" | "project" */
@@ -811,6 +942,8 @@ int main(int argc, char **argv)
       return kb_cmd_tenancy(argc, argv);
    if (argc > 1 && strcmp(argv[1], "spend") == 0)
       return kb_cmd_spend(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "budget") == 0)
+      return kb_cmd_budget(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;

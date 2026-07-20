@@ -427,3 +427,13 @@ CREATE TABLE IF NOT EXISTS org_model_catalog (  id INTEGER PRIMARY KEY AUTOINCRE
 CREATE TABLE IF NOT EXISTS org_model_entitlement (  id INTEGER PRIMARY KEY AUTOINCREMENT,  model_id TEXT NOT NULL REFERENCES org_model_catalog(model_id),  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  created_at TEXT NOT NULL DEFAULT '',  UNIQUE(model_id, team_id));
 CREATE INDEX IF NOT EXISTS idx_org_ent_team ON org_model_entitlement(team_id);
 CREATE INDEX IF NOT EXISTS idx_org_ent_model ON org_model_entitlement(model_id);
+
+-- P4a budget reservation core (sqlite shim mirror of schema.sql: columns only; RLS, the
+-- expression UNIQUE INDEXes, the atomic SECURITY DEFINER reserve/settle/set/show, and
+-- the WORM audit append are Postgres-only, so every P4a runtime path is gated by
+-- db2_tenant_require_pg() and hard-fails on the shim rather than reserving unprotected).
+CREATE TABLE IF NOT EXISTS org_budget (  id INTEGER PRIMARY KEY AUTOINCREMENT,  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  project_id INTEGER REFERENCES kb_project(id) ON DELETE CASCADE,  period TEXT NOT NULL,  limit_usd TEXT NOT NULL,  soft_limit_usd TEXT,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS org_budget_counter (  id INTEGER PRIMARY KEY AUTOINCREMENT,  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  project_id INTEGER REFERENCES kb_project(id) ON DELETE CASCADE,  period TEXT NOT NULL,  period_id TEXT NOT NULL,  spend_usd TEXT NOT NULL DEFAULT '0',  reserved_usd TEXT NOT NULL DEFAULT '0',  updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS org_budget_reservation (  id INTEGER PRIMARY KEY AUTOINCREMENT,  request_id TEXT NOT NULL,  origin_cert_cn TEXT NOT NULL,  team_id INTEGER NOT NULL REFERENCES kb_team(id),  project_id INTEGER REFERENCES kb_project(id),  pricing_version INTEGER NOT NULL,  reserved_max_usd TEXT NOT NULL,  state TEXT NOT NULL DEFAULT 'admitted',  lease_expires_at TEXT NOT NULL DEFAULT '',  realized_usd TEXT,  created_at TEXT NOT NULL DEFAULT '',  settled_at TEXT NOT NULL DEFAULT '',  UNIQUE(origin_cert_cn, request_id));
+CREATE TABLE IF NOT EXISTS org_budget_reservation_alloc (  id INTEGER PRIMARY KEY AUTOINCREMENT,  reservation_id INTEGER NOT NULL REFERENCES org_budget_reservation(id) ON DELETE CASCADE,  counter_key TEXT NOT NULL,  period TEXT NOT NULL,  period_id TEXT NOT NULL,  reserved_usd TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_org_budget_alloc_resv ON org_budget_reservation_alloc(reservation_id);

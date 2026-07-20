@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 75
+Total endpoints: 77
 
 ## Endpoints
 
@@ -65,6 +65,40 @@ Responses:
 - `200` — Audit action list
 - `400` — Missing required time-window
 - `401` — Unauthorized
+
+### `POST /v1/budget/set`
+
+Set a team/project period budget cap (org-admin, P4a)
+
+Upserts the hard-cap config for (team, optional project, period). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403. A hard reduction of the limit below the current period's already committed (spend + reserved) is rejected as retroactive (409). limit_usd and soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a config-only operator-signal threshold (P4a does not enforce it — a soft limit never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the reserve-before-dispatch enforcement rides with P2b.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Budget cap upserted
+- `400` — Missing or malformed team/period/limit_usd/project/soft_limit_usd
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+- `409` — Retroactive reduction below current committed spend+reserved
+
+### `GET /v1/budget/show`
+
+Show a team's budget caps + current-period counters (org-admin or team-lead, P4a)
+
+Returns every configured cap for the team (optionally filtered to one project), each joined to its current UTC period counter: limit, spend, reserved, and remaining (= limit - spend - reserved). Authorization is enforced at the DB layer inside a SECURITY DEFINER function — the caller must be an org-admin OR a lead of the requested team. All money fields are NUMERIC strings (never floats).
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | yes | integer | Team id (required). |
+| `project` | query | no | integer | Optional project filter; absent shows every cap for the team. |
+
+Responses:
+
+- `200` — Budget caps + current-period counters
+- `400` — Missing or malformed team/project
+- `401` — Authentication required
+- `403` — Not authorized (org-admin or team-lead required)
 
 ### `GET /v1/capabilities`
 

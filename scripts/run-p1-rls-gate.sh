@@ -53,6 +53,12 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 echo "== P3b org spend-reporting authorization assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p3b_spend_rls_test.sql"
 
+echo "== P4a budget reservation core correctness + isolation assertions (same provisioned db) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p4_budget_rls_test.sql"
+
+echo "== P4a budget over-commit concurrency gate (genuinely parallel connections) =="
+"$ROOT/scripts/p4_budget_concurrency.sh" "$DB_URL"
+
 echo "== P1 RLS gate: cleanup =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
 echo "== P1 RLS gate: PASSED =="

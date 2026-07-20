@@ -130,5 +130,33 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_catalog_remove(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_model_entitle(TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_model_unentitle(TEXT,BIGINT) TO aimee_kb_runtime;
+
+  -- P4a budget reservation core. The four budget tables are WRITTEN ONLY by the SECURITY
+  -- DEFINER reserve/settle/set functions (owned by aimee_kb_owner, which bypasses
+  -- ENABLE-not-FORCE RLS). Runtime therefore gets SELECT (RLS-filtered: admin OR
+  -- team-lead on config/counter, admin-only on reservation/alloc) but its direct write
+  -- grant from the ALL TABLES line above is REVOKED, so a compromised runtime session
+  -- cannot forge or mutate a reservation/counter out of band.
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
+    org_budget, org_budget_counter, org_budget_reservation, org_budget_reservation_alloc
+    FROM aimee_kb_runtime;
+  GRANT SELECT ON
+    org_budget, org_budget_counter, org_budget_reservation, org_budget_reservation_alloc
+    TO aimee_kb_runtime;
+  -- The budget functions are the ONLY write path; EXECUTE to runtime, never PUBLIC.
+  REVOKE ALL ON FUNCTION org_budget_period_id(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_budget_reserve(TEXT,TEXT,BIGINT,BIGINT,BIGINT,NUMERIC,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_budget_settle(TEXT,TEXT,NUMERIC) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_budget_settle_expired() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_budget_heartbeat(TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_budget_set(BIGINT,BIGINT,TEXT,NUMERIC,NUMERIC) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_budget_show(BIGINT,BIGINT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_budget_period_id(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_budget_reserve(TEXT,TEXT,BIGINT,BIGINT,BIGINT,NUMERIC,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_budget_settle(TEXT,TEXT,NUMERIC) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_budget_settle_expired() TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_budget_heartbeat(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_budget_set(BIGINT,BIGINT,TEXT,NUMERIC,NUMERIC) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_budget_show(BIGINT,BIGINT) TO aimee_kb_runtime;
 END
 $$;

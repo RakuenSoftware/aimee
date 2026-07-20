@@ -1455,6 +1455,97 @@ paths:
         "400": { description: Missing or malformed team/project/since/until }
         "401": { description: Authentication required }
         "403": { description: Not authorized (org-admin or team-lead required) }
+  /budget/set:
+    post:
+      operationId: setBudget
+      summary: Set a team/project period budget cap (org-admin, P4a)
+      description: >
+        Upserts the hard-cap config for (team, optional project, period). Org-admin gated
+        at the DB layer and WORM-audited atomically with the mutation; a non-admin caller
+        receives 403. A hard reduction of the limit below the current period's already
+        committed (spend + reserved) is rejected as retroactive (409). limit_usd and
+        soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a
+        config-only operator-signal threshold (P4a does not enforce it — a soft limit
+        never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the
+        reserve-before-dispatch enforcement rides with P2b.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, period, limit_usd]
+              properties:
+                team: { type: integer }
+                project: { type: integer }
+                period: { type: string, enum: [day, month] }
+                limit_usd: { type: string }
+                soft_limit_usd: { type: string }
+      responses:
+        "200":
+          description: Budget cap upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  team: { type: integer }
+                  project: { type: integer }
+                  period: { type: string }
+        "400": { description: Missing or malformed team/period/limit_usd/project/soft_limit_usd }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+        "409": { description: Retroactive reduction below current committed spend+reserved }
+  /budget/show:
+    get:
+      operationId: showBudget
+      summary: Show a team's budget caps + current-period counters (org-admin or team-lead, P4a)
+      description: >
+        Returns every configured cap for the team (optionally filtered to one project),
+        each joined to its current UTC period counter: limit, spend, reserved, and
+        remaining (= limit - spend - reserved). Authorization is enforced at the DB layer
+        inside a SECURITY DEFINER function — the caller must be an org-admin OR a lead of
+        the requested team. All money fields are NUMERIC strings (never floats).
+      parameters:
+        - name: team
+          in: query
+          required: true
+          description: Team id (required).
+          schema: { type: integer }
+        - name: project
+          in: query
+          required: false
+          description: Optional project filter; absent shows every cap for the team.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Budget caps + current-period counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team: { type: integer }
+                  project: { type: integer }
+                  count: { type: integer }
+                  budgets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        team_id: { type: integer }
+                        project_id: { type: integer, nullable: true }
+                        period: { type: string }
+                        period_id: { type: string }
+                        limit_usd: { type: string }
+                        soft_limit_usd: { type: string, nullable: true }
+                        spend_usd: { type: string }
+                        reserved_usd: { type: string }
+                        remaining_usd: { type: string }
+        "400": { description: Missing or malformed team/project }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (org-admin or team-lead required) }
   /enrollments:
     get:
       operationId: listEnrollments
