@@ -2055,6 +2055,26 @@ paths:
       summary: Issue an mTLS client cert for a CN (operator-gated; returns cert + one-time key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Issued, content: { application/json: { schema: { type: object } } } } }
+  /cert/sign:
+    post:
+      summary: Sign a client-generated CSR for a CN (operator-gated; private key stays client-side)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cn, csr]
+              properties:
+                cn: { type: string }
+                csr: { type: string, description: PEM-encoded certificate signing request }
+                days: { type: integer, minimum: 1, maximum: 3650, default: 90 }
+      responses:
+        "200":
+          description: Signed certificate, CN, and serial
+          content:
+            application/json:
+              schema: { type: object }
   /cert/list:
     post:
       summary: List issued mTLS client certs (serial, cn, expiry, revoked)
