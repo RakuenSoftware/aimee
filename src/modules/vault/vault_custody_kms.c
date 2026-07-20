@@ -1,5 +1,6 @@
 #include "vault_custody_kms.h"
 #include "vault_crypto.h"
+#include "vault_hwm.h"
 #include <openssl/crypto.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -14,6 +15,18 @@
  * id via argv/env and must emit exactly one 32-byte decrypted root to stdout.
  * No shell is used, output is bounded, and any short/extra output fails closed. */
 typedef struct { int sealed; } kms_ctx;
+static uint64_t g_hwm_version;
+static int hwm_call(const char *op,const char *key,uint64_t expected,uint64_t next,uint64_t *ver,uint8_t *att,size_t *alen)
+{
+ const char *helper=getenv("AIMEE_VAULT_KMS_HELPER"); if(!helper||!key||!att||!alen)return -1; struct stat st;
+ if(stat(helper,&st)!=0||!S_ISREG(st.st_mode)||(st.st_mode&022)||access(helper,X_OK)!=0)return -1;
+ int p[2]; if(pipe(p)!=0)return -1; pid_t pid=fork(); if(pid<0){close(p[0]);close(p[1]);return -1;}
+ if(pid==0){char e[32],n[32]; snprintf(e,sizeof(e),"%llu",(unsigned long long)expected); snprintf(n,sizeof(n),"%llu",(unsigned long long)next); dup2(p[1],1); close(p[0]);close(p[1]); execl(helper,helper,op,key,e,n,(char*)NULL); _exit(127);}
+ close(p[1]); uint8_t b[128]; size_t z=0; while(z<sizeof(b)){ssize_t r=read(p[0],b+z,sizeof(b)-z);if(r<0&&errno==EINTR)continue;if(r<=0)break;z+=(size_t)r;} close(p[0]); int ws=0;waitpid(pid,&ws,0); if(!WIFEXITED(ws)||WEXITSTATUS(ws)!=0||z<9||z>72)return -1;
+ char *nl=(char*)memchr(b,'\n',z); size_t off=nl?(size_t)(nl-(char*)b):z; if(!nl||off>20)return -1; b[off]=0; char *q=NULL; unsigned long long v=strtoull((char*)b,&q,10); if(!q||q!=nl)return -1; size_t sig=z-off-1; if(sig!=64)return -1; memcpy(att,nl+1,64); if(vault_hwm_attest_verify(key,(uint64_t)v,att,64)!=0)return -1; *ver=(uint64_t)v; *alen=64; return 0;
+}
+static int hwm_read(void *v,const char *k,uint64_t *ver,uint8_t *a,size_t c,size_t *n){(void)v;if(c<64||hwm_call("hwm-read",k,0,0,ver,a,n)!=0)return -1;g_hwm_version=*ver;return 0;}
+static int hwm_cas(void *v,const char *k,uint64_t e,uint64_t x,uint8_t *a,size_t c,size_t *n){(void)v;if(c<64||e!=g_hwm_version||x!=e+1)return -1;uint64_t got=0;if(hwm_call("hwm-cas",k,e,x,&got,a,n)!=0||got!=x)return -1;g_hwm_version=got;return 0;}
 static kms_ctx g = {1};
 static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
 {
@@ -32,5 +45,5 @@ static int sealed(void*v){return ((kms_ctx*)v)->sealed;}
 static int unseal(void*v,const void*p,size_t n){(void)p;(void)n;uint8_t k[VAULT_KEK_LEN];int r=get_kek(v,k);OPENSSL_cleanse(k,sizeof(k));return r;}
 static int seal(void*v){((kms_ctx*)v)->sealed=1;return 0;}
 static int rotate(void*v,const char*a,int*b,int*c,char*d,size_t e,char*f,size_t g){(void)v;(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;return -1;}
-static const vault_custody_provider_t p={"kms",&g,get_kek,rotate,sealed,unseal,seal};
+static const vault_custody_provider_t p={"kms",&g,get_kek,rotate,sealed,unseal,seal,hwm_read,hwm_cas};
 const vault_custody_provider_t *vault_custody_kms_provider(void){return &p;}
