@@ -126,15 +126,22 @@ static void test_policy_selection(void)
    char err[160];
 
    assert(kb_vault_policy_select("file", err, sizeof(err)) == 0);
-   assert(kb_vault_policy_select(NULL, err, sizeof(err)) == 0);  /* NULL -> file */
-   assert(kb_vault_policy_select("", err, sizeof(err)) == 0);    /* empty -> file */
+   assert(kb_vault_policy_select(NULL, err, sizeof(err)) == 0); /* NULL -> file */
+   assert(kb_vault_policy_select("", err, sizeof(err)) == 0);   /* empty -> file */
    assert(kb_vault_policy_select("mock", err, sizeof(err)) == 0);
 
-   /* Unimplemented real anchors: parse OK but FAIL CLOSED at bind. */
+   /* tpm2 (P7-tpm2a) now BINDS a provider — the real ESAPI one on a WITH_TPM2
+    * build, else the fail-closed stub. On this default (no-libtss2) build it binds
+    * the stub: select succeeds, but the anchor boots SEALED so get_kek fails and
+    * the §3 live-key gate stays FALSE (asserted in test_tpm2_stub_fail_closed). */
+   assert(kb_vault_policy_select("tpm2", err, sizeof(err)) == 0);
+   assert(vault_is_sealed() == 1);
+   assert(kb_vault_live_keys_allowed() == 0);
+
+   /* pkcs11/kms are still unimplemented: parse OK but FAIL CLOSED at bind. */
    err[0] = '\0';
-   assert(kb_vault_policy_select("tpm2", err, sizeof(err)) != 0);
-   assert(strstr(err, "not yet implemented") != NULL);
    assert(kb_vault_policy_select("pkcs11", err, sizeof(err)) != 0);
+   assert(strstr(err, "not yet implemented") != NULL);
    assert(kb_vault_policy_select("kms", err, sizeof(err)) != 0);
 
    /* Typos / unknown values are rejected (validation). */

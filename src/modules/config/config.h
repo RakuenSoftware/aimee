@@ -52,6 +52,11 @@
 #define CONFIG_DEFAULT_CSS_RENDER_COMMAND                                                          \
    "curl -s --max-time 30 --data-binary @- http://aimee-css-render:8780/render"
 
+/* Default TCTI for the tpm2 custody provider (vault.tpm2.tcti): the in-kernel
+ * TPM resource manager device. The swtpm integration CT overrides this to
+ * "swtpm:host=127.0.0.1,port=2321". */
+#define CONFIG_DEFAULT_VAULT_TPM2_TCTI "device:/dev/tpmrm0"
+
 /* Concurrency config: per-model and per-provider overrides */
 #define CONFIG_CONCURRENCY_KEY_LEN     128
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
@@ -380,6 +385,15 @@ typedef struct config
     * implemented (they fail closed at kb bind). Read once at kb startup by
     * kb_vault_policy_select; the server profile always runs `file`. */
    char vault_custody[16];
+   /* vault.tpm2.blob_path: filesystem path to the sealed KEK blob (TPM2B_PUBLIC +
+    * TPM2B_PRIVATE, marshaled) for the tpm2 custody provider (P7-tpm2a). Empty
+    * (default) resolves to <config_default_dir>/vault/tpm2-kek.blob at use. Only
+    * read by the WITH_TPM2 build of vault_custody_tpm2.c; inert otherwise. */
+   char vault_tpm2_blob_path[512];
+   /* vault.tpm2.tcti: the tss2 TCTI connection string passed to
+    * Tss2_TctiLdr_Initialize (default "device:/dev/tpmrm0"; the swtpm CT sets
+    * "swtpm:host=127.0.0.1,port=2321"). Only read by the WITH_TPM2 build. */
+   char vault_tpm2_tcti[128];
    int memory_salience_enabled;
    double memory_salience_weight;
    int memory_salience_window_size;
@@ -722,7 +736,8 @@ typedef struct config
    int kb_search_max_results;
 
    /* Negation and explicit-absence memory.
-    * memory_negation_enabled: 0 = disabled (default), 1 = enabled.
+    * memory_negation_enabled: 0 = disabled, 1 = enabled (default; graduated
+    *   from Bucket 3 after the negation A/B — see benchmarks/bucket3-defaults).
     *   When enabled, insert/update computes not_<token> synthetic terms and
     *   writes them to the negation_tokens column; negated queries also use
     *   negation lexical matching for negative facts. */

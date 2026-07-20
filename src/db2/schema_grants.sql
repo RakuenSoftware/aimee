@@ -122,11 +122,20 @@ BEGIN
   REVOKE ALL ON FUNCTION kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_catalog_entitled() FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+  -- P6c-catalog: the bedrock companion write path is the ONLY way to land a provider=
+  -- 'bedrock' row (the plain org_catalog_upsert fail-closes on it). Runtime keeps NO direct
+  -- catalog access; the new bedrock_* columns are therefore reachable ONLY via the definer
+  -- (org_catalog_entitled()'s projection is UNCHANGED, so account/ARNs/region never leak to
+  -- a tenant read). org_bedrock_adapter_supported is a pure predicate (no table access) —
+  -- left PUBLIC-callable (harmless), plus an explicit runtime grant for clarity.
+  REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_catalog_entitled() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_bedrock_adapter_supported(TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_catalog_remove(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_model_entitle(TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_model_unentitle(TEXT,BIGINT) TO aimee_kb_runtime;

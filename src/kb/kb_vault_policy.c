@@ -4,6 +4,7 @@
  * "real anchor only" rule live in one kb-owned place. */
 #include "kb_vault_policy.h"
 #include "vault_custody_mock.h" /* vault_custody_mock_provider */
+#include "vault_custody_tpm2.h" /* vault_custody_tpm2_provider (real or stub) */
 #include "vault_internal.h"     /* vault_custody_set_provider */
 #include "vault_server_key.h"   /* vault_is_sealed */
 #include <stdio.h>
@@ -65,6 +66,14 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
       return 0;
 
    case KB_CUSTODY_TPM2:
+      /* The tpm2 anchor (P7-tpm2a). Binds the real ESAPI provider on a WITH_TPM2
+       * build, else a fail-closed stub — both boot SEALED. live_keys_allowed()
+       * flips true only once a real (WITH_TPM2) provider is unsealed; the stub's
+       * is_sealed() stays 1, so a libtss2-less build keeps live keys off. */
+      vault_custody_set_provider(vault_custody_tpm2_provider());
+      g_selected = KB_CUSTODY_TPM2;
+      return 0;
+
    case KB_CUSTODY_PKCS11:
    case KB_CUSTODY_KMS:
       /* Declared but unimplemented: fail closed — never silently fall back to a

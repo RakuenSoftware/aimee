@@ -160,9 +160,11 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-ir-metrics \
                $(TESTPREFIX)/unit-test-aimee-frontend \
                $(TESTPREFIX)/unit-test-aimee-backend \
+               $(TESTPREFIX)/unit-test-aimee-backend-bedrock \
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
                $(TESTPREFIX)/unit-test-aimee-ir-stream \
+               $(TESTPREFIX)/unit-test-aimee-converse-stream \
                $(TESTPREFIX)/unit-test-workflow-gate-caps \
                $(TESTPREFIX)/unit-test-wfe-webapi \
                $(TESTPREFIX)/unit-test-cli-profile \
@@ -309,6 +311,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-service \
                $(TESTPREFIX)/unit-test-vault-master-rotate \
                $(TESTPREFIX)/unit-test-vault-seal \
+               $(TESTPREFIX)/unit-test-vault-tpm2-stub \
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-host-resolve \
                $(TESTPREFIX)/unit-test-git-cred-inject \
@@ -598,6 +601,16 @@ $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
                                   $(OBJDIR)/modules/aws/bedrock_policy.o \
                                   $(OBJDIR)/modules/aws/sts_cache.o \
                                   $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# P6b AWS eventstream framing decoder pure test: CRC32 vectors, valid decode,
+# the NEED_MORE/ERROR bounds matrix, exception/error frames, concatenated +
+# rolling-buffer resume, BE->host integer swap, and the deterministic fuzz
+# sweep (memory-safety gate). Links ONLY aws_eventstream.o — CRC32 is
+# self-contained, so no OpenSSL/zlib/cJSON.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-eventstream
+$(TESTPREFIX)/unit-test-aws-eventstream: $(OBJDIR)/tests/test_aws_eventstream.o \
+                                         $(OBJDIR)/modules/aws/aws_eventstream.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-code-index-ops: \
@@ -1648,6 +1661,13 @@ $(TESTPREFIX)/unit-test-aimee-backend: $(OBJDIR)/tests/test_aimee_backend.o \
                                       $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# Slice P6c-ir: Bedrock Converse backend build/parse (pure — cJSON only).
+$(TESTPREFIX)/unit-test-aimee-backend-bedrock: $(OBJDIR)/tests/test_aimee_backend_bedrock.o \
+                                      $(OBJDIR)/server/aimee_backend_bedrock.o \
+                                      $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
+                                      $(OBJDIR)/text.o $(OBJDIR)/util.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 # Slice 3: IR shadow observer (pure — cJSON only).
 $(TESTPREFIX)/unit-test-aimee-ir-shadow: $(OBJDIR)/tests/test_aimee_ir_shadow.o \
                                         $(OBJDIR)/server/aimee_ir_shadow.o \
@@ -1675,6 +1695,15 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
 $(TESTPREFIX)/unit-test-aimee-ir-stream: $(OBJDIR)/tests/test_aimee_ir_stream.o \
                                         $(OBJDIR)/server/aimee_ir_stream.o \
                                         $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Slice P6c-stream: Bedrock ConverseStream event -> IR delta parser (pure — cJSON
+# only; links aimee_backend_bedrock.o for the shared converse_stop_reason mapping).
+$(TESTPREFIX)/unit-test-aimee-converse-stream: $(OBJDIR)/tests/test_aimee_converse_stream.o \
+                                        $(OBJDIR)/server/aimee_ir_stream.o \
+                                        $(OBJDIR)/server/aimee_backend_bedrock.o \
+                                        $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
+                                        $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S1 router catalog I/O (enumerates $AIMEE_HOME workflows + built-in lanes).
@@ -3376,12 +3405,46 @@ $(TESTPREFIX)/unit-test-vault-master-rotate: $(OBJDIR)/tests/test_vault_master_r
 $(TESTPREFIX)/unit-test-vault-seal: $(OBJDIR)/tests/test_vault_seal.o \
                               $(OBJDIR)/kb/kb_vault_policy.o \
                               $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Default-build (no libtss2) stub contract for the tpm2 custody provider. The kb
+# policy seam pulls in kb_vault_policy.o which now references the tpm2 provider,
+# so this links vault_custody_tpm2.o (the stub in a default build).
+$(TESTPREFIX)/unit-test-vault-tpm2-stub: $(OBJDIR)/tests/test_vault_tpm2_stub.o \
+                              $(OBJDIR)/kb/kb_vault_policy.o \
+                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# P7-tpm2a swtpm integration harness. Built ON DEMAND ONLY (NOT in TEST_TARGETS,
+# so the default no-libtss2 build never touches it) by the CT gate:
+#   make WITH_TPM2=1 $(OBJDIR)/tests/p7-tpm2-harness
+# It links the KB-PREFIXED vault_custody_tpm2.o — the one the kb pattern rule
+# compiles WITH -DWITH_TPM2 (the real ESAPI provider) — plus the tss2 libraries
+# ($(KB_TPM2_LDLIBS)). test_vault_tpm2.c itself only uses the public provider API
+# (no tss2 headers), so this object compiles with the ordinary tests rule.
+# scripts/p7_tpm2_swtpm_test.sh builds + drives this binary against swtpm.
+$(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
+                              $(OBJDIR)/kb/kb_vault_policy.o \
+                              $(OBJDIR)/kb/modules/vault/vault_custody_tpm2.o \
+                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_TPM2_LDLIBS)
 
 $(TESTPREFIX)/unit-test-agent-key-import: $(OBJDIR)/tests/test_agent_key_import.o \
                               $(OBJDIR)/cli_agent_keys.o \
