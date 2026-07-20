@@ -167,7 +167,12 @@ def extract_contract(path: Path) -> dict[str, object]:
 
 
 def extract_json_fence(path: Path, name: str) -> dict[str, object]:
-    raw = _read_text(path)
+    return extract_json_fence_text(_read_text(path), name, path=path)
+
+
+def extract_json_fence_text(
+    raw: str, name: str, *, path: Path | str
+) -> dict[str, object]:
     opening = re.compile(rf"^```json {re.escape(name)}[ \t]*$", re.MULTILINE)
     matches = list(opening.finditer(raw))
     if len(matches) != 1:
@@ -185,6 +190,28 @@ def extract_json_fence(path: Path, name: str) -> dict[str, object]:
     if not isinstance(value, dict):
         fail("schema", f"{name} must be a JSON object", path=path)
     return value
+
+
+def load_validated_contract(
+    config_root: Path,
+    *,
+    require_status: str,
+    contract_path: Path = DEFAULT_CONTRACT,
+    check_git: bool = True,
+) -> dict[str, object]:
+    """Load the contract and handoff through the same path used by the CLI."""
+    resolved_contract = resolve_under_root(config_root, contract_path, label="contract")
+    contract = extract_contract(resolved_contract)
+    handoff_path = resolve_under_root(config_root, DEFAULT_HANDOFF, label="handoff")
+    validate_handoff(extract_json_fence(handoff_path, "slice3-handoff"), handoff_path)
+    validate_contract(
+        contract,
+        path=resolved_contract,
+        config_root=config_root,
+        require_status=require_status,
+        check_git=check_git,
+    )
+    return contract
 
 
 def validate_handoff(value: dict[str, object], path: Path) -> None:
@@ -839,21 +866,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     try:
-        contract_path = resolve_under_root(config_root, args.contract, label="contract")
-        contract = extract_contract(contract_path)
-        handoff_path = resolve_under_root(config_root, DEFAULT_HANDOFF, label="handoff")
-        validate_handoff(extract_json_fence(handoff_path, "slice3-handoff"), handoff_path)
-        validate_contract(
-            contract,
-            path=contract_path,
-            config_root=config_root,
+        contract = load_validated_contract(
+            config_root,
             require_status=args.require_status,
+            contract_path=args.contract,
             check_git=True,
         )
     except ContractError as exc:
         print(f"check_git_core_contract: error: {exc}", file=sys.stderr)
         return 1
-    print(f"check_git_core_contract: ok ({args.require_status}; {contract_path})")
+    del contract
+    resolved_contract = resolve_under_root(config_root, args.contract, label="contract")
+    print(f"check_git_core_contract: ok ({args.require_status}; {resolved_contract})")
     return 0
 
 
