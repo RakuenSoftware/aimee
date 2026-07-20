@@ -81,7 +81,7 @@ static int mtls_get_ca(char *resp, int cap)
    char ca_dir[1024];
    snprintf(ca_dir, sizeof(ca_dir), "%s/kb-ca", kb_default_config_dir());
    kb_pki_ca_t ca;
-   if (kb_pki_ca_load(ca_dir, &ca) != 0)
+   if (kb_pki_ca_load_custodied(ca_dir, &ca) != 0)
    {
       snprintf(resp, (size_t)cap, "{\"error\":\"no CA\"}");
       return 500;
@@ -116,7 +116,7 @@ static int mtls_renew(const char *scope_cn, const char *body, char *resp, int ca
    char ca_dir[1024];
    snprintf(ca_dir, sizeof(ca_dir), "%s/kb-ca", kb_default_config_dir());
    kb_pki_ca_t ca;
-   if (kb_pki_ca_load(ca_dir, &ca) != 0)
+   if (kb_pki_ca_load_custodied(ca_dir, &ca) != 0)
    {
       cJSON_Delete(req);
       snprintf(resp, (size_t)cap, "{\"error\":\"renew unavailable: no CA\"}");
@@ -389,7 +389,7 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    if (snprintf(ca_dir, sizeof(ca_dir), "%s/kb-ca", data_dir) >= (int)sizeof(ca_dir))
       return -1;
    kb_pki_ca_t ca;
-   if (kb_pki_ca_load_or_create(ca_dir, &ca, NULL) != 0)
+   if (kb_pki_ca_load_or_create_custodied(ca_dir, &ca, NULL) != 0)
       return -1;
    char scert[KB_PKI_CERT_PEM_MAX], skey[KB_PKI_KEY_PEM_MAX];
    int issued = kb_pki_issue_server_cert(&ca, host, 60L * 60 * 24 * 365, scert, sizeof(scert), skey,
