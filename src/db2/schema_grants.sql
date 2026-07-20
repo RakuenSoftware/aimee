@@ -100,6 +100,15 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rotation_get(BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_claim(TEXT,BIGINT,TEXT,TEXT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_heartbeat(TEXT,BIGINT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_release(TEXT,BIGINT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_checkpoint_old_ref(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_stage_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_probe_admit(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_salt_read(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_kek_check_read(TEXT) TO aimee_kb_runtime;
@@ -117,6 +126,15 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rotation_get(BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_claim(TEXT,BIGINT,TEXT,TEXT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_heartbeat(TEXT,BIGINT,TEXT,BIGINT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_release(TEXT,BIGINT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_checkpoint_old_ref(TEXT,BIGINT,TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_stage_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_probe_admit(TEXT,BIGINT,TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) TO aimee_kb_runtime;
 
   -- P2a org model catalog + entitlement. The catalog is admin-managed and read/written
   -- EXCLUSIVELY through the SECURITY DEFINER functions (owned by aimee_kb_owner, which

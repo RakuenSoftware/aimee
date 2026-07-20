@@ -311,6 +311,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-store \
                $(TESTPREFIX)/unit-test-vault-seam \
                $(TESTPREFIX)/unit-test-kb-vault-rotation \
+               $(TESTPREFIX)/unit-test-kb-vault-rotation-ops \
+               $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live \
                $(TESTPREFIX)/unit-test-vault-kms-hwm-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation-live \
                $(TESTPREFIX)/unit-test-vault-service \
@@ -3327,6 +3329,18 @@ $(TESTPREFIX)/unit-test-vault-seam: $(OBJDIR)/tests/test_vault_seam.o \
 $(TESTPREFIX)/unit-test-kb-vault-rotation: $(OBJDIR)/tests/test_kb_vault_rotation.o \
                               $(OBJDIR)/kb/kb_vault_rotation.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-vault-rotation-ops: $(OBJDIR)/tests/test_kb_vault_rotation_ops.o \
+                              $(OBJDIR)/kb/kb_vault_rotation_ops.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: \
+                              $(OBJDIR)/tests/test_kb_vault_rotation_ops_live.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
 
 # P10 kb vault Postgres backend. REAL-PG test: links the KB object closure (real libpq
 # via db_postgres.o, the vault core + db2/vault_pg.o) so that on a box with
