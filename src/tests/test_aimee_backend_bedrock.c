@@ -391,6 +391,58 @@ static void test_tool_result_json_and_error(void)
    cJSON_Delete(tr.tool_result);
 }
 
+/* image.format must be a Converse enum; an unknown media-type -> the block is
+ * OMITTED (never a schema-invalid format). A known type -> emitted with the enum. */
+static void test_image_format_enum(void)
+{
+   /* unknown subtype -> omitted */
+   aimee_block_t bimg;
+   memset(&bimg, 0, sizeof bimg);
+   bimg.type = AIMEE_BLK_IMAGE;
+   bimg.media_type = "application/octet-stream";
+   bimg.media_ref = "aGVsbG8="; /* base64 */
+   aimee_message_t m = {.role = "user", .blocks = &bimg, .n_blocks = 1};
+   aimee_request_t ir;
+   memset(&ir, 0, sizeof ir);
+   ir.messages = &m;
+   ir.n_messages = 1;
+   cJSON *j = bedrock_converse_build(&ir);
+   cJSON *content = obj(cJSON_GetArrayItem(obj(j, "messages"), 0), "content");
+   assert(cJSON_GetArraySize(content) == 0); /* no image block emitted */
+   cJSON_Delete(j);
+
+   /* jpg alias -> "jpeg" */
+   bimg.media_type = "image/jpg";
+   j = bedrock_converse_build(&ir);
+   content = obj(cJSON_GetArrayItem(obj(j, "messages"), 0), "content");
+   assert(cJSON_GetArraySize(content) == 1);
+   cJSON *img = obj(cJSON_GetArrayItem(content, 0), "image");
+   assert(strcmp(str(img, "format"), "jpeg") == 0);
+   cJSON_Delete(j);
+}
+
+/* toolUse.input must always be a JSON object even if the IR carried a non-object. */
+static void test_tooluse_input_object(void)
+{
+   aimee_block_t btu;
+   memset(&btu, 0, sizeof btu);
+   btu.type = AIMEE_BLK_TOOL_USE;
+   btu.tool_id = "t1";
+   btu.tool_name = "fn";
+   btu.tool_input = cJSON_CreateString("not-an-object"); /* opaque non-object */
+   aimee_message_t m = {.role = "assistant", .blocks = &btu, .n_blocks = 1};
+   aimee_request_t ir;
+   memset(&ir, 0, sizeof ir);
+   ir.messages = &m;
+   ir.n_messages = 1;
+   cJSON *j = bedrock_converse_build(&ir);
+   cJSON *tu = obj(cJSON_GetArrayItem(obj(cJSON_GetArrayItem(obj(j, "messages"), 0), "content"), 0),
+                   "toolUse");
+   assert(cJSON_IsObject(obj(tu, "input"))); /* coerced to {}, not a string */
+   cJSON_Delete(j);
+   cJSON_Delete(btu.tool_input);
+}
+
 int main(void)
 {
    printf("aimee-backend-bedrock: ");
@@ -403,6 +455,8 @@ int main(void)
    test_parse_stop_reasons();
    test_thinking_parse_roundtrip();
    test_tool_result_json_and_error();
+   test_image_format_enum();
+   test_tooluse_input_object();
    printf("ok\n");
    return 0;
 }

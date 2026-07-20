@@ -25,12 +25,21 @@ static const char *ostr(const cJSON *o, const char *k)
 
 /* Derive a Converse image `format` from an IR media_type ("image/png" -> "png").
  * Returns the substring after the '/', or the whole string if there is none. */
+/* Converse image.format is a fixed lowercase enum {png,jpeg,gif,webp}. Derive it
+ * from the media-type subtype; return NULL for anything not in the enum so the
+ * caller OMITS the block rather than emitting a schema-invalid format. */
 static const char *converse_image_format(const char *media_type)
 {
    if (!media_type)
-      return "png";
+      return NULL;
    const char *slash = strchr(media_type, '/');
-   return (slash && slash[1]) ? slash + 1 : media_type;
+   const char *sub = (slash && slash[1]) ? slash + 1 : media_type;
+   if (strcmp(sub, "png") == 0 || strcmp(sub, "jpeg") == 0 || strcmp(sub, "gif") == 0 ||
+       strcmp(sub, "webp") == 0)
+      return sub;
+   if (strcmp(sub, "jpg") == 0)
+      return "jpeg"; /* common alias -> the Converse enum name */
+   return NULL;
 }
 
 /* An IR media_ref is renderable as Converse `source.bytes` (a base64 STRING) ONLY
@@ -72,9 +81,14 @@ static cJSON *block_to_converse(const aimee_block_t *b)
       cJSON *el = cJSON_CreateObject();
       cJSON *tu = cJSON_AddObjectToObject(el, "toolUse");
       cJSON_AddStringToObject(tu, "toolUseId", b->tool_id ? b->tool_id : "");
+      /* Converse toolUse.input MUST be a JSON object; the IR's opaque tool_input
+       * is an object for a well-formed call, but guard a non-object (string/array/
+       * scalar) into an empty object so the emitted body stays schema-valid. */
       cJSON_AddStringToObject(tu, "name", b->tool_name ? b->tool_name : "");
-      cJSON_AddItemToObject(
-          tu, "input", b->tool_input ? cJSON_Duplicate(b->tool_input, 1) : cJSON_CreateObject());
+      cJSON_AddItemToObject(tu, "input",
+                            (b->tool_input && cJSON_IsObject(b->tool_input))
+                                ? cJSON_Duplicate(b->tool_input, 1)
+                                : cJSON_CreateObject());
       return el;
    }
    case AIMEE_BLK_TOOL_RESULT:
@@ -90,12 +104,15 @@ static cJSON *block_to_converse(const aimee_block_t *b)
    case AIMEE_BLK_IMAGE:
    {
       /* Converse takes image bytes as a base64 string; a URL ref has no generic
-       * Converse spelling -> omit the block (documented; S3 is P6c-egress). */
-      if (!media_ref_is_base64(b->media_ref))
+       * Converse spelling -> omit the block (documented; S3 is P6c-egress). The
+       * format must be a valid Converse enum, else the block is omitted (never a
+       * schema-invalid format). */
+      const char *fmt = converse_image_format(b->media_type);
+      if (!fmt || !media_ref_is_base64(b->media_ref))
          return NULL;
       cJSON *el = cJSON_CreateObject();
       cJSON *img = cJSON_AddObjectToObject(el, "image");
-      cJSON_AddStringToObject(img, "format", converse_image_format(b->media_type));
+      cJSON_AddStringToObject(img, "format", fmt);
       cJSON *src = cJSON_AddObjectToObject(img, "source");
       cJSON_AddStringToObject(src, "bytes", b->media_ref);
       return el;
