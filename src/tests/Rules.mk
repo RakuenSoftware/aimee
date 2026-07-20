@@ -311,6 +311,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-service \
                $(TESTPREFIX)/unit-test-vault-master-rotate \
                $(TESTPREFIX)/unit-test-vault-seal \
+               $(TESTPREFIX)/unit-test-vault-tpm2-stub \
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-host-resolve \
                $(TESTPREFIX)/unit-test-git-cred-inject \
@@ -3404,12 +3405,46 @@ $(TESTPREFIX)/unit-test-vault-master-rotate: $(OBJDIR)/tests/test_vault_master_r
 $(TESTPREFIX)/unit-test-vault-seal: $(OBJDIR)/tests/test_vault_seal.o \
                               $(OBJDIR)/kb/kb_vault_policy.o \
                               $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Default-build (no libtss2) stub contract for the tpm2 custody provider. The kb
+# policy seam pulls in kb_vault_policy.o which now references the tpm2 provider,
+# so this links vault_custody_tpm2.o (the stub in a default build).
+$(TESTPREFIX)/unit-test-vault-tpm2-stub: $(OBJDIR)/tests/test_vault_tpm2_stub.o \
+                              $(OBJDIR)/kb/kb_vault_policy.o \
+                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# P7-tpm2a swtpm integration harness. Built ON DEMAND ONLY (NOT in TEST_TARGETS,
+# so the default no-libtss2 build never touches it) by the CT gate:
+#   make WITH_TPM2=1 $(OBJDIR)/tests/p7-tpm2-harness
+# It links the KB-PREFIXED vault_custody_tpm2.o — the one the kb pattern rule
+# compiles WITH -DWITH_TPM2 (the real ESAPI provider) — plus the tss2 libraries
+# ($(KB_TPM2_LDLIBS)). test_vault_tpm2.c itself only uses the public provider API
+# (no tss2 headers), so this object compiles with the ordinary tests rule.
+# scripts/p7_tpm2_swtpm_test.sh builds + drives this binary against swtpm.
+$(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
+                              $(OBJDIR)/kb/kb_vault_policy.o \
+                              $(OBJDIR)/kb/modules/vault/vault_custody_tpm2.o \
+                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_TPM2_LDLIBS)
 
 $(TESTPREFIX)/unit-test-agent-key-import: $(OBJDIR)/tests/test_agent_key_import.o \
                               $(OBJDIR)/cli_agent_keys.o \

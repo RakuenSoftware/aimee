@@ -329,9 +329,22 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
-                  modules/vault/vault_custody_mock.c \
+                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c \
                   modules/vault/vault_capability.c
 KB_VAULT_OBJS = $(VAULT_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o)
+
+# P7-tpm2a: the real tpm2 custody provider is BUILD-GUARDED. The default build
+# compiles vault_custody_tpm2.c as a fail-closed stub with NO libtss2 dependency
+# (so CI and dev hosts without libtss2 build cleanly). `make WITH_TPM2=1` (on a
+# host with libtss2-esys, e.g. the swtpm integration CT) compiles the real ESAPI
+# path and links tss2-esys / tss2-mu / tss2-tctildr into the kb image only.
+ifeq ($(WITH_TPM2),1)
+KB_TPM2_CFLAGS := -DWITH_TPM2 $(shell pkg-config --cflags tss2-esys 2>/dev/null)
+KB_TPM2_LDLIBS := $(shell pkg-config --libs tss2-esys 2>/dev/null) -ltss2-mu -ltss2-tctildr
+else
+KB_TPM2_CFLAGS :=
+KB_TPM2_LDLIBS :=
+endif
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
 DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
@@ -588,7 +601,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(MCP_GIT_OBJS) $
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 DEPS = $(ALL_OBJS:.o=.d)
 
-.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check p1-rls-gate-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
+.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check p1-rls-gate-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(GATEWAY) $(FORWARDER)
 
@@ -624,6 +637,10 @@ verify-local: lint check-linking
 	@echo "verify-local: ok"
 
 server: retire-obsolete-binaries $(SERVER) $(KB) $(FORWARDER)
+
+# Convenience alias so `make kb` (and the WITH_TPM2 dry-run gate) builds just the
+# aimee-kb sidecar image.
+kb: $(KB)
 
 # Lean build: size-optimized, stripped binary for minimal deployments.
 # Uses -Os (size opt), -g0 (no debug info), -s (strip symbols), and
@@ -944,7 +961,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # util (openssl + platform_random only), so the kb sidecar links it directly.
 $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(L_KB)
+	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
 
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
@@ -1007,9 +1024,13 @@ $(OBJDIR)/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
 
+# $(KB_TPM2_CFLAGS) is empty by default (stub build, no libtss2) and becomes
+# `-DWITH_TPM2 <tss2-esys cflags>` under `make WITH_TPM2=1` — the only file that
+# reads WITH_TPM2 is modules/vault/vault_custody_tpm2.c, so applying it to every
+# kb object is harmless and keeps the WITH_TPM2 switch in one place (P7-tpm2a).
 $(OBJDIR)/kb/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
+	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
 
 $(OBJDIR)/server/%.o: %.c
 	@mkdir -p $(dir $@)
