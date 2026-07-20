@@ -14,9 +14,9 @@
 | **P2** kb egress authority + catalog | 🟡 partial | **P2a** catalog + entitlement | **P2b** egress path (live server↔kb wiring) |
 | **P3** Cost attribution | ✅ done | **P3a** pricing+WORM-ledger+rollup, **P3b** spend reporting | — |
 | **P4** Budgets + rate limits | ✅ done | **P4a** budget reservation core, **P4b** keyed rate limiter (both concurrency-proven) | — |
-| **P5** OIDC control plane | ⬜ pending | — | mgmt channel + OIDC propagation (needs the live server↔kb topology) |
+| **P5** OIDC control plane | 🟡 integration | authenticated management route, registry/heartbeat, mTLS client propagation | live two-node server↔kb topology + OIDC propagation |
 | **P6** Bedrock + vendor breadth | 🟡 pure cores done | **P6a** SigV4/STS auth, **P6b** eventstream decoder, **P6c-catalog** routing+validation, **P6c-ir** Converse↔IR, **P6c-stream** stream→delta | **P6c-egress** driver dispatch + native InvokeModel + pricing rows |
-| **P7** Hardened kb vault | 🟡 anchor live | **P10** vault core, **tpm2a** seal barrier, **tpm2b** PolicyNV anti-rollback (swtpm-validated) | WORM-audited key-use (§6), pkcs11/kms, CA-key-behind-vault (§7), kb DEK re-wrap |
+| **P7** Hardened kb vault | 🟡 integration | seal/PolicyNV, WORM key-use, PKCS#11, KMS helper, CA-key custody, DEK re-wrap | cloud-KMS attestation and operational rotation validation |
 | **P8** thin-client mTLS | 🟡 partial | **P8a** per-request durable cert revocation (invariant #5) | **P8b/c** client-cert presentation + ramp + enrollment |
 | **P9** Telemetry tiering | 🟡 partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
 | **P10** Shared vault core | ✅ done | core extraction, kb Postgres store, custody selection + seal barrier | — (hardening tracked under P7) |
