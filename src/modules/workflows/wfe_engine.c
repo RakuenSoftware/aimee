@@ -367,6 +367,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
           node->block != WFE_BLK_GATE_HUMAN)
       {
          WFE_CKW(db1_work_item_set_terminal(work_item_id, "abandoned"));
+         (void)db1_work_item_abandon_children(work_item_id); /* no-op for a leaf slice */
          db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine",
                                  "abandoned: autonomous dead-end (no human to escalate to)", "",
                                  r.cost_usd);
@@ -483,6 +484,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
                if (strcmp(wi.mode, "autonomous") == 0)
                {
                   WFE_CKW(db1_work_item_set_terminal(work_item_id, "abandoned"));
+                  (void)db1_work_item_abandon_children(work_item_id); /* no-op for a leaf slice */
                   db1_lifecycle_event_add(
                       work_item_id, node->id, "terminal", "engine",
                       "abandoned: max_iters reached (autonomous, no human to escalate to)", "",
