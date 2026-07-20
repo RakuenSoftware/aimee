@@ -219,6 +219,23 @@ int main(void)
       cJSON_Delete(pl);
    }
 
+   /* (l) an out-of-range contentBlockIndex on a contentBlock* event -> -1 (no
+    * unbounded block_id escapes to the consumer). */
+   {
+      converse_stream_state_t st;
+      converse_stream_state_init(&st);
+      int n = run("contentBlockStart", "{\"contentBlockIndex\":-1}", &st, d, 8, &pl);
+      assert(n == -1);
+      cJSON_Delete(pl);
+      n = run("contentBlockStop", "{\"contentBlockIndex\":99999}", &st, d, 8, &pl);
+      assert(n == -1);
+      cJSON_Delete(pl);
+      n = run("contentBlockDelta", "{\"contentBlockIndex\":100000,\"delta\":{\"text\":\"x\"}}", &st,
+              d, 8, &pl);
+      assert(n == -1);
+      cJSON_Delete(pl);
+   }
+
    printf("ok\n");
    return 0;
 }

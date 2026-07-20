@@ -210,6 +210,8 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
       if (!payload)
          return -1;
       int idx = oint(payload, "contentBlockIndex", 0);
+      if (idx < 0 || idx >= AIMEE_STREAM_MAX_TOOLS)
+         return -1; /* a valid Converse stream never has an out-of-range index */
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_BLOCK_START;
       out[0].block_id = idx;
@@ -240,6 +242,8 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
       if (!payload)
          return -1;
       int idx = oint(payload, "contentBlockIndex", 0);
+      if (idx < 0 || idx >= AIMEE_STREAM_MAX_TOOLS)
+         return -1;
       const cJSON *delta = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "delta");
       if (!delta || !cJSON_IsObject(delta))
          return -1; /* structurally-malformed KNOWN event -> drop the stream */
@@ -290,6 +294,8 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
       if (!payload)
          return -1;
       int idx = oint(payload, "contentBlockIndex", 0);
+      if (idx < 0 || idx >= AIMEE_STREAM_MAX_TOOLS)
+         return -1;
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_BLOCK_STOP;
       out[0].block_id = idx;

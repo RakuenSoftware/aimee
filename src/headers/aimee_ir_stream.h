@@ -52,8 +52,10 @@ void converse_stream_state_init(converse_stream_state_t *st);
  * on a structurally-malformed KNOWN event (caller drops the stream). An unknown
  * event_type -> 0 (forward-compat ignore). LIFETIME: like openai_chunk_to_deltas, the
  * emitted deltas' const char* fields (text_delta / tool_args_delta / tool_id /
- * tool_name / error_message) BORROW into `payload`; `payload` must outlive the deltas'
- * use. */
+ * tool_name / error_message) BORROW into `payload` (or, for an exception event with no
+ * `message`, into `event_type`); both `payload` and `event_type` must outlive the
+ * deltas' use. An out-of-range contentBlockIndex on a contentBlock* event returns -1
+ * (a valid Converse stream never emits one) so no unbounded block_id escapes. */
 int bedrock_converse_stream_to_deltas(const char *event_type, const struct cJSON *payload,
                                       converse_stream_state_t *st, aimee_delta_t *out, int max);
 
