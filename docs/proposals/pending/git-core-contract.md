@@ -1,6 +1,6 @@
 # Proposal: define the required Git core contract
 
-- **State:** PENDING — implementation roundtable approval is required before migration
+- **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
 - **Parent:** [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md)
 - **Delivery dependency:** [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)
 - **Owns:** Git's repository boundary, memory-ingest seam, provenance, redaction order, and non-Git behavior
@@ -106,9 +106,14 @@ decision and reason code.
     "pre-persistence-secret-redaction"
   ],
   "lifecycle": {
-    "status": "pending",
+    "status": "roundtable-approved",
     "enforcement_scope": "structural-only",
-    "approval_evidence": null
+    "approval_evidence": {
+      "run_id": "oprun_g6a5e97653a8b0afb_1784587926_15",
+      "artifact_path": "docs/validation/roundtable/git-core-contract.json",
+      "file_sha256": "77abcd7893d7db8e55caca04ef86c45f3f5ac35c3f5c252f766e444549985d9b",
+      "reviewed_contract_sha256": "551fdfb29f68bf4235c0a8b8baf6d5a154697bdc0d7e5c6ce622028732f46470"
+    }
   },
   "historical_cutoff": {
     "commit": "6ce37f53e1f627c19e15fc01f68959f546a5eded",
