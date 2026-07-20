@@ -4057,3 +4057,27 @@ CREATE TABLE IF NOT EXISTS kb_server_registry (
 ALTER TABLE kb_server_registry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_server_registry FORCE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_kb_server_registry_team ON kb_server_registry(team_id);
+
+-- Registry reads are tenant-scoped even when the HTTP caller supplies a team
+-- selector.  The selector narrows the result; it never grants membership.  The
+-- authenticated principal is installed by db2_tenant_scope_begin and the
+-- policies therefore protect both this route and any future DB2 entrypoint.
+DROP POLICY IF EXISTS p_server_registry_team_read ON kb_server_registry;
+CREATE POLICY p_server_registry_team_read ON kb_server_registry FOR SELECT
+  USING (kb_principal_is_admin() OR team_id IN
+         (SELECT team FROM kb_team_membership
+            WHERE identity_key = current_setting('aimee.principal', true)));
+
+-- A server heartbeat is identified by its verified client certificate.  Keep
+-- the machine update narrow: it may update only its own row, while operators
+-- retain the normal team/admin update path for future management operations.
+DROP POLICY IF EXISTS p_server_registry_heartbeat_update ON kb_server_registry;
+CREATE POLICY p_server_registry_heartbeat_update ON kb_server_registry FOR UPDATE
+  USING (kb_principal_is_admin() OR team_id IN
+         (SELECT team FROM kb_team_membership
+            WHERE identity_key = current_setting('aimee.principal', true))
+         OR cert_cn = current_setting('aimee.principal', true))
+  WITH CHECK (kb_principal_is_admin() OR team_id IN
+         (SELECT team FROM kb_team_membership
+            WHERE identity_key = current_setting('aimee.principal', true))
+         OR cert_cn = current_setting('aimee.principal', true));

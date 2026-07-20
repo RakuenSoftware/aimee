@@ -1,6 +1,6 @@
 #include "kb_mgmt_client.h"
 #include "kb_mgmt_endpoint.h"
-#include "http/kb_tls.h"
+#include "kb_tls.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
