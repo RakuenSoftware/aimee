@@ -111,3 +111,53 @@ No egress, no target-struct read/wiring, no IR/Converse serializer, no SigV4 cal
 rows, no live Bedrock. Pure authoritative catalog fields + the adapter-registry fail-closed
 validation gate that guarantees the catalog only ever stores a Bedrock target the merged P6a
 `bedrock_policy` will accept — real-PG-proven.
+
+## v2 refinements (roundtable-converged; close the write bypass + true fail-closed registry)
+
+- **The plain `org_catalog_upsert` MUST REJECT `provider='bedrock'` (RAISE 22023).** Decision:
+  a **companion `org_catalog_bedrock_upsert`** is the ONLY write path for a bedrock row. To
+  make that airtight, `org_catalog_upsert` (the non-bedrock path) now fail-closes on
+  `p_provider='bedrock'` ("use org_catalog_bedrock_upsert"). Otherwise a caller could write a
+  bedrock row via the plain path with NULL routing fields, bypassing ALL validation — the
+  single most important fix. (Closes the recurring bypass finding.)
+- **The adapter registry is a FIXED ALLOWLIST for BOTH apis — `converse` is NOT "any
+  non-empty family".** `org_bedrock_adapter_supported(api, family)` (a plain **IMMUTABLE**
+  function, NOT SECURITY DEFINER — it is a pure predicate) knows a fixed set of KNOWN families
+  {anthropic, amazon-nova, amazon-titan, meta-llama, mistral, cohere, ai21}. `converse` →
+  supported for every KNOWN family (an unknown/typo family is REJECTED, not admitted).
+  `invoke` (native) → supported ONLY for the native-adapter subset {anthropic}. So
+  `(converse, cohere)`→ok, `(converse, typo-family)`→reject, `(invoke, anthropic)`→ok,
+  `(invoke, meta-llama)`→reject. A real fail-closed registry.
+- **Completeness validation exactly matches P6a `bedrock_policy` fail-closed (no gap).**
+  Reject when: `bedrock_api` ∉ {converse,invoke}; `model_family` not adapter-supported;
+  `bedrock_target_type` ∉ the 5; `aws_partition` ∉ {aws,aws-us-gov,aws-cn}; `aws_region_set`
+  empty OR ANY element empty/whitespace; a `*-inference-profile` target with empty
+  `underlying_fm_arns` OR any element not a well-formed `arn:<partition>:bedrock:…foundation-
+  model/…` (mirror P6a `fm_arn_valid`); a NON-foundation target with `aws_account` empty or
+  not 12 digits. The target **`id` = the catalog `model_id`** (P6a's target id; already
+  CHECK'd 1..200 + used as the profile/model id) — no separate column. Each array element is
+  charset-validated (`[A-Za-z0-9_.:/-]`, non-empty) so the target the catalog stores is
+  exactly one `bedrock_policy` accepts.
+- **Scope tightened: SCHEMA + DEFINERS + real-PG test ONLY — NO C access layer, NO HTTP/CLI
+  this slice.** Since the egress + admin surface are both deferred, a `db2_catalog_bedrock_
+  upsert` C wrapper would be an unused interface with no production caller (a real smell the
+  panel flagged). The DEFINER is the authoritative, testable gate; the C layer + admin surface
+  land with P6c-egress when there is a consumer. This is leaner and non-speculative.
+- **Column exposure is admin/definer-only (verify, don't assume RLS covers columns).** RLS
+  filters rows, not columns — but P2a already REVOKED the runtime role's DIRECT `SELECT` on
+  `org_model_catalog` (runtime reads only via the `org_catalog_entitled()` definer). So the new
+  bedrock_* columns are reachable ONLY by admin/definer. `org_catalog_entitled()`'s projection
+  is UNCHANGED (it does NOT add the bedrock_* fields), so no tenant read path exposes account/
+  ARNs/region. The gate asserts the runtime role gets `permission denied` on a direct
+  `SELECT bedrock_api FROM org_model_catalog` (same posture P2a proved).
+- **PG array-literal safety (explicit).** `aws_region_set` / `underlying_fm_arns` are built as
+  `'{elem,elem}'::text[]` ONLY after each element passes the `[A-Za-z0-9_.:/-]{1,256}` charset
+  check (no quote/brace/comma/backslash can appear) — identical to the P9a allowlist-array
+  builder; a failing element → reject the whole upsert. (No element is concatenated raw.)
+
+### Gate additions
+
+- (h) the PLAIN `org_catalog_upsert` with `provider='bedrock'` → REJECTED (the bypass is
+  closed); (i) `(converse, unknown-family)` → REJECTED (registry is fail-closed, not
+  accept-any); (j) a `underlying_fm_arns` element with a non-foundation-model / wildcard /
+  cross-service ARN → REJECTED; (k) `aws_account='abc'` on a provisioned target → REJECTED.
