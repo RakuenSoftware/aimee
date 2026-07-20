@@ -1,5 +1,7 @@
 # P7 rotation core: anchor-authoritative credential versions
 
+Status: complete
+
 ## Scope
 
 Land the persistence and custody primitives required by P7 §8 without adding an
