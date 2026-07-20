@@ -102,7 +102,10 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
    size_t att_len = 0;
    uint64_t anchor = 0;
    if (vault_hwm_read(row.key_id, &anchor, att, sizeof(att), &att_len) != 0)
+   {
+      OPENSSL_cleanse(att, sizeof(att));
       return -1;
+   }
    int action = kb_vault_rotation_classify(anchor, (uint64_t)row.from_version,
                                            (uint64_t)row.to_version);
    if (action == KB_VAULT_ROTATION_RETRY_CAS)
@@ -111,7 +114,10 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
       att_len = 0;
       if (vault_hwm_cas(row.key_id, (uint64_t)row.from_version, (uint64_t)row.to_version, att,
                         sizeof(att), &att_len) != 0)
+      {
+         OPENSSL_cleanse(att, sizeof(att));
          return -1;
+      }
    }
    else if (action != KB_VAULT_ROTATION_FINALIZE)
    {
