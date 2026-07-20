@@ -82,3 +82,39 @@ follow-up); budget caps (P4). P3b is read-only over existing rollup rows.
 
 No caps (P4), no live-call write (P2b), no server-proxy CLI, no billing/invoicing. Pure
 authorized read surface over spend aimee already computes.
+
+## v2 refinements (roundtable-converged; simpler + hardened)
+
+- **DROP `org_spend_query_audit` from P3b** — ship ONLY `org_spend_query` over
+  `org_spend_rollup` (one source, no rollup-vs-ledger drift contract; the rollup is
+  maintained in the P3a settle txn so it IS the authoritative reporting source). The
+  ad-hoc exact-ledger query is deferred to when it's needed, with an explicit
+  `source`/`settled_through` watermark at that time.
+- **`p_team IS NULL` (all-teams) branch requires `kb_principal_is_admin()` EXPLICITLY** —
+  do not rely on `is_team_lead(NULL)` being false. The predicate is:
+  `IF p_team IS NULL THEN require admin ELSE require (admin OR is_team_lead(p_team))`.
+  `is_team_lead(NULL)` returns false (documented), but admin is checked explicitly for
+  the NULL path.
+- **Strict date validation, fail-closed on the same RAISE path as authz.** `p_since` /
+  `p_until` must match `^\d{4}-\d{2}-\d{2}$`, cast validly to `::date` (catch invalid like
+  `2026-13-40`), and satisfy `p_since <= p_until`; otherwise RAISE (errcode 22007/22023).
+  The C route rejects a malformed team/date at the boundary (400) before the definer call.
+- **`cost_usd` emitted as a deterministic NUMERIC string** (e.g. `to_char(cost_usd,
+  'FM9999999990.0000000000')` / the numeric's text form), NEVER a C double — no precision
+  loss for finance export. tokens/calls are integers.
+- **Explicit `total` field.** Response: `{team, project?, since, until,
+  total:{prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens,
+  cost_usd, calls}, by_model:[{billable_model, …same fields…}], by_project:[…]}`. The gate
+  asserts `sum(by_model.cost_usd) == total.cost_usd` and per-model tokens reconcile.
+- **Route team/date handling:** `?team=` OPTIONAL int64 — absent → the `p_team IS NULL`
+  (admin-only) branch; present → parsed/validated int64 (reject non-integer/out-of-range,
+  400). `?project=` optional int64. `?since=/?until=` required (or default to a bounded
+  window), validated as above.
+- **Gate proves the FUNCTION is the gate (not just table RLS):** call `org_spend_query`
+  as a non-admin, non-lead actor (via `set_tenant_context`) and assert it RAISEs
+  `insufficient_privilege` — since the SECURITY DEFINER bypasses RLS, its INTERNAL
+  admin/lead predicate is the only authz on that path, so it must be tested directly.
+  Plus: team-lead sees only own team, admin sees all, per-model reconciliation, date range.
+- **P4 coupling note:** `total.cost_usd`/`calls` is the signal P4's budget enforcement
+  will read; keep the response shape stable so P4 can add `cap`/`remaining` without a
+  breaking change.
