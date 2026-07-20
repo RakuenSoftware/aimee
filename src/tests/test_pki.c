@@ -28,8 +28,9 @@ static char *make_csr(const char *subject_cn, int forge)
        X509_REQ_set_version(req, 0) != 1)
       goto done;
    X509_NAME *name = X509_REQ_get_subject_name(req);
-   if (!name || X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC,
-                                            (const unsigned char *)subject_cn, -1, -1, 0) != 1 ||
+   if (!name ||
+       X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC,
+                                  (const unsigned char *)subject_cn, -1, -1, 0) != 1 ||
        X509_REQ_set_pubkey(req, key) != 1 || X509_REQ_sign(req, key, EVP_sha256()) <= 0)
       goto done;
    if (forge)
