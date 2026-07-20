@@ -1436,7 +1436,19 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
          const char *wi = wfe_ctx_work_item(ctx);
          if (wi && wi[0])
          {
-            snprintf(branchbuf, sizeof branchbuf, "aimee/wi/%s", wi);
+            /* A foreach PARENT fanned its work out to slices that each merged into the
+             * durable feature branch aimee/feat/<id>; its FINAL pr must open FROM that
+             * feature branch — it carries every merged slice's deliverable — NOT
+             * aimee/wi/<id>, which carries only the parent's own split artifact
+             * (.wfe-split.json). A leaf run with no children committed to its own
+             * aimee/wi/<id> branch, and a slice sub-PR (also childless) opens from its
+             * own aimee/wi/<slice>. Distinguish by whether this run has children. */
+            int child_total = 0;
+            db1_work_item_child_counts(wi, &child_total, NULL, NULL);
+            if (child_total > 0)
+               feature_branch_name(wi, branchbuf, sizeof branchbuf); /* aimee/feat/<id> */
+            else
+               snprintf(branchbuf, sizeof branchbuf, "aimee/wi/%s", wi);
             branch = branchbuf;
          }
          else
