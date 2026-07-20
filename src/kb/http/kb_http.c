@@ -31,6 +31,7 @@
 #include "kb_http_insights.h"
 #include "kb_http_budget.h"
 #include "kb_http_rate.h"
+#include "kb_http_servers.h"
 #include "kb_http_telemetry.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
@@ -836,6 +837,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       if (tr >= 0)
          return tr;
    }
+   { int sr = kb_http_servers_route(method, path, query_string, out_buf, out_cap); if (sr >= 0) return sr; }
 
    /* Model catalog + entitlement routes (P2a): /v1/models/entitled (tenant read) +
     * the /v1/models/org/ admin CRUD (admin-gated at the DB layer, WORM-audited).
