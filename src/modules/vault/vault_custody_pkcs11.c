@@ -18,7 +18,8 @@ static int open_token(pk11_ctx *c)
   if(c->f->C_Initialize(NULL_PTR)!=CKR_OK)return -1;
   CK_ULONG n=8; CK_SLOT_ID slots[8];
   if(c->f->C_GetSlotList(CK_TRUE,slots,&n)!=CKR_OK||!n)return -1;
-  if(slot_s&&slot>=n) return -1; slot=slot_s?slots[slot]:slots[0];
+  if(slot_s&&slot>=n) return -1;
+  slot=slot_s?slots[slot]:slots[0];
   if(c->f->C_OpenSession(slot,CKF_SERIAL_SESSION|CKF_RW_SESSION,NULL,NULL,&c->s)!=CKR_OK)return -1;
   if(c->f->C_Login(c->s,CKU_USER,(CK_UTF8CHAR_PTR)pin,(CK_ULONG)strlen(pin))!=CKR_OK)return -1;
   c->sealed=0; return 0;
