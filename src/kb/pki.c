@@ -25,6 +25,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out);
+
 static int hx(const uint8_t *in, size_t n, char *out, size_t cap)
 {
    static const char d[]="0123456789abcdef";
@@ -36,13 +38,6 @@ static int unhx(const char *in, size_t n, uint8_t *out, size_t cap)
    if((n&1)||cap<n/2)return -1;
    for(size_t i=0;i<n/2;i++){int a=(in[i*2]<='9'?in[i*2]-'0':in[i*2]-'a'+10),b=(in[i*2+1]<='9'?in[i*2+1]-'0':in[i*2+1]-'a'+10);if(a<0||a>15||b<0||b>15)return -1;out[i]=(uint8_t)((a<<4)|b);}return 0;
 }
-/* Unit-test link targets that exercise the legacy PEM API do not link the vault
- * profile. Production links provide the strong implementations. */
-__attribute__((weak)) int vault_server_kek(uint8_t k[VAULT_KEK_LEN]) { (void)k; return -1; }
-__attribute__((weak)) int vault_secret_encrypt(const uint8_t k[VAULT_DEK_LEN],const uint8_t *a,size_t al,const uint8_t *p,size_t n,uint8_t no[VAULT_GCM_NONCE_LEN],uint8_t *c,uint8_t t[VAULT_GCM_TAG_LEN])
-{ (void)k;(void)a;(void)al;(void)p;(void)n;(void)no;(void)c;(void)t; return -1; }
-__attribute__((weak)) int vault_secret_decrypt(const uint8_t k[VAULT_DEK_LEN],const uint8_t *a,size_t al,const uint8_t no[VAULT_GCM_NONCE_LEN],const uint8_t *c,size_t n,const uint8_t t[VAULT_GCM_TAG_LEN],uint8_t *p)
-{ (void)k;(void)a;(void)al;(void)no;(void)c;(void)n;(void)t;(void)p; return -1; }
 
 /* --- small PEM <-> object helpers --- */
 
@@ -591,6 +586,11 @@ int kb_pki_ca_load(const char *dir, kb_pki_ca_t *out)
    if (!dir || !dir[0] || !out)
       return -1;
 
+   char vault_path[1024];
+   if (join_path(dir, "ca-key.vault", vault_path, sizeof(vault_path)) == 0 &&
+       access(vault_path, F_OK) == 0)
+      return kb_pki_ca_load_custodied(dir, out);
+
    char cert_path[1024], key_path[1024];
    if (join_path(dir, "ca.pem", cert_path, sizeof(cert_path)) != 0)
       return -1;
@@ -654,7 +654,16 @@ int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out)
    char cp[1024],ep[1024],buf[KB_PKI_KEY_PEM_MAX*2+256];
    if(join_path(dir,"ca.pem",cp,sizeof(cp))||join_path(dir,"ca-key.vault",ep,sizeof(ep)))return -1;
    if(read_text_file(cp,out->cert_pem,sizeof(out->cert_pem))<0)return -1;
-   if(read_text_file(ep,buf,sizeof(buf))<0)return -1;
+   if(read_text_file(ep,buf,sizeof(buf))<0)
+   {
+      if(access(ep,F_OK)==0) return -1; /* present-but-invalid: fail closed */
+      /* One-way migration compatibility: an existing legacy key is accepted
+       * only when no encrypted artifact exists; new writes never create it. */
+      char legacy[1024];
+      if(join_path(dir,"ca-key.pem",legacy,sizeof(legacy))!=0 ||
+         read_text_file(legacy,out->key_pem,sizeof(out->key_pem))<0) return -1;
+      return 0;
+   }
    char *a=strtok(buf,"\n"),*n=strtok(NULL,"\n"),*t=strtok(NULL,"\n"),*c=strtok(NULL,"\n");
    if(!a||!n||!t||!c||strcmp(a,"AIMEE-CA-VAULT-V1"))return -1;
    uint8_t kek[VAULT_KEK_LEN],nonce[VAULT_GCM_NONCE_LEN],tag[VAULT_GCM_TAG_LEN],ct[KB_PKI_KEY_PEM_MAX]; int rc=-1;

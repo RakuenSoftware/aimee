@@ -498,7 +498,7 @@ int kb_enroll_redeem_csr(const char *data_dir, const char *token, const char *cs
 
    /* Load the CA before consuming, so a missing CA also does not burn the token. */
    kb_pki_ca_t ca;
-   if (kb_pki_ca_load(ca_dir, &ca) != 0)
+   if (kb_pki_ca_load_custodied(ca_dir, &ca) != 0)
       return -1;
 
    char scope[KB_ENROLL_SCOPE_MAX];
