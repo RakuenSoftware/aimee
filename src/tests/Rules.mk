@@ -586,6 +586,20 @@ $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
                                        $(OBJDIR)/db2/org_telemetry_fmt.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# P6a AWS-auth core pure tests: SigV4 (published aws-sig-v4-test-suite vectors),
+# STS body/parse + web-identity JWT signature verify, bedrock least-privilege
+# session policy, and STS session-cache isolation. Links only the kb-only
+# modules/aws/*.o + cJSON (JWT claim parse) + OpenSSL (HMAC/SHA256/JWT verify) via
+# TEST_L_FLAGS — no DB, no network (pure/offline).
+TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-auth
+$(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
+                                  $(OBJDIR)/modules/aws/aws_sigv4.o \
+                                  $(OBJDIR)/modules/aws/aws_sts.o \
+                                  $(OBJDIR)/modules/aws/bedrock_policy.o \
+                                  $(OBJDIR)/modules/aws/sts_cache.o \
+                                  $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(OBJDIR)/tests/test_code_index_ops.o \
                                        $(OBJDIR)/db2/code_index_ops.o \
