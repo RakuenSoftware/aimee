@@ -35,13 +35,7 @@ tree path without copying path hashes into a second baseline.
   "receiver": "slice-3-proposal-ordering-gate",
   "contract_file": "docs/proposals/pending/git-core-contract.md",
   "evidence_file": "docs/validation/roundtable/git-core-contract.json",
-  "invariants": [
-    "git-required-core",
-    "memory-owns-code-intelligence",
-    "principal-scoped-ingest",
-    "signed-producer-and-repository-provenance",
-    "pre-persistence-secret-redaction"
-  ],
+  "invariants_source": "git-core-contract.invariants",
   "ordering_script_baseline": "6ce37f53e1f627c19e15fc01f68959f546a5eded",
   "trigger_surface_source": "git-core-contract"
 }

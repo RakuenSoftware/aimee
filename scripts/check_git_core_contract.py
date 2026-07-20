@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import subprocess
 import sys
 from typing import NoReturn
@@ -33,19 +34,85 @@ INVARIANT_IDS = (
 )
 
 EXPECTED_ACCEPTANCE = {
-    "cross_principal_access": ("deny", "PRINCIPAL_SCOPE_DENIED"),
-    "missing_producer_signature": ("deny", "PRODUCER_SIGNATURE_MISSING"),
-    "missing_repository_signature": ("deny", "REPOSITORY_SIGNATURE_MISSING"),
-    "unredacted_secret": ("deny", "REDACTION_DENY"),
-    "direct_git_persistence": ("deny", "GIT_PERSIST_FORBIDDEN"),
-    "git_owned_code_intelligence": ("deny", "MEMORY_EXCLUSIVE"),
-    "submit_only_violation": ("deny", "SUBMIT_ONLY_VIOLATION"),
-    "non_git_workspace_git_only_operation": ("capability_absent", "CAPABILITY_ABSENT"),
-    "signer_identity_reuse": ("deny", "SIGNER_IDENTITY_REUSE"),
-    "deny_allow_overlap": ("deny", "DENY_ALLOW_OVERLAP"),
-    "post_approval_contract_mutation": ("deny", "REVIEW_DIGEST_MISMATCH"),
-    "valid_repository_ingest": ("pass", "CONTRACT_SATISFIED"),
-    "non_git_workspace_base_operation": ("pass", "CONTRACT_SATISFIED"),
+    "cross_principal_access": (
+        "cross-principal-access", "integration", "deny", "PRINCIPAL_SCOPE_DENIED"
+    ),
+    "missing_principal_scope": (
+        "missing-principal-scope", "integration", "deny", "PRINCIPAL_SCOPE_MISSING"
+    ),
+    "missing_producer_signature": (
+        "missing-producer-signature", "integration", "deny", "PRODUCER_SIGNATURE_MISSING"
+    ),
+    "missing_repository_signature": (
+        "missing-repository-signature", "integration", "deny", "REPOSITORY_SIGNATURE_MISSING"
+    ),
+    "producer_verifier_failure": (
+        "producer-verifier-failure", "integration", "deny", "PRODUCER_VERIFICATION_FAILED"
+    ),
+    "repository_verifier_failure": (
+        "repository-verifier-failure", "integration", "deny", "REPOSITORY_VERIFICATION_FAILED"
+    ),
+    "unknown_payload_class": (
+        "unknown-payload-class", "integration", "deny", "UNKNOWN_PAYLOAD_CLASS"
+    ),
+    "incomplete_redaction_scan": (
+        "incomplete-redaction-scan", "integration", "deny", "REDACTION_SCAN_INCOMPLETE"
+    ),
+    "redactor_error": ("redactor-error", "integration", "deny", "REDACTION_ENGINE_FAILED"),
+    "unredacted_secret": ("unredacted-secret", "integration", "deny", "REDACTION_DENY"),
+    "split_input_secret": ("split-input-secret", "integration", "deny", "REDACTION_DENY"),
+    "partial_persistence_prevented": (
+        "partial-persistence-prevented", "integration", "deny", "PARTIAL_PERSISTENCE_FORBIDDEN"
+    ),
+    "direct_git_persistence": (
+        "direct-git-persistence", "mechanical", "deny", "GIT_PERSIST_FORBIDDEN"
+    ),
+    "git_owned_code_intelligence": (
+        "git-owned-code-intelligence", "mechanical", "deny", "MEMORY_EXCLUSIVE"
+    ),
+    "submit_only_violation": (
+        "submit-only-violation", "mechanical", "deny", "SUBMIT_ONLY_VIOLATION"
+    ),
+    "non_git_workspace_git_only_operation": (
+        "non-git-workspace-git-only-operation",
+        "integration",
+        "capability_absent",
+        "CAPABILITY_ABSENT",
+    ),
+    "signer_identity_reuse": (
+        "signer-identity-reuse", "integration", "deny", "SIGNER_IDENTITY_REUSE"
+    ),
+    "deny_allow_overlap": ("deny-allow-overlap", "mechanical", "deny", "DENY_ALLOW_OVERLAP"),
+    "post_approval_contract_mutation": (
+        "post-approval-contract-mutation", "mechanical", "deny", "REVIEW_DIGEST_MISMATCH"
+    ),
+    "valid_repository_ingest": (
+        "valid-repository-ingest", "integration", "pass", "CONTRACT_SATISFIED"
+    ),
+    "non_git_workspace_base_operation": (
+        "non-git-workspace-base-operation", "integration", "pass", "CONTRACT_SATISFIED"
+    ),
+}
+
+CANONICAL_NAMESPACE = "memory.code-intelligence.repository-records"
+CANONICAL_INGEST = "memory.repository-record.ingest.v1"
+EXPECTED_READ_SCOPES = {
+    ("workspace.repository", "git", "read"),
+    (CANONICAL_NAMESPACE, "memory", "read"),
+}
+EXPECTED_WRITE_SCOPES = {(CANONICAL_NAMESPACE, "memory", "write")}
+EXPECTED_TRIGGERS = {
+    "descriptors": {("src/modules/git/module.yaml", "descriptor")},
+    "generated_builds": {
+        ("src/generated/modules.mk", "make-build"),
+        ("cmake/generated/modules.cmake", "cmake-build"),
+    },
+    "generated_profiles": {("build/inventory/core.json", "generated-profile")},
+}
+EXPECTED_READINESS = {("src/modules/git/module.yaml", "readiness", "ready")}
+EXPECTED_STATUS_ROOTS = {
+    ("docs/proposals", "git-runtime-ready"),
+    ("docs/modules", "git-runtime-ready"),
 }
 
 
@@ -101,15 +168,19 @@ def extract_contract(path: Path) -> dict[str, object]:
 
 def extract_json_fence(path: Path, name: str) -> dict[str, object]:
     raw = _read_text(path)
-    fence = f"```json {name}\n"
-    if raw.count(fence) != 1:
+    opening = re.compile(rf"^```json {re.escape(name)}[ \t]*$", re.MULTILINE)
+    matches = list(opening.finditer(raw))
+    if len(matches) != 1:
         fail("contract-fence", f"expected exactly one {name} JSON fence", path=path)
-    body = raw.split(fence, 1)[1]
-    if "\n```" not in body:
+    body = raw[matches[0].end() :]
+    if body.startswith("\r\n"):
+        body = body[2:]
+    elif body.startswith("\n"):
+        body = body[1:]
+    closing = re.search(r"^```[ \t]*$", body, re.MULTILINE)
+    if closing is None:
         fail("contract-fence", f"unterminated {name} JSON fence", path=path)
-    payload, remainder = body.split("\n```", 1)
-    if fence in remainder:
-        fail("contract-fence", f"multiple {name} JSON fences", path=path)
+    payload = body[: closing.start()].rstrip("\r\n")
     value = loads_strict(payload, path=path)
     if not isinstance(value, dict):
         fail("schema", f"{name} must be a JSON object", path=path)
@@ -124,7 +195,7 @@ def validate_handoff(value: dict[str, object], path: Path) -> None:
             "receiver",
             "contract_file",
             "evidence_file",
-            "invariants",
+            "invariants_source",
             "ordering_script_baseline",
             "trigger_surface_source",
         },
@@ -141,18 +212,20 @@ def validate_handoff(value: dict[str, object], path: Path) -> None:
     _literal(
         handoff["evidence_file"], EVIDENCE_PATH.as_posix(), "handoff.evidence_file", path
     )
-    invariants = _list(handoff["invariants"], "handoff.invariants", path)
-    if tuple(invariants) != INVARIANT_IDS:
-        fail(
-            "handoff-invariants",
-            f"expected ordered invariants {list(INVARIANT_IDS)!r}, actual {invariants!r}",
-            path=path,
-        )
+    _literal(
+        handoff["invariants_source"],
+        "git-core-contract.invariants",
+        "handoff.invariants_source",
+        path,
+    )
     _literal(
         handoff["ordering_script_baseline"], CUTOFF, "handoff.ordering_script_baseline", path
     )
     _literal(
-        handoff["trigger_surface_source"], "git-core-contract", "handoff.trigger_surface_source", path
+        handoff["trigger_surface_source"],
+        "git-core-contract",
+        "handoff.trigger_surface_source",
+        path,
     )
 
 
@@ -251,6 +324,16 @@ def _validate_scopes(principal: dict[str, object], path: Path) -> None:
 
     validate(read_scope, "principal.read_scope", "read")
     validate(write_scope, "principal.write_scope", "write")
+    actual_read = {
+        (entry["namespace"], entry["principal"], entry["access"]) for entry in read_scope
+    }
+    actual_write = {
+        (entry["namespace"], entry["principal"], entry["access"]) for entry in write_scope
+    }
+    if actual_read != EXPECTED_READ_SCOPES:
+        fail("principal-scope", "read_scope differs from the v1 contract", path=path)
+    if actual_write != EXPECTED_WRITE_SCOPES:
+        fail("principal-scope", "write_scope differs from the v1 contract", path=path)
     namespaces = _list(
         principal["code_intelligence_namespaces"],
         "principal.code_intelligence_namespaces",
@@ -259,6 +342,12 @@ def _validate_scopes(principal: dict[str, object], path: Path) -> None:
     for index, namespace in enumerate(namespaces):
         _string(namespace, f"code_intelligence_namespaces[{index}]", path, identifier=True)
     _unique(namespaces, lambda value: value, "code-intelligence namespace", path)
+    if namespaces != [CANONICAL_NAMESPACE]:
+        fail(
+            "memory-exclusive",
+            f"code_intelligence_namespaces must equal {[CANONICAL_NAMESPACE]!r}",
+            path=path,
+        )
     for namespace in namespaces:
         writers = {
             entry["principal"]
@@ -268,7 +357,8 @@ def _validate_scopes(principal: dict[str, object], path: Path) -> None:
         if writers != {"memory"}:
             fail(
                 "memory-exclusive",
-                f"namespace {namespace!r} must have exactly memory as writer, actual {sorted(writers)}",
+                f"namespace {namespace!r} must have exactly memory as writer, "
+                f"actual {sorted(writers)}",
                 path=path,
             )
 
@@ -277,6 +367,10 @@ def _validate_provenance(value: object, path: Path) -> None:
     provenance = _object(
         value, {"producer", "repository", "require_both", "identity_rule"}, "provenance", path
     )
+    verifier_by_side = {
+        "producer": "git.provenance.producer.verify.v1",
+        "repository": "git.provenance.repository.verify.v1",
+    }
     for side in ("producer", "repository"):
         side_obj = _object(provenance[side], {"signature"}, f"provenance.{side}", path)
         signature = _object(
@@ -296,11 +390,13 @@ def _validate_provenance(value: object, path: Path) -> None:
                 identifier=True,
             )
         _unique(algorithms, lambda item: item, f"{side} signature algorithm", path)
-        _string(
+        if set(algorithms) != {"ssh-ed25519", "openpgp"}:
+            fail("provenance", f"{side} signature algorithm allowlist differs from v1", path=path)
+        _literal(
             signature["verifier_contract"],
+            verifier_by_side[side],
             f"provenance.{side}.signature.verifier_contract",
             path,
-            identifier=True,
         )
     _literal(provenance["require_both"], True, "provenance.require_both", path)
     _literal(
@@ -367,6 +463,9 @@ def _validate_triggers(value: object, path: Path) -> None:
             if entry["kind"] not in kinds:
                 fail("trigger-surface", f"{group}[{index}].kind is invalid", path=path)
         _unique(entries, lambda item: item["path"], f"{group} path", path)
+        actual = {(entry["path"], entry["kind"]) for entry in entries}
+        if actual != EXPECTED_TRIGGERS[group]:
+            fail("trigger-surface", f"{group} differs from the v1 trigger set", path=path)
     readiness = _list(trigger["readiness_markers"], "trigger_surface.readiness_markers", path)
     for index, raw in enumerate(readiness):
         entry = _object(raw, {"path", "key", "value"}, f"readiness[{index}]", path)
@@ -374,12 +473,18 @@ def _validate_triggers(value: object, path: Path) -> None:
         _string(entry["key"], f"readiness[{index}].key", path, identifier=True)
         _literal(entry["value"], "ready", f"readiness[{index}].value", path)
     _unique(readiness, lambda item: item["path"], "readiness path", path)
+    actual_readiness = {(item["path"], item["key"], item["value"]) for item in readiness}
+    if actual_readiness != EXPECTED_READINESS:
+        fail("trigger-surface", "readiness markers differ from the v1 trigger set", path=path)
     roots = _list(trigger["status_claim_roots"], "trigger_surface.status_claim_roots", path)
     for index, raw in enumerate(roots):
         entry = _object(raw, {"path", "claim"}, f"status root[{index}]", path)
         _safe_relative(entry["path"], f"status root[{index}].path", path)
         _literal(entry["claim"], "git-runtime-ready", f"status root[{index}].claim", path)
     _unique(roots, lambda item: item["path"], "status root path", path)
+    actual_roots = {(item["path"], item["claim"]) for item in roots}
+    if actual_roots != EXPECTED_STATUS_ROOTS:
+        fail("trigger-surface", "status roots differ from the v1 trigger set", path=path)
 
 
 def _validate_acceptance(value: object, path: Path) -> None:
@@ -387,15 +492,15 @@ def _validate_acceptance(value: object, path: Path) -> None:
     for index, raw in enumerate(entries):
         entry = _object(raw, {"id", "tier", "kind", "expected"}, f"acceptance[{index}]", path)
         _string(entry["id"], f"acceptance[{index}].id", path, identifier=True)
-        if entry["tier"] not in {"mechanical", "integration"}:
-            fail("acceptance", f"acceptance[{index}].tier is invalid", path=path)
         kind = _string(entry["kind"], f"acceptance[{index}].kind", path)
         if kind not in EXPECTED_ACCEPTANCE:
             fail("acceptance", f"unknown acceptance kind {kind!r}", path=path)
         expected = _object(
             entry["expected"], {"decision", "reason_code"}, f"acceptance[{index}].expected", path
         )
-        decision, reason = EXPECTED_ACCEPTANCE[kind]
+        expected_id, tier, decision, reason = EXPECTED_ACCEPTANCE[kind]
+        _literal(entry["id"], expected_id, f"acceptance[{index}].id", path)
+        _literal(entry["tier"], tier, f"acceptance[{index}].tier", path)
         _literal(expected["decision"], decision, f"acceptance[{index}].expected.decision", path)
         _literal(
             expected["reason_code"], reason, f"acceptance[{index}].expected.reason_code", path
@@ -445,7 +550,15 @@ def _validate_evidence(
     evidence = loads_strict(raw, path=evidence_path)
     evidence_obj = _object(
         evidence,
-        {"schema_version", "run_id", "decision", "decided_at", "reviewed_contract_sha256", "findings", "overall"},
+        {
+            "schema_version",
+            "run_id",
+            "decision",
+            "decided_at",
+            "reviewed_contract_sha256",
+            "findings",
+            "overall",
+        },
         "evidence",
         evidence_path,
     )
@@ -460,19 +573,29 @@ def _validate_evidence(
     if parsed.tzinfo != dt.timezone.utc:
         fail("evidence", "decided_at must be UTC", path=evidence_path)
     _literal(
-        evidence_obj["reviewed_contract_sha256"], review_sha, "evidence.reviewed_contract_sha256", evidence_path
+        evidence_obj["reviewed_contract_sha256"],
+        review_sha,
+        "evidence.reviewed_contract_sha256",
+        evidence_path,
     )
     findings = _list(evidence_obj["findings"], "evidence.findings", evidence_path, nonempty=False)
     for index, raw_finding in enumerate(findings):
         finding = _object(
-            raw_finding, {"severity", "location", "message"}, f"evidence.findings[{index}]", evidence_path
+            raw_finding,
+            {"severity", "location", "message"},
+            f"evidence.findings[{index}]",
+            evidence_path,
         )
         if finding["severity"] not in {"blocking", "non-blocking"}:
             fail("evidence", f"finding {index} severity is invalid", path=evidence_path)
         _string(finding["location"], f"finding {index} location", evidence_path)
         _string(finding["message"], f"finding {index} message", evidence_path)
         if finding["severity"] == "blocking":
-            fail("evidence-blocker", f"approval evidence contains blocking finding {index}", path=evidence_path)
+            fail(
+                "evidence-blocker",
+                f"approval evidence contains blocking finding {index}",
+                path=evidence_path,
+            )
     _string(evidence_obj["overall"], "evidence.overall", evidence_path)
     actual_review_sha = reviewed_contract_sha256(contract)
     if actual_review_sha != review_sha:
@@ -480,10 +603,14 @@ def _validate_evidence(
 
 
 def _validate_git_cutoff(config_root: Path, cutoff: dict[str, object], path: Path) -> None:
+    git_path = shutil.which("git", path="/usr/bin:/bin")
+    if git_path != "/usr/bin/git":
+        fail("git-cutoff", f"expected trusted git at /usr/bin/git, actual {git_path!r}", path=path)
+
     def run(*args: str) -> str:
         try:
             result = subprocess.run(
-                ["git", *args],
+                [git_path, *args],
                 cwd=config_root,
                 text=True,
                 stdout=subprocess.PIPE,
@@ -522,7 +649,12 @@ def validate_contract(
     top = _object(
         contract,
         {
-            "schema_version", "contract_version", "module", "classification", "lifecycle",
+            "schema_version",
+            "contract_version",
+            "module",
+            "classification",
+            "invariants",
+            "lifecycle",
             "historical_cutoff", "ownership", "ingest_boundary", "principal", "provenance",
             "redaction", "non_git_workspace", "compatibility", "trigger_surface", "acceptance",
         },
@@ -533,6 +665,13 @@ def validate_contract(
     _literal(top["contract_version"], CONTRACT_VERSION, "contract_version", path)
     _literal(top["module"], "git", "module", path)
     _literal(top["classification"], "required", "classification", path)
+    invariants = _list(top["invariants"], "invariants", path)
+    if tuple(invariants) != INVARIANT_IDS:
+        fail(
+            "contract-invariants",
+            f"expected ordered invariants {list(INVARIANT_IDS)!r}, actual {invariants!r}",
+            path=path,
+        )
 
     lifecycle = _object(
         top["lifecycle"], {"status", "enforcement_scope", "approval_evidence"}, "lifecycle", path
@@ -544,14 +683,21 @@ def validate_contract(
             fail("lifecycle", "pending contract must have null approval evidence", path=path)
         evidence = resolve_under_root(config_root, EVIDENCE_PATH, label="evidence")
         if evidence.exists():
-            fail("lifecycle", "pending contract must not have an approval evidence file", path=evidence)
+            fail(
+                "lifecycle",
+                "pending contract must not have an approval evidence file",
+                path=evidence,
+            )
     elif require_status == "roundtable-approved":
         _validate_evidence(lifecycle, contract, config_root, path)
     else:
         fail("lifecycle", f"unsupported required status {require_status!r}", path=path)
 
     cutoff = _object(
-        top["historical_cutoff"], {"commit", "ref", "pinned_after_slice", "path"}, "historical_cutoff", path
+        top["historical_cutoff"],
+        {"commit", "ref", "pinned_after_slice", "path"},
+        "historical_cutoff",
+        path,
     )
     _literal(cutoff["commit"], CUTOFF, "historical_cutoff.commit", path)
     _literal(cutoff["ref"], "refs/heads/feature/core-modularization", "historical_cutoff.ref", path)
@@ -560,25 +706,46 @@ def validate_contract(
 
     ownership = _object(
         top["ownership"],
-        {"producer", "memory_owner", "code_intelligence_exclusive_to_memory", "git_may_persist_code_intelligence"},
+        {
+            "producer",
+            "memory_owner",
+            "code_intelligence_exclusive_to_memory",
+            "git_may_persist_code_intelligence",
+        },
         "ownership",
         path,
     )
     _literal(ownership["producer"], "git", "ownership.producer", path)
     _literal(ownership["memory_owner"], "memory", "ownership.memory_owner", path)
-    _literal(ownership["code_intelligence_exclusive_to_memory"], True, "ownership.code_intelligence_exclusive_to_memory", path)
-    _literal(ownership["git_may_persist_code_intelligence"], False, "ownership.git_may_persist_code_intelligence", path)
+    _literal(
+        ownership["code_intelligence_exclusive_to_memory"],
+        True,
+        "ownership.code_intelligence_exclusive_to_memory",
+        path,
+    )
+    _literal(
+        ownership["git_may_persist_code_intelligence"],
+        False,
+        "ownership.git_may_persist_code_intelligence",
+        path,
+    )
 
     ingest = _object(
-        top["ingest_boundary"], {"contract_id", "namespace", "writer", "git_access"}, "ingest_boundary", path
+        top["ingest_boundary"],
+        {"contract_id", "namespace", "writer", "git_access"},
+        "ingest_boundary",
+        path,
     )
-    _string(ingest["contract_id"], "ingest_boundary.contract_id", path, identifier=True)
-    _string(ingest["namespace"], "ingest_boundary.namespace", path, identifier=True)
+    _literal(ingest["contract_id"], CANONICAL_INGEST, "ingest_boundary.contract_id", path)
+    _literal(ingest["namespace"], CANONICAL_NAMESPACE, "ingest_boundary.namespace", path)
     _literal(ingest["writer"], "memory", "ingest_boundary.writer", path)
     _literal(ingest["git_access"], "submit-only", "ingest_boundary.git_access", path)
 
     principal = _object(
-        top["principal"], {"policy", "read_scope", "write_scope", "code_intelligence_namespaces"}, "principal", path
+        top["principal"],
+        {"policy", "read_scope", "write_scope", "code_intelligence_namespaces"},
+        "principal",
+        path,
     )
     _validate_scopes(principal, path)
     if ingest["namespace"] not in principal["code_intelligence_namespaces"]:
@@ -586,23 +753,51 @@ def validate_contract(
 
     _validate_provenance(top["provenance"], path)
     _validate_redaction(top["redaction"], path)
-    non_git = _object(top["non_git_workspace"], {"behavior", "git_only_operation"}, "non_git_workspace", path)
+    non_git = _object(
+        top["non_git_workspace"],
+        {"behavior", "git_only_operation"},
+        "non_git_workspace",
+        path,
+    )
     _literal(non_git["behavior"], "usable", "non_git_workspace.behavior", path)
-    _literal(non_git["git_only_operation"], "capability_absent", "non_git_workspace.git_only_operation", path)
+    _literal(
+        non_git["git_only_operation"],
+        "capability_absent",
+        "non_git_workspace.git_only_operation",
+        path,
+    )
 
     compatibility = _object(top["compatibility"], {"legacy_entrypoints"}, "compatibility", path)
-    aliases = _list(compatibility["legacy_entrypoints"], "compatibility.legacy_entrypoints", path, nonempty=False)
-    today = dt.date(2026, 7, 20)
+    aliases = _list(
+        compatibility["legacy_entrypoints"],
+        "compatibility.legacy_entrypoints",
+        path,
+        nonempty=False,
+    )
+    if aliases:
+        fail("compatibility", "contract version 1.0.0 permits no legacy entrypoints", path=path)
     for index, raw in enumerate(aliases):
-        alias = _object(raw, {"surface", "entrypoint", "canonical_contract", "expires"}, f"legacy alias[{index}]", path)
+        alias = _object(
+            raw,
+            {"surface", "entrypoint", "canonical_contract", "expires"},
+            f"legacy alias[{index}]",
+            path,
+        )
         _string(alias["surface"], f"legacy alias[{index}].surface", path, identifier=True)
         _string(alias["entrypoint"], f"legacy alias[{index}].entrypoint", path)
-        _string(alias["canonical_contract"], f"legacy alias[{index}].canonical_contract", path, identifier=True)
+        _string(
+            alias["canonical_contract"],
+            f"legacy alias[{index}].canonical_contract",
+            path,
+            identifier=True,
+        )
         try:
-            expiry = dt.date.fromisoformat(_string(alias["expires"], f"legacy alias[{index}].expires", path))
+            expiry = dt.date.fromisoformat(
+                _string(alias["expires"], f"legacy alias[{index}].expires", path)
+            )
         except ValueError as exc:
             fail("compatibility", f"legacy alias[{index}] expiry invalid: {exc}", path=path)
-        if expiry < today:
+        if expiry < dt.datetime.now(dt.timezone.utc).date():
             fail("compatibility", f"legacy alias[{index}] is expired", path=path)
     _unique(aliases, lambda item: item["surface"], "legacy surface", path)
 
@@ -626,7 +821,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-root", type=Path)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
-    parser.add_argument("--require-status", choices=("pending", "roundtable-approved"), required=True)
+    parser.add_argument(
+        "--require-status", choices=("pending", "roundtable-approved"), required=True
+    )
     return parser.parse_args(argv)
 
 
@@ -636,7 +833,10 @@ def main(argv: list[str] | None = None) -> int:
     root_value = args.config_root or os.environ.get("AIMEE_CONFIG_ROOT") or script_root
     config_root = Path(os.path.realpath(root_value))
     if not config_root.is_dir():
-        print(f"check_git_core_contract: error: rule=config-root: {config_root} is not a directory", file=sys.stderr)
+        print(
+            f"check_git_core_contract: error: rule=config-root: {config_root} is not a directory",
+            file=sys.stderr,
+        )
         return 1
     try:
         contract_path = resolve_under_root(config_root, args.contract, label="contract")

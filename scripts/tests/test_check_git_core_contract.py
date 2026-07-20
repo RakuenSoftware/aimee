@@ -93,12 +93,18 @@ class GitCoreContractTests(unittest.TestCase):
             check_git=True,
         )
 
-    def test_handoff_requires_exact_ordered_invariants(self) -> None:
+    def test_handoff_requires_contract_invariant_source(self) -> None:
         handoff_path = REPO_ROOT / checker.DEFAULT_HANDOFF
         handoff = checker.extract_json_fence(handoff_path, "slice3-handoff")
-        handoff["invariants"] = handoff["invariants"][:-1]
-        with self.assertRaisesRegex(checker.ContractError, "handoff-invariants"):
+        handoff["invariants_source"] = "copied-list"
+        with self.assertRaisesRegex(checker.ContractError, "pinned-value"):
             checker.validate_handoff(handoff, handoff_path)
+
+    def test_contract_requires_exact_ordered_invariants(self) -> None:
+        self.assert_invalid(
+            lambda c: c.__setitem__("invariants", c["invariants"][:-1]),
+            "contract-invariants",
+        )
 
     def test_strict_json_rejects_duplicate_key(self) -> None:
         with self.assertRaisesRegex(checker.ContractError, "json-duplicate-key"):
@@ -106,7 +112,9 @@ class GitCoreContractTests(unittest.TestCase):
 
     def test_strict_json_rejects_float_exponent_and_nonfinite(self) -> None:
         for raw in ('{"value":1.0}', '{"value":1e2}', '{"value":NaN}', '{"value":Infinity}'):
-            with self.subTest(raw=raw), self.assertRaisesRegex(checker.ContractError, "json-number-domain"):
+            with self.subTest(raw=raw), self.assertRaisesRegex(
+                checker.ContractError, "json-number-domain"
+            ):
                 checker.loads_strict(raw, path="test")
 
     def test_top_level_schema_and_versions_fail_closed(self) -> None:
@@ -145,7 +153,7 @@ class GitCoreContractTests(unittest.TestCase):
                 }
             )
 
-        self.assert_invalid(mutate, "memory-exclusive")
+        self.assert_invalid(mutate, "principal-scope")
 
     def test_code_intelligence_namespace_requires_memory_writer(self) -> None:
         self.assert_invalid(lambda c: c["principal"].__setitem__("write_scope", []), "schema")
@@ -153,14 +161,16 @@ class GitCoreContractTests(unittest.TestCase):
     def test_ingest_namespace_must_be_memory_owned(self) -> None:
         self.assert_invalid(
             lambda c: c["ingest_boundary"].__setitem__("namespace", "memory.other"),
-            "ingest-boundary",
+            "pinned-value",
         )
 
     def test_principal_scope_is_closed_default_deny_and_unique(self) -> None:
         cases = (
             lambda c: c["principal"].__setitem__("policy", "allow"),
             lambda c: c["principal"]["read_scope"][0].__setitem__("extra", True),
-            lambda c: c["principal"]["read_scope"].append(copy.deepcopy(c["principal"]["read_scope"][0])),
+            lambda c: c["principal"]["read_scope"].append(
+                copy.deepcopy(c["principal"]["read_scope"][0])
+            ),
         )
         for mutate in cases:
             with self.subTest(mutation=mutate):
@@ -171,6 +181,10 @@ class GitCoreContractTests(unittest.TestCase):
             lambda c: c["provenance"].__setitem__("require_both", False),
             lambda c: c["provenance"].__setitem__("identity_rule", "same-key"),
             lambda c: c["provenance"]["producer"]["signature"].__setitem__("algorithms", []),
+            lambda c: c["provenance"]["producer"]["signature"].__setitem__("algorithms", ["none"]),
+            lambda c: c["provenance"]["producer"]["signature"].__setitem__(
+                "verifier_contract", "x"
+            ),
             lambda c: c["provenance"]["repository"].pop("signature"),
         )
         for mutate in cases:
@@ -201,8 +215,12 @@ class GitCoreContractTests(unittest.TestCase):
     def test_trigger_paths_are_safe_closed_and_unique(self) -> None:
         cases = (
             lambda c: c["trigger_surface"]["descriptors"][0].__setitem__("path", "../module.yaml"),
-            lambda c: c["trigger_surface"]["generated_profiles"].append(copy.deepcopy(c["trigger_surface"]["generated_profiles"][0])),
-            lambda c: c["trigger_surface"]["readiness_markers"][0].__setitem__("value", "available"),
+            lambda c: c["trigger_surface"]["generated_profiles"].append(
+                copy.deepcopy(c["trigger_surface"]["generated_profiles"][0])
+            ),
+            lambda c: c["trigger_surface"]["readiness_markers"][0].__setitem__(
+                "value", "available"
+            ),
             lambda c: c["trigger_surface"]["status_claim_roots"][0].__setitem__("claim", "ready"),
             lambda c: c["trigger_surface"].__setitem__("generated_builds", []),
         )
@@ -210,15 +228,61 @@ class GitCoreContractTests(unittest.TestCase):
             with self.subTest(mutation=mutate):
                 self.assert_invalid(mutate)
 
+    def test_every_v1_trigger_record_is_pinned(self) -> None:
+        groups = (
+            "descriptors",
+            "generated_builds",
+            "generated_profiles",
+            "readiness_markers",
+            "status_claim_roots",
+        )
+        for group in groups:
+            def mutate(contract, group=group):
+                contract["trigger_surface"][group].pop()
+
+            with self.subTest(group=group):
+                self.assert_invalid(mutate)
+
+    def test_ingest_contract_id_is_pinned(self) -> None:
+        self.assert_invalid(
+            lambda c: c["ingest_boundary"].__setitem__(
+                "contract_id", "memory.repository-record.ingest.v2"
+            ),
+            "pinned-value",
+        )
+
+    def test_contract_fence_must_be_unique_at_line_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "proposal.md"
+            path.write_text(
+                "```json git-core-contract\n{}\n```\n```json git-core-contract\n{}\n```\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(checker.ContractError, "contract-fence"):
+                checker.extract_json_fence(path, "git-core-contract")
+
     def test_acceptance_kind_outcomes_are_exact(self) -> None:
-        for kind, (decision, reason) in checker.EXPECTED_ACCEPTANCE.items():
-            for field, bad in (("decision", "pass" if decision != "pass" else "deny"), ("reason_code", "UNKNOWN")):
+        for kind, (expected_id, tier, decision, reason) in checker.EXPECTED_ACCEPTANCE.items():
+            for field, bad in (
+                ("decision", "pass" if decision != "pass" else "deny"),
+                ("reason_code", "UNKNOWN"),
+            ):
                 def mutate(contract, kind=kind, field=field, bad=bad):
                     entry = next(item for item in contract["acceptance"] if item["kind"] == kind)
                     entry["expected"][field] = bad
 
                 with self.subTest(kind=kind, field=field):
                     self.assert_invalid(mutate, "pinned-value")
+            for field, bad in (
+                ("id", expected_id + "-changed"),
+                ("tier", "mechanical" if tier == "integration" else "integration"),
+            ):
+                def mutate_metadata(contract, kind=kind, field=field, bad=bad):
+                    entry = next(item for item in contract["acceptance"] if item["kind"] == kind)
+                    entry[field] = bad
+
+                with self.subTest(kind=kind, field=field):
+                    self.assert_invalid(mutate_metadata, "pinned-value")
 
     def test_acceptance_missing_unknown_and_duplicate_fail(self) -> None:
         cases = (
@@ -297,10 +361,14 @@ class GitCoreContractTests(unittest.TestCase):
             self.approved_fixture(contract, root)
             evidence_path = root / checker.EVIDENCE_PATH
             evidence = json.loads(evidence_path.read_text())
-            evidence["findings"] = [{"severity": "blocking", "location": "contract", "message": "no"}]
+            evidence["findings"] = [
+                {"severity": "blocking", "location": "contract", "message": "no"}
+            ]
             raw = json.dumps(evidence, sort_keys=True, indent=2) + "\n"
             evidence_path.write_text(raw, encoding="utf-8")
-            contract["lifecycle"]["approval_evidence"]["file_sha256"] = hashlib.sha256(raw.encode()).hexdigest()
+            contract["lifecycle"]["approval_evidence"]["file_sha256"] = hashlib.sha256(
+                raw.encode()
+            ).hexdigest()
             with self.assertRaisesRegex(checker.ContractError, "evidence-blocker"):
                 checker.validate_contract(
                     contract,

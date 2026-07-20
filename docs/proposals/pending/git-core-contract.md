@@ -53,10 +53,12 @@ acceptance declaration into an executable fixture before reporting readiness.
 ## Closed machine schema
 
 The fenced JSON block is the sole machine-readable contract instance. Prose may explain it but may
-not override it. Every object is closed: missing or unknown keys fail. IDs use
+not override it. The `invariants` array is the single machine-readable source consumed by the Slice
+3 handoff. Every object is closed: missing or unknown keys fail. IDs use
 `^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$`. Paths are repository-relative, normalized, contained beneath
 the configured repository root, and reject empty, absolute, dot, dot-dot, backslash, NUL, and
-symlink-escape forms. Arrays use the uniqueness rules described by their field names;
+symlink-escape forms. This slice enforces lexical safety; Slice 3 owns filesystem containment for
+future trigger paths that do not exist yet. Arrays use the uniqueness rules described by their field names;
 trigger-surface path-bearing arrays are unique by `path`, principal scope entries by the
 `(namespace, principal, access)` triple, acceptance entries by both `id` and `kind`, and legacy
 aliases by `surface`.
@@ -96,6 +98,13 @@ decision and reason code.
   "contract_version": "1.0.0",
   "module": "git",
   "classification": "required",
+  "invariants": [
+    "git-required-core",
+    "memory-owns-code-intelligence",
+    "principal-scoped-ingest",
+    "signed-producer-and-repository-provenance",
+    "pre-persistence-secret-redaction"
+  ],
   "lifecycle": {
     "status": "pending",
     "enforcement_scope": "structural-only",
@@ -184,9 +193,17 @@ decision and reason code.
   },
   "acceptance": [
     {"id": "cross-principal-access", "tier": "integration", "kind": "cross_principal_access", "expected": {"decision": "deny", "reason_code": "PRINCIPAL_SCOPE_DENIED"}},
+    {"id": "missing-principal-scope", "tier": "integration", "kind": "missing_principal_scope", "expected": {"decision": "deny", "reason_code": "PRINCIPAL_SCOPE_MISSING"}},
     {"id": "missing-producer-signature", "tier": "integration", "kind": "missing_producer_signature", "expected": {"decision": "deny", "reason_code": "PRODUCER_SIGNATURE_MISSING"}},
     {"id": "missing-repository-signature", "tier": "integration", "kind": "missing_repository_signature", "expected": {"decision": "deny", "reason_code": "REPOSITORY_SIGNATURE_MISSING"}},
+    {"id": "producer-verifier-failure", "tier": "integration", "kind": "producer_verifier_failure", "expected": {"decision": "deny", "reason_code": "PRODUCER_VERIFICATION_FAILED"}},
+    {"id": "repository-verifier-failure", "tier": "integration", "kind": "repository_verifier_failure", "expected": {"decision": "deny", "reason_code": "REPOSITORY_VERIFICATION_FAILED"}},
+    {"id": "unknown-payload-class", "tier": "integration", "kind": "unknown_payload_class", "expected": {"decision": "deny", "reason_code": "UNKNOWN_PAYLOAD_CLASS"}},
+    {"id": "incomplete-redaction-scan", "tier": "integration", "kind": "incomplete_redaction_scan", "expected": {"decision": "deny", "reason_code": "REDACTION_SCAN_INCOMPLETE"}},
+    {"id": "redactor-error", "tier": "integration", "kind": "redactor_error", "expected": {"decision": "deny", "reason_code": "REDACTION_ENGINE_FAILED"}},
     {"id": "unredacted-secret", "tier": "integration", "kind": "unredacted_secret", "expected": {"decision": "deny", "reason_code": "REDACTION_DENY"}},
+    {"id": "split-input-secret", "tier": "integration", "kind": "split_input_secret", "expected": {"decision": "deny", "reason_code": "REDACTION_DENY"}},
+    {"id": "partial-persistence-prevented", "tier": "integration", "kind": "partial_persistence_prevented", "expected": {"decision": "deny", "reason_code": "PARTIAL_PERSISTENCE_FORBIDDEN"}},
     {"id": "direct-git-persistence", "tier": "mechanical", "kind": "direct_git_persistence", "expected": {"decision": "deny", "reason_code": "GIT_PERSIST_FORBIDDEN"}},
     {"id": "git-owned-code-intelligence", "tier": "mechanical", "kind": "git_owned_code_intelligence", "expected": {"decision": "deny", "reason_code": "MEMORY_EXCLUSIVE"}},
     {"id": "submit-only-violation", "tier": "mechanical", "kind": "submit_only_violation", "expected": {"decision": "deny", "reason_code": "SUBMIT_ONLY_VIOLATION"}},
@@ -209,6 +226,15 @@ SHA-256 of the canonical contract after only the lifecycle status and evidence f
 normalized back to their pending values. It also binds the exact evidence-file bytes. Consequently,
 only an evidence-only lifecycle transition (`status` and `approval_evidence` fields) is permitted;
 every other post-review mutation fails.
+
+The contract digest intentionally binds the parsed canonical value, not Markdown whitespace or JSON
+key order. Strict parsing rejects duplicate keys, floats, exponent forms, and non-finite values, so
+formatting-only changes preserve the digest while every representable semantic change alters it.
+
+The repository evidence is an auditable pointer and content binding, not a self-authenticating
+credential. Authorization to merge it comes from the protected pull-request workflow and its
+required roundtable review. The checker verifies internal consistency and tamper evidence; it does
+not claim that contributor-controlled bytes can prove their own author.
 
 ## Trigger surface and ordering
 
