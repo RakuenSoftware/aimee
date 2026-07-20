@@ -123,17 +123,20 @@ static int handle_spend(const char *method, const char *qs, char *out, int cap)
    if (rc != 0)
       return err(out, cap, tenant_http_status(rc), "tenant scope failed");
 
-   db2_org_spend_row_t rows[512];
+   db2_org_spend_row_t rows[DB2_SPEND_MAX_ROWS];
    int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
                                (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
    {
-      /* The definer RAISEd (authz/date) -> the txn is aborted; roll back, don't commit. */
+      /* A denied/bad-date definer RAISE aborts the txn; a TOOBIG is detected client-side
+       * (no RAISE) but the read is complete either way — roll back rather than commit. */
       db2_tenant_scope_rollback();
       if (n == DB2_SPEND_ERR_DENIED)
          return err(out, cap, 403, "not authorized (org-admin or team-lead required)");
       if (n == DB2_SPEND_ERR_BADDATE)
          return err(out, cap, 400, "invalid date range");
+      if (n == DB2_SPEND_ERR_TOOBIG)
+         return err(out, cap, 413, "report too large; narrow the team/project/date range");
       return err(out, cap, 500, "spend query failed");
    }
    if (db2_tenant_scope_commit() != 0)

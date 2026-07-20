@@ -568,11 +568,11 @@ static int kb_cmd_spend(int argc, char **argv)
       return 1;
    }
 
-   db2_org_spend_row_t rows[512];
+   db2_org_spend_row_t rows[DB2_SPEND_MAX_ROWS];
    int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
                                (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
-      db2_tenant_scope_rollback(); /* the definer RAISEd -> txn aborted */
+      db2_tenant_scope_rollback(); /* the definer RAISEd (or a client-side TOOBIG) */
    else
       db2_tenant_scope_commit();
 
@@ -583,6 +583,10 @@ static int kb_cmd_spend(int argc, char **argv)
          fprintf(stderr, "aimee-kb: not authorized (org-admin or team-lead required)\n");
       else if (n == DB2_SPEND_ERR_BADDATE)
          fprintf(stderr, "aimee-kb: invalid date range\n");
+      else if (n == DB2_SPEND_ERR_TOOBIG)
+         fprintf(stderr, "aimee-kb: report too large (>%d rows); narrow --team/--project/"
+                         "--since/--until\n",
+                 DB2_SPEND_MAX_ROWS);
       else
          fprintf(stderr, "aimee-kb: spend query failed\n");
       rc = 1;

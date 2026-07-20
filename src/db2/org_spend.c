@@ -40,12 +40,15 @@ int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t pro
    char err[256] = "";
    /* org_spend_query(p_team, p_project, p_since, p_until) — SECURITY DEFINER, actor-bound
     * (it reads aimee.principal for its admin/lead predicate). NULL team = org-wide
-    * (admin-only) branch; NULL project = no project filter. */
+    * (admin-only) branch; NULL project = no project filter. LIMIT ?5 = max+1 is a cheap
+    * overflow probe: reading a (max+1)th row means the report exceeds the caller's buffer,
+    * so we return DB2_SPEND_ERR_TOOBIG rather than SILENTLY TRUNCATE — total/by_* always
+    * reconcile because a too-large report is an explicit error, never partial data. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "SELECT team_id, project_id, billable_model, prompt_tokens, completion_tokens,"
        " cache_read_tokens, cache_write_tokens, cost_usd, calls"
-       " FROM org_spend_query(?1, ?2, ?3, ?4)",
+       " FROM org_spend_query(?1, ?2, ?3, ?4) LIMIT ?5",
        err, sizeof(err));
    if (!st)
       return -1;
@@ -59,11 +62,18 @@ int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t pro
       aimee_pg_bind_null(st, "?2");
    aimee_pg_bind_text(st, "?3", since);
    aimee_pg_bind_text(st, "?4", until);
+   aimee_pg_bind_int64(st, "?5", (int64_t)max + 1);
 
    int n = 0;
+   int overflow = 0;
    aimee_pg_step_t step = AIMEE_PG_DONE;
-   while (n < max && (step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
    {
+      if (n >= max)
+      {
+         overflow = 1; /* the (max+1)th row from the LIMIT probe — report too large */
+         break;
+      }
       db2_org_spend_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       r->team_id = aimee_pg_column_int64(st, 0);
@@ -94,5 +104,7 @@ int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t pro
    aimee_pg_finalize(st);
    if (failed)
       return spend_step_err(err);
+   if (overflow)
+      return DB2_SPEND_ERR_TOOBIG;
    return n;
 }

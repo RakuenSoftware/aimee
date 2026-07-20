@@ -2315,7 +2315,8 @@ BEGIN
      WHERE r.day BETWEEN p_since AND p_until
        AND (p_team IS NULL OR r.team_id = p_team)
        AND (p_project IS NULL OR r.project_id = p_project)
-     GROUP BY r.team_id, r.project_id, r.billable_model;
+     GROUP BY r.team_id, r.project_id, r.billable_model
+     ORDER BY r.team_id, r.project_id NULLS LAST, r.billable_model;
 END; $$;
 
 -- These SECURITY DEFINER functions are never PUBLIC; EXECUTE is granted to the

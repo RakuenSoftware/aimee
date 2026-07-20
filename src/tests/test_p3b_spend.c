@@ -180,6 +180,52 @@ int main(void)
    if (j2)
       free(j2);
 
+   /* Large-set regression: well past the former fixed 512-element scratch cap. Prove the
+    * aggregation neither drops groups nor mis-reconciles at scale (fix #1: no silent
+    * truncation in the util; overflow beyond DB2_SPEND_MAX_ROWS is the db2 layer's job). */
+   {
+      const int N = 1000;
+      db2_org_spend_row_t *big = calloc((size_t)N, sizeof(*big));
+      CHECK(big != NULL, "large-set alloc");
+      if (big)
+      {
+         const char **bcosts = calloc((size_t)N, sizeof(char *));
+         for (int i = 0; i < N; ++i)
+            /* distinct team per row -> N by_team groups; 1 cent each. */
+            set_row(&big[i], 950000 + i, 0, 0, "modelZ", 1, 1, 0, 0, "0.0100000000", 1);
+         char *jb = kb_insights_spend_json(0, 0, 0, 0, "2026-01-01", "2026-12-31", big, N);
+         cJSON *rb = jb ? cJSON_Parse(jb) : NULL;
+         CHECK(rb != NULL, "large-set json parses");
+         if (rb)
+         {
+            cJSON *bt = cJSON_GetObjectItemCaseSensitive(rb, "by_team");
+            CHECK(cJSON_IsArray(bt) && cJSON_GetArraySize(bt) == N,
+                  "all 1000 teams present (no 512 truncation)");
+            cJSON *tot = cJSON_GetObjectItemCaseSensitive(rb, "total");
+            cJSON *tcst = tot ? cJSON_GetObjectItemCaseSensitive(tot, "cost_usd") : NULL;
+            /* 1000 * 0.01 = 10.00 exactly. */
+            CHECK(tcst && strcmp(tcst->valuestring, "10.0000000000") == 0,
+                  "large-set total reconciles exactly (10.0)");
+            int bt_n = 0;
+            cJSON *bit = NULL;
+            cJSON_ArrayForEach(bit, bt)
+            {
+               cJSON *c = cJSON_GetObjectItemCaseSensitive(bit, "cost_usd");
+               if (cJSON_IsString(c) && bt_n < N)
+                  bcosts[bt_n++] = c->valuestring;
+            }
+            char bsum[64];
+            kb_insights_cost_sum(bcosts, bt_n, bsum, sizeof(bsum));
+            CHECK(tcst && strcmp(bsum, tcst->valuestring) == 0,
+                  "sum(by_team) == total across 1000 groups");
+            cJSON_Delete(rb);
+         }
+         free(jb);
+         free(bcosts);
+         free(big);
+      }
+   }
+
    if (failures == 0)
       printf("test_p3b_spend: ALL PASS\n");
    else

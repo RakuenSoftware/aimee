@@ -25,6 +25,15 @@ extern "C"
 /* The definer RAISEd a 'bad date' error (malformed/invalid/inverted range). Maps to
  * 400 at the HTTP boundary (which also pre-validates, so this is defense-in-depth). */
 #define DB2_SPEND_ERR_BADDATE (-3)
+/* The grouped result exceeds DB2_SPEND_MAX_ROWS — the report would not fit the caller's
+ * buffer. Returned INSTEAD of silently truncating, so total/by_* always reconcile; the
+ * caller must narrow the team/project/date range. Maps to HTTP 413. */
+#define DB2_SPEND_ERR_TOOBIG (-4)
+
+/* Max grouped (team, project, model) rows a single report may carry. Chosen large enough
+ * for a real org over a wide window; a query that would produce more is a TOOBIG error
+ * (never a partial 200). Callers size their row buffer to exactly this. */
+#define DB2_SPEND_MAX_ROWS 4096
 
 /* cost_usd text buffer. NUMERIC(20,10) summed over rows: 20 integer + 10 fractional
  * digits + sign + '.' + NUL fits comfortably; sized with headroom. */
@@ -50,10 +59,12 @@ extern "C"
    /* Query authorized spend, grouped per (project, model), over org_spend_rollup for
     * day in [since, until]. When has_team == 0 the org-wide (admin-only) branch is taken
     * (team is ignored); when has_project == 0 the project filter is omitted. since/until
-    * are ISO 'YYYY-MM-DD' TEXT. Fills out[0..n) and returns n (>=0), or a negative
-    * sentinel (DB2_SPEND_ERR_DENIED / DB2_SPEND_ERR_BADDATE / -1). Must run inside an
-    * open tenant scope (db2_tenant_scope_begin sets aimee.principal, which the definer's
-    * predicate reads). */
+    * are ISO 'YYYY-MM-DD' TEXT. out MUST have room for at least max rows; pass
+    * max == DB2_SPEND_MAX_ROWS. Fills out[0..n) and returns n (0..max), or a negative
+    * sentinel (DB2_SPEND_ERR_DENIED / DB2_SPEND_ERR_BADDATE / DB2_SPEND_ERR_TOOBIG / -1).
+    * TOOBIG means the grouped result exceeds max — the result is NEVER silently truncated,
+    * so a returned n is always a COMPLETE set that reconciles. Must run inside an open
+    * tenant scope (db2_tenant_scope_begin sets aimee.principal, read by the predicate). */
    int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t project,
                            const char *since, const char *until, db2_org_spend_row_t *out, int max);
 
