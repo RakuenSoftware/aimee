@@ -718,8 +718,10 @@ int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *c
    sqlite3 *db = db1_conn();
    sqlite3_stmt *stm = NULL;
    if (!cp || strlen(cp) >= cert_len || !db ||
-       sqlite3_prepare_v2(db, "INSERT INTO pki_certs(serial,cn,issued_at,expires_at,revoked) "
-                              "VALUES(?,?,?,?,0)", -1, &stm, NULL) != SQLITE_OK)
+       sqlite3_prepare_v2(db,
+                          "INSERT INTO pki_certs(serial,cn,issued_at,expires_at,revoked) "
+                          "VALUES(?,?,?,?,0)",
+                          -1, &stm, NULL) != SQLITE_OK)
    {
       free(cp);
       goto done_csr;

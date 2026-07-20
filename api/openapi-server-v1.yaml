@@ -272,6 +272,33 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /management/action:
+    post:
+      summary: Execute an authenticated management control-plane action
+      description: >
+        Verifies the caller's management JWT, peer identity, capability, and
+        request digest before dispatching the management action.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Management action accepted
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Management action denied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Management control plane is not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /version:
     get:
       summary: Build version
@@ -936,6 +963,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runs/{id}/events:
     get:
       summary: Stream a run's output as SSE (replay for completed runs)
@@ -949,6 +981,11 @@ paths:
           description: text/event-stream of response.output_text.delta events + a terminal done event
         "404":
           description: No such run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -968,6 +1005,11 @@ paths:
               schema: { type: object }
         "404":
           description: No such run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -2013,6 +2055,26 @@ paths:
       summary: Issue an mTLS client cert for a CN (operator-gated; returns cert + one-time key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Issued, content: { application/json: { schema: { type: object } } } } }
+  /cert/sign:
+    post:
+      summary: Sign a client-generated CSR for a CN (operator-gated; private key stays client-side)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cn, csr]
+              properties:
+                cn: { type: string }
+                csr: { type: string, description: PEM-encoded certificate signing request }
+                days: { type: integer, minimum: 1, maximum: 3650, default: 90 }
+      responses:
+        "200":
+          description: Signed certificate, CN, and serial
+          content:
+            application/json:
+              schema: { type: object }
   /cert/list:
     post:
       summary: List issued mTLS client certs (serial, cn, expiry, revoked)
@@ -2614,6 +2676,28 @@ paths:
     get:
       summary: Server health (RPC twin)
       responses: { "200": { description: Health, content: { application/json: { schema: { type: object } } } } }
+  /server/forensics:
+    get:
+      summary: Recent server shutdown forensics
+      description: >-
+        Privileged, read-only access to recent clean-signal and inferred unclean-exit
+        records from the server host. Capability: tool:execute.
+      responses:
+        "200":
+          description: Recent shutdown records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recent_shutdowns:
+                    type: array
+                    items: { type: object }
+        "403":
+          description: Insufficient capability
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /kb/build:
     post:
       summary: Build the knowledge base (async; poll GET /runs/{id})

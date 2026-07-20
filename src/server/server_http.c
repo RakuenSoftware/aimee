@@ -841,32 +841,55 @@ void server_http_set_runs_handler(server_http_completion_fn fn)
    g_runs_handler = fn;
 }
 
-/* GET /v1/runs/{id}: return the run record (404 when unknown). The snapshot
+/* GET /v1/runs/{id}: return the run record (404 when unknown, 410 when a valid
+ * op-run was interrupted by replacement or evicted from this generation). The snapshot
  * reflects live status transitions (queued -> in_progress -> terminal) as the
  * background worker publishes them. */
+static int run_missing_response(const char *id, char *resp, int cap)
+{
+   openai_runs_missing_t why = openai_runs_store_classify_missing(id);
+   if (why == OPENAI_RUNS_MISSING_UNKNOWN)
+      return err_json(resp, cap, 404, "no such run");
+   const char *status = why == OPENAI_RUNS_MISSING_INTERRUPTED ? "interrupted" : "evicted";
+   const char *message = why == OPENAI_RUNS_MISSING_INTERRUPTED
+                             ? "run interrupted by server replacement"
+                             : "run record evicted from live store";
+   cJSON *o = cJSON_CreateObject();
+   if (!o)
+      return err_json(resp, cap, 500, "out of memory");
+   cJSON_AddStringToObject(o, "error", message);
+   cJSON_AddStringToObject(o, "run_id", id);
+   cJSON_AddStringToObject(o, "status", status);
+   char *json = cJSON_PrintUnformatted(o);
+   int n = json ? snprintf(resp, (size_t)cap, "%s", json) : -1;
+   free(json);
+   cJSON_Delete(o);
+   return (n >= 0 && n < cap) ? 410 : err_json(resp, cap, 500, "response too large");
+}
+
 int route_runs_get(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
    if (!openai_runs_store_get(id, resp, (size_t)cap))
-      return err_json(resp, cap, 404, "no such run");
+      return run_missing_response(id, resp, cap);
    return 200;
 }
 
 /* POST /v1/runs/{id}/stop: request cancellation of an in-flight run. Sets the
  * cancel flag (a no-op once the run is already terminal); the background worker
  * observes it at its next step boundary and finalizes the run as "cancelled".
- * Returns the current run snapshot, or 404 when unknown. */
+ * Returns the current run snapshot, 404 when unknown, or 410 when unavailable. */
 int route_runs_stop(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
    openai_run_status_t st;
    if (!openai_runs_store_status(id, &st))
-      return err_json(resp, cap, 404, "no such run");
+      return run_missing_response(id, resp, cap);
    openai_runs_store_request_cancel(id);
    if (!openai_runs_store_get(id, resp, (size_t)cap))
-      return err_json(resp, cap, 404, "no such run");
+      return run_missing_response(id, resp, cap);
    return 200;
 }
 
@@ -1221,14 +1244,26 @@ static void handle_cli_session_stream(int fd, const char *id, const char *reques
 /* GET /v1/runs/{id}/events: subscribe to the live run record. Flush already
  * buffered events, then block-and-flush new ones as the background worker
  * produces them, until a terminal event. A periodic SSE comment heartbeat
- * doubles as a client-disconnect probe so a hangup frees the listener. 404
- * (buffered) when the run is unknown. */
+ * doubles as a client-disconnect probe so a hangup frees the listener. Missing
+ * valid op-runs return 410; arbitrary unknown ids return 404. */
 static void handle_run_events(int fd, const char *id, const char *request_id)
 {
    openai_run_status_t st0;
    if (!openai_runs_store_status(id, &st0))
    {
-      send_response(fd, 404, "{\"error\":\"no such run\"}", request_id);
+      openai_runs_missing_t why = openai_runs_store_classify_missing(id);
+      if (why == OPENAI_RUNS_MISSING_INTERRUPTED)
+         send_response(fd, 410,
+                       "{\"error\":\"run interrupted by server replacement\","
+                       "\"status\":\"interrupted\"}",
+                       request_id);
+      else if (why == OPENAI_RUNS_MISSING_EVICTED)
+         send_response(fd, 410,
+                       "{\"error\":\"run record evicted from live store\","
+                       "\"status\":\"evicted\"}",
+                       request_id);
+      else
+         send_response(fd, 404, "{\"error\":\"no such run\"}", request_id);
       return;
    }
    write_sse_headers(fd, request_id);

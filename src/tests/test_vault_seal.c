@@ -138,11 +138,14 @@ static void test_policy_selection(void)
    assert(vault_is_sealed() == 1);
    assert(kb_vault_live_keys_allowed() == 0);
 
-   /* pkcs11/kms are still unimplemented: parse OK but FAIL CLOSED at bind. */
+   /* pkcs11/kms bind their providers and fail closed when their external
+    * credential sources are unavailable. */
    err[0] = '\0';
    assert(kb_vault_policy_select("pkcs11", err, sizeof(err)) != 0);
-   assert(strstr(err, "not yet implemented") != NULL);
+   assert(strstr(err, "token unavailable") != NULL);
+   err[0] = '\0';
    assert(kb_vault_policy_select("kms", err, sizeof(err)) != 0);
+   assert(strstr(err, "helper unavailable") != NULL);
 
    /* Typos / unknown values are rejected (validation). */
    err[0] = '\0';

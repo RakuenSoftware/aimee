@@ -6,6 +6,8 @@
  * surrounding `static const client_help_t client_help[] = { ... };` live there.
  */
 {"init", "Run server initialization", CLIENT_TIER_CORE, 1, NULL},
+    {"doctor", "Diagnose server runtime state", CLIENT_TIER_ADVANCED, 1,
+     "  forensics       Show current process generation and interrupted async runs\n"},
     {"manuscript", "Novel-mode manuscript tools", CLIENT_TIER_CORE, 0, NULL},
     {"claude-proxy", "Route Claude Code through aimee's primary model", CLIENT_TIER_ADVANCED, 0,
      "  enable [url] [token]  Point Claude Code at aimee's /v1/messages ingress\n"

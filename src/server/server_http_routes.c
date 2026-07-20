@@ -112,22 +112,32 @@ static int rh_health(const route_req_t *rq, char *resp, int cap)
 
 static int management_action(void *ctx)
 {
-   (void)ctx; return 0;
+   (void)ctx;
+   return 0;
 }
 static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 {
-   const char *jwks=getenv("AIMEE_MGMT_JWKS"), *iss=getenv("AIMEE_MGMT_ISSUER");
-   const char *aud=getenv("AIMEE_MGMT_AUDIENCE"), *bearer=server_http_identity_bearer();
-   const char *peer=server_http_identity_principal();
-   if(!jwks||!iss||!aud||!bearer||!*bearer||!peer||!*peer)
-      return err_json(resp,cap,503,"management control plane is not configured");
-   unsigned char d[SHA256_DIGEST_LENGTH]; SHA256((const unsigned char*)(rq->body?rq->body:""),rq->body?(size_t)rq->body_len:0,d);
-   char hex[65]; for(int i=0;i<32;i++)snprintf(hex+i*2,3,"%02x",d[i]); hex[64]=0;
-   char actor[256],jti[256]; int rc=server_mgmt_endpoint_dispatch(bearer,jwks,iss,aud,peer,
-      getenv("AIMEE_MGMT_CAP")?getenv("AIMEE_MGMT_CAP"):"server.manage", "management-action",hex,
-      management_action,NULL,actor,sizeof(actor),jti,sizeof(jti));
-   if(rc!=0)return err_json(resp,cap,403,"management action denied");
-   snprintf(resp,(size_t)cap,"{\"ok\":true,\"actor\":\"%s\",\"jti\":\"%s\"}",actor,jti); return 200;
+   const char *jwks = getenv("AIMEE_MGMT_JWKS"), *iss = getenv("AIMEE_MGMT_ISSUER");
+   const char *aud = getenv("AIMEE_MGMT_AUDIENCE"), *bearer = server_http_identity_bearer();
+   const char *peer = server_http_identity_principal();
+   if (!jwks || !iss || !aud || !bearer || !*bearer || !peer || !*peer)
+      return err_json(resp, cap, 503, "management control plane is not configured");
+   unsigned char d[SHA256_DIGEST_LENGTH];
+   SHA256((const unsigned char *)(rq->body ? rq->body : ""), rq->body ? (size_t)rq->body_len : 0,
+          d);
+   char hex[65];
+   for (int i = 0; i < 32; i++)
+      snprintf(hex + i * 2, 3, "%02x", d[i]);
+   hex[64] = 0;
+   char actor[256], jti[256];
+   int rc = server_mgmt_endpoint_dispatch(
+       bearer, jwks, iss, aud, peer,
+       getenv("AIMEE_MGMT_CAP") ? getenv("AIMEE_MGMT_CAP") : "server.manage", "management-action",
+       hex, management_action, NULL, actor, sizeof(actor), jti, sizeof(jti));
+   if (rc != 0)
+      return err_json(resp, cap, 403, "management action denied");
+   snprintf(resp, (size_t)cap, "{\"ok\":true,\"actor\":\"%s\",\"jti\":\"%s\"}", actor, jti);
+   return 200;
 }
 static int rh_version(const route_req_t *rq, char *resp, int cap)
 {
@@ -883,7 +893,7 @@ static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
  * row's op-derived cap, gated before we enqueue. */
 typedef struct
 {
-   char run_id[64];
+   char run_id[128];
    char op[64];
    char *line;         /* dispatch body with method injected; owned by worker */
    uint32_t conn_caps; /* caps captured at enqueue time */
@@ -997,9 +1007,9 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
 
    long created = (long)time(NULL);
    static atomic_ulong g_op_run_seq = 0;
-   char id[64];
+   char id[128];
    unsigned long seq = atomic_fetch_add_explicit(&g_op_run_seq, 1, memory_order_relaxed) + 1;
-   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, seq);
+   snprintf(id, sizeof(id), "oprun_%s_%ld_%lu", openai_runs_store_generation(), created, seq);
 
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
    cJSON_AddStringToObject(req, "__run_id", id);
@@ -1881,6 +1891,7 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_device_config},
     {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
     {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
+    {"GET", "/v1/server/forensics", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_server_forensics},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},
