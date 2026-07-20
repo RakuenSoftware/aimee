@@ -162,8 +162,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-backend \
                $(TESTPREFIX)/unit-test-aimee-backend-bedrock \
                $(TESTPREFIX)/unit-test-kb-bedrock-dispatch \
-               $(TESTPREFIX)/unit-test-kb-bedrock-live \
-               $(TESTPREFIX)/unit-test-kb-mgmt-live \
                $(TESTPREFIX)/unit-test-vault-kms \
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
