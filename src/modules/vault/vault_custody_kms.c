@@ -18,8 +18,9 @@ static kms_ctx g = {1};
 static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
 {
    kms_ctx *c=v; const char *helper=getenv("AIMEE_VAULT_KMS_HELPER");
-   if (!helper || !*helper) return -1;
-   struct stat st; if (stat(helper,&st)!=0 || !S_ISREG(st.st_mode) || access(helper,X_OK)!=0) return -1;
+   const char *key_id=getenv("AIMEE_VAULT_KMS_KEY_ID");
+   if (!helper || !*helper || !key_id || !*key_id) return -1;
+   struct stat st; if (stat(helper,&st)!=0 || !S_ISREG(st.st_mode) || (st.st_mode & 022) || access(helper,X_OK)!=0) return -1;
    int p[2]; if(pipe(p)!=0)return -1; pid_t pid=fork();
    if(pid<0){close(p[0]);close(p[1]);return -1;}
    if(pid==0){dup2(p[1],STDOUT_FILENO);close(p[0]);close(p[1]);execl(helper,helper,"decrypt",(char*)NULL);_exit(127);}
