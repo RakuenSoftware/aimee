@@ -136,8 +136,8 @@ int main(void)
    {
       long v;
       /* a non-config autonomy var -> 0 so the caller uses its own env/default */
-      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
-      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 0);
+      platform_unsetenv("AIMEE_AUTONOMY_USD_PER_SEC");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_USD_PER_SEC", &v) == 0);
       /* operator env override wins */
       platform_setenv("AIMEE_AUTONOMY_SKEPTICS", "7");
       assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 7);
@@ -150,6 +150,23 @@ int main(void)
       assert(config_save(&sc) == 0);
       assert(config_reload() == 1);
       assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 9);
+
+      /* Run-safety caps are now config-backed + live too (GUI-tunable). Env override
+       * wins; otherwise the live snapshot; a config.set applies without a restart. */
+      platform_setenv("AIMEE_AUTONOMY_MAX_WALL_SECS", "5400");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &v) == 1 && v == 5400);
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_WALL_SECS");
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
+      memset(&sc, 0, sizeof sc);
+      config_load(&sc);
+      sc.autonomy_max_turns = 1234;
+      sc.autonomy_max_wall_secs = 7200;
+      sc.autonomy_auto_resume_cap_parks = 0; /* flip the default (ON) so the read is meaningful */
+      assert(config_save(&sc) == 0);
+      assert(config_reload() == 1);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 1 && v == 1234);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &v) == 1 && v == 7200);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_AUTO_RESUME_CAP_PARKS", &v) == 1 && v == 0);
    }
 
    /* --- concurrent torn-read stress: readers spin while the writer toggles + reloads --- */

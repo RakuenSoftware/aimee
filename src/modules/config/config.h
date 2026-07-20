@@ -1158,6 +1158,23 @@ typedef struct config
    int autonomy_unit_retry;
    int autonomy_unit_max;
    int autonomy_ci_retry_max;
+   /* Run safety caps + auto-resume policy — historically env-only (AIMEE_AUTONOMY_*);
+    * now config-backed + live via config_autonomy_lookup so they are tunable from the web
+    * Settings GUI (an exported env var still overrides). Defaults match the historical env
+    * defaults, so behavior is unchanged until an operator changes them.
+    * autonomy_max_turns: cumulative persisted-turn cap per run (runaway backstop).
+    * autonomy_max_wall_secs: per-resume wall-clock cap in seconds.
+    * autonomy_stale_abandon_secs: grace before a cap/stuck park is reaped -> abandoned (0 disables).
+    * autonomy_concurrency: max concurrently-driven autonomous runs.
+    * autonomy_auto_resume_cap_parks: 1 = scheduler auto-resumes a wall-cap park (giving it a
+    *   fresh wall window) instead of leaving it to be reaped; bounded by autonomy_max_resumes.
+    * autonomy_max_resumes: max auto-resumes per run before the reaper is allowed to win. */
+   int autonomy_max_turns;
+   int autonomy_max_wall_secs;
+   int autonomy_stale_abandon_secs;
+   int autonomy_concurrency;
+   int autonomy_auto_resume_cap_parks;
+   int autonomy_max_resumes;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned

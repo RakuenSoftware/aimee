@@ -384,6 +384,17 @@ const config_field_t config_fields[] = {
     {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT},
     {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
     {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
+    /* Run safety caps + auto-resume policy — config-backed + live via config_autonomy_lookup
+     * (an exported AIMEE_AUTONOMY_* still overrides). Surfaced in the web Settings GUI. */
+    {"autonomy.max_turns", offsetof(config_t, autonomy_max_turns), sizeof(int), 0, CFG_INT},
+    {"autonomy.max_wall_secs", offsetof(config_t, autonomy_max_wall_secs), sizeof(int), 0,
+     CFG_INT},
+    {"autonomy.stale_abandon_secs", offsetof(config_t, autonomy_stale_abandon_secs), sizeof(int),
+     0, CFG_INT},
+    {"autonomy.concurrency", offsetof(config_t, autonomy_concurrency), sizeof(int), 0, CFG_INT},
+    {"autonomy.auto_resume_cap_parks", offsetof(config_t, autonomy_auto_resume_cap_parks),
+     sizeof(int), 1, CFG_BOOL},
+    {"autonomy.max_resumes", offsetof(config_t, autonomy_max_resumes), sizeof(int), 0, CFG_INT},
     /* Curator pipeline stage gates (kb.curator.*) — exposed so the GUI pipeline editor
      * can toggle stages. Flat config_t fields; config_save reserializes them into the
      * nested kb.curator.* YAML the KB reads on its next load. These MUST stay ahead of the

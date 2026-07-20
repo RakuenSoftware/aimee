@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, Badge, Spinner, InlineStatus, EmptyState, Button } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
+import { loadConfig, saveConfigValue } from "../setup/configApi";
 
 /* ---- API types (mirror the enriched /api/workflow/items* envelopes) ---- */
 
@@ -463,6 +464,7 @@ export default function WorkflowActions() {
           open={triggersOpen}
           onToggle={() => setTriggersOpen((v) => !v)}
         />
+        <RunPolicyPanel />
         <div style={{ marginTop: 8 }}>
           {items.length === 0 && (
             <EmptyState message="No proposals yet." inline />
@@ -605,6 +607,129 @@ export default function WorkflowActions() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Run policy: the autonomy safety caps + auto-resume toggle that govern how far an
+// autonomous run drives on its own (trigger -> PR). These are the autonomy.* config
+// keys; kept here under Workflows because that is exactly what they tune. Config-backed
+// + live, so a change applies to the next workflow (no restart); an exported
+// AIMEE_AUTONOMY_* env var still overrides.
+const AUTONOMY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool" }[] = [
+  {
+    key: "autonomy.auto_resume_cap_parks",
+    label: "Auto-resume wall-cap parks",
+    kind: "bool",
+    help: "When on (default), a run that hits its per-resume wall-clock window is resumed so it keeps going instead of being abandoned. Bounded by max auto-resumes.",
+  },
+  {
+    key: "autonomy.max_wall_secs",
+    label: "Max wall seconds / resume",
+    kind: "int",
+    help: "Per-resume wall-clock cap in seconds. On breach the run parks and (if auto-resume is on) is given a fresh window. Default 1800.",
+  },
+  {
+    key: "autonomy.max_turns",
+    label: "Max turns / run",
+    kind: "int",
+    help: "Cumulative per-run turn cap — the ultimate runaway backstop (auto-resume does not reset it). Default 300.",
+  },
+  {
+    key: "autonomy.max_resumes",
+    label: "Max auto-resumes / run",
+    kind: "int",
+    help: "How many times a run may auto-resume before the reaper is allowed to abandon it. Default 50. 0 = never auto-resume.",
+  },
+  {
+    key: "autonomy.stale_abandon_secs",
+    label: "Stale-abandon grace (s)",
+    kind: "int",
+    help: "Grace before a stuck/capped park is reaped -> abandoned. Default 3600. 0 disables the reaper.",
+  },
+  {
+    key: "autonomy.concurrency",
+    label: "Concurrency",
+    kind: "int",
+    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 8.",
+  },
+];
+
+// Collapsible run-policy editor: loads the autonomy.* config on first open and writes
+// each change back via the same /api/config/set the Settings page uses.
+function RunPolicyPanel() {
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState<Record<string, unknown> | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (open && cfg === null) loadConfig().then(setCfg);
+  }, [open, cfg]);
+  const save = async (key: string, value: unknown) => {
+    setSaving(key);
+    setErr(null);
+    const r = await saveConfigValue(key, value);
+    setSaving(null);
+    if (r.ok) setCfg((c) => ({ ...(c || {}), [key]: r.value }));
+    else setErr(`${key}: ${r.error}`);
+  };
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>⚙ Run policy</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>autonomy caps</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {cfg === null ? (
+            <div style={{ fontSize: 12, color: "#999" }}>Loading…</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: "#999", lineHeight: 1.4, marginBottom: 6 }}>
+                Safety caps + auto-resume for autonomous runs. Applies to the next workflow (no
+                restart); an exported <code>AIMEE_AUTONOMY_*</code> env var overrides.
+              </div>
+              {AUTONOMY_FIELDS.map((f) => (
+                <div
+                  key={f.key}
+                  title={f.help}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
+                >
+                  <span style={{ fontSize: 12, width: 190 }}>{f.label}</span>
+                  {f.kind === "bool" ? (
+                    <input
+                      type="checkbox"
+                      checked={!!cfg?.[f.key]}
+                      onChange={(e) => save(f.key, e.target.checked)}
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      defaultValue={Number(cfg?.[f.key] ?? 0)}
+                      style={{
+                        width: 90,
+                        fontFamily: "ui-monospace, monospace",
+                        fontSize: 12,
+                        padding: "2px 4px",
+                      }}
+                      onBlur={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        if (!Number.isNaN(v) && v !== Number(cfg?.[f.key])) save(f.key, v);
+                      }}
+                    />
+                  )}
+                  {saving === f.key && <span style={{ fontSize: 11, color: "#999" }}>saving…</span>}
+                </div>
+              ))}
+              {err && <div style={{ fontSize: 11, color: "#c00", marginTop: 4 }}>{err}</div>}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
