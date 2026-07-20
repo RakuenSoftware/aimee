@@ -223,8 +223,9 @@ static int handle_set(const char *method, const char *body, char *out, int cap)
       if (rc == DB2_BUDGET_ERR_DENIED)
          return err(out, cap, 403, "not authorized to set budgets (org-admin required)");
       if (rc == DB2_BUDGET_ERR_RETRO)
-         return err(out, cap, 409,
-                    "retroactive reduction: limit below the current period's committed spend+reserved");
+         return err(
+             out, cap, 409,
+             "retroactive reduction: limit below the current period's committed spend+reserved");
       return err(out, cap, 500, "budget set failed");
    }
    if (db2_tenant_scope_commit() != 0)
@@ -256,8 +257,8 @@ static int handle_show(const char *method, const char *qs, char *out, int cap)
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
    db2_org_budget_row_t rows[DB2_BUDGET_MAX_ROWS];
-   int n = db2_org_budget_show(team, has_project, project, rows,
-                               (int)(sizeof(rows) / sizeof(rows[0])));
+   int n =
+       db2_org_budget_show(team, has_project, project, rows, (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
    {
       db2_tenant_scope_rollback();
