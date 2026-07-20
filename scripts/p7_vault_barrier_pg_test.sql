@@ -147,7 +147,7 @@ BEGIN
   LOOP
     guard_pos := position('org_vault_control_require_open()' IN lower(fn.prosrc));
     sensitive_pos := regexp_instr(lower(fn.prosrc),
-      '(pg_advisory_xact_lock|for[[:space:]]+update|insert[[:space:]]+into[[:space:]]+(public\.)?org_vault_|update[[:space:]]+(public\.)?org_vault_|delete[[:space:]]+from[[:space:]]+(public\.)?org_vault_)');
+      '(pg_advisory_xact_lock|for[[:space:]]+update|kb_audit_worm_append|insert[[:space:]]+into[[:space:]]+(public\.)?org_vault_|update[[:space:]]+(public\.)?org_vault_|delete[[:space:]]+from[[:space:]]+(public\.)?org_vault_)');
     IF guard_pos=0 OR (sensitive_pos>0 AND sensitive_pos<guard_pos) THEN
       RAISE EXCEPTION 'P7 barrier FAIL: guard ordering drift in % (guard %, sensitive %)',
         fn.proname,guard_pos,sensitive_pos;
@@ -155,7 +155,7 @@ BEGIN
   END LOOP;
   SELECT array_agg(DISTINCT p.proname ORDER BY p.proname) INTO writers FROM pg_proc p
    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef AND
-   p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+org_vault_(salt|secret|current|rotation|key_use_intent)';
+   p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(public[.])?org_vault_(salt|secret|current|rotation|key_use_intent)';
   IF writers IS DISTINCT FROM expected_writers THEN
     RAISE EXCEPTION 'P7 barrier FAIL: authoritative writer inventory mismatch: %',writers;
   END IF;
@@ -163,6 +163,14 @@ BEGIN
     WHERE n.nspname='public' AND p.proname=ANY(readonly) AND
       p.prosrc LIKE '%org_vault_control_require_open()%') THEN
     RAISE EXCEPTION 'P7 barrier FAIL: read-only inventory became guarded';
+  END IF;
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname=ANY(readonly) AND p.prosecdef) <>
+      cardinality(readonly) OR
+     EXISTS(SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname=ANY(readonly)
+      GROUP BY p.proname HAVING count(*)<>1) THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: read-only function inventory drift';
   END IF;
   IF (SELECT array_agg(p.proname::TEXT ORDER BY p.proname::TEXT) FROM pg_proc p JOIN pg_namespace n
       ON n.oid=p.pronamespace WHERE n.nspname='public' AND
@@ -179,6 +187,13 @@ BEGIN
         p.prosrc LIKE '%pg_advisory_xact_lock(-7046029254386353131::BIGINT)%' AND
         position('pg_advisory_xact_lock(' IN p.prosrc) < position('FOR UPDATE' IN p.prosrc)) THEN
     RAISE EXCEPTION 'P7 barrier FAIL: control advisory domain/order drift';
+  END IF;
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname IN
+        ('org_vault_control_lock_exclusive','org_vault_control_require_open') AND
+        p.prosecdef AND p.provolatile='v' AND
+        p.proconfig @> ARRAY['search_path=public']::TEXT[])<>2 THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: control helper security attributes drift';
   END IF;
   IF (SELECT column_default IS NOT NULL FROM information_schema.columns
       WHERE table_schema='public' AND table_name='org_vault_key_use_intent' AND
