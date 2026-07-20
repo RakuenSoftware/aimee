@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts" / "check_module_inventory.sh"
@@ -33,7 +35,13 @@ class ModuleInventoryTest(unittest.TestCase):
             else:
                 inventory.write_text(json.dumps(content, indent=2), encoding="utf-8")
             return subprocess.run(
-                [str(CHECKER), "--inventory", str(inventory)],
+                [
+                    str(CHECKER),
+                    "--config-root",
+                    str(root),
+                    "--inventory",
+                    inventory.name,
+                ],
                 cwd=cwd or ROOT,
                 text=True,
                 capture_output=True,
@@ -83,7 +91,7 @@ class ModuleInventoryTest(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_parent_traversal_is_resolved_from_config_root(self):
+    def test_parent_traversal_outside_config_root_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             child = root / "child"
@@ -97,16 +105,32 @@ class ModuleInventoryTest(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_failed(result, "rule=path", "must remain under config root")
 
     def test_missing_inventory_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = subprocess.run(
+                [
+                    str(CHECKER),
+                    "--config-root",
+                    temporary,
+                    "--inventory",
+                    "missing.yaml",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assert_failed(result, "rule=input", "cannot read inventory")
+
+    def test_missing_config_root_fails_closed(self):
         result = subprocess.run(
-            [str(CHECKER), "--inventory", "/definitely/missing/inventory.yaml"],
+            [str(CHECKER), "--config-root", "/definitely/missing/config-root"],
             text=True,
             capture_output=True,
             check=False,
         )
-        self.assert_failed(result, "rule=input", "cannot read inventory")
+        self.assert_failed(result, "rule=config-root", "existing directory")
 
     def test_malformed_inventory_fails_closed(self):
         self.assert_failed(self.run_checker("{not-json"), "rule=parse")
@@ -147,15 +171,33 @@ class ModuleInventoryTest(unittest.TestCase):
             self.assert_failed(self.run_checker(payload), "rule=parse", "safe JSON-compatible YAML")
             self.assertFalse(marker.exists())
 
+    def test_checker_has_no_yaml_loader_import(self):
+        source = (ROOT / "scripts" / "check_module_inventory.py").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"(?m)^\s*(?:from|import)\s+(?:yaml|ruamel|pyyaml)\b")
+
+    def test_committed_inventory_is_valid_yaml_with_json_equivalence(self):
+        raw = BASELINE.read_text(encoding="utf-8")
+        self.assertEqual(json.loads(raw), yaml.safe_load(raw))
+
     def test_required_count_drift(self):
         data = self.changed()
         data["required"].append("unexpected-module")
-        self.assert_failed(self.run_checker(data), "rule=required-count", "expected 18", "actual 19")
+        self.assert_failed(
+            self.run_checker(data),
+            "rule=required-count",
+            "REQUIRED_COUNT=18",
+            "actual 19",
+        )
 
     def test_optional_count_drift(self):
         data = self.changed()
         data["optional"].pop()
-        self.assert_failed(self.run_checker(data), "rule=optional-count", "expected 8", "actual 7")
+        self.assert_failed(
+            self.run_checker(data),
+            "rule=optional-count",
+            "OPTIONAL_COUNT=8",
+            "actual 7",
+        )
 
     def test_duplicate_id(self):
         data = self.changed()
@@ -167,12 +209,12 @@ class ModuleInventoryTest(unittest.TestCase):
         data["optional"].append(data["required"][0])
         self.assert_failed(self.run_checker(data), "rule=disjoint-sets", data["required"][0])
 
-    def test_id_syntax_precedes_forbidden_module_rule(self):
+    def test_id_syntax_precedes_count_rule(self):
         data = self.changed()
         data["optional"][0] = "Bad(Module)"
         result = self.run_checker(data)
         self.assert_failed(result, "rule=module-id-syntax")
-        self.assertNotIn("rule=forbidden-module", result.stderr)
+        self.assertNotIn("rule=optional-count", result.stderr)
 
     def test_git_missing(self):
         data = self.changed()
