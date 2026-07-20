@@ -23,7 +23,7 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
    struct stat st; if (stat(helper,&st)!=0 || !S_ISREG(st.st_mode) || (st.st_mode & 022) || access(helper,X_OK)!=0) return -1;
    int p[2]; if(pipe(p)!=0)return -1; pid_t pid=fork();
    if(pid<0){close(p[0]);close(p[1]);return -1;}
-   if(pid==0){dup2(p[1],STDOUT_FILENO);close(p[0]);close(p[1]);execl(helper,helper,"decrypt",(char*)NULL);_exit(127);}
+   if(pid==0){dup2(p[1],STDOUT_FILENO);close(p[0]);close(p[1]);execl(helper,helper,"decrypt",key_id,(char*)NULL);_exit(127);}
    close(p[1]); size_t n=0; int bad=0; while(n<VAULT_KEK_LEN){ssize_t r=read(p[0],out+n,VAULT_KEK_LEN-n);if(r<0&&errno==EINTR)continue;if(r<=0){bad=1;break;}n+=(size_t)r;}
    uint8_t extra; if(!bad&&read(p[0],&extra,1)>0)bad=1; close(p[0]); int ws=0;waitpid(pid,&ws,0);
    if(bad||n!=VAULT_KEK_LEN||!WIFEXITED(ws)||WEXITSTATUS(ws)!=0){OPENSSL_cleanse(out,VAULT_KEK_LEN);return -1;} c->sealed=0; return 0;
