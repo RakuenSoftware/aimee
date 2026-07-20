@@ -11,14 +11,14 @@
 #include <string.h>
 
 static int failures = 0;
-#define CHECK(cond, msg)                                                                            \
-   do                                                                                               \
-   {                                                                                                \
-      if (!(cond))                                                                                  \
-      {                                                                                             \
-         printf("FAIL: %s\n", msg);                                                                 \
-         failures++;                                                                                \
-      }                                                                                             \
+#define CHECK(cond, msg)                                                                           \
+   do                                                                                              \
+   {                                                                                               \
+      if (!(cond))                                                                                 \
+      {                                                                                            \
+         printf("FAIL: %s\n", msg);                                                                \
+         failures++;                                                                               \
+      }                                                                                            \
    } while (0)
 
 int main(void)

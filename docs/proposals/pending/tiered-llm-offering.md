@@ -1,6 +1,6 @@
 # Proposal (master plan): Tiered LLM offering — org-wide models on aimee-kb, user models on aimee-server
 
-- **State:** IN PROGRESS — 18 slices merged to `testing` (see delivery status below). Umbrella plan; tracks ten sub-proposals (`tiered-llm-p1`…`p10`).
+- **State:** IN PROGRESS. Umbrella plan; tracks ten sub-proposals (`tiered-llm-p1`…`p10`).
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
 
 ## Delivery status (as of 2026-07-20)

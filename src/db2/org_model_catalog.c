@@ -39,11 +39,11 @@ int db2_model_catalog_list(db2_model_catalog_row_t *out, int max)
    /* Admin-only read (RLS p_catalog_admin_read). The operator CLI runs as an admin
     * principal, so this direct SELECT is admitted; the runtime role has no catalog
     * SELECT at all and must use org_catalog_entitled() instead. */
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT model_id, display_name, provider, wire, endpoint, enabled::int"
-       " FROM org_model_catalog ORDER BY model_id",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT model_id, display_name, provider, wire, endpoint, enabled::int"
+                        " FROM org_model_catalog ORDER BY model_id",
+                        err, sizeof(err));
    if (!st)
       return -1;
    int n = 0;
@@ -130,8 +130,8 @@ int db2_model_catalog_upsert(const char *model_id, const char *display_name, con
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT org_catalog_upsert(?1, ?2, ?3, ?4, ?5, ?6)", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT org_catalog_upsert(?1, ?2, ?3, ?4, ?5, ?6)",
+                                          err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", model_id);
@@ -166,8 +166,7 @@ int db2_model_catalog_remove(const char *model_id, int64_t *out_removed)
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT org_catalog_remove(?1)", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT org_catalog_remove(?1)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", model_id);

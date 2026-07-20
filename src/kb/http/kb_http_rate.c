@@ -139,8 +139,9 @@ static int handle_policy(const char *method, const char *body, char *out, int ca
        !cJSON_IsNumber(jmax))
    {
       cJSON_Delete(b);
-      return err(out, cap, 400,
-                 "dim (string), scope (string), window_seconds (number), max_count (number) required");
+      return err(
+          out, cap, 400,
+          "dim (string), scope (string), window_seconds (number), max_count (number) required");
    }
    char dim[16];
    snprintf(dim, sizeof(dim), "%s", jdim->valuestring);

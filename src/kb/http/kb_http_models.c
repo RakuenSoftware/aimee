@@ -153,7 +153,8 @@ static int handle_org_upsert(const char *method, const char *body, char *out, in
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
    int64_t id = 0;
-   int rc = db2_model_catalog_upsert(model_id, display_name, provider, wire, endpoint, enabled, &id);
+   int rc =
+       db2_model_catalog_upsert(model_id, display_name, provider, wire, endpoint, enabled, &id);
    if (rc != 0)
    {
       db2_tenant_scope_rollback();

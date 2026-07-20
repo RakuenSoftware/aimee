@@ -5,9 +5,9 @@
 #include "vault_internal.h" /* vault_custody_provider_t seam */
 #include "vault_crypto.h"
 #include "vault_kek_cache.h" /* vault_kek_cache_clear (seal flushes the KEK cache) */
-#include "vault_store.h"   /* vault_store_list_principals, _rekey_field (D13) */
-#include "config.h"        /* config_default_dir */
-#include "platform_path.h" /* platform_mkdir_p */
+#include "vault_store.h"     /* vault_store_list_principals, _rekey_field (D13) */
+#include "config.h"          /* config_default_dir */
+#include "platform_path.h"   /* platform_mkdir_p */
 #include "log.h"
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <dirent.h>
@@ -443,10 +443,7 @@ done:
  * future stateful provider needs no globals. Signatures in vault_server_key.h
  * are UNCHANGED. (hwm_read/hwm_cas are deferred to a later slice.) */
 static const vault_custody_provider_t file_custody = {
-    .name = "file",
-    .ctx = NULL,
-    .get_kek = file_get_kek,
-    .rotate = file_rotate,
+    .name = "file", .ctx = NULL, .get_kek = file_get_kek, .rotate = file_rotate,
     /* Seal slots deliberately left NULL: file custody self-unseals from its 0600
      * master-key file and is ALWAYS unsealed (is_sealed=0, seal/unseal no-op). The
      * server profile runs this provider and never observes VAULT_ERR_SEALED. */

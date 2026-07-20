@@ -17,14 +17,14 @@
 #include <string.h>
 
 static int failures = 0;
-#define CHECK(cond, msg)                                                                            \
-   do                                                                                               \
-   {                                                                                                \
-      if (!(cond))                                                                                  \
-      {                                                                                             \
-         printf("FAIL: %s\n", msg);                                                                 \
-         failures++;                                                                                \
-      }                                                                                             \
+#define CHECK(cond, msg)                                                                           \
+   do                                                                                              \
+   {                                                                                               \
+      if (!(cond))                                                                                 \
+      {                                                                                            \
+         printf("FAIL: %s\n", msg);                                                                \
+         failures++;                                                                               \
+      }                                                                                            \
    } while (0)
 
 static void set_row(db2_org_spend_row_t *r, long long team, int has_project, long long project,
@@ -90,7 +90,8 @@ int main(void)
    {
       cJSON *team = cJSON_GetObjectItemCaseSensitive(root, "team");
       CHECK(cJSON_IsNumber(team) && team->valuedouble == 940001, "team echoed");
-      CHECK(cJSON_GetObjectItemCaseSensitive(root, "project") == NULL, "no project field when absent");
+      CHECK(cJSON_GetObjectItemCaseSensitive(root, "project") == NULL,
+            "no project field when absent");
 
       cJSON *total = cJSON_GetObjectItemCaseSensitive(root, "total");
       cJSON *tcost = total ? cJSON_GetObjectItemCaseSensitive(total, "cost_usd") : NULL;
@@ -123,7 +124,8 @@ int main(void)
 
       /* by_project: three groups (100, 200, and the NULL-project row). */
       cJSON *by_project = cJSON_GetObjectItemCaseSensitive(root, "by_project");
-      CHECK(cJSON_IsArray(by_project) && cJSON_GetArraySize(by_project) == 3, "three project groups");
+      CHECK(cJSON_IsArray(by_project) && cJSON_GetArraySize(by_project) == 3,
+            "three project groups");
       int saw_null = 0;
       cJSON *pit = NULL;
       cJSON_ArrayForEach(pit, by_project)

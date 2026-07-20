@@ -25,10 +25,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define VP_ERR         256
-#define VP_SECRET_MAX  4096 /* max credential plaintext length (matches jsonfile) */
-#define VP_AAD_MAX     384  /* "principal|agent|cred|version" */
-#define VP_MAX_SLOTS   512  /* per-principal slot cap for list/rekey iteration */
+#define VP_ERR        256
+#define VP_SECRET_MAX 4096 /* max credential plaintext length (matches jsonfile) */
+#define VP_AAD_MAX    384  /* "principal|agent|cred|version" */
+#define VP_MAX_SLOTS  512  /* per-principal slot cap for list/rekey iteration */
 
 /* A fixed 32-byte sentinel AES-KW-wrapped under the KEK is the org vault's key-check
  * verifier (one per principal, in org_vault_salt.kek_check): AES-KW unwrap fails the
@@ -358,10 +358,10 @@ static int vault_pg_get(void *ctx, const char *principal, const uint8_t kek[VAUL
       return -1;
 
    char err[VP_ERR] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT version, wrapped_dek, nonce, ciphertext, tag "
-                              "FROM org_vault_get_current(?1, ?2, ?3)",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT version, wrapped_dek, nonce, ciphertext, tag "
+                                          "FROM org_vault_get_current(?1, ?2, ?3)",
+                                          err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", principal);
@@ -515,8 +515,8 @@ static int vault_pg_list_principals(void *ctx, char (*out)[VAULT_PRINCIPAL_MAX],
    if (!conn)
       return -1;
    char err[VP_ERR] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT principal FROM org_vault_list_principals()", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT principal FROM org_vault_list_principals()",
+                                          err, sizeof(err));
    if (!st)
       return -1;
    int n = 0;
@@ -595,8 +595,8 @@ static int rekey_apply(void *conn, const char *principal, const vp_rewrap_t *pla
    for (int i = 0; i < n; i++)
    {
       char err[VP_ERR] = "";
-      aimee_pg_stmt_t *st = aimee_pg_prepare(
-          conn, "SELECT org_vault_rewrap(?1, ?2, ?3, ?4, ?5)", err, sizeof(err));
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn, "SELECT org_vault_rewrap(?1, ?2, ?3, ?4, ?5)", err, sizeof(err));
       if (!st)
          return -1;
       aimee_pg_bind_text(st, "?1", principal);

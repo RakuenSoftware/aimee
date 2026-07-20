@@ -329,6 +329,7 @@ static const config_schema_entry_t config_schema[] = {
     {"require_session_worktree", SCHEMA_BOOL, 0},
     {"require_aimee_memory", SCHEMA_BOOL, 0},
     {"require_aimee_git", SCHEMA_BOOL, 0},
+    {"subagent_ban_enabled", SCHEMA_BOOL, 0},
     {"delegate_sandbox", SCHEMA_BOOL, 0},
     {"delegate_sandbox_image", SCHEMA_STRING, 0},
     {"delegate_sandbox_package_access", SCHEMA_STRING, 0}, /* valid: proxy|off|gated|governance */
@@ -765,6 +766,11 @@ static void config_set_defaults(config_t *cfg)
     * the forge credential stays in-process. Explicit `require_aimee_git: false`
     * bypasses (see wfe_native_gate.c). */
    cfg->require_aimee_git = 1;
+   /* Default-on: the primary agent must not spawn its OWN sub-agents (Task/Agent/
+    * spawn_agent/RemoteTrigger); delegation goes through `aimee delegate` so the
+    * child inherits this session's guardrails. Enforced only when usable delegates
+    * are configured; `subagent_ban_enabled: false` opts out. */
+   cfg->subagent_ban_enabled = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -1355,6 +1361,11 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "require_aimee_git");
    if (cJSON_IsBool(item))
       cfg->require_aimee_git = cJSON_IsTrue(item);
+
+   /* Default-on; parse the explicit opt-out so `subagent_ban_enabled: false` loads. */
+   item = cJSON_GetObjectItemCaseSensitive(root, "subagent_ban_enabled");
+   if (cJSON_IsBool(item))
+      cfg->subagent_ban_enabled = cJSON_IsTrue(item);
 
    /* Delegate sandbox: default 0 (off) from the zeroed config_t, so only an
     * explicit `delegate_sandbox: true` turns it on. A deploy that cannot easily

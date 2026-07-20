@@ -16,8 +16,8 @@
 /* --- serve one mTLS connection (handshake + request + scoped routing) --- */
 
 #include "cJSON.h"
-#include "kb_enroll.h"  /* KB_ENROLL_SCOPE_MAX */
-#include "kb_http.h"    /* kb_http_route_ex */
+#include "kb_enroll.h" /* KB_ENROLL_SCOPE_MAX */
+#include "kb_http.h"   /* kb_http_route_ex */
 #include "../../db2/server_registry.h"
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
 #include "kb_reqctx.h"
@@ -64,10 +64,10 @@ static int mtls_server_heartbeat(const char *cn, const char *body, char *resp, i
    cJSON *sid = j ? cJSON_GetObjectItemCaseSensitive(j, "server_id") : NULL;
    cJSON *health = j ? cJSON_GetObjectItemCaseSensitive(j, "health") : NULL;
    cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
-   int ok = cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
-            db2_server_registry_heartbeat(cJSON_GetStringValue(sid), cn,
-                                          cJSON_GetStringValue(health),
-                                          cJSON_GetStringValue(version)) == 0;
+   int ok =
+       cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
+       db2_server_registry_heartbeat(cJSON_GetStringValue(sid), cn, cJSON_GetStringValue(health),
+                                     cJSON_GetStringValue(version)) == 0;
    cJSON_Delete(j);
    snprintf(resp, (size_t)cap, ok ? "{\"ok\":true}" : "{\"error\":\"heartbeat rejected\"}");
    return ok ? 200 : 403;

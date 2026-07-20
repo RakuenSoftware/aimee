@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (83)
+## CLI-settable keys (84)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -103,6 +103,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_git` | bool | Block a delegate from running `git` or `gh` in a shell (reads included) and redirect git/forge work to aimee's `git_*` tools, which execute on aimee-server where the forge credential stays in-process; delegates are also spawned without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed SSH to any host) and neuters the global/system git config (default on). |
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
+| `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
@@ -301,7 +302,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 168 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 169 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -504,7 +505,7 @@ The binaries read 168 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_CONCURRENCY`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_STALE_ABANDON_SECS`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_CONCURRENCY`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_STALE_ABANDON_SECS`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 

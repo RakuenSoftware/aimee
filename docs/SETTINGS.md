@@ -71,6 +71,24 @@ per-turn toggles). Values are clamped to sane bounds.
 
 ---
 
+### Sub-agent ban: `subagent_ban_enabled`
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `subagent_ban_enabled` | `true` | When on **and** usable delegates are configured, blocks the primary agent's own sub-agent tools (`Task`/`Agent`/`spawn_agent`/`RemoteTrigger`) and redirects to `aimee delegate`, so delegation stays inside aimee's guardrail + memory + KB model. Set `false` to allow provider-native sub-agents. |
+
+What this key gates: the **server guardrail block** (honors `subagent_ban_enabled: false`
+as an opt-out) and the **Claude Code harness enforcement** — a `subagent-guard` PreToolUse
+hook plus a `permissions.deny [Task, Agent]` backstop that aimee's client setup
+auto-installs. The harness gate is evaluated once per client setup / session-start (config
+opt-out is read locally; a one-shot `agent.list` probe decides whether usable delegates
+exist), so changing this key — or adding/removing delegates — re-materializes the hook and
+deny list at the next setup. Independently, the `/v1` **gateway tool-strip** removes
+sub-agent tools from what aimee hands its *own* delegate agents; that strip is always-on
+and is not affected by this key.
+
+---
+
 ## Choosing an economizer tier
 
 The economizer is on by default at the `safe` tier (lossless). To change it, in the web UI

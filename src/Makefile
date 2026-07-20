@@ -330,7 +330,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
-                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c \
+                  modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c \
                   modules/vault/vault_capability.c
 KB_VAULT_OBJS = $(VAULT_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
@@ -345,6 +345,13 @@ KB_TPM2_LDLIBS := $(shell pkg-config --libs tss2-esys 2>/dev/null) -ltss2-mu -lt
 else
 KB_TPM2_CFLAGS :=
 KB_TPM2_LDLIBS :=
+endif
+ifeq ($(WITH_PKCS11),1)
+KB_PKCS11_CFLAGS := -DWITH_PKCS11 $(shell pkg-config --cflags p11-kit-1 2>/dev/null || echo -I/usr/include/p11-kit-1)
+KB_PKCS11_LDLIBS := -ldl
+else
+KB_PKCS11_CFLAGS :=
+KB_PKCS11_LDLIBS :=
 endif
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
@@ -413,6 +420,7 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
@@ -440,7 +448,7 @@ SERVER_KB_CLIENT_OBJS = $(KB_CLIENT_OBJS)
 
 # --- KB Service ---
 KB_SRCS = kb/kb_main.c kb/kb_vault_policy.c kb/kb_background.c kb/kb_service.c kb/kb_service_workers.c kb/kb_ingest_workers.c kb/kb_service_kb.c kb/kb_service_memory.c kb/kb_service_css.c kb/kb_service_agent.c kb/kb_service_graph.c kb/kb_rrf.c kb/kb_graph_analytics.c kb/lessons_cite_tracker.c kb/lessons_capture.c kb/lessons_reflect.c kb/lessons_actuate.c kb/lessons_session_capture.c kb/prompt_sanitizer.c kb/kb_surprising_judge.c kb/kb_service_artifacts.c kb/kb_service_roadmap.c kb/kb_intel_payload.c kb/kb_bandit_registry.c kb/kb_reflection.c kb/kb_curator_queue.c kb/kb_curator_pipeline.c kb/kb_curator_custom.c kb/kb_curator_extract.c kb/kb_curator_extract_code.c kb/kb_curator_grounding.c kb/kb_curator_drain.c kb/kb_curator_resolve_entities.c kb/kb_curator_sidecar.c kb/kb_curator_llm.c kb/kb_curator_judge.c kb/kb_curator_synthesize.c kb/kb_curator_promote.c kb/kb_curator_index_narrative.c kb/kb_curator_index_claims.c kb/kb_curator_contradictions.c kb/kb_curator_index_code_unit.c kb/kb_curator_link_artifacts.c kb/kb_curator_serve.c kb/kb_evidence_embed.c kb/kb_learning_synth.c kb/kb_learning_version.c kb/kb_curator_version.c kb/kb_curator_notify.c kb/kb_mining.c kb/http/kb_http.c kb/http/kb_tls.c kb/http/kb_tls_serve.c kb/http/kb_http_conn.c kb/http/kb_http_ws.c kb/http/kb_http_search.c kb/http/kb_route_acl.c kb/http/kb_ingress.c kb/http/kb_http_team.c kb/http/kb_http_models.c kb/http/kb_models_validate.c kb/http/kb_http_insights.c kb/http/kb_insights_util.c kb/http/kb_http_budget.c kb/http/kb_http_rate.c kb/http/kb_http_telemetry.c kb/http/kb_http_console.c kb/http/kb_http_accounts.c kb/http/kb_http_governance.c kb/kb_scope.c kb/kb_identity_resolve.c kb/kb_oidc_jwks_fleet.c kb/kb_reqctx.c kb/http/kb_http_code.c kb/http/kb_http_code_graphfb.c kb/http/kb_http_pdf.c kb/http/kb_http_ingest.c kb/http/kb_http_jobs.c kb/kb_doc_hash.c kb/kb_doc_pdf.c kb/kb_tsr_sidecar.c kb/kb_blob_store.c kb/kb_blob_reconcile.c kb/kb_ocr_sidecar.c kb/http/kb_http_releases.c kb/http/kb_http_reflections.c kb/kb_ingest_normalize.c kb/kb_service_code_embed.c kb/kb_memory_embed.c kb/kb_memory_facts.c kb/memory_rewrite_llm.c kb/enroll.c kb/verifier.c kb/auth_oidc.c kb/pki.c modules/aws/aws_sigv4.c modules/aws/aws_sts.c modules/aws/bedrock_policy.c modules/aws/sts_cache.c modules/aws/aws_eventstream.c
-KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/http/kb_http_servers.c
+KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c kb/kb_vault_rewrap.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/http/kb_http_servers.c db2/org_token_audit.c
 KB_OBJS = $(KB_SRCS:%.c=$(OBJDIR)/%.o)
 # modules/audit/audit_worm.c is the aimee-server SQLite WORM store (#include <sqlite3.h>); the
 # kb is DB2/Postgres-only and MUST stay sqlite-free (see the boundary integrity
@@ -963,7 +971,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # util (openssl + platform_random only), so the kb sidecar links it directly.
 $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
+	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
@@ -1032,7 +1040,7 @@ $(OBJDIR)/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 # kb object is harmless and keeps the WITH_TPM2 switch in one place (P7-tpm2a).
 $(OBJDIR)/kb/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
+	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) $(KB_PKCS11_CFLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
 
 $(OBJDIR)/server/%.o: %.c
 	@mkdir -p $(dir $@)

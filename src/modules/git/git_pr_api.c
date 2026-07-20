@@ -200,6 +200,41 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
    return st;
 }
 
+/* Authoritative default branch via GET /repos/<owner>/<repo>. Used when no base
+ * was passed and the local origin/HEAD cache is unset/stale. Returns 0 with buf
+ * filled, or -1 — callers must NOT fall back to guessing "main": a repo whose
+ * default is e.g. "testing" would get its PR opened against the wrong branch. */
+static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
+{
+   /* Build the URL directly: gh_get() appends a trailing "/<path>", and GitHub
+    * 404s GET /repos/<owner>/<repo>/ (trailing slash) — only the bare form works. */
+   char url[512];
+   if ((size_t)snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s", cx->owner,
+                        cx->repo) >= sizeof(url))
+      return -1;
+   char hdrs[480];
+   if ((size_t)snprintf(hdrs, sizeof(hdrs), "Authorization: Bearer %s\n" GH_ACCEPT, cx->token) >=
+       sizeof(hdrs))
+      return -1;
+   char *resp = NULL;
+   int st = agent_http_get(url, hdrs, &resp, 20000);
+   wipe(hdrs, sizeof(hdrs));
+   int rc = -1;
+   if (st >= 200 && st < 300 && resp)
+   {
+      cJSON *j = cJSON_Parse(resp);
+      const cJSON *db = j ? cJSON_GetObjectItem(j, "default_branch") : NULL;
+      if (cJSON_IsString(db) && db->valuestring && db->valuestring[0])
+      {
+         snprintf(buf, n, "%s", db->valuestring);
+         rc = 0;
+      }
+      cJSON_Delete(j);
+   }
+   free(resp);
+   return rc;
+}
+
 /* PUT with a JSON body; same containment as gh_get. */
 static int gh_put(const gh_ctx_t *cx, const char *path, const char *body, char **resp)
 {
@@ -287,13 +322,21 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
    char base[256];
    if (base_in && base_in[0])
       snprintf(base, sizeof(base), "%s", base_in);
-   else if (git_cap(repo_dir, "rev-parse --abbrev-ref origin/HEAD", base, sizeof(base)) != 0)
-      snprintf(base, sizeof(base), "main"); /* no origin/HEAD ref → assume main */
-   else
+   else if (git_cap(repo_dir, "rev-parse --abbrev-ref origin/HEAD", base, sizeof(base)) == 0 &&
+            base[0] && strcmp(base, "origin/HEAD") != 0)
    {
       char *sl = strchr(base, '/'); /* "origin/main" → "main" */
       if (sl)
          memmove(base, sl + 1, strlen(sl + 1) + 1);
+   }
+   else if (gh_default_branch(&cx, base, sizeof(base)) != 0)
+   {
+      /* No base given, local origin/HEAD unset/stale, and the authoritative API
+       * lookup failed. Refuse rather than guess "main": opening the PR against
+       * the wrong default branch is worse than surfacing the failure. */
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "cannot resolve default branch (pass an explicit base)");
+      return -1;
    }
    char tbuf[512];
    if (!title || !title[0]) /* default the title to the last commit subject */

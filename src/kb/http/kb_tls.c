@@ -190,9 +190,10 @@ int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
 #include <netdb.h>
 
 int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_pem,
-                          const char *client_cert_pem, const char *client_key_pem,
-                          const char *method, const char *path, const char *body,
-                          const char *authorization, char *resp_out, size_t resp_cap, int *status_out)
+                               const char *client_cert_pem, const char *client_key_pem,
+                               const char *method, const char *path, const char *body,
+                               const char *authorization, char *resp_out, size_t resp_cap,
+                               int *status_out)
 {
    /* client_cert_pem/client_key_pem may be NULL for a cert-less server-auth
     * request (the enrollment bootstrap reaching /v1/enroll/redeem). */
