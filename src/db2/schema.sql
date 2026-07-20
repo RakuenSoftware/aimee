@@ -2702,12 +2702,46 @@ CREATE TABLE IF NOT EXISTS org_model_catalog (
   model_id TEXT NOT NULL UNIQUE CHECK (char_length(model_id) BETWEEN 1 AND 200),
   display_name TEXT NOT NULL DEFAULT '',
   provider TEXT NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 100),
-  wire TEXT NOT NULL CHECK (wire IN ('anthropic','openai','responses','gemini')),
+  wire TEXT NOT NULL CONSTRAINT org_model_catalog_wire_chk
+    CHECK (wire IN ('anthropic','openai','responses','gemini','bedrock')),
   endpoint TEXT NOT NULL DEFAULT '' CHECK (char_length(endpoint) <= 500),
   enabled BOOLEAN NOT NULL DEFAULT true,
+  -- P6c-catalog Bedrock routing tuple (nullable; required + validated ONLY when
+  -- provider='bedrock', which can be written ONLY via org_catalog_bedrock_upsert). A
+  -- non-bedrock row leaves these NULL. Mirrors P6a bedrock_target_t exactly: the egress
+  -- (P6c-egress) builds a bedrock_target_t from these fields, so the catalog may store
+  -- ONLY a complete/valid target that P6a bedrock_session_policy will accept. The column
+  -- CHECKs are a coarse guard; the fail-closed completeness gate is in the definer.
+  bedrock_api TEXT CHECK (bedrock_api IS NULL OR bedrock_api IN ('converse','invoke')),
+  model_family TEXT,
+  bedrock_target_type TEXT CHECK (bedrock_target_type IS NULL OR bedrock_target_type IN
+    ('foundation','provisioned','custom','application-inference-profile',
+     'cross-region-inference-profile')),
+  aws_partition TEXT CHECK (aws_partition IS NULL OR aws_partition IN
+    ('aws','aws-us-gov','aws-cn')),
+  aws_account TEXT,
+  aws_region_set TEXT[],
+  underlying_fm_arns TEXT[],
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
   updated_at TEXT NOT NULL DEFAULT (pg_now_text())
 );
+
+-- Idempotent in-place migration for an existing org_model_catalog (the CREATE ... IF NOT
+-- EXISTS above is a no-op on an established DB): add the P6c Bedrock columns and widen the
+-- wire CHECK to admit 'bedrock'. DROP-then-ADD the named wire constraint so re-applying the
+-- schema is idempotent AND an existing auto-named constraint (org_model_catalog_wire_check)
+-- is replaced.
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS bedrock_api TEXT;
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS model_family TEXT;
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS bedrock_target_type TEXT;
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_partition TEXT;
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_account TEXT;
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_region_set TEXT[];
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS underlying_fm_arns TEXT[];
+ALTER TABLE org_model_catalog DROP CONSTRAINT IF EXISTS org_model_catalog_wire_check;
+ALTER TABLE org_model_catalog DROP CONSTRAINT IF EXISTS org_model_catalog_wire_chk;
+ALTER TABLE org_model_catalog ADD CONSTRAINT org_model_catalog_wire_chk
+  CHECK (wire IN ('anthropic','openai','responses','gemini','bedrock'));
 
 -- org_model_entitlement: which teams may use which models (the tenant-scoped join). A
 -- caller sees a model ONLY if one of their teams is entitled. NEITHER FK cascades: every
@@ -2784,6 +2818,15 @@ BEGIN
   IF p_provider IS NULL OR char_length(p_provider) < 1 OR char_length(p_provider) > 100 THEN
     RAISE EXCEPTION 'org_catalog_upsert: invalid provider' USING ERRCODE = '22023';
   END IF;
+  -- Close the bypass: a bedrock row (with its routing tuple + fail-closed adapter-registry
+  -- validation) may be written ONLY via org_catalog_bedrock_upsert. The plain path can NOT
+  -- be used to sneak a provider='bedrock' row in with NULL/unvalidated routing fields.
+  -- Case- and whitespace-insensitive so 'Bedrock' / 'BEDROCK' / ' bedrock ' cannot slip a
+  -- near-canonical provider past the gate (the companion always writes the exact 'bedrock').
+  IF lower(btrim(p_provider)) = 'bedrock' THEN
+    RAISE EXCEPTION 'org_catalog_upsert: bedrock models must use org_catalog_bedrock_upsert'
+      USING ERRCODE = '22023';
+  END IF;
   IF p_wire NOT IN ('anthropic','openai','responses','gemini') THEN
     RAISE EXCEPTION 'org_catalog_upsert: invalid wire %', p_wire USING ERRCODE = '22023';
   END IF;
@@ -2803,6 +2846,139 @@ BEGIN
     'org_catalog_upsert', p_model_id, 'ok',
     json_build_object('provider', p_provider, 'wire', p_wire,
                       'endpoint', COALESCE(p_endpoint,''),
+                      'enabled', COALESCE(p_enabled, true),
+                      'display_name', COALESCE(p_display_name,''))::text);
+  RETURN v_id;
+END; $$;
+
+-- org_bedrock_adapter_supported(api, family): the FIXED, authoritative adapter registry
+-- as a pure IMMUTABLE predicate (NOT SECURITY DEFINER — it touches no tables). The known
+-- families are a closed allowlist; 'converse' (the normalized path) has an adapter for
+-- every KNOWN family, so an unknown/typo family is REJECTED (fail-closed, not accept-any).
+-- 'invoke' (native) has an adapter ONLY for the native subset {anthropic}. So
+-- (converse, cohere)->TRUE, (converse, typo)->FALSE, (invoke, anthropic)->TRUE,
+-- (invoke, meta-llama)->FALSE, anything else->FALSE. COALESCE keeps a NULL family/api from
+-- yielding SQL NULL (which would fail OPEN under a `NOT ...` guard).
+CREATE OR REPLACE FUNCTION org_bedrock_adapter_supported(p_api TEXT, p_family TEXT)
+RETURNS BOOLEAN LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE COALESCE(p_api, '')
+    WHEN 'converse' THEN COALESCE(p_family, '') IN
+      ('anthropic','amazon-nova','amazon-titan','meta-llama','mistral','cohere','ai21')
+    WHEN 'invoke' THEN COALESCE(p_family, '') = 'anthropic'
+    ELSE false
+  END;
+$$;
+
+-- org_catalog_bedrock_upsert: the ONLY write path for a provider='bedrock' catalog row.
+-- Admin-gated SECURITY DEFINER, WORM-audited in the same txn (mirrors org_catalog_upsert).
+-- FAIL-CLOSED: raises 22023 and writes NOTHING if the (bedrock_api, model_family) pair has
+-- no registered adapter, or the routing tuple (target_type / partition / region_set /
+-- account / underlying_fm_arns) is invalid or incomplete — so the catalog can store ONLY a
+-- bedrock_target_t that P6a bedrock_session_policy will accept. Every array element is
+-- charset-validated BEFORE use (no raw concatenation; the arrays are bound parameters, not
+-- built literals). Sets provider='bedrock', wire='bedrock'.
+CREATE OR REPLACE FUNCTION org_catalog_bedrock_upsert(
+  p_model_id TEXT, p_display_name TEXT, p_api TEXT, p_family TEXT, p_target_type TEXT,
+  p_partition TEXT, p_account TEXT, p_region_set TEXT[], p_underlying_fm_arns TEXT[],
+  p_endpoint TEXT, p_enabled BOOLEAN
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_id BIGINT; v_elem TEXT;
+BEGIN
+  IF NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: admin only' USING ERRCODE = '42501';
+  END IF;
+  -- model_id doubles as the P6a target id (already CHECK'd 1..200 on the column); also
+  -- charset-assert it so the stored target id is exactly one bedrock_policy accepts.
+  IF p_model_id IS NULL OR char_length(p_model_id) < 1 OR char_length(p_model_id) > 200
+     OR p_model_id !~ '^[A-Za-z0-9_.:/-]{1,200}$' THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid model_id' USING ERRCODE = '22023';
+  END IF;
+  IF p_api IS NULL OR p_api NOT IN ('converse','invoke') THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid bedrock_api %', p_api
+      USING ERRCODE = '22023';
+  END IF;
+  -- Fail-closed adapter registry: reject any (api, family) pair with no registered adapter
+  -- (covers an empty/NULL/unknown/typo family and (invoke, non-anthropic)).
+  IF NOT org_bedrock_adapter_supported(p_api, p_family) THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: no adapter for (api=%, family=%)',
+      p_api, p_family USING ERRCODE = '22023';
+  END IF;
+  IF p_target_type IS NULL OR p_target_type NOT IN
+     ('foundation','provisioned','custom','application-inference-profile',
+      'cross-region-inference-profile') THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid target_type %', p_target_type
+      USING ERRCODE = '22023';
+  END IF;
+  IF p_partition IS NULL OR p_partition NOT IN ('aws','aws-us-gov','aws-cn') THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid partition %', p_partition
+      USING ERRCODE = '22023';
+  END IF;
+  -- region_set: non-empty, every element non-empty/non-whitespace + safe charset.
+  IF p_region_set IS NULL OR array_length(p_region_set, 1) IS NULL THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: region_set is empty' USING ERRCODE = '22023';
+  END IF;
+  FOREACH v_elem IN ARRAY p_region_set LOOP
+    IF v_elem IS NULL OR btrim(v_elem) = '' OR v_elem !~ '^[A-Za-z0-9_.:/-]{1,255}$' THEN
+      RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid region_set element'
+        USING ERRCODE = '22023';
+    END IF;
+  END LOOP;
+  -- A *-inference-profile target is underivable without resolved underlying FM ARNs; each
+  -- must be charset-safe FIRST, then a same-partition foundation-model ARN with NO wildcard
+  -- or cross-service prefix (mirrors P6a fm_arn_valid). Validate charset BEFORE the shape.
+  IF p_target_type IN ('application-inference-profile','cross-region-inference-profile') THEN
+    IF p_underlying_fm_arns IS NULL OR array_length(p_underlying_fm_arns, 1) IS NULL THEN
+      RAISE EXCEPTION 'org_catalog_bedrock_upsert: inference-profile target requires underlying_fm_arns'
+        USING ERRCODE = '22023';
+    END IF;
+    FOREACH v_elem IN ARRAY p_underlying_fm_arns LOOP
+      IF v_elem IS NULL OR btrim(v_elem) = '' OR v_elem !~ '^[A-Za-z0-9_.:/-]{1,255}$' THEN
+        RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid underlying_fm_arns element'
+          USING ERRCODE = '22023';
+      END IF;
+      IF v_elem !~ ('^arn:' || p_partition ||
+                    ':bedrock:[A-Za-z0-9-]+::foundation-model/[A-Za-z0-9_.:/-]+$') THEN
+        RAISE EXCEPTION 'org_catalog_bedrock_upsert: underlying_fm_arns element is not a same-partition foundation-model ARN'
+          USING ERRCODE = '22023';
+      END IF;
+    END LOOP;
+  END IF;
+  -- A NON-foundation target (provisioned/custom/either profile) carries an account segment:
+  -- require a 12-digit account. A foundation target has no account segment (leave NULL).
+  IF p_target_type <> 'foundation' THEN
+    IF p_account IS NULL OR p_account !~ '^[0-9]{12}$' THEN
+      RAISE EXCEPTION 'org_catalog_bedrock_upsert: % target requires a 12-digit aws_account',
+        p_target_type USING ERRCODE = '22023';
+    END IF;
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('orgcatalog:' || p_model_id));
+  INSERT INTO org_model_catalog(model_id, display_name, provider, wire, endpoint, enabled,
+      bedrock_api, model_family, bedrock_target_type, aws_partition, aws_account,
+      aws_region_set, underlying_fm_arns)
+    VALUES (p_model_id, COALESCE(p_display_name,''), 'bedrock', 'bedrock',
+            COALESCE(p_endpoint,''), COALESCE(p_enabled, true),
+            p_api, p_family, p_target_type, p_partition, p_account,
+            p_region_set, p_underlying_fm_arns)
+    ON CONFLICT (model_id) DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      provider = 'bedrock',
+      wire = 'bedrock',
+      endpoint = EXCLUDED.endpoint,
+      enabled = EXCLUDED.enabled,
+      bedrock_api = EXCLUDED.bedrock_api,
+      model_family = EXCLUDED.model_family,
+      bedrock_target_type = EXCLUDED.bedrock_target_type,
+      aws_partition = EXCLUDED.aws_partition,
+      aws_account = EXCLUDED.aws_account,
+      aws_region_set = EXCLUDED.aws_region_set,
+      underlying_fm_arns = EXCLUDED.underlying_fm_arns,
+      updated_at = pg_now_text()
+    RETURNING id INTO v_id;
+  PERFORM kb_audit_worm_append('owner-admin', current_setting('aimee.principal', true),
+    'org_catalog_bedrock_upsert', p_model_id, 'ok',
+    json_build_object('api', p_api, 'family', p_family, 'target_type', p_target_type,
+                      'partition', p_partition, 'regions', array_length(p_region_set, 1),
                       'enabled', COALESCE(p_enabled, true),
                       'display_name', COALESCE(p_display_name,''))::text);
   RETURN v_id;
@@ -2882,6 +3058,7 @@ END; $$;
 REVOKE ALL ON FUNCTION kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_entitled() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;

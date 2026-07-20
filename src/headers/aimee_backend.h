@@ -42,4 +42,14 @@ struct cJSON *responses_backend_build(const aimee_request_t *ir);
 int responses_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err,
                             size_t errn);
 
+/* Build an AWS Bedrock Converse request from the IR (system blocks -> `system[]`
+ * text parts; messages -> `messages[]` with toolUse/toolResult/reasoningContent
+ * parts; tools -> `toolConfig.tools[].toolSpec`; sampling -> `inferenceConfig`).
+ * The body is IDENTICAL for Converse and ConverseStream; modelId is a URI param and
+ * is NOT emitted. Returns a new cJSON the caller owns, or NULL on bad args. */
+struct cJSON *bedrock_converse_build(const aimee_request_t *ir);
+/* Parse a Bedrock Converse response (output.message) into the IR. Returns 0 (out
+ * owned by caller -> aimee_response_free), -1 + err on a missing/malformed message. */
+int bedrock_converse_parse(const struct cJSON *resp, aimee_response_t *out, char *err, size_t errn);
+
 #endif /* DEC_AIMEE_BACKEND_H */
