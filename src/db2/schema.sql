@@ -4036,3 +4036,24 @@ REVOKE ALL ON FUNCTION org_telemetry_ingest(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,NUME
 REVOKE ALL ON FUNCTION org_telemetry_allow(TEXT,TEXT[],BOOLEAN) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_telemetry_allow_show() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_metrics_snapshot() FROM PUBLIC;
+-- P5 server registry: kb-authoritative fleet inventory.  Management transport
+-- and enrollment code consume this tenant-scoped table; endpoint/cert values are
+-- enrollment-owned and never accepted from an operator action.
+CREATE TABLE IF NOT EXISTS kb_server_registry (
+  server_id TEXT PRIMARY KEY,
+  cert_cn TEXT NOT NULL UNIQUE,
+  mgmt_cert_cn TEXT NOT NULL UNIQUE,
+  owner_issuer TEXT NOT NULL DEFAULT '',
+  owner_subject TEXT NOT NULL DEFAULT '',
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  endpoint TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  health TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  last_seen TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE kb_server_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_server_registry FORCE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_kb_server_registry_team ON kb_server_registry(team_id);
