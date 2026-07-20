@@ -123,6 +123,8 @@ static int do_metrics(char *out, int cap)
       free(rows);
       if (n == DB2_TELEMETRY_ERR_DENIED)
          return err(out, cap, 403, "not authorized (org-admin required)");
+      if (n == DB2_TELEMETRY_ERR_TOOBIG)
+         return err(out, cap, 500, "metrics snapshot exceeds buffer (too many series)");
       return err(out, cap, 500, "metrics snapshot failed");
    }
    int wrote = org_telemetry_render_prom(rows, n, out, (size_t)cap);

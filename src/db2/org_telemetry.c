@@ -154,11 +154,17 @@ int db2_metrics_snapshot(org_metric_row_t *out, int max)
    if (!st)
       return -1;
    int n = 0;
+   int overflow = 0;
    aimee_pg_step_t step = AIMEE_PG_DONE;
    while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
    {
       if (n >= max)
+      {
+         /* More series exist than the buffer holds: refuse rather than emit a
+          * silently-incomplete /metrics (a monitoring correctness hazard). */
+         overflow = 1;
          break;
+      }
       org_metric_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       const char *c = aimee_pg_column_text(st, 0);
@@ -175,5 +181,7 @@ int db2_metrics_snapshot(org_metric_row_t *out, int max)
    aimee_pg_finalize(st);
    if (failed)
       return telemetry_step_err(err);
+   if (overflow)
+      return DB2_TELEMETRY_ERR_TOOBIG;
    return n;
 }

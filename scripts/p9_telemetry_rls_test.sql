@@ -117,6 +117,15 @@ BEGIN
   r := org_telemetry_ingest('evt-7', 'cn', 949301, 'agent.metrics.v1',
                             'tokens_total', 'histogram', 5, 1700000005);
   IF r <> 'dropped' THEN RAISE EXCEPTION 'P9 FAIL: (e) bad metric_kind = % (want dropped)', r; END IF;
+  -- (e) a source_event_id that is NOT an id-safe opaque key (an email-like '@',
+  -- a space, prose) -> dropped: source_event_id is bounded so it cannot become a
+  -- free-text / PII smuggling channel despite being caller-supplied.
+  r := org_telemetry_ingest('user@example.com', 'cn', 949301, 'agent.metrics.v1',
+                            'tokens_total', 'counter', 5, 1700000006);
+  IF r <> 'dropped' THEN RAISE EXCEPTION 'P9 FAIL: (e) email-like source_event_id = % (want dropped)', r; END IF;
+  r := org_telemetry_ingest('some free text', 'cn', 949301, 'agent.metrics.v1',
+                            'tokens_total', 'counter', 5, 1700000007);
+  IF r <> 'dropped' THEN RAISE EXCEPTION 'P9 FAIL: (e) spaced source_event_id = % (want dropped)', r; END IF;
   SELECT count(*) INTO c FROM org_telemetry WHERE source_event_id IN ('evt-5','evt-6','evt-7');
   IF c <> 0 THEN RAISE EXCEPTION 'P9 FAIL: (e) a malformed ingest stored a row (count = %)', c; END IF;
 END $$;

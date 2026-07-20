@@ -28,6 +28,12 @@ extern "C"
  * failure to 500. */
 #define DB2_TELEMETRY_ERR_DENIED (-2)
 
+/* The metrics snapshot produced more series than the caller's buffer holds. A
+ * silent truncation would return a successful-but-incomplete Prometheus export
+ * (missing series for a very large org), so the snapshot fails LOUDLY instead —
+ * the HTTP route maps it to 500. (Mirrors the P3b spend-report TOOBIG posture.) */
+#define DB2_TELEMETRY_ERR_TOOBIG (-3)
+
 /* Ingest outcome strings (as returned by org_telemetry_ingest). */
 #define DB2_TELEMETRY_RESULT_MAX 16
 

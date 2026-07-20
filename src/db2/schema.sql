@@ -3723,8 +3723,11 @@ BEGIN
   -- Bounded, well-formed inputs only. Everything below fails CLOSED to 'dropped'
   -- (stores nothing) rather than RAISE, so an at-least-once forwarder gets a
   -- stable non-error contract for a rejected record.
-  IF p_source_event_id IS NULL OR char_length(p_source_event_id) < 1
-     OR char_length(p_source_event_id) > 200 THEN
+  -- source_event_id is an OPAQUE idempotency key, not a content channel: bound its
+  -- charset (id-safe chars only) so a forwarder cannot smuggle an email / OIDC sub
+  -- / free-text prose through it (an '@' or a space is dropped) — keeping the row
+  -- content-free in substance, not just in column set.
+  IF p_source_event_id IS NULL OR p_source_event_id !~ '^[A-Za-z0-9_.:-]{1,200}$' THEN
     RETURN 'dropped';
   END IF;
   IF p_origin_cn IS NULL OR char_length(p_origin_cn) < 1
