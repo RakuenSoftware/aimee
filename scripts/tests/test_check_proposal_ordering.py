@@ -76,44 +76,52 @@ class ProposalOrderingTests(unittest.TestCase):
         self.assertTrue(ordering.source_or_exact_signal("src/generated/modules.mk", exact))
         self.assertFalse(ordering.source_or_exact_signal("src/modules/memory/a.c", exact))
 
-    def test_claim_patterns_are_closed_whole_line_and_case_sensitive(self) -> None:
-        patterns = ordering.claim_patterns({"git-runtime-ready"})
-        accepted = (
+    def test_claim_patterns_are_format_specific_literal_and_closed(self) -> None:
+        yaml_patterns = ordering.claim_patterns("git-runtime-ready", ".yaml")
+        json_patterns = ordering.claim_patterns("git-runtime-ready", ".json")
+        yaml_accepted = (
             "git-runtime-ready: true",
             "  git-runtime-ready : true # approved",
-            '"git-runtime-ready": true,',
         )
-        rejected = (
+        yaml_rejected = (
             "git-runtime-ready: false",
+            "git-runtime-ready: True",
+            "git-runtime-ready: yes",
+            "git-runtime-ready: !!bool true",
+            "git-runtime-ready: true % comment",
+            "git-runtime-ready: |",
             "Git-runtime-ready: true",
             "git-runtime-ready-extended: true",
             "prose git-runtime-ready: true",
             "# git-runtime-ready: true",
+            '"git-runtime-ready": true,',
         )
-        for line in accepted:
+        for line in yaml_accepted:
             with self.subTest(line=line):
-                self.assertTrue(any(pattern.fullmatch(line) for pattern in patterns))
-        for line in rejected:
+                self.assertTrue(any(pattern.fullmatch(line) for pattern in yaml_patterns))
+        for line in yaml_rejected:
             with self.subTest(line=line):
-                self.assertFalse(any(pattern.fullmatch(line) for pattern in patterns))
+                self.assertFalse(any(pattern.fullmatch(line) for pattern in yaml_patterns))
+        for line in ('"git-runtime-ready": true', '"git-runtime-ready": true,'):
+            with self.subTest(line=line):
+                self.assertTrue(any(pattern.fullmatch(line) for pattern in json_patterns))
+        self.assertFalse(
+            any(pattern.fullmatch("git-runtime-ready: true") for pattern in json_patterns)
+        )
 
     def test_added_claim_ignores_deletion_context_and_binary(self) -> None:
-        patterns = ordering.claim_patterns({"git-runtime-ready"})
         self.assertTrue(
             ordering.added_claim_signal(
-                b"+++ b/status.yaml\n+git-runtime-ready: true\n", patterns
+                b"not ready\n", b"git-runtime-ready: true\n", "git-runtime-ready", ".yaml"
             )
         )
         self.assertFalse(
             ordering.added_claim_signal(
-                b"+++ b/status.yaml\n-git-runtime-ready: true\n", patterns
+                b"git-runtime-ready: true\n", b"not ready\n", "git-runtime-ready", ".yaml"
             )
         )
-        self.assertFalse(ordering.added_claim_signal(b"\xff\x00", patterns))
         self.assertFalse(
-            ordering.added_claim_signal(
-                b"+++ b/status.md\n+git-runtime-ready: true\n", patterns
-            )
+            ordering.added_claim_signal(b"", b"\xff\x00", "git-runtime-ready", ".yaml")
         )
 
     def test_history_records_source_signal_even_after_revert(self) -> None:
@@ -155,7 +163,8 @@ class ProposalOrderingTests(unittest.TestCase):
             )
             self.assertEqual(len(signals), 1)
             self.assertEqual(
-                signals[0][2], [("status-claim", "docs/modules:git-runtime-ready")]
+                signals[0][2],
+                [("status-claim", "docs/modules:git-runtime-ready:docs/modules/git.yaml")],
             )
         finally:
             tmp.cleanup()
@@ -265,6 +274,150 @@ class ProposalOrderingTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_structured_claim_ignores_gitattributes_and_quoted_filename(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            attributes = repo / ".gitattributes"
+            attributes.write_text("*.yaml -diff\n", encoding="utf-8")
+            self.commit(repo, "disable yaml diff driver")
+            doc = repo / 'docs/modules/weird\t"\nname.yaml'
+            doc.parent.mkdir(parents=True)
+            doc.write_text("git-runtime-ready: true\n", encoding="utf-8")
+            head = self.commit(repo, "structured claim")
+            signals = ordering.scan_history(
+                repo,
+                cutoff,
+                head,
+                exact_paths=set(),
+                root_claims=[("docs/modules", "git-runtime-ready")],
+            )
+            claims = [
+                evidence
+                for _, _, entries in signals
+                for kind, evidence in entries
+                if kind == "status-claim"
+            ]
+            self.assertEqual(len(claims), 1)
+            self.assertIn('weird\t"\nname.yaml', claims[0])
+        finally:
+            tmp.cleanup()
+
+    def test_claim_rename_into_root_is_signal_and_rename_out_is_removal(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            outside = repo / "elsewhere/status.yaml"
+            outside.parent.mkdir(parents=True)
+            outside.write_text("git-runtime-ready: true\n", encoding="utf-8")
+            source_commit = self.commit(repo, "outside claim")
+            inside = repo / "docs/modules/status.yaml"
+            inside.parent.mkdir(parents=True)
+            outside.rename(inside)
+            rename_in = self.commit(repo, "rename claim into root")
+            inside.rename(outside)
+            rename_out = self.commit(repo, "rename claim out of root")
+            root_claims = [("docs/modules", "git-runtime-ready")]
+            incoming = ordering.commit_signals(
+                repo,
+                source_commit,
+                rename_in,
+                exact_paths=set(),
+                root_claims=root_claims,
+            )
+            outgoing = ordering.commit_signals(
+                repo,
+                rename_in,
+                rename_out,
+                exact_paths=set(),
+                root_claims=root_claims,
+            )
+            self.assertTrue(any(kind == "status-claim" for kind, _ in incoming))
+            self.assertFalse(any(kind == "status-claim" for kind, _ in outgoing))
+            self.assertTrue(ordering.is_ancestor(repo, cutoff, rename_out))
+        finally:
+            tmp.cleanup()
+
+    def test_complete_dag_scan_keeps_side_branch_signal_and_revert(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            anchor_file = repo / "contract.md"
+            anchor_file.write_text("approved\n", encoding="utf-8")
+            anchor = self.commit(repo, "anchor")
+            self.git(repo, "switch", "-q", "-c", "side")
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("signal\n", encoding="utf-8")
+            self.commit(repo, "side signal")
+            source.unlink()
+            self.commit(repo, "side revert")
+            self.git(repo, "switch", "-q", "master")
+            self.git(
+                repo,
+                "-c",
+                "user.name=Aimee Test",
+                "-c",
+                "user.email=aimee@example.invalid",
+                "merge",
+                "--no-ff",
+                "-m",
+                "merge side",
+                "side",
+            )
+            head = self.git(repo, "rev-parse", "HEAD")
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            self.assertEqual(len(signals), 2)
+            ordering.enforce_signal_precedence(repo, anchor, signals)
+        finally:
+            tmp.cleanup()
+
+    def test_pr_shape_branch_without_anchor_fails_precedence(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            self.git(repo, "switch", "-q", "-c", "proposed")
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("signal\n", encoding="utf-8")
+            self.commit(repo, "pre-anchor signal")
+            self.git(repo, "switch", "-q", "master")
+            anchor_file = repo / "contract.md"
+            anchor_file.write_text("approved\n", encoding="utf-8")
+            anchor = self.commit(repo, "anchor")
+            self.git(
+                repo,
+                "-c",
+                "user.name=Aimee Test",
+                "-c",
+                "user.email=aimee@example.invalid",
+                "merge",
+                "--no-ff",
+                "-m",
+                "synthetic merge",
+                "proposed",
+            )
+            head = self.git(repo, "rev-parse", "HEAD")
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            with self.assertRaisesRegex(ordering.OrderingError, "git-contract-ordering"):
+                ordering.enforce_signal_precedence(repo, anchor, signals)
+        finally:
+            tmp.cleanup()
+
+    def test_all_signal_evidence_is_rendered_on_failure(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            with self.assertRaises(ordering.OrderingError) as caught:
+                ordering.enforce_signal_precedence(
+                    repo,
+                    "f" * 40,
+                    [(cutoff, cutoff, [("path", "one"), ("status-claim", "two")])],
+                )
+            self.assertIn("path:one", str(caught.exception))
+            self.assertIn("status-claim:two", str(caught.exception))
+        finally:
+            tmp.cleanup()
+
     def test_event_binding(self) -> None:
         head = "a" * 40
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -272,9 +425,11 @@ class ProposalOrderingTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "GITHUB_EVENT_NAME": "push",
-                "GITHUB_REF": "refs/heads/feature/core-modularization",
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REF": "refs/pull/123/merge",
                 "GITHUB_SHA": head,
+                "GITHUB_BASE_REF": "feature/core-modularization",
+                "GITHUB_HEAD_REF": "slice/example",
             },
             clear=True,
         ):
@@ -300,16 +455,39 @@ class ProposalOrderingTests(unittest.TestCase):
             ):
                 ordering.validate_event(head)
 
-    def test_contract_checker_loader_rejects_symlink(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "checker.py"
-            target.write_text("pass\n", encoding="utf-8")
-            link = Path(tmp) / "link.py"
-            link.symlink_to(target)
-            with mock.patch.object(ordering, "CONTRACT_CHECKER", link), self.assertRaisesRegex(
-                ordering.OrderingError, "checker-load"
+        partials = (
+            {"GITHUB_SHA": head},
+            {"GITHUB_REF": "refs/heads/feature/core-modularization"},
+            {"GITHUB_BASE_REF": "feature/core-modularization"},
+        )
+        for env in partials:
+            with (
+                self.subTest(env=env),
+                mock.patch.dict(os.environ, env, clear=True),
+                self.assertRaisesRegex(ordering.OrderingError, "event-"),
             ):
-                ordering.load_contract_checker()
+                ordering.validate_event(head)
+        wrong_base = {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REF": "refs/pull/123/merge",
+            "GITHUB_SHA": head,
+            "GITHUB_BASE_REF": "main",
+            "GITHUB_HEAD_REF": "slice/example",
+        }
+        with mock.patch.dict(os.environ, wrong_base, clear=True), self.assertRaisesRegex(
+            ordering.OrderingError, "event-base"
+        ):
+            ordering.validate_event(head)
+
+    def test_live_input_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            target = repo / "target.md"
+            target.write_text("pass\n", encoding="utf-8")
+            link = repo / "link.md"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(ordering.OrderingError, "input-symlink"):
+                ordering.read_live_text(repo, "link.md")
 
     def test_git_execution_failure_is_fail_closed(self) -> None:
         with mock.patch.object(ordering, "GIT", "/definitely/missing/git"), self.assertRaisesRegex(
@@ -318,17 +496,33 @@ class ProposalOrderingTests(unittest.TestCase):
             ordering.git(REPO_ROOT, "status")
 
     def test_live_discovery_equals_immutable_slice2_blob(self) -> None:
-        contract_checker = ordering.load_contract_checker()
-        pinned, pinned_handoff = ordering.canonical_metadata(REPO_ROOT, contract_checker)
-        live = contract_checker.load_validated_contract(
-            REPO_ROOT, require_status="roundtable-approved", check_git=True
-        )
-        ordering.validate_discovery(live, pinned, pinned_handoff, pinned_handoff)
+        pinned, pinned_handoff = ordering.canonical_metadata(REPO_ROOT)
+        live, live_handoff = ordering.live_metadata(REPO_ROOT)
+        ordering.validate_discovery(live, pinned, live_handoff, pinned_handoff)
 
         drifted_handoff = copy.deepcopy(pinned_handoff)
         drifted_handoff["receiver"] = "changed"
         with self.assertRaisesRegex(ordering.OrderingError, "discovery-drift"):
             ordering.validate_discovery(live, pinned, drifted_handoff, pinned_handoff)
+
+        drifted_contract = copy.deepcopy(live)
+        drifted_contract["trigger_surface"]["status_claim_roots"].append(
+            {"path": "docs/extra", "claim": "git-runtime-ready"}
+        )
+        with self.assertRaisesRegex(ordering.OrderingError, "discovery-drift"):
+            ordering.validate_discovery(
+                drifted_contract, pinned, live_handoff, pinned_handoff
+            )
+
+    def test_contract_shape_failure_has_stable_rule(self) -> None:
+        contract = {"trigger_surface": {group: [] for group in ordering.TRIGGER_GROUPS}}
+        del contract["trigger_surface"]["readiness_markers"]
+        with self.assertRaisesRegex(ordering.OrderingError, "contract-shape"):
+            ordering.path_metadata(contract)
+
+    def test_non_repository_config_root_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ordering.main(["--config-root", tmp]), 1)
 
 
 if __name__ == "__main__":

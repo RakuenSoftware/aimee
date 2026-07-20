@@ -4,23 +4,43 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import difflib
+import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import NoReturn
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CONTRACT_CHECKER = REPO_ROOT / "scripts/check_git_core_contract.py"
 SLICE2_ANCHOR = "a3c4d413b6ce5f674994a6e6c4589ae2383819a4"
 CONTRACT_PATH = "docs/proposals/pending/git-core-contract.md"
 EVIDENCE_PATH = "docs/validation/roundtable/git-core-contract.json"
 HANDOFF_PATH = "docs/validation/core-modularization-slice-2.md"
+CHECKER_PATH = "scripts/check_git_core_contract.py"
+FEATURE_BRANCH = "feature/core-modularization"
 GIT = shutil.which("git", path="/usr/bin:/bin") or "/usr/bin/git"
+PYTHON = shutil.which("python3", path="/usr/bin:/bin") or "/usr/bin/python3"
+TRIGGER_GROUPS = (
+    "descriptors",
+    "generated_builds",
+    "generated_profiles",
+    "readiness_markers",
+    "status_claim_roots",
+)
+HANDOFF = {
+    "schema_version": 1,
+    "receiver": "slice-3-proposal-ordering-gate",
+    "contract_file": CONTRACT_PATH,
+    "evidence_file": EVIDENCE_PATH,
+    "invariants_source": "git-core-contract.invariants",
+    "ordering_script_baseline": "6ce37f53e1f627c19e15fc01f68959f546a5eded",
+    "trigger_surface_source": "git-core-contract",
+}
 
 
 class OrderingError(ValueError):
@@ -31,28 +51,9 @@ def fail(rule: str, message: str) -> NoReturn:
     raise OrderingError(f"rule={rule}: {message}")
 
 
-def load_contract_checker():
-    expected = REPO_ROOT / "scripts/check_git_core_contract.py"
+def git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     try:
-        resolved = CONTRACT_CHECKER.resolve(strict=True)
-    except OSError as exc:
-        fail("checker-load", f"cannot resolve contract checker: {exc}")
-    if CONTRACT_CHECKER.is_symlink() or resolved != expected:
-        fail(
-            "checker-load",
-            f"contract checker path is not the trusted repository file: {resolved}",
-        )
-    spec = importlib.util.spec_from_file_location("check_git_core_contract", CONTRACT_CHECKER)
-    if spec is None or spec.loader is None:
-        fail("checker-load", f"cannot load {CONTRACT_CHECKER}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def git(repo: Path, *args: str, check: bool = True) -> bytes:
-    try:
-        result = subprocess.run(
+        return subprocess.run(
             [GIT, *args],
             cwd=repo,
             stdout=subprocess.PIPE,
@@ -61,7 +62,11 @@ def git(repo: Path, *args: str, check: bool = True) -> bytes:
         )
     except OSError as exc:
         fail("git-exec", f"cannot execute {GIT}: {exc}")
-    if check and result.returncode != 0:
+
+
+def git(repo: Path, *args: str) -> bytes:
+    result = git_run(repo, *args)
+    if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", "replace").strip()
         fail("git-command", f"git {' '.join(args)} failed ({result.returncode}): {stderr}")
     return result.stdout
@@ -74,29 +79,188 @@ def git_text(repo: Path, *args: str) -> str:
         fail("git-output", f"git {' '.join(args)} returned invalid UTF-8: {exc}")
 
 
-def canonical_metadata(repo: Path, checker) -> tuple[dict[str, object], dict[str, object]]:
-    for path in (CONTRACT_PATH, EVIDENCE_PATH, HANDOFF_PATH):
-        git(repo, "cat-file", "-e", f"{SLICE2_ANCHOR}:{path}")
-    raw = git(repo, "show", f"{SLICE2_ANCHOR}:{CONTRACT_PATH}")
-    handoff_raw = git(repo, "show", f"{SLICE2_ANCHOR}:{HANDOFF_PATH}")
+def require_repository(repo: Path) -> None:
+    result = git_run(repo, "rev-parse", "--show-toplevel")
+    if result.returncode != 0:
+        fail("config-root", f"{repo} is not a Git repository")
     try:
-        text = raw.decode("utf-8")
-        handoff_text = handoff_raw.decode("utf-8")
+        top = result.stdout.decode("utf-8").strip()
     except UnicodeDecodeError as exc:
-        fail("anchor-contract", f"pinned metadata is not UTF-8: {exc}")
-    contract = checker.extract_json_fence_text(text, "git-core-contract", path=CONTRACT_PATH)
-    handoff = checker.extract_json_fence_text(
-        handoff_text, "slice3-handoff", path=HANDOFF_PATH
+        fail("config-root", f"repository root is not UTF-8: {exc}")
+    if Path(os.path.realpath(top)) != repo:
+        fail("config-root", f"{repo} is not the repository root")
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            fail("json-duplicate-key", f"duplicate object key {key!r}")
+        value[key] = item
+    return value
+
+
+def _reject_number(value: str) -> NoReturn:
+    fail("json-number-domain", f"floating, exponent, or non-finite number forbidden: {value}")
+
+
+def loads_strict(raw: str, *, label: str) -> dict[str, object]:
+    try:
+        value = json.loads(
+            raw,
+            object_pairs_hook=_no_duplicate_keys,
+            parse_float=_reject_number,
+            parse_constant=_reject_number,
+        )
+    except json.JSONDecodeError as exc:
+        fail("json-parse", f"{label}: {exc.msg} at {exc.lineno}:{exc.colno}")
+    if not isinstance(value, dict):
+        fail("contract-shape", f"{label} must be a JSON object")
+    return value
+
+
+def extract_json_fence_text(raw: str, name: str, *, label: str) -> dict[str, object]:
+    opening = re.compile(rf"^```json {re.escape(name)}[ \t]*$", re.MULTILINE)
+    matches = list(opening.finditer(raw))
+    if len(matches) != 1:
+        fail("contract-fence", f"{label}: expected exactly one {name} JSON fence")
+    body = raw[matches[0].end() :]
+    if body.startswith("\r\n"):
+        body = body[2:]
+    elif body.startswith("\n"):
+        body = body[1:]
+    closing = re.search(r"^```[ \t]*$", body, re.MULTILINE)
+    if closing is None:
+        fail("contract-fence", f"{label}: unterminated {name} JSON fence")
+    return loads_strict(body[: closing.start()].rstrip("\r\n"), label=label)
+
+
+def read_live_text(repo: Path, relative: str) -> str:
+    candidate = repo / relative
+    resolved = Path(os.path.realpath(candidate))
+    try:
+        resolved.relative_to(repo)
+    except ValueError:
+        fail("path-containment", f"{relative} escapes repository root")
+    if candidate.is_symlink():
+        fail("input-symlink", f"{relative} must not be a symlink")
+    try:
+        return resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        fail("input", f"cannot read {relative}: {exc}")
+
+
+def anchor_text(repo: Path, relative: str, rule: str) -> str:
+    result = git_run(repo, "show", f"{SLICE2_ANCHOR}:{relative}")
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        fail(rule, f"cannot read {relative} from Slice 2 anchor: {detail}")
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        fail(rule, f"{relative} at Slice 2 anchor is not UTF-8: {exc}")
+
+
+def validate_handoff(value: dict[str, object], *, label: str) -> None:
+    if value != HANDOFF:
+        fail("handoff-shape", f"{label} differs from the exact Slice 2 handoff")
+
+
+def validate_trusted_contract(repo: Path) -> None:
+    checker = git(repo, "show", f"{SLICE2_ANCHOR}:{CHECKER_PATH}")
+    with tempfile.TemporaryDirectory(prefix="aimee-ordering-") as directory:
+        checker_path = Path(directory) / "check_git_core_contract.py"
+        checker_path.write_bytes(checker)
+        checker_path.chmod(0o400)
+        try:
+            result = subprocess.run(
+                [
+                    PYTHON,
+                    "-I",
+                    "-S",
+                    str(checker_path),
+                    "--config-root",
+                    str(repo),
+                    "--require-status",
+                    "roundtable-approved",
+                ],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except OSError as exc:
+            fail("checker-exec", f"cannot execute trusted contract checker: {exc}")
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        fail("contract-validation", f"trusted Slice 2 checker rejected HEAD: {detail}")
+
+
+def canonical_metadata(repo: Path) -> tuple[dict[str, object], dict[str, object]]:
+    contract = extract_json_fence_text(
+        anchor_text(repo, CONTRACT_PATH, "anchor-contract"),
+        "git-core-contract",
+        label=f"{SLICE2_ANCHOR}:{CONTRACT_PATH}",
     )
+    evidence = git_run(repo, "cat-file", "-e", f"{SLICE2_ANCHOR}:{EVIDENCE_PATH}")
+    if evidence.returncode != 0:
+        fail("anchor-evidence", f"{EVIDENCE_PATH} is absent from the Slice 2 anchor")
+    handoff = extract_json_fence_text(
+        anchor_text(repo, HANDOFF_PATH, "anchor-handoff"),
+        "slice3-handoff",
+        label=f"{SLICE2_ANCHOR}:{HANDOFF_PATH}",
+    )
+    validate_handoff(handoff, label="pinned handoff")
+    return contract, handoff
+
+
+def live_metadata(repo: Path) -> tuple[dict[str, object], dict[str, object]]:
+    contract = extract_json_fence_text(
+        read_live_text(repo, CONTRACT_PATH), "git-core-contract", label=CONTRACT_PATH
+    )
+    handoff = extract_json_fence_text(
+        read_live_text(repo, HANDOFF_PATH), "slice3-handoff", label=HANDOFF_PATH
+    )
+    validate_handoff(handoff, label="live handoff")
     return contract, handoff
 
 
 def discovery_view(contract: dict[str, object]) -> dict[str, object]:
-    return {
-        "historical_cutoff": contract["historical_cutoff"],
-        "invariants": contract["invariants"],
-        "trigger_surface": contract["trigger_surface"],
-    }
+    try:
+        return {
+            "historical_cutoff": contract["historical_cutoff"],
+            "invariants": contract["invariants"],
+            "trigger_surface": contract["trigger_surface"],
+        }
+    except KeyError as exc:
+        fail("contract-shape", f"contract lacks discovery field {exc.args[0]!r}")
+
+
+def path_metadata(contract: dict[str, object]) -> tuple[set[str], list[tuple[str, str]]]:
+    trigger = contract.get("trigger_surface")
+    if not isinstance(trigger, dict):
+        fail("contract-shape", "trigger_surface must be an object")
+    missing = set(TRIGGER_GROUPS) - set(trigger)
+    unknown = set(trigger) - set(TRIGGER_GROUPS)
+    if missing or unknown:
+        fail(
+            "contract-shape",
+            f"trigger_surface keys mismatch; missing={sorted(missing)}, unknown={sorted(unknown)}",
+        )
+    exact: set[str] = set()
+    try:
+        for group in ("descriptors", "generated_builds", "generated_profiles"):
+            exact.update(str(item["path"]).rstrip("/") for item in trigger[group])
+        exact.update(str(item["path"]).rstrip("/") for item in trigger["readiness_markers"])
+        root_claims = [
+            (str(item["path"]).rstrip("/"), str(item["claim"]))
+            for item in trigger["status_claim_roots"]
+        ]
+    except (KeyError, TypeError) as exc:
+        fail("contract-shape", f"malformed trigger_surface record: {exc}")
+    if "" in exact or any(not root or not claim for root, claim in root_claims):
+        fail("contract-shape", "trigger_surface paths and claims must not be empty")
+    return exact, root_claims
 
 
 def validate_discovery(
@@ -106,28 +270,17 @@ def validate_discovery(
     pinned_handoff: dict[str, object],
 ) -> None:
     if discovery_view(live) != discovery_view(pinned):
-        fail("discovery-drift", "HEAD contract discovery metadata differs from Slice 2 anchor")
-    if live_handoff != pinned_handoff:
+        fail("discovery-drift", "HEAD discovery metadata differs from Slice 2 anchor")
+    live_paths, live_roots = path_metadata(live)
+    pinned_paths, pinned_roots = path_metadata(pinned)
+    if live_paths != pinned_paths or live_roots != pinned_roots:
+        fail("discovery-drift", "HEAD trigger paths or claim roots differ from Slice 2 anchor")
+    if json.dumps(live_handoff, sort_keys=True) != json.dumps(pinned_handoff, sort_keys=True):
         fail("discovery-drift", "HEAD handoff differs from Slice 2 anchor")
 
 
-def path_metadata(
-    contract: dict[str, object],
-) -> tuple[set[str], list[tuple[str, str]]]:
-    trigger = contract["trigger_surface"]
-    exact: set[str] = set()
-    for group in ("descriptors", "generated_builds", "generated_profiles"):
-        exact.update(item["path"] for item in trigger[group])
-    exact.update(item["path"] for item in trigger["readiness_markers"])
-    root_claims = [
-        (item["path"].rstrip("/"), item["claim"])
-        for item in trigger["status_claim_roots"]
-    ]
-    return exact, root_claims
-
-
 def source_or_exact_signal(path: str, exact_paths: set[str]) -> bool:
-    return path == "src/modules/git" or path.startswith("src/modules/git/") or path in exact_paths
+    return path.startswith("src/modules/git/") or path in exact_paths
 
 
 def parse_name_status(raw: bytes) -> list[tuple[str, tuple[str, ...]]]:
@@ -145,45 +298,46 @@ def parse_name_status(raw: bytes) -> list[tuple[str, tuple[str, ...]]]:
         path_count = 2 if status.startswith(("R", "C")) else 1
         if index + path_count > len(fields):
             fail("name-status", f"truncated record for status {status!r}")
-        paths: list[str] = []
-        for field in fields[index : index + path_count]:
-            try:
-                paths.append(field.decode("utf-8"))
-            except UnicodeDecodeError as exc:
-                fail("name-status", f"non-UTF-8 path: {exc}")
+        try:
+            paths = tuple(field.decode("utf-8") for field in fields[index : index + path_count])
+        except UnicodeDecodeError as exc:
+            fail("name-status", f"non-UTF-8 path: {exc}")
         index += path_count
-        records.append((status, tuple(paths)))
+        records.append((status, paths))
     return records
 
 
-def claim_patterns(claims: set[str]) -> tuple[re.Pattern[str], ...]:
-    patterns: list[re.Pattern[str]] = []
-    for claim in sorted(claims):
-        escaped = re.escape(claim)
-        patterns.append(re.compile(rf"^[ \t]*{escaped}[ \t]*:[ \t]*true(?:[ \t]+#.*)?[ \t]*$"))
-        patterns.append(re.compile(rf'^[ \t]*"{escaped}"[ \t]*:[ \t]*true[ \t]*,?[ \t]*$'))
-    return tuple(patterns)
+def under_root(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "/")
 
 
-def added_claim_signal(diff: bytes, patterns: tuple[re.Pattern[str], ...]) -> bool:
+def claim_patterns(claim: str, suffix: str) -> tuple[re.Pattern[str], ...]:
+    escaped = re.escape(claim)
+    if suffix in {".yaml", ".yml"}:
+        return (
+            re.compile(rf"^[ \t]*{escaped}[ \t]*:[ \t]*true(?:[ \t]+#.*)?[ \t]*$"),
+        )
+    if suffix == ".json":
+        return (re.compile(rf'^[ \t]*"{escaped}"[ \t]*:[ \t]*true[ \t]*,?[ \t]*$'),)
+    return ()
+
+
+def blob(repo: Path, revision: str, path: str) -> bytes | None:
+    result = git_run(repo, "show", f"{revision}:{path}")
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def added_claim_signal(before: bytes, after: bytes, claim: str, suffix: str) -> bool:
     try:
-        text = diff.decode("utf-8")
+        old_lines = before.decode("utf-8").splitlines()
+        new_lines = after.decode("utf-8").splitlines()
     except UnicodeDecodeError:
         return False
-    structured_file = False
-    for line in text.splitlines():
-        if line.startswith("+++ "):
-            changed_path = line[4:]
-            if changed_path.startswith("b/"):
-                changed_path = changed_path[2:]
-            structured_file = changed_path.endswith((".json", ".yaml", ".yml"))
-            continue
-        if not structured_file:
-            continue
-        if not line.startswith("+") or line.startswith("+++"):
-            continue
-        candidate = line[1:]
-        if any(pattern.fullmatch(candidate) for pattern in patterns):
+    patterns = claim_patterns(claim, suffix)
+    for line in difflib.ndiff(old_lines, new_lines):
+        if line.startswith("+ ") and any(pattern.fullmatch(line[2:]) for pattern in patterns):
             return True
     return False
 
@@ -208,27 +362,37 @@ def commit_signals(
         commit,
         "--",
     )
+    records = parse_name_status(raw)
     signals: list[tuple[str, str]] = []
-    for status, paths in parse_name_status(raw):
-        for path in paths:
-            if source_or_exact_signal(path, exact_paths):
-                signals.append(("path", f"{status}:{path}"))
-                break
-    for root, claim in root_claims:
-        claim_diff = git(
-            repo,
-            "diff",
-            "--unified=0",
-            "--no-color",
-            "--no-ext-diff",
-            parent,
-            commit,
-            "--",
-            root,
-        )
-        if added_claim_signal(claim_diff, claim_patterns({claim})):
-            signals.append(("status-claim", f"{root}:{claim}"))
+    for status, paths in records:
+        if any(source_or_exact_signal(path, exact_paths) for path in paths):
+            signals.append(("path", f"{status}:{' -> '.join(paths)}"))
+
+        if status.startswith("D"):
+            continue
+        destination = paths[-1]
+        suffix = Path(destination).suffix.lower()
+        if suffix not in {".json", ".yaml", ".yml"}:
+            continue
+        after = blob(repo, commit, destination)
+        if after is None:
+            fail("git-blob", f"cannot read {commit}:{destination}")
+        for root, claim in root_claims:
+            if not under_root(destination, root):
+                continue
+            source = paths[0]
+            source_in_root = under_root(source, root)
+            before = blob(repo, parent, source) if source_in_root else None
+            if added_claim_signal(before or b"", after, claim, suffix):
+                signals.append(("status-claim", f"{root}:{claim}:{destination}"))
     return signals
+
+
+def first_parent(repo: Path, commit: str) -> str:
+    line = git_text(repo, "rev-list", "--parents", "-n", "1", commit).split()
+    if len(line) < 2:
+        fail("git-history", f"commit {commit} has no first parent")
+    return line[1]
 
 
 def scan_history(
@@ -239,13 +403,11 @@ def scan_history(
     exact_paths: set[str],
     root_claims: list[tuple[str, str]],
 ) -> list[tuple[str, str, list[tuple[str, str]]]]:
-    commits_text = git_text(
-        repo, "rev-list", "--first-parent", "--reverse", f"{cutoff}..{head}"
-    )
+    commits_text = git_text(repo, "rev-list", "--topo-order", "--reverse", f"{cutoff}..{head}")
     commits = commits_text.splitlines() if commits_text else []
     found: list[tuple[str, str, list[tuple[str, str]]]] = []
     for commit in commits:
-        parent = git_text(repo, "rev-parse", f"{commit}^1")
+        parent = first_parent(repo, commit)
         signals = commit_signals(
             repo,
             parent,
@@ -259,73 +421,87 @@ def scan_history(
 
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    try:
-        result = subprocess.run(
-            [GIT, "merge-base", "--is-ancestor", ancestor, descendant],
-            cwd=repo,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    except OSError as exc:
-        fail("git-exec", f"cannot execute {GIT}: {exc}")
+    result = git_run(repo, "merge-base", "--is-ancestor", ancestor, descendant)
     if result.returncode not in (0, 1):
         fail("git-ancestry", f"cannot compare {ancestor} to {descendant}")
     return result.returncode == 0
+
+
+def on_first_parent_chain(repo: Path, ancestor: str, descendant: str) -> bool:
+    current = descendant
+    while True:
+        if current == ancestor:
+            return True
+        line = git_text(repo, "rev-list", "--parents", "-n", "1", current).split()
+        if len(line) < 2:
+            return False
+        current = line[1]
 
 
 def enforce_signal_precedence(
     repo: Path, anchor: str, signals: list[tuple[str, str, list[tuple[str, str]]]]
 ) -> None:
     for commit, parent, evidence in signals:
-        if not is_ancestor(repo, anchor, parent):
+        if not on_first_parent_chain(repo, anchor, parent):
+            rendered = ", ".join(f"{kind}:{value}" for kind, value in evidence)
             fail(
                 "git-contract-ordering",
-                f"signal at {commit} does not follow approved Slice 2 contract: "
-                f"{evidence[0][0]}:{evidence[0][1]}",
+                f"signal at {commit} does not follow approved Slice 2 contract: {rendered}",
             )
 
 
 def validate_event(head: str) -> None:
-    event = os.environ.get("GITHUB_EVENT_NAME")
-    ref = os.environ.get("GITHUB_REF")
-    event_sha = os.environ.get("GITHUB_SHA")
-    if not event:
-        return
-    if not event_sha:
-        fail("event-head", "GITHUB_SHA is required for GitHub events")
-    if not ref:
-        fail("event-ref", "GITHUB_REF is required for GitHub events")
-    if event_sha != head:
-        fail("event-head", f"GITHUB_SHA {event_sha} differs from checked-out HEAD {head}")
-    allowed = (
-        event == "push" and ref == "refs/heads/feature/core-modularization"
-    ) or (
-        event == "pull_request" and bool(ref and re.fullmatch(r"refs/pull/[0-9]+/merge", ref))
-    ) or (
-        event == "workflow_dispatch" and ref == "refs/heads/feature/core-modularization"
+    keys = (
+        "GITHUB_EVENT_NAME",
+        "GITHUB_REF",
+        "GITHUB_SHA",
+        "GITHUB_BASE_REF",
+        "GITHUB_HEAD_REF",
     )
-    if not allowed:
-        fail("event-ref", f"unsupported GitHub event/ref pair {event!r}/{ref!r}")
+    context = {key: os.environ.get(key, "") for key in keys}
+    if not any(context.values()):
+        return
+    event = context["GITHUB_EVENT_NAME"]
+    ref = context["GITHUB_REF"]
+    event_sha = context["GITHUB_SHA"]
+    if not event:
+        fail("event-name", "GITHUB_EVENT_NAME is required when GitHub context is present")
+    if not ref:
+        fail("event-ref", "GITHUB_REF is required when GitHub context is present")
+    if not event_sha or event_sha != head:
+        fail("event-head", f"GITHUB_SHA {event_sha!r} differs from checked-out HEAD {head}")
+    if event == "pull_request":
+        if not re.fullmatch(r"refs/pull/[0-9]+/merge", ref):
+            fail("event-ref", f"unsupported pull_request ref {ref!r}")
+        if context["GITHUB_BASE_REF"] != FEATURE_BRANCH:
+            fail("event-base", f"pull request must target {FEATURE_BRANCH}")
+        if not context["GITHUB_HEAD_REF"]:
+            fail("event-head-ref", "GITHUB_HEAD_REF is required for pull requests")
+        return
+    if event in {"push", "workflow_dispatch"} and ref == f"refs/heads/{FEATURE_BRANCH}":
+        return
+    fail("event-ref", f"unsupported GitHub event/ref pair {event!r}/{ref!r}")
 
 
 def validate_ordering(repo: Path) -> int:
-    checker = load_contract_checker()
+    require_repository(repo)
     head = git_text(repo, "rev-parse", "HEAD")
     validate_event(head)
     git(repo, "cat-file", "-e", f"{SLICE2_ANCHOR}^{{commit}}")
     if not is_ancestor(repo, SLICE2_ANCHOR, head):
         fail("slice2-anchor", "approved Slice 2 anchor is not an ancestor of HEAD")
 
-    pinned, pinned_handoff = canonical_metadata(repo, checker)
-    live = checker.load_validated_contract(
-        repo, require_status="roundtable-approved", check_git=True
-    )
-    live_handoff_path = repo / HANDOFF_PATH
-    live_handoff = checker.extract_json_fence(live_handoff_path, "slice3-handoff")
+    validate_trusted_contract(repo)
+    pinned, pinned_handoff = canonical_metadata(repo)
+    live, live_handoff = live_metadata(repo)
     validate_discovery(live, pinned, live_handoff, pinned_handoff)
 
-    cutoff = pinned["historical_cutoff"]["commit"]
+    try:
+        cutoff = str(pinned["historical_cutoff"]["commit"])
+    except (KeyError, TypeError) as exc:
+        fail("contract-shape", f"malformed historical cutoff: {exc}")
+    if not is_ancestor(repo, cutoff, SLICE2_ANCHOR):
+        fail("slice2-anchor", "historical cutoff does not precede the Slice 2 anchor")
     exact_paths, root_claims = path_metadata(pinned)
     signals = scan_history(
         repo,
@@ -355,11 +531,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     try:
-        signal_count = validate_ordering(repo)
+        signals_after_anchor = validate_ordering(repo)
     except (OrderingError, OSError, subprocess.SubprocessError, UnicodeError, ValueError) as exc:
         print(f"check_proposal_ordering: error: {exc}", file=sys.stderr)
         return 1
-    print(f"check_proposal_ordering: ok ({signal_count} post-cutoff signal commit(s); {repo})")
+    print(
+        "check_proposal_ordering: ok "
+        f"({signals_after_anchor} post-cutoff signal commit(s); {repo})"
+    )
     return 0
 
 

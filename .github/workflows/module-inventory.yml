@@ -88,6 +88,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -99,7 +100,17 @@ jobs:
           GITHUB_REF: refs/heads/feature/core-modularization
           GITHUB_SHA: ${{ github.sha }}
         run: python3 -I -S scripts/check_proposal_ordering.py
-      - name: Enforce from a non-repository working directory
+      - name: Validate CWD independence
         run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_proposal_ordering.py"
+      - name: Reject a non-repository config root
+        run: |
+          root=$(mktemp -d)
+          if output=$(python3 -I -S scripts/check_proposal_ordering.py \
+              --config-root "$root" 2>&1); then
+            echo "::error::non-repository config root unexpectedly passed: $output"
+            exit 1
+          fi
+          echo "$output"
+          printf '%s\n' "$output" | grep -q 'rule=config-root'
       - name: Test proposal-ordering failure modes
         run: python3 -I scripts/tests/test_check_proposal_ordering.py -v
