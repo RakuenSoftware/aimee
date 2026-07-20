@@ -8,11 +8,19 @@
 #include "cli_remote.h"
 #include "aimee_client.h"
 #include "aimee_home.h"
+#include "aimee_tls.h"
 #include "config.h" /* AIMEE_BOOTSTRAP_BEARER */
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <fcntl.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
+#include <unistd.h>
+#endif
 #ifdef _WIN32
 #include <direct.h>
 #define AIMEE_MKDIR(p) _mkdir(p)
@@ -100,6 +108,8 @@ static int read_remote_conf(char *url, size_t url_sz, char *token, size_t token_
 
 /* remote_enroll is defined below; forward-declare for the load-time auto-enroll. */
 static int remote_enroll(const char *url, char *out, size_t out_sz, int json_output);
+static int remote_enroll_client_cert(int quiet);
+static int g_remote_mtls_enrolled;
 
 void cli_remote_load_persisted(void)
 {
@@ -123,12 +133,173 @@ void cli_remote_load_persisted(void)
       char strong[256];
       remote_enroll(url, strong, sizeof(strong), 1 /* quiet */);
    }
+   else if (token[0])
+      remote_enroll_client_cert(1 /* quiet; idempotent when already installed */);
 }
 
 static void remote_ca_path(char *out, size_t out_sz)
 {
    snprintf(out, out_sz, "%s/remote-ca.pem", aimee_home());
 }
+
+#ifdef __linux__
+static int write_sync_file(const char *path, const char *data, size_t len, mode_t mode)
+{
+   int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode);
+   if (fd < 0)
+      return -1;
+   size_t off = 0;
+   while (off < len)
+   {
+      ssize_t n = write(fd, data + off, len - off);
+      if (n <= 0)
+      {
+         close(fd);
+         unlink(path);
+         return -1;
+      }
+      off += (size_t)n;
+   }
+   int sync_rc = fsync(fd);
+   int close_rc = close(fd);
+   int rc = sync_rc == 0 && close_rc == 0 ? 0 : -1;
+   if (rc != 0)
+      unlink(path);
+   return rc;
+}
+
+/* Generate the thin-client key locally, submit only its signed CSR, then install
+ * the key/cert with owner-only temp files and atomic renames. */
+static int remote_enroll_client_cert(int quiet)
+{
+   int is_https = 0;
+   if (!aimee_client_remote_active_scheme(NULL, 0, &is_https) || !is_https)
+      return -1;
+   char tls_dir[600], key_tmp[700], cert_tmp[700], key_path[700], cert_path[700];
+   snprintf(tls_dir, sizeof(tls_dir), "%s/tls", aimee_home());
+   ensure_dir_p(tls_dir);
+   unsigned char rnd[8];
+   if (RAND_bytes(rnd, sizeof(rnd)) != 1)
+      return -1;
+   char cn[128];
+   snprintf(cn, sizeof(cn), "thin-%02x%02x%02x%02x%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2],
+            rnd[3], rnd[4], rnd[5], rnd[6], rnd[7]);
+   snprintf(key_tmp, sizeof(key_tmp), "%s/.client.key.%ld.tmp", tls_dir, (long)getpid());
+   snprintf(cert_tmp, sizeof(cert_tmp), "%s/.client.crt.%ld.tmp", tls_dir, (long)getpid());
+   snprintf(key_path, sizeof(key_path), "%s/client.key", tls_dir);
+   snprintf(cert_path, sizeof(cert_path), "%s/client.crt", tls_dir);
+   char existing_cert[700], existing_key[700];
+   int eligible = aimee_tls_client_cert_eligible(aimee_home(), existing_cert,
+                                                  sizeof(existing_cert), existing_key,
+                                                  sizeof(existing_key));
+   if (eligible == 1)
+      return 0;
+   struct stat key_st, cert_st;
+   int have_key = lstat(key_path, &key_st) == 0;
+   int have_cert = lstat(cert_path, &cert_st) == 0;
+   if (have_key || have_cert)
+      return -1; /* preserve partial evidence; connection path fails closed */
+
+   EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+   EVP_PKEY *key = NULL;
+   X509_REQ *req = NULL;
+   BIO *kb = NULL, *rb = NULL;
+   char *key_pem = NULL, *csr_pem = NULL;
+   int rc = -1;
+   if (!kctx || EVP_PKEY_keygen_init(kctx) != 1 ||
+       EVP_PKEY_CTX_set_ec_paramgen_curve_nid(kctx, NID_X9_62_prime256v1) != 1 ||
+       EVP_PKEY_keygen(kctx, &key) != 1 || !(req = X509_REQ_new()) ||
+       X509_REQ_set_version(req, 0) != 1)
+      goto done;
+   X509_NAME *name = X509_REQ_get_subject_name(req);
+   if (!name || X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC,
+                                            (const unsigned char *)cn, -1, -1, 0) != 1 ||
+       X509_REQ_set_pubkey(req, key) != 1 || X509_REQ_sign(req, key, EVP_sha256()) <= 0 ||
+       !(kb = BIO_new(BIO_s_mem())) || !(rb = BIO_new(BIO_s_mem())) ||
+       PEM_write_bio_PrivateKey(kb, key, NULL, NULL, 0, NULL, NULL) != 1 ||
+       PEM_write_bio_X509_REQ(rb, req) != 1)
+      goto done;
+   BUF_MEM *km = NULL, *rm = NULL;
+   BIO_get_mem_ptr(kb, &km);
+   BIO_get_mem_ptr(rb, &rm);
+   if (!km || !rm || !(key_pem = strndup(km->data, km->length)) ||
+       !(csr_pem = strndup(rm->data, rm->length)) ||
+       write_sync_file(key_tmp, key_pem, km->length, 0600) != 0)
+      goto done;
+
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      goto done;
+   cJSON_AddStringToObject(request, "cn", cn);
+   cJSON_AddStringToObject(request, "csr", csr_pem);
+   char *body = cJSON_PrintUnformatted(request);
+   cJSON_Delete(request);
+   int status = 0;
+   if (quiet)
+      aimee_client_suppress_conn_errors(1);
+   char *response = body ? aimee_client_request("POST", "/v1/cert/sign", body, &status) : NULL;
+   if (quiet)
+      aimee_client_suppress_conn_errors(0);
+   free(body);
+   cJSON *root = response ? cJSON_Parse(response) : NULL;
+   free(response);
+   cJSON *cert = root ? cJSON_GetObjectItemCaseSensitive(root, "cert") : NULL;
+   BIO *cert_bio = cert && cJSON_IsString(cert) ? BIO_new_mem_buf(cert->valuestring, -1) : NULL;
+   X509 *leaf = cert_bio ? PEM_read_bio_X509(cert_bio, NULL, NULL, NULL) : NULL;
+   int key_matches = leaf && X509_check_private_key(leaf, key) == 1;
+   X509_free(leaf);
+   BIO_free(cert_bio);
+   if (status != 200 || !cJSON_IsString(cert) || !cert->valuestring || !key_matches ||
+       write_sync_file(cert_tmp, cert->valuestring, strlen(cert->valuestring), 0600) != 0)
+   {
+      cJSON_Delete(root);
+      goto done;
+   }
+   cJSON_Delete(root);
+   if (rename(cert_tmp, cert_path) != 0)
+      goto done;
+   if (rename(key_tmp, key_path) != 0)
+   {
+      unlink(cert_path);
+      goto done;
+   }
+   int dirfd = open(tls_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+   if (dirfd < 0 || fsync(dirfd) != 0)
+   {
+      if (dirfd >= 0)
+         close(dirfd);
+      unlink(key_path);
+      unlink(cert_path);
+      goto done;
+   }
+   close(dirfd);
+   if (!quiet)
+      printf("  mTLS: enrolled individual client certificate %s\n", cn);
+   rc = 0;
+done:
+   if (rc != 0)
+   {
+      unlink(key_tmp);
+      unlink(cert_tmp);
+   }
+   if (key_pem)
+      OPENSSL_cleanse(key_pem, strlen(key_pem));
+   free(key_pem);
+   free(csr_pem);
+   BIO_free(kb);
+   BIO_free(rb);
+   X509_REQ_free(req);
+   EVP_PKEY_free(key);
+   EVP_PKEY_CTX_free(kctx);
+   return rc;
+}
+#else
+static int remote_enroll_client_cert(int quiet)
+{
+   (void)quiet;
+   return -1;
+}
+#endif
 
 /* Probe GET /v1/health over the currently-active remote (verifying TLS). Returns
  * 1 when the server answers (a real HTTP status — so the chain + hostname/SAN
@@ -188,6 +359,7 @@ static int remote_pin_cert(const char *url, int json_output)
  * in place on disk and in effect. */
 static int remote_enroll(const char *url, char *out, size_t out_sz, int json_output)
 {
+   g_remote_mtls_enrolled = 0;
    int st = 0;
    char *body = aimee_client_request("POST", "/v1/api/rotate_bearer", "{}", &st);
    if (!body || st != 200)
@@ -226,9 +398,13 @@ static int remote_enroll(const char *url, char *out, size_t out_sz, int json_out
       fclose(f);
    }
    aimee_client_set_remote(url, out);
+   int mtls_enrolled = remote_enroll_client_cert(json_output);
+   g_remote_mtls_enrolled = mtls_enrolled == 0;
    if (!json_output)
       printf("  enrolled: rotated the one-time bootstrap token to a strong per-deployment "
              "bearer\n            (the bootstrap token no longer works against this server).\n");
+   if (mtls_enrolled != 0 && !json_output)
+      fprintf(stderr, "  mTLS: client certificate enrollment was not completed\n");
    return 0;
 }
 
@@ -283,16 +459,23 @@ static int remote_set(const char *url, const char *token, int json_output)
     * a failure (older server without api.rotate_bearer, already enrolled) leaves the
     * bootstrap token configured and is reported by remote_enroll. */
    int enrolled = 0;
+   int mtls_enrolled = 0;
    char strong_token[256] = "";
    if (verified && token && strcmp(token, AIMEE_BOOTSTRAP_BEARER) == 0 &&
        remote_enroll(url, strong_token, sizeof(strong_token), json_output) == 0)
+   {
       enrolled = 1;
+      mtls_enrolled = g_remote_mtls_enrolled;
+   }
+   else if (verified && token && token[0] && remote_enroll_client_cert(json_output) == 0)
+      mtls_enrolled = 1;
 
    if (json_output)
       printf("{\"ok\":true,\"url\":\"%s\",\"token\":%s,\"pinned\":%s,\"verified\":%s,"
-             "\"enrolled\":%s}\n",
+             "\"enrolled\":%s,\"mtls_enrolled\":%s}\n",
              url, token && *token ? "true" : "false", pinned ? "true" : "false",
-             verified ? "true" : "false", enrolled ? "true" : "false");
+             verified ? "true" : "false", enrolled ? "true" : "false",
+             mtls_enrolled ? "true" : "false");
    else
    {
       printf("Remote server set to %s%s\n", url, token && *token ? " (with token)" : "");
