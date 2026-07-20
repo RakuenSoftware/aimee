@@ -38,7 +38,7 @@ int kb_egress_admit_dispatch(const kb_egress_admission_t *a, kb_egress_dispatch_
    }
    int64_t audit_id = 0;
    if (db2_org_token_audit_start(a->request_id, a->origin_cn, a->actor_issuer,
-                                 a->actor_subject, a->team, a->has_project ? a->project : 0,
+                                 a->actor_subject, a->team, a->has_project, a->project,
                                  a->model, a->pricing_version, a->session_id,
                                  a->delegation_id, &audit_id) != 0)
    {
