@@ -3,7 +3,9 @@
 #include "kb_http_insights.h"
 #include "kb_http_models.h"
 #include "kb_http_rate.h"
+#include "kb/http/kb_http_servers.h"
 #include "kb_http_telemetry.h"
+#include "db2/server_registry.h"
 
 int kb_http_telemetry_token_route(const char *method, const char *path, const char *query_string,
                                   const char *body, const char *presented, char *out_buf,
@@ -74,5 +76,26 @@ int kb_http_telemetry_route(const char *method, const char *path, const char *qu
    (void)body;
    (void)out_buf;
    (void)out_cap;
+   return -1;
+}
+
+int kb_http_servers_route(const char *method, const char *path, const char *query_string,
+                          char *out_buf, int out_cap)
+{
+   (void)method;
+   (void)path;
+   (void)query_string;
+   (void)out_buf;
+   (void)out_cap;
+   return -1;
+}
+
+int db2_server_registry_heartbeat(const char *server_id, const char *endpoint,
+                                  const char *cert_fingerprint, const char *capabilities_json)
+{
+   (void)server_id;
+   (void)endpoint;
+   (void)cert_fingerprint;
+   (void)capabilities_json;
    return -1;
 }
