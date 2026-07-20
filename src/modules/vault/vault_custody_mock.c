@@ -18,13 +18,17 @@ static int mock_get_kek(void *vctx, uint8_t kek[VAULT_KEK_LEN])
    vault_custody_mock_ctx_t *ctx = vctx;
    if (!kek || !ctx)
       return -1;
+   pthread_mutex_lock(&ctx->mu);
+   int rc = 0;
    if (ctx->sealed || !ctx->kek_ready)
    {
       OPENSSL_cleanse(kek, VAULT_KEK_LEN); /* sealed anchor yields no key (P7 §3) */
-      return -1;
+      rc = -1;
    }
-   memcpy(kek, ctx->kek, VAULT_KEK_LEN);
-   return 0;
+   else
+      memcpy(kek, ctx->kek, VAULT_KEK_LEN);
+   pthread_mutex_unlock(&ctx->mu);
+   return rc;
 }
 
 /* The mock doesn't rotate — that rides with the real anchor + CA-key slice. */
@@ -39,14 +43,22 @@ static int mock_rotate(void *vctx, const char *server_principal, int *out_princi
    (void)backup_path;
    (void)backup_path_len;
    if (errbuf && errlen)
+   {
       strncpy(errbuf, "mock custody does not support rotation", errlen - 1);
+      errbuf[errlen - 1] = '\0'; /* strncpy does not NUL-terminate on truncation */
+   }
    return -1;
 }
 
 static int mock_is_sealed(void *vctx)
 {
    vault_custody_mock_ctx_t *ctx = vctx;
-   return ctx ? ctx->sealed : 1;
+   if (!ctx)
+      return 1;
+   pthread_mutex_lock(&ctx->mu);
+   int s = ctx->sealed;
+   pthread_mutex_unlock(&ctx->mu);
+   return s;
 }
 
 /* Model an anchor's Decrypt: condense the opaque unseal secret to a 32-byte root
@@ -60,16 +72,22 @@ static int mock_unseal(void *vctx, const void *params, size_t len)
 
    uint8_t root[VAULT_ROOT_KEY_LEN];
    SHA256((const unsigned char *)params, len, root); /* secret -> 32-byte root */
+   pthread_mutex_lock(&ctx->mu);
    int rc = vault_kek_derive(root, sizeof(root), MOCK_KEK_SALT, sizeof(MOCK_KEK_SALT), ctx->kek);
    OPENSSL_cleanse(root, sizeof(root));
    if (rc != 0)
    {
+      /* Fail CLOSED: derive failed -> no usable KEK AND re-seal, so is_sealed()
+       * stays consistent with get_kek() (never unsealed-without-KEK). */
       OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek));
       ctx->kek_ready = 0;
+      ctx->sealed = 1;
+      pthread_mutex_unlock(&ctx->mu);
       return -1;
    }
    ctx->kek_ready = 1;
    ctx->sealed = 0;
+   pthread_mutex_unlock(&ctx->mu);
    return 0;
 }
 
@@ -78,14 +96,17 @@ static int mock_seal(void *vctx)
    vault_custody_mock_ctx_t *ctx = vctx;
    if (!ctx)
       return -1;
+   pthread_mutex_lock(&ctx->mu);
    OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek)); /* flush the derived KEK */
    ctx->kek_ready = 0;
    ctx->sealed = 1;
+   pthread_mutex_unlock(&ctx->mu);
    return 0;
 }
 
 /* The singleton mock ctx starts SEALED (get_kek fails until unseal). */
-static vault_custody_mock_ctx_t g_mock_ctx = {.sealed = 1, .kek_ready = 0};
+static vault_custody_mock_ctx_t g_mock_ctx = {
+    .mu = PTHREAD_MUTEX_INITIALIZER, .sealed = 1, .kek_ready = 0};
 
 static const vault_custody_provider_t g_mock_provider = {
     .name = "mock",
@@ -104,7 +125,9 @@ const vault_custody_provider_t *vault_custody_mock_provider(void)
 
 void vault_custody_mock_reset(void)
 {
+   pthread_mutex_lock(&g_mock_ctx.mu);
    OPENSSL_cleanse(g_mock_ctx.kek, sizeof(g_mock_ctx.kek));
    g_mock_ctx.kek_ready = 0;
    g_mock_ctx.sealed = 1;
+   pthread_mutex_unlock(&g_mock_ctx.mu);
 }

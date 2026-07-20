@@ -2,6 +2,7 @@
 #define DEC_VAULT_CUSTODY_MOCK_H 1
 
 #include <stdint.h>
+#include <pthread.h>
 #include "vault_crypto.h"   /* VAULT_KEK_LEN */
 #include "vault_internal.h" /* vault_custody_provider_t */
 
@@ -18,8 +19,10 @@
 
 typedef struct
 {
-   int sealed;    /* 1 = sealed (get_kek fails); starts 1 */
-   int kek_ready; /* 1 once a KEK has been derived by unseal */
+   pthread_mutex_t mu; /* guards sealed/kek_ready/kek so concurrent get_kek/seal/
+                        * unseal cannot race (e.g. copy a KEK mid-seal). */
+   int sealed;         /* 1 = sealed (get_kek fails); starts 1 */
+   int kek_ready;      /* 1 once a KEK has been derived by unseal */
    uint8_t kek[VAULT_KEK_LEN];
 } vault_custody_mock_ctx_t;
 
