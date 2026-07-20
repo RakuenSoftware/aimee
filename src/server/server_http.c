@@ -1551,6 +1551,40 @@ void handle_conn(int fd, int is_tcp)
       return;
    }
 
+   /* P8a (invariant #5): per-request DURABLE client-cert revocation/expiry re-check.
+    * mtls_verify_cb runs ONLY at handshake — OpenSSL cannot re-run it on a keep-alive
+    * connection — so a cert revoked via cert.revoke AFTER its handshake would keep
+    * authorizing on the open connection. This MUST run BEFORE every data-serving
+    * dispatch (the SSE, native streaming-chat, shadow-mirror, and unary route paths
+    * all follow), so it is placed here, right after the auth/caps gates, NOT after
+    * the later identity-capture (which several streaming paths early-return before).
+    * Gate on the actual verified peer cert (server_tls_peer_identity yields a serial),
+    * independent of how identity is later resolved: a bearer/UDS conn has no client
+    * cert and is skipped; a verified client cert is re-checked against the DURABLE DB
+    * row (NOT the g_revoked snapshot) on EVERY request. Non-VALID (revoked/expired/
+    * unknown) or an unavailable authority (ERROR) -> 403 before any dispatch. */
+   if (server_conn_io_has_ssl(fd))
+   {
+      char rc_cn[256] = "", rc_serial[80] = "";
+      if (server_tls_peer_identity(server_conn_io_get_ssl(fd), rc_cn, sizeof(rc_cn), rc_serial,
+                                   sizeof(rc_serial)) &&
+          rc_serial[0])
+      {
+         pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
+         if (cs != PKI_CERT_VALID)
+         {
+            LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
+                     path, pki_cert_status_str(cs), rc_serial, request_id);
+            send_response(
+                fd, 403,
+                "{\"error\":{\"message\":\"client certificate is no longer valid "
+                "(revoked, expired, or unrecognized)\",\"type\":\"authentication_error\"}}",
+                request_id);
+            return;
+         }
+      }
+   }
+
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */
    {
@@ -1807,50 +1841,6 @@ void handle_conn(int fd, int is_tcp)
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so
     * a reused worker thread cannot leak it into the next request. */
    server_http_identity_capture(fd, is_tcp, buf);
-   /* P8a (invariant #5): per-request DURABLE revocation/expiry re-check for an
-    * mTLS client cert. mtls_verify_cb runs ONLY at handshake — OpenSSL cannot
-    * re-run it on a keep-alive connection — so a cert revoked via cert.revoke
-    * AFTER its handshake would keep authorizing on the open connection. Re-extract
-    * the peer serial (same server_tls_peer_identity path pki_certs.serial was
-    * written from) and consult the durable DB row (NOT the g_revoked snapshot) on
-    * EVERY request. Non-VALID -> 403 before routing. FAIL-CLOSED: an
-    * ATTEST_MTLS_CLIENT conn whose serial cannot be re-extracted, or whose
-    * revocation authority is unavailable (ERROR), is refused too. A non-mTLS conn
-    * (bearer/UDS/other) is unaffected. */
-   if (server_http_identity_transport() == ATTEST_MTLS_CLIENT)
-   {
-      char rc_cn[256] = "", rc_serial[80] = "";
-      pki_cert_status_t cs;
-      if (!server_tls_peer_identity(server_conn_io_get_ssl(fd), rc_cn, sizeof(rc_cn), rc_serial,
-                                    sizeof(rc_serial)) ||
-          !rc_serial[0])
-      {
-         LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: no serial) req_id=%s", method, path,
-                  request_id);
-         send_response(fd, 403,
-                       "{\"error\":\"client certificate not valid (revoked/expired/unknown)\"}",
-                       request_id);
-         g_rpc_conn_caps = CAPS_READ_ONLY;
-         server_http_identity_clear();
-         free(resp);
-         free(body);
-         return;
-      }
-      cs = pki_cert_check(rc_serial, time(NULL));
-      if (cs != PKI_CERT_VALID)
-      {
-         LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
-                  path, pki_cert_status_str(cs), rc_serial, request_id);
-         send_response(fd, 403,
-                       "{\"error\":\"client certificate not valid (revoked/expired/unknown)\"}",
-                       request_id);
-         g_rpc_conn_caps = CAPS_READ_ONLY;
-         server_http_identity_clear();
-         free(resp);
-         free(body);
-         return;
-      }
-   }
    server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;

@@ -153,11 +153,6 @@ const char *server_http_identity_principal(void)
    return tl_principal;
 }
 
-attested_transport_t server_http_identity_transport(void)
-{
-   return tl_transport;
-}
-
 void server_http_identity_apply(server_conn_t *conn)
 {
    if (!conn)
