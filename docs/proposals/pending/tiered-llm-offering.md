@@ -16,7 +16,7 @@
 | **P4** Budgets + rate limits | ✅ done | **P4a** budget reservation core, **P4b** keyed rate limiter (both concurrency-proven) | — |
 | **P5** OIDC control plane | 🟡 integration | authenticated management route, registry/heartbeat, mTLS client propagation | live two-node server↔kb topology + OIDC propagation |
 | **P6** Bedrock + vendor breadth | 🟡 pure cores done | **P6a** SigV4/STS auth, **P6b** eventstream decoder, **P6c-catalog** routing+validation, **P6c-ir** Converse↔IR, **P6c-stream** stream→delta | **P6c-egress** driver dispatch + native InvokeModel + pricing rows |
-| **P7** Hardened kb vault | 🟡 integration | seal/PolicyNV, WORM key-use, PKCS#11, KMS helper, CA-key custody, DEK re-wrap, signed-HWM + crash-resumable rotation core | operational provision/probe/revoke/retire driver, steady-state HWM enforcement, whole-vault TPM reseal maintenance |
+| **P7** Hardened kb vault | 🟡 integration | seal/PolicyNV, WORM key-use, PKCS#11, KMS helper, CA-key custody, DEK re-wrap, signed-HWM + crash-resumable rotation core, fenced provision/probe/revoke/retire driver | steady-state HWM enforcement, compromise admission barrier, whole-vault TPM reseal maintenance |
 | **P8** thin-client mTLS | 🟡 partial | **P8a** per-request durable cert revocation (invariant #5) | **P8b/c** client-cert presentation + ramp + enrollment |
 | **P9** Telemetry tiering | 🟡 partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
 | **P10** Shared vault core | ✅ done | core extraction, kb Postgres store, custody selection + seal barrier | — (hardening tracked under P7) |

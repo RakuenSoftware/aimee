@@ -1,5 +1,10 @@
 # P7 rotation operations: fenced vendor workflow
 
+- **State:** completed (2026-07-20).
+- **Evidence:** local build/lint/unit and GCC ASAN+UBSAN; real PG17.10 schema,
+  RLS, 12-worker fencing, expiry takeover, and stale-winner gates on CT103;
+  signed mock-KMS HWM plus lost-response mock-vendor recovery on CT260.
+
 ## Scope
 
 Compose the delivered anchor-authoritative rotation core into a vendor-neutral,

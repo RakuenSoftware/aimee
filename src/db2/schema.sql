@@ -2628,6 +2628,13 @@ CREATE TABLE IF NOT EXISTS org_vault_rotation (
                     ('provision','staged','probed','activating','activated','revoked','retired','failed')),
   compromise      BOOLEAN NOT NULL DEFAULT false,
   hwm_attestation BYTEA,
+  old_vendor_ref  TEXT NOT NULL DEFAULT '' CHECK (char_length(old_vendor_ref) <= 512),
+  new_vendor_ref  TEXT NOT NULL DEFAULT '' CHECK (char_length(new_vendor_ref) <= 512),
+  revoke_receipt  TEXT NOT NULL DEFAULT '' CHECK (char_length(revoke_receipt) <= 512),
+  failure_phase   TEXT NOT NULL DEFAULT '' CHECK (char_length(failure_phase) <= 32),
+  claim_owner     TEXT NOT NULL DEFAULT '' CHECK (char_length(claim_owner) <= 200),
+  claim_token     BIGINT NOT NULL DEFAULT 0 CHECK (claim_token >= 0),
+  claim_until     TIMESTAMPTZ,
   last_error      TEXT NOT NULL DEFAULT '' CHECK (char_length(last_error) <= 1000),
   created_at      TEXT NOT NULL DEFAULT (pg_now_text()),
   updated_at      TEXT NOT NULL DEFAULT (pg_now_text()),
@@ -2637,6 +2644,33 @@ CREATE TABLE IF NOT EXISTS org_vault_rotation (
 ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_state_check;
 ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_state_check CHECK (state IN
   ('provision','staged','probed','activating','activated','revoked','retired','failed'));
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS old_vendor_ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS new_vendor_ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS revoke_receipt TEXT NOT NULL DEFAULT '';
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS failure_phase TEXT NOT NULL DEFAULT '';
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS claim_owner TEXT NOT NULL DEFAULT '';
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS claim_token BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE org_vault_rotation ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ;
+-- Keep upgraded databases equivalent to fresh installs: CREATE TABLE IF NOT EXISTS
+-- does not add the new column constraints to an existing P7 core table.
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_old_vendor_ref_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_old_vendor_ref_check
+  CHECK (char_length(old_vendor_ref) <= 512);
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_new_vendor_ref_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_new_vendor_ref_check
+  CHECK (char_length(new_vendor_ref) <= 512);
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_revoke_receipt_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_revoke_receipt_check
+  CHECK (char_length(revoke_receipt) <= 512);
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_failure_phase_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_failure_phase_check
+  CHECK (char_length(failure_phase) <= 32);
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_claim_owner_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_claim_owner_check
+  CHECK (char_length(claim_owner) <= 200);
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_claim_token_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_claim_token_check
+  CHECK (claim_token >= 0);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_active_slot
   ON org_vault_rotation(principal, agent, cred)
   WHERE state <> 'retired';
@@ -2844,13 +2878,19 @@ BEGIN
     json_build_object('rotation_id',r.id,'version',r.to_version)::text);
 END; $$;
 
+-- The ops slice extends the TABLE return shape. PostgreSQL cannot change OUT
+-- parameters through CREATE OR REPLACE, so an in-place P7-core upgrade must
+-- drop this read facade before recreating it with the extended non-secret row.
+DROP FUNCTION IF EXISTS org_vault_rotation_get(BIGINT);
 CREATE OR REPLACE FUNCTION org_vault_rotation_get(p_rotation_id BIGINT)
 RETURNS TABLE(id BIGINT,key_id TEXT,principal TEXT,team_id BIGINT,agent TEXT,cred TEXT,
   from_version BIGINT,to_version BIGINT,state TEXT,compromise BOOLEAN,hwm_attestation BYTEA,
-  last_error TEXT)
+  last_error TEXT,old_vendor_ref TEXT,new_vendor_ref TEXT,revoke_receipt TEXT,
+  failure_phase TEXT,claim_owner TEXT,claim_token BIGINT,claim_until TIMESTAMPTZ)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT r.id,r.key_id,r.principal,r.team_id,r.agent,r.cred,r.from_version,r.to_version,
-         r.state,r.compromise,r.hwm_attestation,r.last_error
+         r.state,r.compromise,r.hwm_attestation,r.last_error,r.old_vendor_ref,r.new_vendor_ref,
+         r.revoke_receipt,r.failure_phase,r.claim_owner,r.claim_token,r.claim_until
     FROM org_vault_rotation r
    WHERE r.id=p_rotation_id
      AND (kb_principal_is_admin() OR
@@ -2858,6 +2898,264 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
            (SELECT team FROM kb_team_membership
              WHERE identity_key=current_setting('aimee.principal',true))));
 $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_claim(
+  p_actor TEXT,p_rotation_id BIGINT,p_expected TEXT,p_owner TEXT,p_ttl_seconds INTEGER
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE; v_token BIGINT;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_expected,'')='' OR COALESCE(p_owner,'')='' OR
+     char_length(p_owner)>200 OR p_ttl_seconds NOT BETWEEN 5 AND 300 THEN
+    RAISE EXCEPTION 'org_vault_rotation_claim: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_claim: unknown rotation'; END IF;
+  IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_claim: not authorized' USING ERRCODE='42501';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF r.state<>p_expected THEN
+    RAISE EXCEPTION 'org_vault_rotation_claim: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF r.claim_owner<>'' AND r.claim_until>clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_claim: already claimed' USING ERRCODE='40001';
+  END IF;
+  IF r.claim_token=9223372036854775807 THEN
+    RAISE EXCEPTION 'org_vault_rotation_claim: token exhausted' USING ERRCODE='22003';
+  END IF;
+  UPDATE org_vault_rotation SET claim_owner=p_owner,claim_token=claim_token+1,
+    claim_until=clock_timestamp()+make_interval(secs=>p_ttl_seconds),updated_at=pg_now_text()
+    WHERE id=r.id RETURNING claim_token INTO v_token;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.claim',r.key_id,'allow',
+    json_build_object('rotation_id',r.id,'state',r.state,'claim_token',v_token)::text);
+  RETURN v_token;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_heartbeat(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_ttl_seconds INTEGER
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token<1 OR
+     p_ttl_seconds NOT BETWEEN 5 AND 300 THEN
+    RAISE EXCEPTION 'org_vault_rotation_heartbeat: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_heartbeat: not authorized' USING ERRCODE='42501';
+  END IF;
+  UPDATE org_vault_rotation SET claim_until=clock_timestamp()+make_interval(secs=>p_ttl_seconds),
+    updated_at=pg_now_text() WHERE id=p_rotation_id AND claim_owner=p_owner AND
+    claim_token=p_token AND claim_until>clock_timestamp();
+  IF FOUND THEN
+    PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.heartbeat',r.key_id,'allow',
+      json_build_object('rotation_id',r.id,'claim_token',p_token)::text);
+  END IF;
+  RETURN FOUND;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_release(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 THEN
+    RAISE EXCEPTION 'org_vault_rotation_release: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_release: not authorized' USING ERRCODE='42501';
+  END IF;
+  UPDATE org_vault_rotation SET claim_owner='',claim_until=NULL,updated_at=pg_now_text()
+    WHERE id=p_rotation_id AND claim_owner=p_owner AND claim_token=p_token;
+  IF FOUND THEN
+    PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.release',r.key_id,'allow',
+      json_build_object('rotation_id',r.id,'claim_token',p_token)::text);
+  END IF;
+  RETURN FOUND;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_checkpoint_old_ref(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_old_ref TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 OR
+     COALESCE(p_old_ref,'')='' OR char_length(p_old_ref)>512 THEN
+    RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: invalid ref' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.state<>'provision' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: stale claim' USING ERRCODE='40001';
+  END IF;
+  IF r.old_vendor_ref<>'' AND r.old_vendor_ref<>p_old_ref THEN
+    RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: replay mismatch' USING ERRCODE='40001';
+  END IF;
+  UPDATE org_vault_rotation SET old_vendor_ref=p_old_ref,updated_at=pg_now_text() WHERE id=r.id;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.old_ref',r.key_id,'allow',
+    json_build_object('rotation_id',r.id,'claim_token',p_token)::text);
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_stage_claimed(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_new_ref TEXT,
+  p_wrapped_dek BYTEA,p_nonce BYTEA,p_ciphertext BYTEA,p_tag BYTEA
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE; v_version BIGINT;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 OR
+     COALESCE(p_new_ref,'')='' OR char_length(p_new_ref)>512 OR p_wrapped_dek IS NULL OR
+     octet_length(p_wrapped_dek)<>40 OR p_nonce IS NULL OR octet_length(p_nonce)<>12 OR
+     p_ciphertext IS NULL OR octet_length(p_ciphertext) NOT BETWEEN 1 AND 4096 OR
+     p_tag IS NULL OR octet_length(p_tag)<>16 THEN
+    RAISE EXCEPTION 'org_vault_rotation_stage_claimed: invalid ref' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_stage_claimed: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.state<>'provision' OR r.old_vendor_ref='' OR r.claim_owner<>p_owner OR
+     r.claim_token<>p_token OR r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_stage_claimed: stale claim' USING ERRCODE='40001';
+  END IF;
+  v_version := org_vault_rotation_stage(p_actor,p_rotation_id,p_wrapped_dek,p_nonce,p_ciphertext,p_tag);
+  UPDATE org_vault_rotation SET new_vendor_ref=p_new_ref,claim_owner='',claim_until=NULL,
+    updated_at=pg_now_text() WHERE id=p_rotation_id;
+  RETURN v_version;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_probe_admit(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_operation_key TEXT
+) RETURNS TABLE(version BIGINT,wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 OR
+     COALESCE(p_operation_key,'')='' OR char_length(p_operation_key)>200 THEN
+    RAISE EXCEPTION 'org_vault_rotation_probe_admit: invalid operation key' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_probe_admit: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.state<>'staged' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_probe_admit: stale claim' USING ERRCODE='40001';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM kb_audit_event WHERE action='vault.rotation.probe_use' AND
+      subject=p_operation_key) THEN
+    PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.probe_use',p_operation_key,'allow',
+      json_build_object('rotation_id',r.id,'version',r.to_version)::text);
+  END IF;
+  RETURN QUERY SELECT s.version,s.wrapped_dek,s.nonce,s.ciphertext,s.tag
+    FROM org_vault_secret s WHERE s.principal=r.principal AND s.agent=r.agent AND
+      s.cred=r.cred AND s.version=r.to_version AND s.hwm_attestation IS NULL;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_transition_claimed(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_expected TEXT,p_next TEXT,
+  p_receipt TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 OR
+     COALESCE(p_expected,'')='' OR COALESCE(p_next,'')='' OR
+     char_length(COALESCE(p_receipt,''))>512 THEN
+    RAISE EXCEPTION 'org_vault_rotation_transition_claimed: receipt too long' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_transition_claimed: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.state<>p_expected OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_transition_claimed: stale claim' USING ERRCODE='40001';
+  END IF;
+  IF p_expected='activated' AND p_next='revoked' AND COALESCE(p_receipt,'')='' THEN
+    RAISE EXCEPTION 'org_vault_rotation_transition_claimed: revoke evidence required'
+      USING ERRCODE='22023';
+  END IF;
+  IF p_expected='revoked' AND p_next='retired' AND r.revoke_receipt='' THEN
+    RAISE EXCEPTION 'org_vault_rotation_transition_claimed: revoke evidence missing'
+      USING ERRCODE='40001';
+  END IF;
+  PERFORM org_vault_rotation_transition(p_actor,p_rotation_id,p_expected,p_next,'');
+  UPDATE org_vault_rotation SET revoke_receipt=CASE WHEN COALESCE(p_receipt,'')=''
+      THEN revoke_receipt ELSE p_receipt END,claim_owner='',claim_until=NULL,updated_at=pg_now_text()
+    WHERE id=p_rotation_id;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_fail_claimed(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_expected TEXT,p_phase TEXT,
+  p_error TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 OR
+     p_expected NOT IN ('provision','staged') OR p_phase NOT IN ('provision','probe') OR
+     char_length(COALESCE(p_error,''))>1000 THEN
+    RAISE EXCEPTION 'org_vault_rotation_fail_claimed: invalid phase' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_fail_claimed: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.state<>p_expected OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_fail_claimed: stale claim' USING ERRCODE='40001';
+  END IF;
+  PERFORM org_vault_rotation_transition(p_actor,p_rotation_id,p_expected,'failed',p_error);
+  UPDATE org_vault_rotation SET failure_phase=p_phase,claim_owner='',claim_until=NULL,
+    updated_at=pg_now_text() WHERE id=p_rotation_id;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rotation_remediate(
+  p_actor TEXT,p_rotation_id BIGINT,p_owner TEXT,p_token BIGINT,p_anchor_version BIGINT,
+  p_evidence TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_vault_rotation%ROWTYPE; v_cur BIGINT; v_bad BOOLEAN;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR COALESCE(p_owner,'')='' OR p_token IS NULL OR p_token<1 OR
+     p_anchor_version IS NULL OR COALESCE(p_evidence,'')='' OR char_length(p_evidence)>512 THEN
+    RAISE EXCEPTION 'org_vault_rotation_remediate: evidence required' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_remediate: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.state<>'failed' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() OR p_anchor_version<>r.from_version THEN
+    RAISE EXCEPTION 'org_vault_rotation_remediate: unsafe state' USING ERRCODE='40001';
+  END IF;
+  SELECT version INTO v_cur FROM org_vault_current WHERE principal=r.principal AND
+    agent=r.agent AND cred=r.cred;
+  IF v_cur<>r.from_version THEN
+    RAISE EXCEPTION 'org_vault_rotation_remediate: current pointer changed' USING ERRCODE='40001';
+  END IF;
+  SELECT EXISTS(SELECT 1 FROM org_vault_secret WHERE principal=r.principal AND agent=r.agent AND
+    cred=r.cred AND version=r.to_version AND hwm_attestation IS NOT NULL) INTO v_bad;
+  IF v_bad THEN
+    RAISE EXCEPTION 'org_vault_rotation_remediate: staged row is attested' USING ERRCODE='40001';
+  END IF;
+  DELETE FROM org_vault_secret WHERE principal=r.principal AND agent=r.agent AND cred=r.cred AND
+    version=r.to_version AND hwm_attestation IS NULL;
+  UPDATE org_vault_rotation SET state='retired',revoke_receipt=p_evidence,claim_owner='',
+    claim_until=NULL,updated_at=pg_now_text() WHERE id=r.id;
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.remediate',r.key_id,'allow',
+    json_build_object('rotation_id',r.id,'failure_phase',r.failure_phase)::text);
+END; $$;
 
 -- These SECURITY DEFINER functions are never PUBLIC; EXECUTE is granted to the runtime
 -- role out of band in schema_grants.sql (hardened tier only).
@@ -2879,6 +3177,15 @@ REVOKE ALL ON FUNCTION org_vault_rotation_stage(TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BY
 REVOKE ALL ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rotation_get(BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_claim(TEXT,BIGINT,TEXT,TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_heartbeat(TEXT,BIGINT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_release(TEXT,BIGINT,TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_checkpoint_old_ref(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_stage_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_probe_admit(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
 
 -- ============================================================================
 -- P2a ORG MODEL CATALOG + ENTITLEMENT (tiered-llm-p2a, catalog-only). The org's
