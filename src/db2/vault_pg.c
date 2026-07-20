@@ -79,6 +79,7 @@ static int pg_scalar_i64(const char *sql, const char *a1, const char *a2, const 
    void *conn = db2_conn();
    if (!conn)
       return -1;
+
    char err[VP_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -621,16 +622,20 @@ static int vault_pg_rekey(void *ctx, const char *principal, const uint8_t old_ke
    if (!conn)
       return -1;
 
+   char txerr[VP_ERR] = "";
+   if (aimee_pg_exec(conn, "BEGIN", txerr, sizeof(txerr)) != 0)
+      return -1;
+
    /* Validate the OLD KEK against the verifier FIRST (independent of credential count,
     * so an empty vault cannot be rekeyed with a wrong old KEK). A principal with no
     * verifier was never unlocked: refuse. */
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
    if (kek_check_read(conn, principal, wrapped) != 1 || !kek_check_matches(wrapped, old_kek))
-      return -1;
+      goto rollback;
 
    vp_rewrap_t *plan = calloc(VP_MAX_SLOTS, sizeof(*plan));
    if (!plan)
-      return -1;
+      goto rollback;
    int n = 0;
    int rc = -1;
    if (rekey_compute(conn, principal, old_kek, new_kek, plan, &n) == 0 &&
@@ -638,6 +643,11 @@ static int vault_pg_rekey(void *ctx, const char *principal, const uint8_t old_ke
       rc = 0;
    OPENSSL_cleanse(plan, VP_MAX_SLOTS * sizeof(*plan));
    free(plan);
+   if (rc == 0 && aimee_pg_exec(conn, "COMMIT", txerr, sizeof(txerr)) == 0)
+      return 0;
+rollback:
+   (void)aimee_pg_exec(conn, "ROLLBACK", txerr, sizeof(txerr));
+   rc = -1;
    return rc;
 }
 
