@@ -1215,6 +1215,153 @@ paths:
                     type: array
                     items: { type: object }
         "401": { description: Authentication required }
+  /models/entitled:
+    get:
+      operationId: listEntitledModels
+      summary: List the caller's entitled org models (P2a)
+      description: >
+        Returns the org models the authenticated caller is entitled to use — the join
+        of the org model catalog with the caller's team entitlements, actor-bound to the
+        verified principal (a caller can never see another principal's entitled models).
+        Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name
+        and NO credential or slot reference. Disabled catalog entries are excluded.
+      responses:
+        "200":
+          description: Entitled models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        model_id: { type: string }
+                        display_name: { type: string }
+                        provider: { type: string }
+                        wire: { type: string, enum: [anthropic, openai, responses, gemini] }
+                        endpoint: { type: string }
+        "401": { description: Authentication required }
+  /models/org/add:
+    post:
+      operationId: addOrgModel
+      summary: Create or update an org model catalog entry (org-admin, P2a)
+      description: >
+        Upserts a catalog entry (keyed by model_id). Org-admin gated at the DB layer and
+        WORM-audited atomically with the mutation; a non-admin caller receives 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, provider, wire]
+              properties:
+                model_id: { type: string }
+                provider: { type: string }
+                wire: { type: string, enum: [anthropic, openai, responses, gemini] }
+                display_name: { type: string }
+                endpoint: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Catalog entry upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  model_id: { type: string }
+        "400": { description: Invalid model_id, provider, or wire }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /models/org/set:
+    post:
+      operationId: setOrgModel
+      summary: Alias of /models/org/add — upsert an org model catalog entry (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, provider, wire]
+              properties:
+                model_id: { type: string }
+                provider: { type: string }
+                wire: { type: string, enum: [anthropic, openai, responses, gemini] }
+                display_name: { type: string }
+                endpoint: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200": { description: Catalog entry upserted }
+        "400": { description: Invalid model_id, provider, or wire }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /models/org/remove:
+    post:
+      operationId: removeOrgModel
+      summary: Remove an org model catalog entry and its entitlements (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id]
+              properties:
+                model_id: { type: string }
+      responses:
+        "200":
+          description: Catalog entry removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  removed: { type: integer }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /models/org/entitle:
+    post:
+      operationId: entitleOrgModel
+      summary: Grant a team access to an org model (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, team]
+              properties:
+                model_id: { type: string }
+                team: { type: integer }
+      responses:
+        "200": { description: Entitlement granted }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin), or unknown model/team }
+  /models/org/unentitle:
+    post:
+      operationId: unentitleOrgModel
+      summary: Revoke a team's access to an org model (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, team]
+              properties:
+                model_id: { type: string }
+                team: { type: integer }
+      responses:
+        "200": { description: Entitlement revoked }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
   /enrollments:
     get:
       operationId: listEnrollments

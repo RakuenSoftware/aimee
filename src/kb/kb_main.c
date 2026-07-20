@@ -10,6 +10,7 @@
 #include "db2_tenant.h"
 #include "team.h"
 #include "membership.h"
+#include "org_model_catalog.h"
 #include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
@@ -584,10 +585,83 @@ static int kb_cmd_tenancy(int argc, char **argv)
                 rows[i].name, rows[i].access_mode);
       rc_http = (n < 0) ? 1 : 0;
    }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "list") == 0)
+   {
+      db2_model_catalog_row_t rows[512];
+      int n = db2_model_catalog_list(rows, 512);
+      for (int i = 0; i < n; i++)
+         printf("%s\t%s\t%s\t%s\t%s\t%s\n", rows[i].model_id,
+                rows[i].enabled ? "enabled" : "disabled", rows[i].provider, rows[i].wire,
+                rows[i].endpoint, rows[i].display_name);
+      rc_http = (n < 0) ? 1 : 0;
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 4 &&
+            (strcmp(argv[3], "add") == 0 || strcmp(argv[3], "set") == 0) && argc >= 7)
+   {
+      /* models org add|set <model_id> <provider> <wire> [display_name] [endpoint] [--disabled] */
+      int enabled = 1;
+      for (int i = 4; i < argc; i++)
+         if (strcmp(argv[i], "--disabled") == 0)
+            enabled = 0;
+      const char *display_name =
+          (argc >= 8 && strncmp(argv[7], "--", 2) != 0) ? argv[7] : "";
+      const char *endpoint = (argc >= 9 && strncmp(argv[8], "--", 2) != 0) ? argv[8] : "";
+      int64_t id = 0;
+      if (db2_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
+                                   &id) == 0)
+      {
+         printf("{\"id\":%lld,\"model_id\":\"%s\"}\n", (long long)id, argv[4]);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org add failed (not authorized or invalid wire)\n");
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 5 &&
+            strcmp(argv[3], "remove") == 0)
+   {
+      int64_t removed = 0;
+      if (db2_model_catalog_remove(argv[4], &removed) == 0)
+      {
+         printf("{\"model_id\":\"%s\",\"removed\":%lld}\n", argv[4], (long long)removed);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org remove failed (not authorized)\n");
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 6 &&
+            strcmp(argv[3], "entitle") == 0)
+   {
+      int64_t id = 0;
+      if (db2_model_entitle(argv[4], strtoll(argv[5], NULL, 10), &id) == 0)
+      {
+         printf("{\"model_id\":\"%s\",\"team\":%s,\"id\":%lld}\n", argv[4], argv[5], (long long)id);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org entitle failed (not authorized or unknown model/team)\n");
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 6 &&
+            strcmp(argv[3], "unentitle") == 0)
+   {
+      int64_t removed = 0;
+      if (db2_model_unentitle(argv[4], strtoll(argv[5], NULL, 10), &removed) == 0)
+      {
+         printf("{\"model_id\":\"%s\",\"team\":%s,\"removed\":%lld}\n", argv[4], argv[5],
+                (long long)removed);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org unentitle failed (not authorized)\n");
+   }
    else
    {
       fprintf(stderr, "Usage: aimee-kb team create|list|add-member|remove-member ...\n"
-                      "       aimee-kb project create|list ...\n");
+                      "       aimee-kb project create|list ...\n"
+                      "       aimee-kb models list\n"
+                      "       aimee-kb models org add|set <model_id> <provider> "
+                      "<anthropic|openai|responses|gemini> [display_name] [endpoint] [--disabled]\n"
+                      "       aimee-kb models org remove <model_id>\n"
+                      "       aimee-kb models org entitle|unentitle <model_id> <team_id>\n");
    }
 
    if (rc_http == 0)
@@ -609,7 +683,8 @@ int main(int argc, char **argv)
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);
-   if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0))
+   if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0 ||
+                    strcmp(argv[1], "models") == 0))
       return kb_cmd_tenancy(argc, argv);
 
    log_level_t log_level = LOG_INFO;

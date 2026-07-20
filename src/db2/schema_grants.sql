@@ -98,5 +98,30 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_current_wraps(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
+
+  -- P2a org model catalog + entitlement. The catalog is admin-managed and read/written
+  -- EXCLUSIVELY through the SECURITY DEFINER functions (owned by aimee_kb_owner, which
+  -- bypasses ENABLE-not-FORCE RLS). Runtime gets NO direct catalog access AT ALL — not
+  -- even SELECT — so every catalog read funnels through org_catalog_entitled(); its
+  -- direct write grant from the ALL TABLES line above is REVOKED too. Entitlement direct
+  -- SELECT stays (RLS-filtered: own-team OR admin) for defense-in-depth, but its writes
+  -- are REVOKED (only the definer functions may mutate it).
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_model_catalog FROM aimee_kb_runtime;
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON org_model_entitlement FROM aimee_kb_runtime;
+  GRANT SELECT ON org_model_entitlement TO aimee_kb_runtime;
+  -- The catalog CRUD + entitled-read functions are the ONLY access path; EXECUTE to
+  -- runtime, never PUBLIC. kb_audit_worm_append is intentionally NOT granted to runtime
+  -- (only the owner-run definer mutations call it) so runtime cannot forge audit rows.
+  REVOKE ALL ON FUNCTION kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_entitled() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_catalog_entitled() TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_remove(TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_model_entitle(TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_model_unentitle(TEXT,BIGINT) TO aimee_kb_runtime;
 END
 $$;

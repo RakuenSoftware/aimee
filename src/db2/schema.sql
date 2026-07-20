@@ -2518,3 +2518,271 @@ REVOKE ALL ON FUNCTION org_vault_list_principals() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_current_wraps(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) FROM PUBLIC;
+
+-- ============================================================================
+-- P2a ORG MODEL CATALOG + ENTITLEMENT (tiered-llm-p2a, catalog-only). The org's
+-- model OFFERING (catalog) + which teams may use each model (entitlement). Holds
+-- NO keys, no egress, no vault — P2b routes egress and derives the vault slot from
+-- the resolved billing team + the model's provider; P2a is pure catalog + tenant-
+-- scoped entitlement + admin CRUD, tenant-isolated and WORM-audited.
+--
+-- Single-org / platform-scoped, like P3a: aimee-kb IS the org tier, so there is no
+-- org_id column — UNIQUE(model_id) is the org-global catalog. "cross-org rejected"
+-- reduces to the P1 resolver rule: org_catalog_entitled() reads ONLY the actor's own
+-- teams (current_setting('aimee.principal')), so a caller can never see another
+-- principal's entitled models. Multi-org-in-one-kb is a non-goal here (same posture
+-- as P3a pricing).
+--
+-- RLS posture: ENABLE (not FORCE) ROW LEVEL SECURITY — mirrors P3a/P10. The owner-
+-- scoped SECURITY DEFINER functions bypass RLS to read/write; the non-owner
+-- NOBYPASSRLS runtime role has NO direct catalog access AT ALL (schema_grants.sql
+-- revokes even SELECT) — every catalog read funnels through org_catalog_entitled().
+-- Entitlement direct reads stay tenant-filtered (defense-in-depth). No credential /
+-- endpoint-override field is ever exposed beyond the authoritative catalog columns.
+--
+-- Audit: every catalog/entitlement mutation is a SECURITY DEFINER function that
+-- appends a kb_audit_event (before/after, actor, action) INSIDE the same txn as the
+-- mutation via kb_audit_worm_append() — if the audit append fails the whole mutation
+-- rolls back (never a mutation without its audit). org_catalog_remove deletes the
+-- model's entitlements EXPLICITLY (auditing the removal), not via a silent cascade.
+-- ============================================================================
+
+-- kb_audit_worm_append: SQL-callable WORM audit append that produces a row
+-- BYTE-IDENTICAL to the C store (db2/kb_audit_worm.c) — same domain, length-prefixed
+-- canonicalization, and SHA-256, so db2_kb_audit_verify_chain() verifies rows written
+-- by either path. The advisory xact lock serializes appenders so seq stays gap-free.
+-- ts is excluded from the hash (seq is the sole ordering authority), matching the C
+-- record. Never granted to the runtime role — only the owner-run definer mutations
+-- below call it, so a compromised runtime session cannot forge an audit row.
+CREATE OR REPLACE FUNCTION kb_audit_worm_append(
+  p_actor_role TEXT, p_actor_principal TEXT, p_action TEXT,
+  p_subject TEXT, p_verdict TEXT, p_detail TEXT
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_seq BIGINT; v_prev TEXT; v_hash TEXT; v_msg TEXT;
+  r TEXT := COALESCE(p_actor_role, '');
+  a TEXT := COALESCE(p_actor_principal, '');
+  ac TEXT := COALESCE(p_action, '');
+  s TEXT := COALESCE(p_subject, '');
+  vd TEXT := COALESCE(p_verdict, '');
+  d TEXT := COALESCE(p_detail, '');
+BEGIN
+  IF ac = '' THEN
+    RAISE EXCEPTION 'kb_audit_worm_append: empty action' USING ERRCODE = '22023';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('kb_audit_event'));
+  SELECT seq, row_hash INTO v_seq, v_prev FROM kb_audit_event ORDER BY seq DESC LIMIT 1;
+  IF v_seq IS NULL THEN
+    v_seq := 1;
+    v_prev := '0000000000000000000000000000000000000000000000000000000000000000';
+  ELSE
+    v_seq := v_seq + 1;
+  END IF;
+  -- Canonical message: DOMAIN \n prev_hash \n <octet_length:value>*8, fields in the
+  -- fixed order (seq, actor_role, actor_principal, action, subject, verdict, key_id,
+  -- detail). key_id is always '' for these governed rows.
+  v_msg := 'aimee.audit.worm.v1' || E'\n' || v_prev || E'\n'
+        || octet_length(v_seq::text) || ':' || v_seq::text
+        || octet_length(r)  || ':' || r
+        || octet_length(a)  || ':' || a
+        || octet_length(ac) || ':' || ac
+        || octet_length(s)  || ':' || s
+        || octet_length(vd) || ':' || vd
+        || octet_length('') || ':' || ''
+        || octet_length(d)  || ':' || d;
+  v_hash := encode(sha256(convert_to(v_msg, 'UTF8')), 'hex');
+  INSERT INTO kb_audit_event(seq, ts, actor_role, actor_principal, action, subject,
+      verdict, detail, key_id, prev_hash, row_hash)
+    VALUES (v_seq, pg_now_text(), r, a, ac, s, vd, d, '', v_prev, v_hash);
+END; $$;
+
+-- org_model_catalog: the org's model offerings (one row per org model). endpoint is
+-- catalog-owned now (may be empty -> provider default) so P2b's strict trust boundary
+-- derives provider/wire/endpoint exclusively from the authoritative catalog — the
+-- server never supplies it. NO cred_slot_ref, NO billable_model, NO org_id (v2).
+CREATE TABLE IF NOT EXISTS org_model_catalog (
+  id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+  model_id TEXT NOT NULL UNIQUE CHECK (char_length(model_id) BETWEEN 1 AND 200),
+  display_name TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 100),
+  wire TEXT NOT NULL CHECK (wire IN ('anthropic','openai','responses','gemini')),
+  endpoint TEXT NOT NULL DEFAULT '',
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  updated_at TEXT NOT NULL DEFAULT (pg_now_text())
+);
+
+-- org_model_entitlement: which teams may use which models (the tenant-scoped join). A
+-- caller sees a model ONLY if one of their teams is entitled. The model_id FK carries
+-- NO cascade — org_catalog_remove deletes entitlements explicitly (and audits each
+-- removal) rather than relying on a silent cascade; the team_id FK cascades on team
+-- delete (a removed team legitimately drops its entitlements as part of its lifecycle).
+CREATE TABLE IF NOT EXISTS org_model_entitlement (
+  id BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+  model_id TEXT NOT NULL REFERENCES org_model_catalog(model_id),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  UNIQUE(model_id, team_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_ent_team ON org_model_entitlement(team_id);
+CREATE INDEX IF NOT EXISTS idx_org_ent_model ON org_model_entitlement(model_id);
+
+-- ENABLE (not FORCE) RLS: the owner-scoped SECURITY DEFINER functions bypass RLS to
+-- read/write; the non-owner runtime role's direct reads stay filtered by the policies
+-- below (catalog: admin-only; entitlement: tenant OR admin).
+ALTER TABLE org_model_catalog ENABLE ROW LEVEL SECURITY;
+ALTER TABLE org_model_entitlement ENABLE ROW LEVEL SECURITY;
+
+-- Catalog direct reads: org-admins only (the offering table is admin-managed and never
+-- a tenant read — tenants see their entitled models ONLY through org_catalog_entitled()).
+DROP POLICY IF EXISTS p_catalog_admin_read ON org_model_catalog;
+CREATE POLICY p_catalog_admin_read ON org_model_catalog FOR SELECT USING (kb_principal_is_admin());
+
+-- Entitlement direct reads: a caller sees entitlement rows for a team in its OWN
+-- memberships, and an org-admin sees all. missing_ok=true -> NULL principal -> no rows.
+DROP POLICY IF EXISTS p_entitlement_tenant_read ON org_model_entitlement;
+CREATE POLICY p_entitlement_tenant_read ON org_model_entitlement FOR SELECT
+  USING (team_id IN (SELECT team FROM kb_team_membership
+                     WHERE identity_key = current_setting('aimee.principal', true)));
+DROP POLICY IF EXISTS p_entitlement_admin_read ON org_model_entitlement;
+CREATE POLICY p_entitlement_admin_read ON org_model_entitlement FOR SELECT
+  USING (kb_principal_is_admin());
+
+-- org_catalog_entitled(): the ONLY read surface the server/runtime touches. Takes NO
+-- principal argument — it reads current_setting('aimee.principal', true) (the actor set
+-- by set_tenant_context / db2_tenant_scope_begin), so a caller can NEVER nominate
+-- another principal's memberships (no confused-deputy on the owner-bypassing definer).
+-- Joins catalog x entitlement x the actor's memberships; EXCLUDES enabled=false rows;
+-- returns ONLY the authoritative catalog columns — NEVER a credential/slot field.
+CREATE OR REPLACE FUNCTION org_catalog_entitled()
+RETURNS TABLE(model_id TEXT, display_name TEXT, provider TEXT, wire TEXT, endpoint TEXT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT DISTINCT c.model_id, c.display_name, c.provider, c.wire, c.endpoint
+    FROM org_model_catalog c
+    JOIN org_model_entitlement e ON e.model_id = c.model_id
+    JOIN kb_team_membership m ON m.team = e.team_id
+   WHERE c.enabled = true
+     AND m.identity_key = current_setting('aimee.principal', true)
+   ORDER BY c.model_id;
+$$;
+
+-- org_catalog_upsert: admin-gated create-or-update of a catalog row, WORM-audited in
+-- the same txn. The advisory xact lock per model serializes concurrent admins.
+CREATE OR REPLACE FUNCTION org_catalog_upsert(
+  p_model_id TEXT, p_display_name TEXT, p_provider TEXT, p_wire TEXT,
+  p_endpoint TEXT, p_enabled BOOLEAN
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_id BIGINT;
+BEGIN
+  IF NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_catalog_upsert: admin only' USING ERRCODE = '42501';
+  END IF;
+  IF p_model_id IS NULL OR char_length(p_model_id) < 1 OR char_length(p_model_id) > 200 THEN
+    RAISE EXCEPTION 'org_catalog_upsert: invalid model_id' USING ERRCODE = '22023';
+  END IF;
+  IF p_provider IS NULL OR char_length(p_provider) < 1 OR char_length(p_provider) > 100 THEN
+    RAISE EXCEPTION 'org_catalog_upsert: invalid provider' USING ERRCODE = '22023';
+  END IF;
+  IF p_wire NOT IN ('anthropic','openai','responses','gemini') THEN
+    RAISE EXCEPTION 'org_catalog_upsert: invalid wire %', p_wire USING ERRCODE = '22023';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('orgcatalog:' || p_model_id));
+  INSERT INTO org_model_catalog(model_id, display_name, provider, wire, endpoint, enabled)
+    VALUES (p_model_id, COALESCE(p_display_name,''), p_provider, p_wire,
+            COALESCE(p_endpoint,''), COALESCE(p_enabled, true))
+    ON CONFLICT (model_id) DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      provider = EXCLUDED.provider,
+      wire = EXCLUDED.wire,
+      endpoint = EXCLUDED.endpoint,
+      enabled = EXCLUDED.enabled,
+      updated_at = pg_now_text()
+    RETURNING id INTO v_id;
+  PERFORM kb_audit_worm_append('owner-admin', current_setting('aimee.principal', true),
+    'org_catalog_upsert', p_model_id, 'ok',
+    json_build_object('provider', p_provider, 'wire', p_wire,
+                      'endpoint', COALESCE(p_endpoint,''),
+                      'enabled', COALESCE(p_enabled, true),
+                      'display_name', COALESCE(p_display_name,''))::text);
+  RETURN v_id;
+END; $$;
+
+-- org_catalog_remove: admin-gated delete of a catalog row. Deletes the model's
+-- entitlements EXPLICITLY first (auditing the count), then the catalog row — no silent
+-- ON DELETE CASCADE. WORM-audited in the same txn. Returns the number of catalog rows
+-- removed (0 if the model_id was unknown).
+CREATE OR REPLACE FUNCTION org_catalog_remove(p_model_id TEXT) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_ent BIGINT; v_cat BIGINT;
+BEGIN
+  IF NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_catalog_remove: admin only' USING ERRCODE = '42501';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('orgcatalog:' || p_model_id));
+  WITH d AS (DELETE FROM org_model_entitlement WHERE model_id = p_model_id RETURNING 1)
+    SELECT count(*) INTO v_ent FROM d;
+  WITH d AS (DELETE FROM org_model_catalog WHERE model_id = p_model_id RETURNING 1)
+    SELECT count(*) INTO v_cat FROM d;
+  PERFORM kb_audit_worm_append('owner-admin', current_setting('aimee.principal', true),
+    'org_catalog_remove', p_model_id,
+    CASE WHEN v_cat > 0 THEN 'ok' ELSE 'not_found' END,
+    json_build_object('entitlements_removed', v_ent, 'catalog_removed', v_cat)::text);
+  RETURN v_cat;
+END; $$;
+
+-- org_model_entitle: admin-gated grant of (model, team). Idempotent (ON CONFLICT DO
+-- NOTHING). Rejects an unknown model or team. WORM-audited in the same txn. Returns the
+-- new entitlement id, or 0 if the grant already existed.
+CREATE OR REPLACE FUNCTION org_model_entitle(p_model_id TEXT, p_team_id BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_id BIGINT;
+BEGIN
+  IF NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_model_entitle: admin only' USING ERRCODE = '42501';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM org_model_catalog WHERE model_id = p_model_id) THEN
+    RAISE EXCEPTION 'org_model_entitle: unknown model %', p_model_id USING ERRCODE = '23503';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM kb_team WHERE id = p_team_id) THEN
+    RAISE EXCEPTION 'org_model_entitle: unknown team %', p_team_id USING ERRCODE = '23503';
+  END IF;
+  INSERT INTO org_model_entitlement(model_id, team_id) VALUES (p_model_id, p_team_id)
+    ON CONFLICT (model_id, team_id) DO NOTHING
+    RETURNING id INTO v_id;
+  PERFORM kb_audit_worm_append('owner-admin', current_setting('aimee.principal', true),
+    'org_model_entitle', p_model_id || '@' || p_team_id::text, 'ok',
+    json_build_object('model_id', p_model_id, 'team_id', p_team_id)::text);
+  RETURN COALESCE(v_id, 0);
+END; $$;
+
+-- org_model_unentitle: admin-gated revoke of (model, team). WORM-audited in the same
+-- txn. Returns the number of entitlement rows removed (0 if none matched).
+CREATE OR REPLACE FUNCTION org_model_unentitle(p_model_id TEXT, p_team_id BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_n BIGINT;
+BEGIN
+  IF NOT kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'org_model_unentitle: admin only' USING ERRCODE = '42501';
+  END IF;
+  WITH d AS (DELETE FROM org_model_entitlement
+             WHERE model_id = p_model_id AND team_id = p_team_id RETURNING 1)
+    SELECT count(*) INTO v_n FROM d;
+  PERFORM kb_audit_worm_append('owner-admin', current_setting('aimee.principal', true),
+    'org_model_unentitle', p_model_id || '@' || p_team_id::text,
+    CASE WHEN v_n > 0 THEN 'ok' ELSE 'not_found' END,
+    json_build_object('model_id', p_model_id, 'team_id', p_team_id, 'removed', v_n)::text);
+  RETURN v_n;
+END; $$;
+
+-- These SECURITY DEFINER functions are never PUBLIC; EXECUTE on the catalog CRUD +
+-- entitled-read is granted to the runtime role out of band in schema_grants.sql.
+-- kb_audit_worm_append is deliberately NOT granted to runtime (only the owner-run
+-- definers above call it) so runtime cannot forge audit rows.
+REVOKE ALL ON FUNCTION kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_catalog_entitled() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;

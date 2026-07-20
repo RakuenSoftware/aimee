@@ -33,6 +33,7 @@
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
+#include "kb_http_models.h"
 #include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
@@ -818,6 +819,15 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int tr = kb_http_team_route(method, path, query_string, body, out_buf, out_cap);
       if (tr >= 0)
          return tr;
+   }
+
+   /* Model catalog + entitlement routes (P2a): /v1/models/entitled (tenant read) +
+    * the /v1/models/org/ admin CRUD (admin-gated at the DB layer, WORM-audited).
+    * Returns -1 for non-models paths so the router falls through. */
+   {
+      int mr = kb_http_models_route(method, path, body, out_buf, out_cap);
+      if (mr >= 0)
+         return mr;
    }
 
    /* Console + accounts routes. Served only to the owner (unscoped credential) or

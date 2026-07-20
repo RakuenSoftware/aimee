@@ -418,6 +418,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-oidc-jwks \
                $(TESTPREFIX)/unit-test-db2-hardening \
                $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard \
+               $(TESTPREFIX)/unit-test-kb-models-validate \
                $(TESTPREFIX)/unit-test-kb-route-acl \
                $(TESTPREFIX)/unit-test-kb-enroll \
                $(TESTPREFIX)/unit-test-kb-verifier \
@@ -4020,6 +4021,12 @@ $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard: $(OBJDIR)/tests/test_kb_tenancy_s
 
 $(TESTPREFIX)/unit-test-kb-route-acl: $(OBJDIR)/tests/test_kb_route_acl.o \
                      $(OBJDIR)/kb/http/kb_route_acl.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# P2a: pure route-admission validators (wire whitelist + name bound). No storage/PG
+# dependency — the entitled-resolution + admin-gate are proven by the real-PG RLS gate.
+$(TESTPREFIX)/unit-test-kb-models-validate: $(OBJDIR)/tests/test_kb_models_validate.o \
+                     $(OBJDIR)/kb/http/kb_models_validate.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.o \

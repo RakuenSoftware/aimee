@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 68
+Total endpoints: 74
 
 ## Endpoints
 
@@ -676,6 +676,81 @@ Responses:
 - `400` — Missing required parameters
 - `401` — Unauthorized
 - `503` — Knowledge or vector store unavailable
+
+### `GET /v1/models/entitled`
+
+List the caller's entitled org models (P2a)
+
+Returns the org models the authenticated caller is entitled to use — the join of the org model catalog with the caller's team entitlements, actor-bound to the verified principal (a caller can never see another principal's entitled models). Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name and NO credential or slot reference. Disabled catalog entries are excluded.
+
+Responses:
+
+- `200` — Entitled models
+- `401` — Authentication required
+
+### `POST /v1/models/org/add`
+
+Create or update an org model catalog entry (org-admin, P2a)
+
+Upserts a catalog entry (keyed by model_id). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Catalog entry upserted
+- `400` — Invalid model_id
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+
+### `POST /v1/models/org/entitle`
+
+Grant a team access to an org model (org-admin, P2a)
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Entitlement granted
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+
+### `POST /v1/models/org/remove`
+
+Remove an org model catalog entry and its entitlements (org-admin, P2a)
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Catalog entry removed
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+
+### `POST /v1/models/org/set`
+
+Alias of /models/org/add — upsert an org model catalog entry (org-admin, P2a)
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Catalog entry upserted
+- `400` — Invalid model_id
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+
+### `POST /v1/models/org/unentitle`
+
+Revoke a team's access to an org model (org-admin, P2a)
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Entitlement revoked
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
 
 ### `GET /v1/pipeline/status`
 
