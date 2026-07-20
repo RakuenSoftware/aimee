@@ -949,6 +949,10 @@ int main(void)
              fallback);
       assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1) ==
              CAPS_AUTHENTICATED);
+      assert(server_http_mtls_transport_allowed(1, 1, 0) == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0) == 0);
+      assert(server_http_mtls_transport_allowed(1, 2, 1) == 1);
+      assert(server_http_mtls_transport_allowed(0, 2, 0) == 1);
       assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/memory/store",
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/memory/store",

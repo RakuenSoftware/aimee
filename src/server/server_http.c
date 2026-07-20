@@ -361,6 +361,11 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
    return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
 }
 
+int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated)
+{
+   return !is_tcp || mtls_mode < 2 || mtls_authenticated;
+}
+
 /* Routes deliberately reachable over the TCP listener regardless of
  * aimee.api.remote_writes (still capability-gated): the detached-workspace
  * reverse channel and registry mutations (workspace-resource-plane). The serving
@@ -1517,6 +1522,7 @@ void handle_conn(int fd, int is_tcp)
     * still depend on the shared bearer. This remains authentication only: the
     * normal route/capability gates below still deny remote-write surfaces. */
    int mtls_authenticated = 0;
+   int mtls_mode = server_tls_mtls_mode();
    if (server_conn_io_has_ssl(fd))
    {
       char rc_cn[256] = "", rc_serial[80] = "";
@@ -1537,31 +1543,49 @@ void handle_conn(int fd, int is_tcp)
             return;
          }
          mtls_authenticated = 1;
-         long ramp_now = (long)time(NULL);
-         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
-            LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
-         else if (pki_mtls_ramp_ready(ramp_now) == 1)
+         /* Presentation writes are migration-only. Once required, the durable
+          * roster is still checked above but the steady-state request path does
+          * not take DB1's write gate or recompute the whole roster hash. */
+         if (mtls_mode == 1)
          {
-            SSL_CTX *prepared = server_tls_prepare_required();
-            if (!prepared)
-               LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
-            else
+            long ramp_now = (long)time(NULL);
+            if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+               LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
+            else if (pki_mtls_ramp_ready(ramp_now) == 1)
             {
-               int advanced = pki_mtls_ramp_advance(ramp_now);
-               if (advanced == 1)
-                  server_tls_activate_required(prepared);
+               SSL_CTX *prepared = server_tls_prepare_required();
+               if (!prepared)
+                  LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
                else
                {
-                  server_tls_discard_prepared(prepared);
-                  if (advanced < 0)
-                     LOG_WARN("server.http", "mTLS ramp durable advance failed");
+                  int advanced = pki_mtls_ramp_advance(ramp_now);
+                  if (advanced == 1)
+                     server_tls_activate_required(prepared);
+                  else
+                  {
+                     server_tls_discard_prepared(prepared);
+                     if (advanced < 0)
+                        LOG_WARN("server.http", "mTLS ramp durable advance failed");
+                  }
                }
             }
          }
       }
    }
 
-   int mtls_mode = server_tls_mtls_mode();
+   /* Promotion applies to connections accepted under the old optional context
+    * too: once durable state is required, a no-cert keep-alive may not retain
+    * bearer fallback merely because its handshake predated the context swap. */
+   mtls_mode = server_tls_mtls_mode();
+   if (!server_http_mtls_transport_allowed(is_tcp, mtls_mode, mtls_authenticated))
+   {
+      send_response(fd, 401,
+                    "{\"error\":{\"message\":\"a valid client certificate is required\","
+                    "\"type\":\"authentication_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
+      return;
+   }
    int effective_remote_writes =
        is_tcp && mtls_mode > 0 ? SERVER_REMOTE_WRITES_OFF : g_remote_writes;
    uint32_t effective_caps = server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,

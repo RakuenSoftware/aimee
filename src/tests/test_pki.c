@@ -415,6 +415,7 @@ int main(void)
     * (handle_conn) refuses 403 on ERROR just as on REVOKED/EXPIRED/UNKNOWN. */
    db1_shutdown();
    assert(pki_cert_check("any-serial", (long)time(NULL)) == PKI_CERT_ERROR);
+   assert(pki_mtls_ramp_init(1) == -1); /* never fall back to optional on DB failure */
    printf("pki: P8a authority-down -> ERROR (fail-closed) ok\n");
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);

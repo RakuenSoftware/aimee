@@ -972,7 +972,7 @@ int pki_mtls_ramp_init(int configured_mode)
       return configured_mode;
    sqlite3 *db = db1_conn();
    if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
-      return configured_mode;
+      return -1;
    char hash[65];
    int rc = -1, persisted = configured_mode, txn_open = 1;
    if (ramp_roster_snapshot(db, (long)time(NULL), hash, NULL, NULL) != 0)
@@ -1028,9 +1028,8 @@ done:
    {
       if (txn_open)
          db1_txn_end(db, "ROLLBACK");
-      aimee_log(LOG_WARN, "pki.ramp",
-                "mTLS ramp startup self-test failed; holding configured mode");
-      return configured_mode;
+      aimee_log(LOG_WARN, "pki.ramp", "mTLS ramp startup self-test failed; refusing mTLS startup");
+      return -1;
    }
    return persisted > configured_mode ? persisted : configured_mode;
 }
