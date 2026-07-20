@@ -714,6 +714,70 @@ int pki_is_revoked(const char *serial)
    return revoked;
 }
 
+const char *pki_cert_status_str(pki_cert_status_t s)
+{
+   switch (s)
+   {
+   case PKI_CERT_VALID:
+      return "VALID";
+   case PKI_CERT_REVOKED:
+      return "REVOKED";
+   case PKI_CERT_EXPIRED:
+      return "EXPIRED";
+   case PKI_CERT_UNKNOWN:
+      return "UNKNOWN";
+   case PKI_CERT_ERROR:
+      return "ERROR";
+   }
+   return "ERROR";
+}
+
+/* Per-request DURABLE revocation/expiry re-check — see pki.h. A FRESH prepared
+ * SELECT against DB1 on every call (never the g_revoked snapshot), mirroring
+ * pki_list's DB access pattern. Precedence: a prepare/bind/step failure ->
+ * PKI_CERT_ERROR (an unavailable authority must never fail open, and must be
+ * distinguishable from UNKNOWN); no matching row -> PKI_CERT_UNKNOWN; a row with
+ * revoked!=0 -> PKI_CERT_REVOKED; a row with expires_at>0 AND expires_at<=now ->
+ * PKI_CERT_EXPIRED; else PKI_CERT_VALID. SQLite is serialized, so (as with
+ * pki_list) no g_mu is held around the query. */
+pki_cert_status_t pki_cert_check(const char *serial, long now)
+{
+   if (!serial || !serial[0])
+      return PKI_CERT_UNKNOWN; /* no serial to look up -> fail closed at caller */
+   db_ensure_tables();
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return PKI_CERT_ERROR; /* revocation store unavailable -> fail closed */
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT revoked, expires_at FROM pki_certs WHERE serial = ?", -1, &st,
+                          NULL) != SQLITE_OK)
+      return PKI_CERT_ERROR;
+   if (sqlite3_bind_text(st, 1, serial, -1, SQLITE_TRANSIENT) != SQLITE_OK)
+   {
+      sqlite3_finalize(st);
+      return PKI_CERT_ERROR;
+   }
+   int rc = sqlite3_step(st);
+   pki_cert_status_t status;
+   if (rc == SQLITE_ROW)
+   {
+      int revoked = sqlite3_column_int(st, 0);
+      long expires_at = (long)sqlite3_column_int64(st, 1);
+      if (revoked != 0)
+         status = PKI_CERT_REVOKED;
+      else if (expires_at > 0 && expires_at <= now)
+         status = PKI_CERT_EXPIRED;
+      else
+         status = PKI_CERT_VALID;
+   }
+   else if (rc == SQLITE_DONE)
+      status = PKI_CERT_UNKNOWN; /* no such serial on this server's roster */
+   else
+      status = PKI_CERT_ERROR; /* step failure (lock/IO) -> fail closed */
+   sqlite3_finalize(st);
+   return status;
+}
+
 int pki_list(void (*cb)(void *ctx, const char *serial, const char *cn, long issued_at,
                         long expires_at, int revoked),
              void *ctx)

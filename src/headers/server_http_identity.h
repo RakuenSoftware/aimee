@@ -46,6 +46,12 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf);
  * capture and clear, i.e. during a route handler on the serving thread. */
 const char *server_http_identity_principal(void);
 
+/* The captured attested transport class for the in-flight request (ATTEST_NONE
+ * if un-attested). Lets handle_conn apply the P8a per-request mTLS revocation/
+ * expiry re-check (only ATTEST_MTLS_CLIENT conns are re-checked) without
+ * synthesizing a conn. Valid only between capture and clear. */
+attested_transport_t server_http_identity_transport(void);
+
 /* The in-flight request's inbound `aimee-session-id` header value and bearer token
  * (both "" when absent), for the economizer gateway-mutation session-key resolver.
  * Valid only during a route handler on the serving thread (same lifetime as the
