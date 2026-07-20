@@ -352,6 +352,15 @@ static int wfe_live_verify_run(const char *workdir, char *out_verdict, size_t n)
    cJSON_AddStringToObject(args, "action", "run");
    cJSON_AddBoolToObject(args, "async", 0); /* synchronous: we need the verdict now */
    cJSON_AddStringToObject(args, "format", "json");
+   /* Assert authority over the target: this provider verifies a SPECIFIC work-item
+    * worktree (we pin the run_cmd CWD to it below), so it is the authoritative
+    * in-process caller force_in_scope exists for. Without this, handle_git_verify
+    * falls to verify_project_in_scope(), which reports the WFE repo out-of-scope
+    * whenever it is not the daemon's "current project" -> an "unavailable" verdict
+    * that loops the implement block to its cap. Forcing in-scope here decouples the
+    * WFE verify from the global verify_cross_project flag (a deployment knob that
+    * should not gate whether a slice's own committed tree can be verified). */
+   cJSON_AddBoolToObject(args, "force_in_scope", 1);
    /* handle_git_verify never reads a "path" arg itself — on the MCP route the
     * dispatch layer chdirs the run_cmd thread before the handler runs, and
     * resolve_verify_root() picks the root up from that CWD. Calling the handler
