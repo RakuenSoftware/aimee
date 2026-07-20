@@ -40,3 +40,15 @@ int server_mgmt_token_verify_bound(const char *jwt, const char *jwks_json, const
    if(ok){snprintf(cap,cap_n,"%s",cc->valuestring);snprintf(jti,jti_n,"%s",jj->valuestring);}
    cJSON_Delete(p); return ok;
 }
+
+int server_mgmt_action_authorize(const char *jwt, const char *jwks_json, const char *issuer,
+                                 const char *audience, const char *peer_cert_cn, long now,
+                                 int remote_writes, const char *required, kb_verify_result_t *out,
+                                 char *jti, size_t jti_n)
+{
+   if (!remote_writes || !required || !*required || !jti || !jti_n) return 0;
+   char cap[128];
+   if (!server_mgmt_token_verify_bound(jwt, jwks_json, issuer, audience, peer_cert_cn, now,
+                                       out, cap, sizeof(cap), jti, jti_n)) return 0;
+   return strcmp(cap, required) == 0;
+}
