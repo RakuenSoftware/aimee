@@ -250,6 +250,11 @@ aws_es_status_t aws_es_decode(const uint8_t *buf, size_t len, aws_es_message_t *
    if (!buf || !out || !consumed)
       return AWS_ES_ERROR;
 
+   /* Clear `out` up-front so NO return path (ERROR / NEED_MORE / OK) can leave a
+    * caller reading stale struct fields (dangling ptr/len views) from a prior call:
+    * on a non-OK return `out` is fully zeroed, not merely `*consumed`. */
+   memset(out, 0, sizeof(*out));
+
    /* Need the full 12-byte prelude before we can trust any length. */
    if (len < 12)
       return AWS_ES_NEED_MORE;
@@ -295,7 +300,8 @@ aws_es_status_t aws_es_decode(const uint8_t *buf, size_t len, aws_es_message_t *
    const uint8_t *headers_start = buf + 12;
    const uint8_t *headers_end = headers_start + headers_length;
 
-   memset(out, 0, sizeof(*out));
+   /* `out` was already zeroed up-front and untouched since; parse_headers appends
+    * from n_headers==0. */
    if (parse_headers(headers_start, headers_end, out) != 0)
       return AWS_ES_ERROR;
 
