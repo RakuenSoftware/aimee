@@ -22,8 +22,10 @@ also has no production caller in this slice.
 - Add SECURITY DEFINER claim/release/checkpoint/remediate functions. A claim is
   acquired atomically on the primary for one expected state, increments the
   fencing token, and may be stolen only after its database-time expiry. Every
-  state/result commit from an external call must present the current token.
-  The current owner heartbeats long calls. Stale workers may cleanse their local
+  state/result commit from an external call must present the current token. The
+  claim tuple and state CAS are persisted on the same rotation row transaction.
+  The current owner heartbeats at no more than one third of the lease TTL; a
+  provider callback that cannot be heartbeat safely is unsupported. Stale workers may cleanse their local
   result but cannot mutate the rotation; overlapping calls after a crashed or
   paused owner are safe only through the provider idempotency contract below.
 - Derive stable per-step operation keys from the durable rotation ID and step,
@@ -69,7 +71,9 @@ dedicated remediation function, not the generic transition function.
   protections are mandatory: allocation fails closed if either protection
   cannot be established, and `OPENSSL_cleanse` runs before `munlock`/free on
   every exit. The atomic stage checkpoint persists ciphertext and
-  `new_vendor_ref` together. There is no plaintext-returning public accessor.
+  `new_vendor_ref` together. `old_vendor_ref` is captured by the same provider's
+  pre-provision reconciliation and persisted before provision is claimed; a
+  missing old reference blocks activation. There is no plaintext-returning public accessor.
 - Probe reads exactly the inert `to_version` ciphertext envelope through a new
   rotation-scoped DB function. A vault-owned staged-use primitive decrypts only
   inside the protected arena, invokes the provider callback there, and returns
@@ -78,7 +82,9 @@ dedicated remediation function, not the generic transition function.
   fenced `probed` checkpoint.
   Ordinary vault reads continue to resolve only `org_vault_current`.
 - Revoke receives only the durable old vendor reference and stable operation
-  key. The provider must confirm accepted/already-revoked status and return a
+  key. The same callback accepts either old or new references so remediation can
+  revoke an abandoned candidate. The provider must confirm the credential is
+  unusable (not merely that a request was accepted/already queued) and return a
   bounded non-secret receipt; success atomically checkpoints `revoked` plus that
   receipt. Retire is a local fenced transition only when the receipt is present.
 - Activation continues through `kb_vault_rotation_activate_or_resume`; the
@@ -95,7 +101,10 @@ dedicated remediation function, not the generic transition function.
   positive reconcile/revoke evidence, re-reads the anchor, then an
   audited SQL function removes only the inert staged `to_version` row and retires
   the failed attempt. It never deletes the rotation history/WORM rows, a current
-  row, or an anchor-attested version; any mismatch remains blocking.
+  row, or an anchor-attested version; the staged row must have NULL HWM
+  attestation. A failed provision with no vendor reference is remediable only
+  after reconciliation positively reports that no credential exists for the
+  operation key. Any mismatch or unavailable anchor remains blocking.
 - An `activating` row is never abandoned. If the anchor reports `to_version`,
   recovery finalizes; if it reports `from_version`, recovery retries CAS. Any
   other anchor version fails closed for operator investigation.
@@ -106,11 +115,14 @@ dedicated remediation function, not the generic transition function.
 
 - Unit: lease acquisition/expiry/fencing, stale-result rejection, deterministic
   operation keys, provision reconciliation, staged-only probe, callback failure,
-  full cleansing, idempotent revoke/retire, and remediation preconditions.
+  full cleansing, idempotent revoke/retire, compromise-start rejection, a
+  different-secret replay rejected without positive orphan evidence, and
+  remediation preconditions.
 - Real PG17: two workers race every claim; only the winning token checkpoints.
   Prove no external callback runs in a transaction, stale owners cannot advance,
   remediation cannot delete current/attested rows, and every transition appends
-  one secret-free WORM record atomically.
+  one secret-free WORM record atomically. Inject WORM admission failure and prove
+  probe never decrypts or calls the vendor.
 - CT260: run real PG17 plus signed mock KMS HWM and a mock vendor. Inject crashes
   before and after each external side effect, including a lost one-time provision
   response and revoke response, then resume to one active N+1 credential, one
