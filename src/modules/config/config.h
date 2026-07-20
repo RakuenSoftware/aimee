@@ -717,7 +717,8 @@ typedef struct config
    int kb_search_max_results;
 
    /* Negation and explicit-absence memory.
-    * memory_negation_enabled: 0 = disabled (default), 1 = enabled.
+    * memory_negation_enabled: 0 = disabled, 1 = enabled (default; graduated
+    *   from Bucket 3 after the negation A/B — see benchmarks/bucket3-defaults).
     *   When enabled, insert/update computes not_<token> synthetic terms and
     *   writes them to the negation_tokens column; negated queries also use
     *   negation lexical matching for negative facts. */
