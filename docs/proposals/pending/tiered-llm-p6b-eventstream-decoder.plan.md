@@ -110,3 +110,53 @@ those consume.
 No IR mapping, no Bedrock driver/egress, no live stream, no Converse/native body serializer,
 no network. Pure, bounded, CRC-validated, fuzz-tested eventstream FRAMING decoder, kb-only,
 that the deferred Bedrock streaming path (P6c) will consume.
+
+## v2 refinements (roundtable-converged; correctness + resume/integer-safety contract)
+
+- **Value-type mapping CONFIRMED (do not "fix"):** 0=bool-true (0 B), 1=bool-false (0 B),
+  2=byte int8 (1 B), 3=short int16 (2 B), 4=int int32 (4 B), 5=**long int64 (8 B, fixed,
+  not a varint)**, 6=**byte-array/blob (u16 len + bytes)**, 7=string (u16 len + bytes),
+  8=timestamp int64 (8 B, epoch millis), 9=uuid (16 B). (The review's "type 5 is varint /
+  type 6 is long" claim was itself contradicted — the AWS eventstream uses FIXED int64 for
+  type 5 and a length-prefixed blob for type 6. Implement exactly this table.)
+- **CRC contract (explicit):** `aws_es_crc32` = IEEE 802.3 CRC32, reflected, poly 0xEDB88320,
+  init 0xFFFFFFFF, xorout 0xFFFFFFFF (check("123456789")==0xCBF43926, check("")==0). The
+  prelude_crc and message_crc fields are stored **big-endian** on the wire; read them
+  big-endian and compare. prelude_crc = crc32(first 8 bytes); message_crc = crc32(first
+  total_length − 4 bytes) — i.e. it DOES cover the prelude + prelude_crc field. The symbol
+  is `aws_es_crc32` (NOT a generic `crc32`) to avoid any future link collision.
+- **Integer-safety (mandatory guards, called out):** read total_length + headers_length as
+  uint32 then WIDEN to `size_t`/`uint64_t` for all arithmetic. BEFORE computing the payload
+  length, check `headers_length + 16 <= total_length` (guard the `total_length −
+  headers_length − 16` **underflow** — never subtract first). Check `total_length <= len`
+  (buffered) and `total_length <= AWS_ES_MAX_MESSAGE` and `total_length >= 16` FIRST. Every
+  header read checks `cursor + field_size <= headers_end` before the read (name_len, the u16
+  blob/string length, the fixed value widths). No signed arithmetic on a length.
+- **ERROR is fatal — the stream is unrecoverable, not resyncable.** On `AWS_ES_ERROR`
+  (bad CRC / overrun / oversize / bad value-type) `consumed` is set to 0 and the CONTRACT is
+  that the caller MUST tear down the stream/connection — an eventstream cannot be resynced
+  past a corrupt frame (there is no frame delimiter to scan to). Documented in the header so
+  P6c does not attempt to "skip and continue." `NEED_MORE` also sets consumed=0 (nothing
+  consumed); only `AWS_ES_OK` sets consumed=total_length.
+- **Error/exception frame headers:** classify on `:message-type` (event | exception | error)
+  and expose, when present, `:event-type`, `:content-type`, `:exception-type`, **and
+  `:error-code` / `:error-message`** (the error-frame headers). The message PAYLOAD ptr+len
+  is reported for ALL classes (an exception frame carries a serialized error body the caller
+  reads) — so P6c can surface the AWS error detail, never treat it as model content.
+- **Header cap behavior (locked):** at `AWS_ES_MAX_HEADERS` the message STILL decodes — the
+  payload + classification + the first N headers are reported and a `headers_truncated` flag
+  is set; excess headers are skipped (still bounds-validated, just not captured). It is NOT
+  an ERROR (a well-formed message with many headers is valid).
+- **P6c API shape locked now (avoid churn):** the message struct exposes decoded multi-byte
+  integer header values in HOST byte order (converted from wire big-endian at decode), string/
+  blob values as {ptr,len} views into the caller buffer, and a stable classification enum.
+
+### Gate additions
+
+- Test (h): rolling buffer — a COMPLETE message A concatenated with a PARTIAL message B
+  (B's prelude present, body short): the first `aws_es_decode` returns OK with
+  consumed==A.total_length; a second call on the remainder returns NEED_MORE (consumed=0),
+  and after the rest of B arrives it decodes OK. (The real stream-consumer path.)
+- Test (i): an ERROR return sets consumed=0 (the caller cannot mis-resume past it).
+- Test (j): a decoded int/long header value is byte-swapped correctly from wire big-endian
+  to host order.
