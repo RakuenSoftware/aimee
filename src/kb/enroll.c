@@ -415,7 +415,7 @@ int kb_enroll_mint(const char *data_dir, const char *host, int port, const char 
 
    /* Persistent CA (created once, reused on every later call/restart). */
    kb_pki_ca_t ca;
-   if (kb_pki_ca_load_or_create(ca_dir, &ca, NULL) != 0)
+   if (kb_pki_ca_load_or_create_custodied(ca_dir, &ca, NULL) != 0)
       return -1;
    char fp[KB_PKI_FP_HEX];
    if (kb_pki_ca_fingerprint(ca.cert_pem, fp, sizeof(fp)) != 0)
@@ -453,7 +453,7 @@ int kb_enroll_redeem(const char *data_dir, const char *token, long valid_secs, c
    /* Load the CA first, so a missing/broken CA does NOT burn the single-use
     * token (the token is only consumed once we know we can issue against it). */
    kb_pki_ca_t ca;
-   if (kb_pki_ca_load(ca_dir, &ca) != 0)
+   if (kb_pki_ca_load_custodied(ca_dir, &ca) != 0)
       return -1;
 
    /* Validate + atomically consume the token; its scope becomes the cert subject. */

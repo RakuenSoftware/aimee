@@ -112,6 +112,13 @@ extern "C"
     * same CA (same fingerprint) rather than re-rolling it. */
    int kb_pki_ca_load_or_create(const char *dir, kb_pki_ca_t *out, int *created);
 
+   /* Vault-custodied persistence: the private key is encrypted under the
+    * configured vault server KEK and stored as ca-key.vault; no PEM key file is
+    * emitted. These APIs are used by production enrollment/TLS paths. */
+   int kb_pki_ca_save_custodied(const char *dir, const kb_pki_ca_t *ca);
+   int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out);
+   int kb_pki_ca_load_or_create_custodied(const char *dir, kb_pki_ca_t *out, int *created);
+
 #ifdef __cplusplus
 }
 #endif

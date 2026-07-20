@@ -4,6 +4,9 @@
  * Self-signed CA + client-cert issuance + sha256 CA fingerprint + full X509
  * chain verification, all over PEM strings. RSA-2048, SHA-256 signatures. */
 #include "kb_pki.h"
+#include "../modules/vault/vault_server_key.h"
+#include "../modules/vault/vault_crypto.h"
+#include <openssl/crypto.h>
 
 #include <openssl/bn.h>
 #include <openssl/evp.h>
@@ -21,6 +24,25 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+static int hx(const uint8_t *in, size_t n, char *out, size_t cap)
+{
+   static const char d[]="0123456789abcdef";
+   if (cap < n*2+1) return -1;
+   for(size_t i=0;i<n;i++){out[i*2]=d[in[i]>>4];out[i*2+1]=d[in[i]&15];} out[n*2]=0; return 0;
+}
+static int unhx(const char *in, size_t n, uint8_t *out, size_t cap)
+{
+   if((n&1)||cap<n/2)return -1;
+   for(size_t i=0;i<n/2;i++){int a=(in[i*2]<='9'?in[i*2]-'0':in[i*2]-'a'+10),b=(in[i*2+1]<='9'?in[i*2+1]-'0':in[i*2+1]-'a'+10);if(a<0||a>15||b<0||b>15)return -1;out[i]=(uint8_t)((a<<4)|b);}return 0;
+}
+/* Unit-test link targets that exercise the legacy PEM API do not link the vault
+ * profile. Production links provide the strong implementations. */
+__attribute__((weak)) int vault_server_kek(uint8_t k[VAULT_KEK_LEN]) { (void)k; return -1; }
+__attribute__((weak)) int vault_secret_encrypt(const uint8_t k[VAULT_DEK_LEN],const uint8_t *a,size_t al,const uint8_t *p,size_t n,uint8_t no[VAULT_GCM_NONCE_LEN],uint8_t *c,uint8_t t[VAULT_GCM_TAG_LEN])
+{ (void)k;(void)a;(void)al;(void)p;(void)n;(void)no;(void)c;(void)t; return -1; }
+__attribute__((weak)) int vault_secret_decrypt(const uint8_t k[VAULT_DEK_LEN],const uint8_t *a,size_t al,const uint8_t no[VAULT_GCM_NONCE_LEN],const uint8_t *c,size_t n,const uint8_t t[VAULT_GCM_TAG_LEN],uint8_t *p)
+{ (void)k;(void)a;(void)al;(void)no;(void)c;(void)n;(void)t;(void)p; return -1; }
 
 /* --- small PEM <-> object helpers --- */
 
@@ -603,5 +625,49 @@ int kb_pki_ca_load_or_create(const char *dir, kb_pki_ca_t *out, int *created)
    }
    if (created)
       *created = 1;
+   return 0;
+}
+
+int kb_pki_ca_save_custodied(const char *dir, const kb_pki_ca_t *ca)
+{
+   if (!dir || !dir[0] || !ca || !ca->cert_pem[0] || !ca->key_pem[0]) return -1;
+   if (mkdir(dir, 0700) != 0 && errno != EEXIST) return -1;
+   char cp[1024], ep[1024];
+   if (join_path(dir, "ca.pem", cp, sizeof(cp)) || join_path(dir, "ca-key.vault", ep, sizeof(ep))) return -1;
+   uint8_t kek[VAULT_KEK_LEN], nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN];
+   uint8_t ct[KB_PKI_KEY_PEM_MAX]; char nh[VAULT_GCM_NONCE_LEN*2+1], th[VAULT_GCM_TAG_LEN*2+1];
+   char ch[KB_PKI_KEY_PEM_MAX*2+1]; int rc=-1;
+   if (vault_server_kek(kek) != 0 || vault_secret_encrypt(kek, (const uint8_t*)"aimee-kb-ca-key-v1", 18,
+         (const uint8_t*)ca->key_pem, strlen(ca->key_pem), nonce, ct, tag) != 0) goto done;
+   if (hx(nonce,sizeof(nonce),nh,sizeof(nh)) || hx(tag,sizeof(tag),th,sizeof(th)) ||
+       hx(ct,strlen(ca->key_pem),ch,sizeof(ch))) goto done;
+   int fd=open(cp,O_WRONLY|O_CREAT|O_TRUNC,0644); if(fd<0)goto done;
+   size_t cl=strlen(ca->cert_pem); if(write(fd,ca->cert_pem,cl)!=(ssize_t)cl){close(fd);goto done;} close(fd);
+   fd=open(ep,O_WRONLY|O_CREAT|O_TRUNC,0600); if(fd<0)goto done;
+   dprintf(fd,"AIMEE-CA-VAULT-V1\n%s\n%s\n%s\n",nh,th,ch); if(fsync(fd)!=0){close(fd);goto done;} close(fd); rc=0;
+done: OPENSSL_cleanse(kek,sizeof(kek)); OPENSSL_cleanse(ct,sizeof(ct)); return rc;
+}
+
+int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out)
+{
+   if(!dir||!out)return -1;
+   char cp[1024],ep[1024],buf[KB_PKI_KEY_PEM_MAX*2+256];
+   if(join_path(dir,"ca.pem",cp,sizeof(cp))||join_path(dir,"ca-key.vault",ep,sizeof(ep)))return -1;
+   if(read_text_file(cp,out->cert_pem,sizeof(out->cert_pem))<0)return -1;
+   if(read_text_file(ep,buf,sizeof(buf))<0)return -1;
+   char *a=strtok(buf,"\n"),*n=strtok(NULL,"\n"),*t=strtok(NULL,"\n"),*c=strtok(NULL,"\n");
+   if(!a||!n||!t||!c||strcmp(a,"AIMEE-CA-VAULT-V1"))return -1;
+   uint8_t kek[VAULT_KEK_LEN],nonce[VAULT_GCM_NONCE_LEN],tag[VAULT_GCM_TAG_LEN],ct[KB_PKI_KEY_PEM_MAX]; int rc=-1;
+   size_t cn=strlen(c); if(unhx(n,strlen(n),nonce,sizeof(nonce))||unhx(t,strlen(t),tag,sizeof(tag))||unhx(c,cn,ct,sizeof(ct))||vault_server_kek(kek)!=0)goto done;
+   if(vault_secret_decrypt(kek,(const uint8_t*)"aimee-kb-ca-key-v1",18,nonce,ct,cn/2,tag,(uint8_t*)out->key_pem)!=0)goto done;
+   rc=1; out->key_pem[cn/2]=0;
+done: OPENSSL_cleanse(kek,sizeof(kek)); OPENSSL_cleanse(ct,sizeof(ct)); if(rc<0)OPENSSL_cleanse(out->key_pem,sizeof(out->key_pem)); return rc;
+}
+
+int kb_pki_ca_load_or_create_custodied(const char *dir, kb_pki_ca_t *out, int *created)
+{
+   int r=kb_pki_ca_load_custodied(dir,out); if(r==1){if(created)*created=0;return 0;}
+   if(kb_pki_ca_generate(out)!=0||kb_pki_ca_save_custodied(dir,out)!=0){OPENSSL_cleanse(out,sizeof(*out));return -1;}
+   if(created)*created=1;
    return 0;
 }
