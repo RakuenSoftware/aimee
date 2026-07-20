@@ -116,3 +116,43 @@ No eventstream framing (P6b), no egress wiring, no cross-target linkage, no live
 frontend renderer change. Pure Converse-stream-event → aimee_delta_t parser — the streaming half
 of the Converse response mapping — fixture-tested vs AWS's documented ConverseStream events,
 completing the Bedrock pure cores.
+
+## v2 refinements (roundtable-converged; ConverseStream fidelity + robustness)
+
+- **BLOCK_DELTA kind comes from the delta's OWN variant, not state.** `contentBlockDelta.delta`
+  is a union that self-identifies: `{text:…}`→text_delta (kind TEXT); `{toolUse:{input:…}}`→
+  tool_args_delta (kind TOOL_USE; `input` is a JSON-STRING fragment accumulated across deltas —
+  emit the fragment verbatim as tool_args_delta, do NOT parse it); `{reasoningContent:{text:…}}`→
+  text_delta (kind THINKING). An unknown delta variant within a well-formed contentBlockDelta
+  (e.g. `citation`, `reasoningContent.redactedContent`, a signature-only reasoning delta) → emit
+  0 deltas for it (forward-compat SKIP, NOT -1). Per-index state tracks the block KIND (text /
+  tool_use / thinking — three, not two) ONLY so BLOCK_STOP can carry the right `kind`.
+- **contentBlockStart: TOOL_USE iff `start.toolUse` is present, else TEXT.** Handle `start`
+  absent OR an empty object OR a non-toolUse union all as a TEXT block-start (do not require
+  `start`). A `start.toolUse` → BLOCK_START kind=TOOL_USE with tool_id/tool_name.
+- **Stream-side EXCEPTION events → an ERROR delta.** The known ConverseStream exception
+  event-types — `internalServerException`, `modelStreamErrorException`, `validationException`,
+  `throttlingException`, `serviceUnavailableException` — map to AIMEE_DELTA_ERROR with
+  `error_message` from the payload's `message` field (so the stream surfaces the AWS error, not
+  silently ignores it). A genuinely-unknown event_type (a future Converse event) → 0 deltas
+  (ignore, forward-compat). A structurally-malformed KNOWN event (e.g. contentBlockDelta whose
+  `delta` is not an object) → -1 (drop the stream, P6b-consistent).
+- **Usage on TURN_STOP is consistent with `openai_chunk_to_deltas`.** That analogue already
+  emits a TURN_STOP carrying `usage_in/usage_out` (incl. a usage-only final chunk), and the
+  renderer reads usage from whichever TURN_STOP carries it. So: `messageStop{stopReason}` →
+  TURN_STOP with stop_reason (usage 0); `metadata{usage}` → TURN_STOP with usage_in=inputTokens,
+  usage_out=outputTokens (stop_reason UNKNOWN/0). `aimee_delta_t` has only usage_in/usage_out
+  (no cache fields) — cache tokens are dropped on the stream path (the non-stream parse keeps
+  them); documented. This two-TURN_STOP shape matches the existing OpenAI streaming contract, so
+  no renderer change is needed.
+- **`converse_stop_reason` is currently `static` in aimee_backend_bedrock.c** — expose it via
+  `aimee_backend.h` as the single source of truth and reuse it for messageStop (do not re-derive
+  a second mapping). The test link list therefore includes `aimee_backend_bedrock.o`.
+
+### Gate additions
+
+- (i) an interleaved sequence — text block 0 + tool_use block 1 + reasoning block 2 streaming,
+  then BLOCK_STOP for each — asserts each BLOCK_STOP carries the right kind (state correctness).
+- (j) a `throttlingException` event → 1 ERROR delta with error_message; an unknown event → 0.
+- (k) a contentBlockDelta with an unknown delta variant (e.g. `citation`) → 0 deltas (skip), NOT
+  -1; a contentBlockDelta whose `delta` is not an object → -1.
