@@ -1,17 +1,24 @@
 # Proposal: Standing LoCoMo / LongMemEval benchmark cadence
 
-- **State:** proposed (pending — not started)
+- **State:** accepted — §1–§3 implemented in follow-up commits; §4 sweep landed in
+  this commit (see [§4 Sweep log](#sweep-log))
+- **Scope of this commit:** §4 only. §1 (nightly workflow), §2 (results store +
+  `BASELINE.json`), §3 (`check_drift.py` drift gate) are designed but not built
+  here. They ride their own follow-ups and unblock each other in order: §2 →
+  §3 → §1.
 
 ## Thesis
 
-Acceptance criteria across the codebase cite retrieval/memory parity in absolute
-terms — "within ±0.005 of baseline", "P@5 ≥ 0.45", "no regression vs. mem0" —
-but **nothing runs the full benchmarks on a schedule**. `bench-smoke.yml` fires
-only on `pull_request`, and it runs the harness *unit tests* + a provisioning
-coverage gate + **mini** fixtures (`locomo-mini.json`, `longmemeval-mini.json`),
-not the real datasets. So the numbers those criteria are measured against are
-computed by hand, ad hoc, and then quietly go stale. As the roadmap says: either
-put the benchmarks on a cadence, or stop citing parity criteria nobody measures.
+Acceptance criteria and prose across the codebase cite retrieval/memory parity
+in absolute terms — e.g. `docs/ROADMAP.md:64` ("`kb_search` mean P@5 from 0.268
+→ ≥ 0.45 on the 44-query POC set") and `docs/ROADMAP.md:150` (a meta-comment
+that acceptance criteria "cite 'within ±0.005 of baseline'") — but **nothing
+runs the full benchmarks on a schedule**. `bench-smoke.yml` fires only on
+`pull_request`, and it runs the harness *unit tests* + a provisioning coverage
+gate + **mini** fixtures (`locomo-mini.json`, `longmemeval-mini.json`), not the
+real datasets. So the numbers those criteria are measured against are computed
+by hand, ad hoc, and then quietly go stale. As the roadmap says: either put the
+benchmarks on a cadence, or stop citing parity criteria nobody measures.
 
 ## Goal
 
@@ -67,6 +74,51 @@ locally. Acceptance criteria stop citing an unmeasured number.
 Sweep the acceptance criteria that cite a parity band and either (a) point them at
 `BASELINE.json` + the drift gate, or (b) delete the citation. A criterion that
 references a number no job measures is debt, not a spec.
+
+### Sweep log
+
+Executed against `HEAD` on this branch. The literal set in scope:
+
+```
+±0.005          # memory-parity band
+P@5 ≥ 0.45      # kb_search target (ROADMAP.md)
+0.268           # kb_search baseline (ROADMAP.md)
+no regression vs. mem0
+```
+
+`grep -rn -E '±0\.005|P@5|0\.268|0\.45|0\.005|memory parity|no regression vs.*mem0'`
+over `docs/`, `scripts/`, `benchmarks/`, `src/` returned the following matches
+**with the literals as quoted acceptance-style text** (excluding this proposal
+file and result-JSON artifacts which are runtime data, not criteria):
+
+| File:Line | Literal | Verdict |
+|---|---|---|
+| `docs/ROADMAP.md:64` | `P@5 ≥ 0.45` and `0.268` baseline | **Keep.** Real, owned deliverable target for the embedder-sidecar retrieval lift (Phase 0 of deep-curator). Will become measurable once §1 + §2 land; no spec drift today because the line names the dataset (44-query POC set) and the bounded work item. |
+| `docs/ROADMAP.md:150` | `±0.005` | **Keep, but it self-resolves.** This is a meta-comment that points at *this proposal*. Once §1–§3 land, the cadence exists and the criterion is no longer unmeasured. No edit needed; the bullet becomes historical. |
+| `docs/PROPOSALS.md:123` | (proposal summary, no literals) | **Keep.** Index entry for this proposal; accurate summary. |
+| `docs/proposals/pending/standing-benchmark-cadence.md` | all | **This file.** Thesis text quotes the literals as the problem the proposal fixes; that is intentional and not a spec claim. |
+| `docs/validation/embedder-gate-locomo.md`, `benchmarks/results/*`, `src/tests/test_*.c`, `scripts/embed-*.py` | `0.45`, `0.4560`, `0.4526`, etc. | **Out of scope.** Result JSON, validation tables, code constants, and per-fixture numerics — not acceptance criteria citing a parity band. |
+
+**No acceptance criterion in code, scripts, or test files cites a parity band.**
+The only documents that quote the literals are: this proposal (intentionally,
+as the problem statement) and `docs/ROADMAP.md` (one owned target at line 64;
+one meta-comment at line 150 that this proposal itself renders obsolete once
+the cadence exists).
+
+**Net sweep action for this commit:** none beyond this log. The literals
+this proposal fixes are *not* scattered across the tree; they live entirely in
+the proposal and one roadmap line that already points back here. The
+acceptance-criterion debt is real (no cadence) but it is *this proposal's*
+debt to retire, not a sweep across other files.
+
+### Follow-up checklist for §1/§2/§3
+
+When §2 lands `benchmarks/BASELINE.json`, re-run the sweep above and confirm
+no new literals appear in unrelated files. When §3 lands `check_drift.py`,
+add an assertion that every threshold it checks is either (a) declared in
+`BASELINE.json` or (b) explicitly marked `manual-review` — fail the build
+otherwise. When §1 lands the nightly workflow, add the drift gate as a
+required check so an undeclared threshold can't escape into CI.
 
 ## Non-goals
 

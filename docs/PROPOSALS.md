@@ -1,10 +1,10 @@
 # Proposals
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 This index reflects the actual proposal tree under
 [`docs/proposals/`](proposals/). The authoritative state is the directory
 listing itself; this file is a navigable summary of it. Ordering within a
 section does not imply global priority.
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
@@ -13,7 +13,7 @@ section does not imply global priority.
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
 | Review notes | `proposals/reviews/` | 0 |
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 > **Reconciliation note (2026-07-07).** A prior version of this index described a
 > ~40-item "charter-spine" roadmap (curator, corpus stages, cross-source learning,
 > statistical decision systems, MDL synthesis, Bayesian calibration, contextual
@@ -24,13 +24,13 @@ section does not imply global priority.
 > folder and undercounting `done/` by ~48. This rewrite restores the index to the
 > tree. Orphaned design docs cited by shipped code are tracked under
 > [Documentation integrity](#documentation-integrity).
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 ## Governing contracts
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 Three platform-wide contracts govern every intelligence-surface change. They are
 realized in code and enforced in review; their standalone proposal documents are
 **not currently in the tree** (see [Documentation integrity](#documentation-integrity)):
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 1. **Architecture Charter** — fixes role division across neural, symbolic,
    statistical, planning, and deterministic passes (Recall / Rerank / Rewrite /
    Extract / Synthesize / Judge / Reflect / Classify-Score / Plan-Search / Reason /
@@ -47,11 +47,11 @@ realized in code and enforced in review; their standalone proposal documents are
 3. **Memory Public Contract** — the caller-facing memory contract (scope, filters,
    typed mutation verbs, profile packs, stable `--explain`) shared across CLI, MCP,
    and the aimee-kb `/v1/` API.
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 ## Pending
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 The genuinely open work — eighteen proposals (all but one not yet implemented).
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
   enforcer sit, and can it prove enforcement held without trusting the agent it
@@ -76,7 +76,7 @@ The genuinely open work — eighteen proposals (all but one not yet implemented)
      fleet registry so unmediated/rogue actors are visible; hash-pin (TOFU) then
      sign plugins/skills/templates/workflows; authenticate the hook channel.
      **Enforce / Classify-Score / Gate-Promote.**
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 - [The code graph should carry the architecture, not just the symbols](proposals/pending/code-graph-architecture-surface.md)
   — five slices that turn the symbol/call graph into an architecture surface: route
   and storage node kinds with framework-aware extraction, a repo-level orientation
@@ -120,9 +120,12 @@ The genuinely open work — eighteen proposals (all but one not yet implemented)
   same-commit move convention plus a documented supersession rule and the reconcile
   drift class to enforce it.
 - [Standing LoCoMo / LongMemEval benchmark cadence](proposals/pending/standing-benchmark-cadence.md)
-  — acceptance criteria cite absolute retrieval/memory parity numbers but nothing
-  runs the full benchmarks on a schedule; adds a standing benchmark cadence beyond
-  the PR-only `bench-smoke`.
+  — accepted; §4 sweep landed in this commit, §1–§3 (nightly workflow + results
+  store + drift gate) ride follow-ups. The literal "parity criteria nobody
+  measures" debt lives mostly in the proposal itself and one ROADMAP target —
+  the real gap is the missing cadence, not a scattered set of unmeasurable
+  thresholds. See the §4 sweep log in the proposal for what the tree actually
+  contains.
 - [Close out platform phase 7 — v1 API stability tag + distributed-mode validation](proposals/pending/v1-stability-and-distributed-validation.md)
   — the aimee-kb platform arc landed phases 1–6; phase 7 (distributed-mode
   validation + a v1 API stability tag) is the one remaining piece with no closing
@@ -170,12 +173,12 @@ The genuinely open work — eighteen proposals (all but one not yet implemented)
   and deeper per-directory convention discovery (the walk is already correct and
   tested; `AGENTS.md` is a foreign convention classed untrusted advisory).
   **Evaluate-Optimize / Calibrate.**
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 ## Done (66)
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 The [`proposals/done/`](proposals/done/) directory holds 66 shipped proposals.
 Grouped by theme:
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 - **Universal gateway, ingress & protocol.**
   [universal LLM gateway](proposals/done/aimee-universal-gateway.md),
   [canonical IR](proposals/done/aimee-canonical-ir.md),
@@ -249,14 +252,14 @@ Grouped by theme:
   [one unified `aimee-llm` container](proposals/done/unified-llm-container.md),
   [webchat git projects + in-browser VSCode](proposals/done/webchat-git-projects-and-vscode.md),
   [dedicated Proposals web page](proposals/done/proposals-ui-page.md).
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 For the full chronological record, see the directory listing or
 `git log -- docs/proposals/done/`.
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 ## Documentation integrity
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 Cleanup surfaced while regenerating this index:
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 - **`three-db-split` fully purged (this change).** The former three-tier framing
   (DB1 / DB2 / DB3-Qdrant) is gone: the vector tier is a pgvector extension inside
   DB2, full stop. All `docs/proposals/{accepted,pending,done}/three-db-*.md`
@@ -288,9 +291,9 @@ Cleanup surfaced while regenerating this index:
   - Recommended follow-up: restore the orphaned design docs to `done/` as post-hoc
     records of shipped work, or replace each header comment with the shipped
     filename. Tracked separately from this index refresh.
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 ## Notes
-
+  the real gap is the missing cadence, not a scattered set of unmeasurable
 - The pending list is small by design. Proposals that ship move to `done/`.
 - The Architecture Charter is the review gate for any new intelligence-surface
   proposal (neural, symbolic, statistical, planning, or deterministic): it must
