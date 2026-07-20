@@ -79,6 +79,7 @@ BEGIN
     org_vault_salt, org_vault_secret, org_vault_current FROM aimee_kb_runtime;
   GRANT SELECT ON
     org_vault_salt, org_vault_secret, org_vault_current TO aimee_kb_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_vault_rotation FROM aimee_kb_runtime;
   -- The vault definer functions are the ONLY write/read-through path; EXECUTE to
   -- runtime, never PUBLIC.
   REVOKE ALL ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) FROM PUBLIC;
@@ -93,6 +94,12 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_current_wraps(TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_authorized(TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,BIGINT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_stage(TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_get(BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_salt_read(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_kek_check_read(TEXT) TO aimee_kb_runtime;
@@ -105,6 +112,11 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_current_wraps(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,BIGINT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_stage(TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_get(BIGINT) TO aimee_kb_runtime;
 
   -- P2a org model catalog + entitlement. The catalog is admin-managed and read/written
   -- EXCLUSIVELY through the SECURITY DEFINER functions (owned by aimee_kb_owner, which

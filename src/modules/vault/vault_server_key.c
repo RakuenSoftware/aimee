@@ -450,12 +450,15 @@ static const vault_custody_provider_t file_custody = {
 };
 
 static const vault_custody_provider_t *g_custody = &file_custody;
+static pthread_mutex_t g_hwm_mu = PTHREAD_MUTEX_INITIALIZER;
 
 /* Rebind the active custody provider (P7 profile composition / tests). NULL
  * restores the built-in file provider. See vault_internal.h. */
 void vault_custody_set_provider(const vault_custody_provider_t *provider)
 {
+   pthread_mutex_lock(&g_hwm_mu);
    g_custody = provider ? provider : &file_custody;
+   pthread_mutex_unlock(&g_hwm_mu);
 }
 
 int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
@@ -490,4 +493,58 @@ int vault_seal(void)
     * even if the provider has no seal slot (P7 §3 "sealing flushes the KEK cache"). */
    vault_kek_cache_clear();
    return g_custody->seal ? g_custody->seal(g_custody->ctx) : 0;
+}
+
+int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
+                   size_t *att_len)
+{
+   if (version)
+      *version = 0;
+   if (att_len)
+      *att_len = 0;
+   if (!key_id || !key_id[0] || !version || !att || att_cap == 0 || !att_len)
+   {
+      if (att && att_cap)
+         OPENSSL_cleanse(att, att_cap);
+      return -1;
+   }
+   pthread_mutex_lock(&g_hwm_mu);
+   int rc = (!g_custody->hwm_read || !g_custody->hwm_cas)
+                ? -1
+                : g_custody->hwm_read(g_custody->ctx, key_id, version, att, att_cap, att_len);
+   pthread_mutex_unlock(&g_hwm_mu);
+   if (rc != 0 || *att_len == 0 || *att_len > att_cap)
+   {
+      OPENSSL_cleanse(att, att_cap);
+      *version = 0;
+      *att_len = 0;
+      return -1;
+   }
+   return 0;
+}
+
+int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
+                  size_t att_cap, size_t *att_len)
+{
+   if (att_len)
+      *att_len = 0;
+   if (!key_id || !key_id[0] || expected == UINT64_MAX || next != expected + 1 || !att ||
+       att_cap == 0 || !att_len)
+   {
+      if (att && att_cap)
+         OPENSSL_cleanse(att, att_cap);
+      return -1;
+   }
+   pthread_mutex_lock(&g_hwm_mu);
+   int rc = (!g_custody->hwm_read || !g_custody->hwm_cas)
+                ? -1
+                : g_custody->hwm_cas(g_custody->ctx, key_id, expected, next, att, att_cap, att_len);
+   pthread_mutex_unlock(&g_hwm_mu);
+   if (rc != 0 || *att_len == 0 || *att_len > att_cap)
+   {
+      OPENSSL_cleanse(att, att_cap);
+      *att_len = 0;
+      return -1;
+   }
+   return 0;
 }

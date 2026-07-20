@@ -1,6 +1,7 @@
 #ifndef DEC_VAULT_SERVER_KEY_H
 #define DEC_VAULT_SERVER_KEY_H 1
 
+#include <stddef.h>
 #include <stdint.h>
 #include "vault_crypto.h" /* VAULT_KEK_LEN */
 
@@ -89,5 +90,14 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
 int vault_is_sealed(void);
 int vault_unseal(const void *params, size_t len);
 int vault_seal(void);
+
+/* Anchor-authoritative per-key high-water operations (P7 §8). Providers that
+ * do not supply the complete signed-HWM seam fail closed; there is deliberately
+ * no database or process-local fallback. Returned attestations have already
+ * been cryptographically verified by the provider. */
+int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
+                   size_t *att_len);
+int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
+                  size_t att_cap, size_t *att_len);
 
 #endif /* DEC_VAULT_SERVER_KEY_H */
