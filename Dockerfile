@@ -22,7 +22,7 @@ ARG AIMEE_VERSION=""
 # build stage), then build the kb with AIMEE_TREESITTER=1 (real-AST C/C++ class/
 # method extraction). See docs/proposals/pending/cpp-class-method-extraction.md.
 RUN sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-kb AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+    && make -C src -j"$(nproc)" ../aimee-kb AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 FROM debian:bookworm-slim
 
