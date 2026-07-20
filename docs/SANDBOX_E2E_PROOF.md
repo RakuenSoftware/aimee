@@ -1,0 +1,3 @@
+This file serves as the e2e proof artifact for the autonomous core-capture run 30 (reference marker `core-capture-run30-20260720`); it is created on the work-item branch to confirm that the delegate can write a new document under `docs/`, surface it through `git status`, and have it included in the final commit without altering any other tracked file.
+
+This second paragraph records that the artifact was authored in the sandbox worktree at `/var/lib/aimee/wfe-worktrees/wi_6b8e5c646e3fcc260e8dee324ad6dd24.s0` and is the only change introduced on the work-item branch for this run; no other tracked file is modified, added, or removed.
