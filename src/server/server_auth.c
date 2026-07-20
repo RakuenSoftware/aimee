@@ -105,6 +105,7 @@ const method_policy_t method_registry[] = {
     {"vault.delete", CAP_DELEGATE, "delete a vault credential"},
     {"vault.lock", CAP_DELEGATE, "lock the credential vault"},
     {"cert.issue", CAP_DELEGATE, "issue an mTLS client cert"},
+    {"cert.sign", CAP_DELEGATE, "sign a client-generated mTLS CSR"},
     {"cert.list", CAP_DELEGATE, "list issued mTLS client certs"},
     {"cert.revoke", CAP_DELEGATE, "revoke an mTLS client cert"},
     {"jobs.list", CAP_DELEGATE, "list delegate jobs"},

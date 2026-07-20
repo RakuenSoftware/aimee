@@ -8,11 +8,62 @@
 #include <sqlite3.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+static char *make_csr(const char *subject_cn, int forge)
+{
+   EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+   EVP_PKEY *key = NULL;
+   X509_REQ *req = NULL;
+   BIO *bio = NULL;
+   char *out = NULL;
+   if (!kctx || EVP_PKEY_keygen_init(kctx) != 1 ||
+       EVP_PKEY_CTX_set_ec_paramgen_curve_nid(kctx, NID_X9_62_prime256v1) != 1 ||
+       EVP_PKEY_keygen(kctx, &key) != 1 || !(req = X509_REQ_new()) ||
+       X509_REQ_set_version(req, 0) != 1)
+      goto done;
+   X509_NAME *name = X509_REQ_get_subject_name(req);
+   if (!name || X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC,
+                                            (const unsigned char *)subject_cn, -1, -1, 0) != 1 ||
+       X509_REQ_set_pubkey(req, key) != 1 || X509_REQ_sign(req, key, EVP_sha256()) <= 0)
+      goto done;
+   if (forge)
+   {
+      EVP_PKEY_CTX *other_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+      EVP_PKEY *other = NULL;
+      int ok = other_ctx && EVP_PKEY_keygen_init(other_ctx) == 1 &&
+               EVP_PKEY_CTX_set_ec_paramgen_curve_nid(other_ctx, NID_X9_62_prime256v1) == 1 &&
+               EVP_PKEY_keygen(other_ctx, &other) == 1 && X509_REQ_set_pubkey(req, other) == 1;
+      EVP_PKEY_free(other);
+      EVP_PKEY_CTX_free(other_ctx);
+      if (!ok)
+         goto done;
+   }
+   if (!(bio = BIO_new(BIO_s_mem())) || PEM_write_bio_X509_REQ(bio, req) != 1)
+      goto done;
+   BUF_MEM *mem = NULL;
+   BIO_get_mem_ptr(bio, &mem);
+   if (mem)
+   {
+      out = malloc(mem->length + 1);
+      if (out)
+      {
+         memcpy(out, mem->data, mem->length);
+         out[mem->length] = '\0';
+      }
+   }
+done:
+   BIO_free(bio);
+   X509_REQ_free(req);
+   EVP_PKEY_free(key);
+   EVP_PKEY_CTX_free(kctx);
+   return out;
+}
 
 static int verify_chains_to_ca(const char *cert_pem, const char *ca_path)
 {
@@ -116,6 +167,45 @@ int main(void)
    assert(strstr(key, "BEGIN") != NULL && strstr(key, "PRIVATE KEY") != NULL);
    assert(serial[0] != '\0');
    assert(verify_chains_to_ca(cert, ca_path) == 1);
+
+   /* P8b: the client owns the key and sends only a signed CSR. The CSR subject is
+    * ignored; the server-selected CN is authoritative and the roster is durable. */
+   char *csr = make_csr("attacker-chosen-cn", 0);
+   char csr_cert[8192] = "", csr_serial[64] = "";
+   assert(csr != NULL);
+   assert(pki_sign_csr("thin-client-1", 30, csr, csr_cert, sizeof(csr_cert), csr_serial,
+                       sizeof(csr_serial)) == 0);
+   assert(verify_chains_to_ca(csr_cert, ca_path) == 1);
+   assert(pki_cert_check(csr_serial, (long)time(NULL)) == PKI_CERT_VALID);
+   BIO *signed_bio = BIO_new_mem_buf(csr_cert, -1);
+   X509 *signed_cert = signed_bio ? PEM_read_bio_X509(signed_bio, NULL, NULL, NULL) : NULL;
+   char signed_cn[128] = "";
+   assert(signed_cert != NULL);
+   X509_NAME_get_text_by_NID(X509_get_subject_name(signed_cert), NID_commonName, signed_cn,
+                             sizeof(signed_cn));
+   assert(strcmp(signed_cn, "thin-client-1") == 0);
+   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(signed_cert, NID_ext_key_usage, NULL, NULL);
+   int have_client = 0, have_server = 0;
+   assert(eku != NULL);
+   for (int i = 0; i < sk_ASN1_OBJECT_num(eku); i++)
+   {
+      int nid = OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, i));
+      have_client |= nid == NID_client_auth;
+      have_server |= nid == NID_server_auth;
+   }
+   assert(have_client && !have_server);
+   EXTENDED_KEY_USAGE_free(eku);
+   X509_free(signed_cert);
+   BIO_free(signed_bio);
+   char bad_cert[8192], bad_serial[64];
+   assert(pki_sign_csr("thin-client-bad", 30, "not a csr", bad_cert, sizeof(bad_cert), bad_serial,
+                       sizeof(bad_serial)) == -1);
+   char *forged_csr = make_csr("forged", 1);
+   assert(forged_csr != NULL);
+   assert(pki_sign_csr("thin-client-forged", 30, forged_csr, bad_cert, sizeof(bad_cert), bad_serial,
+                       sizeof(bad_serial)) == -1);
+   free(forged_csr);
+   free(csr);
 
    /* Revocation: not revoked, then revoked, reflected in the snapshot. */
    assert(pki_is_revoked(serial) == 0);

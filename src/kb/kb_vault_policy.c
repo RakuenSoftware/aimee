@@ -101,6 +101,15 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
             snprintf(errbuf, errlen, "kms helper unavailable or returned invalid root");
          return -1;
       }
+      if (vault_custody_kms_hwm_refresh() != 0)
+      {
+         vault_seal();
+         vault_custody_set_provider(NULL);
+         g_selected = KB_CUSTODY_FILE;
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kms high-water mark unavailable or untrusted");
+         return -1;
+      }
       return 0;
 
    case KB_CUSTODY_UNKNOWN:
@@ -116,5 +125,6 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
 int kb_vault_live_keys_allowed(void)
 {
    /* Real anchor AND currently unsealed. file/mock -> false unconditionally. */
-   return custody_is_real_anchor(g_selected) && vault_is_sealed() == 0;
+   return custody_is_real_anchor(g_selected) && vault_is_sealed() == 0 &&
+          (g_selected != KB_CUSTODY_KMS || vault_custody_kms_hwm_ready());
 }
