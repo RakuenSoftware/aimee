@@ -62,8 +62,7 @@ typedef struct
  * derive-and-return-KEK logic; rotate wraps vault_server_key_rotate(). The
  * default provider ("file") reads/mints the 0600 .server-master.key file.
  *
- * NOTE: hwm_read/hwm_cas (rollback high-water-mark) are deliberately NOT part of
- * this vtable yet — deferred to a later slice. */
+ * HWM callbacks carry a version plus a detached signed attestation. */
 typedef struct
 {
    const char *name;
@@ -94,6 +93,10 @@ typedef struct
    int (*is_sealed)(void *ctx);
    int (*unseal)(void *ctx, const void *params, size_t len);
    int (*seal)(void *ctx);
+   int (*hwm_read)(void *ctx, const char *key_id, uint64_t *version, uint8_t *att,
+                   size_t att_cap, size_t *att_len);
+   int (*hwm_cas)(void *ctx, const char *key_id, uint64_t expected, uint64_t next,
+                  uint8_t *att, size_t att_cap, size_t *att_len);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────
