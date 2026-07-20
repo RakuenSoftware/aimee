@@ -78,14 +78,12 @@ openai_runs_missing_t openai_runs_store_classify_missing(const char *run_id)
    /* Pre-generation ids were oprun_<created>_<seq>. A replacement running this
     * version cannot retain them, so a well-formed legacy handle is interrupted. */
    if (!sep2)
-      return all_digits(token, (size_t)(sep1 - token)) &&
-                     all_digits(sep1 + 1, strlen(sep1 + 1))
+      return all_digits(token, (size_t)(sep1 - token)) && all_digits(sep1 + 1, strlen(sep1 + 1))
                  ? OPENAI_RUNS_MISSING_INTERRUPTED
                  : OPENAI_RUNS_MISSING_UNKNOWN;
    if (!sep2[1] || strchr(sep2 + 1, '_'))
       return OPENAI_RUNS_MISSING_UNKNOWN;
-   if (!all_digits(sep1 + 1, (size_t)(sep2 - sep1 - 1)) ||
-       !all_digits(sep2 + 1, strlen(sep2 + 1)))
+   if (!all_digits(sep1 + 1, (size_t)(sep2 - sep1 - 1)) || !all_digits(sep2 + 1, strlen(sep2 + 1)))
       return OPENAI_RUNS_MISSING_UNKNOWN;
 
    size_t token_n = (size_t)(sep1 - token);

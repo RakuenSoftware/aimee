@@ -29,21 +29,44 @@ static int q(const char *s, const char *k, char *o, size_t n)
 
 int kb_http_servers_route(const char *m, const char *p, const char *qs, char *out, int cap)
 {
-   if (!strcmp(p, "/v1/servers")) {
+   if (!strcmp(p, "/v1/servers"))
+   {
       /* list route below */
-   } else if (!strncmp(p, "/v1/servers/", 12) && !strcmp(m, "GET")) {
+   }
+   else if (!strncmp(p, "/v1/servers/", 12) && !strcmp(m, "GET"))
+   {
       const char *id = p + 12, *slash = strstr(id, "/health");
       char sid[128];
-      if (!slash || slash[7] || slash == id || (size_t)(slash-id) >= sizeof(sid)) return -1;
-      memcpy(sid, id, (size_t)(slash-id)); sid[slash-id] = 0;
-      char t[32], *e; long long team;
-      if (!q(qs, "team", t, sizeof(t))) { snprintf(out,cap,"{\"error\":\"team is required\"}"); return 400; }
-      team = strtoll(t,&e,10); if (!*t || *e || team <= 0) { snprintf(out,cap,"{\"error\":\"invalid team\"}"); return 400; }
+      if (!slash || slash[7] || slash == id || (size_t)(slash - id) >= sizeof(sid))
+         return -1;
+      memcpy(sid, id, (size_t)(slash - id));
+      sid[slash - id] = 0;
+      char t[32], *e;
+      long long team;
+      if (!q(qs, "team", t, sizeof(t)))
+      {
+         snprintf(out, cap, "{\"error\":\"team is required\"}");
+         return 400;
+      }
+      team = strtoll(t, &e, 10);
+      if (!*t || *e || team <= 0)
+      {
+         snprintf(out, cap, "{\"error\":\"invalid team\"}");
+         return 400;
+      }
       db2_server_row_t row;
-      if (db2_server_registry_get(team,sid,&row) != 0) { snprintf(out,cap,"{\"error\":\"server not found\"}"); return 404; }
-      snprintf(out,cap,"{\"server_id\":\"%s\",\"status\":\"%s\",\"health\":\"%s\",\"version\":\"%s\"}",row.server_id,row.status,row.health,row.version);
+      if (db2_server_registry_get(team, sid, &row) != 0)
+      {
+         snprintf(out, cap, "{\"error\":\"server not found\"}");
+         return 404;
+      }
+      snprintf(out, cap,
+               "{\"server_id\":\"%s\",\"status\":\"%s\",\"health\":\"%s\",\"version\":\"%s\"}",
+               row.server_id, row.status, row.health, row.version);
       return 200;
-   } else return -1;
+   }
+   else
+      return -1;
    if (strcmp(m, "GET"))
       return 405;
    char t[32];

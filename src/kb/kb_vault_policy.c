@@ -7,8 +7,8 @@
 #include "vault_custody_tpm2.h" /* vault_custody_tpm2_provider (real or stub) */
 #include "vault_custody_pkcs11.h"
 #include "vault_custody_kms.h"
-#include "vault_internal.h"     /* vault_custody_set_provider */
-#include "vault_server_key.h"   /* vault_is_sealed */
+#include "vault_internal.h"   /* vault_custody_set_provider */
+#include "vault_server_key.h" /* vault_is_sealed */
 #include <stdio.h>
 #include <string.h>
 
@@ -85,7 +85,8 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
       {
          vault_custody_set_provider(NULL);
          g_selected = KB_CUSTODY_FILE;
-         if (errbuf && errlen) snprintf(errbuf, errlen, "pkcs11 token unavailable or login failed");
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "pkcs11 token unavailable or login failed");
          return -1;
       }
       return 0;
@@ -95,8 +96,9 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
       if (vault_unseal(NULL, 0) != 0)
       {
          vault_custody_set_provider(NULL);
-         g_selected=KB_CUSTODY_FILE;
-         if(errbuf&&errlen)snprintf(errbuf,errlen,"kms helper unavailable or returned invalid root");
+         g_selected = KB_CUSTODY_FILE;
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kms helper unavailable or returned invalid root");
          return -1;
       }
       return 0;
