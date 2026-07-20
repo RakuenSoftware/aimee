@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 18 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 19 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — eighteen proposals (all but one not yet implemented).
+The genuinely open work — nineteen proposals (all but one not yet implemented).
 
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
@@ -84,6 +84,13 @@ The genuinely open work — eighteen proposals (all but one not yet implemented)
   coverage + provenance as an honesty envelope, and hop-grouped/confidence-scored
   impact. Slices 2/5 ship on today's graph; slice 1 is the only real extractor work.
   **Extract / Detect-Cluster / Recall / Calibrate / Constrain-Verify.**
+- [Make Aimee's core explicit, delete unused complexity, and modularize the source tree](proposals/pending/core-substrate-and-source-module-boundaries.md)
+  — defines the irreducible core as memory (including code intelligence, embedding, and
+  reranking), routing, IR messaging, and translation; makes synthesis and other non-core
+  capabilities optional; audits self-contained feature islands before retaining them; moves
+  feature implementations from global source buckets into documented, dependency-enforced
+  modules; and uses the migration as a deletion-first, DRY refactor rather than a directory
+  shuffle. **Recall / Rerank / Route / Translate / Constrain-Verify.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.
