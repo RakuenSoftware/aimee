@@ -1,7 +1,31 @@
 # Proposal (master plan): Tiered LLM offering — org-wide models on aimee-kb, user models on aimee-server
 
-- **State:** proposed (pending — not started). Umbrella plan; tracks ten sub-proposals (`tiered-llm-p1`…`p10`).
+- **State:** IN PROGRESS — 18 slices merged to `testing` (see delivery status below). Umbrella plan; tracks ten sub-proposals (`tiered-llm-p1`…`p10`).
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
+
+## Delivery status (as of 2026-07-20)
+
+18 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
+`testing`. Completed per-slice implementation plans live in `docs/proposals/done/`.
+
+| P | Status | Merged slices | Remaining |
+|---|---|---|---|
+| **P1** Tenancy + identity | ✅ done | schema+RLS, OIDC (iat + fleet JWKS), tenant-write policies + bootstrap, operator CLI | — |
+| **P2** kb egress authority + catalog | 🟡 partial | **P2a** catalog + entitlement | **P2b** egress path (live server↔kb wiring) |
+| **P3** Cost attribution | ✅ done | **P3a** pricing+WORM-ledger+rollup, **P3b** spend reporting | — |
+| **P4** Budgets + rate limits | ✅ done | **P4a** budget reservation core, **P4b** keyed rate limiter (both concurrency-proven) | — |
+| **P5** OIDC control plane | ⬜ pending | — | mgmt channel + OIDC propagation (needs the live server↔kb topology) |
+| **P6** Bedrock + vendor breadth | 🟡 pure cores done | **P6a** SigV4/STS auth, **P6b** eventstream decoder, **P6c-catalog** routing+validation, **P6c-ir** Converse↔IR, **P6c-stream** stream→delta | **P6c-egress** driver dispatch + native InvokeModel + pricing rows |
+| **P7** Hardened kb vault | 🟡 anchor live | **P10** vault core, **tpm2a** seal barrier, **tpm2b** PolicyNV anti-rollback (swtpm-validated) | WORM-audited key-use (§6), pkcs11/kms, CA-key-behind-vault (§7), kb DEK re-wrap |
+| **P8** thin-client mTLS | 🟡 partial | **P8a** per-request durable cert revocation (invariant #5) | **P8b/c** client-cert presentation + ramp + enrollment |
+| **P9** Telemetry tiering | 🟡 partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
+| **P10** Shared vault core | ✅ done | core extraction, kb Postgres store, custody selection + seal barrier | — (hardening tracked under P7) |
+
+Remaining work is integration/topology (P2b egress, P5 mgmt channel, P6c-egress, P8b/c) —
+validatable on the dedicated integration environment (a throwaway TPM2-equipped CT). The tpm2
+custody provider was validated against a software TPM2 (swtpm), which exercises the identical
+TPM2 2.0 API/semantics as silicon.
+
 - **Origin:** an operator question — "several teams want to play with models from different vendors (OpenAI, Anthropic, Bedrock, …); set something sane up now rather than hand out a pile of raw vendor keys." The market answer to that ask is an internal LLM gateway (LiteLLM / TrueFoundry / Portkey / Kong / OpenRouter). aimee is already in that category — it just isn't multi-tenant yet. This plan closes the gap **without adopting a virtual-key subsystem** and **without breaking aimee-server's single-user design**, by leaning on identity aimee already has.
 
 ## Thesis

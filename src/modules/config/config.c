@@ -881,6 +881,8 @@ static void config_set_defaults(config_t *cfg)
    cfg->vault_tpm2_blob_path[0] = '\0'; /* empty -> <config>/vault/tpm2-kek.blob at use */
    snprintf(cfg->vault_tpm2_tcti, sizeof(cfg->vault_tpm2_tcti), "%s",
             CONFIG_DEFAULT_VAULT_TPM2_TCTI);
+   snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s",
+            CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX);
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
    cfg->model_meta_refresh_minutes = 60;
@@ -1817,6 +1819,10 @@ int config_load_file(config_t *cfg)
             if (cJSON_IsString(tcti) && tcti->valuestring && tcti->valuestring[0])
                snprintf(cfg->vault_tpm2_tcti, sizeof(cfg->vault_tpm2_tcti), "%s",
                         tcti->valuestring);
+            cJSON *nvi = cJSON_GetObjectItemCaseSensitive(tpm2, "nv_index");
+            if (cJSON_IsString(nvi) && nvi->valuestring && nvi->valuestring[0])
+               snprintf(cfg->vault_tpm2_nv_index, sizeof(cfg->vault_tpm2_nv_index), "%s",
+                        nvi->valuestring);
          }
       }
    }

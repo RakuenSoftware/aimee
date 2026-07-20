@@ -159,6 +159,8 @@ const config_field_t config_fields[] = {
      sizeof(((config_t *)0)->vault_tpm2_blob_path), 0, CFG_STRING, RELOAD_RESTART, FGROUP_ADVANCED},
     {"vault.tpm2.tcti", offsetof(config_t, vault_tpm2_tcti),
      sizeof(((config_t *)0)->vault_tpm2_tcti), 0, CFG_STRING, RELOAD_RESTART, FGROUP_ADVANCED},
+    {"vault.tpm2.nv_index", offsetof(config_t, vault_tpm2_nv_index),
+     sizeof(((config_t *)0)->vault_tpm2_nv_index), 0, CFG_STRING, RELOAD_RESTART, FGROUP_ADVANCED},
     {"kb_evidence_emit_enabled", offsetof(config_t, kb_evidence_emit_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"fidelity_check_enabled", offsetof(config_t, fidelity_check_enabled), sizeof(int), 0,

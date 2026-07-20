@@ -932,14 +932,16 @@ int config_save(const config_t *cfg)
       int want_blob = cfg->vault_tpm2_blob_path[0] != '\0';
       int want_tcti = cfg->vault_tpm2_tcti[0] &&
                       strcmp(cfg->vault_tpm2_tcti, CONFIG_DEFAULT_VAULT_TPM2_TCTI) != 0;
-      if (want_custody || want_blob || want_tcti)
+      int want_nvidx = cfg->vault_tpm2_nv_index[0] &&
+                       strcmp(cfg->vault_tpm2_nv_index, CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX) != 0;
+      if (want_custody || want_blob || want_tcti || want_nvidx)
       {
          cJSON *vault = cJSON_AddObjectToObject(root, "vault");
          if (vault)
          {
             if (want_custody)
                cJSON_AddStringToObject(vault, "custody", cfg->vault_custody);
-            if (want_blob || want_tcti)
+            if (want_blob || want_tcti || want_nvidx)
             {
                cJSON *tpm2 = cJSON_AddObjectToObject(vault, "tpm2");
                if (tpm2)
@@ -948,6 +950,8 @@ int config_save(const config_t *cfg)
                      cJSON_AddStringToObject(tpm2, "blob_path", cfg->vault_tpm2_blob_path);
                   if (want_tcti)
                      cJSON_AddStringToObject(tpm2, "tcti", cfg->vault_tpm2_tcti);
+                  if (want_nvidx)
+                     cJSON_AddStringToObject(tpm2, "nv_index", cfg->vault_tpm2_nv_index);
                }
             }
          }
