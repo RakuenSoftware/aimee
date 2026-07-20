@@ -78,6 +78,15 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen)
    case KB_CUSTODY_PKCS11:
       vault_custody_set_provider(vault_custody_pkcs11_provider());
       g_selected = KB_CUSTODY_PKCS11;
+      /* PKCS#11 login is the provider's explicit unseal operation.  Fail closed
+       * during startup if the configured token/PIN/object cannot be opened. */
+      if (vault_unseal(NULL, 0) != 0)
+      {
+         vault_custody_set_provider(NULL);
+         g_selected = KB_CUSTODY_FILE;
+         if (errbuf && errlen) snprintf(errbuf, errlen, "pkcs11 token unavailable or login failed");
+         return -1;
+      }
       return 0;
    case KB_CUSTODY_KMS:
       /* Declared but unimplemented: fail closed — never silently fall back to a
