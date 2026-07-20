@@ -8,7 +8,12 @@
  *
  * Input contract (non-S3 semantics): the canonical URI is the RAW path; each
  * path SEGMENT is RFC3986 percent-encoded exactly ONCE (Bedrock/STS are non-S3,
- * so no S3-style double-encode). Canonical headers are lowercase-name,
+ * so no S3-style double-encode). The caller MUST pass an ALREADY-NORMALIZED path
+ * (no "." / ".." / empty "//" segments) — this signer does not perform RFC3986
+ * dot-segment path normalization. Bedrock/STS runtime paths are fixed and
+ * dot-segment-free, so P6b constructs a normalized path from the catalog target;
+ * a path with dot-segments would not match AWS's normalize-path signing behaviour.
+ * Canonical headers are lowercase-name,
  * value-trimmed + inner-whitespace-collapsed, sorted by name. When a session
  * token is supplied it is added to the SIGNED header set as x-amz-security-token.
  *

@@ -391,10 +391,20 @@ static void test_web_identity(void)
       aws_webid_status_t st = aws_webidentity_validate("not-a-jwt", jwks, iss, aud, now, NULL);
       assert(st != AWS_WEBID_OK);
    }
+   /* fail-CLOSED on empty/NULL expected iss or aud: a validly-signed token whose
+    * iss/aud match the token itself must still be REJECTED, never accept-any. */
+   {
+      char *jwt = make_jwt(pl, key);
+      assert(aws_webidentity_validate(jwt, jwks, "", aud, now, NULL) != AWS_WEBID_OK);
+      assert(aws_webidentity_validate(jwt, jwks, iss, "", now, NULL) != AWS_WEBID_OK);
+      assert(aws_webidentity_validate(jwt, jwks, NULL, aud, now, NULL) != AWS_WEBID_OK);
+      assert(aws_webidentity_validate(jwt, jwks, iss, NULL, now, NULL) != AWS_WEBID_OK);
+      free(jwt);
+   }
    free(jwks);
    EVP_PKEY_free(key);
    EVP_PKEY_free(other);
-   printf("  web-identity: valid ok; wrong-sig/iss/aud/expired rejected\n");
+   printf("  web-identity: valid ok; wrong-sig/iss/aud/expired/empty-expected rejected\n");
 }
 
 /* ================= (c) STS body construction (mode distinction) ============= */
@@ -635,7 +645,33 @@ static void test_bedrock_policy(void)
                             .id = "x"};
       assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
    }
-   printf("  bedrock policy: 5 types exact + fail-closed (no wildcard, no Converse)\n");
+   {
+      /* a profile whose underlying ARN is malformed / cross-service / wildcard ->
+       * fail closed (the bad ARN must never leak into the Resource set). */
+      const char *bad_wildcard[] = {"arn:aws:bedrock:us-east-1::foundation-model/*"};
+      const char *bad_service[] = {"arn:aws:s3:us-east-1::foundation-model/x"};
+      const char *bad_shape[] = {"arn:aws:bedrock:us-east-1::provisioned-model/x"};
+      const char *cases[3];
+      cases[0] = bad_wildcard[0];
+      cases[1] = bad_service[0];
+      cases[2] = bad_shape[0];
+      for (int i = 0; i < 3; i++)
+      {
+         const char *one[] = {cases[i]};
+         bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
+                               .partition = "aws",
+                               .region_set = regions1,
+                               .n_regions = 1,
+                               .account = "123456789012",
+                               .id = "p",
+                               .underlying_fm_arns = one,
+                               .n_underlying = 1};
+         assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
+         assert(out[0] == '\0');
+      }
+   }
+   printf("  bedrock policy: 5 types exact + fail-closed (no wildcard, no Converse, "
+          "bad-underlying-ARN rejected)\n");
 }
 
 /* ===================== (f) STS cache isolation matrix ====================== */

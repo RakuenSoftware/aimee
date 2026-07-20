@@ -252,6 +252,12 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
    if (!token || !jwks_json || !jwks_json[0])
       return AWS_WEBID_ERR_MALFORMED;
 
+   /* Fail CLOSED on a missing/empty expectation: an unconfigured issuer or
+    * audience must never silently accept ANY iss/aud (a misconfiguration would
+    * otherwise trust arbitrarily-issued tokens). Both are mandatory. */
+   if (!expected_iss || !expected_iss[0] || !expected_aud || !expected_aud[0])
+      return AWS_WEBID_ERR_CLAIMS;
+
    /* Split the compact JWS into three segments. */
    const char *dot1 = strchr(token, '.');
    if (!dot1)

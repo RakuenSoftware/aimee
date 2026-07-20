@@ -25,6 +25,22 @@ static int token_safe(const char *s)
    return 1;
 }
 
+/* A caller-supplied underlying foundation-model ARN must have the exact shape
+ * arn:<partition>:bedrock:<region>::foundation-model/<id> for the SAME partition —
+ * so a malformed, wildcard, or cross-service ARN cannot be smuggled verbatim into
+ * the least-privilege Resource set. Rejects any '*' and any non-bedrock service. */
+static int fm_arn_valid(const char *arn, const char *part)
+{
+   if (!token_safe(arn)) /* token_safe already forbids '*' and whitespace */
+      return 0;
+   char prefix[64];
+   int pn = snprintf(prefix, sizeof(prefix), "arn:%s:bedrock:", part);
+   if (pn <= 0 || (size_t)pn >= sizeof(prefix) || strncmp(arn, prefix, (size_t)pn) != 0)
+      return 0;
+   /* Must name the foundation-model resource type (empty account: '::'). */
+   return strstr(arn, "::foundation-model/") != NULL;
+}
+
 static int partition_valid(const char *p)
 {
    return p && (strcmp(p, "aws") == 0 || strcmp(p, "aws-us-gov") == 0 || strcmp(p, "aws-cn") == 0);
@@ -129,10 +145,18 @@ int bedrock_session_policy(const bedrock_target_t *t, int is_streaming, char *ou
          if (res_addf(&rs, "arn:%s:bedrock:%s:%s:%s/%s", part, t->region_set[i], t->account, kind,
                       t->id) != 0)
             return -1;
-      /* PLUS every underlying destination-region foundation-model ARN (verbatim). */
+      /* PLUS every underlying destination-region foundation-model ARN. Each is
+       * SHAPE-VALIDATED (arn:<part>:bedrock:<region>::foundation-model/<id>) before
+       * emission so a malformed / cross-service / wildcard ARN in the target struct
+       * fails closed rather than leaking an unrelated Resource into the IAM policy.
+       * (Defence-in-depth atop the P6b invariant that the target is authoritative.) */
       for (size_t i = 0; i < t->n_underlying; i++)
+      {
+         if (!fm_arn_valid(t->underlying_fm_arns[i], part))
+            return -1;
          if (res_add(&rs, t->underlying_fm_arns[i]) != 0)
             return -1;
+      }
       break;
    }
 
