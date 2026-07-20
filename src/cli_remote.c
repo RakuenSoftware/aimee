@@ -182,16 +182,15 @@ static int remote_enroll_client_cert(int quiet)
    if (RAND_bytes(rnd, sizeof(rnd)) != 1)
       return -1;
    char cn[128];
-   snprintf(cn, sizeof(cn), "thin-%02x%02x%02x%02x%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2],
-            rnd[3], rnd[4], rnd[5], rnd[6], rnd[7]);
+   snprintf(cn, sizeof(cn), "thin-%02x%02x%02x%02x%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2], rnd[3],
+            rnd[4], rnd[5], rnd[6], rnd[7]);
    snprintf(key_tmp, sizeof(key_tmp), "%s/.client.key.%ld.tmp", tls_dir, (long)getpid());
    snprintf(cert_tmp, sizeof(cert_tmp), "%s/.client.crt.%ld.tmp", tls_dir, (long)getpid());
    snprintf(key_path, sizeof(key_path), "%s/client.key", tls_dir);
    snprintf(cert_path, sizeof(cert_path), "%s/client.crt", tls_dir);
    char existing_cert[700], existing_key[700];
-   int eligible = aimee_tls_client_cert_eligible(aimee_home(), existing_cert,
-                                                  sizeof(existing_cert), existing_key,
-                                                  sizeof(existing_key));
+   int eligible = aimee_tls_client_cert_eligible(aimee_home(), existing_cert, sizeof(existing_cert),
+                                                 existing_key, sizeof(existing_key));
    if (eligible == 1)
       return 0;
    struct stat key_st, cert_st;
@@ -212,8 +211,9 @@ static int remote_enroll_client_cert(int quiet)
        X509_REQ_set_version(req, 0) != 1)
       goto done;
    X509_NAME *name = X509_REQ_get_subject_name(req);
-   if (!name || X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC,
-                                            (const unsigned char *)cn, -1, -1, 0) != 1 ||
+   if (!name ||
+       X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC, (const unsigned char *)cn, -1,
+                                  -1, 0) != 1 ||
        X509_REQ_set_pubkey(req, key) != 1 || X509_REQ_sign(req, key, EVP_sha256()) <= 0 ||
        !(kb = BIO_new(BIO_s_mem())) || !(rb = BIO_new(BIO_s_mem())) ||
        PEM_write_bio_PrivateKey(kb, key, NULL, NULL, 0, NULL, NULL) != 1 ||

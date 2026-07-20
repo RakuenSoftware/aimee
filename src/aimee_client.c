@@ -375,7 +375,7 @@ int aimee_client_remote_active_scheme(char *desc_out, unsigned long desc_sz, int
          *is_https_out = is_https;
    }
    else if (desc_out && desc_sz)
-         snprintf(desc_out, desc_sz, "%s", url);
+      snprintf(desc_out, desc_sz, "%s", url);
    return 1;
 }
 
