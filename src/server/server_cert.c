@@ -66,6 +66,41 @@ int handle_cert_issue(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* POST /v1/cert/sign {cn,csr,days?} -> {cn,serial,cert}. The caller generated
+ * and retains the private key; CSR signature verification proves possession. */
+int handle_cert_sign(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   if (!cert_op_allowed(conn))
+      return server_send_error(conn, "cert: signing requires an attested operator connection",
+                               NULL);
+   cJSON *jcn = cJSON_GetObjectItemCaseSensitive(req, "cn");
+   cJSON *jcsr = cJSON_GetObjectItemCaseSensitive(req, "csr");
+   if (!cJSON_IsString(jcn) || !jcn->valuestring[0] || !cJSON_IsString(jcsr) ||
+       !jcsr->valuestring[0])
+      return server_send_error(conn, "cert: 'cn' and 'csr' are required", NULL);
+   int days = 90;
+   cJSON *jd = cJSON_GetObjectItemCaseSensitive(req, "days");
+   if (jd && cJSON_IsNumber(jd))
+   {
+      if (jd->valuedouble < 1 || jd->valuedouble > 3650)
+         return server_send_error(conn, "cert: 'days' must be between 1 and 3650", NULL);
+      days = (int)jd->valuedouble;
+   }
+   char cert[8192] = "", serial[80] = "";
+   if (pki_sign_csr(jcn->valuestring, days, jcsr->valuestring, cert, sizeof(cert), serial,
+                    sizeof(serial)) != 0)
+      return server_send_error(conn, "cert: CSR signing failed", NULL);
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return server_send_error(conn, "cert: out of memory", NULL);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "cn", jcn->valuestring);
+   cJSON_AddStringToObject(resp, "serial", serial);
+   cJSON_AddStringToObject(resp, "cert", cert);
+   return server_send_ok(conn, resp);
+}
+
 /* POST /v1/cert/revoke {serial} -> ok. */
 int handle_cert_revoke(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

@@ -1577,6 +1577,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"vault.delete", handle_vault_delete},
     {"vault.lock", handle_vault_lock},
     {"cert.issue", handle_cert_issue},
+    {"cert.sign", handle_cert_sign},
     {"cert.list", handle_cert_list},
     {"cert.revoke", handle_cert_revoke},
     {"jobs.list", handle_jobs_list},

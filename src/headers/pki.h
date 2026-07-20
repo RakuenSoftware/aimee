@@ -31,6 +31,9 @@ extern "C"
    int pki_issue(const char *cn, int validity_days, char *cert_pem, size_t cert_len, char *key_pem,
                  size_t key_len, char *serial_out, size_t serial_len);
 
+   int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *cert_pem,
+                    size_t cert_len, char *serial_out, size_t serial_len);
+
    /* Revoke by hex serial (adds to the DB1 denylist + the in-memory snapshot).
     * Returns 0 on success (including already-revoked), -1 on error. */
    int pki_revoke(const char *serial);
