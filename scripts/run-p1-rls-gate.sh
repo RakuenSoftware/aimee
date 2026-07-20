@@ -50,6 +50,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p10_vault_rls_test.sql"
 echo "== P2a org-model catalog + entitlement isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 
+echo "== P6c bedrock catalog routing + fail-closed adapter-registry validation (same provisioned db) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p6c_bedrock_catalog_test.sql"
+
 echo "== P3b org spend-reporting authorization assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p3b_spend_rls_test.sql"
 

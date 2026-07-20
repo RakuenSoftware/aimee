@@ -423,7 +423,7 @@ CREATE TABLE IF NOT EXISTS org_vault_current (  principal TEXT NOT NULL,  agent 
 -- only; RLS, the SECURITY DEFINER catalog CRUD + org_catalog_entitled(), and the WORM
 -- audit append are Postgres-only, so every P2a runtime path is gated by
 -- db2_tenant_require_pg() and hard-fails on the shim rather than reading unprotected).
-CREATE TABLE IF NOT EXISTS org_model_catalog (  id INTEGER PRIMARY KEY AUTOINCREMENT,  model_id TEXT NOT NULL UNIQUE,  display_name TEXT NOT NULL DEFAULT '',  provider TEXT NOT NULL,  wire TEXT NOT NULL,  endpoint TEXT NOT NULL DEFAULT '',  enabled INTEGER NOT NULL DEFAULT 1,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS org_model_catalog (  id INTEGER PRIMARY KEY AUTOINCREMENT,  model_id TEXT NOT NULL UNIQUE,  display_name TEXT NOT NULL DEFAULT '',  provider TEXT NOT NULL,  wire TEXT NOT NULL,  endpoint TEXT NOT NULL DEFAULT '',  enabled INTEGER NOT NULL DEFAULT 1,  bedrock_api TEXT,  model_family TEXT,  bedrock_target_type TEXT,  aws_partition TEXT,  aws_account TEXT,  aws_region_set TEXT,  underlying_fm_arns TEXT,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS org_model_entitlement (  id INTEGER PRIMARY KEY AUTOINCREMENT,  model_id TEXT NOT NULL REFERENCES org_model_catalog(model_id),  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  created_at TEXT NOT NULL DEFAULT '',  UNIQUE(model_id, team_id));
 CREATE INDEX IF NOT EXISTS idx_org_ent_team ON org_model_entitlement(team_id);
 CREATE INDEX IF NOT EXISTS idx_org_ent_model ON org_model_entitlement(model_id);
