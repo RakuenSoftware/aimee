@@ -52,4 +52,9 @@ struct cJSON *bedrock_converse_build(const aimee_request_t *ir);
  * owned by caller -> aimee_response_free), -1 + err on a missing/malformed message. */
 int bedrock_converse_parse(const struct cJSON *resp, aimee_response_t *out, char *err, size_t errn);
 
+/* Map a Converse `stopReason` string to the canonical stop-reason enum. Shared by
+ * the non-streaming parse and the ConverseStream delta parser (messageStop) so there
+ * is one source of truth. NULL / unrecognized -> AIMEE_STOP_UNKNOWN. */
+aimee_stop_reason_t converse_stop_reason(const char *sr);
+
 #endif /* DEC_AIMEE_BACKEND_H */

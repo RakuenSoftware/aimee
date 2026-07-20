@@ -164,6 +164,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
                $(TESTPREFIX)/unit-test-aimee-ir-stream \
+               $(TESTPREFIX)/unit-test-aimee-converse-stream \
                $(TESTPREFIX)/unit-test-workflow-gate-caps \
                $(TESTPREFIX)/unit-test-wfe-webapi \
                $(TESTPREFIX)/unit-test-cli-profile \
@@ -1693,6 +1694,15 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
 $(TESTPREFIX)/unit-test-aimee-ir-stream: $(OBJDIR)/tests/test_aimee_ir_stream.o \
                                         $(OBJDIR)/server/aimee_ir_stream.o \
                                         $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Slice P6c-stream: Bedrock ConverseStream event -> IR delta parser (pure — cJSON
+# only; links aimee_backend_bedrock.o for the shared converse_stop_reason mapping).
+$(TESTPREFIX)/unit-test-aimee-converse-stream: $(OBJDIR)/tests/test_aimee_converse_stream.o \
+                                        $(OBJDIR)/server/aimee_ir_stream.o \
+                                        $(OBJDIR)/server/aimee_backend_bedrock.o \
+                                        $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
+                                        $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S1 router catalog I/O (enumerates $AIMEE_HOME workflows + built-in lanes).

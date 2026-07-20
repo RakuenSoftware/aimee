@@ -31,6 +31,32 @@ void openai_stream_state_init(openai_stream_state_t *st);
 int openai_chunk_to_deltas(const struct cJSON *chunk, openai_stream_state_t *st, aimee_delta_t *out,
                            int max);
 
+/* --- backend: AWS Bedrock ConverseStream event -> IR deltas ---
+ * The streaming analogue of bedrock_converse_parse: maps ONE decoded ConverseStream
+ * event (its `:event-type` header string + the already-parsed payload JSON) to 0+ IR
+ * deltas. NO eventstream framing here (P6b decodes the binary frame upstream, kb-side)
+ * -- this is pure JSON -> deltas, server-side. Per-contentBlockIndex block KIND is
+ * tracked (bounded like the openai state) ONLY so a contentBlockStop carries the right
+ * `kind`. */
+typedef struct
+{
+   aimee_block_type_t kind[AIMEE_STREAM_MAX_TOOLS]; /* per contentBlockIndex block kind */
+   int kind_set[AIMEE_STREAM_MAX_TOOLS];            /* 1 once kind[i] recorded */
+} converse_stream_state_t;
+
+void converse_stream_state_init(converse_stream_state_t *st);
+
+/* Convert one decoded ConverseStream event into up to `max` IR deltas (updates st).
+ * `event_type` is the frame's `:event-type` header (e.g. "contentBlockDelta"); payload
+ * is the decoded event JSON. Returns the number of deltas written (>=0, <=max), or -1
+ * on a structurally-malformed KNOWN event (caller drops the stream). An unknown
+ * event_type -> 0 (forward-compat ignore). LIFETIME: like openai_chunk_to_deltas, the
+ * emitted deltas' const char* fields (text_delta / tool_args_delta / tool_id /
+ * tool_name / error_message) BORROW into `payload`; `payload` must outlive the deltas'
+ * use. */
+int bedrock_converse_stream_to_deltas(const char *event_type, const struct cJSON *payload,
+                                      converse_stream_state_t *st, aimee_delta_t *out, int max);
+
 /* --- frontend: IR delta -> Anthropic Messages SSE text --- */
 typedef struct
 {

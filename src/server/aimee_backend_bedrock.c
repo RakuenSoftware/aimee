@@ -292,8 +292,10 @@ cJSON *bedrock_converse_build(const aimee_request_t *ir)
 /* --- parse: Converse response -> IR --- */
 
 /* Map a Converse stopReason string to the canonical enum. raw_stop_reason keeps the
- * provider string verbatim in EVERY case, so guardrail-vs-filter is recoverable. */
-static aimee_stop_reason_t converse_stop_reason(const char *sr)
+ * provider string verbatim in EVERY case, so guardrail-vs-filter is recoverable.
+ * Exposed via aimee_backend.h so the ConverseStream delta parser reuses this one
+ * mapping (no second source of truth). */
+aimee_stop_reason_t converse_stop_reason(const char *sr)
 {
    if (!sr)
       return AIMEE_STOP_UNKNOWN;
