@@ -611,12 +611,17 @@ export default function WorkflowActions() {
   );
 }
 
-// Run policy: the autonomy safety caps + auto-resume toggle that govern how far an
-// autonomous run drives on its own (trigger -> PR). These are the autonomy.* config
-// keys; kept here under Workflows because that is exactly what they tune. Config-backed
-// + live, so a change applies to the next workflow (no restart); an exported
-// AIMEE_AUTONOMY_* env var still overrides.
-const AUTONOMY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool" }[] = [
+// Run policy: trigger admission plus the autonomy safety caps that govern how many
+// workflows start and how far each one drives (trigger -> PR). Kept here under
+// Workflows because that is exactly what they tune. Config-backed + live; exported
+// AIMEE_AUTONOMY_* values still override the matching autonomy fields.
+const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool" }[] = [
+  {
+    key: "trigger.max_concurrent",
+    label: "Trigger admission cap",
+    kind: "int",
+    help: "Maximum active runs admitted across configured triggers. New proposals remain queued for a later scheduler pass when the cap is reached. Default 2. 0 = uncapped.",
+  },
   {
     key: "autonomy.auto_resume_cap_parks",
     label: "Auto-resume wall-cap parks",
@@ -681,7 +686,7 @@ function RunPolicyPanel() {
       >
         <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontWeight: 600, fontSize: 13 }}>⚙ Run policy</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>autonomy caps</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>admission + autonomy caps</span>
       </div>
       {open && (
         <div style={{ marginTop: 6 }}>
@@ -690,10 +695,11 @@ function RunPolicyPanel() {
           ) : (
             <>
               <div style={{ fontSize: 11, color: "#999", lineHeight: 1.4, marginBottom: 6 }}>
-                Safety caps + auto-resume for autonomous runs. Applies to the next workflow (no
-                restart); an exported <code>AIMEE_AUTONOMY_*</code> env var overrides.
+                Admission, safety caps, and auto-resume for autonomous runs. Changes apply live;
+                an exported <code>AIMEE_AUTONOMY_*</code> env var overrides matching autonomy
+                fields.
               </div>
-              {AUTONOMY_FIELDS.map((f) => (
+              {RUN_POLICY_FIELDS.map((f) => (
                 <div
                   key={f.key}
                   title={f.help}
