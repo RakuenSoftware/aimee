@@ -120,7 +120,14 @@ static int handle_org_upsert(const char *method, const char *body, char *out, in
       cJSON_Delete(b);
       return err(out, cap, 400, "model_id, provider, wire required");
    }
-   char model_id[256], provider[128], wire[32], display_name[256], endpoint[576];
+   /* Reject an over-length endpoint at the boundary (the schema CHECK is <=500) rather
+    * than letting the snprintf below silently truncate a too-long value into the buffer. */
+   if (cJSON_IsString(jendp) && strlen(jendp->valuestring) > 500)
+   {
+      cJSON_Delete(b);
+      return err(out, cap, 400, "endpoint too long (<=500 chars)");
+   }
+   char model_id[256], provider[128], wire[32], display_name[256], endpoint[DB2_MODEL_ENDPOINT_CAP];
    snprintf(model_id, sizeof(model_id), "%s", jmodel->valuestring);
    snprintf(provider, sizeof(provider), "%s", jprov->valuestring);
    snprintf(wire, sizeof(wire), "%s", jwire->valuestring);
@@ -139,6 +146,8 @@ static int handle_org_upsert(const char *method, const char *body, char *out, in
       return err(out, cap, 400, "invalid provider (printable, 1-100 chars)");
    if (!kb_models_wire_valid(wire))
       return err(out, cap, 400, "wire must be anthropic|openai|responses|gemini");
+   if (!kb_models_endpoint_valid(endpoint, 500))
+      return err(out, cap, 400, "invalid endpoint (empty or http(s):// URL, <=500 chars)");
 
    int http = 0;
    if (begin_actor_scope(out, cap, &http) != 0)
@@ -148,7 +157,9 @@ static int handle_org_upsert(const char *method, const char *body, char *out, in
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
-      return err(out, cap, 403, "not authorized to manage the model catalog");
+      if (rc == DB2_MODEL_ERR_DENIED)
+         return err(out, cap, 403, "not authorized to manage the model catalog");
+      return err(out, cap, 500, "model catalog update failed");
    }
    if (db2_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
@@ -184,7 +195,9 @@ static int handle_org_remove(const char *method, const char *body, char *out, in
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
-      return err(out, cap, 403, "not authorized to manage the model catalog");
+      if (rc == DB2_MODEL_ERR_DENIED)
+         return err(out, cap, 403, "not authorized to manage the model catalog");
+      return err(out, cap, 500, "model catalog remove failed");
    }
    if (db2_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
@@ -209,12 +222,17 @@ static int handle_org_entitle(const char *method, const char *body, int grant, c
    }
    char model_id[256];
    snprintf(model_id, sizeof(model_id), "%s", jmodel->valuestring);
-   int64_t team_id = (int64_t)jteam->valuedouble;
+   double team_d = jteam->valuedouble;
    cJSON_Delete(b);
    if (!kb_models_name_clean(model_id, 200))
       return err(out, cap, 400, "invalid model_id");
-   if (team_id <= 0)
-      return err(out, cap, 400, "invalid team");
+   /* team must be a positive integer within int64 range: reject NaN, a fractional value
+    * (e.g. 1.9), <=0, or an out-of-range magnitude BEFORE the double->int64 cast (casting
+    * an out-of-range double to int64 is undefined). 9223372036854775808.0 == 2^63 is the
+    * first magnitude past INT64_MAX and is exactly representable as a double. */
+   if (!(team_d >= 1.0) || team_d >= 9223372036854775808.0 || team_d != (double)(int64_t)team_d)
+      return err(out, cap, 400, "team must be a positive integer");
+   int64_t team_id = (int64_t)team_d;
 
    int http = 0;
    if (begin_actor_scope(out, cap, &http) != 0)
@@ -225,7 +243,9 @@ static int handle_org_entitle(const char *method, const char *body, int grant, c
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
-      return err(out, cap, 403, "not authorized to manage entitlements (or unknown model/team)");
+      if (rc == DB2_MODEL_ERR_DENIED)
+         return err(out, cap, 403, "not authorized to manage entitlements");
+      return err(out, cap, 500, "entitlement update failed (or unknown model/team)");
    }
    if (db2_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");

@@ -11,9 +11,19 @@
 #include "db2_internal.h"
 #include "db2_tenant.h"
 #include "db_postgres.h"
+#include "kb_models_validate.h"
 
 #include <stdio.h>
 #include <string.h>
+
+/* An admin-gated definer RAISEs "<fn>: admin only" (SQLSTATE 42501) when the caller is
+ * not an org-admin; libpq surfaces that message text in the step error. Map it to the
+ * distinct DB2_MODEL_ERR_DENIED so a mutation handler can return 403 vs 500 (every other
+ * failure — constraint/unknown model/team/audit — stays a generic -1). */
+static int model_step_err(const char *err)
+{
+   return (err && strstr(err, "admin only")) ? DB2_MODEL_ERR_DENIED : -1;
+}
 
 int db2_model_catalog_list(db2_model_catalog_row_t *out, int max)
 {
@@ -105,6 +115,17 @@ int db2_model_catalog_upsert(const char *model_id, const char *display_name, con
       return g;
    if (!model_id || !model_id[0] || !provider || !provider[0] || !wire || !wire[0])
       return -1;
+   /* Validate identically to the HTTP route (kb_http_models.c) so the CLI cannot store a
+    * control-char/invalid value the HTTP path rejects — this C layer is the single choke
+    * point both callers pass through. Rejected here BEFORE any DB round-trip. */
+   if (!kb_models_name_clean(model_id, 200))
+      return -1;
+   if (!kb_models_name_clean(provider, 100))
+      return -1;
+   if (!kb_models_wire_valid(wire))
+      return -1;
+   if (!kb_models_endpoint_valid(endpoint ? endpoint : "", 500))
+      return -1;
    void *conn = db2_conn();
    if (!conn)
       return -1;
@@ -126,7 +147,7 @@ int db2_model_catalog_upsert(const char *model_id, const char *display_name, con
    int64_t id = (step == AIMEE_PG_ROW) ? aimee_pg_column_int64(st, 0) : 0;
    aimee_pg_finalize(st);
    if (step != AIMEE_PG_ROW)
-      return -1;
+      return model_step_err(err);
    if (out_id)
       *out_id = id;
    return 0;
@@ -138,6 +159,8 @@ int db2_model_catalog_remove(const char *model_id, int64_t *out_removed)
    if (g)
       return g;
    if (!model_id || !model_id[0])
+      return -1;
+   if (!kb_models_name_clean(model_id, 200))
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -152,7 +175,7 @@ int db2_model_catalog_remove(const char *model_id, int64_t *out_removed)
    int64_t removed = (step == AIMEE_PG_ROW) ? aimee_pg_column_int64(st, 0) : 0;
    aimee_pg_finalize(st);
    if (step != AIMEE_PG_ROW)
-      return -1;
+      return model_step_err(err);
    if (out_removed)
       *out_removed = removed;
    return 0;
@@ -164,6 +187,8 @@ static int model_ent_op(const char *sql, const char *model_id, int64_t team_id, 
    if (g)
       return g;
    if (!model_id || !model_id[0] || team_id <= 0)
+      return -1;
+   if (!kb_models_name_clean(model_id, 200))
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -178,7 +203,7 @@ static int model_ent_op(const char *sql, const char *model_id, int64_t team_id, 
    int64_t v = (step == AIMEE_PG_ROW) ? aimee_pg_column_int64(st, 0) : 0;
    aimee_pg_finalize(st);
    if (step != AIMEE_PG_ROW)
-      return -1;
+      return model_step_err(err);
    if (out)
       *out = v;
    return 0;

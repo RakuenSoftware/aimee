@@ -24,3 +24,20 @@ int kb_models_name_clean(const char *s, int max)
          return 0;
    return 1;
 }
+
+int kb_models_endpoint_valid(const char *endpoint, int max)
+{
+   if (!endpoint)
+      return 0;
+   size_t n = strlen(endpoint);
+   if (n == 0)
+      return 1; /* empty -> provider default */
+   if ((int)n > max)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+      if ((unsigned char)endpoint[i] < 0x20 || (unsigned char)endpoint[i] == 0x7f)
+         return 0;
+   if (strncmp(endpoint, "https://", 8) != 0 && strncmp(endpoint, "http://", 7) != 0)
+      return 0;
+   return 1;
+}

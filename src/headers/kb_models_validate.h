@@ -20,6 +20,12 @@ extern "C"
     * state. `max` is the inclusive upper bound. Returns 1 when clean, else 0. */
    int kb_models_name_clean(const char *s, int max);
 
+   /* A catalog endpoint override. Empty is VALID (the provider default is used). A
+    * non-empty endpoint must be <= max chars, contain no control/DEL bytes, and begin
+    * with http:// or https:// (so a bare host or a non-URL scheme can't be stored). NULL
+    * -> 0. `max` is the inclusive upper bound (500 for the org_model_catalog column). */
+   int kb_models_endpoint_valid(const char *endpoint, int max);
+
 #ifdef __cplusplus
 }
 #endif

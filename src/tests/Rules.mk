@@ -3241,6 +3241,17 @@ $(TESTPREFIX)/unit-test-vault-pg: $(OBJDIR)/tests/test_vault_pg.o \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
+# P2a atomic-audit proof. REAL-PG test (SKIPs without AIMEE_TEST_PG_URL): builds a mixed
+# [C, SQL, C] kb_audit_event chain and asserts the C verifier accepts it + the SQL row
+# hashes byte-identically in C. Same KB object closure as unit-test-vault-pg (real libpq
+# via db_postgres.o + the kb db2 layer that carries kb_audit_worm.o/schema.sql).
+$(TESTPREFIX)/unit-test-kb-audit-worm-pg: $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
 $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
                               $(OBJDIR)/modules/git/git_ops.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_cred_inject.o $(OBJDIR)/modules/git/git_ssh_agent.o $(OBJDIR)/modules/webuser/webuser_runtime.o \
                               $(OBJDIR)/modules/git/git_forge_vault.o $(OBJDIR)/modules/git/git_host_cred.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/workspace/workspace_scope.o \

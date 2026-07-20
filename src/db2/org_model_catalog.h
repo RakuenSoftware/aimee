@@ -17,6 +17,16 @@ extern "C"
 {
 #endif
 
+/* Admin-denied return code (the SECURITY DEFINER function RAISEd SQLSTATE 42501 —
+ * "admin only"). Distinct from a generic -1 so a mutation handler can map an admin
+ * denial to HTTP 403 and every other DB/constraint/audit failure to HTTP 500. */
+#define DB2_MODEL_ERR_DENIED (-2)
+
+/* Catalog endpoint buffer. Sized so a stored endpoint (schema CHECK: <=500 chars)
+ * round-trips through the HTTP read, the struct field, and the read-back with NO
+ * silent truncation. One size, used end-to-end. */
+#define DB2_MODEL_ENDPOINT_CAP 512
+
    /* One entitled-model row as returned by org_catalog_entitled(). NO credential or
     * slot field — the entitled surface is the authoritative catalog columns only. */
    typedef struct
@@ -25,7 +35,7 @@ extern "C"
       char display_name[256];
       char provider[112];
       char wire[16];
-      char endpoint[520];
+      char endpoint[DB2_MODEL_ENDPOINT_CAP];
    } db2_model_entitled_row_t;
 
    /* One full catalog row (admin view — includes enabled + the endpoint). */
@@ -35,7 +45,7 @@ extern "C"
       char display_name[256];
       char provider[112];
       char wire[16];
-      char endpoint[520];
+      char endpoint[DB2_MODEL_ENDPOINT_CAP];
       int enabled;
    } db2_model_catalog_row_t;
 
