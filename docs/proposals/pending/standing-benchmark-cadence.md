@@ -93,7 +93,7 @@ file and result-JSON artifacts which are runtime data, not criteria):
 
 | File:Line | Literal | Verdict |
 |---|---|---|
-| `docs/ROADMAP.md:64` | `P@5 ≥ 0.45` and `0.268` baseline | **Keep.** Real, owned deliverable target for the embedder-sidecar retrieval lift (Phase 0 of deep-curator). Will become measurable once §1 + §2 land; no spec drift today because the line names the dataset (44-query POC set) and the bounded work item. |
+| `docs/ROADMAP.md:64` | `P@5 ≥ 0.45` and `0.268` baseline | **Keep, anchored.** Real, owned deliverable target for the embedder-sidecar retrieval lift (Phase 0 of deep-curator). The criterion now points at the `benchmarks/BASELINE.json` entry for `locomo_longmemeval_poc` and is enforced by the `bench-drift-check` gate (≤ ±0.005 drift per PR/nightly), so the numeric target is no longer unmeasured. |
 | `docs/ROADMAP.md:150` | `±0.005` | **Keep, but it self-resolves.** This is a meta-comment that points at *this proposal*. Once §1–§3 land, the cadence exists and the criterion is no longer unmeasured. No edit needed; the bullet becomes historical. |
 | `docs/PROPOSALS.md:123` | (proposal summary, no literals) | **Keep.** Index entry for this proposal; accurate summary. |
 | `docs/proposals/pending/standing-benchmark-cadence.md` | all | **This file.** Thesis text quotes the literals as the problem the proposal fixes; that is intentional and not a spec claim. |
