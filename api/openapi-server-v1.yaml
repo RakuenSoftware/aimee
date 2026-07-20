@@ -2013,6 +2013,35 @@ paths:
       summary: Issue an mTLS client cert for a CN (operator-gated; returns cert + one-time key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Issued, content: { application/json: { schema: { type: object } } } } }
+  /cert/sign:
+    post:
+      summary: Sign a locally generated mTLS client CSR (operator-gated; private key never leaves the client)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cn, csr]
+              properties:
+                cn: { type: string, minLength: 1 }
+                csr: { type: string, minLength: 1, description: PEM-encoded PKCS#10 CSR }
+                days: { type: integer, minimum: 1, maximum: 3650, default: 90 }
+      responses:
+        "200":
+          description: Signed client certificate
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, cn, serial, cert]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  cn: { type: string }
+                  serial: { type: string }
+                  cert: { type: string, description: PEM-encoded X.509 certificate }
+        "400": { description: Invalid CSR or request }
+        "403": { description: Operator authorization required }
   /cert/list:
     post:
       summary: List issued mTLS client certs (serial, cn, expiry, revoked)
@@ -2023,6 +2052,31 @@ paths:
       summary: Revoke an mTLS client cert by serial (operator-gated)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Revoked, content: { application/json: { schema: { type: object } } } } }
+  /management/action:
+    post:
+      summary: Authorize a management action with mTLS identity and a management JWT
+      description: >
+        Validates the configured issuer, audience, capability, peer identity,
+        request-body digest, and replay-protected JWT ID before dispatch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Management action authorized and dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, actor, jti]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  actor: { type: string }
+                  jti: { type: string }
+        "403": { description: Management action denied }
+        "503": { description: Management control plane is not configured }
   /delegate/reply:
     post:
       summary: Reply to a delegate
