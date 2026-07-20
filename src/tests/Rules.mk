@@ -500,7 +500,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-trajectory-batch \
                $(TESTPREFIX)/unit-test-delegate-credentials \
                $(TESTPREFIX)/unit-test-curator-fixtures \
-               $(TESTPREFIX)/unit-test-substrate-fixtures
+               $(TESTPREFIX)/unit-test-substrate-fixtures \
+               $(TESTPREFIX)/unit-test-org-telemetry \
+               $(TESTPREFIX)/unit-test-aws-auth \
+               $(TESTPREFIX)/unit-test-aws-eventstream
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -583,7 +586,6 @@ $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
 # validation, token sha256 + constant-time compare, content-free structural
 # check). Links only the dependency-light org_telemetry_fmt.o (+ OpenSSL for
 # sha256 via TEST_L_FLAGS); the DB-backed paths live in the real-PG gate.
-TEST_TARGETS += $(TESTPREFIX)/unit-test-org-telemetry
 $(OBJDIR)/tests/test_org_telemetry.o: schema_data.h
 $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
                                        $(OBJDIR)/db2/org_telemetry_fmt.o
@@ -594,7 +596,6 @@ $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
 # session policy, and STS session-cache isolation. Links only the kb-only
 # modules/aws/*.o + cJSON (JWT claim parse) + OpenSSL (HMAC/SHA256/JWT verify) via
 # TEST_L_FLAGS — no DB, no network (pure/offline).
-TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-auth
 $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
                                   $(OBJDIR)/modules/aws/aws_sigv4.o \
                                   $(OBJDIR)/modules/aws/aws_sts.o \
@@ -608,7 +609,6 @@ $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
 # rolling-buffer resume, BE->host integer swap, and the deterministic fuzz
 # sweep (memory-safety gate). Links ONLY aws_eventstream.o — CRC32 is
 # self-contained, so no OpenSSL/zlib/cJSON.
-TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-eventstream
 $(TESTPREFIX)/unit-test-aws-eventstream: $(OBJDIR)/tests/test_aws_eventstream.o \
                                          $(OBJDIR)/modules/aws/aws_eventstream.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
