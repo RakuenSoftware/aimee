@@ -872,6 +872,9 @@ static void config_set_defaults(config_t *cfg)
                                                    to disable */
    snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "file"); /* default custody
                                                                         (self-unsealing) */
+   cfg->vault_tpm2_blob_path[0] = '\0'; /* empty -> <config>/vault/tpm2-kek.blob at use */
+   snprintf(cfg->vault_tpm2_tcti, sizeof(cfg->vault_tpm2_tcti), "%s",
+            CONFIG_DEFAULT_VAULT_TPM2_TCTI);
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
    cfg->model_meta_refresh_minutes = 60;
@@ -1790,6 +1793,20 @@ int config_load_file(config_t *cfg)
          cJSON *cust = cJSON_GetObjectItemCaseSensitive(vault_cfg, "custody");
          if (cJSON_IsString(cust) && cust->valuestring && cust->valuestring[0])
             snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "%s", cust->valuestring);
+         /* vault.tpm2.{blob_path,tcti} — the P7-tpm2a custody provider's sealed-blob
+          * path + tss2 TCTI string (read by the WITH_TPM2 build only). */
+         cJSON *tpm2 = cJSON_GetObjectItemCaseSensitive(vault_cfg, "tpm2");
+         if (cJSON_IsObject(tpm2))
+         {
+            cJSON *bp = cJSON_GetObjectItemCaseSensitive(tpm2, "blob_path");
+            if (cJSON_IsString(bp) && bp->valuestring)
+               snprintf(cfg->vault_tpm2_blob_path, sizeof(cfg->vault_tpm2_blob_path), "%s",
+                        bp->valuestring);
+            cJSON *tcti = cJSON_GetObjectItemCaseSensitive(tpm2, "tcti");
+            if (cJSON_IsString(tcti) && tcti->valuestring && tcti->valuestring[0])
+               snprintf(cfg->vault_tpm2_tcti, sizeof(cfg->vault_tpm2_tcti), "%s",
+                        tcti->valuestring);
+         }
       }
    }
    cJSON_Delete(root);

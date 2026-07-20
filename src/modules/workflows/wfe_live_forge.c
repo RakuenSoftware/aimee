@@ -55,6 +55,39 @@ static const char *forge_dir(const char *repo)
  * (this bit s2 — "Permission denied (publickey)"). Pushing to the HTTPS URL makes
  * git request the credential the askpass supplies. The same HTTPS URL is passed
  * as remote_url so per-host token resolution is unambiguous. */
+/* True iff the REMOTE branch already contains the LOCAL branch tip (remote is
+ * at-or-ahead of local on the same history). Credentialed fetch of the remote
+ * branch into FETCH_HEAD, then an ancestry test: local tip is an ancestor of the
+ * fetched remote tip. Used to distinguish a benign "remote already published this
+ * branch (and merged more onto it)" push rejection from a real divergence/error.
+ * Conservative: any failure (fetch error, absent branch, diverged) returns 0. */
+static int forge_remote_contains_local(const char *dir, const char *url, const char *branch)
+{
+   char refspec[300];
+   snprintf(refspec, sizeof refspec, "refs/heads/%s", branch);
+   const char *fargv[] = {"git", "-C", dir, "fetch", "--quiet", url, refspec, NULL};
+   int token_fd = -1;
+   char **envp = git_cred_inject_build_env_for_repo(NULL, url, dir, NULL, environ, &token_fd);
+   char *out = NULL;
+   int frc = safe_exec_capture_cwd_env_fd_timeout(fargv, dir, envp ? envp : environ, &out, 1 << 14,
+                                                  120000, token_fd,
+                                                  token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   if (token_fd >= 0)
+      close(token_fd);
+   if (envp)
+      git_cred_inject_free_env(envp);
+   free(out);
+   if (frc != 0)
+      return 0; /* branch absent remotely or fetch failed -> not a "remote ahead" case */
+   /* is-ancestor <local branch tip> FETCH_HEAD: exit 0 => remote contains local. */
+   const char *aargv[] = {"git",           "-C",   dir,          "merge-base",
+                          "--is-ancestor", branch, "FETCH_HEAD", NULL};
+   char *ao = NULL;
+   int arc = safe_exec_capture(aargv, &ao, 1 << 12);
+   free(ao);
+   return arc == 0 ? 1 : 0;
+}
+
 static int forge_push_branch(const char *dir, const char *branch, const char *what)
 {
    char url[512], err[200];
@@ -78,10 +111,33 @@ static int forge_push_branch(const char *dir, const char *branch, const char *wh
       close(token_fd);
    if (envp)
       git_cred_inject_free_env(envp);
-   if (rc != 0)
-      aimee_log(LOG_WARN, "wfe-forge", "%s %s failed: %s", what, branch, out ? out : "");
+   if (rc == 0)
+   {
+      free(out);
+      return 0;
+   }
+   /* The push was rejected. This is EXPECTED and benign when the remote branch
+    * already CONTAINS this local branch and more — the durable feature branch
+    * aimee/feat/<id> that a run's slice sub-PRs have already merged into on the
+    * remote, while this (parent) checkout still holds the pre-merge base. Force-
+    * pushing would drop the merged slices; failing wedges the final PR forever
+    * (observed live: "! [rejected] ... (fetch first)" then final_pr parks). Detect
+    * it: fetch the remote branch and, if our local tip is an ANCESTOR of it, the
+    * remote is already published with everything the PR needs — succeed without
+    * pushing. Any other rejection (diverged history, absent branch, auth) stays a
+    * failure. */
+   if (forge_remote_contains_local(dir, url, branch))
+   {
+      aimee_log(LOG_INFO, "wfe-forge",
+                "%s %s: remote branch already contains this branch (published by prior "
+                "slice merges) — skipping push, opening PR against the remote branch",
+                what, branch);
+      free(out);
+      return 0;
+   }
+   aimee_log(LOG_WARN, "wfe-forge", "%s %s failed: %s", what, branch, out ? out : "");
    free(out);
-   return rc == 0 ? 0 : -1;
+   return -1;
 }
 
 /* The master switch: the live forge does nothing unless the operator enabled it.

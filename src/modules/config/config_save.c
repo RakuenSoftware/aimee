@@ -925,11 +925,31 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "css_render_command", cfg->css_render_command);
    /* Vault custody: default "file" — persist only a non-default selection, under a
     * nested "vault" object so the key round-trips as vault.custody. */
-   if (cfg->vault_custody[0] && strcmp(cfg->vault_custody, "file") != 0)
    {
-      cJSON *vault = cJSON_AddObjectToObject(root, "vault");
-      if (vault)
-         cJSON_AddStringToObject(vault, "custody", cfg->vault_custody);
+      int want_custody = cfg->vault_custody[0] && strcmp(cfg->vault_custody, "file") != 0;
+      int want_blob = cfg->vault_tpm2_blob_path[0] != '\0';
+      int want_tcti = cfg->vault_tpm2_tcti[0] &&
+                      strcmp(cfg->vault_tpm2_tcti, CONFIG_DEFAULT_VAULT_TPM2_TCTI) != 0;
+      if (want_custody || want_blob || want_tcti)
+      {
+         cJSON *vault = cJSON_AddObjectToObject(root, "vault");
+         if (vault)
+         {
+            if (want_custody)
+               cJSON_AddStringToObject(vault, "custody", cfg->vault_custody);
+            if (want_blob || want_tcti)
+            {
+               cJSON *tpm2 = cJSON_AddObjectToObject(vault, "tpm2");
+               if (tpm2)
+               {
+                  if (want_blob)
+                     cJSON_AddStringToObject(tpm2, "blob_path", cfg->vault_tpm2_blob_path);
+                  if (want_tcti)
+                     cJSON_AddStringToObject(tpm2, "tcti", cfg->vault_tpm2_tcti);
+               }
+            }
+         }
+      }
    }
    if (cfg->kb_evidence_emit_enabled)
       cJSON_AddBoolToObject(root, "kb_evidence_emit_enabled", 1);
