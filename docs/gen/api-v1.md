@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 77
+Total endpoints: 79
 
 ## Endpoints
 
@@ -841,6 +841,39 @@ Responses:
 - `201` — Project created
 - `401` — Authentication required
 - `403` — Not authorized
+
+### `POST /v1/rate/policy`
+
+Set a keyed fixed-window rate-limit policy (org-admin, P4b)
+
+Upserts the admin-set rate policy for (dim, scope). dim is the limiter dimension (team | project | cert | model | cred_slot); scope is the concrete id/name, or "*" for the dim default applied when no specific row exists. window_seconds is the fixed-window width and max_count the requests admitted per window (max_count = 0 is an always-deny). Org-admin gated at the DB layer and WORM-audited atomically with the mutation; a non-admin caller receives 403. The policy is authoritative and never caller-supplied at enforcement time — the P2b egress path passes only the resolved identity to org_rate_check, which looks the policy up. RATE ONLY: the enforcement wiring at egress rides with P2b; the budget core is P4a.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Rate policy upserted
+- `400` — Missing or malformed dim/scope/window_seconds/max_count
+- `401` — Authentication required
+- `403` — Not authorized (not an org-admin)
+
+### `GET /v1/rate/show`
+
+Show a keyed rate-limit policy (org-admin or team-lead, P4b)
+
+Returns the rate policy for the exact (dim, scope) pair (0 or 1 row). Authorization is enforced at the DB layer inside a SECURITY DEFINER function — the caller must be an org-admin, OR (for dim=team) a lead of that team, OR (for dim=project) a lead of the team that owns the project. The global dims (model, cred_slot) and the "*" default are admin-only. Read-only.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `dim` | query | yes | string (team, project, cert, model, cred_slot) | Limiter dimension (team | project | cert | model | cred_slot). |
+| `scope` | query | yes | string | The concrete id/name, or "*" for the dim default. |
+
+Responses:
+
+- `200` — Rate policy (0 or 1 row)
+- `400` — Missing or malformed dim/scope
+- `401` — Authentication required
+- `403` — Not authorized (org-admin or team-lead required)
 
 ### `POST /v1/releases`
 

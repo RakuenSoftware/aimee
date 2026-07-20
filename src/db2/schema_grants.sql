@@ -158,5 +158,23 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_budget_heartbeat(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_budget_set(BIGINT,BIGINT,TEXT,NUMERIC,NUMERIC) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_budget_show(BIGINT,BIGINT) TO aimee_kb_runtime;
+
+  -- P4b keyed fixed-window rate limiter. org_rate_policy + org_rate_window are WRITTEN
+  -- ONLY by the SECURITY DEFINER check/set functions (owned by aimee_kb_owner, which
+  -- bypasses ENABLE-not-FORCE RLS). Runtime gets SELECT on the policy config
+  -- (RLS-filtered: admin OR team-lead), but its direct write grant from the ALL TABLES
+  -- line is REVOKED. org_rate_window is a definer-only operational counter: runtime gets
+  -- NO direct read or write, so a compromised runtime session cannot read or forge the
+  -- shared window counters out of band.
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON org_rate_policy FROM aimee_kb_runtime;
+  GRANT SELECT ON org_rate_policy TO aimee_kb_runtime;
+  REVOKE ALL ON org_rate_window FROM aimee_kb_runtime;
+  -- The rate functions are the ONLY write path; EXECUTE to runtime, never PUBLIC.
+  REVOKE ALL ON FUNCTION org_rate_check(BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_rate_policy_set(TEXT,TEXT,INT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_rate_policy_show(TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_rate_check(BIGINT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_rate_policy_set(TEXT,TEXT,INT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_rate_policy_show(TEXT,TEXT) TO aimee_kb_runtime;
 END
 $$;

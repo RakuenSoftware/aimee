@@ -12,6 +12,7 @@
 #include "membership.h"
 #include "kb_insights_util.h"
 #include "org_budget.h"
+#include "org_rate.h"
 #include "org_model_catalog.h"
 #include "org_spend.h"
 #include "project.h"
@@ -757,6 +758,117 @@ static int kb_cmd_budget(int argc, char **argv)
    return rc;
 }
 
+/* Operator-facing rate-policy admin CLI (P4b):
+ *   aimee-kb rate set --dim D --scope S --window SECS --max N
+ *   aimee-kb rate show --dim D --scope S
+ * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * SECURITY DEFINER org_rate_policy_set/show admin gate passes). RATE ONLY (the budget
+ * core is P4a; the org_rate_check egress enforcement is P2b). */
+static int kb_cmd_rate(int argc, char **argv)
+{
+   const char *sub = argc > 2 ? argv[2] : "";
+   const char *dim = NULL, *scope = NULL;
+   int64_t window = 0, maxc = -1;
+   int has_window = 0, has_max = 0;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--dim") == 0 && i + 1 < argc)
+         dim = argv[++i];
+      else if (strcmp(argv[i], "--scope") == 0 && i + 1 < argc)
+         scope = argv[++i];
+      else if (strcmp(argv[i], "--window") == 0 && i + 1 < argc)
+      {
+         window = strtoll(argv[++i], NULL, 10);
+         has_window = 1;
+      }
+      else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc)
+      {
+         maxc = strtoll(argv[++i], NULL, 10);
+         has_max = 1;
+      }
+   }
+   if ((strcmp(sub, "set") != 0 && strcmp(sub, "show") != 0) || !dim || !scope)
+   {
+      fprintf(stderr,
+              "Usage: aimee-kb rate set --dim team|project|cert|model|cred_slot --scope S "
+              "--window SECS --max N\n"
+              "       aimee-kb rate show --dim D --scope S\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   int rc = 1;
+   if (strcmp(sub, "set") == 0)
+   {
+      if (!has_window || window <= 0 || !has_max || maxc < 0)
+      {
+         fprintf(stderr, "aimee-kb: rate set needs --window >0 and --max >=0\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      int64_t id = 0;
+      int r = db2_org_rate_policy_set(dim, scope, window, maxc, &id);
+      if (r == 0)
+      {
+         printf("{\"id\":%lld,\"dim\":\"%s\",\"scope\":\"%s\",\"window_seconds\":%lld,\"max_count\":%lld}\n",
+                (long long)id, dim, scope, (long long)window, (long long)maxc);
+         rc = 0;
+      }
+      else if (r == DB2_RATE_ERR_DENIED)
+         fprintf(stderr, "rate set failed (not authorized — org-admin required)\n");
+      else
+         fprintf(stderr, "rate set failed\n");
+   }
+   else /* show */
+   {
+      db2_org_rate_policy_t rows[DB2_RATE_MAX_ROWS];
+      int n = db2_org_rate_policy_show(dim, scope, rows, DB2_RATE_MAX_ROWS);
+      if (n >= 0)
+      {
+         printf("id\tdim\tscope\twindow_seconds\tmax_count\n");
+         for (int i = 0; i < n; i++)
+            printf("%lld\t%s\t%s\t%lld\t%lld\n", (long long)rows[i].id, rows[i].dim,
+                   rows[i].scope_key, (long long)rows[i].window_seconds,
+                   (long long)rows[i].max_count);
+         rc = 0;
+      }
+      else if (n == DB2_RATE_ERR_DENIED)
+         fprintf(stderr, "rate show failed (not authorized — org-admin or team-lead required)\n");
+      else
+         fprintf(stderr, "rate show failed\n");
+   }
+
+   if (rc == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc;
+}
+
 static int kb_cmd_tenancy(int argc, char **argv)
 {
    const char *group = argv[1]; /* "team" | "project" */
@@ -944,6 +1056,8 @@ int main(int argc, char **argv)
       return kb_cmd_spend(argc, argv);
    if (argc > 1 && strcmp(argv[1], "budget") == 0)
       return kb_cmd_budget(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "rate") == 0)
+      return kb_cmd_rate(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;

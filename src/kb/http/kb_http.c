@@ -30,6 +30,7 @@
 #include "kb_http_governance.h"
 #include "kb_http_insights.h"
 #include "kb_http_budget.h"
+#include "kb_http_rate.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
@@ -850,6 +851,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int br = kb_http_budget_route(method, path, query_string, body, out_buf, out_cap);
       if (br >= 0)
          return br;
+   }
+
+   /* Rate-limit admin routes (P4b): POST /v1/rate/policy (org-admin) + GET /v1/rate/show
+    * (org-admin OR team-lead). Authorization is enforced at the DB layer inside the
+    * SECURITY DEFINER org_rate_policy_set / org_rate_policy_show (a non-authorized caller
+    * surfaces as 403). org_rate_check (egress enforcement) is not routed here (P2b).
+    * Returns -1 for non-rate paths so the router falls through. */
+   {
+      int rr = kb_http_rate_route(method, path, query_string, body, out_buf, out_cap);
+      if (rr >= 0)
+         return rr;
    }
 
    /* Console + accounts routes. Served only to the owner (unscoped credential) or

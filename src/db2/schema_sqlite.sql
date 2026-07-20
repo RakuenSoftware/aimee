@@ -437,3 +437,11 @@ CREATE TABLE IF NOT EXISTS org_budget_counter (  id INTEGER PRIMARY KEY AUTOINCR
 CREATE TABLE IF NOT EXISTS org_budget_reservation (  id INTEGER PRIMARY KEY AUTOINCREMENT,  request_id TEXT NOT NULL,  origin_cert_cn TEXT NOT NULL,  team_id INTEGER NOT NULL REFERENCES kb_team(id),  project_id INTEGER REFERENCES kb_project(id),  pricing_version INTEGER NOT NULL,  reserved_max_usd TEXT NOT NULL,  state TEXT NOT NULL DEFAULT 'admitted',  lease_expires_at TEXT NOT NULL DEFAULT '',  realized_usd TEXT,  created_at TEXT NOT NULL DEFAULT '',  settled_at TEXT NOT NULL DEFAULT '',  UNIQUE(origin_cert_cn, request_id));
 CREATE TABLE IF NOT EXISTS org_budget_reservation_alloc (  id INTEGER PRIMARY KEY AUTOINCREMENT,  reservation_id INTEGER NOT NULL REFERENCES org_budget_reservation(id) ON DELETE CASCADE,  counter_key TEXT NOT NULL,  period TEXT NOT NULL,  period_id TEXT NOT NULL,  reserved_usd TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_org_budget_alloc_resv ON org_budget_reservation_alloc(reservation_id);
+
+-- P4b keyed fixed-window rate limiter (schema-sync mirror only). The RLS + the atomic
+-- lock-all/check-all/bump SECURITY DEFINER org_rate_check and the WORM-audited
+-- org_rate_policy_set are Postgres-only, so every P4b runtime path is gated by
+-- db2_tenant_require_pg() and hard-fails on the shim rather than rate-limiting unsafely.
+CREATE TABLE IF NOT EXISTS org_rate_policy (  id INTEGER PRIMARY KEY AUTOINCREMENT,  dim TEXT NOT NULL,  scope_key TEXT NOT NULL,  window_seconds INTEGER NOT NULL,  max_count INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_rate_policy_key ON org_rate_policy(dim, scope_key);
+CREATE TABLE IF NOT EXISTS org_rate_window (  dim_key TEXT NOT NULL,  window_id TEXT NOT NULL,  count INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT '',  PRIMARY KEY (dim_key, window_id));
