@@ -13,6 +13,12 @@
   owns the live IR-path conversion and IR-stage semantics. This proposal owns the larger source-tree
   boundary and makes that registry one of the core extension surfaces rather than defining a
   competing stage system.
+- **Related (`synth-tiers`):** [`AIMEE_KB_SYNTH_TIERS.md`](../../AIMEE_KB_SYNTH_TIERS.md) defines
+  Tier A as mechanical extraction/indexing and Tier B as reasoning. This proposal assigns Tier A
+  to required core memory under the canonical name **structured extraction and indexing**.
+- **Related (`curator-backend`):** [`curator-llm-backend.md`](../done/curator-llm-backend.md)
+  defines the existing Tier-A stage set and provider routing. This proposal changes its
+  architectural placement, not its runtime protocol.
 
 ## Contents
 
@@ -41,10 +47,10 @@ controls.
 Aimee is the shared intelligence substrate between agents, models, tools, and applications. Its
 irreducible core is:
 
-1. **Memory** — persistent, episodic, working, semantic, and code memory, including the embedding
-   and reranking inference required to store and recall it. Code intelligence is not a separate
-   feature beside memory: symbols, references, call graphs, dependency graphs, code history,
-   architecture facts, and blast radius are memory over code.
+1. **Memory** — persistent, episodic, working, semantic, and code memory, including the structured
+   extraction/indexing, embedding, and reranking inference required to populate and recall it. Code
+   intelligence is not a separate feature beside memory: symbols, references, call graphs,
+   dependency graphs, code history, architecture facts, and blast radius are memory over code.
 2. **Routing** — selecting the right model, agent, tool, workflow, memory source, or destination for
    a typed message.
 3. **IR messaging** — the canonical request, response, event, tool, and stream-delta representation
@@ -58,8 +64,20 @@ governance, git/forge integration, CSS analysis, sandboxes, dashboards, web-user
 roadmaps, evals, economization, synthesis, and particular delivery channels must be independently
 configurable and removable wherever their dependencies permit.
 
-Synthesis may enrich or compose an answer from recalled material. Memory storage and ranked recall
-must work without synthesis.
+**Structured extraction and indexing** is required core memory. It turns document and code inputs
+into validated chunks, entities, claims, facts, relations, indexes, and artifact links. Raw storage
+can exist without it, but Aimee's promised semantic and code-memory capabilities cannot.
+
+Synthesis may compose or summarize an answer from recalled material. Extraction, indexing,
+storage, and ranked recall must work without synthesis. In this proposal, **synthesis** means only
+presentation-oriented generation; the historically named Tier-A “synthesis” path is structured
+extraction and indexing, not the optional synthesis module.
+
+This is a terminology migration, not two meanings retained indefinitely. New descriptors,
+capability IDs, code, GUI labels, and module documentation may not use “Tier-A synthesis”; they use
+`structured_extraction_and_indexing`. Slice 1 updates the still-supported Tier-A protocol
+documentation and records any shipped legacy capability/config aliases in a bounded compatibility
+record. The bare term `synthesis` thereafter refers only to the optional presentation module.
 
 The architectural rule is:
 
@@ -135,6 +153,12 @@ src/
   modules/
     memory/              # REQUIRED: all memory, including code intelligence
       code/              # symbols, extractors, graph, architecture, blast radius
+      extraction/         # REQUIRED: structured extraction/indexing contract + provider
+        documents/        # chunks, tags, entities, claims, facts, relations
+        code/             # symbols, references, units, graph inputs
+        linking/          # cross-modality artifact links
+        schemas/          # canonical Tier-A outputs and validation
+        providers/        # typed registry and one working implementation
       inference/          # REQUIRED components: memory.embedding, memory.reranking
         embedding/       # vectorization contract and working implementation
         reranking/       # relevance-scoring contract and working implementation
@@ -153,7 +177,8 @@ src/
     delegates/
     workflows/
     roundtable/
-    synthesis/           # OPTIONAL: generation/composition over recalled memory
+    synthesis/           # OPTIONAL: answer composition/summarization over recalled evidence
+    memory-tier-b/       # OPTIONAL: memory-owned judging/reconciliation/promotion extension
     guardrails/
     governance/
     git/
@@ -223,44 +248,66 @@ retrieval, lifecycle, confidence, and recall contracts for:
 - code memory: files, symbols, references, calls, imports, routes, storage touches, architecture,
   cross-repo relations, graph health, and blast radius.
 
-Embedding and reranking are core memory operations, not optional inference features:
+Structured extraction/indexing, embedding, and reranking are required core-memory operations:
 
+- **Structured extraction and indexing** is the architectural name for the existing Tier-A
+  mechanical stage set: `extract_docs`, `extract_code`, `index_narrative`, `index_claims`,
+  `index_code_unit`, and `link_artifacts`. It owns grammar-constrained document/code extraction;
+  chunking, tagging, and indexing; entity, claim, fact, and relation extraction; artifact linking;
+  and the canonical schemas and validation for those outputs.
 - **Embedding** gives memory a shared semantic coordinate system at write/index and query time.
-  Its contract, model metadata and dimension checks, provider selection, execution path, and at
-  least one supported implementation are present in every core profile.
-- **Reranking** turns broad candidate retrieval into useful recall. Its contract, score semantics,
-  provider selection, execution path, and at least one supported implementation are likewise
-  present in every core profile.
-- A deployment may select replaceable local, accelerated, or remote implementations and register
-  additional providers, but it may not report a healthy memory service without a resolved embedder
-  and reranker. Their absence is a startup/configuration error, not an optional degraded state.
-- Embedding and reranking providers register through memory-owned typed registries. The app
-  composition root resolves and injects one implementation of each into memory during startup;
-  memory does not call the general routing module to choose them per request. This keeps the core
-  edge acyclic while still allowing build profiles to select implementations. At least one
-  reference implementation of each is part of every core build closure, even when accelerated or
-  remote alternatives are omitted.
-- Resolution is startup-only. The composition root reads the build/profile choice, asks each
-  memory-owned registry for the named capability, validates model identity/dimension or scoring
-  contract plus health, and injects immutable handles. Core memory does not perform per-request
-  provider selection, inspect optional-provider concrete types, query the general route catalog,
-  or silently fail over between embedders/rerankers. A deployment that wants failover restarts or
-  reconfigures through the composition boundary after health validation; a future hot-failover
-  design requires a separate approved contract that preserves this dependency direction.
-- The first production core profile uses the existing `aimee-llm` HTTP contracts with
-  Qwen3-Embedding-4B and Ettin (`ettin-reranker-400m` GPU or `ettin-reranker-68m` CPU) as the
-  reference deployment. Their memory-owned HTTP adapters are in the core build closure; the model
-  service is an external runtime dependency whose absence makes readiness fail. Deterministic
-  fixture providers exist only for contract/unit tests and do not satisfy production readiness.
-- **Synthesis is optional.** It can summarize, compose, extract, or generate over recalled memory,
-  but disabling it must leave storage, indexing, candidate retrieval, reranking, and evidence
-  return fully functional. The synthesis module depends on core contracts; core memory never calls
-  its concrete symbols.
+- **Reranking** turns broad candidate retrieval into useful ranked recall.
 
-Language parsers, OCR, a particular database backend, and additional inference backends may be
-optional producers/providers. The knowledge they produce and the APIs used to store, relate,
-recall, and reason over it are core memory. Disabling a parser reduces code-memory coverage; it
-does not create a separate non-memory ontology.
+Each operation has a memory-owned typed registry, provider metadata and validation, an execution
+path, and at least one working production implementation in every core profile. A deployment may
+select replaceable local, accelerated, or remote implementations and register additional
+providers, but memory readiness fails unless all three required providers resolve and validate.
+Their absence is a startup/configuration error, not an optional degraded state.
+
+Resolution is startup-only. The app composition root reads the build/profile choice, validates the
+Tier-A schema/grammar contract, embedding model/dimension contract, and reranking score/permutation
+contract, then injects immutable handles. Core memory does not select providers per request, inspect
+optional-provider concrete types, query the general route catalog, or silently fail over. A
+deployment that wants failover restarts or reconfigures through the composition boundary after
+health validation; a future hot-failover design requires a separate approved contract that
+preserves this dependency direction.
+
+The first production core profile uses the existing `aimee-llm` HTTP contracts for Tier A,
+Qwen3-Embedding-4B, and Ettin (`ettin-reranker-400m` GPU or `ettin-reranker-68m` CPU). Their
+memory-owned HTTP adapters are in the core build closure; the model service is an external runtime
+dependency whose absence makes readiness fail. Deterministic fixture providers exist only for
+contract/unit tests and do not satisfy production readiness.
+
+**Synthesis is optional.** It performs presentation-oriented answer composition and generative
+summarization over recalled evidence. Disabling it must leave extraction, indexing, storage,
+candidate retrieval, reranking, and evidence return fully functional. The synthesis module depends
+on core contracts; core memory never calls its concrete symbols.
+
+Tier-B reasoning—judging, entity resolution, contradiction reconciliation, and promotion—is
+memory-owned but is not required by the minimal core profile. Its implementation lives in the
+optional `memory-tier-b` descriptor, depends only on memory's public contracts, and is absent from
+the core descriptor's source and link sets; core memory never imports it. When that descriptor is
+absent or not selectable, judging, semantic deduplication, contradiction reconciliation, and
+promotion/demotion are explicitly unavailable and memory readiness is unaffected. They are never delegated to a weak
+Tier-A model. Curation, deduplication, contradiction handling, promotion/demotion, calibration, and
+outcome learning remain memory semantics owned by that extension when present; they do not move
+into presentation synthesis.
+
+If `memory-tier-b` is selected but its provider is unavailable, the extension fails its own
+readiness with a typed provider error and its operations return typed `unavailable`; it never
+silently falls through to Tier A, raw input, or presentation synthesis. Core-memory readiness
+remains independent because core has no edge to the extension.
+
+Specialized language parsers, OCR, proprietary extractors, a particular database backend,
+additional Tier-A providers, and Tier-B implementations may be optional. The extraction/indexing
+contract, its canonical output schemas, and one working general Tier-A implementation are required.
+Disabling a specialist reduces coverage; disabling Tier A is a startup error.
+
+Within structured extraction, `schemas/` is dependency-free and owns canonical record types and
+validation. `providers/`, `documents/`, and `code/` may depend on those schemas. `linking/` consumes
+schema-valid document and code records and emits artifact links; document/code producers never
+depend on linking, and linking never imports provider implementations. These edges are internal to
+the required memory descriptor and must remain acyclic.
 
 ### Routing
 
@@ -269,8 +316,8 @@ context as typed IR/routing input; routing does not import memory implementation
 memory retrieval.
 It also does not import delegate, workflow, roundtable, or provider implementation headers.
 Optional modules register routable capabilities. Removing one shrinks the catalog without changing
-routing core. Embedding/reranking implementation choice is not general request routing; it remains
-inside the memory provider registry described above.
+routing core. Tier-A extraction, embedding, and reranking implementation choice is not general
+request routing; it remains inside the memory provider registries described above.
 
 ### IR messaging
 
@@ -374,15 +421,27 @@ The v1 descriptor contains at least:
   "generated_sources": [],
   "link_groups": [],
   "public_include": ["src/modules/roundtable/include/aimee/roundtable/roundtable.h"],
+  "config": [
+    {
+      "key": "roundtable.max_rounds",
+      "type": "integer",
+      "default": 3,
+      "reload_class": "hot",
+      "visibility": "operational",
+      "active_when": "present-enabled",
+      "requires_component": null,
+      "deprecation": null
+    }
+  ],
   "documentation": "docs/modules/roundtable.md",
   "liveness_manifest": "docs/audit/clusters/roundtable.yaml"
 }
 ```
 
 Core descriptors use `"class": "core"`, set `build_selectable` and `runtime_toggle` false, and
-cannot be disabled. Memory declares
-`required_components: ["memory.embedding", "memory.reranking"]`; profile
-resolution fails if either component has no selected implementation. `registers` names only typed
+cannot be disabled. Memory requires `memory.structured_extraction_and_indexing`,
+`memory.embedding`, and `memory.reranking`; profile resolution fails if any component has no
+selected implementation. `registers` names only typed
 registries from the approved registry vocabulary, not arbitrary initialization callbacks.
 `default_enabled` controls default profile selection only; it does not imply runtime toggleability.
 The generated catalog reports `absent`, `present-disabled`, `present-enabled`, or
@@ -405,6 +464,41 @@ The existing plugin context and the IR stage registry are reused and narrowed wh
 single universal registration function is not required: memory providers, translators, routing
 capabilities, stages, commands, and service handlers should remain typed registries.
 
+### Truthful effective configuration surface
+
+The web GUI and configuration API must expose only settings that affect the selected, active
+product. Today, `config.show` returns every row in one global `config_fields[]` allowlist and the
+Settings page renders every returned key; deploy, advanced, and development keys are merely hidden
+until search or an advanced toggle reveals them. Parsing a key proves only that the loader accepts
+it. It does not prove that a production path consumes it or that its owning feature is active.
+
+Module descriptors are the single authored authority for configuration ownership. Every advertised
+setting must have exactly one owning descriptor and declare its type, default, reload class,
+visibility, activation rule, and deprecation/migration status. The generated config-read inventory
+must resolve it to at least one non-test production consumer through the normal resolved-config
+path. A load/save helper, generated schema, GUI row, documentation entry, or same-cluster test is
+not a production consumer.
+
+One generated effective-config catalog joins those declarations with the selected profile, derived
+module state, readiness state, and verified read inventory. The configuration API, web GUI,
+generated schema/defaults, CLI presentation, and module-document checks consume that catalog. They
+may not maintain separate allowlists or infer ownership and grouping from key prefixes. Exposure is
+deterministic:
+
+- `absent` or `dependency-missing`: expose no settings or advertised schema entries for the module;
+- `present-disabled`: expose only a module enable affordance when runtime enablement is supported;
+- `present-enabled`: expose only declared operational settings with a verified live consumer;
+- core: treat the module as always enabled, but still suppress unread or inactive settings.
+
+An install affordance for an absent build-selectable module belongs to the product/module catalog,
+not to the configuration schema. This preserves a path to add or enable a capability without
+presenting its inert operational controls as if they worked.
+
+Persisted legacy keys are not silently destroyed. An approved compatibility record may keep a key
+accepted by the loader, round-tripped, migrated, and reported through a structured diagnostic for a
+bounded window, but an inert legacy key is not advertised in the effective catalog. Removing its
+parse or migration path is a separate compatibility decision with an expiry and recovery test.
+
 ## Module documentation contract
 
 Every module is documented individually. A directory name, generated header list, or top-level
@@ -422,8 +516,10 @@ Each module document contains, where applicable:
    consumers, and the allowed dependency direction.
 4. **Lifecycle** — registration, initialization, steady-state workers/hooks/stages, shutdown, and
    unload/disable behavior.
-5. **Configuration** — build-profile controls, runtime keys, defaults, required secrets or external
-   services, validation, and examples for enabled and disabled states.
+5. **Configuration** — every owned key, type, default, reload behavior, visibility/activation rule,
+   required secret or external service, validation, deprecation/migration status, and examples for
+   enabled and disabled states. The generated catalog supplies the exact table; authored prose
+   explains intent and may not contradict it.
 6. **Surfaces** — commands, HTTP/RPC/MCP/ACP routes, IR stages, tools, events, plugin extension
    points, and generated descriptors owned by the module.
 7. **Data ownership** — schemas/tables, files, caches, indexes, migrations, provenance, retention,
@@ -446,8 +542,9 @@ free-form claims without IDs, and self-consumers fail validation.
 
 Mechanical coverage is explicit: headings/presence and the evidence block are schema-checked;
 dependencies are compared to include/symbol graphs; config keys to the generated config-read
-inventory; surfaces/registrations to generated route/command/registry inventories; and owned data
-to schema/file inventories. Purpose/boundaries, rationale, lifecycle prose, failure semantics,
+inventory and effective-config catalog; surfaces/registrations to generated route/command/registry
+inventories; and owned data to schema/file inventories. Purpose/boundaries, rationale, lifecycle
+prose, failure semantics,
 security analysis, observability meaning, examples, and removal cost receive a named human review
 because correctness cannot be inferred from headings. `docs/modules/_template.md` is the worked
 reference and includes acceptable core and optional examples. CI fails distinctly on missing
@@ -466,6 +563,10 @@ drift but do not replace authored rationale, boundaries, failure semantics, or e
 Documentation changes land in the same slice as code, contract, configuration, route, schema, or
 dependency changes. A module extraction is incomplete until its document describes the resulting
 module rather than the pre-migration layout.
+
+Acceptance 10 is the sole module-document drift check, including configuration-table equality and
+the Tier-A terminology migration. Acceptance 16 validates the API/GUI catalog projection and does
+not duplicate documentation traversal.
 
 ## Feature-liveness audit: find code that is alive only to itself
 
@@ -498,6 +599,7 @@ For each feature cluster, record:
 | Runtime trace | Which default, integration, dogfood, or explicitly configured workflow executes it? |
 | Data flow | Who outside the feature consumes its outputs, rows, events, files, or registrations? |
 | User surface | Is the command/route/config documented as part of a coherent supported journey? |
+| Configuration consumption | Which non-test production operation reads the resolved key, and in which active profiles? |
 | Duplication | Does another live path already provide the same result? |
 | Cost | What production LOC, dependencies, schema, configuration, startup work, and test burden does it add? |
 | Core fit | Is it part of memory/routing/IR/translation, an optional capability, or neither? |
@@ -517,9 +619,16 @@ Classify every cluster using these stable identifiers:
 
 The audit produces both a human-readable report and a machine-readable manifest containing the
 feature id, source/header/test/schema/config/route sets, incoming and outgoing feature edges,
-profiles, runtime evidence, classification, decision, and rationale. The graph must collapse
+profiles, runtime evidence, configuration owner/read sites/activation states, classification,
+decision, and rationale. The graph must collapse
 file/symbol edges into feature clusters and exclude test-only edges by default, with an explicit
 view that shows how much apparent reachability comes only from tests.
+
+A key whose evidence stops at parsing, saving, schema generation, its own GUI control, or
+same-cluster tests is self-referential configuration. It strengthens an `exposed-unproven`,
+`self-contained-island`, or `duplicate-legacy` disposition; it may not be used to retain the key or
+feature. The audit reports such keys explicitly so implementation, tests, schema, GUI help, and
+documentation can be removed together after any compatibility window.
 
 Disposition follows evidence:
 
@@ -585,10 +694,12 @@ callers, headers, target links, and tests before changing paths.
 
 | Current family | Target owner |
 |---|---|
-| `index.c`, `extractors*.c`, `code_*`, `rel_types.c`, graph and blast-radius logic | `modules/memory/code/` |
+| symbol/reference query, code graph, architecture, and blast-radius parts of `index.c`, `code_*`, and `rel_types.c` | `modules/memory/code/` |
 | `memory_*`, session/episode/history/working-memory implementations | `modules/memory/` modality subdirectories |
+| Tier-A parts of `index.c`, `extractors*.c`, `code_*`, and `rel_types.c`; document/code extraction, chunking, tagging, entity/claim/fact/relation extraction, indexing, artifact linking, schemas, validation, and provider adapter | required `modules/memory/extraction/`; mixed files are split, and specialized language/OCR/proprietary extractors remain optional producers |
 | embedding/reranking probes, clients, metadata, execution, dimension/score guards | `modules/memory/inference/{embedding,reranking}/` |
-| generative answer composition, summarization, and extraction over recalled evidence | optional `modules/synthesis/` (stored evidence/provenance remains memory-owned) |
+| presentation-oriented answer composition and generative summarization over recalled evidence | optional `modules/synthesis/` (stored evidence/provenance remains memory-owned) |
+| Tier-B judging, entity resolution, contradiction reconciliation, and promotion | optional memory-owned `modules/memory-tier-b/`; depends on memory public contracts and is absent from the minimal core profile |
 | curation, deduplication, contradiction handling, promotion/demotion, calibration, and learning from outcomes | `modules/memory/` lifecycle/learning owners unless the audited implementation only generates presentation text |
 | memory-bearing portions of `db1/`, `db2/`, and `kb/` | `modules/memory/{personal,shared,storage,service}/` |
 | `aimee_ir_*`, IR metrics/shadow/stream structures | `modules/ir/` |
@@ -602,9 +713,10 @@ callers, headers, target links, and tests before changing paths.
 | OS-specific sockets, process, keychain, and TLS implementations | `platform/<os>/` behind base/core contracts |
 | generated route, schema, CLI-help, and tool-prompt data | `generated/` |
 
-Provider/model selection belongs to routing; conversion to and from a provider's wire format
-belongs to translation; HTTP execution belongs to a transport adapter. A file doing all three must
-be split at those seams rather than assigned by its filename.
+General request provider/model selection belongs to routing. Startup selection for required Tier-A,
+embedding, and reranking providers belongs to memory's typed registries. Conversion to and from a
+provider's wire format belongs to translation; HTTP execution belongs to a transport adapter. A
+file doing all three must be split at those seams rather than assigned by its filename.
 
 ## Slices
 
@@ -622,6 +734,9 @@ and consolidated instead of preserved for history's sake.
   and map observed execution back to feature clusters.
 - Inventory commands, routes, flags, config fields, schemas/tables, workers, stages, plugins,
   dashboards, and generated descriptors with their non-self consumers.
+- Compare every setting currently advertised by the config API or web GUI with its owning feature,
+  production read sites, active profiles, and observed effect. A parser, saver, help string, GUI
+  control, or self-test does not establish liveness.
 - Publish the human and machine-readable liveness reports and classify every feature cluster.
 - Produce proposed retain, deprecate, consolidate, or delete dispositions, including the complete
   implementation/test/config/schema/route/documentation set affected by each deletion. Do not
@@ -668,6 +783,12 @@ proposed deletion names its public-compatibility decision, complete removal set,
 - Generate authoritative module surface, command, route, schema, config-read, and registration
   inventories used by documentation drift checks. Slice 0B owns the descriptor generator,
   dependency checker, surface-baseline script, documentation catalog/checker, and their fixtures.
+- Generate the effective-config catalog from descriptor-owned declarations, selected-profile
+  state, readiness, and verified production reads. Freeze profile-specific advertised-config
+  snapshots separately from the persisted-input compatibility baseline.
+- Land the descriptor config schema, ownership/read-site validation, state join, and catalog
+  generator here. Later slices populate or migrate declarations; Slice 5A switches product
+  consumers and removes the legacy presentation paths rather than introducing a second generator.
 - Record the cleanup baseline: production LOC/files, internal types, registries, source lists,
   compatibility flags, pass-through wrappers, and duplicate implementations by feature family.
 
@@ -715,11 +836,22 @@ advance; and the production cleanup ledger demonstrates a net reduction in the a
 ### Slice 1 — establish the four mandatory core modules
 
 - Finish co-locating memory public/private headers with `modules/memory/`.
+- Establish structured extraction and indexing as a mandatory memory submodule at
+  `modules/memory/extraction/`, including its grammar-constrained Tier-A schemas, validation,
+  provider contract, startup resolution, and one working production provider. Its canonical stage
+  set is `extract_docs`, `extract_code`, `index_narrative`, `index_claims`, `index_code_unit`, and
+  `link_artifacts`. Specialized language, OCR, proprietary, accelerated, and additional remote
+  extractors remain optional and capability-reported. Tier-B reasoning is not promoted by this
+  slice.
+- Update supported Tier-A protocol/module documentation to deprecate “Tier-A synthesis,” record any
+  shipped alias compatibility, and make structured extraction/indexing the only new capability and
+  GUI terminology. Update the core-round-trip fixture and fixture schema in this slice.
 - Establish embedding and reranking as mandatory memory submodules, including their typed provider
   contracts, model/dimension/score metadata, startup resolution, and working reference
   implementations.
-- Extract synthesis behind an optional-module contract; core memory returns ranked evidence
-  without requiring synthesis to be present.
+- Extract presentation-oriented answer composition and generative summarization behind an
+  optional synthesis contract; core memory returns structured, ranked evidence without synthesis.
+  Tier-B reasoning remains in the optional memory-owned `memory-tier-b` extension.
 - Move IR types, ownership, metrics, shadow, and delta code from server/global headers into
   `modules/ir/`.
 - Extract routing contracts, catalog, and policy from server/delegate/provider-specific files into
@@ -743,23 +875,29 @@ no optional-module object or header dependency. The fixture
 map/symbol ownership manifest to assert that no optional object, header, or symbol
 is present, starts with the SQLite reference storage adapter, and reports provider contract
 identities. A separate production-provider readiness test exercises the compiled `aimee-llm`
-embedding/reranking adapters in the external-service CI tier; production startup cannot substitute
-the fixture providers. The deterministic fixture performs
-write → embed → candidate retrieval → rerank → route → IR response → loopback JSON translation,
+Tier-A, embedding, and reranking adapters in the external-service CI tier; production startup
+cannot substitute the fixture providers. The deterministic fixture performs
+extract → write → embed → candidate retrieval → rerank → route → IR response → loopback JSON translation,
 asserts relevant evidence at the public boundary, and asserts synthesis is absent from both the
 link closure and capability catalog. A synthesis request returns typed `unavailable`, never a
 silent pass-through or null failure. This gate lands in Slice 1 and stays green thereafter.
 
 ### Slice 2 — put code intelligence wholly inside memory
 
-- Move `index.c`, `extractors*.c`, `code_collect.c`, `code_match.c`, `code_outline.c`,
-  `code_treesitter.c`, `code_audit_graph.c`, `rel_types.c`, and their owned headers into
-  `modules/memory/code/`.
+- Split `index.c`, `extractors*.c`, `code_collect.c`, `code_match.c`, `code_outline.c`,
+  `code_treesitter.c`, `code_audit_graph.c`, `rel_types.c`, and their owned headers by
+  responsibility. Required Tier-A code record production, validation, and indexing move to
+  `modules/memory/extraction/code/`; symbol/reference query, graph, architecture, and blast-radius
+  behavior move to `modules/memory/code/`. The extraction side emits canonical records; the code
+  side consumes them through memory contracts and never imports extractor/provider internals.
 - Move KB-side code graph, code vector, cross-repo graph, architecture, and blast-radius
   implementations into the same memory-owned subtree, separated into storage/service adapters as
   needed.
 - Keep language-specific extractors optional and capability-reported. Keep the code-memory schema,
   ontology, query contracts, graph relations, and recall surface core.
+- Treat code extraction as the code modality of required structured extraction/indexing. The
+  modality contract and one working implementation are core; additional language-specific
+  extractors are optional producers.
 - Rename user-facing documentation only where it incorrectly presents code intelligence as a
   peer subsystem instead of a memory modality; command compatibility remains unchanged.
 
@@ -772,15 +910,19 @@ and no code-intelligence implementation remains at `src/` root.
   storage adapter.
 - Re-home DB2 shared/corpus/code-memory implementations under `modules/memory/shared/` and their
   storage adapter.
-- Re-home KB memory algorithms—curation, deduplication, contradiction handling, ranking,
-  calibration, reflection, retrieval, and lifecycle—under memory-owned submodules.
+- Re-home KB memory algorithms—Tier-A extraction/indexing/linking, curation, deduplication,
+  contradiction handling, ranking, calibration, reflection, retrieval, and lifecycle—under
+  memory-owned submodules. Tier A lands under required `modules/memory/extraction/`; Tier-B
+  reasoning lands in the optional `memory-tier-b` descriptor and is not linked into the minimal
+  core profile.
 - Move embedding and reranking integrations currently split across root, KB, DB, platform, probe,
   and client families into the mandatory memory inference owners. Additional local, accelerated,
   or remote providers remain replaceable; the operations do not become optional.
-- Move only generative answer composition, summarization, and extraction over recalled evidence
-  into the optional synthesis module. Curation, deduplication, contradiction handling,
-  promotion/demotion, calibration, outcome learning, and stored facts/evidence/provenance remain
-  memory-owned unless Slice 0A proves a specific implementation is a removable island.
+- Move only presentation-oriented answer composition and generative summarization over recalled
+  evidence into the optional synthesis module. Tier-B judging, semantic deduplication,
+  contradiction handling, promotion/demotion, calibration, and outcome learning move to
+  `memory-tier-b`; stored facts/evidence/provenance remain core-memory-owned unless Slice 0A proves
+  a specific implementation is a removable island.
 - Collapse duplicate DB1/DB2 query construction, row mapping, scope handling, and result shaping
   behind the smallest storage contracts that their real differences permit.
 - Leave `app/kb/` with process startup, connection composition, listener lifecycle, and generic
@@ -819,6 +961,30 @@ proposal's evidence gates, and server composition imports only public routing/IR
 **Gate:** generated CLI help and route descriptors are unchanged for the default profile; disabling
 an optional module removes its commands/routes cleanly and returns the documented unavailable
 response rather than leaving a dangling handler.
+
+### Slice 5A — make the configuration API and web GUI truthful
+
+- Replace the global presentation allowlist with the generated effective-config catalog. Retain a
+  narrow typed setter/loader registry only where persistence needs it; it is generated or validated
+  from the same descriptor declarations and is not a second surface authority.
+- Consume the catalog and validator established in Slice 0B; this slice does not redefine their
+  schema or generation algorithm.
+- Make the config API, Settings page, setup flows, and any dashboard controls consume the catalog.
+  Remove unconditional rendering, key-prefix ownership/category heuristics, and advanced-search
+  paths that can reveal settings excluded by the catalog.
+- For a runtime-toggleable module, show only its enable control while it is present-disabled and
+  reveal operational settings only after it becomes present-enabled and ready. Do not synthesize
+  enable controls for core modules or build-absent modules.
+- Execute the approved dispositions for unread, unowned, duplicate, and self-referential settings.
+  Keep legacy load/migration diagnostics only for the compatibility window named by each record.
+- Generate the configuration sections in every individual module document from the same catalog,
+  while retaining authored rationale, examples, failure semantics, and migration guidance.
+
+**Gate:** for `core`, `personal`, `shared-kb`, `full`, and every full-minus-one profile, the API and
+GUI expose exactly the catalog's effective keys and controls: no superset and no subset. CI fails
+unread, unowned, stale, or wrongly activated entries; disabling one optional module removes its
+operational settings without frontend changes, and persisted legacy fixtures migrate or produce
+their approved structured diagnostics without data loss.
 
 ### Slice 6 — finish existing optional-module extractions
 
@@ -868,10 +1034,11 @@ install/package manifests contain every public header and selected module artifa
 
 Build and test at least these profiles:
 
-1. **core:** memory + routing + IR + translation, with working embedding and reranking plus the
-   SQLite reference storage adapter, the memory-owned `aimee-llm` HTTP embedding/reranking
-   adapters, one fixed routing capability, the core request/evidence IR types, and the loopback
-   JSON translator used by `app/core-smoke`; synthesis and every optional descriptor are absent;
+1. **core:** memory + routing + IR + translation, with working structured extraction/indexing,
+   embedding, and reranking plus the SQLite reference storage adapter; the memory-owned
+   `aimee-llm` HTTP Tier-A/embedding/reranking adapters; one fixed routing capability; the core
+   request/evidence IR types; and the loopback JSON translator used by `app/core-smoke`. Synthesis,
+   Tier-B reasoning, specialized extractors, and every optional descriptor are absent;
 2. **personal:** core + personal memory + chosen agent/provider adapters;
 3. **shared-kb:** core + shared storage, ingest, curation, and code-memory producers;
 4. **full:** today's default bundled product;
@@ -880,18 +1047,21 @@ Build and test at least these profiles:
    all rows run in CI, with slow external-service rows eligible for a required nightly tier only
    when the PR tier still performs their build/link/absence checks.
 
-The core profile is not required to provide every wire/provider/database implementation. It must
-provide every core contract and at least one reference adapter per boundary so the substrate is
-executable and testable. Embedding and reranking must resolve to working implementations and pass a
-write -> candidate retrieval -> rerank round trip. Typed absence is valid for synthesis and other
-optional capabilities, not for embedding or reranking.
+The core profile is not required to provide every wire/provider/database implementation or every
+specialized extractor. It must provide every core contract and at least one reference adapter per
+boundary so the substrate is executable and testable. Structured extraction/indexing, embedding,
+and reranking must resolve to working implementations and pass an
+extract -> write -> embed -> candidate retrieval -> rerank round trip. Typed absence is valid for synthesis,
+Tier-B reasoning, specialist extractors, and other optional capabilities—not for Tier A, embedding,
+or reranking.
 
 **Gate:** every profile builds and starts; core behavior is identical across profiles; optional
 module absence never changes the core ABI or creates unresolved symbols. Slice 8 creates
 `scripts/test_module_profiles.sh` and the canonical core-round-trip harness. The core fixture also
 proves embeddings are distinguishable for semantically distinct inputs and the reranker
 non-trivially reorders a known embedding-only misranking; a constant embedder or pass-through
-reranker fails.
+reranker fails. It also proves Tier-A output conforms to the canonical schema/grammar and that an
+unavailable Tier-A provider fails with a typed readiness error.
 
 ## Normative implementation contracts
 
@@ -918,12 +1088,13 @@ validated after YAML-to-JSON decoding. No additional properties are allowed in v
 | `runtime_toggle` | boolean; must be `false` for core |
 | `unavailable_reason` | null or `slice:<id>: <reason>`; required and non-null only while an optional module is not build-selectable |
 | `depends_on` | unique array of module names |
-| `required_components` | unique array from `memory.storage`, `memory.embedding`, `memory.reranking`, `routing.selector`, `ir.pipeline`, `translation.adapter` |
-| `registers` | unique array of objects `{kind,id}`; `kind` is one of `memory_storage_provider`, `memory_embedding_provider`, `memory_reranking_provider`, `routing_capability`, `ir_stage`, `translator`, `command`, `service_handler`, `plugin_manifest`, `tool`, or `event` and `id` is a namespaced stable identifier |
+| `required_components` | unique array from `memory.storage`, `memory.structured_extraction_and_indexing`, `memory.embedding`, `memory.reranking`, `routing.selector`, `ir.pipeline`, `translation.adapter` |
+| `registers` | unique array of objects `{kind,id}`; `kind` is one of `memory_storage_provider`, `memory_structured_extraction_provider`, `memory_embedding_provider`, `memory_reranking_provider`, `routing_capability`, `ir_stage`, `translator`, `command`, `service_handler`, `plugin_manifest`, `tool`, or `event` and `id` is a namespaced stable identifier; Tier-A grammar transport is provider metadata, not a parallel registry |
 | `sources` | unique array of repository-relative regular source paths; no globs |
 | `generated_sources` | unique array of `{path,producer}`; the producer is a declared generator target and the path must exist after it runs |
 | `link_groups` | array of `{name,members,after}`; names and members are unique and `after` forms a DAG |
 | `public_include` | unique array of paths matching `src/modules/<name>/include/aimee/<name>/**` |
+| `config` | unique-key array of `{key,type,default,reload_class,visibility,active_when,requires_component,deprecation}`; `type` is `string`, `boolean`, `integer`, or `number`; `reload_class` is `hot`, `reappliable`, or `restart`; `visibility` is `operational` or `enable-control`; `active_when` is `present-enabled` for operational settings and `present-disabled` for enable controls; `requires_component` is null or a declared required-component ID; `deprecation` is null or an approved compatibility-record ID |
 | `documentation` | path equal to `docs/modules/<name>.md` |
 | `liveness_manifest` | path to a cluster manifest conforming to `feature-cluster.schema.json` |
 
@@ -934,6 +1105,44 @@ Every required component must have exactly one selected implementation. New regi
 an architecture-contract change requiring an independent architecture approval and a schema-version
 change. Descriptor sources and registrations cannot reintroduce a path or ID marked removed in a
 cleanup ledger without a new approved disposition record.
+
+The descriptor validator permits no core `enable-control`, no operational entry with an activation
+state other than `present-enabled`, and at most one optional-module enable control.
+`requires_component: null` means module-state gating only; a non-null value additionally requires
+that named component's readiness probe to pass. The effective
+catalog generator joins each declaration to the selected profile and derived module state. It
+requires exactly one owner and at least one non-test production read from the generated config-read
+inventory for every advertised operational key. Reads performed only by a loader, saver,
+schema/catalog generator, GUI/API presentation path, documentation build, or test do not satisfy
+that requirement. Duplicate ownership, missing reads, inactive owners, or an advertised key absent
+from the effective catalog are hard failures.
+
+`required_components` governs whether a selected module/profile can become ready;
+`config[].requires_component` only governs whether one operational setting is useful enough to
+advertise after module selection. The latter cannot weaken the former. An enable control may not
+target a core module or any required component, and a legacy alias/compatibility mapper may not
+translate a required component into a disabled state. The schema rejects unknown registry kinds
+and additional `registers` properties, so grammar transport cannot reappear as a standalone
+registration; it is carried only by the structured-extraction provider ABI below.
+
+For this contract, `stale` means a loader/setter row, schema/default entry, GUI/API/help entry, or
+module-document key that no longer resolves byte-for-byte to its owning descriptor declaration or
+to an unexpired compatibility record. It does not mean “not changed recently”; CI evaluates
+current ownership and consumption rather than inventing a time-based activity signal.
+
+The acceptance flags are also normative. `tier-a-synthesis-outside-compat` means a normalized,
+case-insensitive occurrence of “Tier-A synthesis” anywhere in new module documentation, generated
+help, or GUI labels except the terminology-migration paragraph and an unexpired compatibility
+record. `--check-legacy-migrations` requires every persisted key excluded from the effective catalog
+to name such a record and a fixture proving either lossless migration or load/save round-trip plus a
+structured diagnostic `{key,record,expires,action}`. After expiry, the fixture must prove migration
+to a live key or explicit rejection; continued silent acceptance or advertisement fails.
+
+The API and GUI receive catalog entries, not the raw persistence registry. For an absent module the
+join emits nothing; for a present-disabled optional module it emits only its declared enable
+control; for a present-enabled module it emits its verified operational keys. A readiness-gated key
+is withheld until its declared component is active. Core modules use the same join with an
+always-enabled state, so mandatory status cannot be used to expose dormant knobs.
 
 The `module_evidence` fenced YAML block in each module document requires: `schema_version`,
 `module`, `class`, `dependencies`, `config_keys`, `surfaces` (typed `{kind,id}` values), `owned_data`
@@ -1032,34 +1241,76 @@ aimee-core-profile`, and `cmake --build build/core --target aimee-core-test`. Th
 tier builds, links, and proves symbol/catalog absence for every optional module; runtime rows without
 external services also execute. External-service runtime rows execute in the mandatory nightly tier.
 
+The `hardware` acceptance tier is that mandatory, release-blocking nightly job. Its environment
+provides the configured `aimee-llm` endpoint and credentials plus the Tier-A provider, Qwen
+embedding model, and Ettin reranker identities declared by the core profile. A missing service,
+credential, expected model, readiness probe, or required full-minus-one row fails the tier; it is
+not converted to a skip. PR CI still performs build/link/catalog absence and fixture contracts.
+
 ### Core provider ABI and round-trip fixture
 
 Memory owns the public provider ABI at `src/modules/memory/include/aimee/memory/providers.h`.
+`aimee_structured_extraction_provider_v1` contains ABI version, provider/model IDs, Tier-A schema
+set ID, grammar transport (`json-schema` or `gbnf`), `init`, `fini`, `validate_model`, and
+`extract_batch`. It consumes caller-owned document/code chunks and writes caller-owned, provenance-
+bearing entity/claim/fact/relation/artifact-link records into bounded output buffers. Every returned
+record must validate against the declared canonical schema set and grammar.
+
 `aimee_embedding_provider_v1` contains ABI version, provider/model IDs, dimension, `init`, `fini`,
 `validate_model`, and `embed_batch`; the caller owns input strings and the provider writes exactly
 `count * dimension` finite normalized floats into caller-owned output. `aimee_reranking_provider_v1`
 contains ABI version, provider/model IDs, `init`, `fini`, `validate_model`, and `rerank`; it returns
-one finite score and stable permutation over caller-owned candidates. Both return the shared enum
+one finite score and stable permutation over caller-owned candidates. All three return the shared enum
 `AIMEE_PROVIDER_OK`, `AIMEE_PROVIDER_UNAVAILABLE`, `AIMEE_PROVIDER_MODEL_MISMATCH`,
-`AIMEE_PROVIDER_DIMENSION_MISMATCH`, or `AIMEE_PROVIDER_INVALID_OUTPUT`.
+`AIMEE_PROVIDER_DIMENSION_MISMATCH`, `AIMEE_PROVIDER_SCHEMA_MISMATCH`,
+`AIMEE_PROVIDER_GRAMMAR_REJECTED`, or `AIMEE_PROVIDER_INVALID_OUTPUT`.
+
+The app composition root calls
+`aimee_memory_inference_providers_resolve(profile, config, handles, error)` exactly once before
+declaring readiness. That function resolves one structured-extraction, one embedding, and one
+reranking provider, runs the three validation probes, and returns immutable handles or the typed
+failing component/error. There is no disable flag for Tier A, embedding, or reranking in a valid
+core profile: configuration selects an
+implementation, not whether the operation exists. Extraction-only and raw-storage-only products
+are utilities or non-core profiles and may not report Aimee Core memory readiness.
+
+This helper resolves only the three required memory-inference kinds. The general profile resolver
+already enforces every descriptor `required_components` entry; memory storage, routing, IR, and
+translation resolve through their own typed registries/contracts and are exercised by the write,
+route, IR, and translation stages of acceptance 7.
+
+The catalog generator enforces that rule across every declared profile: the three core-memory
+readiness IDs are advertised as a complete set or not as Aimee Core readiness at all. A partial set,
+a required-component enable control, or a legacy mapping to disabled is invalid before profile
+tests run.
 
 Production `core` compiles the `aimee-llm` HTTP adapters into memory and readiness probes
-`memory.embedding.ready` and `memory.reranking.ready` validate endpoint, model ID, embedding
-dimension, output cardinality, finite values, and rerank permutation. Startup is non-ready with the
-specific error above if either probe fails. Deterministic `fixture_embedding_v1` and
-`fixture_reranking_v1` are linked only into the `aimee-core-test` harness through test injection;
-they have no descriptor, profile, production catalog entry, or installed header.
+`memory.structured_extraction_and_indexing.ready`, `memory.embedding.ready`, and
+`memory.reranking.ready` validate endpoint, model ID, Tier-A schema/grammar, extraction output,
+embedding dimension/cardinality/finite values, and rerank permutation. Startup is non-ready with
+the specific typed error if any probe fails. Deterministic `fixture_structured_extraction_v1`,
+`fixture_embedding_v1`, and `fixture_reranking_v1` are linked only into the `aimee-core-test`
+harness through test injection; they have no descriptor, production profile/catalog entry, or
+installed header.
 
-`tests/core_round_trip/core_round_trip.schema.json` requires `schema_version`, provider metadata,
-three or more memories `{id,text}`, query, `embedding_assertions`, `embedding_candidate_order`,
-`expected_rerank_order`, route ID, expected IR response, and expected translated JSON.
+Acceptance 7 injects exactly one structured-extraction, one embedding, and one reranking fixture
+provider and exercises them through `aimee_memory_inference_providers_resolve`; Slice 1 owns the
+fixture and schema changes. Acceptance 15 separately exercises the compiled production
+`aimee-llm` HTTP adapters and readiness probes in external-service CI. Fixture providers can never
+satisfy acceptance 15 or production startup.
+
+`tests/core_round_trip/core_round_trip.schema.json` requires `schema_version`, Tier-A/embedding/
+reranking provider metadata, three or more memories `{id,text}`, query, `extraction_assertions`,
+`embedding_assertions`, `embedding_candidate_order`, `expected_rerank_order`, route ID, expected IR
+response, and expected translated JSON.
 `core_round_trip.json` uses memories `m1: "C parser resolves call symbols"`,
 `m2: "Banana bread uses ripe bananas"`, and `m3: "C call graph records caller and callee"`; query
-`"Which memory explains C caller relationships?"`. It requires every distinct pair's L2 distance
-to exceed `1e-6`, the best relevant-vs-irrelevant cosine margin to be at least `0.10`, embedding
-candidate order `[m1,m2,m3]`, and reranked order `[m3,m1,m2]`; thus `m3` must move from rank 3 to
-rank 1, identity reranking fails, and NDCG@3 must be at least `0.95`. A constant embedder fails both
-distance predicates.
+`"Which memory explains C caller relationships?"`. It requires grammar-conformant, schema-valid
+Tier-A records with source provenance and at least one entity plus one claim per memory. It also
+requires every distinct pair's L2 distance to exceed `1e-6`, the best relevant-vs-irrelevant cosine
+margin to be at least `0.10`, embedding candidate order `[m1,m2,m3]`, and reranked order
+`[m3,m1,m2]`; thus `m3` must move from rank 3 to rank 1, identity reranking fails, and NDCG@3 must
+be at least `0.95`. A no-op/schema-invalid extractor, constant embedder, or identity reranker fails.
 
 #### Threshold registry
 
@@ -1072,24 +1323,30 @@ and a compatibility record when shipped behavior is affected.
 | `min_pairwise_l2` | `1e-6` | core-round-trip fixture and acceptance 7 |
 | `min_relevance_cosine_margin` | `0.10` | core-round-trip fixture and acceptance 7 |
 | `min_ndcg_at_3` | `0.95` | core-round-trip fixture and acceptance 7 |
+| `min_tier_a_records` | one entity and one claim per memory | core-round-trip fixture and acceptance 7 |
+| `tier_a_grammar_conformance` | `100%` of returned records | core-round-trip fixture and acceptance 7 |
 | `unknown_deadline_days` | `30` | cluster evidence rules and acceptance 8 |
 | `exposed_unproven_deadline_days` | `90` | cluster evidence rules and acceptance 8 |
 | `compatibility_retention` | longer of two stable releases or 180 days | recovery contract and acceptance 11 |
 
-The harness records and asserts named registry traversal:
+The harness records and asserts named registry traversal in order:
+`memory.structured_extraction_and_indexing/selected.extract`,
 `memory.storage/sqlite-reference.write`, `memory.embedding/selected.embed`,
 `memory.storage/sqlite-reference.candidates`, `memory.reranking/selected.rerank`,
 `routing.capability/core.fixed.select`, `ir.stage/core.response.shape`, and
 `translation.adapter/core.loopback-json.encode`. The translator contract is
 `src/modules/translation/include/aimee/translation/loopback_json.h`; core registers it directly,
-accepts the canonical IR response, and emits the fixture's canonical sorted-key JSON without an
-optional provider.
+accepts the canonical IR response including Tier-A provenance, and emits the fixture's canonical
+sorted-key JSON without an optional provider. An unavailable Tier-A provider must fail at the
+extract stage with a typed provider error, never silently pass raw input through.
 
 The harness dumps `build/core/capabilities.json` and sorted global undefined/defined symbols. It
 requires no catalog kind or ID matching `synthesis` and no linked symbol with prefixes
 `aimee_synthesis_`, `aimee_answer_compose_`, or `aimee_generative_summary_`; the closed prefix list
-lives in `tests/core_round_trip/forbidden_synthesis_symbols.txt`. Each stage above must appear once
-in `build/core/core-round-trip-trace.json` with the expected input/output ID; a partial smoke fails.
+lives in `tests/core_round_trip/forbidden_synthesis_symbols.txt`. Tier-B reasoning prefixes live in
+`tests/core_round_trip/forbidden_tier_b_symbols.txt` and are also absent from the minimal core link
+closure. Each of the eight stages above must appear once in
+`build/core/core-round-trip-trace.json` with the expected input/output ID; a partial smoke fails.
 
 ### Dependency graph algorithm and cycle policy
 
@@ -1126,7 +1383,8 @@ normalizer, and compatibility-record field for every file:
 | `cli-help.txt` | byte-equal after replacing only version, build date, and workspace prefix tokens |
 | `routes.json` | semantic JSON after sorting by protocol/method/path; all route fields byte-equal |
 | `ir-success.json`, `ir-error.json`, `ir-stream.jsonl` | semantic JSON; only request IDs, trace IDs, timestamps, and measured latency are tokenized; at least one fixture of each kind per protocol |
-| `config-schema.json`, `config-defaults.json` | semantic sorted-key JSON; no fields normalized |
+| `config-schema.json`, `config-defaults.json` | persisted-input compatibility: semantic sorted-key JSON; no fields normalized |
+| effective config snapshots for `core`, `personal`, `shared-kb`, `full`, and full-minus-one | semantic sorted-key JSON generated from the catalog; exact key/control equality for each profile and activation state |
 | `db1-schema.sha256`, `db2-schema.sha256` | byte-equal SHA-256 of normalized SQLite `.schema` output with whitespace canonicalized, followed by ordered migration ID and content-digest pairs; migration timestamps are excluded, IDs/order/content are not |
 | `public-headers.txt`, `public-symbols.txt` | byte-equal sorted path or ABI symbol/signature lines; addresses are omitted |
 | `plugin-abi.json` | semantic sorted-key JSON; only build version is tokenized |
@@ -1139,6 +1397,18 @@ a compatibility change. Generated inventories used by documentation are
 `build/inventory/{dependencies,config-reads,surfaces,registrations,owned-data,tests}.json`; the Slice
 0B generator and dependency scanner own them, and `scripts/check_module_docs.sh` compares them to
 the descriptor, module evidence, and `docs/journeys/registry.yaml`.
+
+Persisted-input compatibility and advertised configuration are intentionally separate baselines.
+An approved legacy key may remain loadable during its compatibility window without appearing in
+the effective API/GUI snapshot. Conversely, appearing in the old global allowlist is not a reason
+to preserve advertisement: exposure requires current ownership, activation, and production-read
+evidence. This rule narrows the general public-config preservation rule in this proposal and is the
+authority when the two would otherwise conflict.
+
+The advertised-config snapshots and every CLI/API/GUI config projection are rendered from the
+same effective catalog. `compare_surface_baseline.sh --config` may compare those rendered snapshots
+and the separate persisted-input schema; it may not enumerate keys from the legacy loader/setter
+registry or another allowlist.
 
 ### Deletion, migration, and recovery contract
 
@@ -1184,6 +1454,13 @@ The proposal completed three review passes on 2026-07-20:
    direction.
 3. The final draft added the normative contracts in this document. Architecture, adversarial, and
    verification reviewers independently found no remaining blocker and returned **APPROVED**.
+4. The required Tier-A and truthful web-config amendment was composed with a technical-writer pass,
+   rejected once for ambiguous Tier-B link ownership, code-extraction ownership, duplicate grammar
+   registration, extraction dependency direction, and incomplete config/readiness mechanics, then
+   revised. Focused architecture, adversarial, and verification re-reviews independently returned
+   **APPROVED** after the proposal made Tier B an optional memory-owned descriptor, made provider
+   and config state mechanically decidable, and separated persisted compatibility from advertised
+   API/GUI configuration.
 
 Roundtable approval means the proposal is coherent and executable enough to seek project approval;
 it does not bypass the per-slice human review, compatibility decisions, or acceptance gates defined
@@ -1203,8 +1480,9 @@ refactor reviewable without reducing it to a directory shuffle:
 - Run blast-radius analysis before each broad family move and update the module dependency graph
   in the same commit. Store the machine-readable result with the slice ledger and require a
   reviewer to acknowledge every high-confidence incoming edge.
-- Preserve public CLI commands, HTTP/RPC routes, database schemas, config keys, plugin manifests,
-  and wire shapes unless another approved proposal explicitly changes them.
+- Preserve public CLI commands, HTTP/RPC routes, database schemas, persisted config compatibility,
+  plugin manifests, and wire shapes unless an approved compatibility record changes them.
+  Advertised API/GUI config is deliberately narrower and follows the effective-catalog rule above.
 - Never solve a dependency violation by adding a broad global header or by moving optional behavior
   into `base`/core.
 - Remove feature-specific tests with a deleted feature. Do not keep a private subsystem alive solely
@@ -1227,9 +1505,12 @@ refactor reviewable without reducing it to a directory shuffle:
 - Combining DB1 and DB2 into one database or changing tenancy/storage guarantees.
 - Making all modules dynamically loaded shared libraries.
 - Changing the public command or API taxonomy merely to mirror directories.
-- Treating code intelligence, embedding, or reranking as optional. Individual language parsers and
-  additional inference backends may be optional; the operations and one working implementation of
-  embedding and reranking are mandatory.
+- Treating code intelligence, structured extraction/indexing, embedding, or reranking as optional.
+  Specialist parsers, OCR, proprietary extractors, and additional inference backends may be
+  optional; the three operations and one working implementation of each are mandatory.
+- Making Tier-B reasoning required by the minimal core profile, or moving it into presentation
+  synthesis. Tier-B remains an optional memory-owned extension; synthesis remains optional answer
+  composition and generative summarization.
 - Moving generic code into a junk-drawer `common`, `misc`, or oversized `base` directory.
 - Duplicating the IR-stage registry, provider registries, or plugin system.
 - Preserving an unused feature merely because it has tests, docs, schema, or a registered surface.
@@ -1241,9 +1522,15 @@ refactor reviewable without reducing it to a directory shuffle:
   independently revertible.
 - **A false core grows until nothing is optional.** The four-capability thesis is the admission
   rule. A dependency used by optional features does not become core merely because it is popular.
+- **The historical “Tier-A synthesis” name obscures a core memory operation.** The proposal calls
+  it `structured extraction and indexing`, requires it through the memory descriptor and readiness
+  probe, and reserves `synthesis` for optional presentation-oriented generation.
+- **Tier-B reasoning is accidentally pulled into the minimum core.** Tier-A stages and Tier-B
+  stages have separate provider contracts, readiness, descriptors, and link-closure assertions.
+  The optional `memory-tier-b` descriptor is absent from the minimal core profile.
 - **A tiny core becomes unusable abstraction theater.** The core profile includes reference
-  adapters, working embedding and reranking, and an executable
-  write/embed/retrieve/rerank/route/IR/translation round trip without synthesis.
+  adapters, working structured extraction/indexing, embedding, and reranking, and an executable
+  extract/write/embed/retrieve/rerank/route/IR/translation round trip without synthesis.
 - **Memory becomes a new monolith.** Memory is one capability and ontology, not one compilation
   unit. Its modality, producer, storage, service, and CLI submodules remain separately owned.
 - **Provider code blurs routing and translation.** Split selection, conversion, and transport at
@@ -1252,6 +1539,16 @@ refactor reviewable without reducing it to a directory shuffle:
   sources.
 - **Runtime-disable claims outrun reality.** Physical modularity, build omission, and runtime
   unloadability are separately declared and separately tested.
+- **The Settings page advertises knobs that do nothing.** The API and GUI project one generated
+  effective-config catalog. Ownership, active-module state, readiness, and a non-test production
+  read are required before a setting appears; profile snapshots reject both extra and missing rows.
+- **Hiding disabled-module settings makes the module impossible to enable.** A selected,
+  runtime-toggleable module may expose one enable control while disabled; its operational settings
+  appear only after activation. Installation of an absent module remains a separate module-catalog
+  action, not inert configuration.
+- **Cleaning the GUI silently destroys old configuration.** Advertisement and persisted-input
+  compatibility are separate. Legacy keys remain accepted, migrated or round-tripped, and
+  diagnosed only for their approved window; parser removal is independently gated.
 - **Deletion meets deployed state.** Source/API deletions and persisted-data retirement are
   separate decisions. Applied migrations are never removed; pre-deletion images/tags and compatible
   schemas are retained through the window, and recovery after schema advancement is a tested
@@ -1271,15 +1568,19 @@ contract; if a summary conflicts with a `check` string, the `check` string contr
 ### Outcome summary
 
 - The repository and architecture documentation define Aimee Core as memory (including code
-  intelligence, embedding, and reranking), routing, IR messaging, and translation. Synthesis is an
-  optional module over recalled memory.
+  intelligence, structured extraction/indexing, embedding, and reranking), routing, IR messaging,
+  and translation. Synthesis is an optional presentation module over recalled memory; Tier-B
+  reasoning is an optional memory-owned extension absent from the minimal core profile.
 - `memory`, `routing`, `ir`, and `translation` are explicit mandatory source modules with public
   contracts and no dependency on optional modules.
-- Code indexing, symbol/call/dependency graphs, architecture facts, and blast radius live under the
-  memory owner and use the memory ontology/recall contracts.
-- Every core profile resolves working embedding and reranking implementations and fails startup
-  clearly if either is unavailable; synthesis can be absent without degrading ranked evidence
-  retrieval.
+- Code indexing, symbol/call/dependency graphs, architecture facts, blast radius, and the canonical
+  Tier-A extraction/indexing schemas live under the memory owner and use memory contracts.
+- Every core profile resolves working structured-extraction, embedding, and reranking providers
+  and fails startup clearly if any is unavailable. Synthesis can be absent without degrading
+  extraction, indexing, ranked evidence retrieval, or reranking.
+- The core round trip traverses eight named stages in order: extract, write, embed, candidate
+  retrieval, rerank, route, IR response, and loopback translation. A missing or invalid Tier-A
+  provider fails with a typed error rather than silently passing raw input through.
 - Every retained feature has a liveness classification, a non-self consumer or supported journey,
   and an explicit owner. Self-contained islands and superseded implementations are deleted with
   their tests/config/schema/docs rather than migrated.
@@ -1288,14 +1589,18 @@ contract; if a summary conflicts with a `check` string, the `check` string contr
 - App directories own composition, listener, lifecycle, and generic dispatch only.
 - Every optional built-in module has machine-readable metadata, declared dependencies, and a
   build/runtime availability state.
+- The web GUI and config API show exactly the live settings for the selected and active modules.
+  Absent modules contribute no config surface, disabled optional modules contribute only an enable
+  control, and self-referential or unread keys enter the cleanup/deprecation path.
 - Every core and optional module has an individual, authoritative document satisfying the module
   documentation contract and linked from the generated module catalog.
 - Make and CMake consume the same module graph and reject cycles, undeclared edges, private-header
   imports, and core-to-optional dependencies.
 - The core, personal, shared-KB, full, and full-minus-one profiles build and pass their relevant
   tests.
-- Default-profile CLI help, route descriptors, API fixtures, plugin discovery, configuration, and
-  database schemas remain compatible.
+- Default-profile CLI help, route descriptors, API fixtures, plugin discovery, persisted
+  configuration, and database schemas remain compatible; advertised configuration is the exact
+  live effective-catalog projection rather than a frozen superset of historical keys.
 - Each slice reports its production cleanup ledger; duplicate paths, registries, fallbacks,
   internal representations, and pass-through layers trend downward, and any net production growth
   is explicitly justified.
@@ -1309,13 +1614,14 @@ contract; if a summary conflicts with a `check` string, the `check` string contr
 - {id: 4, tier: mechanical, check: "scripts/test_module_profiles.sh --pr-tier --profiles core,personal,shared-kb,full --full-minus-one-every-optional --require-build-link-absence"}
 - {id: 5, tier: integration, check: "scripts/compare_surface_baseline.sh --index tests/baselines/modules/index.yaml --write-report build/reports/surface-diff.json --cli-help --routes --ir-fixtures --config --db-schemas --public-symbols --public-headers --plugin-abi --packages"}
 - {id: 6, tier: integration, check: "make -C src test-core-contracts test-memory-code test-ir test-routing test-translation"}
-- {id: 7, tier: integration, check: "scripts/test_core_round_trip.sh --profile core --fixture tests/core_round_trip/core_round_trip.json --fixture-schema tests/core_round_trip/core_round_trip.schema.json --trace build/core/core-round-trip-trace.json --forbidden-symbols tests/core_round_trip/forbidden_synthesis_symbols.txt --require-all-seven-stages --require-synthesis-absent --min-cosine-margin 0.10 --min-distinct-l2 1e-6 --require-rerank-order m3,m1,m2 --min-ndcg 0.95"}
+- {id: 7, tier: integration, check: "scripts/test_core_round_trip.sh --profile core --fixture tests/core_round_trip/core_round_trip.json --fixture-schema tests/core_round_trip/core_round_trip.schema.json --trace build/core/core-round-trip-trace.json --forbidden-symbols tests/core_round_trip/forbidden_synthesis_symbols.txt,tests/core_round_trip/forbidden_tier_b_symbols.txt --require-all-eight-stages --require-tier-a-present --require-tier-a-schema-valid --require-tier-a-grammar-conformant --require-tier-a-unavailable-fails-typed --require-synthesis-absent --require-tier-b-absent --min-cosine-margin 0.10 --min-distinct-l2 1e-6 --require-rerank-order m3,m1,m2 --min-ndcg 0.95"}
 - {id: 8, tier: mechanical, check: "scripts/audit_feature_liveness.sh --cluster-schema docs/audit/feature-cluster.schema.json --disposition-schema docs/audit/disposition.schema.json --reviewers docs/audit/reviewers.yaml --exclude-test-edges --exclude-self-registration --require-non-self-endpoint-proof --fail-unassigned --fail-unclassified --fail-expired-unknown --fail-expired-exposed --fail-retained-self-islands --require-one-disposition-per-cluster --require-independent-review"}
 - {id: 9, tier: mechanical, check: "scripts/check_cleanup_ledger.sh --require-every-slice --require-consumers --explain-production-growth --require-blast-radius"}
-- {id: 10, tier: mechanical, check: "scripts/check_module_docs.sh --catalog docs/modules --descriptor-schema src/modules/module.schema.json --evidence-schema docs/modules/module-evidence.schema.json --journey-registry docs/journeys/registry.yaml --inventory build/inventory --required-sections --check-dependencies --check-config --check-surfaces --check-data --check-journeys --require-human-attestation"}
+- {id: 10, tier: mechanical, check: "scripts/check_module_docs.sh --catalog docs/modules --descriptor-schema src/modules/module.schema.json --evidence-schema docs/modules/module-evidence.schema.json --journey-registry docs/journeys/registry.yaml --inventory build/inventory --required-sections --check-dependencies --check-config --check-surfaces --check-data --check-journeys --forbid-legacy-term tier-a-synthesis-outside-compat --require-human-attestation"}
 - {id: 11, tier: integration, check: "scripts/test_db_compat.sh --db1 --db2 --matrix oldest-supported,immediately-prior,current-empty --fixtures tests/fixtures/db-compat --compat-schema docs/audit/compatibility-record.schema.json --retention-policy two-releases-or-180-days --append-only-migrations --test-recovery scripts/recover_refactor.sh"}
 - {id: 12, tier: mechanical, check: "scripts/check_generated_module_builds.sh --descriptor-schema src/modules/module.schema.json --make src/generated/modules.mk --cmake cmake/generated/modules.cmake --ownership tests/baselines/modules/ownership.json --all-profiles --byte-equal --fail-drift"}
 - {id: 13, tier: integration, check: "scripts/check_plugin_abi.sh --baseline tests/baselines/modules/plugin-abi.json"}
 - {id: 14, tier: mechanical, check: "scripts/check_deletion_dispositions.sh --schema docs/audit/disposition.schema.json --compat-schema docs/audit/compatibility-record.schema.json --inventories build/inventory --core-trace build/core/core-round-trip-trace.json --independent-approval --complete-touch-set --rollback-owner --deadlines"}
-- {id: 15, tier: hardware, check: "scripts/test_module_profiles.sh --external-service-runtime --full-minus-one-every-optional && scripts/test_provider_readiness.sh --profile core --embedding memory.embedding.ready --reranking memory.reranking.ready"}
+- {id: 15, tier: hardware, check: "scripts/test_module_profiles.sh --external-service-runtime --full-minus-one-every-optional && scripts/test_provider_readiness.sh --profile core --extraction memory.structured_extraction_and_indexing.ready --embedding memory.embedding.ready --reranking memory.reranking.ready"}
+- {id: 16, tier: integration, check: "scripts/check_effective_config_surface.sh --descriptor-catalog src/modules --config-reads build/inventory/config-reads.json --profiles core,personal,shared-kb,full --all-declared-profiles --full-minus-one-every-optional --api-exact --gui-exact --hide-absent --disabled-enable-only --fail-required-enable-control --fail-partial-core-readiness --fail-unread --fail-unowned --fail-stale --fail-wrong-activation --forbid-legacy-label tier-a-synthesis-outside-compat --check-legacy-migrations"}
 ```
