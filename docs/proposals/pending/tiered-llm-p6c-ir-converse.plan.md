@@ -123,3 +123,48 @@ No streaming parser, no egress/dispatch wiring, no SigV4 call, no eventstream co
 InvokeModel, no additionalModelRequestFields, no kb linkage, no live Bedrock. Pure Converse↔IR
 request+response serializer — the 4th backend adapter — fixture-tested against AWS's documented
 Converse schema, completing the pure Bedrock cores (auth + framing + IR-map).
+
+## v2 refinements (roundtable-converged; exact Converse wire fidelity)
+
+- **`toolChoice` wraps auto/any in an OBJECT, never bare strings:** `{"auto":{}}` | `{"any":{}}`
+  | `{"tool":{"name":"X"}}`. Read the opaque `ir->tool_choice`'s `type` (auto|any|tool + name,
+  the Anthropic-style shape the IR carries); an unrecognized/absent shape → OMIT `toolChoice`
+  entirely (safe default), never emit a malformed one.
+- **`image.source.bytes` is a base64 STRING.** Emit `{image:{format:<from media_type>,source:
+  {bytes:<media_ref>}}}` ONLY when `media_ref` is a base64 payload; if `media_ref` is a URL
+  (the IR allows either), Converse has no URL image input on the generic path — OMIT the block
+  (documented; S3 `source.s3Location` is a P6c-egress concern). Never put a URL in `source.bytes`.
+- **`reasoningContent` includes the signature + is family-shaped.** THINKING → `{reasoningContent:
+  {reasoningText:{text:<text>, signature:<thinking_signature when present>}}}`. (It is a
+  Claude-on-Bedrock feature; the serializer emits it whenever the IR carries a THINKING block —
+  the IR only has one if the request had it — and family-appropriateness is the catalog/egress's
+  job, not the serializer's.)
+- **`toolResult.content[]` is typed parts:** a plain-string `tool_result` → `[{text:<str>}]`; a
+  structured (object/array) `tool_result` → `[{json:<dup>}]`. `status` = `tool_is_error ?
+  "error" : "success"`.
+- **`inferenceConfig` is OMITTED ENTIRELY when no sub-field is set** — never emit an empty
+  `inferenceConfig:{}`. Same for `toolConfig` (omit when `n_tools==0` AND no toolChoice) and
+  `system` (omit when no system blocks produce a part). Test (a) asserts the empty-omission.
+- **`stopReason` — map the known set, everything else → UNKNOWN + raw preserved.** end_turn→
+  END_TURN, tool_use→TOOL_USE, max_tokens→MAX_TOKENS, stop_sequence→STOP_SEQUENCE,
+  content_filtered→CONTENT_FILTER, guardrail_intervened→CONTENT_FILTER; ANY other/unknown value
+  (e.g. `context_exceeded`) → AIMEE_STOP_UNKNOWN. In EVERY case `raw_stop_reason` keeps the
+  provider string verbatim, so no information is lost and the egress can distinguish
+  guardrail-vs-filter from the raw.
+- **`inputSchema.json` is the tool's JSON-Schema object, duplicated as-is** (`cJSON_Duplicate`);
+  the IR `aimee_tool_t.schema` already holds a JSON-Schema object. (Numeric/whitespace/key-order
+  reformatting from the dup is semantically irrelevant for a schema — acceptable.)
+- **top_k-only fidelity (documented limitation):** Converse has no `inferenceConfig.topK` (it is
+  a per-family `additionalModelRequestFields` value, deferred to P6c-egress). A request that sets
+  ONLY `top_k` (not `top_p`) therefore serializes with no `topK` this slice — documented; the
+  egress adds `additionalModelRequestFields`. `top_p` (has_top_p) → `topP` as normal.
+
+### Gate additions
+
+- (a2) a request with NO inference params + NO tools + NO system → the body has NO
+  `inferenceConfig`, NO `toolConfig`, NO `system` keys (empty-omission).
+- (b2) a Converse response with `stopReason:"guardrail_intervened"` → stop_reason preserved in
+  `raw_stop_reason` verbatim (and mapped to CONTENT_FILTER); an unknown stopReason → UNKNOWN +
+  raw kept.
+- (e) `toolChoice` round-trips as `{"auto":{}}` / `{"tool":{"name":…}}` (object-wrapped, not a
+  bare string).
