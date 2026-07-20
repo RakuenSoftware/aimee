@@ -27,6 +27,7 @@ ALLOWED_AGENT_NAMED_SOURCES = {
     "db2/agent_hints.c",
     "db2/agent_outcomes.c",
     "db2/kb_service_backend_agent.c",
+    "db2/server_registry.c",
 }
 
 FORBIDDEN_SOURCE_PREFIXES = (
