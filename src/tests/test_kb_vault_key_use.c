@@ -126,6 +126,27 @@ int vault_is_sealed(void)
    return g_sealed;
 }
 
+int vault_aad_build_v2(const char *principal, const char *agent, const char *cred, int64_t version,
+                       uint8_t *out, size_t cap, size_t *out_len)
+{
+   int n =
+       snprintf((char *)out, cap, "v2:%s|%s|%s|%lld", principal, agent, cred, (long long)version);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   *out_len = (size_t)n;
+   return 0;
+}
+
+int vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
+                            int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   int n = snprintf((char *)out, cap, "%s|%s|%s|%lld", principal, agent, cred, (long long)version);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   *out_len = (size_t)n;
+   return 0;
+}
+
 int vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN],
                      uint8_t dek[VAULT_DEK_LEN])
 {
@@ -144,8 +165,8 @@ int vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, s
    (void)nonce;
    (void)ciphertext;
    (void)tag;
-   if (!dek || dek[0] != 0x66 || !aad || aad_len != strlen("vault|bedrock|primary|2") ||
-       memcmp(aad, "vault|bedrock|primary|2", aad_len) != 0 ||
+   if (!dek || dek[0] != 0x66 || !aad || aad_len != strlen("v2:vault|bedrock|primary|2") ||
+       memcmp(aad, "v2:vault|bedrock|primary|2", aad_len) != 0 ||
        ciphertext_len != sizeof(g_secret) - 1)
       return -1;
    memcpy(plaintext, g_secret, sizeof(g_secret) - 1);

@@ -195,18 +195,18 @@ static int build_envelope(const db2_vault_rotation_row_t *row, const unsigned ch
                           size_t secret_len, rotation_secret_arena_t *arena,
                           db2_vault_rotation_envelope_t *envelope)
 {
-   char aad[1500];
-   int n = snprintf(aad, sizeof(aad), "%s|%s|%s|%lld", row->principal, row->agent, row->cred,
-                    (long long)row->to_version);
-   if (n <= 0 || (size_t)n >= sizeof(aad) || secret_len > sizeof(envelope->ciphertext) ||
-       vault_server_kek(arena->kek) != 0 ||
+   uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
+   size_t aad_len = 0;
+   if (vault_aad_build_v2(row->principal, row->agent, row->cred, row->to_version, aad, sizeof(aad),
+                          &aad_len) != 0 ||
+       secret_len > sizeof(envelope->ciphertext) || vault_server_kek(arena->kek) != 0 ||
        vault_crypto_random(arena->dek, sizeof(arena->dek)) != 0)
       return -1;
    memset(envelope, 0, sizeof(*envelope));
    envelope->version = row->to_version;
    envelope->ciphertext_len = secret_len;
-   if (vault_secret_encrypt(arena->dek, (const unsigned char *)aad, (size_t)n, secret, secret_len,
-                            envelope->nonce, envelope->ciphertext, envelope->tag) != 0 ||
+   if (vault_secret_encrypt(arena->dek, aad, aad_len, secret, secret_len, envelope->nonce,
+                            envelope->ciphertext, envelope->tag) != 0 ||
        vault_dek_wrap(arena->kek, arena->dek, envelope->wrapped_dek) != 0)
    {
       OPENSSL_cleanse(envelope, sizeof(*envelope));
@@ -219,16 +219,21 @@ static int decrypt_envelope(const db2_vault_rotation_row_t *row,
                             const db2_vault_rotation_envelope_t *envelope,
                             rotation_secret_arena_t *arena)
 {
-   char aad[1500];
-   int n = snprintf(aad, sizeof(aad), "%s|%s|%s|%lld", row->principal, row->agent, row->cred,
-                    (long long)envelope->version);
-   if (n <= 0 || (size_t)n >= sizeof(aad) || envelope->version != row->to_version ||
-       envelope->ciphertext_len > sizeof(arena->secret) || vault_server_kek(arena->kek) != 0 ||
+   uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
+   size_t aad_len = 0;
+   if (vault_aad_build_v2(row->principal, row->agent, row->cred, envelope->version, aad,
+                          sizeof(aad), &aad_len) != 0 ||
+       envelope->version != row->to_version || envelope->ciphertext_len > sizeof(arena->secret) ||
+       vault_server_kek(arena->kek) != 0 ||
        vault_dek_unwrap(arena->kek, envelope->wrapped_dek, arena->dek) != 0)
       return -1;
-   return vault_secret_decrypt(arena->dek, (const unsigned char *)aad, (size_t)n, envelope->nonce,
-                               envelope->ciphertext, envelope->ciphertext_len, envelope->tag,
-                               arena->secret);
+   int rc = vault_secret_decrypt(arena->dek, aad, aad_len, envelope->nonce, envelope->ciphertext,
+                                 envelope->ciphertext_len, envelope->tag, arena->secret);
+   if (rc != 0 && vault_aad_build_v1_safe(row->principal, row->agent, row->cred, envelope->version,
+                                          aad, sizeof(aad), &aad_len) == 0)
+      rc = vault_secret_decrypt(arena->dek, aad, aad_len, envelope->nonce, envelope->ciphertext,
+                                envelope->ciphertext_len, envelope->tag, arena->secret);
+   return rc;
 }
 
 static int fail_claimed(const kb_principal_t *caller, int64_t team_id, int64_t id,

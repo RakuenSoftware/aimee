@@ -16,14 +16,12 @@
 #include <unistd.h>
 #endif
 
-#define KEY_USE_AAD_MAX 1133
-
 typedef struct
 {
    unsigned char plaintext[DB2_VAULT_KEY_USE_CIPHERTEXT_MAX];
    unsigned char kek[VAULT_KEK_LEN];
    unsigned char dek[VAULT_DEK_LEN];
-   char aad[KEY_USE_AAD_MAX];
+   uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
 } key_use_arena_t;
 
 static int bounded(const char *s, size_t max, int empty_ok)
@@ -95,17 +93,6 @@ static int scope_finish(int rc)
       return -1;
    }
    return db2_tenant_scope_commit() == 0 ? rc : -1;
-}
-
-static int aad_build(key_use_arena_t *arena, const char *principal, const char *agent,
-                     const char *cred, int64_t version, size_t *aad_len)
-{
-   int n = snprintf(arena->aad, sizeof(arena->aad), "%s|%s|%s|%lld", principal, agent, cred,
-                    (long long)version);
-   if (n < 0 || (size_t)n >= sizeof(arena->aad))
-      return -1;
-   *aad_len = (size_t)n;
-   return 0;
 }
 
 kb_vault_key_use_status_t
@@ -218,11 +205,15 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
    }
    guard_held = 1;
    size_t aad_len = 0;
-   if (aad_build(arena, principal, agent, cred, admitted.version, &aad_len) != 0 ||
+   if (vault_aad_build_v2(principal, agent, cred, admitted.version, arena->aad, sizeof(arena->aad),
+                          &aad_len) != 0 ||
        vault_dek_unwrap(arena->kek, admitted.wrapped_dek, arena->dek) != 0 ||
-       vault_secret_decrypt(arena->dek, (const uint8_t *)arena->aad, aad_len, admitted.nonce,
-                            admitted.ciphertext, admitted.ciphertext_len, admitted.tag,
-                            arena->plaintext) != 0)
+       (vault_secret_decrypt(arena->dek, arena->aad, aad_len, admitted.nonce, admitted.ciphertext,
+                             admitted.ciphertext_len, admitted.tag, arena->plaintext) != 0 &&
+        (vault_aad_build_v1_safe(principal, agent, cred, admitted.version, arena->aad,
+                                 sizeof(arena->aad), &aad_len) != 0 ||
+         vault_secret_decrypt(arena->dek, arena->aad, aad_len, admitted.nonce, admitted.ciphertext,
+                              admitted.ciphertext_len, admitted.tag, arena->plaintext) != 0)))
       result = KB_VAULT_KEY_USE_INTEGRITY;
    else
       result = callback(arena->plaintext, admitted.ciphertext_len, callback_ctx) == 0

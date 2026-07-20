@@ -73,9 +73,12 @@ int main(void)
    uint8_t nonce[VAULT_GCM_NONCE_LEN], ciphertext[sizeof(secret) - 1], tag[VAULT_GCM_TAG_LEN];
    assert(vault_server_kek(kek) == 0 && vault_crypto_random(dek, sizeof(dek)) == 0 &&
           vault_dek_wrap(kek, dek, wrapped) == 0);
-   const char aad[] = "team:970713:provider:bedrock|bedrock|primary|2";
-   assert(vault_secret_encrypt(dek, (const uint8_t *)aad, strlen(aad), secret, sizeof(secret) - 1,
-                               nonce, ciphertext, tag) == 0);
+   uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
+   size_t aad_len = 0;
+   assert(vault_aad_build_v2("team:970713:provider:bedrock", "bedrock", "primary", 2, aad,
+                             sizeof(aad), &aad_len) == 0);
+   assert(vault_secret_encrypt(dek, aad, aad_len, secret, sizeof(secret) - 1, nonce, ciphertext,
+                               tag) == 0);
 
    assert(db2_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("SELECT org_vault_put('team:970713:provider:bedrock',970713,'bedrock',"

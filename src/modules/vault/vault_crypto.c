@@ -6,7 +6,69 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 #include <openssl/rand.h>
+#include <stdio.h>
 #include <string.h>
+
+static void put_u32be(uint8_t *out, uint32_t value)
+{
+   out[0] = (uint8_t)(value >> 24);
+   out[1] = (uint8_t)(value >> 16);
+   out[2] = (uint8_t)(value >> 8);
+   out[3] = (uint8_t)value;
+}
+
+static void put_u64be(uint8_t *out, uint64_t value)
+{
+   for (unsigned i = 0; i < 8; i++)
+      out[i] = (uint8_t)(value >> (56 - 8 * i));
+}
+
+int vault_aad_build_v2(const char *principal, const char *agent, const char *cred, int64_t version,
+                       uint8_t *out, size_t cap, size_t *out_len)
+{
+   static const uint8_t domain[] = "kb.vault.envelope";
+   if (!principal || !agent || !cred || !out || !out_len || version < 1)
+      return -1;
+   size_t pn = strlen(principal), an = strlen(agent), cn = strlen(cred);
+   if (pn < 1 || pn > 600 || an > 255 || cn > 255)
+      return -1;
+   size_t need = sizeof(domain) + 1 + 4 + pn + 4 + an + 4 + cn + 8;
+   if (need > cap)
+      return -1;
+   size_t off = 0;
+   memcpy(out + off, domain, sizeof(domain));
+   off += sizeof(domain); /* includes the domain's NUL terminator */
+   out[off++] = 2;
+   put_u32be(out + off, (uint32_t)pn);
+   off += 4;
+   memcpy(out + off, principal, pn);
+   off += pn;
+   put_u32be(out + off, (uint32_t)an);
+   off += 4;
+   memcpy(out + off, agent, an);
+   off += an;
+   put_u32be(out + off, (uint32_t)cn);
+   off += 4;
+   memcpy(out + off, cred, cn);
+   off += cn;
+   put_u64be(out + off, (uint64_t)version);
+   off += 8;
+   *out_len = off;
+   return 0;
+}
+
+int vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
+                            int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   if (!principal || !agent || !cred || !out || !out_len || version < 1 || strchr(principal, '|') ||
+       strchr(agent, '|') || strchr(cred, '|'))
+      return -1;
+   int n = snprintf((char *)out, cap, "%s|%s|%s|%lld", principal, agent, cred, (long long)version);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   *out_len = (size_t)n;
+   return 0;
+}
 
 int vault_crypto_random(uint8_t *out, size_t n)
 {

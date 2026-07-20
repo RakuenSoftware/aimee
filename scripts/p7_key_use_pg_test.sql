@@ -110,6 +110,32 @@ BEGIN
   END IF;
 END $$;
 
+-- Defense in depth: key use independently rejects a slot with history under a
+-- second key_id even if a repair/import bypassed rotation_start's writer check.
+INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,state)
+VALUES('conflicting-key','team:970711:provider:bedrock',970711,'bedrock','primary',2,3,'retired');
+SET ROLE aimee_kb_runtime;
+SELECT set_tenant_context('oidc:test:p7usea',970711);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM * FROM org_vault_key_use_candidate('oidc:test:p7usea',970711,
+      'team:970711|bedrock|primary','team:970711:provider:bedrock','bedrock','primary',2);
+    RAISE EXCEPTION 'P7 key-use FAIL: inverse slot history conflict accepted by candidate';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+  BEGIN
+    PERFORM * FROM org_vault_key_use_admit('oidc:test:p7usea',970711,
+      'cert:test-ca:01','use-history-conflict','team:970711|bedrock|primary',
+      'team:970711:provider:bedrock','bedrock','primary',2,repeat('e',64),
+      'bedrock','anthropic.claude','invoke','\xaabbcc'::bytea);
+    RAISE EXCEPTION 'P7 key-use FAIL: inverse slot history conflict accepted by admit';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+END $$;
+RESET ROLE;
+DELETE FROM org_vault_rotation WHERE key_id='conflicting-key';
+
 CREATE OR REPLACE FUNCTION p7_key_use_force_audit_failure() RETURNS trigger
 LANGUAGE plpgsql AS $$ BEGIN
   IF NEW.action='vault.key_use' THEN RAISE EXCEPTION 'forced key-use WORM failure'; END IF;
