@@ -1458,6 +1458,18 @@ void config_parse_roundtable_section(config_t *cfg, cJSON *root)
 void config_parse_kb_section2(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
+
+   /* telemetry.metrics_token (P9a): the SHA-256 hex of the /v1/metrics +
+    * /v1/telemetry/metrics scrape/ingest token (never the plaintext). */
+   cJSON *telemetry = cJSON_GetObjectItemCaseSensitive(root, "telemetry");
+   if (cJSON_IsObject(telemetry))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(telemetry, "metrics_token");
+      if (cJSON_IsString(item) && item->valuestring)
+         strncpy(cfg->telemetry_metrics_token, item->valuestring,
+                 sizeof(cfg->telemetry_metrics_token) - 1);
+   }
+
    cJSON *kb = cJSON_GetObjectItemCaseSensitive(root, "kb");
    if (cJSON_IsObject(kb))
    {

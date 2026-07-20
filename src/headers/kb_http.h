@@ -17,6 +17,11 @@ int kb_http_start(int port, const char *bearer_token);
 /* Signal the listener thread to stop and wait for it to exit. */
 void kb_http_stop(void);
 
+/* P9a: set the /v1/metrics + /v1/telemetry/metrics scrape/ingest token, stored as
+ * a SHA-256 hex (config telemetry.metrics_token). Empty/NULL disables the token
+ * path (those routes are then org-admin only). Call once before kb_http_start. */
+void kb_http_set_telemetry_token(const char *hash);
+
 /* Route a single HTTP request and write the response into out_buf (null-
  * terminated). Returns the HTTP status code.
  * method, path, auth_header are null-terminated strings (auth_header may

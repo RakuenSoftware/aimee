@@ -176,5 +176,26 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_rate_check(BIGINT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_rate_policy_set(TEXT,TEXT,INT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_rate_policy_show(TEXT,TEXT) TO aimee_kb_runtime;
+
+  -- P9a telemetry export + content-free ingest. org_telemetry + org_telemetry_allowlist
+  -- are WRITTEN ONLY by the SECURITY DEFINER ingest/allow functions (owned by
+  -- aimee_kb_owner, which bypasses ENABLE-not-FORCE RLS). Runtime gets SELECT on
+  -- org_telemetry (RLS-filtered: admin OR team-lead of the row's team) for defense in
+  -- depth, but its direct write grant from the ALL TABLES line is REVOKED. The allowlist
+  -- is admin-managed: runtime gets NO direct access AT ALL (read via org_telemetry_allow_show,
+  -- which enforces the admin gate). /v1/metrics never reads org_telemetry — it reads the
+  -- authoritative rollup tables via org_metrics_snapshot (the write-only-target invariant).
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON org_telemetry FROM aimee_kb_runtime;
+  GRANT SELECT ON org_telemetry TO aimee_kb_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_telemetry_allowlist FROM aimee_kb_runtime;
+  -- The telemetry functions are the ONLY access path; EXECUTE to runtime, never PUBLIC.
+  REVOKE ALL ON FUNCTION org_telemetry_ingest(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,NUMERIC,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_telemetry_allow(TEXT,TEXT[],BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_telemetry_allow_show() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_metrics_snapshot() FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_telemetry_ingest(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,NUMERIC,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_telemetry_allow(TEXT,TEXT[],BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_telemetry_allow_show() TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_metrics_snapshot() TO aimee_kb_runtime;
 END
 $$;

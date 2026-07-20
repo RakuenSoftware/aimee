@@ -31,6 +31,7 @@
 #include "kb_http_insights.h"
 #include "kb_http_budget.h"
 #include "kb_http_rate.h"
+#include "kb_http_telemetry.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
@@ -735,6 +736,18 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return 200;
    }
 
+   /* P9a telemetry scrape/ingest TOKEN path: the dedicated token authorizes GET
+    * /v1/metrics + POST /v1/telemetry/metrics WITHOUT the kb bearer, so it runs
+    * BEFORE the bearer gate; a miss returns -1 and falls through to admin auth. */
+   {
+      const char *presented =
+          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      int tk = kb_http_telemetry_token_route(method, path, query_string, body, presented, out_buf,
+                                             out_cap);
+      if (tk >= 0)
+         return tk;
+   }
+
    /* Auth + scope authorization via the pluggable Verifier seam (kb_verifier.h): the built-in
     * kb-token verifier validates the configured bearer (which may be self-describing
     * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
@@ -862,6 +875,14 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int rr = kb_http_rate_route(method, path, query_string, body, out_buf, out_cap);
       if (rr >= 0)
          return rr;
+   }
+
+   /* Telemetry export + ingest admin routes (P9a): the org-admin path for
+    * /v1/metrics and /v1/telemetry (the token path ran pre-gate). DB-enforced. */
+   {
+      int tr = kb_http_telemetry_route(method, path, query_string, body, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
    }
 
    /* Console + accounts routes. Served only to the owner (unscoped credential) or

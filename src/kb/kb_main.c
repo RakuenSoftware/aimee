@@ -13,6 +13,7 @@
 #include "kb_insights_util.h"
 #include "org_budget.h"
 #include "org_rate.h"
+#include "org_telemetry.h"
 #include "org_model_catalog.h"
 #include "org_spend.h"
 #include "project.h"
@@ -31,8 +32,8 @@
 #include "memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
-#include "db2/vault_pg.h"    /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
-#include "kb/kb_vault_policy.h" /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -586,8 +587,9 @@ static int kb_cmd_spend(int argc, char **argv)
       else if (n == DB2_SPEND_ERR_BADDATE)
          fprintf(stderr, "aimee-kb: invalid date range\n");
       else if (n == DB2_SPEND_ERR_TOOBIG)
-         fprintf(stderr, "aimee-kb: report too large (>%d rows); narrow --team/--project/"
-                         "--since/--until\n",
+         fprintf(stderr,
+                 "aimee-kb: report too large (>%d rows); narrow --team/--project/"
+                 "--since/--until\n",
                  DB2_SPEND_MAX_ROWS);
       else
          fprintf(stderr, "aimee-kb: spend query failed\n");
@@ -610,7 +612,8 @@ static int kb_cmd_spend(int argc, char **argv)
    }
    else
    {
-      printf("team\tproject\tmodel\tprompt\tcompletion\tcache_read\tcache_write\tcost_usd\tcalls\n");
+      printf(
+          "team\tproject\tmodel\tprompt\tcompletion\tcache_read\tcache_write\tcost_usd\tcalls\n");
       for (int i = 0; i < n; i++)
       {
          printf("%lld\t", (long long)rows[i].team_id);
@@ -662,10 +665,9 @@ static int kb_cmd_budget(int argc, char **argv)
    }
    if (strcmp(sub, "set") != 0 && strcmp(sub, "show") != 0)
    {
-      fprintf(stderr,
-              "Usage: aimee-kb budget set --team X [--project Y] --period day|month "
-              "--limit USD [--soft USD]\n"
-              "       aimee-kb budget show --team X [--project Y]\n");
+      fprintf(stderr, "Usage: aimee-kb budget set --team X [--project Y] --period day|month "
+                      "--limit USD [--soft USD]\n"
+                      "       aimee-kb budget show --team X [--project Y]\n");
       return 1;
    }
    if (!has_team || team <= 0)
@@ -714,7 +716,8 @@ static int kb_cmd_budget(int argc, char **argv)
       else if (r == DB2_BUDGET_ERR_DENIED)
          fprintf(stderr, "budget set failed (not authorized — org-admin required)\n");
       else if (r == DB2_BUDGET_ERR_RETRO)
-         fprintf(stderr, "budget set failed (retroactive reduction below committed spend+reserved)\n");
+         fprintf(stderr,
+                 "budget set failed (retroactive reduction below committed spend+reserved)\n");
       else
          fprintf(stderr, "budget set failed\n");
    }
@@ -724,7 +727,8 @@ static int kb_cmd_budget(int argc, char **argv)
       int n = db2_org_budget_show(team, has_project, project, rows, DB2_BUDGET_MAX_ROWS);
       if (n >= 0)
       {
-         printf("team\tproject\tperiod\tperiod_id\tlimit_usd\tsoft_usd\tspend_usd\treserved_usd\tremaining_usd\n");
+         printf("team\tproject\tperiod\tperiod_id\tlimit_usd\tsoft_usd\tspend_usd\treserved_"
+                "usd\tremaining_usd\n");
          for (int i = 0; i < n; i++)
          {
             printf("%lld\t", (long long)rows[i].team_id);
@@ -789,10 +793,9 @@ static int kb_cmd_rate(int argc, char **argv)
    }
    if ((strcmp(sub, "set") != 0 && strcmp(sub, "show") != 0) || !dim || !scope)
    {
-      fprintf(stderr,
-              "Usage: aimee-kb rate set --dim team|project|cert|model|cred_slot --scope S "
-              "--window SECS --max N\n"
-              "       aimee-kb rate show --dim D --scope S\n");
+      fprintf(stderr, "Usage: aimee-kb rate set --dim team|project|cert|model|cred_slot --scope S "
+                      "--window SECS --max N\n"
+                      "       aimee-kb rate show --dim D --scope S\n");
       return 1;
    }
 
@@ -827,7 +830,8 @@ static int kb_cmd_rate(int argc, char **argv)
       int r = db2_org_rate_policy_set(dim, scope, window, maxc, &id);
       if (r == 0)
       {
-         printf("{\"id\":%lld,\"dim\":\"%s\",\"scope\":\"%s\",\"window_seconds\":%lld,\"max_count\":%lld}\n",
+         printf("{\"id\":%lld,\"dim\":\"%s\",\"scope\":\"%s\",\"window_seconds\":%lld,\"max_"
+                "count\":%lld}\n",
                 (long long)id, dim, scope, (long long)window, (long long)maxc);
          rc = 0;
       }
@@ -853,6 +857,155 @@ static int kb_cmd_rate(int argc, char **argv)
          fprintf(stderr, "rate show failed (not authorized — org-admin or team-lead required)\n");
       else
          fprintf(stderr, "rate show failed\n");
+   }
+
+   if (rc == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc;
+}
+
+/* aimee-kb telemetry {show, allow} — the P9a operator surface. `show` prints the
+ * ingest allowlist + a Prometheus dump of the authoritative-state metrics; `allow`
+ * upserts an allowlist entry (admin, WORM-audited). Acts as the install owner
+ * (bootstrap admin), mirroring `aimee-kb rate`. */
+static int kb_cmd_telemetry(int argc, char **argv)
+{
+   const char *sub = argc > 2 ? argv[2] : "";
+   const char *schema = NULL, *metrics = NULL;
+   int enabled = 1;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--schema") == 0 && i + 1 < argc)
+         schema = argv[++i];
+      else if (strcmp(argv[i], "--metrics") == 0 && i + 1 < argc)
+         metrics = argv[++i];
+      else if (strcmp(argv[i], "--disabled") == 0)
+         enabled = 0;
+   }
+   if (strcmp(sub, "show") != 0 && strcmp(sub, "allow") != 0)
+   {
+      fprintf(stderr, "Usage: aimee-kb telemetry show\n"
+                      "       aimee-kb telemetry allow --schema S --metrics a,b,c [--disabled]\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   int rc = 1;
+   if (strcmp(sub, "show") == 0)
+   {
+      db2_telemetry_allow_row_t rows[DB2_TELEMETRY_ALLOW_MAX_ROWS];
+      int n = db2_telemetry_allow_show(rows, DB2_TELEMETRY_ALLOW_MAX_ROWS);
+      if (n >= 0)
+      {
+         printf("event_schema\tenabled\tmetric_names\tupdated_at\n");
+         for (int i = 0; i < n; i++)
+            printf("%s\t%d\t%s\t%s\n", rows[i].event_schema, rows[i].enabled, rows[i].metric_names,
+                   rows[i].updated_at);
+         static org_metric_row_t mrows[DB2_TELEMETRY_MAX_ROWS];
+         int m = db2_metrics_snapshot(mrows, DB2_TELEMETRY_MAX_ROWS);
+         if (m >= 0)
+         {
+            static char buf[256 * 1024];
+            if (org_telemetry_render_prom(mrows, m, buf, sizeof(buf)) >= 0)
+            {
+               printf("\n# --- /v1/metrics (Prometheus) ---\n");
+               fputs(buf, stdout);
+            }
+            rc = 0;
+         }
+         else if (m == DB2_TELEMETRY_ERR_DENIED)
+            fprintf(stderr, "telemetry metrics failed (not authorized — org-admin required)\n");
+         else
+            fprintf(stderr, "telemetry metrics snapshot failed\n");
+      }
+      else if (n == DB2_TELEMETRY_ERR_DENIED)
+         fprintf(stderr, "telemetry show failed (not authorized — org-admin required)\n");
+      else
+         fprintf(stderr, "telemetry show failed\n");
+   }
+   else /* allow */
+   {
+      if (!schema || !metrics)
+      {
+         fprintf(stderr, "aimee-kb: telemetry allow needs --schema S --metrics a,b,c\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      /* Build the Postgres array literal '{a,b,c}' from the comma list. Each name
+       * must be a bounded [a-zA-Z0-9_:] identifier (no quoting/escaping needed). */
+      char arr[1024];
+      size_t o = 0;
+      arr[o++] = '{';
+      arr[o] = '\0';
+      int first = 1, bad = 0;
+      char tmp[1024];
+      snprintf(tmp, sizeof(tmp), "%s", metrics);
+      for (char *tok = strtok(tmp, ","); tok; tok = strtok(NULL, ","))
+      {
+         if (!org_telemetry_metric_name_valid(tok))
+         {
+            bad = 1;
+            break;
+         }
+         size_t nl = strlen(tok);
+         if (o + nl + 2 >= sizeof(arr))
+         {
+            bad = 1;
+            break;
+         }
+         if (!first)
+            arr[o++] = ',';
+         memcpy(arr + o, tok, nl);
+         o += nl;
+         arr[o] = '\0';
+         first = 0;
+      }
+      if (bad || first)
+      {
+         fprintf(stderr, "aimee-kb: each --metrics name must match [a-zA-Z0-9_:]{1,128}\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      arr[o++] = '}';
+      arr[o] = '\0';
+      int r = db2_telemetry_allow(schema, arr, enabled);
+      if (r == 0)
+      {
+         printf("{\"event_schema\":\"%s\",\"metric_names\":\"%s\",\"enabled\":%s}\n", schema, arr,
+                enabled ? "true" : "false");
+         rc = 0;
+      }
+      else if (r == DB2_TELEMETRY_ERR_DENIED)
+         fprintf(stderr, "telemetry allow failed (not authorized — org-admin required)\n");
+      else
+         fprintf(stderr, "telemetry allow failed\n");
    }
 
    if (rc == 0)
@@ -969,8 +1122,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
       for (int i = 4; i < argc; i++)
          if (strcmp(argv[i], "--disabled") == 0)
             enabled = 0;
-      const char *display_name =
-          (argc >= 8 && strncmp(argv[7], "--", 2) != 0) ? argv[7] : "";
+      const char *display_name = (argc >= 8 && strncmp(argv[7], "--", 2) != 0) ? argv[7] : "";
       const char *endpoint = (argc >= 9 && strncmp(argv[8], "--", 2) != 0) ? argv[8] : "";
       int64_t id = 0;
       if (db2_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
@@ -1058,6 +1210,8 @@ int main(int argc, char **argv)
       return kb_cmd_budget(argc, argv);
    if (argc > 1 && strcmp(argv[1], "rate") == 0)
       return kb_cmd_rate(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "telemetry") == 0)
+      return kb_cmd_telemetry(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;
@@ -1294,6 +1448,9 @@ int main(int argc, char **argv)
     * file so all stateless kb instances agree on trusted keys and IdP rotation
     * converges within the bounded refresh. Falls back to the file when no PG rows. */
    kb_oidc_jwks_fleet_enable();
+   /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
+    * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
+   kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
    if (kb_http_start(http_port, kb_cfg.kb_api_bearer_token) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so

@@ -65,6 +65,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p4b_rate_rls_test.sql"
 echo "== P4b rate shared-window-not-N× concurrency gate (genuinely parallel connections) =="
 "$ROOT/scripts/p4b_rate_concurrency.sh" "$DB_URL"
 
+echo "== P9a telemetry export + content-free ingest correctness + isolation assertions (same provisioned db) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p9_telemetry_rls_test.sql"
+
 echo "== P1 RLS gate: cleanup =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
 echo "== P1 RLS gate: PASSED =="

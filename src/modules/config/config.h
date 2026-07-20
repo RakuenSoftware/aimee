@@ -1346,6 +1346,15 @@ typedef struct config
    int kb_api_http_port;
    char kb_api_bearer_token[256];
 
+   /* telemetry.metrics_token (P9a): the scrape/ingest token for GET /v1/metrics +
+    * POST /v1/telemetry/metrics, stored as its SHA-256 HEX (64 lowercase hex
+    * chars) — never the plaintext token. The operator computes
+    * `printf %s <token> | sha256sum` and sets the hash here; kb compares the
+    * presented bearer's SHA-256 constant-time against it. Empty = no token (those
+    * routes are then org-admin only). A wrong/missing token is a 401 with no echo.
+    * One token covers both scrape (read) and ingest (write). */
+   char telemetry_metrics_token[128];
+
    /* Remote aimee-kb client pointer (used when this host does NOT run a local
     * aimee-kb sidecar). When set, aimee-server exports these into its own
     * environment at startup so the env-based kb_client transport

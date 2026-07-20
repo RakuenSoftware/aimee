@@ -576,6 +576,16 @@ $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
                                       $(OBJDIR)/db2/db_schema.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
+# P9a telemetry pure-helper tests (Prometheus render/escape, metric_name
+# validation, token sha256 + constant-time compare, content-free structural
+# check). Links only the dependency-light org_telemetry_fmt.o (+ OpenSSL for
+# sha256 via TEST_L_FLAGS); the DB-backed paths live in the real-PG gate.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-org-telemetry
+$(OBJDIR)/tests/test_org_telemetry.o: schema_data.h
+$(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
+                                       $(OBJDIR)/db2/org_telemetry_fmt.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(OBJDIR)/tests/test_code_index_ops.o \
                                        $(OBJDIR)/db2/code_index_ops.o \

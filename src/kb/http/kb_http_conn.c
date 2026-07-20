@@ -243,9 +243,17 @@ void handle_connection(int fd)
    if (strcmp(method, "HEAD") == 0)
       resp_heap[0] = '\0';
 
-   /* Serve OpenAPI spec with YAML content-type; all other routes use JSON. */
-   const char *ct =
-       (strcmp(clean_path, "/v1/openapi.yaml") == 0) ? "application/yaml" : "application/json";
+   /* Serve OpenAPI spec with YAML content-type; the Prometheus export as its text
+    * exposition format (0.0.4); all other routes use JSON. GET /v1/metrics is the
+    * P9a scrape endpoint. On an error status it still carries a JSON error body, so
+    * keep JSON unless the request succeeded. */
+   const char *ct;
+   if (strcmp(clean_path, "/v1/openapi.yaml") == 0)
+      ct = "application/yaml";
+   else if (strcmp(clean_path, "/v1/metrics") == 0 && status >= 200 && status < 300)
+      ct = "text/plain; version=0.0.4; charset=utf-8";
+   else
+      ct = "application/json";
    send_response_ex(fd, status, resp_heap, request_id, ct);
    free(req_body_heap);
    free(resp_heap);

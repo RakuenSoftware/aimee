@@ -325,6 +325,8 @@ const config_field_t config_fields[] = {
      RELOAD_RESTART},
     {"kb_api_bearer_token", offsetof(config_t, kb_api_bearer_token),
      sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART},
+    {"telemetry.metrics_token", offsetof(config_t, telemetry_metrics_token),
+     sizeof(((config_t *)0)->telemetry_metrics_token), 0, CFG_STRING, RELOAD_RESTART},
     {"kb_mining_enabled", offsetof(config_t, kb_mining_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT,
      RELOAD_HOT, FGROUP_ADVANCED},

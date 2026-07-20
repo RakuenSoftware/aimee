@@ -445,3 +445,13 @@ CREATE INDEX IF NOT EXISTS idx_org_budget_alloc_resv ON org_budget_reservation_a
 CREATE TABLE IF NOT EXISTS org_rate_policy (  id INTEGER PRIMARY KEY AUTOINCREMENT,  dim TEXT NOT NULL,  scope_key TEXT NOT NULL,  window_seconds INTEGER NOT NULL,  max_count INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_rate_policy_key ON org_rate_policy(dim, scope_key);
 CREATE TABLE IF NOT EXISTS org_rate_window (  dim_key TEXT NOT NULL,  window_id TEXT NOT NULL,  count INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT '',  PRIMARY KEY (dim_key, window_id));
+
+-- P9a telemetry export + content-free ingest target (schema-sync mirror only).
+-- The RLS + the allowlist-gated fail-closed SECURITY DEFINER org_telemetry_ingest,
+-- the WORM-audited org_telemetry_allow, and the org_metrics_snapshot aggregate are
+-- Postgres-only, so every P9a runtime path is gated by db2_tenant_require_pg() and
+-- hard-fails on the shim rather than ingesting/exporting unsafely.
+CREATE TABLE IF NOT EXISTS org_telemetry (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_event_id TEXT NOT NULL,  origin_cert_cn TEXT NOT NULL,  team_id INTEGER REFERENCES kb_team(id),  event_schema TEXT NOT NULL,  metric_name TEXT NOT NULL,  metric_kind TEXT NOT NULL,  value TEXT NOT NULL DEFAULT '0',  ts INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT '');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_telemetry_source ON org_telemetry(source_event_id);
+CREATE INDEX IF NOT EXISTS idx_org_telemetry_team_created ON org_telemetry(team_id, created_at);
+CREATE TABLE IF NOT EXISTS org_telemetry_allowlist (  event_schema TEXT PRIMARY KEY,  metric_names TEXT NOT NULL,  enabled INTEGER NOT NULL DEFAULT 1,  updated_at TEXT NOT NULL DEFAULT '');

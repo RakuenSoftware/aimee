@@ -795,6 +795,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->guardrails_blast_radius_advisory_enabled = 0;
    cfg->kb_api_http_port = 0;
    cfg->kb_api_bearer_token[0] = '\0';
+   cfg->telemetry_metrics_token[0] = '\0';
    cfg->kb_worker_count = CONFIG_DEFAULT_KB_WORKER_THREADS;
    cfg->kb_connection_workers = 2;
    cfg->code_hybrid_weight_code = 1.0;
