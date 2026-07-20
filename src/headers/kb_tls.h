@@ -86,6 +86,11 @@ extern "C"
                              const char *client_cert_pem, const char *client_key_pem,
                              const char *method, const char *path, const char *body, char *resp_out,
                              size_t resp_cap, int *status_out);
+   int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_pem,
+                                  const char *client_cert_pem, const char *client_key_pem,
+                                  const char *method, const char *path, const char *body,
+                                  const char *authorization, char *resp_out, size_t resp_cap,
+                                  int *status_out);
 
    /* TOFU bootstrap: fetch the kb's CA certificate from GET /v1/enroll/ca and
     * trust it ONLY if its sha256 fingerprint equals `expected_fp_hex` (the value
