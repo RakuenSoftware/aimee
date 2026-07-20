@@ -1,9 +1,11 @@
 #include "kb_http_servers.h"
 #include "../../db2/server_registry.h"
 #include "../kb_mgmt_endpoint.h"
+#include "cJSON.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+
 static int q(const char *s, const char *k, char *o, size_t n)
 {
    if (!s)
@@ -24,6 +26,7 @@ static int q(const char *s, const char *k, char *o, size_t n)
    }
    return 0;
 }
+
 int kb_http_servers_route(const char *m, const char *p, const char *qs, char *out, int cap)
 {
    if (strcmp(p, "/v1/servers"))
@@ -50,22 +53,44 @@ int kb_http_servers_route(const char *m, const char *p, const char *qs, char *ou
       snprintf(out, cap, "{\"error\":\"registry unavailable\"}");
       return 503;
    }
-   int used = snprintf(out, cap, "{\"servers\":[");
-   for (int i = 0; i < n && used < cap; i++)
+   cJSON *root = cJSON_CreateObject();
+   cJSON *servers = cJSON_AddArrayToObject(root, "servers");
+   if (!root || !servers)
+   {
+      cJSON_Delete(root);
+      snprintf(out, cap, "{\"error\":\"out of memory\"}");
+      return 503;
+   }
+   for (int i = 0; i < n; i++)
    {
       if (kb_mgmt_endpoint_validate(rows[i].endpoint) != 0)
       {
+         cJSON_Delete(root);
          snprintf(out, cap, "{\"error\":\"unsafe registered endpoint\"}");
          return 500;
       }
-      used +=
-          snprintf(out + used, cap - used,
-                   "%s{\"server_id\":\"%s\",\"cert_cn\":\"%s\",\"mgmt_cert_cn\":\"%s\","
-                   "\"endpoint\":\"%s\",\"status\":\"%s\",\"health\":\"%s\",\"version\":\"%s\"}",
-                   i ? "," : "", rows[i].server_id, rows[i].cert_cn, rows[i].mgmt_cert_cn,
-                   rows[i].endpoint, rows[i].status, rows[i].health, rows[i].version);
+      cJSON *r = cJSON_CreateObject();
+      if (!r)
+      {
+         cJSON_Delete(root);
+         return 503;
+      }
+      cJSON_AddStringToObject(r, "server_id", rows[i].server_id);
+      cJSON_AddStringToObject(r, "cert_cn", rows[i].cert_cn);
+      cJSON_AddStringToObject(r, "mgmt_cert_cn", rows[i].mgmt_cert_cn);
+      cJSON_AddStringToObject(r, "endpoint", rows[i].endpoint);
+      cJSON_AddStringToObject(r, "status", rows[i].status);
+      cJSON_AddStringToObject(r, "health", rows[i].health);
+      cJSON_AddStringToObject(r, "version", rows[i].version);
+      cJSON_AddItemToArray(servers, r);
    }
-   if (used < cap)
-      snprintf(out + used, cap - used, "]}");
-   return 200;
+   char *json = cJSON_PrintUnformatted(root);
+   int rc = (json && strlen(json) < (size_t)cap) ? 200 : 413;
+   if (rc == 200)
+      snprintf(out, cap, "%s", json);
+   else
+      snprintf(out, cap, "{\"error\":\"response too large\"}");
+   free(json);
+   cJSON_Delete(root);
+   return rc;
 }
