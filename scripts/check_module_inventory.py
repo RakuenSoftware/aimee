@@ -23,7 +23,7 @@ DEFAULT_INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
 ALLOWED_KEYS = {"schema_version", "required", "optional"}
 REQUIRED_COUNT = 18
 OPTIONAL_COUNT = 8
-PINNED_CLASSIFICATIONS = {"git": "required"}
+PINNED_REQUIRED = {"git"}
 
 
 class InventoryError(ValueError):
@@ -106,8 +106,6 @@ def validate_inventory(
                 f"invalid module ID {invalid!r}",
                 path=path,
             )
-
-    for group, values in (("required", required), ("optional", optional)):
         counts = Counter(values)
         duplicate = next((module_id for module_id in values if counts[module_id] > 1), None)
         if duplicate is not None:
@@ -126,13 +124,12 @@ def validate_inventory(
             path=path,
         )
 
-    groups = {"required": set(required), "optional": set(optional)}
-    for module_id, expected in PINNED_CLASSIFICATIONS.items():
-        if module_id not in groups[expected]:
-            actual = next((name for name, values in groups.items() if module_id in values), "absent")
+    for module_id in PINNED_REQUIRED:
+        if module_id not in required:
+            actual = "optional" if module_id in optional else "absent"
             _fail(
                 "required-classification",
-                f"module {module_id!r}: expected {expected}, actual {actual}",
+                f"module {module_id!r}: expected required, actual {actual}",
                 path=path,
             )
 
@@ -160,14 +157,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def resolve_inventory(args: argparse.Namespace) -> Path:
     script_root = Path(__file__).resolve().parent.parent
     root_value = args.config_root or os.environ.get("AIMEE_CONFIG_ROOT") or script_root
-    config_root = Path(root_value).resolve()
+    config_root = Path(os.path.realpath(root_value))
     if not config_root.is_dir():
         raise InventoryError(
             f"{config_root}: rule=config-root: expected an existing directory"
         )
 
     candidate = args.inventory if args.inventory.is_absolute() else config_root / args.inventory
-    inventory = candidate.resolve(strict=False)
+    inventory = Path(os.path.realpath(candidate))
     try:
         inventory.relative_to(config_root)
     except ValueError as exc:

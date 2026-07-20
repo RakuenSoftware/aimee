@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
 import subprocess
@@ -11,18 +12,30 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:  # Local stdlib-only runs may omit this CI-only dependency.
+    yaml = None
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts" / "check_module_inventory.sh"
 BASELINE = ROOT / "tests" / "baselines" / "modules" / "canonical-inventory.yaml"
+CHECKER_SOURCE = ROOT / "scripts" / "check_module_inventory.py"
+
+SPEC = importlib.util.spec_from_file_location("module_inventory_checker", CHECKER_SOURCE)
+CHECKER_MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(CHECKER_MODULE)
 
 
 class ModuleInventoryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+
+    def test_checker_constants_match_committed_inventory(self):
+        self.assertEqual(CHECKER_MODULE.REQUIRED_COUNT, len(self.baseline["required"]))
+        self.assertEqual(CHECKER_MODULE.OPTIONAL_COUNT, len(self.baseline["optional"]))
 
     def run_checker(self, content: bytes | str | dict[str, object], *, cwd: Path | None = None):
         with tempfile.TemporaryDirectory() as temporary:
@@ -107,6 +120,36 @@ class ModuleInventoryTest(unittest.TestCase):
             )
         self.assert_failed(result, "rule=path", "must remain under config root")
 
+    def test_symlink_escape_outside_config_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root_temp, tempfile.TemporaryDirectory() as outside_temp:
+            root = Path(root_temp)
+            outside = Path(outside_temp) / "inventory.yaml"
+            outside.write_text(json.dumps(self.baseline), encoding="utf-8")
+            (root / "inventory.yaml").symlink_to(outside)
+            result = subprocess.run(
+                [str(CHECKER), "--config-root", str(root), "--inventory", "inventory.yaml"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assert_failed(result, "rule=path", "must remain under config root")
+
+    def test_environment_config_root_from_unrelated_cwd(self):
+        with tempfile.TemporaryDirectory() as root_temp, tempfile.TemporaryDirectory() as cwd_temp:
+            root = Path(root_temp)
+            (root / "inventory.yaml").write_text(json.dumps(self.baseline), encoding="utf-8")
+            environment = os.environ.copy()
+            environment["AIMEE_CONFIG_ROOT"] = str(root)
+            result = subprocess.run(
+                [str(CHECKER), "--inventory", "inventory.yaml"],
+                cwd=cwd_temp,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_missing_inventory_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             result = subprocess.run(
@@ -172,9 +215,10 @@ class ModuleInventoryTest(unittest.TestCase):
             self.assertFalse(marker.exists())
 
     def test_checker_has_no_yaml_loader_import(self):
-        source = (ROOT / "scripts" / "check_module_inventory.py").read_text(encoding="utf-8")
+        source = CHECKER_SOURCE.read_text(encoding="utf-8")
         self.assertNotRegex(source, r"(?m)^\s*(?:from|import)\s+(?:yaml|ruamel|pyyaml)\b")
 
+    @unittest.skipUnless(yaml is not None, "requires PyYAML")
     def test_committed_inventory_is_valid_yaml_with_json_equivalence(self):
         raw = BASELINE.read_text(encoding="utf-8")
         self.assertEqual(json.loads(raw), yaml.safe_load(raw))

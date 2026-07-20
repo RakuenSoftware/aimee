@@ -46,10 +46,12 @@ jobs:
           data["required"].append("replacement-module")
           path.write_text(json.dumps(data))
           PY
-          if ./scripts/check_module_inventory.sh \
-              --config-root "$root" --inventory inventory.yaml; then
-            echo "::error::mutated inventory unexpectedly passed"
+          if output=$(./scripts/check_module_inventory.sh \
+              --config-root "$root" --inventory inventory.yaml 2>&1); then
+            echo "::error::mutated inventory unexpectedly passed: $output"
             exit 1
           fi
+          echo "$output"
+          printf '%s\n' "$output" | grep -q 'rule=required-classification'
       - name: Test inventory failure modes
         run: python3 -I scripts/tests/test_check_module_inventory.py -v
