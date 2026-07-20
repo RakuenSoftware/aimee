@@ -37,5 +37,9 @@ int main(void)
    assert(strstr(seen_auth, "Authorization: AWS4-HMAC-SHA256 ") != NULL);
    assert(strstr(seen_auth, "X-Amz-Security-Token: TOKEN") != NULL);
    assert(status == 200 && strstr(out, "ok") != NULL);
+   assert(kb_bedrock_dispatch_https(&t, &ir, 1, "AKID", "SECRET", NULL,
+                                    "20260101T000000Z", "20260101", "CA", NULL,
+                                    out, sizeof(out), &status) == 0);
+   assert(strcmp(seen_path, "/model/demo.model/converse-stream") == 0);
    return 0;
 }
