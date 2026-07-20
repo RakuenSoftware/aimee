@@ -98,3 +98,59 @@ No egress wiring (P2b), no TPM reservation (follow-up), no per-instance RAM limi
 thing being replaced), no counter sharding, no server-proxy CLI. Pure keyed fixed-window
 RPM limiter over shared Postgres + admin, with the shared-window concurrency invariant
 proven on real PG.
+
+## v2 refinements (roundtable-converged; concurrency + spoof-safety critical)
+
+- **org_rate_check takes the RESOLVED IDENTITY, not a caller dim_key array.** Signature:
+  `org_rate_check(p_team BIGINT, p_project BIGINT, p_model TEXT, p_cred_slot TEXT)` — the
+  values P2b resolves AUTHORITATIVELY from the authenticated request (same as
+  org_budget_reserve). The function INTERNALLY builds the applicable dim_keys
+  (`team:<id>`, `project:<id>`, `model:<name>`, `cred_slot:<ref>`) and looks up each dim's
+  policy (specific scope_key, else the `*` default). A caller can NOT omit the team, invent
+  a dim, or pick a lax scope — closes the P4a-review spoof in its new shape.
+- **Lock-all / check-all / bump-all-or-none (the P4a org_budget_reserve pattern), no
+  RAISE-for-control-flow.** For each applicable (dim with a policy), in **deterministic
+  dim_key ASCII sort order**: `INSERT INTO org_rate_window(dim_key, window_id, count)
+  VALUES (k, w, 0) ON CONFLICT DO NOTHING`, then `SELECT count FROM org_rate_window WHERE …
+  FOR UPDATE` (locks the row). After locking ALL applicable windows, check each
+  `count < max_count`; if ANY fails → return `refused` with the binding dim (NO window
+  incremented — nothing consumed); if ALL pass → `UPDATE … SET count = count + 1` for each
+  and return `admitted`. Row-level FOR UPDATE in a fixed order serializes concurrent
+  checkers (over-limit-safe) and is deadlock-free. Returns a STRUCTURED result
+  `(admitted BOOLEAN, binding_dim TEXT, reset_epoch BIGINT)` so P2b gets a stable contract
+  + a retry-after (window reset), never parsed error text.
+- **max_count = 0 refuses the FIRST request.** The initial `count=0` row + the
+  `count < max_count` check means an empty window with max=0 → `0 < 0` false → refused
+  (an always-deny policy works). (The old `INSERT … VALUES(…,1)` bug admitted one; fixed by
+  inserting `count=0` and incrementing only after the check passes.)
+- **Window key encodes window_seconds** so a policy window change can't alias counters:
+  `window_id = window_seconds || ':' || floor(extract(epoch from now()) / window_seconds)`
+  (canonical primary clock). `now()` is the txn-start time — fine for a short admission txn.
+- **org_rate_window PK = (dim_key, window_id)** directly (no surrogate id, no COALESCE — a
+  valid composite PK; simpler for the high-churn counter). `org_rate_policy` keeps the
+  surrogate id PK + UNIQUE INDEX(dim, scope_key).
+- **window_id is INTERNAL to org_rate_check** — no runtime-exposed `org_rate_window_id`
+  function (a caller has no reason to precompute a window).
+- **URL decided: `/v1/rate/policy` (POST, admin set) + `/v1/rate/show` (GET, admin or
+  team-lead).** Not folded into /v1/budget (rate is a distinct concept). Fixed at plan time
+  so the descriptor gate is deterministic.
+- **Fixed-window boundary burst: ACCEPTED, documented.** A fixed window admits up to
+  ~2× max_count across a window edge (max in the last instant of window N + max in the
+  first of N+1). This is acceptable for coarse RPM abuse-limiting (the hard SPEND cap is
+  P4a's reservation, not the rate window); a sliding/GCRA window is a documented future
+  refinement, not P4b.
+- **RLS read (org_rate_policy):** admin sees all; a team-lead sees `dim='team'` rows for
+  teams they lead and `dim='project'` rows for those teams' projects; the global dims
+  (`model`, `cred_slot`, `scope_key='*'`) are admin-only read. `org_rate_window` has no
+  direct tenant read (operational counters; definer-only).
+- **Table ownership** — every definer + its tables are created by the one schema-applying
+  role, so the SECURITY DEFINER writer owns (or has privilege on) org_rate_window/policy
+  (same invariant P3a/P4a rely on and CT103 validated).
+
+### Gate additions
+
+- Decide the harness proves BOTH: (a) single-window over-limit safety (N parallel bumps,
+  max=K → exactly K admitted, count==K, not N×); (b) a multi-dim scenario where team A is
+  already at its cap and a multi-dim check (A + a headroom dim) is refused with binding_dim=
+  team and NO dim consumed (all-or-nothing). (c) the reset_epoch in the structured result
+  equals the window boundary.
