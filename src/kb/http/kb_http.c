@@ -63,11 +63,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
-
 #define KB_HTTP_BACKLOG  16
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
-
 extern kb_service_ctx_t *g_kb_ctx;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap);
@@ -827,7 +825,6 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 403;
       }
    }
-
    /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
     * authenticated caller; the org-admin capability for writes is enforced at the
     * DB layer (RLS write policies), and reads are RLS-scoped to the caller's teams.
@@ -836,9 +833,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int tr = kb_http_team_route(method, path, query_string, body, out_buf, out_cap);
       if (tr >= 0)
          return tr;
+      tr = kb_http_servers_route(method, path, query_string, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
    }
-   { int sr = kb_http_servers_route(method, path, query_string, out_buf, out_cap); if (sr >= 0) return sr; }
-
    /* Model catalog + entitlement routes (P2a): /v1/models/entitled (tenant read) +
     * the /v1/models/org/ admin CRUD (admin-gated at the DB layer, WORM-audited).
     * Returns -1 for non-models paths so the router falls through. */
