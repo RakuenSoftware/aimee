@@ -1,6 +1,6 @@
 # P7 steady-state signed-HWM key-use admission
 
-- **State:** proposed implementation slice.
+- **State:** delivered and merged-ready implementation slice.
 - **Depends on:** P7 signed-HWM rotation core and fenced rotation operations.
 
 ## Scope
@@ -84,9 +84,9 @@ attested-slot API:
    Stop on a replay or conflict; only a newly committed admission returns an envelope.
 5. Allocate a page-aligned `mlock` + `MADV_DONTDUMP` arena; protection failure is
    retryable and the plaintext callback is never invoked.
-6. Obtain the custody KEK into the arena, unwrap the row DEK, decrypt with AAD
-   `principal|agent|cred|version`, and invoke the callback with only the bounded
-   plaintext credential bytes.
+6. Obtain the custody KEK into the arena, unwrap the row DEK, decrypt with the
+   domain-separated, length-prefixed v2 slot AAD (with a delimiter-free v1 read
+   fallback), and invoke the callback with only the bounded plaintext credential bytes.
 7. `OPENSSL_cleanse` the entire arena and envelope on every exit before
    `munlock`/`munmap`.
 
@@ -142,7 +142,8 @@ uses during compromise rotation is explicitly deferred to the compromise barrier
   length before copying. Exercise cancellation deferral and seal-generation change
   between admission and boundary entry.
 - Real PG17 on CT103: RLS/definer/grant checks, exact-version envelope selection,
-  immutable intent binding, concurrent same-use-ID admission with one new winner and
+  immutable intent binding including cross-team inverse-history conflicts,
+  concurrent same-use-ID admission with one new winner and
   replay-only losers, WORM-failure atomicity,
   activating-state refusal, and a restored old current pointer rejected against a
   newer supplied anchor version. Re-run the full P1 gate and in-place schema upgrade.
