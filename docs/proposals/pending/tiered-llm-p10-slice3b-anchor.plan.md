@@ -86,3 +86,52 @@ singleton-lease fencing (§3); WORM-audited key use + witness outbox (§6); use-
 
 No real hardware anchor; no multi-instance seal coordination; no key moved into the vault
 yet (that is the CA-key slice, next, now §3-compliant); no use-in-place/WORM/rotation.
+
+## v2 refinements (roundtable-converged; security-critical)
+
+Panel found no blocking issue; these repeated signals reshape the slice:
+
+- **`mock` NEVER satisfies the §3 live-key gate.** `kb_vault_live_keys_allowed()` requires
+  custody ∈ {`tpm2`,`pkcs11`,`kms`} (a REAL external anchor) AND unsealed. `file` AND
+  `mock` both → **false**. `mock` is a **test/dev provider only** — it exists to exercise
+  the seal state machine, and is compiled in but can NEVER be the basis for holding a live
+  key. (Closes "a hardened kb bypasses §3 with vault.custody=mock".)
+- **Seal flushes + zeroizes the KEK.** `vault_seal()` (or the provider's seal) calls
+  `vault_kek_cache_clear()` and zeroizes any cached/derived KEK, so no post-seal cached
+  KEK survives (P7 §3 "sealing flushes the KEK cache"). The mock zeroizes its derived KEK
+  on re-seal; a subsequent `get_kek` re-derives only after a fresh `unseal`.
+- **Seal state lives in the custody PROVIDER instance, not a shared global.** Add optional
+  `seal`/`unseal`/`is_sealed` to `vault_custody_provider_t` (or the provider owns the state
+  in its `ctx`). The `file` provider is a no-op always-unsealed. The **server profile
+  (file custody) never seals** and never sees `VAULT_ERR_SEALED`. No mutable seal flag in
+  shared module state.
+- **Config validation at parse.** `vault.custody` is validated against the known enum at
+  config-load (reject `tpm`, `TPM2`, `kmss`, … with a clear error), not deferred to bind.
+  `tpm2`/`pkcs11`/`kms` parse OK but **fail closed at provider-bind** ("not yet
+  implemented; use file (dev) or mock (test)").
+- **Unseal is provider-specific, not a universal passphrase.** The mock unseals from a
+  config secret; the real anchors (deferred) define their own unseal (workload-identity
+  `Decrypt` / TPM policy session / PKCS#11 login). The seam's unseal is an opaque
+  provider callback — do NOT bake `vault_unseal(secret,len)` as THE contract.
+- **`VAULT_ERR_SEALED` scoping.** Returned only by an anchor provider's `get_kek` when
+  sealed; the file provider never returns it (server unaffected).
+
+### Tightened scope (defer live-key mechanics to the CA-key slice)
+
+Slice 3b stores NO keys, so the §3 boot-scan + the `kind`-column classifier + per-use
+live-key enforcement ride with the **CA-key slice** (where a live key first exists). 3b
+ships: (1) `vault.custody` config + parse validation + provider selection (unimpl anchors
+fail-closed); (2) per-provider seal/unseal state (file always-unsealed; a sealed provider's
+`get_kek` → `VAULT_ERR_SEALED`; seal flushes+zeroizes the KEK cache); (3) the `mock` anchor
+provider (test-only, never live-key-eligible); (4) `kb_vault_live_keys_allowed()` (requires
+a real unsealed anchor); (5) `VAULT_ERR_SEALED`. The CA-key slice then adds the `kind`
+column, the boot fail-closed, and the central per-use enforcement at the kb_vault live-key
+choke point.
+
+### Tests (add the negative + zeroize checks)
+
+Mock seal state machine: sealed → `get_kek` = `VAULT_ERR_SEALED`; unseal → succeeds;
+re-seal → KEK cache cleared, next `get_kek` fails until re-unseal. `file` always unsealed.
+`kb_vault_live_keys_allowed()` false for file AND mock (unit). Config parse rejects
+typos + unimpl anchors fail at bind. Negative: a `file`-custody kb with no live keys builds
++ starts clean (server profile path unaffected).
