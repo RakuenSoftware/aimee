@@ -1254,8 +1254,7 @@ static void receipt_from_header(const uint8_t *h, vault_tpm2_reseal_receipt_t *r
    SHA256(h, TPM2_RESEAL_BUNDLE_HDR, r->manifest_digest);
 }
 
-static int receipt_equal(const vault_tpm2_reseal_receipt_t *a,
-                         const vault_tpm2_reseal_receipt_t *b)
+static int receipt_equal(const vault_tpm2_reseal_receipt_t *a, const vault_tpm2_reseal_receipt_t *b)
 {
    return a && b && a->old_generation == b->old_generation &&
           a->new_generation == b->new_generation &&
@@ -1293,8 +1292,7 @@ static int bundle_load(reseal_bundle_t *b)
        * bundle is corruption, never the ABSENT state. */
       return -2;
    }
-   if (b->len < TPM2_RESEAL_BUNDLE_HDR ||
-       memcmp(b->bytes, TPM2_RESEAL_BUNDLE_MAGIC, 8) != 0)
+   if (b->len < TPM2_RESEAL_BUNDLE_HDR || memcmp(b->bytes, TPM2_RESEAL_BUNDLE_MAGIC, 8) != 0)
       return -2;
    uint32_t clen = get_be32(b->bytes + 168), flen = get_be32(b->bytes + 172);
    if (!clen || !flen || clen > TPM2_BLOB_MAX || flen > TPM2_BLOB_MAX ||
@@ -1348,10 +1346,9 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
       if (nv == receipt->new_generation)
       {
          uint8_t active[32];
-         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->new_generation,
-                                       active) == 0 &&
-             memcmp(active, receipt->future_digest, 32) == 0 &&
-             fsync_parent(g_ctx.blob_path) == 0)
+         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->new_generation, active) ==
+                 0 &&
+             memcmp(active, receipt->future_digest, 32) == 0 && fsync_parent(g_ctx.blob_path) == 0)
          {
             *out = VAULT_TPM2_RESEAL_CLEANED;
             return VAULT_TPM2_RESEAL_OK;
@@ -1362,8 +1359,8 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
       if (nv == receipt->old_generation)
       {
          uint8_t active[32];
-         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation,
-                                       active) != 0 ||
+         if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation, active) !=
+                 0 ||
              memcmp(active, receipt->predecessor_digest, 32) != 0 ||
              fsync_parent(g_ctx.blob_path) != 0)
          {
@@ -1389,8 +1386,8 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
        memcmp(active, b->receipt.predecessor_digest, 32) == 0)
       *out = VAULT_TPM2_RESEAL_PREPARED;
    else if (nv == b->receipt.new_generation &&
-            blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.new_generation,
-                                      active) == 0 &&
+            blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.new_generation, active) ==
+                0 &&
             memcmp(active, b->receipt.future_digest, 32) == 0)
    {
       if (fsync_parent(g_ctx.blob_path) != 0)
@@ -1398,8 +1395,8 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
       *out = VAULT_TPM2_RESEAL_INSTALLED;
    }
    else if (nv == b->receipt.new_generation &&
-            blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.old_generation,
-                                      active) == 0 &&
+            blob_file_digest_validate(&g_ctx, g_ctx.blob_path, b->receipt.old_generation, active) ==
+                0 &&
             memcmp(active, b->receipt.predecessor_digest, 32) == 0)
       *out = VAULT_TPM2_RESEAL_NV_ADVANCED;
    else
@@ -1465,7 +1462,8 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
    (void)unlink(cap_path);
    (void)unlink(fut_path);
    if (seal_generation_path(&g_ctx, new_kek, nv, secret, strlen(secret), cap_path, NULL, 0) != 0 ||
-       seal_generation_path(&g_ctx, new_kek, nv + 1, secret, strlen(secret), fut_path, NULL, 0) != 0)
+       seal_generation_path(&g_ctx, new_kek, nv + 1, secret, strlen(secret), fut_path, NULL, 0) !=
+           0)
       goto prep_done;
    uint8_t cap[TPM2_BLOB_MAX], fut[TPM2_BLOB_MAX], bytes[TPM2_RESEAL_BUNDLE_MAX];
    size_t clen = 0, flen = 0;
@@ -1504,8 +1502,8 @@ out:
    return rc;
 }
 
-int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt,
-                                     const char *secret, vault_tpm2_reseal_status_t *out)
+int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
+                                     vault_tpm2_reseal_status_t *out)
 {
    if (out)
       *out = VAULT_TPM2_RESEAL_CORRUPT;
@@ -1514,16 +1512,15 @@ int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt,
    pthread_mutex_lock(&g_ctx.mu);
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
    reseal_mark_sealed();
-   if (ensure_ready(&g_ctx) == 0 && ensure_primary(&g_ctx, 0) == 0 &&
-       (lockfd = reseal_lock()) >= 0)
+   if (ensure_ready(&g_ctx) == 0 && ensure_primary(&g_ctx, 0) == 0 && (lockfd = reseal_lock()) >= 0)
       rc = reseal_status_locked(receipt, secret, out, NULL);
    reseal_unlock(lockfd);
    pthread_mutex_unlock(&g_ctx.mu);
    return rc;
 }
 
-int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
-                                     const char *secret, vault_tpm2_reseal_status_t *out)
+int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
+                                     vault_tpm2_reseal_status_t *out)
 {
    if (out)
       *out = VAULT_TPM2_RESEAL_CORRUPT;
@@ -1533,8 +1530,7 @@ int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
    reseal_bundle_t b;
    reseal_mark_sealed();
-   if (ensure_ready(&g_ctx) != 0 || ensure_primary(&g_ctx, 0) != 0 ||
-       (lockfd = reseal_lock()) < 0)
+   if (ensure_ready(&g_ctx) != 0 || ensure_primary(&g_ctx, 0) != 0 || (lockfd = reseal_lock()) < 0)
       goto out;
    rc = reseal_status_locked(receipt, secret, out, &b);
    if (rc != 0 || *out == VAULT_TPM2_RESEAL_CLEANED)
@@ -1557,7 +1553,8 @@ int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
       uint64_t before = 0;
       uint8_t active[32];
       if (nv_read(&g_ctx, &before) != 0 || before != receipt->old_generation ||
-          blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation, active) != 0 ||
+          blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation, active) !=
+              0 ||
           memcmp(active, receipt->predecessor_digest, 32) != 0)
       {
          *out = VAULT_TPM2_RESEAL_CONFLICT;
@@ -1578,9 +1575,9 @@ int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
    if (*out == VAULT_TPM2_RESEAL_NV_ADVANCED)
    {
       uint8_t active[32];
-      int future_valid =
-          blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->new_generation, active) == 0 &&
-          memcmp(active, receipt->future_digest, 32) == 0;
+      int future_valid = blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->new_generation,
+                                                   active) == 0 &&
+                         memcmp(active, receipt->future_digest, 32) == 0;
       if (!future_valid)
       {
          if (blob_file_digest_validate(&g_ctx, g_ctx.blob_path, receipt->old_generation, active) !=
@@ -1607,8 +1604,7 @@ out:
    return rc;
 }
 
-int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt,
-                                    const char *secret)
+int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt, const char *secret)
 {
    if (!receipt || !secret)
       return VAULT_TPM2_RESEAL_ERR;
@@ -1617,8 +1613,7 @@ int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt,
    vault_tpm2_reseal_status_t st;
    reseal_mark_sealed();
    if (ensure_ready(&g_ctx) == 0 && ensure_primary(&g_ctx, 0) == 0 &&
-       (lockfd = reseal_lock()) >= 0 &&
-       reseal_status_locked(receipt, secret, &st, NULL) == 0 &&
+       (lockfd = reseal_lock()) >= 0 && reseal_status_locked(receipt, secret, &st, NULL) == 0 &&
        (st == VAULT_TPM2_RESEAL_PREPARED || st == VAULT_TPM2_RESEAL_ABSENT))
    {
       char path[1152];
@@ -1645,8 +1640,7 @@ int vault_custody_tpm2_reseal_cleanup(const vault_tpm2_reseal_receipt_t *receipt
    vault_tpm2_reseal_status_t st;
    reseal_mark_sealed();
    if (ensure_ready(&g_ctx) == 0 && ensure_primary(&g_ctx, 0) == 0 &&
-       (lockfd = reseal_lock()) >= 0 &&
-       reseal_status_locked(receipt, secret, &st, NULL) == 0 &&
+       (lockfd = reseal_lock()) >= 0 && reseal_status_locked(receipt, secret, &st, NULL) == 0 &&
        (st == VAULT_TPM2_RESEAL_INSTALLED || st == VAULT_TPM2_RESEAL_CLEANED))
    {
       char path[1152];
@@ -1851,8 +1845,8 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
    return VAULT_TPM2_RESEAL_NOT_BUILT;
 }
 
-int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt,
-                                     const char *secret, vault_tpm2_reseal_status_t *out)
+int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
+                                     vault_tpm2_reseal_status_t *out)
 {
    (void)receipt;
    (void)secret;
@@ -1861,14 +1855,13 @@ int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt,
    return VAULT_TPM2_RESEAL_NOT_BUILT;
 }
 
-int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
-                                     const char *secret, vault_tpm2_reseal_status_t *out)
+int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
+                                     vault_tpm2_reseal_status_t *out)
 {
    return vault_custody_tpm2_reseal_status(receipt, secret, out);
 }
 
-int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt,
-                                    const char *secret)
+int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt, const char *secret)
 {
    (void)receipt;
    (void)secret;

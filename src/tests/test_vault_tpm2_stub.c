@@ -77,10 +77,9 @@ static void test_stub_prepared_reseal_refused(void)
    assert(status == VAULT_TPM2_RESEAL_ABSENT);
    assert(vault_custody_tpm2_reseal_commit(&receipt, "secret", &status) ==
           VAULT_TPM2_RESEAL_NOT_BUILT);
-   assert(vault_custody_tpm2_reseal_abort(&receipt, "secret") ==
-          VAULT_TPM2_RESEAL_NOT_BUILT);
-   assert(vault_custody_tpm2_reseal_cleanup(
-              &receipt, "secret", VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED) ==
+   assert(vault_custody_tpm2_reseal_abort(&receipt, "secret") == VAULT_TPM2_RESEAL_NOT_BUILT);
+   assert(vault_custody_tpm2_reseal_cleanup(&receipt, "secret",
+                                            VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED) ==
           VAULT_TPM2_RESEAL_NOT_BUILT);
    printf("  PASS: test_stub_prepared_reseal_refused\n");
 }

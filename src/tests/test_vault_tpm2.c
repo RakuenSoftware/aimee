@@ -190,8 +190,8 @@ int main(int argc, char **argv)
       else if (strcmp(cmd, "prepared-abort") == 0)
          pr = vault_custody_tpm2_reseal_abort(&receipt, argv[2]);
       else
-         pr = vault_custody_tpm2_reseal_cleanup(
-             &receipt, argv[2], VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED);
+         pr = vault_custody_tpm2_reseal_cleanup(&receipt, argv[2],
+                                                VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED);
       if (pr != VAULT_TPM2_RESEAL_OK)
          return die("prepared operation failed");
       printf("test_vault_tpm2: %s OK status=%d\n", cmd, (int)status);
