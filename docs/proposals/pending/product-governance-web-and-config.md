@@ -28,6 +28,17 @@ a knowledge base. It is the multi-tenant management and governance boundary for 
 identity, policy distribution, fleet/runtime management, provider governance, audit visibility,
 and optional KB synthesis. Knowledge-base functionality remains a domain inside Control.
 
+Control is the composition host, not the owner of every capability it presents. Optional
+`governance` owns OIDC/SSO, organizational identities and roles, governance policy authoring and
+distribution, approvals/decision records, posture profiles, attestation exports, agent/delegation
+identity chains, fleet governance, and artifact signing/trust. `control-web` renders those surfaces
+only when governance is selected and active; headless governance remains available through CLI,
+environment/configuration, and non-web APIs. With governance omitted, Control still supports its
+core multi-tenant shared-memory and management contracts using core principal/tenant handles and a
+tenant-scoped local reference authenticator, but exposes no OIDC or organizational-governance
+surface through CLI, environment/configuration, API, or web. Its audit projection remains a
+deterministic read-only view sourced directly from the core audit ledger.
+
 Core contracts remain product-neutral. Runtime and Control choose deployment topology and custody:
 Runtime hosts per-user memory and enforcement instances; Control hosts multi-tenant shared-memory
 instances, distributes policy artifacts consumed by core `execution-policy`, and projects the core
@@ -95,7 +106,7 @@ retention window. Unowned, unread, stale, or wrong-activation keys enter deletio
 ## Binding checks
 
 ```yaml acceptance
-- {id: 1, tier: integration, check: "scripts/test_product_boundary_rename.sh --canonical-runtime aimee-runtime --canonical-control aimee-control --runtime-opaque-single-principal-handle --forbid-principal-collections-selectors-replacement --control-multi-tenant --require-tenant-principal-policy-reauthorization --audit-projection-deterministic-read-only --compatibility-records --forbid-new-legacy-names"}
+- {id: 1, tier: integration, check: "scripts/test_product_boundary_rename.sh --canonical-runtime aimee-runtime --canonical-control aimee-control --runtime-opaque-single-principal-handle --forbid-principal-collections-selectors-replacement --control-multi-tenant --governance-optional --require-core-local-auth-multi-tenant --require-governance-surfaces-absent-from-cli-env-config-api-web --require-audit-source-core-ledger-when-governance-absent --require-tenant-principal-policy-reauthorization --audit-projection-deterministic-read-only --compatibility-records --forbid-new-legacy-names"}
 - {id: 2, tier: integration, check: "scripts/test_web_module_lifecycle.sh --modules runtime-web,control-web --default-enabled --independent-startup-disable --forbid-dashboard-descriptors --forbid-dashboard-module-docs --forbid-dashboard-enable-keys --forbid-dashboard-listeners --require-dashboard-routes-under-gui --forbid-parallel-schedulers --legacy-web-aliases-module-owned --disabled-route-indistinguishable-from-unknown --forbid-core-html-fallback --forbid-disabled-load-register-listen-route-asset-job-metric-symbol-invocation --require-omitted-build-link-symbol-absence --forbid-gateway-web-forwarding --no-auto-restart-reload --cold-restart-config-before-listeners --forbid-old-config-fallback --require-headless-cli-env-config-api"}
 - {id: 3, tier: integration, check: "scripts/check_effective_config_surface.sh --profiles core,runtime,control,full --full-minus-one-every-optional --api-exact --gui-exact --hide-absent --disabled-enable-only --fail-required-enable-control --fail-unread --fail-unowned --fail-stale --fail-wrong-activation --check-legacy-migrations"}
 - {id: 4, tier: mechanical, check: "scripts/compare_surface_baseline.sh --config --profiles core,runtime,control,full --separate-persisted-input-from-advertised"}

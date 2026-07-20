@@ -83,9 +83,10 @@ small base/value primitives, platform shims, and generated contracts.
 
 The initial optional set is:
 
-`plugin-loader`, `workflows` (including triggers), `roundtable`, `kb-synthesis`, `runtime-web`,
-`control-web`, `benchmarks`, `git`, specialist analyzers/extractors, additional delegate/workspace/vault
-providers, delivery channels, speech adapters, and advanced sandbox/policy providers.
+`plugin-loader`, `governance`, `workflows` (including triggers), `roundtable`, `kb-synthesis`,
+`runtime-web`, `control-web`, `benchmarks`, `git`, specialist analyzers/extractors, additional
+delegate/workspace/vault providers, delivery channels, speech adapters, and advanced sandbox/policy
+providers.
 
 Individual skill packages are optional content, not architectural modules. MCP and ACP adapters
 are required protocol implementations. A channel, backend, or provider does not become core merely
@@ -100,6 +101,24 @@ because its core contract requires one reference implementation.
 - `runtime-web` and `control-web` are independent optional modules, enabled by default. Each GUI
   includes its dashboard; there is no separate dashboard switch. Either product can run headless.
 - Old product/config names receive bounded compatibility aliases; new code may not introduce them.
+
+The optional `governance` module owns federated OIDC/SSO, organizational identity and roles,
+governance policy authoring/distribution, approvals and decision records, posture profiles,
+attestation/evidence surfaces, agent/delegation identity chains, fleet governance, and executable-
+artifact trust. It consumes core principal, vault, execution-policy, audit, gateway, protocol,
+routing, delegate, tool, and config contracts. Core retains local principal/tenant handles,
+fail-closed action enforcement, credential custody, transport authentication, and audit-ledger
+integrity, so disabling governance removes the organizational governance plane without weakening
+the core safety boundary.
+
+The governance program includes
+[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md),
+[`governance-policy-surface-and-posture.md`](governance-policy-surface-and-posture.md),
+[`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md),
+and [`tiered-llm-p5-oidc-control-plane.md`](tiered-llm-p5-oidc-control-plane.md), plus their plans and
+follow-ups. Those proposals are implemented through `governance`; when they strengthen a required
+safety invariant, the underlying enforcement or ledger change lands behind the owning core contract
+rather than making that safety property optional.
 
 ## Proposal map and order
 
@@ -116,11 +135,17 @@ because its core contract requires one reference implementation.
    and optional KB synthesis.
 5. [`product-governance-web-and-config.md`](product-governance-web-and-config.md) owns the Runtime /
    Control Plane rename, governance split, web lifecycles, and truthful configuration surfaces.
-6. [`large-refactor-delivery-and-compatibility.md`](large-refactor-delivery-and-compatibility.md)
+6. The governance program—[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md),
+   [`governance-policy-surface-and-posture.md`](governance-policy-surface-and-posture.md),
+   [`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md),
+   and [`tiered-llm-p5-oidc-control-plane.md`](tiered-llm-p5-oidc-control-plane.md)—owns the optional
+   governance feature design and depends on proposals 2–5's core/module/product boundaries.
+7. [`large-refactor-delivery-and-compatibility.md`](large-refactor-delivery-and-compatibility.md)
    sequences the moves and defines compatibility, cleanup, recovery, and completion gates.
 
-Proposals 2–5 may be reviewed in parallel, but implementation follows the dependency order recorded
-in proposal 6. Approval of one child does not imply approval of another. No child proposal may
+Proposals 2–5 may be reviewed in parallel; proposal 6 follows their boundary decisions, and
+implementation follows the dependency order recorded in proposal 7. Approval of one child does not
+imply approval of another. No child proposal may
 redefine this suite's taxonomy or shared invariants; changing them requires updating the suite
 index and every affected child in one review.
 
@@ -152,3 +177,9 @@ liveness/delivery groups, covering the complete suite without review-payload tru
 All technical-writer, architecture, adversarial, and verification approvals apply to the same
 revision. Roundtable approval means the suite is coherent and executable enough to seek project
 acceptance; it does not bypass per-slice review or the binding gates in each child.
+
+Post-approval terminology amendments renamed optional `evals` to `benchmarks` and added optional
+`governance`. Focused technical-writing, architecture, adversarial, and verification reviews
+approved both amendments after governance ownership, dependency direction, absent-module behavior,
+and the core safety boundary were made normative. These amendments therefore retain the suite's
+roundtable-approved state.

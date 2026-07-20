@@ -29,9 +29,11 @@ cleanup. This proposal coordinates implementation; it does not redefine module o
 6. Extract protocol, gateway, routing, translation, delegate, tool, workspace, vault, policy, audit,
    configuration, and module-runtime implementations from composition hosts (core-contract and
    module/build proposals).
-7. Rename Runtime and Control Plane, then extract their independent web modules and truthful config
+7. Extract OIDC and the governance proposal family into optional `governance` over the already-
+   established core enforcement/audit/vault/authentication contracts (governance program).
+8. Rename Runtime and Control Plane, then extract their independent web modules and truthful config
    projections behind compatibility aliases (product/web/config proposal).
-8. Move optional feature families, delete superseded paths, collapse global headers/build buckets,
+9. Move remaining optional feature families, delete superseded paths, collapse global headers/build buckets,
    and prove all profiles and full-minus-one variants (this proposal, consuming every child).
 
 The numbers express prerequisites, not a demand for strictly serial work: successors may run in

@@ -50,6 +50,71 @@ routes, assets, config projection, and background work to unload cleanly. Requir
 no enable control. `workflows` is the sole owner of trigger, cron, and event-activation behavior;
 there is no separate `triggers` module or registry.
 
+`governance` is the sole optional owner of OIDC/SSO federation, organizational roles/policy
+authoring, governance posture, governance approvals and decision records, attestation exports,
+fleet-governance records, agent/delegation governance identity, and executable-artifact trust.
+It may register policy and identity artifacts through core contracts but may not own or bypass core
+execution authorization, audit-ledger integrity, vault custody, or gateway/protocol authentication.
+
+`tests/baselines/modules/governance-ownership.yaml` is authoritative. It assigns distinct IDs for
+OIDC federation, SSO federation, organizational roles, policy authoring, policy distribution,
+governance approvals, governance decision records, posture profiles, attestation exports,
+agent/delegation governance identity, fleet-governance records, artifact signing, and artifact
+trust. It forbids aliases or ownership claims that shadow core `execution-policy`,
+`policy.enforce`, `audit.ledger`, `vault.custody`, `gateway.auth`, or `protocols.auth`. It also requires
+`governance` to declare dependencies on `module-runtime`, `config`, `ir`, `gateway`, `protocols`,
+`vault`, `execution-policy`, `audit`, `routing`, `delegates`, and `tools`; core has no reciprocal
+dependency.
+
+The following is the normative semantic content of that future artifact; key order is irrelevant,
+but no entry may be omitted, aliased, or weakened:
+
+```yaml
+schema_version: 1
+module: governance
+capabilities:
+  oidc-federation: governance
+  sso-federation: governance
+  organizational-roles: governance
+  policy-authoring: governance
+  policy-distribution: governance
+  governance-approvals: governance
+  governance-decision-records: governance
+  posture-profiles: governance
+  attestation-exports: governance
+  agent-delegation-governance-identity: governance
+  fleet-governance-records: governance
+  artifact-signing: governance
+  artifact-trust: governance
+forbidden_core_shadows:
+  - execution-policy
+  - policy.enforce
+  - audit.ledger
+  - vault.custody
+  - gateway.auth
+  - protocols.auth
+required_dependencies:
+  - module-runtime
+  - config
+  - ir
+  - gateway
+  - protocols
+  - vault
+  - execution-policy
+  - audit
+  - routing
+  - delegates
+  - tools
+forbidden_dependencies_from_core:
+  - governance
+```
+
+The ownership file and its checker are implementation deliverables of this proposal, not claims
+that those files already exist. The descriptor validator must validate `schema_version: 1`, require
+exact semantic equality with this block, reject unknown keys and aliases, and run before profile
+generation. The suite's existing full-minus-one matrix then proves governance omission, while the
+core-contract audit test proves the ledger remains required independently of governance.
+
 ## Generated builds and dependencies
 
 One deterministic generator emits sorted Make and CMake fragments plus object-to-module and
@@ -95,6 +160,6 @@ logic or a second provider implementation.
 - {id: 3, tier: mechanical, check: "scripts/check_module_deps.sh --include-graph --public-symbol-graph --link-graph --no-cycles --no-core-to-optional --no-private-cross-imports --file-line-evidence"}
 - {id: 4, tier: mechanical, check: "scripts/check_src_root_allowlist.sh src/ROOT_FILE_ALLOWLIST && scripts/check_forwarding_headers.sh --fail-migrated-consumers --enforce-expiry"}
 - {id: 5, tier: mechanical, check: "scripts/check_module_docs.sh --catalog docs/modules --inventory build/inventory --required-sections --require-substantive-content --require-real-inventory-symbol-provider-config-surface-data-references --check-purpose-non-goals --check-public-contracts --check-dependencies-consumers --check-providers-readiness --check-config-activation --check-surfaces --check-data-migrations --check-security-privacy --check-journeys --check-tests-failures --check-diagnostics --check-compatibility --check-extension-removal --require-signed-human-attestation"}
-- {id: 6, tier: mechanical, check: "scripts/check_capability_ownership.sh --catalog src/modules --require triggers=workflows,cron=workflows,event-activation=workflows --forbid-module triggers --forbid-parallel-registry"}
+- {id: 6, tier: mechanical, check: "scripts/check_capability_ownership.sh --catalog src/modules --require triggers=workflows,cron=workflows,event-activation=workflows --ownership-contract tests/baselines/modules/governance-ownership.yaml --schema-version 1 --require-normative-semantic-equality --reject-unknown-keys-aliases --require-exact-capability-owners --require-declared-dependencies --forbid-core-shadow --forbid-core-to-governance --must-pass-before-profile-generation --forbid-module triggers --forbid-parallel-registry"}
 - {id: 7, tier: mechanical, check: "scripts/check_implementation_uniqueness.sh --normalized-ast-control-flow --fail-duplicate-providers --aliases-forward-only --forbid-alias-business-logic-second-implementation"}
 ```

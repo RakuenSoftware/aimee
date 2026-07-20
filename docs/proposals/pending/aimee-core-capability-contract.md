@@ -109,6 +109,11 @@ mission.
 - Defining memory inference semantics or product/web ownership; their child proposals own those
   details.
 - Defining descriptors, generated builds, source migration, or compatibility policy.
+- Requiring federated identity, organizational governance, policy authoring/distribution,
+  fleet governance, or compliance/attestation surfaces. Optional `governance` provides those over
+  the required enforcement, identity-handle, vault, and audit contracts. Binding check 5 proves
+  that core does not require governance and that governance's positive ownership comes only from
+  the module catalog's governance ownership contract.
 
 ## Binding checks
 
@@ -117,4 +122,5 @@ mission.
 - {id: 2, tier: integration, check: "make -C src test-core-contracts test-module-runtime test-config test-ir test-translation test-protocols test-gateway test-memory-code test-learning test-routing test-delegates test-tools test-workspace test-skills test-response-composition test-vault test-execution-policy test-audit"}
 - {id: 3, tier: integration, check: "scripts/test_core_round_trip.sh --profile core --stage-registry src/generated/core-stage-registry.yaml --generated-stage-manifest tests/core_round_trip/core-stages.yaml --require-descriptor-manifest-registry-runtime-trace-equality --protocols mcp,acp --require-adaptive-skill-affects-context-route --require-learning-records-outcome --fail-noop-learning-skills --require-response-composition-present --require-kb-synthesis-absent --require-no-optional-link-closure --typed-provider-failures"}
 - {id: 4, tier: mechanical, check: "scripts/test_module_profiles.sh --profiles core --make-cmake-object-equality --require-reference-providers --require-ready --require-production-provider-provenance --forbid-test-fixture-objects-handles-descriptors"}
+- {id: 5, tier: mechanical, check: "scripts/check_optional_contract_boundary.sh --optional governance --profile core --forbid-core-requires --ownership-contract tests/baselines/modules/governance-ownership.yaml --require-catalog-owner-equality --forbid-core-capability-shadow"}
 ```
