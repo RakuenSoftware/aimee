@@ -287,11 +287,11 @@ typedef struct config
    char workspace_sandbox_image[64][256];
    int workspace_count;
    char guardrail_mode[16];
-   int subagent_ban_enabled;        /* default ON: when set AND usable delegates are configured,
-                                       block the primary agent's own sub-agent tools (Task/Agent/
-                                       spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
-                                       Explicit `subagent_ban_enabled: false` allows provider-native
-                                       sub-agents. */
+   int subagent_ban_enabled; /* default ON: when set AND usable delegates are configured,
+                                block the primary agent's own sub-agent tools (Task/Agent/
+                                spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
+                                Explicit `subagent_ban_enabled: false` allows provider-native
+                                sub-agents. */
    char provider[16];
    /* Durable default persona: the persona a fresh primary session starts as, and
     * the persona draft roundtable panelists author with when none is set. Width =
@@ -1164,8 +1164,8 @@ typedef struct config
     * defaults, so behavior is unchanged until an operator changes them.
     * autonomy_max_turns: cumulative persisted-turn cap per run (runaway backstop).
     * autonomy_max_wall_secs: per-resume wall-clock cap in seconds.
-    * autonomy_stale_abandon_secs: grace before a cap/stuck park is reaped -> abandoned (0 disables).
-    * autonomy_concurrency: max concurrently-driven autonomous runs.
+    * autonomy_stale_abandon_secs: grace before a cap/stuck park is reaped -> abandoned (0
+    * disables). autonomy_concurrency: max concurrently-driven autonomous runs.
     * autonomy_auto_resume_cap_parks: 1 = scheduler auto-resumes a wall-cap park (giving it a
     *   fresh wall window) instead of leaving it to be reaped; bounded by autonomy_max_resumes.
     * autonomy_max_resumes: max auto-resumes per run before the reaper is allowed to win. */

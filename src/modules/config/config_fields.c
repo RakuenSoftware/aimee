@@ -385,12 +385,12 @@ const config_field_t config_fields[] = {
     {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
     {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
     /* Run safety caps + auto-resume policy — config-backed + live via config_autonomy_lookup
-     * (an exported AIMEE_AUTONOMY_* still overrides). Surfaced in the web Settings GUI. */
+     * (an exported AIMEE_AUTONOMY_* still overrides). Surfaced in the Workflows GUI's Run
+     * policy panel. */
     {"autonomy.max_turns", offsetof(config_t, autonomy_max_turns), sizeof(int), 0, CFG_INT},
-    {"autonomy.max_wall_secs", offsetof(config_t, autonomy_max_wall_secs), sizeof(int), 0,
+    {"autonomy.max_wall_secs", offsetof(config_t, autonomy_max_wall_secs), sizeof(int), 0, CFG_INT},
+    {"autonomy.stale_abandon_secs", offsetof(config_t, autonomy_stale_abandon_secs), sizeof(int), 0,
      CFG_INT},
-    {"autonomy.stale_abandon_secs", offsetof(config_t, autonomy_stale_abandon_secs), sizeof(int),
-     0, CFG_INT},
     {"autonomy.concurrency", offsetof(config_t, autonomy_concurrency), sizeof(int), 0, CFG_INT},
     {"autonomy.auto_resume_cap_parks", offsetof(config_t, autonomy_auto_resume_cap_parks),
      sizeof(int), 1, CFG_BOOL},
