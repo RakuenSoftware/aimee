@@ -147,3 +147,6 @@ src/vendor/tree-sitter-powershell/
 .wfe-scope.json
 intent_record_*.json
 .rt-tmp/
+
+# Per-run nightly benchmark artifacts (written by .github/workflows/bench-nightly.yml)
+bench-results/

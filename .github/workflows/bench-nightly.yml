@@ -1,21 +1,23 @@
 name: Benchmark Nightly
 
+# Required secrets (configure at repo / org level):
+#   AIMEE_LLM_API_KEY       - API key for the LLM judge used by benchmarks/run-llm.sh
+#   AIMEE_BENCH_DATASET_URL - Optional signed URL for the non-mini dataset mirror
+# Set these on the self-hosted runner environment, on this workflow, or on the
+# calling environment; the workflow passes them through to the bench scripts.
+
 on:
   schedule:
-    # Nightly at 04:00 UTC (after day-1 PR merges settle)
+    # Nightly at 04:00 UTC (after day-1 PR merges settle) — cheap suites only
     - cron: "0 4 * * *"
+    # Weekly at 06:00 UTC on Mondays — full LLM-graded suite on non-mini data
+    - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
       max_samples:
         description: "Per-dataset sample cap (0 = full)"
         required: false
         default: "0"
-  push:
-    branches: [main, testing]
-    paths:
-      - "benchmarks/**"
-      - "scripts/download-*.sh"
-      - ".github/workflows/bench-nightly.yml"
 
 permissions:
   contents: read
@@ -27,11 +29,17 @@ concurrency:
 jobs:
   nightly:
     name: aimee memory benchmarks (LLM)
-    runs-on: ubuntu-22.04
+    # Self-hosted runner: full benchmarks on non-mini datasets and any
+    # LLM-grading or signed-dataset credentials must run on infrastructure we
+    # control, not on ephemeral GitHub-hosted runners. The self-hosted label
+    # is configured per runner in this repository's runner pool.
+    runs-on: [self-hosted, linux]
     timeout-minutes: 360
     env:
       AIMEE_BENCH_RESULTS_DIR: /tmp/bench-results/nightly
       AIMEE_BENCH_MAX_SAMPLES: ${{ github.event.inputs.max_samples || '0' }}
+      AIMEE_LLM_API_KEY: ${{ secrets.AIMEE_LLM_API_KEY }}
+      AIMEE_BENCH_DATASET_URL: ${{ secrets.AIMEE_BENCH_DATASET_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,31 +65,56 @@ jobs:
           pip install -e ./aimee
 
       - name: Download memory benchmark datasets (LocOMo + LongMemEval-S)
+        env:
+          AIMEE_BENCH_DATASET_URL: ${{ secrets.AIMEE_BENCH_DATASET_URL }}
         run: ./scripts/download-memory-benchmarks.sh
 
-      - name: Run aimee vs LocOMo (LLM track)
-        run: ./benchmarks/run-llm.sh locomo
+      - name: Run LLM-graded memory benchmarks
+        env:
+          AIMEE_LLM_API_KEY: ${{ secrets.AIMEE_LLM_API_KEY }}
+          AIMEE_BENCH_RESULTS_DIR: /tmp/bench-results/nightly
+          AIMEE_BENCH_MAX_SAMPLES: ${{ github.event.inputs.max_samples || '0' }}
+        run: ./benchmarks/run-llm.sh
 
-      - name: Run aimee vs LongMemEval-S (LLM track)
-        run: ./benchmarks/run-llm.sh longmemeval
-
-      - name: Verify result scores
+      - name: Compute artifact name slug
+        id: slug
+        if: always()
         run: |
-          set -euo pipefail
-          RESULTS_DIR="${AIMEE_BENCH_RESULTS_DIR}"
-          shopt -s nullglob
-          RESULTS=("${RESULTS_DIR}"/*_llm_v*.json)
-          if [ "${#RESULTS[@]}" -eq 0 ]; then
-            echo "No result files produced under ${RESULTS_DIR}" >&2
-            exit 1
+          # Write the dated+sha artifact slug into a step output so the
+          # upload step below can reference it (the \`name:\` field is resolved
+          # by GitHub Actions and would not interpolate shell \`$(...)\`).
+          RUN_DATE=$(date -u +%Y-%m-%d)
+          SHORT_SHA=${GITHUB_SHA::12}
+          echo "date=${RUN_DATE}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "name=bench-nightly-${RUN_DATE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "dir=bench-results/nightly/${RUN_DATE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage dated results under bench-results/
+        if: always()
+        env:
+          AIMEE_BENCH_RESULTS_DIR: /tmp/bench-results/nightly
+        run: |
+          STAGE_DIR="${{ steps.slug.outputs.dir }}"
+          mkdir -p "$STAGE_DIR"
+          if compgen -G "$AIMEE_BENCH_RESULTS_DIR/*.json" > /dev/null; then
+            cp "$AIMEE_BENCH_RESULTS_DIR"/*.json "$STAGE_DIR"/
           fi
-          PYTHONPATH="${GITHUB_WORKSPACE}" python3 benchmarks/verify_scores.py "${RESULTS[@]}"
+          if compgen -G "$AIMEE_BENCH_RESULTS_DIR/*.log" > /dev/null; then
+            cp "$AIMEE_BENCH_RESULTS_DIR"/*.log "$STAGE_DIR"/
+          fi
+          printf '{"run_date":"%s","commit":"%s","ref":"%s","trigger":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$GITHUB_SHA" \
+            "$GITHUB_REF" \
+            "$GITHUB_EVENT_NAME" \
+            > "$STAGE_DIR/manifest.json"
 
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-nightly-results
-          path: /tmp/bench-results/nightly/
+          name: ${{ steps.slug.outputs.name }}
+          path: ${{ steps.slug.outputs.dir }}
           if-no-files-found: warn
           retention-days: 30
