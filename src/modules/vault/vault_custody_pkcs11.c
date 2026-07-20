@@ -15,10 +15,13 @@ static int open_token(pk11_ctx *c)
   unsigned long slot=slot_s?strtoul(slot_s,NULL,10):0; if(!pin||!*pin)return -1;
   c->dl=dlopen(mod,RTLD_NOW|RTLD_LOCAL); if(!c->dl)return -1;
   CK_C_GetFunctionList get=(CK_C_GetFunctionList)dlsym(c->dl,"C_GetFunctionList"); if(!get||get(&c->f)!=CKR_OK)return -1;
-  if(c->f->C_Initialize(NULL_PTR)!=CKR_OK)return -1; CK_ULONG n=8; CK_SLOT_ID slots[8];
-  if(c->f->C_GetSlotList(CK_TRUE,slots,&n)!=CKR_OK||!n)return -1; if(slot_s&&slot>=n) return -1; slot=slot_s?slots[slot]:slots[0];
+  if(c->f->C_Initialize(NULL_PTR)!=CKR_OK)return -1;
+  CK_ULONG n=8; CK_SLOT_ID slots[8];
+  if(c->f->C_GetSlotList(CK_TRUE,slots,&n)!=CKR_OK||!n)return -1;
+  if(slot_s&&slot>=n) return -1; slot=slot_s?slots[slot]:slots[0];
   if(c->f->C_OpenSession(slot,CKF_SERIAL_SESSION|CKF_RW_SESSION,NULL,NULL,&c->s)!=CKR_OK)return -1;
-  if(c->f->C_Login(c->s,CKU_USER,(CK_UTF8CHAR_PTR)pin,(CK_ULONG)strlen(pin))!=CKR_OK)return -1; c->sealed=0; return 0;
+  if(c->f->C_Login(c->s,CKU_USER,(CK_UTF8CHAR_PTR)pin,(CK_ULONG)strlen(pin))!=CKR_OK)return -1;
+  c->sealed=0; return 0;
 }
 static int get_kek(void *v,uint8_t out[VAULT_KEK_LEN])
 { pk11_ctx*c=v; pthread_mutex_lock(&c->mu); if(c->sealed&&open_token(c)!=0){pthread_mutex_unlock(&c->mu);return -1;} const char *label=getenv("AIMEE_VAULT_PKCS11_LABEL"); if(!label||!*label)label="aimee-kek"; CK_UTF8CHAR lab[128]; memcpy(lab,label,strlen(label)); CK_ULONG ll=strlen(label); CK_ATTRIBUTE q={CKA_LABEL,lab,ll}; if(c->f->C_FindObjectsInit(c->s,&q,1)!=CKR_OK){pthread_mutex_unlock(&c->mu);return -1;} CK_OBJECT_HANDLE o=0; CK_ULONG n=0; CK_RV r=c->f->C_FindObjects(c->s,&o,1,&n); c->f->C_FindObjectsFinal(c->s); if(r!=CKR_OK||n!=1){pthread_mutex_unlock(&c->mu);return -1;} CK_ULONG len=VAULT_KEK_LEN; CK_ATTRIBUTE a={CKA_VALUE,out,len}; r=c->f->C_GetAttributeValue(c->s,o,&a,1); pthread_mutex_unlock(&c->mu); return r==CKR_OK&&a.ulValueLen==VAULT_KEK_LEN?0:-1; }
