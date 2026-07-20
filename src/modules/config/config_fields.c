@@ -371,6 +371,9 @@ const config_field_t config_fields[] = {
      offsetof(config_t, roundtable_pipeline_parked_releases_slot), sizeof(int), 1, CFG_BOOL},
     {"roundtable.pipeline_unknown_context_tokens",
      offsetof(config_t, roundtable_pipeline_unknown_context_tokens), sizeof(int), 0, CFG_INT},
+    /* Trigger admission policy. The scheduler reads this from the live config snapshot on
+     * every sweep, so GUI changes take effect without a restart. */
+    {"trigger.max_concurrent", offsetof(config_t, trigger_max_concurrent), sizeof(int), 0, CFG_INT},
     /* The economizer is a SINGLE tiered control: get/set as an "off|safe|aggressive" string
      * (CFG_ECON_TIER stores the int enum). The old per-lever reduce.* / economizer.enabled|
      * aggressive keys were removed; the per-tier lever values are internal presets (econ_preset).

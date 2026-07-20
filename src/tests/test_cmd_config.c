@@ -164,6 +164,13 @@ static void test_config_fields_helpers(void)
    assert(cJSON_IsNumber(v) && v->valueint == 42);
    cJSON_Delete(v);
 
+   /* nested trigger admission policy is GUI/config.set writable */
+   const config_field_t *trigger_cap = config_field_lookup("trigger.max_concurrent");
+   assert(trigger_cap && config_field_set_value(&cfg, trigger_cap, "7") == 0);
+   v = config_field_value_json(&cfg, trigger_cap);
+   assert(cJSON_IsNumber(v) && v->valueint == 7);
+   cJSON_Delete(v);
+
    /* float — including a threshold field that used to be mistyped CFG_STRING */
    const config_field_t *thr = config_field_lookup("guardrails_semantic_warn_threshold");
    assert(thr && config_field_set_value(&cfg, thr, "0.25") == 0);
