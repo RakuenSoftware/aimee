@@ -95,7 +95,16 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
       return -1;
    if (strcmp(row.state, "activated") == 0)
       return KB_VAULT_ROTATION_COMPLETE;
-   if (strcmp(row.state, "probed") != 0 || row.from_version < 1 || row.to_version < 1)
+   if (strcmp(row.state, "probed") == 0)
+   {
+      if (rotation_scope_begin(caller, team_id, actor) != 0)
+         return -1;
+      rc = db2_vault_rotation_transition(actor, rotation_id, "probed", "activating", "");
+      if (rotation_scope_finish(rc) != 0)
+         return -1;
+      memcpy(row.state, "activating", sizeof("activating"));
+   }
+   if (strcmp(row.state, "activating") != 0 || row.from_version < 1 || row.to_version < 1)
       return -1;
 
    uint8_t att[DB2_VAULT_ROTATION_ATTEST_MAX];

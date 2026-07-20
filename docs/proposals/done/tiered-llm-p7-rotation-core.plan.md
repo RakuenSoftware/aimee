@@ -20,8 +20,9 @@ whole-vault maintenance window, never as a per-principal rewrap.
 - Add `org_vault_rotation`, uniquely keyed by `(principal,agent,cred)` while
   active, with stable `key_id`, `from_version`, `to_version`, state, compromise
   flag, timestamps, bounded last error, and the final signed attestation.
-- States are `provision`, `staged`, `probed`, `activated`, `revoked`, `retired`,
-  plus terminal `failed`. Transitions are monotonic compare-and-set operations
+- States are `provision`, `staged`, `probed`, `activating`, `activated`, `revoked`,
+  `retired`, plus terminal `failed`. The committed `activating` claim closes the
+  race between a late failure transition and the external CAS. Transitions are monotonic compare-and-set operations
   under the slot advisory lock and append the existing DB2 WORM chain in the
   same transaction.
 - Add SECURITY DEFINER functions to start/read/transition a rotation, stage an
@@ -54,7 +55,8 @@ whole-vault maintenance window, never as a per-principal rewrap.
 
 ## Concurrency and failure rules
 
-- One active rotation per slot; concurrent starters converge or get conflict.
+- One active rotation per slot and per stable HWM key; a key ID is permanently
+  bound to one credential slot. Concurrent starters converge or get conflict.
 - The rotation uses the existing `orgvault:` slot-lock namespace. Ordinary put,
   delete, and re-wrap writers take the same lock and reject a non-retired
   rotation, so they cannot invalidate a staged `from_version`. A failed attempt

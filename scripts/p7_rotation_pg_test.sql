@@ -25,6 +25,12 @@ BEGIN
     RAISE EXCEPTION 'P7 FAIL: immutable N+1 row missing';
   END IF;
   PERFORM org_vault_rotation_transition('owner',rid,'staged','probed','');
+  BEGIN
+    PERFORM org_vault_rotation_transition('owner',rid,'probed','failed','late failure');
+    RAISE EXCEPTION 'P7 FAIL: probed rotation could race activation into failed';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
+  PERFORM org_vault_rotation_transition('owner',rid,'probed','activating','');
   PERFORM org_vault_rotation_finalize('owner',rid,'\xaabbcc'::bytea);
   IF org_vault_has('team:970701:provider:bedrock','bedrock','primary') <> 2 THEN
     RAISE EXCEPTION 'P7 FAIL: finalize did not advance pointer';
@@ -58,6 +64,24 @@ BEGIN
   BEGIN
     PERFORM org_vault_delete('team:970701:provider:bedrock','bedrock','primary');
     RAISE EXCEPTION 'P7 FAIL: delete bypassed active rotation';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+END $$;
+
+SELECT org_vault_put('team:970701:provider:bedrock',970701,'bedrock','secondary',1,
+  '\x2102'::bytea,'\x2304'::bytea,'\x2506'::bytea,'\x2708'::bytea);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM org_vault_rotation_start('owner','team:970701|bedrock|primary',
+      'team:970701:provider:bedrock',970701,'bedrock','secondary',1,false);
+    RAISE EXCEPTION 'P7 FAIL: HWM key was shared across credential slots';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_vault_rotation_start('owner','different-hwm-key',
+      'team:970701:provider:bedrock',970701,'bedrock','primary',2,false);
+    RAISE EXCEPTION 'P7 FAIL: credential slot changed its stable HWM key';
   EXCEPTION WHEN serialization_failure THEN NULL;
   END;
 END $$;

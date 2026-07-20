@@ -2625,7 +2625,7 @@ CREATE TABLE IF NOT EXISTS org_vault_rotation (
   from_version    BIGINT NOT NULL CHECK (from_version >= 1),
   to_version      BIGINT NOT NULL CHECK (to_version = from_version + 1),
   state           TEXT NOT NULL CHECK (state IN
-                    ('provision','staged','probed','activated','revoked','retired','failed')),
+                    ('provision','staged','probed','activating','activated','revoked','retired','failed')),
   compromise      BOOLEAN NOT NULL DEFAULT false,
   hwm_attestation BYTEA,
   last_error      TEXT NOT NULL DEFAULT '' CHECK (char_length(last_error) <= 1000),
@@ -2633,8 +2633,15 @@ CREATE TABLE IF NOT EXISTS org_vault_rotation (
   updated_at      TEXT NOT NULL DEFAULT (pg_now_text()),
   UNIQUE(principal, agent, cred, to_version)
 );
+-- CREATE TABLE IF NOT EXISTS does not evolve an existing generated CHECK.
+ALTER TABLE org_vault_rotation DROP CONSTRAINT IF EXISTS org_vault_rotation_state_check;
+ALTER TABLE org_vault_rotation ADD CONSTRAINT org_vault_rotation_state_check CHECK (state IN
+  ('provision','staged','probed','activating','activated','revoked','retired','failed'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_active_slot
   ON org_vault_rotation(principal, agent, cred)
+  WHERE state <> 'retired';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_active_key
+  ON org_vault_rotation(key_id)
   WHERE state <> 'retired';
 CREATE INDEX IF NOT EXISTS idx_org_vault_rotation_team ON org_vault_rotation(team_id);
 ALTER TABLE org_vault_rotation ENABLE ROW LEVEL SECURITY;
@@ -2682,6 +2689,12 @@ BEGIN
   IF v_team IS DISTINCT FROM p_team_id THEN
     RAISE EXCEPTION 'org_vault_rotation_start: principal/team mismatch' USING ERRCODE='42501';
   END IF;
+  IF EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=p_principal AND
+      agent=COALESCE(p_agent,'') AND cred=COALESCE(p_cred,'') AND key_id<>p_key_id) OR
+     EXISTS(SELECT 1 FROM org_vault_rotation WHERE key_id=p_key_id AND
+      (principal<>p_principal OR agent<>COALESCE(p_agent,'') OR cred<>COALESCE(p_cred,''))) THEN
+    RAISE EXCEPTION 'org_vault_rotation_start: key binding conflict' USING ERRCODE='40001';
+  END IF;
   SELECT * INTO v_row FROM org_vault_rotation
    WHERE principal=p_principal AND agent=COALESCE(p_agent,'') AND cred=COALESCE(p_cred,'')
      AND state <> 'retired' FOR UPDATE;
@@ -2693,11 +2706,16 @@ BEGIN
     END IF;
     RAISE EXCEPTION 'org_vault_rotation_start: active rotation conflict' USING ERRCODE = '40001';
   END IF;
-  INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,
-      state,compromise)
-    VALUES(p_key_id,p_principal,p_team_id,COALESCE(p_agent,''),COALESCE(p_cred,''),
-      p_from_version,p_from_version+1,'provision',COALESCE(p_compromise,false))
-    RETURNING id INTO v_id;
+  BEGIN
+    INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,
+        state,compromise)
+      VALUES(p_key_id,p_principal,p_team_id,COALESCE(p_agent,''),COALESCE(p_cred,''),
+        p_from_version,p_from_version+1,'provision',COALESCE(p_compromise,false))
+      RETURNING id INTO v_id;
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'org_vault_rotation_start: concurrent key binding conflict'
+      USING ERRCODE='40001';
+  END;
   PERFORM kb_audit_worm_append('kb',p_actor,'vault.rotation.start',p_key_id,'allow',
     json_build_object('rotation_id',v_id,'from_version',p_from_version,
                       'to_version',p_from_version+1,'compromise',COALESCE(p_compromise,false))::text);
@@ -2753,9 +2771,10 @@ BEGIN
     RAISE EXCEPTION 'org_vault_rotation_transition: invalid input' USING ERRCODE='22023';
   END IF;
   IF NOT ((p_expected='staged' AND p_next='probed') OR
+      (p_expected='probed' AND p_next='activating') OR
       (p_expected='activated' AND p_next='revoked') OR
       (p_expected='revoked' AND p_next='retired') OR
-      (p_next='failed' AND p_expected IN ('provision','staged','probed'))) THEN
+      (p_next='failed' AND p_expected IN ('provision','staged'))) THEN
     RAISE EXCEPTION 'org_vault_rotation_transition: invalid requested transition % -> %',
       p_expected,p_next USING ERRCODE='22023';
   END IF;
@@ -2803,7 +2822,7 @@ BEGIN
     IF v_cur=r.to_version AND r.hwm_attestation=p_hwm_attestation THEN RETURN; END IF;
     RAISE EXCEPTION 'org_vault_rotation_finalize: replay mismatch' USING ERRCODE='40001';
   END IF;
-  IF r.state<>'probed' THEN
+  IF r.state<>'activating' THEN
     RAISE EXCEPTION 'org_vault_rotation_finalize: invalid state %',r.state USING ERRCODE='40001';
   END IF;
   UPDATE org_vault_secret SET hwm_attestation=p_hwm_attestation
