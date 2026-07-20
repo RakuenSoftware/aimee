@@ -1662,8 +1662,17 @@ int main(int argc, char **argv)
        strcmp(argv[cmd_start], "acp-serve") != 0)
    {
       /* Supply the real delegate probe so the sub-agent-ban gate can consult the
-       * server once (agent.list) during client-integration setup. */
-      client_integrations_set_delegate_probe(cli_delegate_probe);
+       * server once (agent.list) during client-integration setup — but NOT on the
+       * high-frequency hook callbacks (attention-guard fires on every tool use),
+       * where the probe would add a per-tool server round-trip. Those invocations
+       * run with no probe (the gate treats "unknown" as leave-as-is); the ban is
+       * (re)materialized at session-start and on ordinary user commands. */
+      const char *c = argv[cmd_start];
+      int hook_callback = strcmp(c, "attention-guard") == 0 || strcmp(c, "subagent-guard") == 0 ||
+                          strcmp(c, "hooks") == 0 || strcmp(c, "user-prompt-submit") == 0 ||
+                          strcmp(c, "pre-compact") == 0;
+      if (!hook_callback)
+         client_integrations_set_delegate_probe(cli_delegate_probe);
       ensure_client_integrations();
    }
 

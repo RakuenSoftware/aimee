@@ -25,7 +25,7 @@ tool) with a redirect-to-`aimee delegate` message.
   "permissions": { "deny": ["Task", "Agent"] },
   "hooks": {
     "PreToolUse": [{
-      "matcher": "Agent|Task|Subagent|spawn_agent",
+      "matcher": "Agent|Task|Subagent|spawn_agent|RemoteTrigger",
       "hooks": [{ "type": "command",
                   "command": "<repo>/.claude/hooks/block_subagent.py" }]
     }]

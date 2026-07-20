@@ -77,12 +77,15 @@ per-turn toggles). Values are clamped to sane bounds.
 |-----|---------|--------|
 | `subagent_ban_enabled` | `true` | When on **and** usable delegates are configured, blocks the primary agent's own sub-agent tools (`Task`/`Agent`/`spawn_agent`/`RemoteTrigger`) and redirects to `aimee delegate`, so delegation stays inside aimee's guardrail + memory + KB model. Set `false` to allow provider-native sub-agents. |
 
-The ban is enforced at three layers: the `/v1` gateway tool-strip (aimee's own agents),
-the server guardrail path, and a Claude Code `subagent-guard` PreToolUse hook plus a
-`permissions.deny [Task, Agent]` backstop that aimee's client setup auto-installs. The
-config + delegates gate is evaluated once per client setup / session-start (a one-shot
-`agent.list` probe decides whether delegates exist), so a change to this key — or adding/
-removing delegates — re-materializes the hook and deny list at the next setup.
+What this key gates: the **server guardrail block** (honors `subagent_ban_enabled: false`
+as an opt-out) and the **Claude Code harness enforcement** — a `subagent-guard` PreToolUse
+hook plus a `permissions.deny [Task, Agent]` backstop that aimee's client setup
+auto-installs. The harness gate is evaluated once per client setup / session-start (config
+opt-out is read locally; a one-shot `agent.list` probe decides whether usable delegates
+exist), so changing this key — or adding/removing delegates — re-materializes the hook and
+deny list at the next setup. Independently, the `/v1` **gateway tool-strip** removes
+sub-agent tools from what aimee hands its *own* delegate agents; that strip is always-on
+and is not affected by this key.
 
 ---
 

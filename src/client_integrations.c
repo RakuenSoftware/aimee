@@ -1038,18 +1038,31 @@ static void remove_permissions_deny_tool(cJSON *root, const char *tool, int *dir
  * install nor tear down on a transient outage. */
 static void ensure_subagent_ban(cJSON *root, cJSON *hooks, int *dirty)
 {
+   /* Config opt-out is checked FIRST, from local aimee.yaml — no server call. So
+    * `subagent_ban_enabled: false` reliably tears the ban down even when the
+    * server is unreachable, and we never probe when the operator has opted out. */
+   if (!client_config_bool("subagent_ban_enabled", 1))
+   {
+      remove_aimee_event_hook(hooks, "PreToolUse", "subagent-guard", dirty);
+      remove_permissions_deny_tool(root, "Task", dirty);
+      remove_permissions_deny_tool(root, "Agent", dirty);
+      return;
+   }
+
    int probe = g_delegate_probe ? g_delegate_probe() : -1; /* 1 avail, 0 none, -1 unknown */
    if (probe < 0)
-      return;
-   int active = (probe == 1) && client_config_bool("subagent_ban_enabled", 1);
-   if (active)
+      return; /* delegate availability unknown (server down / no probe): leave as-is */
+   if (probe == 1)
    {
+      /* Matcher covers every tool client_tool_is_subagent recognizes, incl.
+       * RemoteTrigger. permissions.deny lists Task+Agent (the Claude-native
+       * spawns); the hook backstops the rest with the actionable message. */
       ensure_aimee_event_hook(hooks, "PreToolUse", "subagent-guard",
-                              "Agent|Task|Subagent|spawn_agent", dirty);
+                              "Agent|Task|Subagent|spawn_agent|RemoteTrigger", dirty);
       ensure_permissions_deny_tool(root, "Task", dirty);
       ensure_permissions_deny_tool(root, "Agent", dirty);
    }
-   else
+   else /* probe == 0: no usable delegate to redirect to -> don't ban */
    {
       remove_aimee_event_hook(hooks, "PreToolUse", "subagent-guard", dirty);
       remove_permissions_deny_tool(root, "Task", dirty);
