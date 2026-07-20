@@ -62,6 +62,15 @@ echo "== P7 signed-HWM same-use concurrency gate =="
 echo "== P7 fenced vendor-operation multi-worker concurrency gate =="
 "$ROOT/scripts/p7_rotation_ops_concurrency.sh" "$DB_URL"
 
+echo "== P7 primary barrier grant-reapplication gate =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/db2/schema_grants.sql"
+
+echo "== P7 primary vault maintenance barrier assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_barrier_pg_test.sql"
+
+echo "== P7 primary vault maintenance barrier concurrency gate =="
+"$ROOT/scripts/p7_vault_barrier_concurrency.sh" "$DB_URL"
+
 echo "== P2a org-model catalog + entitlement isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 

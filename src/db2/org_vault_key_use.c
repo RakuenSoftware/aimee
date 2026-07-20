@@ -10,6 +10,8 @@
 
 static int classified_error(const char *err)
 {
+   if (err && strstr(err, "org_vault_control: sealed"))
+      return DB2_VAULT_KEY_USE_SEALED;
    return err && (strstr(err, "org_vault_key_use_candidate: invalid input") ||
                   strstr(err, "org_vault_key_use_candidate: not authorized") ||
                   strstr(err, "org_vault_key_use_candidate: unstable key binding") ||
@@ -141,10 +143,20 @@ int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *auth
    }
    int newly_admitted = b[0] == 't' || b[0] == '1';
    int rc = 0;
-   if (newly_admitted)
-      rc = read_envelope(st, 1, version, out) == 0 ? 0 : DB2_VAULT_KEY_USE_INTEGRITY;
+   if (aimee_pg_column_is_null(st, 1) || aimee_pg_column_int64(st, 1) < 1)
+      rc = DB2_VAULT_KEY_USE_INTEGRITY;
    else
-      for (int col = 1; col <= 5; col++)
+      out->seal_epoch = aimee_pg_column_int64(st, 1);
+   if (newly_admitted)
+   {
+      int64_t seal_epoch = out->seal_epoch;
+      if (rc == 0 && read_envelope(st, 2, version, out) == 0)
+         out->seal_epoch = seal_epoch;
+      else
+         rc = DB2_VAULT_KEY_USE_INTEGRITY;
+   }
+   else
+      for (int col = 2; col <= 6; col++)
          if (!aimee_pg_column_is_null(st, col))
             rc = DB2_VAULT_KEY_USE_INTEGRITY;
    aimee_pg_finalize(st);
