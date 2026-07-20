@@ -99,5 +99,14 @@ int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t a
                    size_t *att_len);
 int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
                   size_t att_cap, size_t *att_len);
+int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, size_t att_len);
+
+/* Local seal-generation guard for synchronous use-in-place. Snapshot before durable
+ * admission, then begin immediately before KEK access. A successful begin holds a
+ * shared guard until vault_use_end; seal takes the exclusive side and advances the
+ * generation, so an admission cannot cross a seal/unseal cycle. */
+uint64_t vault_use_epoch_snapshot(void);
+int vault_use_begin(uint64_t expected_epoch, uint8_t kek[VAULT_KEK_LEN]);
+void vault_use_end(void);
 
 #endif /* DEC_VAULT_SERVER_KEY_H */

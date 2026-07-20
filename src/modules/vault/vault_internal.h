@@ -93,10 +93,12 @@ typedef struct
    int (*is_sealed)(void *ctx);
    int (*unseal)(void *ctx, const void *params, size_t len);
    int (*seal)(void *ctx);
-   int (*hwm_read)(void *ctx, const char *key_id, uint64_t *version, uint8_t *att,
-                   size_t att_cap, size_t *att_len);
-   int (*hwm_cas)(void *ctx, const char *key_id, uint64_t expected, uint64_t next,
-                  uint8_t *att, size_t att_cap, size_t *att_len);
+   int (*hwm_read)(void *ctx, const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
+                   size_t *att_len);
+   int (*hwm_cas)(void *ctx, const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
+                  size_t att_cap, size_t *att_len);
+   int (*hwm_verify)(void *ctx, const char *key_id, uint64_t version, const uint8_t *att,
+                     size_t att_len);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────
