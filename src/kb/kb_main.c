@@ -26,7 +26,8 @@
 #include "memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
-#include "db2/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "db2/vault_pg.h"    /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "kb/kb_vault_policy.h" /* kb_vault_policy_select (custody selection, P7 §3) */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -777,6 +778,22 @@ int main(int argc, char **argv)
     * is the kb bind — file custody stays default; later slices add external-anchor
     * custody + seal/unseal before any key-holding activation on a hardened tier. */
    vault_store_set_backend(&vault_pg_backend);
+
+   /* Select the custody provider for the vault's server KEK (P10/P7 slice 3b).
+    * `file` (default) keeps today's self-unsealing behavior; `mock` binds the
+    * test/dev seal-barrier anchor; tpm2/pkcs11/kms are declared but unimplemented
+    * and FAIL CLOSED here (never a silent fallback to a plaintext root). An unknown
+    * vault.custody value is likewise rejected. */
+   {
+      char custody_err[160] = "";
+      if (kb_vault_policy_select(kb_cfg.vault_custody, custody_err, sizeof(custody_err)) != 0)
+      {
+         fprintf(stderr, "aimee-kb: %s\n", custody_err);
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
 
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
     * starting the service. */

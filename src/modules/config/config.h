@@ -368,6 +368,13 @@ typedef struct config
     * is down (the oracle reports UNAVAILABLE, never a fake verdict). Set empty to
     * disable. */
    char css_render_command[512];
+   /* vault.custody: which custody provider anchors the vault's server KEK (P10/P7
+    * slice 3b). One of {file,mock,tpm2,pkcs11,kms}. `file` (default) self-unseals
+    * from a 0600 master-key file (today's low-ops behavior). `mock` is a test/dev
+    * anchor exercising the seal barrier. tpm2/pkcs11/kms are declared but not yet
+    * implemented (they fail closed at kb bind). Read once at kb startup by
+    * kb_vault_policy_select; the server profile always runs `file`. */
+   char vault_custody[16];
    int memory_salience_enabled;
    double memory_salience_weight;
    int memory_salience_window_size;

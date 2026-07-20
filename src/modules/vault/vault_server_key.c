@@ -4,6 +4,7 @@
 #include "vault_server_key.h"
 #include "vault_internal.h" /* vault_custody_provider_t seam */
 #include "vault_crypto.h"
+#include "vault_kek_cache.h" /* vault_kek_cache_clear (seal flushes the KEK cache) */
 #include "vault_store.h"   /* vault_store_list_principals, _rekey_field (D13) */
 #include "config.h"        /* config_default_dir */
 #include "platform_path.h" /* platform_mkdir_p */
@@ -446,6 +447,9 @@ static const vault_custody_provider_t file_custody = {
     .ctx = NULL,
     .get_kek = file_get_kek,
     .rotate = file_rotate,
+    /* Seal slots deliberately left NULL: file custody self-unseals from its 0600
+     * master-key file and is ALWAYS unsealed (is_sealed=0, seal/unseal no-op). The
+     * server profile runs this provider and never observes VAULT_ERR_SEALED. */
 };
 
 static const vault_custody_provider_t *g_custody = &file_custody;
@@ -467,4 +471,26 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
 {
    return g_custody->rotate(g_custody->ctx, server_principal, out_principals, out_creds,
                             backup_path, backup_path_len, errbuf, errlen);
+}
+
+/* ── Seal barrier (P7 §3) ─────────────────────────────────────────────────────
+ * These dispatch to the bound provider's OPTIONAL seal slots. A NULL slot means
+ * "always unsealed / no-op", which is the file provider — so the SERVER profile
+ * (file custody) never seals and vault_is_sealed() is always 0 for it. */
+int vault_is_sealed(void)
+{
+   return g_custody->is_sealed ? g_custody->is_sealed(g_custody->ctx) : 0;
+}
+
+int vault_unseal(const void *params, size_t len)
+{
+   return g_custody->unseal ? g_custody->unseal(g_custody->ctx, params, len) : 0;
+}
+
+int vault_seal(void)
+{
+   /* Flush the process-wide KEK cache FIRST so no cached KEK can survive the seal,
+    * even if the provider has no seal slot (P7 §3 "sealing flushes the KEK cache"). */
+   vault_kek_cache_clear();
+   return g_custody->seal ? g_custody->seal(g_custody->ctx) : 0;
 }

@@ -72,4 +72,22 @@ void vault_server_key_reset_for_test(void);
 int vault_server_key_rotate(const char *server_principal, int *out_principals, int *out_creds,
                             char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen);
 
+/* ── Seal barrier (P7 §3; slice 3b) ───────────────────────────────────────────
+ * Thin seam-side accessors that dispatch to the currently-bound custody provider's
+ * OPTIONAL seal slots (see vault_internal.h). The default `file` provider has NULL
+ * seal slots, so under it these are no-ops: vault_is_sealed()==0 always, and
+ * vault_seal()/vault_unseal() return 0 without effect — the SERVER profile is
+ * UNAFFECTED and never sees a sealed state.
+ *
+ * vault_is_sealed() -> 1 if the bound provider reports sealed (its get_kek will
+ *                      fail), else 0. A provider with no is_sealed slot => 0.
+ * vault_unseal(params,len) -> forward opaque provider-specific unseal params.
+ *                      Returns 0 on success, -1 on failure. NULL slot => 0.
+ * vault_seal() -> seal the provider AND flush the process KEK cache
+ *                 (vault_kek_cache_clear), so no cached KEK survives a seal.
+ *                 Returns 0 on success, -1 if the provider's seal fails. */
+int vault_is_sealed(void);
+int vault_unseal(const void *params, size_t len);
+int vault_seal(void);
+
 #endif /* DEC_VAULT_SERVER_KEY_H */

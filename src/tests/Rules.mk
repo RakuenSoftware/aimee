@@ -308,6 +308,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-seam \
                $(TESTPREFIX)/unit-test-vault-service \
                $(TESTPREFIX)/unit-test-vault-master-rotate \
+               $(TESTPREFIX)/unit-test-vault-seal \
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-host-resolve \
                $(TESTPREFIX)/unit-test-git-cred-inject \
@@ -3329,6 +3330,19 @@ $(TESTPREFIX)/unit-test-vault-master-rotate: $(OBJDIR)/tests/test_vault_master_r
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# P10/P7 slice 3b: the custody seal/unseal barrier + kb §3 live-key gate. Links the
+# seam (vault_server_key), the mock anchor, the KEK cache (seal flushes it), and the
+# kb-only policy (kb_vault_policy.o) — all OpenSSL-only, no PG needed (3b stores no keys).
+$(TESTPREFIX)/unit-test-vault-seal: $(OBJDIR)/tests/test_vault_seal.o \
+                              $(OBJDIR)/kb/kb_vault_policy.o \
+                              $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_store.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

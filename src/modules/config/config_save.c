@@ -923,6 +923,14 @@ int config_save(const config_t *cfg)
     * OR an empty string to disable) so both round-trip; the default isn't written. */
    if (strcmp(cfg->css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) != 0)
       cJSON_AddStringToObject(root, "css_render_command", cfg->css_render_command);
+   /* Vault custody: default "file" — persist only a non-default selection, under a
+    * nested "vault" object so the key round-trips as vault.custody. */
+   if (cfg->vault_custody[0] && strcmp(cfg->vault_custody, "file") != 0)
+   {
+      cJSON *vault = cJSON_AddObjectToObject(root, "vault");
+      if (vault)
+         cJSON_AddStringToObject(vault, "custody", cfg->vault_custody);
+   }
    if (cfg->kb_evidence_emit_enabled)
       cJSON_AddBoolToObject(root, "kb_evidence_emit_enabled", 1);
    if (cfg->fidelity_check_enabled)

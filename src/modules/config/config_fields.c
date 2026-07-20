@@ -152,6 +152,8 @@ const config_field_t config_fields[] = {
     {"audit_worm_enabled", offsetof(config_t, audit_worm_enabled), sizeof(int), 0, CFG_BOOL},
     {"css_render_command", offsetof(config_t, css_render_command),
      sizeof(((config_t *)0)->css_render_command), 0, CFG_STRING},
+    {"vault.custody", offsetof(config_t, vault_custody), sizeof(((config_t *)0)->vault_custody), 0,
+     CFG_STRING, RELOAD_RESTART, FGROUP_ADVANCED},
     {"kb_evidence_emit_enabled", offsetof(config_t, kb_evidence_emit_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"fidelity_check_enabled", offsetof(config_t, fidelity_check_enabled), sizeof(int), 0,

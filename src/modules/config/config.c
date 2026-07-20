@@ -869,6 +869,8 @@ static void config_set_defaults(config_t *cfg)
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty
                                                    to disable */
+   snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "file"); /* default custody
+                                                                        (self-unsealing) */
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
    cfg->model_meta_refresh_minutes = 60;
@@ -1778,6 +1780,17 @@ int config_load_file(config_t *cfg)
    }
    config_parse_ensemble_section(cfg, root);
    config_parse_roundtable_section(cfg, root);
+   /* Vault custody selection (vault.custody) — P10/P7 slice 3b. Stored verbatim;
+    * validated against the enum + provider-bound at kb startup (kb_vault_policy). */
+   {
+      cJSON *vault_cfg = cJSON_GetObjectItemCaseSensitive(root, "vault");
+      if (cJSON_IsObject(vault_cfg))
+      {
+         cJSON *cust = cJSON_GetObjectItemCaseSensitive(vault_cfg, "custody");
+         if (cJSON_IsString(cust) && cust->valuestring && cust->valuestring[0])
+            snprintf(cfg->vault_custody, sizeof(cfg->vault_custody), "%s", cust->valuestring);
+      }
+   }
    cJSON_Delete(root);
    /* Update mtime cache */
    {

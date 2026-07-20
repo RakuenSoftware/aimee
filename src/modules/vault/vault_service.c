@@ -34,6 +34,8 @@ const char *vault_status_str(vault_status_t s)
       return "io_error";
    case VAULT_ERR_UNSUPPORTED_OP:
       return "unsupported_op";
+   case VAULT_ERR_SEALED:
+      return "sealed";
    }
    return "error";
 }

@@ -27,6 +27,10 @@ typedef enum
    VAULT_ERR_IO,         /* vault file read/write failure */
    VAULT_ERR_UNSUPPORTED_OP, /* op not supported by the active store backend (e.g. the
                                 server-autonomous dual-wrap ops on the kb pg backend) */
+   VAULT_ERR_SEALED,         /* the custody provider is SEALED — the server KEK is
+                                unavailable until an out-of-band unseal (P7 §3). Only an
+                                external-anchor custody returns this; the file provider
+                                (server profile) never seals, so never yields it. */
 } vault_status_t;
 
 /* A short human-readable label for a status (for error responses/logging). */

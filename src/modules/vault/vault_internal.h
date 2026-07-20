@@ -72,6 +72,28 @@ typedef struct
    int (*get_kek)(void *ctx, uint8_t kek[VAULT_KEK_LEN]);
    int (*rotate)(void *ctx, const char *server_principal, int *out_principals, int *out_creds,
                  char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen);
+
+   /* ── Seal barrier (P7 §3; slice 3b) — all OPTIONAL (may be NULL) ─────────────
+    * These model an EXTERNAL-ANCHOR custody that boots SEALED and refuses to yield
+    * a KEK until an out-of-band unseal runs. Seal state lives in the provider's
+    * `ctx` (per-instance), never a shared module global. A NULL slot means "always
+    * unsealed / no-op" — which is exactly the `file` provider: it self-unseals from
+    * its 0600 master-key file, so the SERVER profile never seals and never observes
+    * VAULT_ERR_SEALED. When a provider IS sealed, its get_kek MUST fail (-1); the
+    * kb-facing accessor maps that to VAULT_ERR_SEALED after checking is_sealed().
+    *
+    *   is_sealed(ctx) -> 1 if sealed (get_kek must fail), 0 if unsealed. A NULL
+    *                     slot is treated as 0 (always unsealed).
+    *   unseal(ctx, params, len) -> provider-specific unseal from opaque `params`
+    *                     (the mock: an unseal secret; a real anchor: a workload-
+    *                     identity Decrypt / TPM policy session / PKCS#11 login).
+    *                     Returns 0 on success. NULL slot => no-op success.
+    *   seal(ctx) -> seal + flush the provider's derived/cached KEK (zeroize).
+    *                Returns 0 on success. NULL slot => no-op success. The seam-level
+    *                vault_seal() ALSO flushes the process KEK cache regardless. */
+   int (*is_sealed)(void *ctx);
+   int (*unseal)(void *ctx, const void *params, size_t len);
+   int (*seal)(void *ctx);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────
