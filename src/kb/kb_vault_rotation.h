@@ -12,8 +12,7 @@ enum
    KB_VAULT_ROTATION_COMPLETE = 3
 };
 
-int kb_vault_rotation_classify(uint64_t anchor_version, uint64_t from_version,
-                               uint64_t to_version);
+int kb_vault_rotation_classify(uint64_t anchor_version, uint64_t from_version, uint64_t to_version);
 int kb_vault_rotation_start(const kb_principal_t *caller, int64_t team_id, const char *key_id,
                             const char *principal, const char *agent, const char *cred,
                             int64_t from_version, int compromise, int64_t *out_rotation_id);

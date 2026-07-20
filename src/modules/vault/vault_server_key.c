@@ -538,8 +538,7 @@ int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t 
    pthread_mutex_lock(&g_hwm_mu);
    int rc = (!g_custody->hwm_read || !g_custody->hwm_cas)
                 ? -1
-                : g_custody->hwm_cas(g_custody->ctx, key_id, expected, next, att, att_cap,
-                                     att_len);
+                : g_custody->hwm_cas(g_custody->ctx, key_id, expected, next, att, att_cap, att_len);
    pthread_mutex_unlock(&g_hwm_mu);
    if (rc != 0 || *att_len == 0 || *att_len > att_cap)
    {

@@ -144,11 +144,12 @@ int main(void)
    snprintf(g_row.key_id, sizeof(g_row.key_id), "team:7|bedrock|primary");
    g_anchor = 3;
    int64_t id = 0;
-   assert(kb_vault_rotation_start(&caller, 7, g_row.key_id, "team:7", "bedrock", "primary", 4,
-                                  0, &id) == -1);
+   assert(kb_vault_rotation_start(&caller, 7, g_row.key_id, "team:7", "bedrock", "primary", 4, 0,
+                                  &id) == -1);
    g_anchor = 4;
-   assert(kb_vault_rotation_start(&caller, 7, g_row.key_id, "team:7", "bedrock", "primary", 4,
-                                  0, &id) == 0 && id == 9);
+   assert(kb_vault_rotation_start(&caller, 7, g_row.key_id, "team:7", "bedrock", "primary", 4, 0,
+                                  &id) == 0 &&
+          id == 9);
    const uint8_t b[] = {1, 2, 3};
    assert(kb_vault_rotation_stage(&caller, 7, id, b, sizeof(b), b, sizeof(b), b, sizeof(b), b,
                                   sizeof(b)) == 0);

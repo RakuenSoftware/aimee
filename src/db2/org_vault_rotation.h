@@ -33,8 +33,8 @@ int db2_vault_rotation_stage(const char *actor, int64_t rotation_id, const uint8
                              size_t tag_len, int64_t *out_version);
 int db2_vault_rotation_transition(const char *actor, int64_t rotation_id, const char *expected,
                                   const char *next, const char *error);
-int db2_vault_rotation_finalize(const char *actor, int64_t rotation_id,
-                                const uint8_t *attestation, size_t attestation_len);
+int db2_vault_rotation_finalize(const char *actor, int64_t rotation_id, const uint8_t *attestation,
+                                size_t attestation_len);
 int db2_vault_rotation_get(int64_t rotation_id, db2_vault_rotation_row_t *out);
 
 #endif

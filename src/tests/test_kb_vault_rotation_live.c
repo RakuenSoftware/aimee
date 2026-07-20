@@ -49,8 +49,8 @@ int main(void)
 
    vault_custody_set_provider(vault_custody_kms_provider());
    int64_t rid = 0;
-   assert(kb_vault_rotation_start(&caller, 0, key_id, "org:test:p7-live", "bedrock", "primary",
-                                  1, 0, &rid) == 0);
+   assert(kb_vault_rotation_start(&caller, 0, key_id, "org:test:p7-live", "bedrock", "primary", 1,
+                                  0, &rid) == 0);
    const uint8_t envelope[] = {0x11, 0x22, 0x33};
    assert(kb_vault_rotation_stage(&caller, 0, rid, envelope, sizeof(envelope), envelope,
                                   sizeof(envelope), envelope, sizeof(envelope), envelope,

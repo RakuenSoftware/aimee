@@ -21,11 +21,11 @@ int main(void)
    assert(p->hwm_read(p->ctx, getenv("AIMEE_VAULT_KMS_KEY_ID"), &before, att, sizeof(att), &len) ==
           0);
    assert(before > 0 && len == 64 && before != UINT64_MAX);
-   assert(p->hwm_cas(p->ctx, getenv("AIMEE_VAULT_KMS_KEY_ID"), before, before + 1, att,
-                     sizeof(att), &len) == 0);
+   assert(p->hwm_cas(p->ctx, getenv("AIMEE_VAULT_KMS_KEY_ID"), before, before + 1, att, sizeof(att),
+                     &len) == 0);
    assert(len == 64);
-   assert(p->hwm_cas(p->ctx, getenv("AIMEE_VAULT_KMS_KEY_ID"), before, before + 1, att,
-                     sizeof(att), &len) == -1);
+   assert(p->hwm_cas(p->ctx, getenv("AIMEE_VAULT_KMS_KEY_ID"), before, before + 1, att, sizeof(att),
+                     &len) == -1);
    assert(p->hwm_read(p->ctx, getenv("AIMEE_VAULT_KMS_KEY_ID"), &after, att, sizeof(att), &len) ==
           0);
    assert(after == before + 1);

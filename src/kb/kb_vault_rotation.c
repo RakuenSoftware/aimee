@@ -8,8 +8,7 @@
 #include <openssl/crypto.h>
 #include <string.h>
 
-int kb_vault_rotation_classify(uint64_t anchor_version, uint64_t from_version,
-                               uint64_t to_version)
+int kb_vault_rotation_classify(uint64_t anchor_version, uint64_t from_version, uint64_t to_version)
 {
    if (from_version == 0 || from_version == UINT64_MAX || to_version != from_version + 1)
       return -1;
@@ -115,8 +114,8 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
       OPENSSL_cleanse(att, sizeof(att));
       return -1;
    }
-   int action = kb_vault_rotation_classify(anchor, (uint64_t)row.from_version,
-                                           (uint64_t)row.to_version);
+   int action =
+       kb_vault_rotation_classify(anchor, (uint64_t)row.from_version, (uint64_t)row.to_version);
    if (action == KB_VAULT_ROTATION_RETRY_CAS)
    {
       OPENSSL_cleanse(att, sizeof(att));

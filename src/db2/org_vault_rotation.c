@@ -24,14 +24,15 @@ int db2_vault_rotation_start(const char *actor, const char *key_id, const char *
                              int has_team, int64_t team_id, const char *agent, const char *cred,
                              int64_t from_version, int compromise, int64_t *out_id)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || !key_id || !key_id[0] ||
-       !principal || !principal[0] || !agent || !cred || from_version < 1 ||
-       from_version == INT64_MAX)
+   if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || !key_id || !key_id[0] || !principal ||
+       !principal[0] || !agent || !cred || from_version < 1 || from_version == INT64_MAX)
       return -1;
    void *conn = db2_conn();
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(
-       conn, "SELECT org_vault_rotation_start(?1,?2,?3,?4,?5,?6,?7,?8)", err, sizeof(err)) : NULL;
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_start(?1,?2,?3,?4,?5,?6,?7,?8)",
+                               err, sizeof(err))
+            : NULL;
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -63,8 +64,10 @@ int db2_vault_rotation_stage(const char *actor, int64_t rotation_id, const uint8
       return -1;
    void *conn = db2_conn();
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(
-       conn, "SELECT org_vault_rotation_stage(?1,?2,?3,?4,?5,?6)", err, sizeof(err)) : NULL;
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_stage(?1,?2,?3,?4,?5,?6)", err,
+                               sizeof(err))
+            : NULL;
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -88,8 +91,10 @@ int db2_vault_rotation_transition(const char *actor, int64_t rotation_id, const 
       return -1;
    void *conn = db2_conn();
    char errbuf[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(
-       conn, "SELECT org_vault_rotation_transition(?1,?2,?3,?4,?5)", errbuf, sizeof(errbuf)) : NULL;
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_transition(?1,?2,?3,?4,?5)", errbuf,
+                               sizeof(errbuf))
+            : NULL;
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -102,16 +107,18 @@ int db2_vault_rotation_transition(const char *actor, int64_t rotation_id, const 
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_finalize(const char *actor, int64_t rotation_id,
-                                const uint8_t *attestation, size_t attestation_len)
+int db2_vault_rotation_finalize(const char *actor, int64_t rotation_id, const uint8_t *attestation,
+                                size_t attestation_len)
 {
    if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 ||
        !valid_blob(attestation, attestation_len))
       return -1;
    void *conn = db2_conn();
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(
-       conn, "SELECT org_vault_rotation_finalize(?1,?2,?3)", err, sizeof(err)) : NULL;
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_finalize(?1,?2,?3)", err,
+                               sizeof(err))
+            : NULL;
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -129,8 +136,9 @@ int db2_vault_rotation_get(int64_t rotation_id, db2_vault_rotation_row_t *out)
    memset(out, 0, sizeof(*out));
    void *conn = db2_conn();
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(
-       conn, "SELECT * FROM org_vault_rotation_get(?1)", err, sizeof(err)) : NULL;
+   aimee_pg_stmt_t *st =
+       conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_get(?1)", err, sizeof(err))
+            : NULL;
    if (!st)
       return -1;
    aimee_pg_bind_int64(st, "?1", rotation_id);
