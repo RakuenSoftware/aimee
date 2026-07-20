@@ -6,10 +6,35 @@
 - **Scope:** source ownership, dependency direction, build composition, optional-module
   configuration, and a substantial internal simplification. Public contracts remain compatible
   unless separately approved, but internal APIs and implementations are expected to be refactored,
-  consolidated, and deleted aggressively.
-- **Related:** `ir-sole-path-and-pluggable-stages.md` owns the live IR-path conversion and IR-stage
-  semantics. This proposal owns the larger source-tree boundary and makes that registry one of the
-  core extension surfaces rather than defining a competing stage system.
+  consolidated, and deleted aggressively. Scope also includes the normative schemas, descriptors,
+  generated builds, evidence records, recovery contract, and executable acceptance checks defined
+  below.
+- **Related (`ir-path`):** [`ir-sole-path-and-pluggable-stages.md`](ir-sole-path-and-pluggable-stages.md)
+  owns the live IR-path conversion and IR-stage semantics. This proposal owns the larger source-tree
+  boundary and makes that registry one of the core extension surfaces rather than defining a
+  competing stage system.
+
+## Contents
+
+1. [Thesis](#thesis), [current evidence](#current-state-and-evidence), and
+   [terminology](#terminology-core-module-optional-module-plugin)
+2. [Target tree](#target-source-tree) and [cleanup principles](#cleanup-principles-less-is-more)
+3. [Core contracts](#core-contracts) and [dependency law](#dependency-law)
+4. [Module descriptors](#module-descriptor-and-build-composition) and
+   [module documentation](#module-documentation-contract)
+5. [Feature-liveness audit](#feature-liveness-audit-find-code-that-is-alive-only-to-itself),
+   [cluster evidence rules](#cluster-evidence-rules), and [initial ownership](#initial-ownership-map)
+6. [Implementation slices](#slices) and [normative implementation contracts](#normative-implementation-contracts)
+7. [Move discipline](#move-discipline), [risks](#risks-and-mitigations), and
+   [binding acceptance checks](#acceptance)
+
+## How to read this proposal
+
+The thesis, evidence, tree illustration, cleanup principles, and risks explain intent. Statements
+using **must**, **may not**, **required**, **forbidden**, or **Gate** are normative. The descriptor
+schemas, algorithms, commands, thresholds, and acceptance YAML are binding implementation
+contracts. When explanatory prose conflicts with a normative contract, the normative contract
+controls.
 
 ## Thesis
 
@@ -31,8 +56,10 @@ Everything else is a module built on that substrate. A module may ship with Aime
 default, but that does not make it part of the core. Delegates, workflows, roundtables, guardrails,
 governance, git/forge integration, CSS analysis, sandboxes, dashboards, web-user runtime, skills,
 roadmaps, evals, economization, synthesis, and particular delivery channels must be independently
-configurable and removable wherever their dependencies permit. Synthesis may enrich or compose an
-answer from recalled material, but memory storage and ranked recall must work without it.
+configurable and removable wherever their dependencies permit.
+
+Synthesis may enrich or compose an answer from recalled material. Memory storage and ranked recall
+must work without synthesis.
 
 The architectural rule is:
 
@@ -94,6 +121,9 @@ seams.
 
 ## Target source tree
 
+This illustration uses the descriptor component vocabulary defined in
+[Module descriptor and build composition](#module-descriptor-and-build-composition).
+
 ```text
 src/
   app/
@@ -105,9 +135,9 @@ src/
   modules/
     memory/              # REQUIRED: all memory, including code intelligence
       code/              # symbols, extractors, graph, architecture, blast radius
-      inference/
-        embedding/       # REQUIRED: vectorization contract and working implementation
-        reranking/       # REQUIRED: relevance scoring contract and working implementation
+      inference/          # REQUIRED components: memory.embedding, memory.reranking
+        embedding/       # vectorization contract and working implementation
+        reranking/       # relevance-scoring contract and working implementation
       personal/          # DB1-backed personal/session/working memory adapters
       shared/            # DB2-backed corpus/team memory adapters
       storage/           # persistence contracts and concrete backends
@@ -150,8 +180,10 @@ boundary already exists. The invariants matter more than the illustration:
 
 ## Cleanup principles: less is more
 
-Modularization is the forcing function for a significant refactor. Every migrated family must be
-made smaller and clearer where evidence supports it:
+These principles explain the cleanup strategy. Their executable form lives in the
+[normative implementation contracts](#normative-implementation-contracts), Slice gates, and
+[acceptance checks](#acceptance). Every migrated family must be made smaller and clearer where
+evidence supports it:
 
 - **One path:** choose one canonical implementation, migrate callers, then delete the fallback,
   shadow copy, compatibility mapper, and duplicate data model when its evidence gate is satisfied.
@@ -173,9 +205,6 @@ made smaller and clearer where evidence supports it:
   exempt from the two-consumer rule. Additions to those contracts after Slice 1 require two real
   consumers. If both consumers of any other new abstraction are later deleted, the same slice must
   re-evaluate and normally delete that abstraction.
-- **Measure deletion:** every slice carries a deletion/consolidation ledger and reports production
-  files, lines, duplicate paths, feature flags, and registries removed or added. Tests and generated
-  outputs are reported separately so they cannot disguise production growth.
 
 Significant internal refactoring is explicitly in scope. Compatibility is required at Aimee's
 public boundaries—CLI, HTTP/RPC, IR contract, persisted data, config, and supported plugin ABI—not
@@ -185,8 +214,8 @@ for private functions, internal headers, historical source paths, or redundant i
 
 ### Memory is one core capability with multiple modalities
 
-The memory module owns the common identity, scope, provenance, relation, retrieval, lifecycle,
-confidence, and recall contracts for:
+**Requirement.** The memory module owns the common identity, scope, provenance, relation,
+retrieval, lifecycle, confidence, and recall contracts for:
 
 - semantic memory: facts, preferences, decisions, lessons, directives;
 - episodic memory: sessions, attempts, actions, outcomes, and history;
@@ -235,8 +264,9 @@ does not create a separate non-memory ontology.
 
 ### Routing
 
-Routing owns typed selection and dispatch policy. The app supplies memory-derived context as typed
-IR/routing input; routing does not import memory implementation headers or call memory retrieval.
+**Requirement.** Routing owns typed selection and dispatch policy. The app supplies memory-derived
+context as typed IR/routing input; routing does not import memory implementation headers or call
+memory retrieval.
 It also does not import delegate, workflow, roundtable, or provider implementation headers.
 Optional modules register routable capabilities. Removing one shrinks the catalog without changing
 routing core. Embedding/reranking implementation choice is not general request routing; it remains
@@ -244,15 +274,16 @@ inside the memory provider registry described above.
 
 ### IR messaging
 
-IR owns canonical requests, responses, tool calls/results, events, attachments, errors, and stream
-deltas plus their allocation and ownership rules. Optional stages operate on IR contracts. No
-optional module owns a second message representation that the core must understand.
+**Requirement.** IR owns canonical requests, responses, tool calls/results, events, attachments,
+errors, and stream deltas plus their allocation and ownership rules. Optional stages operate on IR
+contracts. No optional module owns a second message representation that the core must understand.
 
 ### Translation
 
-Translation core owns the adapter ABI, registry, validation, and IR boundary rules. Concrete wire
-and provider adapters may be separately selectable, but every adapter translates through the same
-IR. Same-protocol raw bypasses are retired by the related IR-sole-path proposal.
+**Requirement.** Translation core owns the adapter ABI, registry, validation, and IR boundary
+rules. Concrete wire and provider adapters may be separately selectable, but every adapter
+translates through the same IR. Same-protocol raw bypasses are retired by the related `ir-path`
+proposal.
 
 ## Dependency law
 
@@ -284,7 +315,10 @@ More precisely:
    optional symbols, or branch on an optional module's concrete type.
 5. Apps select modules and wire registries. They contain no business logic beyond startup,
    shutdown, dispatch, and transport lifecycle.
-6. Cross-module calls use public headers. Including another module's private/internal header is a
+6. Cross-module public headers may use opaque pointers and forward declarations of another
+   module's public types without importing the definition. Any use that requires the definition—
+   including member access, by-value parameters, `sizeof`, or inline function bodies—creates a real
+   edge that must appear in `depends_on`. Including another module's private/internal header is a
    build failure.
 
 There are no core-to-optional compile/link exceptions. The following necessary interactions are
@@ -314,35 +348,40 @@ orchestration belongs in the app composition root.
 Each `src/modules/<name>/` gains one machine-readable descriptor. The descriptor set is the single
 source of truth. One Slice 0B generator validates it and emits checked-in, deterministically sorted
 Make and CMake fragments; neither build system independently discovers module sources. Descriptor
-globs are expanded by the generator relative to the descriptor directory, sorted bytewise, and
-written as exact paths. Generated-source producers and link-order groups are explicit descriptor
-fields. CI regenerates both fragments and fails on any diff, then compares the selected source and
-link sets for every profile.
+source paths are explicit—globs are invalid—and sorted bytewise by the generator. Generated-source
+producers and link-order groups are explicit descriptor fields. CI regenerates both fragments and
+fails on any diff, then compares the selected source and link sets for every profile.
 
 The v1 descriptor contains at least:
 
 ```json
 {
+  "schema_version": 1,
   "name": "roundtable",
   "class": "optional",
   "default_enabled": true,
   "build_selectable": true,
   "runtime_toggle": false,
-  "unavailable_reason": "legacy startup wiring; removed in Slice 6.roundtable",
+  "unavailable_reason": null,
   "depends_on": ["ir", "routing", "delegates"],
   "required_components": [],
-  "registers": ["ir_stage", "command", "service_handler"],
-  "sources": ["*.c"],
+  "registers": [
+    {"kind": "ir_stage", "id": "roundtable.review"},
+    {"kind": "command", "id": "roundtable.run"},
+    {"kind": "service_handler", "id": "roundtable.execute"}
+  ],
+  "sources": ["src/modules/roundtable/roundtable.c"],
   "generated_sources": [],
   "link_groups": [],
-  "public_include": "include",
-  "documentation": "README.md",
-  "liveness_manifest": "liveness.yaml"
+  "public_include": ["src/modules/roundtable/include/aimee/roundtable/roundtable.h"],
+  "documentation": "docs/modules/roundtable.md",
+  "liveness_manifest": "docs/audit/clusters/roundtable.yaml"
 }
 ```
 
 Core descriptors use `"class": "core"`, set `build_selectable` and `runtime_toggle` false, and
-cannot be disabled. Memory declares `required_components: ["embedding", "reranking"]`; profile
+cannot be disabled. Memory declares
+`required_components: ["memory.embedding", "memory.reranking"]`; profile
 resolution fails if either component has no selected implementation. `registers` names only typed
 registries from the approved registry vocabulary, not arbitrary initialization callbacks.
 `default_enabled` controls default profile selection only; it does not imply runtime toggleability.
@@ -463,17 +502,17 @@ For each feature cluster, record:
 | Cost | What production LOC, dependencies, schema, configuration, startup work, and test burden does it add? |
 | Core fit | Is it part of memory/routing/IR/translation, an optional capability, or neither? |
 
-Classify every cluster:
+Classify every cluster using these stable identifiers:
 
-1. **core-live** — required by a core round trip and owned by one of the four core modules;
-2. **optional-live** — demonstrably used through a supported workflow, but removable from core;
-3. **exposed-unproven** — reachable as a command/route/flag but with no external consumer or
+1. **`core-live`** — required by a core round trip and owned by one of the four core modules;
+2. **`optional-live`** — demonstrably used through a supported workflow, but removable from core;
+3. **`exposed-unproven`** — reachable as a command/route/flag but with no external consumer or
    end-to-end workflow evidence;
-4. **self-contained island** — implementation, tests, data, and registration refer primarily to
+4. **`self-contained-island`** — implementation, tests, data, and registration refer primarily to
    one another and no meaningful non-self consumer exists;
-5. **duplicate/legacy** — a second path, fallback, superseded experiment, or compatibility layer
+5. **`duplicate-legacy`** — a second path, fallback, superseded experiment, or compatibility layer
    whose replacement is live;
-6. **unknown** — insufficient evidence; assigned an owner and a time-bounded investigation rather
+6. **`unknown`** — insufficient evidence; assigned an owner and a time-bounded investigation rather
    than silently retained.
 
 The audit produces both a human-readable report and a machine-readable manifest containing the
@@ -488,9 +527,9 @@ Disposition follows evidence:
 - `optional-live`: simplify, migrate, and add a real disable/absence test;
 - `exposed-unproven`: instrument locally, exercise deliberately, then either document a supported
   workflow or deprecate/delete it;
-- `self-contained island`: delete implementation, tests, config, schema, routes, docs, and build
+- `self-contained-island`: delete implementation, tests, config, schema, routes, docs, and build
   entries together unless a concrete consumer is identified;
-- `duplicate/legacy`: migrate remaining callers to the authoritative path and delete it behind the
+- `duplicate-legacy`: migrate remaining callers to the authoritative path and delete it behind the
   applicable parity/deprecation gate;
 - `unknown`: do not modularize yet; resolve the evidence question first.
 
@@ -504,7 +543,7 @@ traces, CI integration journeys, benchmarks/evals, and project dogfood. Lack of 
 is not alone proof of death, but lack of execution **plus** no non-self consumer, no coherent
 supported journey, and a duplicate or isolated data flow is strong deletion evidence.
 
-### Cluster definition, evidence, and deadlines
+## Cluster evidence rules
 
 The initial cluster map is not inferred circularly from the graph it is meant to judge. It starts
 from existing `src/modules/<name>/` ownership plus the complete Initial ownership map below. Every
@@ -519,19 +558,23 @@ journey is a versioned manifest entry with an entry command/route, ordered obser
 expected data/output, and an integration/eval/dogfood test ID that exercises it. A dashboard card,
 help entry, unit test, or route alone cannot be that journey.
 
-Evidence sources are named and reproducible: the default personal-memory, shared-KB, code-memory,
-provider, delegate, workflow, and web integration journeys; the memory/retrieval and code-graph
-evals; and local opt-in dogfood traces stored as redacted structural event manifests. Dogfood alone
-cannot promote a cluster to `optional-live`; it needs a non-self static/data consumer or a checked
-supported journey. Classification or override approval requires a reviewer outside the cluster's
-owner, with evidence links in the manifest. Challenges and later-reported missed consumers reopen
-the disposition; any reintroduction PR includes an audit-gap postmortem and updates the detection
-rule or journey inventory that missed it.
+Evidence sources must be named and reproducible:
+
+- default personal-memory, shared-KB, code-memory, provider, delegate, workflow, and web integration
+  journeys;
+- memory/retrieval and code-graph evaluations; and
+- local opt-in dogfood traces stored as redacted structural event manifests.
+
+Dogfood alone cannot promote a cluster to `optional-live`; it needs a non-self static/data consumer
+or a checked supported journey. Classification or override approval requires a reviewer outside the
+cluster's owner, with evidence links in the manifest. Challenges and later-reported missed
+consumers reopen the disposition. Any reintroduction PR includes an audit-gap postmortem and updates
+the detection rule or journey inventory that missed it.
 
 `unknown` has a 30-day resolution deadline; `exposed-unproven` has a 90-day deadline. On expiry CI
 fails until the cluster is promoted with evidence or receives an approved deletion/deprecation
 record. Neither classification may be migrated into a permanent module. `core fit: neither`
-defaults to `self-contained island` unless supported-journey evidence promotes it to
+defaults to `self-contained-island` unless supported-journey evidence promotes it to
 `optional-live`. The machine manifest stores `owner`, `classified_at`, `disposition_deadline`,
 `reviewer`, and any signed override; overrides cannot be approved by the owning module alone.
 
@@ -641,10 +684,10 @@ against which compatibility and simplification can be measured.
 - Cross-check every proposed deletion against the four core descriptors' `required_components`
   and a provisional core-round-trip stage inventory; an intersection blocks deletion pending an
   architecture decision.
-- Delete clear self-contained islands as complete units: implementation, self-tests, config,
+- Delete clear `self-contained-island` clusters as complete units: implementation, self-tests, config,
   schema/migrations where safely removable, routes/commands, documentation, generated entries,
   and build ownership.
-- For duplicate/legacy paths, prove the surviving implementation satisfies the recorded public
+- For `duplicate-legacy` paths, prove the surviving implementation satisfies the recorded public
   fixtures, migrate remaining non-self callers, and delete the duplicate rather than wrapping it
   behind the new module boundary.
 - For public surfaces requiring a deprecation window, retain only a thin compatibility adapter,
@@ -690,15 +733,14 @@ advance; and the production cleanup ledger demonstrates a net reduction in the a
 - Consolidate duplicate core types/helpers and delete superseded internal representations as their
   callers move; do not reproduce old library buckets inside the new directories.
 
-**Gate:** the exact Make targets `aimee-core-objects`, `aimee-core`, `aimee-core-profile`, and
+**Gate:** the exact Make targets `aimee-core-objects`, `aimee-core-core`, `aimee-core-profile`, and
 `aimee-core-test` and CMake targets `aimee_mod_memory`, `aimee_mod_routing`, `aimee_mod_ir`,
 `aimee_mod_translation`, `aimee_core_core`, `aimee-core-profile`, and `aimee-core-test` build with
-no optional-module object or header dependency,
-and `tests/core_round_trip/core_round_trip.json` passes through the canonical
+no optional-module object or header dependency. The fixture
+`tests/core_round_trip/core_round_trip.json` passes through the canonical
 `scripts/test_core_round_trip.sh`. The test builds only the four core descriptors plus
-`app/core-smoke`, injects the non-production fixture providers specified below, asserts with the
-link map/symbol ownership manifest that no optional
-object/header/symbol
+`app/core-smoke`, injects the non-production fixture providers specified below, and uses the link
+map/symbol ownership manifest to assert that no optional object, header, or symbol
 is present, starts with the SQLite reference storage adapter, and reports provider contract
 identities. A separate production-provider readiness test exercises the compiled `aimee-llm`
 embedding/reranking adapters in the external-service CI tier; production startup cannot substitute
@@ -921,7 +963,7 @@ decision, complete touch set, compatibility-record references, rollback owner, `
 deadline. One aggregate approval cannot cover multiple cluster IDs.
 
 Slice 0A also checks in six schema-valid, non-production examples under
-`docs/audit/examples/{core-required,optional-live,exposed-unproven,self-contained-island,duplicate-legacy,unknown}.yaml`.
+`docs/audit/examples/{core-live,optional-live,exposed-unproven,self-contained-island,duplicate-legacy,unknown}.yaml`.
 They demonstrate the required evidence, independent attestation, touch set, compatibility choice,
 and deadline for every classification; the audit test suite validates them as contract fixtures.
 
@@ -965,10 +1007,11 @@ CMake after a topological sort of `after`; a cycle is invalid.
 The normative generated core shape is therefore:
 
 ```make
-.PHONY: aimee-core-objects aimee-core-profile aimee-core-test
+.PHONY: aimee-core-objects aimee-core-core aimee-core-profile aimee-core-test
 aimee-core-objects: $(AIMEE_CORE_OBJECTS)
 build/make/core/libaimee_core.a: aimee-core-objects
 \t$(AR) rcsD $@ $(AIMEE_CORE_LINK_INPUTS)
+aimee-core-core: build/make/core/libaimee_core.a
 aimee-core-profile: build/make/core/aimee-core-profile
 aimee-core-test: aimee-core-profile
 \tscripts/test_core_round_trip.sh --profile core --binary build/make/core/aimee-core-profile --fixture tests/core_round_trip/core_round_trip.json
@@ -1018,6 +1061,21 @@ candidate order `[m1,m2,m3]`, and reranked order `[m3,m1,m2]`; thus `m3` must mo
 rank 1, identity reranking fails, and NDCG@3 must be at least `0.95`. A constant embedder fails both
 distance predicates.
 
+#### Threshold registry
+
+These values are shared by the fixture, its schema, the liveness audit, recovery policy, and the
+acceptance commands. Changing one requires architecture review, updates to every named consumer,
+and a compatibility record when shipped behavior is affected.
+
+| Name | Value | Consumers |
+|---|---:|---|
+| `min_pairwise_l2` | `1e-6` | core-round-trip fixture and acceptance 7 |
+| `min_relevance_cosine_margin` | `0.10` | core-round-trip fixture and acceptance 7 |
+| `min_ndcg_at_3` | `0.95` | core-round-trip fixture and acceptance 7 |
+| `unknown_deadline_days` | `30` | cluster evidence rules and acceptance 8 |
+| `exposed_unproven_deadline_days` | `90` | cluster evidence rules and acceptance 8 |
+| `compatibility_retention` | longer of two stable releases or 180 days | recovery contract and acceptance 11 |
+
 The harness records and asserts named registry traversal:
 `memory.storage/sqlite-reference.write`, `memory.embedding/selected.embed`,
 `memory.storage/sqlite-reference.candidates`, `memory.reranking/selected.rerank`,
@@ -1035,8 +1093,8 @@ in `build/core/core-round-trip-trace.json` with the expected input/output ID; a 
 
 ### Dependency graph algorithm and cycle policy
 
-Public headers are exactly regular files matching
-`^src/modules/([^/]+)/include/aimee/\1/.+\\.h$`; all other module headers are private. A public
+A public header is a regular file whose path matches
+`^src/modules/([^/]+)/include/aimee/\1/.+\\.h$`. All other module headers are private. A public
 header may include another module's public header only when `depends_on` declares that module. It
 may not include another module's private header. Cross-core value-type references are allowed, but
 the complete transitive public-include/type graph must be acyclic; optional modules may depend on
@@ -1207,6 +1265,11 @@ refactor reviewable without reducing it to a directory shuffle:
 
 ## Acceptance
 
+The prose below is a human-readable outcome summary. The YAML checks are the binding acceptance
+contract; if a summary conflicts with a `check` string, the `check` string controls.
+
+### Outcome summary
+
 - The repository and architecture documentation define Aimee Core as memory (including code
   intelligence, embedding, and reranking), routing, IR messaging, and translation. Synthesis is an
   optional module over recalled memory.
@@ -1236,6 +1299,8 @@ refactor reviewable without reducing it to a directory shuffle:
 - Each slice reports its production cleanup ledger; duplicate paths, registries, fallbacks,
   internal representations, and pass-through layers trend downward, and any net production growth
   is explicitly justified.
+
+### Binding checks
 
 ```yaml acceptance
 - {id: 1, tier: mechanical, check: "scripts/check_module_deps.sh --catalog src/modules --ownership tests/baselines/modules/dependency-ownership.json --include-graph --public-symbol-graph --link-graph --no-cycles --no-core-to-optional --no-private-cross-imports --file-line-evidence"}
