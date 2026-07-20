@@ -3233,8 +3233,7 @@ BEGIN
        (r.principal<>p_principal OR r.team_id IS DISTINCT FROM p_team_id OR
         r.agent<>COALESCE(p_agent,'') OR r.cred<>COALESCE(p_cred,''))) OR
      EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
-       r.team_id IS NOT DISTINCT FROM p_team_id AND r.agent=COALESCE(p_agent,'') AND
-       r.cred=COALESCE(p_cred,'') AND r.key_id<>p_key_id) THEN
+       r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND r.key_id<>p_key_id) THEN
     RAISE EXCEPTION 'org_vault_key_use_candidate: unstable key binding' USING ERRCODE='40001';
   END IF;
   RETURN QUERY SELECT s.wrapped_dek,s.nonce,s.ciphertext,s.tag,s.hwm_attestation
@@ -3296,8 +3295,7 @@ BEGIN
        (r.principal<>p_principal OR r.team_id IS DISTINCT FROM p_team_id OR
         r.agent<>COALESCE(p_agent,'') OR r.cred<>COALESCE(p_cred,''))) OR
      EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
-       r.team_id IS NOT DISTINCT FROM p_team_id AND r.agent=COALESCE(p_agent,'') AND
-       r.cred=COALESCE(p_cred,'') AND r.key_id<>p_key_id) THEN
+       r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND r.key_id<>p_key_id) THEN
     RAISE EXCEPTION 'org_vault_key_use_admit: unstable key binding' USING ERRCODE='40001';
   END IF;
   SELECT s.* INTO e FROM org_vault_current c JOIN org_vault_secret s ON

@@ -113,7 +113,7 @@ END $$;
 -- Defense in depth: key use independently rejects a slot with history under a
 -- second key_id even if a repair/import bypassed rotation_start's writer check.
 INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,state)
-VALUES('conflicting-key','team:970711:provider:bedrock',970711,'bedrock','primary',2,3,'retired');
+VALUES('conflicting-key','team:970711:provider:bedrock',970712,'bedrock','primary',2,3,'retired');
 SET ROLE aimee_kb_runtime;
 SELECT set_tenant_context('oidc:test:p7usea',970711);
 DO $$
