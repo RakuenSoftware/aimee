@@ -419,6 +419,7 @@ static struct
    int rotate_calls;
    int hwm_read_calls;
    int hwm_cas_calls;
+   int hwm_verify_calls;
    uint64_t hwm_version;
 } g_custody_mock;
 
@@ -473,6 +474,17 @@ static int cm_hwm_cas(void *ctx, const char *key_id, uint64_t expected, uint64_t
    return 0;
 }
 
+static int cm_hwm_verify(void *ctx, const char *key_id, uint64_t version, const uint8_t *att,
+                         size_t att_len)
+{
+   g_custody_mock.seen_ctx = ctx;
+   g_custody_mock.hwm_verify_calls++;
+   return key_id && strcmp(key_id, "team:7|bedrock|primary") == 0 &&
+                  version == g_custody_mock.hwm_version && att && att_len == 8
+              ? 0
+              : -1;
+}
+
 static void test_custody_facade_dispatches_through_provider(void)
 {
    memset(&g_custody_mock, 0, sizeof(g_custody_mock));
@@ -484,6 +496,7 @@ static void test_custody_facade_dispatches_through_provider(void)
        .rotate = cm_rotate,
        .hwm_read = cm_hwm_read,
        .hwm_cas = cm_hwm_cas,
+       .hwm_verify = cm_hwm_verify,
    };
    vault_custody_set_provider(&mock);
 
@@ -508,6 +521,9 @@ static void test_custody_facade_dispatches_through_provider(void)
    assert(version == 4 && att_len == 8 && att[0] == 0xa5);
    assert(vault_hwm_cas("team:7|bedrock|primary", 4, 5, att, sizeof(att), &att_len) == 0);
    assert(g_custody_mock.hwm_version == 5 && att_len == 8 && att[0] == 0x5a);
+   assert(vault_hwm_verify("team:7|bedrock|primary", 5, att, att_len) == 0);
+   assert(g_custody_mock.hwm_verify_calls == 1);
+   assert(vault_hwm_verify("team:7|bedrock|primary", 4, att, att_len) == -1);
    memset(att, 0xcc, sizeof(att));
    att_len = 9;
    assert(vault_hwm_cas("team:7|bedrock|primary", UINT64_MAX, 0, att, sizeof(att), &att_len) == -1);

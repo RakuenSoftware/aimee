@@ -451,14 +451,20 @@ static const vault_custody_provider_t file_custody = {
 
 static const vault_custody_provider_t *g_custody = &file_custody;
 static pthread_mutex_t g_hwm_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_rwlock_t g_use_lock = PTHREAD_RWLOCK_INITIALIZER;
+static uint64_t g_use_epoch = 1;
 
 /* Rebind the active custody provider (P7 profile composition / tests). NULL
  * restores the built-in file provider. See vault_internal.h. */
 void vault_custody_set_provider(const vault_custody_provider_t *provider)
 {
+   pthread_rwlock_wrlock(&g_use_lock);
    pthread_mutex_lock(&g_hwm_mu);
    g_custody = provider ? provider : &file_custody;
    pthread_mutex_unlock(&g_hwm_mu);
+   if (g_use_epoch != UINT64_MAX)
+      g_use_epoch++;
+   pthread_rwlock_unlock(&g_use_lock);
 }
 
 int vault_server_kek(uint8_t kek[VAULT_KEK_LEN])
@@ -484,15 +490,50 @@ int vault_is_sealed(void)
 
 int vault_unseal(const void *params, size_t len)
 {
-   return g_custody->unseal ? g_custody->unseal(g_custody->ctx, params, len) : 0;
+   pthread_rwlock_wrlock(&g_use_lock);
+   int rc = g_custody->unseal ? g_custody->unseal(g_custody->ctx, params, len) : 0;
+   pthread_rwlock_unlock(&g_use_lock);
+   return rc;
 }
 
 int vault_seal(void)
 {
+   pthread_rwlock_wrlock(&g_use_lock);
+   if (g_use_epoch != UINT64_MAX)
+      g_use_epoch++;
    /* Flush the process-wide KEK cache FIRST so no cached KEK can survive the seal,
     * even if the provider has no seal slot (P7 §3 "sealing flushes the KEK cache"). */
    vault_kek_cache_clear();
-   return g_custody->seal ? g_custody->seal(g_custody->ctx) : 0;
+   int rc = g_custody->seal ? g_custody->seal(g_custody->ctx) : 0;
+   pthread_rwlock_unlock(&g_use_lock);
+   return rc;
+}
+
+uint64_t vault_use_epoch_snapshot(void)
+{
+   pthread_rwlock_rdlock(&g_use_lock);
+   uint64_t epoch = g_use_epoch;
+   pthread_rwlock_unlock(&g_use_lock);
+   return epoch;
+}
+
+int vault_use_begin(uint64_t expected_epoch, uint8_t kek[VAULT_KEK_LEN])
+{
+   if (!expected_epoch || expected_epoch == UINT64_MAX || !kek ||
+       pthread_rwlock_rdlock(&g_use_lock) != 0)
+      return -1;
+   if (g_use_epoch != expected_epoch || vault_is_sealed() || vault_server_kek(kek) != 0)
+   {
+      OPENSSL_cleanse(kek, VAULT_KEK_LEN);
+      pthread_rwlock_unlock(&g_use_lock);
+      return -1;
+   }
+   return 0;
+}
+
+void vault_use_end(void)
+{
+   pthread_rwlock_unlock(&g_use_lock);
 }
 
 int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
@@ -547,4 +588,16 @@ int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t 
       return -1;
    }
    return 0;
+}
+
+int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, size_t att_len)
+{
+   if (!key_id || !key_id[0] || !version || !att || !att_len)
+      return -1;
+   pthread_mutex_lock(&g_hwm_mu);
+   int rc = (!g_custody->hwm_read || !g_custody->hwm_cas || !g_custody->hwm_verify)
+                ? -1
+                : g_custody->hwm_verify(g_custody->ctx, key_id, version, att, att_len);
+   pthread_mutex_unlock(&g_hwm_mu);
+   return rc == 0 ? 0 : -1;
 }

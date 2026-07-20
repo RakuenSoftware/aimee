@@ -2,7 +2,7 @@
  * slice 2). Implements vault_store_backend_t over DB2 (db2_conn() + aimee_pg_*),
  * with the SAME envelope crypto as the jsonfile backend (vault_crypto): a fresh
  * random DEK per credential, AES-KW-wrapped under the caller-supplied KEK, the
- * secret AES-256-GCM'd under the DEK with AAD = "principal|agent|cred|version".
+ * secret AES-256-GCM'd under the DEK with canonical versioned slot AAD.
  * Persists ONLY ciphertext — never the KEK, DEK, or plaintext. See vault_pg.h.
  *
  * Reads/writes go through the SECURITY DEFINER vault functions in db2/schema.sql
@@ -27,8 +27,8 @@
 
 #define VP_ERR        256
 #define VP_SECRET_MAX 4096 /* max credential plaintext length (matches jsonfile) */
-#define VP_AAD_MAX    384  /* "principal|agent|cred|version" */
-#define VP_MAX_SLOTS  512  /* per-principal slot cap for list/rekey iteration */
+#define VP_AAD_MAX    VAULT_ENVELOPE_AAD_MAX
+#define VP_MAX_SLOTS  512 /* per-principal slot cap for list/rekey iteration */
 
 /* A fixed 32-byte sentinel AES-KW-wrapped under the KEK is the org vault's key-check
  * verifier (one per principal, in org_vault_salt.kek_check): AES-KW unwrap fails the
@@ -61,14 +61,6 @@ static int principal_team_id(const char *principal, int64_t *team)
       return 0;
    *team = (int64_t)v;
    return 1;
-}
-
-/* Build the AEAD AAD "principal|agent|cred|version" into out; returns its length or -1. */
-static int build_aad(const char *principal, const char *agent, const char *cred, int64_t version,
-                     char *out, size_t cap)
-{
-   int n = snprintf(out, cap, "%s|%s|%s|%lld", principal, agent, cred, (long long)version);
-   return (n < 0 || (size_t)n >= cap) ? -1 : n;
 }
 
 /* Run a scalar-BIGINT-returning definer function taking (p1[,p2,p3]) TEXT args.
@@ -297,16 +289,17 @@ static int vault_pg_set(void *ctx, const char *principal, const uint8_t kek[VAUL
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN];
-   char aad[VP_AAD_MAX];
+   uint8_t aad[VP_AAD_MAX];
+   size_t aad_len = 0;
    uint8_t *ct = malloc(pt_len ? pt_len : 1);
    if (!ct)
       goto out;
-   if (build_aad(principal, agent, cred, version, aad, sizeof(aad)) < 0)
+   if (vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
       goto out;
    if (vault_crypto_random(dek, sizeof(dek)) != 0)
       goto out;
-   if (vault_secret_encrypt(dek, (const uint8_t *)aad, strlen(aad), (const uint8_t *)secret, pt_len,
-                            nonce, ct, tag) != 0)
+   if (vault_secret_encrypt(dek, aad, aad_len, (const uint8_t *)secret, pt_len, nonce, ct, tag) !=
+       0)
       goto out;
    if (vault_dek_wrap(kek, dek, wrapped) != 0)
       goto out;
@@ -418,12 +411,17 @@ static int vault_pg_get(void *ctx, const char *principal, const uint8_t kek[VAUL
       pt = malloc(pt_alloc);
       if (!pt)
          goto out;
-      char aad[VP_AAD_MAX];
-      if (build_aad(principal, agent, cred, version, aad, sizeof(aad)) < 0)
+      uint8_t aad[VP_AAD_MAX];
+      size_t aad_len = 0;
+      if (vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
          goto out;
       if (vault_dek_unwrap(kek, wrapped, dek) != 0 ||
-          vault_secret_decrypt(dek, (const uint8_t *)aad, strlen(aad), nonce,
-                               (const uint8_t *)ctbuf, (size_t)clen, tag, pt) != 0)
+          (vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen, tag,
+                                pt) != 0 &&
+           (vault_aad_build_v1_safe(principal, agent, cred, version, aad, sizeof(aad), &aad_len) !=
+                0 ||
+            vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen,
+                                 tag, pt) != 0)))
          goto out; /* fail-closed: wrong KEK / tamper / AAD mismatch */
       memcpy(out, pt, (size_t)clen);
       out[clen] = '\0';

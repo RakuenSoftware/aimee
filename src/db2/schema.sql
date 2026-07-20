@@ -3187,6 +3187,140 @@ REVOKE ALL ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BI
 REVOKE ALL ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
 
+-- P7 steady-state key-use admission.  Intent and WORM audit commit before
+-- plaintext release.  Exact replays return no envelope, preventing callbacks.
+CREATE TABLE IF NOT EXISTS org_vault_key_use_intent (
+  team_id BIGINT NOT NULL REFERENCES kb_team(id) ON DELETE RESTRICT,
+  authenticated_origin TEXT NOT NULL CHECK (char_length(authenticated_origin) BETWEEN 1 AND 575),
+  use_id TEXT NOT NULL CHECK (char_length(use_id) BETWEEN 1 AND 200),
+  key_id TEXT NOT NULL CHECK (char_length(key_id) BETWEEN 1 AND 600),
+  principal TEXT NOT NULL CHECK (char_length(principal) BETWEEN 1 AND 600),
+  agent TEXT NOT NULL CHECK (char_length(agent) <= 255),
+  cred TEXT NOT NULL CHECK (char_length(cred) <= 255),
+  version BIGINT NOT NULL CHECK (version >= 1),
+  request_digest TEXT NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}$'),
+  provider TEXT NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 64),
+  model TEXT NOT NULL CHECK (char_length(model) BETWEEN 1 AND 255),
+  operation TEXT NOT NULL CHECK (char_length(operation) BETWEEN 1 AND 64),
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY(team_id,authenticated_origin,use_id)
+);
+ALTER TABLE org_vault_key_use_intent ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION org_vault_key_use_candidate(
+  p_actor TEXT,p_team_id BIGINT,p_key_id TEXT,p_principal TEXT,p_agent TEXT,p_cred TEXT,
+  p_version BIGINT
+) RETURNS TABLE(wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,hwm_attestation BYTEA)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF COALESCE(p_actor,'')='' OR p_team_id IS NULL OR p_team_id<1 OR
+     COALESCE(p_key_id,'')='' OR char_length(p_key_id)>600 OR
+     COALESCE(p_principal,'')='' OR char_length(p_principal)>600 OR
+     char_length(COALESCE(p_agent,''))>255 OR char_length(COALESCE(p_cred,''))>255 OR
+     p_version IS NULL OR p_version<1 THEN
+    RAISE EXCEPTION 'org_vault_key_use_candidate: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) THEN
+    RAISE EXCEPTION 'org_vault_key_use_candidate: not authorized' USING ERRCODE='42501';
+  END IF;
+  IF EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
+       r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND r.state='activating') OR
+     NOT EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
+       r.principal=p_principal AND r.team_id=p_team_id AND r.agent=COALESCE(p_agent,'') AND
+       r.cred=COALESCE(p_cred,'') AND r.to_version=p_version AND
+       r.state IN ('activated','revoked','retired')) OR
+     EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
+       (r.principal<>p_principal OR r.team_id IS DISTINCT FROM p_team_id OR
+        r.agent<>COALESCE(p_agent,'') OR r.cred<>COALESCE(p_cred,''))) OR
+     EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
+       r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND r.key_id<>p_key_id) THEN
+    RAISE EXCEPTION 'org_vault_key_use_candidate: unstable key binding' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT s.wrapped_dek,s.nonce,s.ciphertext,s.tag,s.hwm_attestation
+    FROM org_vault_current c JOIN org_vault_secret s ON
+      s.principal=c.principal AND s.agent=c.agent AND s.cred=c.cred AND s.version=c.version
+   WHERE c.principal=p_principal AND c.agent=COALESCE(p_agent,'') AND
+     c.cred=COALESCE(p_cred,'') AND c.version=p_version AND s.team_id=p_team_id AND
+     s.hwm_attestation IS NOT NULL AND octet_length(s.hwm_attestation)>0;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_key_use_admit(
+  p_actor TEXT,p_team_id BIGINT,p_authenticated_origin TEXT,p_use_id TEXT,p_key_id TEXT,
+  p_principal TEXT,p_agent TEXT,p_cred TEXT,p_version BIGINT,p_request_digest TEXT,
+  p_provider TEXT,p_model TEXT,p_operation TEXT,p_hwm_attestation BYTEA
+) RETURNS TABLE(newly_admitted BOOLEAN,wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,
+                hwm_attestation BYTEA)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE i org_vault_key_use_intent%ROWTYPE; e org_vault_secret%ROWTYPE;
+BEGIN
+  IF COALESCE(p_actor,'')='' OR p_team_id IS NULL OR p_team_id<1 OR
+     COALESCE(p_authenticated_origin,'')='' OR char_length(p_authenticated_origin)>575 OR
+     COALESCE(p_use_id,'')='' OR char_length(p_use_id)>200 OR
+     COALESCE(p_key_id,'')='' OR char_length(p_key_id)>600 OR
+     COALESCE(p_principal,'')='' OR char_length(p_principal)>600 OR
+     char_length(COALESCE(p_agent,''))>255 OR char_length(COALESCE(p_cred,''))>255 OR
+     p_version IS NULL OR p_version<1 OR COALESCE(p_request_digest,'')!~'^[0-9a-f]{64}$' OR
+     COALESCE(p_provider,'')='' OR char_length(p_provider)>64 OR
+     COALESCE(p_model,'')='' OR char_length(p_model)>255 OR
+     COALESCE(p_operation,'')='' OR char_length(p_operation)>64 OR
+     p_hwm_attestation IS NULL OR octet_length(p_hwm_attestation) NOT BETWEEN 1 AND 512 THEN
+    RAISE EXCEPTION 'org_vault_key_use_admit: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF NOT org_vault_rotation_authorized(p_actor,p_team_id) THEN
+    RAISE EXCEPTION 'org_vault_key_use_admit: not authorized' USING ERRCODE='42501';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('vault-use:'||p_team_id::text||'|'||
+    p_authenticated_origin||'|'||p_use_id));
+  SELECT * INTO i FROM org_vault_key_use_intent WHERE team_id=p_team_id AND
+    authenticated_origin=p_authenticated_origin AND use_id=p_use_id FOR UPDATE;
+  IF FOUND THEN
+    IF i.key_id=p_key_id AND i.principal=p_principal AND i.agent=COALESCE(p_agent,'') AND
+       i.cred=COALESCE(p_cred,'') AND i.version=p_version AND
+       i.request_digest=p_request_digest AND i.provider=p_provider AND i.model=p_model AND
+       i.operation=p_operation THEN
+      RETURN QUERY SELECT false,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
+      RETURN;
+    END IF;
+    RAISE EXCEPTION 'org_vault_key_use_admit: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||p_principal||'|'||
+    COALESCE(p_agent,'')||'|'||COALESCE(p_cred,'')));
+  IF EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
+       r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND r.state='activating') OR
+     NOT EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
+       r.principal=p_principal AND r.team_id=p_team_id AND r.agent=COALESCE(p_agent,'') AND
+       r.cred=COALESCE(p_cred,'') AND r.to_version=p_version AND
+       r.state IN ('activated','revoked','retired')) OR
+     EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
+       (r.principal<>p_principal OR r.team_id IS DISTINCT FROM p_team_id OR
+        r.agent<>COALESCE(p_agent,'') OR r.cred<>COALESCE(p_cred,''))) OR
+     EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.principal=p_principal AND
+       r.agent=COALESCE(p_agent,'') AND r.cred=COALESCE(p_cred,'') AND r.key_id<>p_key_id) THEN
+    RAISE EXCEPTION 'org_vault_key_use_admit: unstable key binding' USING ERRCODE='40001';
+  END IF;
+  SELECT s.* INTO e FROM org_vault_current c JOIN org_vault_secret s ON
+    s.principal=c.principal AND s.agent=c.agent AND s.cred=c.cred AND s.version=c.version
+   WHERE c.principal=p_principal AND c.agent=COALESCE(p_agent,'') AND
+     c.cred=COALESCE(p_cred,'') AND c.version=p_version AND s.team_id=p_team_id FOR UPDATE OF s;
+  IF NOT FOUND OR e.hwm_attestation IS NULL OR e.hwm_attestation IS DISTINCT FROM p_hwm_attestation THEN
+    RAISE EXCEPTION 'org_vault_key_use_admit: attestation mismatch' USING ERRCODE='40001';
+  END IF;
+  INSERT INTO org_vault_key_use_intent(team_id,authenticated_origin,use_id,key_id,principal,
+    agent,cred,version,request_digest,provider,model,operation)
+  VALUES(p_team_id,p_authenticated_origin,p_use_id,p_key_id,p_principal,COALESCE(p_agent,''),
+    COALESCE(p_cred,''),p_version,p_request_digest,p_provider,p_model,p_operation);
+  PERFORM kb_audit_worm_append('kb',p_actor,'vault.key_use',p_key_id,'allow',
+    json_build_object('team_id',p_team_id,'origin',p_authenticated_origin,'use_id',p_use_id,
+      'principal',p_principal,'agent',COALESCE(p_agent,''),'cred',COALESCE(p_cred,''),
+      'version',p_version,'request_digest',p_request_digest,'provider',p_provider,
+      'model',p_model,'operation',p_operation)::text);
+  RETURN QUERY SELECT true,e.wrapped_dek,e.nonce,e.ciphertext,e.tag,e.hwm_attestation;
+END; $$;
+
+REVOKE ALL ON TABLE org_vault_key_use_intent FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) FROM PUBLIC;
+
 -- ============================================================================
 -- P2a ORG MODEL CATALOG + ENTITLEMENT (tiered-llm-p2a, catalog-only). The org's
 -- model OFFERING (catalog) + which teams may use each model (entitlement). Holds

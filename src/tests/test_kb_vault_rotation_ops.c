@@ -150,6 +150,25 @@ int vault_crypto_random(uint8_t *out, size_t n)
    memset(out, 0x55, n);
    return 0;
 }
+int vault_aad_build_v2(const char *principal, const char *agent, const char *cred, int64_t version,
+                       uint8_t *out, size_t cap, size_t *out_len)
+{
+   int n =
+       snprintf((char *)out, cap, "v2:%s|%s|%s|%lld", principal, agent, cred, (long long)version);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   *out_len = (size_t)n;
+   return 0;
+}
+int vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
+                            int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   int n = snprintf((char *)out, cap, "%s|%s|%s|%lld", principal, agent, cred, (long long)version);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   *out_len = (size_t)n;
+   return 0;
+}
 int vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t an,
                          const uint8_t *pt, size_t pn, uint8_t nonce[VAULT_GCM_NONCE_LEN],
                          uint8_t *ct, uint8_t tag[VAULT_GCM_TAG_LEN])
