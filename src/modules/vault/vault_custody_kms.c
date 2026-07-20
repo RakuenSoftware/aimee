@@ -32,5 +32,5 @@ static int sealed(void*v){return ((kms_ctx*)v)->sealed;}
 static int unseal(void*v,const void*p,size_t n){(void)p;(void)n;uint8_t k[VAULT_KEK_LEN];int r=get_kek(v,k);OPENSSL_cleanse(k,sizeof(k));return r;}
 static int seal(void*v){((kms_ctx*)v)->sealed=1;return 0;}
 static int rotate(void*v,const char*a,int*b,int*c,char*d,size_t e,char*f,size_t g){(void)v;(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;return -1;}
-static const vault_custody_provider_t p={"kms",&g,get_kek,rotate,sealed,unseal,seal};
+static const vault_custody_provider_t p={"kms",&g,get_kek,rotate,sealed,unseal,seal,NULL,NULL};
 const vault_custody_provider_t *vault_custody_kms_provider(void){return &p;}
