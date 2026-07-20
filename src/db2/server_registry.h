@@ -8,5 +8,6 @@ typedef struct
    int64_t team_id;
 } db2_server_row_t;
 int db2_server_registry_list(int64_t, db2_server_row_t *, int);
+int db2_server_registry_get(int64_t, const char *, db2_server_row_t *);
 int db2_server_registry_heartbeat(const char *, const char *, const char *, const char *);
 #endif
