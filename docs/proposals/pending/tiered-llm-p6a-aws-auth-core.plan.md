@@ -134,3 +134,69 @@ No network I/O, no live AWS/STS/Bedrock call, no IR mapping, no eventstream deco
 catalog/pricing schema, no egress wiring, no Vertex/Azure. Pure AWS SigV4 + STS-construction
 + least-privilege-policy + cache-isolation library, vector-tested offline, kb-only, that the
 deferred Bedrock egress (P6b/c) will call.
+
+## v2 refinements (roundtable-converged; real AWS-correctness + a cache-poisoning fix)
+
+These correct genuine AWS facts (the source proposal §1 is wrong on two) and close a real
+security hole; several recurred across independent panelists.
+
+- **Converse is authorized by `bedrock:InvokeModel` / `InvokeModelWithResponseStream`, NOT
+  a dedicated `bedrock:Converse` action.** AWS enforces Converse/ConverseStream through the
+  InvokeModel IAM actions. So the session-policy action set is a SINGLE mapping keyed on the
+  STREAMING flag, not on converse-vs-invoke: non-streaming → `bedrock:InvokeModel`;
+  streaming → `bedrock:InvokeModelWithResponseStream`. (Corrects the plan §4 + proposal §1
+  "bedrock:Converse/ConverseStream" — those are not IAM actions.) The `bedrock_api`
+  (converse|invoke) still selects the WIRE/adapter (P6b), but not the IAM action.
+- **`ExternalId` is an `AssumeRole`-ONLY parameter (mode b).** `AssumeRoleWithWebIdentity`
+  (mode a) does NOT accept `ExternalId`; its confused-deputy protection is the role trust
+  policy's `aud`/`sub` conditions, enforced AWS-side. So P6a puts `ExternalId` ONLY on the
+  AssumeRole builder; the AssumeRoleWithWebIdentity builder omits it. (Corrects proposal §1
+  "Both modes carry a per-tenant ExternalId".)
+- **Web-identity validation VERIFIES THE JWT SIGNATURE, not decode-only.** A decode-only
+  iss/aud/exp check combined with a claim-keyed session cache is a **cache-poisoning hole**:
+  a forged token carrying a real identity's iss/aud/sub could produce a pre-dispatch cache
+  HIT and hand back that identity's live STS session. So `aws_webidentity_validate(token,
+  jwks, expected_iss, expected_aud, now)` **verifies the RS256/ES256 signature against a
+  caller-supplied JWKS** (reuse the kb/auth_oidc.c + kb_oidc_jwks_fleet.c verify path — the
+  JWKS is passed in, keeping P6a pure/offline) THEN checks iss==expected, aud∋expected,
+  exp>now, iat sane. An unsigned/forged/wrong-key token is rejected before it can key a
+  cache lookup. (This is the most security-important refinement.)
+- **STS cache key adds federation mode + (mode a) issuer + audience + RoleSessionName.**
+  Subject alone is not identity-complete: two IdPs can mint the same `sub`. The key becomes:
+  federation-mode, org/team, provider key-slot + credential generation, RoleArn, ExternalId
+  (mode b) OR {issuer, audience, subject} (mode a), RoleSessionName, AWS partition + sorted
+  region set, target (model/profile), normalized session-policy hash. One differing field →
+  miss (the negative matrix extends to mode, issuer, audience).
+- **Target struct is the boundary, honestly scoped.** P6a's `bedrock_session_policy` derives
+  an EXACT policy from the target struct — it cannot itself prove the caller didn't widen the
+  ARN set; that guarantee is the P6b/P2 egress boundary (the target's type/ARNs/partition/
+  region-set MUST be resolved from primary-authoritative catalog config, never a client
+  string). P6a tests assert the DERIVATION is exact + minimal for a given target and
+  fail-closed when underivable; the plan documents "authoritative target resolution is a
+  P6b invariant" rather than claiming P6a enforces it.
+- **SigV4 input contract: raw path in, percent-encoded ONCE (non-S3 semantics).** The
+  canonical-URI input is the RAW path; the signer RFC3986-percent-encodes each segment once
+  (Bedrock is non-S3 → single-encode, no S3 double-encode). Document this so the P6b
+  dispatch feeds a raw path, not a pre-encoded one (avoids double-encoding). The vector
+  tests MUST include a path-needing-encoding case AND explicitly distinguish the three
+  payload modes: SHA-256 of the exact body bytes, the canonical empty-body digest
+  (`e3b0c442...`), and the literal `UNSIGNED-PAYLOAD` sentinel. Also assert byte-level
+  canonical-header rules (lowercase name, trimmed+inner-whitespace-collapsed value, sorted)
+  and that `X-Amz-Security-Token` is a SIGNED header when a session token is present.
+- **STS XML parser is hostile-input-safe.** No external-entity resolution (no XXE); take the
+  FIRST `Credentials` under the expected result element and REJECT duplicate credential
+  fields / trailing alternate result objects; bound every field; a missing AccessKeyId /
+  SecretAccessKey / SessionToken / Expiration → error. (STS returns XML; parse defensively.)
+- **`DurationSeconds` is set EXPLICITLY to 900** (the STS minimum, which equals our ≤15-min
+  cap) — never omitted (omitting defaults to 3600, violating the short-TTL rule). 900 is the
+  only value satisfying both the STS ≥900 floor and our ≤900 ceiling.
+
+### Gate additions
+
+- Policy tests assert the emitted action set is `bedrock:InvokeModel` /
+  `InvokeModelWithResponseStream` (never a `bedrock:Converse` action) and that
+  AssumeRoleWithWebIdentity bodies contain NO `ExternalId`.
+- A web-identity test proves a WRONG-SIGNATURE token is REJECTED (not merely wrong-iss/aud),
+  and that a rejected token never yields a cache entry.
+- The cache negative matrix includes: differing federation mode, differing issuer, differing
+  audience (mode a) → miss.
