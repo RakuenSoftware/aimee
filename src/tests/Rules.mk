@@ -3902,6 +3902,8 @@ $(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
 $(TESTPREFIX)/unit-test-kb-enroll: $(OBJDIR)/tests/test_kb_enroll.o \
                      $(OBJDIR)/kb/enroll.o \
                      $(OBJDIR)/kb/pki.o \
+                     $(OBJDIR)/modules/vault/vault_server_key.o \
+                     $(OBJDIR)/modules/vault/vault_crypto.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/platform_random.o \
                      $(TEST_CORE_OBJS)
