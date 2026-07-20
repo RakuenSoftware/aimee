@@ -600,6 +600,16 @@ $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
                                   $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# P6b AWS eventstream framing decoder pure test: CRC32 vectors, valid decode,
+# the NEED_MORE/ERROR bounds matrix, exception/error frames, concatenated +
+# rolling-buffer resume, BE->host integer swap, and the deterministic fuzz
+# sweep (memory-safety gate). Links ONLY aws_eventstream.o — CRC32 is
+# self-contained, so no OpenSSL/zlib/cJSON.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-aws-eventstream
+$(TESTPREFIX)/unit-test-aws-eventstream: $(OBJDIR)/tests/test_aws_eventstream.o \
+                                         $(OBJDIR)/modules/aws/aws_eventstream.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(OBJDIR)/tests/test_code_index_ops.o \
                                        $(OBJDIR)/db2/code_index_ops.o \
