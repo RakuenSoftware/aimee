@@ -2,6 +2,7 @@
 #include "../db2/org_budget.h"
 #include "../db2/org_rate.h"
 #include "kb_vault_policy.h"
+#include "../db2/org_token_audit.h"
 #include <stdio.h>
 #include <string.h>
 typedef struct { const kb_bedrock_target_t *target; const aimee_request_t *ir; int stream;
@@ -35,6 +36,18 @@ int kb_egress_admit_dispatch(const kb_egress_admission_t *a, kb_egress_dispatch_
       snprintf(out, cap, "budget refused");
       return -3;
    }
+   int64_t audit_id = 0;
+   if (db2_org_token_audit_start(a->request_id, a->origin_cn, a->actor_issuer,
+                                 a->actor_subject, a->team, a->has_project ? a->project : 0,
+                                 a->model, a->pricing_version, a->session_id,
+                                 a->delegation_id, &audit_id) != 0)
+   {
+      int ignored = 0;
+      (void)db2_org_budget_settle(a->origin_cn, a->request_id, "0", &ignored);
+      snprintf(out, cap, "audit unavailable");
+      return -4;
+   }
+   (void)audit_id;
    char err[256];
    int rc = fn(ctx, out, cap, err, sizeof(err));
    char realized[64] = "0";
@@ -44,7 +57,13 @@ int kb_egress_admit_dispatch(const kb_egress_admission_t *a, kb_egress_dispatch_
    if (db2_org_budget_settle(a->origin_cn, a->request_id, realized, &settled) != 0)
    {
       snprintf(out, cap, "settlement failed");
-      return -4;
+      return -5;
+   }
+   if (db2_org_token_audit_settle(a->request_id, a->origin_cn, a->model, a->model,
+                                  0, 0, 0, 0, realized, rc == 0 ? "settled" : "failed") != 0)
+   {
+      snprintf(out, cap, "audit settlement failed");
+      return -6;
    }
    return rc;
 }
