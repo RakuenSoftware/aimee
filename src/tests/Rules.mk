@@ -3522,6 +3522,9 @@ $(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
                               $(OBJDIR)/kb/kb_vault_policy.o \
                               $(OBJDIR)/kb/modules/vault/vault_custody_tpm2.o \
                               $(OBJDIR)/modules/vault/vault_custody_mock.o \
+                              $(OBJDIR)/modules/vault/vault_custody_kms.o \
+                              $(OBJDIR)/modules/vault/vault_custody_pkcs11.o \
+                              $(OBJDIR)/modules/vault/vault_hwm.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_store.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
