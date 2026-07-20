@@ -2,6 +2,7 @@
 set -euo pipefail
 
 db=${1:?usage: p7_vault_barrier_concurrency.sh postgres-url}
+export PGOPTIONS='-c statement_timeout=15s -c lock_timeout=12s'
 tmp=$(mktemp -d)
 fifo="$tmp/admitter.in"
 mkfifo "$fifo"
@@ -121,11 +122,12 @@ race_pids+=("$!")
 
 for _ in $(seq 1 100); do
   racers_waiting=$(psql -Atq "$db" -c "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'p7-barrier-racer-%' AND wait_event_type='Lock'")
-  [ "$racers_waiting" = 12 ] && break
+  mutation_waiting=$(psql -Atq "$db" -c "SELECT count(*) FROM pg_stat_activity WHERE application_name='p7-barrier-mutation' AND wait_event_type='Lock'")
+  [ "$racers_waiting" = 12 ] && [ "$mutation_waiting" = 1 ] && break
   sleep 0.05
 done
-if [ "${racers_waiting:-0}" != 12 ]; then
-  echo "P7 barrier concurrency FAIL: queued racers=$racers_waiting" >&2
+if [ "${racers_waiting:-0}" != 12 ] || [ "${mutation_waiting:-0}" != 1 ]; then
+  echo "P7 barrier concurrency FAIL: queued racers=$racers_waiting mutation=$mutation_waiting" >&2
   exit 1
 fi
 

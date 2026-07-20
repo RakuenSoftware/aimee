@@ -3170,7 +3170,8 @@ BEGIN
   END IF;
   PERFORM org_vault_rotation_transition(p_actor,p_rotation_id,p_expected,p_next,'');
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
-  IF NOT FOUND OR r.state<>p_next OR r.claim_owner<>p_owner OR r.claim_token<>p_token THEN
+  IF NOT FOUND OR r.state<>p_next OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
     RAISE EXCEPTION 'org_vault_rotation_transition_claimed: stale claim' USING ERRCODE='40001';
   END IF;
   UPDATE org_vault_rotation SET revoke_receipt=CASE WHEN COALESCE(p_receipt,'')=''
@@ -3201,7 +3202,8 @@ BEGIN
   END IF;
   PERFORM org_vault_rotation_transition(p_actor,p_rotation_id,p_expected,'failed',p_error);
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
-  IF NOT FOUND OR r.state<>'failed' OR r.claim_owner<>p_owner OR r.claim_token<>p_token THEN
+  IF NOT FOUND OR r.state<>'failed' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
     RAISE EXCEPTION 'org_vault_rotation_fail_claimed: stale claim' USING ERRCODE='40001';
   END IF;
   UPDATE org_vault_rotation SET failure_phase=p_phase,claim_owner='',claim_until=NULL,
@@ -3295,7 +3297,7 @@ CREATE TABLE IF NOT EXISTS org_vault_key_use_intent (
   provider TEXT NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 64),
   model TEXT NOT NULL CHECK (char_length(model) BETWEEN 1 AND 255),
   operation TEXT NOT NULL CHECK (char_length(operation) BETWEEN 1 AND 64),
-  seal_epoch BIGINT NOT NULL DEFAULT 1 CHECK (seal_epoch > 0),
+  seal_epoch BIGINT NOT NULL CHECK (seal_epoch > 0),
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
   PRIMARY KEY(team_id,authenticated_origin,use_id)
 );
@@ -3303,8 +3305,8 @@ CREATE TABLE IF NOT EXISTS org_vault_key_use_intent (
 -- seeded epoch.  Backfill before making the migration column mandatory.
 ALTER TABLE org_vault_key_use_intent ADD COLUMN IF NOT EXISTS seal_epoch BIGINT;
 UPDATE org_vault_key_use_intent SET seal_epoch=1 WHERE seal_epoch IS NULL;
-ALTER TABLE org_vault_key_use_intent ALTER COLUMN seal_epoch SET DEFAULT 1;
 ALTER TABLE org_vault_key_use_intent ALTER COLUMN seal_epoch SET NOT NULL;
+ALTER TABLE org_vault_key_use_intent ALTER COLUMN seal_epoch DROP DEFAULT;
 ALTER TABLE org_vault_key_use_intent DROP CONSTRAINT IF EXISTS org_vault_key_use_intent_seal_epoch_check;
 ALTER TABLE org_vault_key_use_intent ADD CONSTRAINT org_vault_key_use_intent_seal_epoch_check
   CHECK (seal_epoch > 0);

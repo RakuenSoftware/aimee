@@ -50,9 +50,10 @@ stays intact; it is not an authority or enforcement implementation.
 Add immutable `seal_epoch` to each `org_vault_key_use_intent`, bind the current
 epoch during admission, return it from `org_vault_key_use_admit`, and include it in
 the WORM detail. Recreate the Postgres function because its OUT shape changes.
-The migration adds a default of epoch 1, backfills existing immutable intent rows
-to 1, and only then establishes `NOT NULL`; epoch 1 is the seeded pre-barrier
-generation, so historical rows retain their truthful admission generation.
+The migration backfills existing immutable intent rows to epoch 1 before
+establishing `NOT NULL`, and leaves no default; epoch 1 is the seeded pre-barrier
+generation, so historical rows retain their truthful admission generation while
+any future insertion path that omits the live epoch fails closed.
 Extend the DB2 envelope/result and kb key-use result with the epoch and a typed
 SEALED result. Map only the stable SQLSTATE/message classification to SEALED;
 other database errors remain database errors.
@@ -93,8 +94,9 @@ and auth, barrier acquisition, then locked re-read. Claimed wrappers must not ho
 a rotation-row lock while delegating to a nested function that acquires a slot
 advisory lock: they authenticate from a plain snapshot, acquire the barrier, invoke
 the advisory-locking operation, and only then lock/re-read for their own mutation.
-That locked re-read must revalidate claim owner/token and expected state and raise
-on mismatch so the nested mutation and WORM append roll back atomically.
+That locked re-read must revalidate claim owner/token, unexpired lease, and expected
+state and raise on mismatch so the nested mutation and WORM append roll back
+atomically.
 This prevents deadlock with the future orchestrator, which takes control
 `FOR UPDATE` before inventory locks.
 

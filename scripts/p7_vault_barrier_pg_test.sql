@@ -127,6 +127,9 @@ DECLARE readonly TEXT[] := ARRAY['org_vault_current_wraps','org_vault_get_curren
   'org_vault_has','org_vault_kek_check_read','org_vault_key_use_candidate','org_vault_list',
   'org_vault_list_principals','org_vault_rotation_authorized','org_vault_rotation_get',
   'org_vault_salt_read'];
+DECLARE fn RECORD;
+DECLARE guard_pos INTEGER;
+DECLARE sensitive_pos INTEGER;
 BEGIN
   SELECT array_agg(DISTINCT p.proname ORDER BY p.proname) INTO actual FROM pg_proc p
    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND
@@ -134,6 +137,22 @@ BEGIN
   IF actual IS DISTINCT FROM expected THEN
     RAISE EXCEPTION 'P7 barrier FAIL: guarded inventory mismatch: %',actual;
   END IF;
+  IF EXISTS(SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname=ANY(expected)
+      GROUP BY p.proname HAVING count(*)<>1) THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: protected entrypoint overload drift';
+  END IF;
+  FOR fn IN SELECT p.proname,p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname=ANY(expected)
+  LOOP
+    guard_pos := position('org_vault_control_require_open()' IN lower(fn.prosrc));
+    sensitive_pos := regexp_instr(lower(fn.prosrc),
+      '(pg_advisory_xact_lock|for[[:space:]]+update|insert[[:space:]]+into[[:space:]]+(public\.)?org_vault_|update[[:space:]]+(public\.)?org_vault_|delete[[:space:]]+from[[:space:]]+(public\.)?org_vault_)');
+    IF guard_pos=0 OR (sensitive_pos>0 AND sensitive_pos<guard_pos) THEN
+      RAISE EXCEPTION 'P7 barrier FAIL: guard ordering drift in % (guard %, sensitive %)',
+        fn.proname,guard_pos,sensitive_pos;
+    END IF;
+  END LOOP;
   SELECT array_agg(DISTINCT p.proname ORDER BY p.proname) INTO writers FROM pg_proc p
    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef AND
    p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+org_vault_(salt|secret|current|rotation|key_use_intent)';
@@ -160,6 +179,18 @@ BEGIN
         p.prosrc LIKE '%pg_advisory_xact_lock(-7046029254386353131::BIGINT)%' AND
         position('pg_advisory_xact_lock(' IN p.prosrc) < position('FOR UPDATE' IN p.prosrc)) THEN
     RAISE EXCEPTION 'P7 barrier FAIL: control advisory domain/order drift';
+  END IF;
+  IF (SELECT column_default IS NOT NULL FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='org_vault_key_use_intent' AND
+        column_name='seal_epoch') THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: seal_epoch insert must fail closed when omitted';
+  END IF;
+  IF EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname IN
+        ('org_vault_rotation_transition_claimed','org_vault_rotation_fail_claimed') AND
+        (length(p.prosrc)-length(replace(p.prosrc,'claim_until<=clock_timestamp()',''))) /
+          length('claim_until<=clock_timestamp()') < 2) THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: claimed transition expiry recheck drift';
   END IF;
 END $$;
 
