@@ -2497,9 +2497,17 @@ CREATE OR REPLACE FUNCTION org_vault_put(
   p_wrapped_dek BYTEA, p_nonce BYTEA, p_ciphertext BYTEA, p_tag BYTEA
 ) RETURNS BIGINT
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v BIGINT;
+DECLARE v BIGINT; v_rot BOOLEAN := false;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:' || p_principal || '|' || p_agent || '|' || p_cred));
+  IF to_regclass('public.org_vault_rotation') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=$1 AND agent=$2 '
+            'AND cred=$3 AND state<>''retired'')'
+      INTO v_rot USING p_principal,p_agent,p_cred;
+  END IF;
+  IF v_rot THEN
+    RAISE EXCEPTION 'org_vault_put: active rotation conflict' USING ERRCODE='40001';
+  END IF;
   SELECT COALESCE(max(version), 0) + 1 INTO v FROM org_vault_secret
     WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
   IF p_expected_version IS NOT NULL AND p_expected_version <> v THEN
@@ -2554,7 +2562,17 @@ $$;
 -- version rows are no longer referenced by the FK.
 CREATE OR REPLACE FUNCTION org_vault_delete(p_principal TEXT, p_agent TEXT, p_cred TEXT) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_rot BOOLEAN := false;
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||p_principal||'|'||p_agent||'|'||p_cred));
+  IF to_regclass('public.org_vault_rotation') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=$1 AND agent=$2 '
+            'AND cred=$3 AND state<>''retired'')'
+      INTO v_rot USING p_principal,p_agent,p_cred;
+  END IF;
+  IF v_rot THEN
+    RAISE EXCEPTION 'org_vault_delete: active rotation conflict' USING ERRCODE='40001';
+  END IF;
   DELETE FROM org_vault_current WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
   DELETE FROM org_vault_secret  WHERE principal = p_principal AND agent = p_agent AND cred = p_cred;
 END; $$;
@@ -2577,7 +2595,17 @@ CREATE OR REPLACE FUNCTION org_vault_rewrap(
   p_principal TEXT, p_agent TEXT, p_cred TEXT, p_version BIGINT, p_wrapped_dek BYTEA
 ) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_rot BOOLEAN := false;
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||p_principal||'|'||p_agent||'|'||p_cred));
+  IF to_regclass('public.org_vault_rotation') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=$1 AND agent=$2 '
+            'AND cred=$3 AND state<>''retired'')'
+      INTO v_rot USING p_principal,p_agent,p_cred;
+  END IF;
+  IF v_rot THEN
+    RAISE EXCEPTION 'org_vault_rewrap: active rotation conflict' USING ERRCODE='40001';
+  END IF;
   UPDATE org_vault_secret SET wrapped_dek = p_wrapped_dek
    WHERE principal = p_principal AND agent = p_agent AND cred = p_cred AND version = p_version;
 END; $$;
@@ -2607,7 +2635,7 @@ CREATE TABLE IF NOT EXISTS org_vault_rotation (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_vault_rotation_active_slot
   ON org_vault_rotation(principal, agent, cred)
-  WHERE state NOT IN ('retired','failed');
+  WHERE state <> 'retired';
 CREATE INDEX IF NOT EXISTS idx_org_vault_rotation_team ON org_vault_rotation(team_id);
 ALTER TABLE org_vault_rotation ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_vault_rotation_read ON org_vault_rotation;
@@ -2632,7 +2660,7 @@ CREATE OR REPLACE FUNCTION org_vault_rotation_start(
   p_agent TEXT, p_cred TEXT, p_from_version BIGINT, p_compromise BOOLEAN
 ) RETURNS BIGINT
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_id BIGINT; v_cur BIGINT; v_row org_vault_rotation%ROWTYPE;
+DECLARE v_id BIGINT; v_cur BIGINT; v_team BIGINT; v_row org_vault_rotation%ROWTYPE;
 BEGIN
   IF COALESCE(p_actor,'') = '' OR COALESCE(p_key_id,'') = '' OR
      COALESCE(p_principal,'') = '' OR p_from_version IS NULL OR
@@ -2643,15 +2671,20 @@ BEGIN
     RAISE EXCEPTION 'org_vault_rotation_start: not authorized' USING ERRCODE='42501';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext(
-    'orgvaultrot:' || p_principal || '|' || COALESCE(p_agent,'') || '|' || COALESCE(p_cred,'')));
-  SELECT version INTO v_cur FROM org_vault_current
-   WHERE principal=p_principal AND agent=COALESCE(p_agent,'') AND cred=COALESCE(p_cred,'');
+    'orgvault:' || p_principal || '|' || COALESCE(p_agent,'') || '|' || COALESCE(p_cred,'')));
+  SELECT c.version,s.team_id INTO v_cur,v_team FROM org_vault_current c
+    JOIN org_vault_secret s ON s.principal=c.principal AND s.agent=c.agent AND
+      s.cred=c.cred AND s.version=c.version
+   WHERE c.principal=p_principal AND c.agent=COALESCE(p_agent,'') AND c.cred=COALESCE(p_cred,'');
   IF v_cur IS NULL OR v_cur <> p_from_version THEN
     RAISE EXCEPTION 'org_vault_rotation_start: current version mismatch' USING ERRCODE = '40001';
   END IF;
+  IF v_team IS DISTINCT FROM p_team_id THEN
+    RAISE EXCEPTION 'org_vault_rotation_start: principal/team mismatch' USING ERRCODE='42501';
+  END IF;
   SELECT * INTO v_row FROM org_vault_rotation
    WHERE principal=p_principal AND agent=COALESCE(p_agent,'') AND cred=COALESCE(p_cred,'')
-     AND state NOT IN ('retired','failed') FOR UPDATE;
+     AND state <> 'retired' FOR UPDATE;
   IF FOUND THEN
     IF v_row.key_id=p_key_id AND v_row.from_version=p_from_version AND
        v_row.team_id IS NOT DISTINCT FROM p_team_id AND
@@ -2687,7 +2720,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_stage: not authorized' USING ERRCODE='42501';
   END IF;
-  PERFORM pg_advisory_xact_lock(hashtext('orgvaultrot:'||r.principal||'|'||r.agent||'|'||r.cred));
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_stage: unknown rotation'; END IF;
   IF r.state='staged' THEN
@@ -2731,7 +2764,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_transition: not authorized' USING ERRCODE='42501';
   END IF;
-  PERFORM pg_advisory_xact_lock(hashtext('orgvaultrot:'||r.principal||'|'||r.agent||'|'||r.cred));
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_transition: unknown rotation'; END IF;
   IF r.state=p_next THEN RETURN; END IF;
@@ -2761,7 +2794,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_finalize: not authorized' USING ERRCODE='42501';
   END IF;
-  PERFORM pg_advisory_xact_lock(hashtext('orgvaultrot:'||r.principal||'|'||r.agent||'|'||r.cred));
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_finalize: unknown rotation'; END IF;
   IF r.state='activated' THEN

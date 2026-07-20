@@ -53,6 +53,11 @@ whole-vault maintenance window, never as a per-principal rewrap.
 ## Concurrency and failure rules
 
 - One active rotation per slot; concurrent starters converge or get conflict.
+- The rotation uses the existing `orgvault:` slot-lock namespace. Ordinary put,
+  delete, and re-wrap writers take the same lock and reject a non-retired
+  rotation, so they cannot invalidate a staged `from_version`. A failed attempt
+  remains blocking until explicit operator remediation; it is not silently
+  replaced over the immutable `N+1` row.
 - Every core transition is idempotent. Replaying a completed stage/finalize
   returns its durable result without duplicating a version or WORM record.
 - No external network call runs inside a Postgres transaction.

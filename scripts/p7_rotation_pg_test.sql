@@ -44,10 +44,36 @@ BEGIN
     RAISE EXCEPTION 'P7 FAIL: finalize accepted mismatched replay attestation';
   EXCEPTION WHEN serialization_failure THEN NULL;
   END;
+  BEGIN
+    PERFORM org_vault_put('team:970701:provider:bedrock',970701,'bedrock','primary',3,
+      '\x01','\x02','\x03','\x04');
+    RAISE EXCEPTION 'P7 FAIL: ordinary put bypassed active rotation';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_vault_rewrap('team:970701:provider:bedrock','bedrock','primary',2,'\x99');
+    RAISE EXCEPTION 'P7 FAIL: rewrap bypassed active rotation';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_vault_delete('team:970701:provider:bedrock','bedrock','primary');
+    RAISE EXCEPTION 'P7 FAIL: delete bypassed active rotation';
+  EXCEPTION WHEN serialization_failure THEN NULL;
+  END;
 END $$;
 
 SELECT set_config('aimee.test_rotation_id',
   (SELECT id::text FROM org_vault_rotation WHERE team_id=970701 LIMIT 1),true);
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM org_vault_rotation_start('owner','mismatched-team',
+      'team:970701:provider:bedrock',970702,'bedrock','primary',2,false);
+    RAISE EXCEPTION 'P7 FAIL: admin bypassed principal/team binding';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
 
 SET ROLE aimee_kb_runtime;
 SELECT set_tenant_context('oidc:test:p7b',970702);

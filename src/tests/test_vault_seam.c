@@ -508,12 +508,19 @@ static void test_custody_facade_dispatches_through_provider(void)
    assert(version == 4 && att_len == 8 && att[0] == 0xa5);
    assert(vault_hwm_cas("team:7|bedrock|primary", 4, 5, att, sizeof(att), &att_len) == 0);
    assert(g_custody_mock.hwm_version == 5 && att_len == 8 && att[0] == 0x5a);
+   memset(att, 0xcc, sizeof(att));
+   att_len = 9;
    assert(vault_hwm_cas("team:7|bedrock|primary", UINT64_MAX, 0, att, sizeof(att), &att_len) == -1);
+   assert(att_len == 0 && att[0] == 0);
 
    const vault_custody_provider_t incomplete = {
        .name = "incomplete", .ctx = &custody_marker, .get_kek = cm_get_kek, .rotate = cm_rotate};
    vault_custody_set_provider(&incomplete);
+   memset(att, 0xcc, sizeof(att));
+   version = 99;
+   att_len = 9;
    assert(vault_hwm_read("team:7|bedrock|primary", &version, att, sizeof(att), &att_len) == -1);
+   assert(version == 0 && att_len == 0 && att[0] == 0);
 
    vault_custody_set_provider(NULL); /* restore the file provider */
    printf("  PASS: test_custody_facade_dispatches_through_provider\n");

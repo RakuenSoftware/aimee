@@ -503,7 +503,11 @@ int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t a
    if (att_len)
       *att_len = 0;
    if (!key_id || !key_id[0] || !version || !att || att_cap == 0 || !att_len)
+   {
+      if (att && att_cap)
+         OPENSSL_cleanse(att, att_cap);
       return -1;
+   }
    pthread_mutex_lock(&g_hwm_mu);
    int rc = (!g_custody->hwm_read || !g_custody->hwm_cas)
                 ? -1
@@ -526,7 +530,11 @@ int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t 
       *att_len = 0;
    if (!key_id || !key_id[0] || expected == UINT64_MAX || next != expected + 1 || !att ||
        att_cap == 0 || !att_len)
+   {
+      if (att && att_cap)
+         OPENSSL_cleanse(att, att_cap);
       return -1;
+   }
    pthread_mutex_lock(&g_hwm_mu);
    int rc = (!g_custody->hwm_read || !g_custody->hwm_cas)
                 ? -1
