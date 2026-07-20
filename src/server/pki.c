@@ -675,6 +675,79 @@ done:
    return rc;
 }
 
+int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *cert_pem,
+                 size_t cert_len, char *serial_out, size_t serial_len)
+{
+   char san[VAULT_CERT_CN_MAX + 1];
+   if (!cn || !vault_principal_cert_sanitize(cn, san, sizeof(san)) || !csr_pem || !cert_pem ||
+       !serial_out || cert_len == 0 || serial_len == 0)
+      return -1;
+   if (validity_days <= 0)
+      validity_days = 90;
+   cert_pem[0] = serial_out[0] = '\0';
+   BIO *bio = BIO_new_mem_buf(csr_pem, -1);
+   X509_REQ *req = bio ? PEM_read_bio_X509_REQ(bio, NULL, NULL, NULL) : NULL;
+   if (bio)
+      BIO_free(bio);
+   EVP_PKEY *pub = req ? X509_REQ_get_pubkey(req) : NULL;
+   if (!req || !pub || X509_REQ_verify(req, pub) != 1 || pki_ca_ensure() != 0)
+   {
+      EVP_PKEY_free(pub);
+      X509_REQ_free(req);
+      return -1;
+   }
+
+   pthread_mutex_lock(&g_mu);
+   int rc = -1;
+   X509 *cert = X509_new();
+   char serial[64] = "";
+   if (!cert || X509_set_version(cert, 2) != 1 ||
+       set_random_serial(cert, serial, sizeof(serial)) != 0 ||
+       set_name_cn(X509_get_subject_name(cert), san) != 0 ||
+       X509_set_issuer_name(cert, X509_get_subject_name(g_ca_cert)) != 1 ||
+       !X509_gmtime_adj(X509_getm_notBefore(cert), 0) ||
+       !X509_gmtime_adj(X509_getm_notAfter(cert), (long)validity_days * 24 * 3600) ||
+       X509_set_pubkey(cert, pub) != 1 ||
+       add_ext(cert, g_ca_cert, NID_basic_constraints, "critical,CA:FALSE") != 0 ||
+       add_ext(cert, g_ca_cert, NID_key_usage, "critical,digitalSignature") != 0 ||
+       add_ext(cert, g_ca_cert, NID_ext_key_usage, "clientAuth") != 0 ||
+       X509_sign(cert, g_ca_key, EVP_sha256()) == 0)
+      goto done_csr;
+
+   char *cp = pem_cert(cert);
+   sqlite3 *db = db1_conn();
+   sqlite3_stmt *stm = NULL;
+   if (!cp || strlen(cp) >= cert_len || !db ||
+       sqlite3_prepare_v2(db, "INSERT INTO pki_certs(serial,cn,issued_at,expires_at,revoked) "
+                              "VALUES(?,?,?,?,0)", -1, &stm, NULL) != SQLITE_OK)
+   {
+      free(cp);
+      goto done_csr;
+   }
+   long now = (long)time(NULL);
+   sqlite3_bind_text(stm, 1, serial, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stm, 2, san, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(stm, 3, now);
+   sqlite3_bind_int64(stm, 4, now + (long)validity_days * 24 * 3600);
+   if (sqlite3_step(stm) == SQLITE_DONE)
+   {
+      snprintf(cert_pem, cert_len, "%s", cp);
+      snprintf(serial_out, serial_len, "%s", serial);
+      rc = 0;
+   }
+   sqlite3_finalize(stm);
+   free(cp);
+done_csr:
+   X509_free(cert);
+   pthread_mutex_unlock(&g_mu);
+   EVP_PKEY_free(pub);
+   X509_REQ_free(req);
+   if (rc == 0)
+      aimee_log(LOG_INFO, "pki.audit", "signed client CSR cn=%s serial=%s days=%d", san, serial,
+                validity_days);
+   return rc;
+}
+
 int pki_revoke(const char *serial)
 {
    if (!serial || !serial[0])
