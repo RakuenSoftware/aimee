@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../headers/plugin_c_hook.h"
+#include "aimee/module-runtime/pre_llm_hook.h"
 
 /* Simple FNV-1a-inspired hash for testing system_prompt stability. */
 static unsigned long hash_str(const char *s)

@@ -1,9 +1,9 @@
-/* plugin_c_hook.c: in-process C function hook registry.
+/* pre_llm_hook.c: required in-process PRE_LLM_CALL hook registry.
  *
  * Part of the pluggable context engine surface described in
  * docs/proposals/pending/plugin-extension-surface-and-context-engine.md.
  */
-#include "headers/plugin_c_hook.h"
+#include "aimee/module-runtime/pre_llm_hook.h"
 #include "headers/log.h"
 #include <stdlib.h>
 #include <string.h>

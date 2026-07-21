@@ -25,7 +25,7 @@
 #include "log.h"
 #include "model_sampling.h"
 #include "payload_rewrite.h"
-#include "headers/plugin_c_hook.h"
+#include "aimee/module-runtime/pre_llm_hook.h"
 #include "prompts.h"
 #include "util.h"
 #include "cJSON.h"

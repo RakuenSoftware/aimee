@@ -95,19 +95,17 @@ The migration gap is deliberate and bounded:
 1. `plugin.c` and `plugin.h` still mix manifest/install/loading functions with required extension
    ABI and registries.
 2. `plugin_ctx.c` and `plugin_ctx.h` remain ABI-adjacent pending per-symbol classification.
-3. `plugin_c_hook.c` and `plugin_c_hook.h` remain required by agent runtime and must move with the
-   required extension contract, not under an optional owner.
-4. Required consumers still link the loader discovery unit unconditionally.
+3. Required consumers still link the loader discovery unit unconditionally.
 
-The next slice performs the per-symbol audit and core ABI split: required ABI, registries, and the
-required pre-LLM hook contract move to `module-runtime`; manifest discovery, installation,
-enable/disable, removal, and dynamic loading remain candidates for plugin-loader. It then updates
+The next slice performs the per-symbol audit and core ABI split: required ABI and registries move
+to `module-runtime`; manifest discovery, installation, enable/disable, removal, and dynamic loading
+remain candidates for plugin-loader. It then updates
 consumers to core registry contracts and proves the required link closure excludes plugin-loader.
 
 ## Extension and removal rules
 
 New discovery sources, public functions, or dependencies require updating the module descriptor,
-this document, `scripts/check_plugin_loader_ownership.py`, and focused tests together. Removal from
+this document, `scripts/check_module_source_ownership.py`, and focused tests together. Removal from
 required binaries is not complete until the contract split and build-profile proof land. Ordinary
 module documentation and physical source extraction use normal review and CI; signed descriptor-v2
 attestations remain a separate governance program.
