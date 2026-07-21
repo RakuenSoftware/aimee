@@ -12,7 +12,7 @@ struct aimee_pg_stmt
 };
 
 static struct aimee_pg_stmt g_stmt;
-static int g_prepare_ok = 1, g_step_mode;
+static int g_prepare_ok = 1, g_bind_fail, g_step_mode;
 static const char *g_cols[10];
 
 int db2_tenant_require_pg(void)
@@ -36,13 +36,13 @@ int aimee_pg_bind_int64(aimee_pg_stmt_t *stmt, const char *name, int64_t value)
 {
    (void)stmt;
    assert(strcmp(name, "?1") == 0 && value == 42);
-   return 0;
+   return g_bind_fail ? -1 : 0;
 }
 int aimee_pg_bind_text(aimee_pg_stmt_t *stmt, const char *name, const char *value)
 {
    (void)stmt;
    assert(strcmp(name, "?2") == 0 && strcmp(value, "model") == 0);
-   return 0;
+   return g_bind_fail ? -1 : 0;
 }
 aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *err, size_t errlen)
 {
@@ -54,6 +54,8 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *err, size_t errlen)
       return stmt->step++ == 0 ? AIMEE_PG_ROW : AIMEE_PG_DONE;
    if (g_step_mode == 2)
       return AIMEE_PG_ERR;
+   if (g_step_mode == 4)
+      return stmt->step++ == 0 ? AIMEE_PG_ROW : AIMEE_PG_ERR;
    return AIMEE_PG_ROW;
 }
 void aimee_pg_finalize(aimee_pg_stmt_t *stmt)
@@ -151,6 +153,19 @@ static void decode_hostile_rows(void)
    row.underlying_json = huge;
    assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
    free(huge);
+
+   row = foundation_row();
+   row.target_type = "application-inference-profile";
+   row.account = "123456789012";
+   row.invoke_region = "us-west-2";
+   row.regions_json = "[\"us-east-1\",\"us-west-2\"]";
+   row.underlying_json = "[\"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude\","
+                         "\"arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude\"]";
+   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_OK);
+   row.underlying_json = "[\"arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude\"]";
+   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   row.underlying_json = "[\"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude\"]";
+   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
 }
 
 static void resolver_result_mapping(void)
@@ -165,6 +180,9 @@ static void resolver_result_mapping(void)
    g_prepare_ok = 0;
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
    g_prepare_ok = 1;
+   g_bind_fail = 1;
+   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
+   g_bind_fail = 0;
    g_step_mode = 0;
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_UNAVAILABLE);
    g_step_mode = 2;
@@ -180,6 +198,9 @@ static void resolver_result_mapping(void)
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
    g_cols[7] = row.regions_json;
+   g_step_mode = 4;
+   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
+   assert(all_zero(&out, sizeof(out)));
    g_step_mode = 3;
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
