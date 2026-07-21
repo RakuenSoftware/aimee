@@ -59,6 +59,7 @@ ENV AIMEE_KB_HTTP_BIND=1
 
 RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
 # Sidecar clients (the LLM/embedder access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \

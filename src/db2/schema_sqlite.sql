@@ -37,9 +37,10 @@ CREATE TABLE IF NOT EXISTS kb_audit_event (  seq INTEGER PRIMARY KEY,  ts TEXT N
 CREATE TRIGGER IF NOT EXISTS kb_audit_no_update BEFORE UPDATE ON kb_audit_event BEGIN SELECT RAISE(ABORT, 'WORM: kb_audit_event is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS kb_audit_no_delete BEFORE DELETE ON kb_audit_event BEGIN SELECT RAISE(ABORT, 'WORM: kb_audit_event is append-only'); END;
 CREATE TABLE IF NOT EXISTS anti_patterns (  id INTEGER PRIMARY KEY AUTOINCREMENT,  pattern TEXT NOT NULL,  description TEXT NOT NULL DEFAULT '',  source TEXT NOT NULL DEFAULT '',  source_ref TEXT NOT NULL DEFAULT '',  hit_count INTEGER NOT NULL DEFAULT 0,  confidence REAL NOT NULL DEFAULT 1.0);
-CREATE TABLE IF NOT EXISTS kb_enrollments (  id INTEGER PRIMARY KEY AUTOINCREMENT,  scope TEXT NOT NULL DEFAULT '',  fingerprint TEXT NOT NULL,  serial TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'active',  issued_at TEXT NOT NULL DEFAULT '',  last_seen_at TEXT NOT NULL DEFAULT '',  expires_at TEXT NOT NULL DEFAULT '',  revoked_at TEXT NOT NULL DEFAULT '',  legacy INTEGER NOT NULL DEFAULT 0,  cert_issuer TEXT NOT NULL DEFAULT '',  cert_serial_norm TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_enrollments (  id INTEGER PRIMARY KEY AUTOINCREMENT,  scope TEXT NOT NULL DEFAULT '',  fingerprint TEXT NOT NULL,  serial TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'active',  issued_at TEXT NOT NULL DEFAULT '',  last_seen_at TEXT NOT NULL DEFAULT '',  expires_at TEXT NOT NULL DEFAULT '',  revoked_at TEXT NOT NULL DEFAULT '',  legacy INTEGER NOT NULL DEFAULT 0,  cert_issuer TEXT NOT NULL DEFAULT '',  cert_serial_norm TEXT NOT NULL DEFAULT '', authority_id TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kbenroll_fp ON kb_enrollments(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_kbenroll_scope ON kb_enrollments(scope);
+CREATE INDEX IF NOT EXISTS idx_kbenroll_authority ON kb_enrollments(authority_id);
 -- P1 tenancy tables — SQLite shim mirror (plain tables only; RLS/roles/functions
 -- are Postgres-only. Tenant-scoped db2 entrypoints hard-fail on the shim via the
 -- C guard db2_tenant_require_pg(), so the shim never enforces tenancy — these
@@ -469,5 +470,64 @@ CREATE TABLE IF NOT EXISTS org_telemetry (  id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_telemetry_source ON org_telemetry(source_event_id);
 CREATE INDEX IF NOT EXISTS idx_org_telemetry_team_created ON org_telemetry(team_id, created_at);
 CREATE TABLE IF NOT EXISTS org_telemetry_allowlist (  event_schema TEXT PRIMARY KEY,  metric_names TEXT NOT NULL,  enabled INTEGER NOT NULL DEFAULT 1,  updated_at TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS kb_server_registry (  server_id TEXT PRIMARY KEY, cert_cn TEXT NOT NULL UNIQUE, mgmt_cert_cn TEXT NOT NULL UNIQUE, owner_issuer TEXT NOT NULL DEFAULT '', owner_subject TEXT NOT NULL DEFAULT '', team_id INTEGER NOT NULL, endpoint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', health TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', last_seen TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_server_registry (  server_id TEXT PRIMARY KEY, cert_cn TEXT NOT NULL UNIQUE, mgmt_cert_cn TEXT NOT NULL UNIQUE, owner_issuer TEXT NOT NULL DEFAULT '', owner_subject TEXT NOT NULL DEFAULT '', team_id INTEGER NOT NULL, endpoint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', health TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', last_seen TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', client_issuer TEXT NOT NULL DEFAULT '', client_serial_norm TEXT NOT NULL DEFAULT '', client_fingerprint TEXT NOT NULL DEFAULT '', mgmt_issuer TEXT NOT NULL DEFAULT '', mgmt_serial_norm TEXT NOT NULL DEFAULT '', mgmt_fingerprint TEXT NOT NULL DEFAULT '', enrollment_op TEXT NOT NULL DEFAULT '', client_csr_digest TEXT NOT NULL DEFAULT '', mgmt_csr_digest TEXT NOT NULL DEFAULT '', activation_expires_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_kb_server_registry_team ON kb_server_registry(team_id);
+CREATE TABLE IF NOT EXISTS org_egress_binding (
+  team_id INTEGER NOT NULL,
+  model_id TEXT NOT NULL,
+  billable_model TEXT NOT NULL,
+  pricing_version INTEGER NOT NULL,
+  key_id TEXT NOT NULL,
+  vault_principal TEXT NOT NULL,
+  vault_agent TEXT NOT NULL DEFAULT '',
+  vault_cred TEXT NOT NULL DEFAULT '',
+  max_input_tokens INTEGER NOT NULL,
+  max_output_tokens INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  overage_fenced INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(team_id,model_id)
+);
+CREATE TABLE IF NOT EXISTS org_egress_dispatch (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  authority_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  origin_identity TEXT NOT NULL,
+  origin_fingerprint TEXT NOT NULL,
+  request_digest TEXT NOT NULL,
+  team_id INTEGER NOT NULL,
+  project_id INTEGER,
+  model_id TEXT NOT NULL,
+  billable_model TEXT NOT NULL,
+  pricing_version INTEGER NOT NULL,
+  reserved_max_usd NUMERIC NOT NULL,
+  key_id TEXT NOT NULL,
+  vault_principal TEXT NOT NULL,
+  vault_agent TEXT NOT NULL DEFAULT '',
+  vault_cred TEXT NOT NULL DEFAULT '',
+  max_input_tokens INTEGER NOT NULL,
+  max_output_tokens INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  owner_token TEXT NOT NULL DEFAULT '',
+  owner_generation INTEGER NOT NULL DEFAULT 0,
+  owner_instance TEXT NOT NULL DEFAULT '',
+  lease_expires_at TEXT,
+  http_status INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  raw_prompt_tokens TEXT NOT NULL DEFAULT '0',
+  raw_completion_tokens TEXT NOT NULL DEFAULT '0',
+  raw_cache_read_tokens TEXT NOT NULL DEFAULT '0',
+  raw_cache_write_tokens TEXT NOT NULL DEFAULT '0',
+  realized_usd NUMERIC,
+  overage_usd NUMERIC NOT NULL DEFAULT 0,
+  liability_overflow INTEGER NOT NULL DEFAULT 0,
+  outcome_class TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
+  UNIQUE(authority_id,request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_egress_recover
+  ON org_egress_dispatch(state,lease_expires_at,id);

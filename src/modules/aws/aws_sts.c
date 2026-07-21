@@ -488,8 +488,11 @@ int aws_sts_build_signed_assume_role(aws_sts_signed_request_t *out, const char *
    req.region = region;
    req.service = "sts";
    req.access_key_id = access_key_id;
+   req.access_key_id_len = strlen(access_key_id);
    req.secret_access_key = secret_access_key;
+   req.secret_access_key_len = strlen(secret_access_key);
    req.session_token = session_token;
+   req.session_token_len = session_token ? strlen(session_token) : 0;
    return aws_sigv4_sign(&req, &out->sig);
 }
 

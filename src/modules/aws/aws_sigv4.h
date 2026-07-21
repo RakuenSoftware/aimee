@@ -72,8 +72,11 @@ extern "C"
       const char *region;
       const char *service;
       const char *access_key_id;
+      size_t access_key_id_len;
       const char *secret_access_key;
-      const char *session_token; /* NULL or "" if none */
+      size_t secret_access_key_len;
+      const char *session_token; /* NULL when absent */
+      size_t session_token_len;
    } aws_sigv4_request_t;
 
    /* The signing result. All buffers are NUL-terminated. `authorization` is the full

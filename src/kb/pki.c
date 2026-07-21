@@ -236,6 +236,36 @@ int kb_pki_ca_fingerprint(const char *ca_cert_pem, char *hex_out, size_t cap)
    return rc;
 }
 
+int kb_pki_cert_metadata(const char *cert_pem, char *issuer_out, size_t issuer_cap,
+                         char *serial_out, size_t serial_cap)
+{
+   if ((issuer_out && issuer_cap == 0) || (serial_out && serial_cap == 0))
+      return -1;
+   X509 *cert = x509_from_pem(cert_pem);
+   if (!cert)
+      return -1;
+   int rc = -1;
+   char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+   const ASN1_INTEGER *asn1_serial = X509_get0_serialNumber(cert);
+   BIGNUM *bn = asn1_serial ? ASN1_INTEGER_to_BN(asn1_serial, NULL) : NULL;
+   char *serial = bn ? BN_bn2hex(bn) : NULL;
+   if (!issuer || !issuer[0] || !serial || !serial[0])
+      goto done;
+   if ((issuer_out && strlen(issuer) >= issuer_cap) || (serial_out && strlen(serial) >= serial_cap))
+      goto done;
+   if (issuer_out)
+      memcpy(issuer_out, issuer, strlen(issuer) + 1);
+   if (serial_out)
+      memcpy(serial_out, serial, strlen(serial) + 1);
+   rc = 0;
+done:
+   OPENSSL_free(serial);
+   BN_free(bn);
+   OPENSSL_free(issuer);
+   X509_free(cert);
+   return rc;
+}
+
 /* --- client cert issuance --- */
 
 int kb_pki_issue_client_cert(const kb_pki_ca_t *ca, const char *subject_cn, long valid_secs,
@@ -412,10 +442,12 @@ int kb_pki_csr_validate(const char *csr_pem)
    return 0;
 }
 
-int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
-                    long valid_secs, char *cert_pem_out, size_t cert_cap)
+int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
+                            long valid_secs, kb_pki_csr_profile_t profile, char *cert_pem_out,
+                            size_t cert_cap)
 {
-   if (!ca || !subject_cn || !subject_cn[0] || !cert_pem_out || valid_secs <= 0)
+   if (!ca || !subject_cn || !subject_cn[0] || !cert_pem_out || valid_secs <= 0 ||
+       (profile != KB_PKI_CSR_CLIENT_AUTH && profile != KB_PKI_CSR_SERVER_AUTH))
       return -1;
 
    int rc = -1;
@@ -450,9 +482,26 @@ int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subj
    if (X509_set_issuer_name(cert, X509_get_subject_name(ca_cert)) != 1)
       goto done;
 
+   if (profile == KB_PKI_CSR_SERVER_AUTH)
+   {
+      unsigned char tmp[16];
+      const char *kind =
+          (inet_pton(AF_INET, subject_cn, tmp) == 1 || inet_pton(AF_INET6, subject_cn, tmp) == 1)
+              ? "IP"
+              : "DNS";
+      char san[300];
+      int n = snprintf(san, sizeof(san), "%s:%s", kind, subject_cn);
+      if (n < 0 || (size_t)n >= sizeof(san) || !add_ext(ca_cert, cert, NID_subject_alt_name, san))
+         goto done;
+   }
+
+   const char *key_usage = profile == KB_PKI_CSR_SERVER_AUTH
+                               ? "critical,digitalSignature,keyEncipherment"
+                               : "critical,digitalSignature";
+   const char *eku = profile == KB_PKI_CSR_SERVER_AUTH ? "serverAuth" : "clientAuth";
    if (!add_ext(ca_cert, cert, NID_basic_constraints, "critical,CA:FALSE") ||
-       !add_ext(ca_cert, cert, NID_key_usage, "critical,digitalSignature") ||
-       !add_ext(ca_cert, cert, NID_ext_key_usage, "clientAuth") ||
+       !add_ext(ca_cert, cert, NID_key_usage, key_usage) ||
+       !add_ext(ca_cert, cert, NID_ext_key_usage, eku) ||
        !add_ext(ca_cert, cert, NID_subject_key_identifier, "hash") ||
        !add_ext(ca_cert, cert, NID_authority_key_identifier, "keyid:always"))
       goto done;
@@ -473,6 +522,51 @@ done:
    X509_free(ca_cert);
    EVP_PKEY_free(ca_key);
    return rc;
+}
+
+int kb_pki_sign_server_role_csrs(const kb_pki_ca_t *ca, const char *client_csr_pem,
+                                 const char *client_subject, const char *server_csr_pem,
+                                 const char *server_subject, long valid_secs, char *client_cert_out,
+                                 size_t client_cert_cap, char *server_cert_out,
+                                 size_t server_cert_cap)
+{
+   if (client_cert_out && client_cert_cap)
+      client_cert_out[0] = '\0';
+   if (server_cert_out && server_cert_cap)
+      server_cert_out[0] = '\0';
+   if (!ca || !client_csr_pem || !client_subject || !server_csr_pem || !server_subject ||
+       !client_cert_out || !client_cert_cap || !server_cert_out || !server_cert_cap)
+      return -1;
+
+   X509_REQ *client_req = csr_parse_verify(client_csr_pem);
+   X509_REQ *server_req = csr_parse_verify(server_csr_pem);
+   EVP_PKEY *client_key = client_req ? X509_REQ_get_pubkey(client_req) : NULL;
+   EVP_PKEY *server_key = server_req ? X509_REQ_get_pubkey(server_req) : NULL;
+   int distinct = client_key && server_key && EVP_PKEY_eq(client_key, server_key) == 0;
+   EVP_PKEY_free(client_key);
+   EVP_PKEY_free(server_key);
+   X509_REQ_free(client_req);
+   X509_REQ_free(server_req);
+   if (!distinct)
+      return -1;
+
+   if (kb_pki_sign_csr_profile(ca, client_csr_pem, client_subject, valid_secs,
+                               KB_PKI_CSR_CLIENT_AUTH, client_cert_out, client_cert_cap) != 0 ||
+       kb_pki_sign_csr_profile(ca, server_csr_pem, server_subject, valid_secs,
+                               KB_PKI_CSR_SERVER_AUTH, server_cert_out, server_cert_cap) != 0)
+   {
+      OPENSSL_cleanse(client_cert_out, client_cert_cap);
+      OPENSSL_cleanse(server_cert_out, server_cert_cap);
+      return -1;
+   }
+   return 0;
+}
+
+int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
+                    long valid_secs, char *cert_pem_out, size_t cert_cap)
+{
+   return kb_pki_sign_csr_profile(ca, csr_pem, subject_cn, valid_secs, KB_PKI_CSR_CLIENT_AUTH,
+                                  cert_pem_out, cert_cap);
 }
 
 /* --- chain verification --- */

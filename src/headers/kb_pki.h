@@ -38,6 +38,12 @@ extern "C"
       char key_pem[KB_PKI_KEY_PEM_MAX]; /* sensitive — persist with care */
    } kb_pki_ca_t;
 
+   typedef enum
+   {
+      KB_PKI_CSR_CLIENT_AUTH = 1,
+      KB_PKI_CSR_SERVER_AUTH = 2
+   } kb_pki_csr_profile_t;
+
    /* Generate a fresh self-signed CA (RSA-2048, CN "aimee-kb-ca", ~10 year
     * validity, basicConstraints CA:TRUE) into *out. Returns 0 on success, -1 on
     * error (RNG / OpenSSL failure or PEM overflow). */
@@ -48,6 +54,12 @@ extern "C"
     * that appears after "sha256:" in the connection string. Accepts any cert
     * PEM (the CA's). Returns 0 on success, -1 on error. */
    int kb_pki_ca_fingerprint(const char *ca_cert_pem, char *hex_out, size_t cap);
+
+   /* Extract the immutable identity fields exactly as the TLS peer helpers do:
+    * issuer in OpenSSL's one-line DN form and serial as uppercase hex. Any
+    * output may be NULL when the caller does not need it. */
+   int kb_pki_cert_metadata(const char *cert_pem, char *issuer_out, size_t issuer_cap,
+                            char *serial_out, size_t serial_cap);
 
    /* Issue a client certificate (RSA-2048) for `subject_cn`, signed by `ca`,
     * valid for `valid_secs` seconds from now (keyUsage digitalSignature,
@@ -84,6 +96,23 @@ extern "C"
     * success, -1 on a malformed / unverifiable CSR or any issuance error. */
    int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
                        long valid_secs, char *cert_pem_out, size_t cert_cap);
+
+   /* Role-separated P5 issuance. The CSR contributes only its verified public
+    * key; subject and extensions are authority-controlled. CLIENT_AUTH emits
+    * exactly clientAuth. SERVER_AUTH emits exactly serverAuth and a SAN for
+    * subject_name. Unknown profiles fail closed. */
+   int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_name,
+                               long valid_secs, kb_pki_csr_profile_t profile, char *cert_pem_out,
+                               size_t cert_cap);
+
+   /* Atomically validate and issue the two P5 server roles. The CSRs must prove
+    * possession of different public keys. On any failure both outputs are
+    * cleared, so a caller cannot accidentally return a partial enrollment. */
+   int kb_pki_sign_server_role_csrs(const kb_pki_ca_t *ca, const char *client_csr_pem,
+                                    const char *client_subject, const char *server_csr_pem,
+                                    const char *server_subject, long valid_secs,
+                                    char *client_cert_out, size_t client_cert_cap,
+                                    char *server_cert_out, size_t server_cert_cap);
 
    /* Validate a PEM PKCS#10 CSR WITHOUT issuing anything: it must parse, its
     * self-signature must verify (proof of private-key possession), and its key
