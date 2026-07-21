@@ -70,3 +70,26 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		t.Fatalf("UI pin semantics not preserved: %+v", agents.requests)
 	}
 }
+
+func TestExtractJSONObjectIgnoresProviderSuffix(t *testing.T) {
+	response := "```json\n" +
+		`{"schema_version":1,"summary":"brace } and escaped quote \" stay data","acceptance_criteria":["done"]}` +
+		"\n```\n$ git status\n" + `{"diagnostic":true}`
+	doc, err := extractJSONObject(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); !strings.Contains(got, `"schema_version":1`) || strings.Contains(got, "diagnostic") {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectSkipsMalformedObjectPreamble(t *testing.T) {
+	doc, err := extractJSONObject(`explanation {not json} then {"verdict":"approve","findings":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != `{"verdict":"approve","findings":[]}` {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}

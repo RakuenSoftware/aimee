@@ -890,17 +890,62 @@ func firstNonempty(value, fallback string) string {
 }
 
 func extractJSONObject(text string) ([]byte, error) {
-	start := strings.IndexByte(text, '{')
-	end := strings.LastIndexByte(text, '}')
-	if start < 0 || end < start {
-		return nil, errors.New("delegate returned no JSON object")
+	for start := strings.IndexByte(text, '{'); start >= 0; {
+		if end, ok := balancedJSONObjectEnd(text, start); ok {
+			doc := []byte(text[start:end])
+			var value map[string]any
+			if json.Unmarshal(doc, &value) == nil {
+				return doc, nil
+			}
+		}
+		next := strings.IndexByte(text[start+1:], '{')
+		if next < 0 {
+			break
+		}
+		start += next + 1
 	}
-	doc := []byte(text[start : end+1])
-	var value any
-	if err := json.Unmarshal(doc, &value); err != nil {
-		return nil, fmt.Errorf("invalid delegate JSON: %w", err)
+	return nil, errors.New("delegate returned no valid JSON object")
+}
+
+// balancedJSONObjectEnd returns the byte immediately after a complete object.
+// Delegate providers sometimes append prose, shell snippets, or a second JSON
+// value despite an "only JSON" prompt. Parsing first-'{' through last-'}' turns
+// that harmless suffix into an infinite workflow refinement loop. Balance one
+// object at a time while honoring quoted braces and escapes instead.
+func balancedJSONObjectEnd(text string, start int) (int, bool) {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(text); i++ {
+		c := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1, true
+			}
+			if depth < 0 {
+				return 0, false
+			}
+		}
 	}
-	return doc, nil
+	return 0, false
 }
 func validateStructured(kind string, doc []byte) error {
 	var root map[string]any
