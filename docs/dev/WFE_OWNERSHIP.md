@@ -40,6 +40,11 @@ resolution ladder without returning credential material. It does not read DB1,
 choose an operation, interpret a workflow, or advance a transition. Go owns
 those decisions and every resulting lifecycle transition.
 
+The Go ID generator is `native_runner.go`'s foreach fan-out. At the mechanical
+boundary, `wfe_item_id_valid` mirrors that grammar and
+`wfe_slice_ref_matches_workdir` derives the only valid slice head and parent
+feature target.
+
 The image uses `tini` as PID 1. The shell entrypoint supervises the C resource
 plane and Go WFE plane as peers: exit of either terminates the other and exits
 the container nonzero, while TERM/INT invokes bounded shutdown of both.

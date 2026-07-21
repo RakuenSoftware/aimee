@@ -344,13 +344,20 @@ static int wfe_ref_valid(const char *s)
    return 1;
 }
 
+#define WFE_MAX_ID_LEN 80
+
+static int wfe_id_root_char(unsigned char c)
+{
+   return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+}
+
 static int wfe_item_id_valid(const char *s)
 {
-   if (!s || strncmp(s, "wi_", 3) != 0 || strlen(s) > 80)
+   if (!s || strncmp(s, "wi_", 3) != 0 || strlen(s) > WFE_MAX_ID_LEN)
       return 0;
    const unsigned char *p = (const unsigned char *)s + 3;
    const unsigned char *root = p;
-   while (isalnum(*p) || *p == '_')
+   while (wfe_id_root_char(*p))
       p++;
    if (p == root)
       return 0;
