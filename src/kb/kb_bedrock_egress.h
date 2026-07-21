@@ -102,8 +102,10 @@ void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target)
 /* Production dispatch derives DNS, Host, SNI, and certificate authority solely from the
  * resolver-issued target.
  * `response` must have been initialized with kb_bedrock_response_init (or be a prior dispatch
- * output); success is caller-owned and released with aimee_response_free.  `http_status` is zero
- * until a final response header has been accepted. */
+ * output); success is caller-owned and released with aimee_response_free.  `http_status` remains
+ * zero for every transport, framing, media, semantic, or callback failure.  A status is published
+ * only after authenticated TLS EOF and complete response framing: 200 on semantic success, or the
+ * validated non-2xx status with KB_BEDROCK_PROVIDER_ERROR. */
 kb_bedrock_result_t kb_bedrock_dispatch_buffered(kb_bedrock_authorized_target_t *target,
                                                  const aimee_request_t *request,
                                                  const kb_bedrock_credentials_t *credentials,

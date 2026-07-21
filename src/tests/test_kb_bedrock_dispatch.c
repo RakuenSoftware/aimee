@@ -992,6 +992,23 @@ static void dispatch_wrapper_tests(void)
           KB_BEDROCK_PROVIDER_ERROR);
    assert(status == 429 && dispatch_mock.body_calls == 0);
 
+   dispatch_mock = (dispatch_mock_t){.status = 429,
+                                     .content_type = "application/json",
+                                     .body = good,
+                                     .body_len = sizeof(good) - 1,
+                                     .post_body_result = KB_HTTP_MALFORMED_RESPONSE};
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
+          KB_BEDROCK_TRANSPORT_ERROR);
+   assert(status == 0 && dispatch_mock.body_calls == 0);
+
+   dispatch_mock = (dispatch_mock_t){.status = 201,
+                                     .content_type = "application/json",
+                                     .body = good,
+                                     .body_len = sizeof(good) - 1};
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
+          KB_BEDROCK_PROVIDER_ERROR);
+   assert(status == 0 && dispatch_mock.body_calls == 0);
+
    dispatch_mock = (dispatch_mock_t){.transport_result = KB_HTTP_TLS_ERROR};
    assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
           KB_BEDROCK_TRANSPORT_ERROR);
@@ -1008,6 +1025,21 @@ static void dispatch_wrapper_tests(void)
    assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, collect_delta, &log,
                                      &status) == KB_BEDROCK_OK);
    assert(status == 200 && log.count == 5 && dispatch_mock.body_calls == (int)stream_len);
+
+   unsigned char *bad_crc = malloc(stream_len);
+   assert(bad_crc != NULL);
+   memcpy(bad_crc, stream_body, stream_len);
+   bad_crc[stream_len - 1] ^= 1U;
+   log = (delta_log_t){0};
+   dispatch_mock = (dispatch_mock_t){.status = 200,
+                                     .content_type = "application/vnd.amazon.eventstream",
+                                     .body = bad_crc,
+                                     .body_len = stream_len,
+                                     .fragment = 17};
+   assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, collect_delta, &log,
+                                     &status) == KB_BEDROCK_MALFORMED_STREAM);
+   assert(status == 0);
+   free(bad_crc);
 
    log = (delta_log_t){0};
    dispatch_mock = (dispatch_mock_t){.status = 200,

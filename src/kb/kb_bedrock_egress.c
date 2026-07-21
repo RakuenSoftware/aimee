@@ -1508,7 +1508,7 @@ kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **sp)
 typedef struct
 {
    int streaming;
-   int *http_status;
+   int observed_status;
    const char *media_type;
    kb_bedrock_result_t first_result;
    unsigned char *body;
@@ -1548,7 +1548,8 @@ static int dispatch_stream_delta(const aimee_delta_t *delta, void *opaque)
 static kb_http_gate_t dispatch_headers(const kb_http_response_t *response, void *opaque)
 {
    bedrock_dispatch_context_t *context = opaque;
-   *context->http_status = response->status;
+   /* Observation is private until transport framing and TLS EOF are both authenticated. */
+   context->observed_status = response->status;
    if (response->status != 200)
       return KB_HTTP_GATE_DISCARD;
    if (strcmp(response->content_type, context->media_type) != 0)
@@ -1670,7 +1671,6 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
 
    bedrock_dispatch_context_t context = {
        .streaming = streaming,
-       .http_status = http_status,
        .media_type = streaming ? "application/vnd.amazon.eventstream" : "application/json",
        .first_result = KB_BEDROCK_OK,
        .callback = callback,
@@ -1692,14 +1692,22 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
                                 .connect_timeout_ms = 5000,
                                 .total_timeout_ms = 30000};
    kb_http_response_t metadata;
+   int publish_status = 0;
    kb_http_result_t transport =
        kb_http_tls_exchange(&request, &metadata, dispatch_headers, dispatch_body, &context);
    if (context.first_result != KB_BEDROCK_OK)
       result = context.first_result;
    else if (transport != KB_HTTP_OK)
       result = map_transport_result(transport);
-   else if (metadata.status != 200)
+   else if (context.observed_status != metadata.status || context.observed_status < 100 ||
+            context.observed_status > 599)
+      result = KB_BEDROCK_TRANSPORT_ERROR;
+   else if (context.observed_status != 200)
+   {
       result = KB_BEDROCK_PROVIDER_ERROR;
+      if (context.observed_status < 200 || context.observed_status > 299)
+         publish_status = context.observed_status;
+   }
    else if (streaming)
    {
       result = kb_bedrock_stream_finish(context.stream);
@@ -1711,6 +1719,10 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
    }
    else
       result = kb_bedrock_nonstream_parse(context.body, context.body_len, response);
+
+   if (result == KB_BEDROCK_OK)
+      publish_status = 200;
+   *http_status = publish_status;
 
    if (context.body)
    {
@@ -1724,8 +1736,6 @@ done:
    kb_bedrock_wire_request_clear(&wire);
    if (result != KB_BEDROCK_OK && response)
       aimee_response_free(response);
-   if (result != KB_BEDROCK_OK && *http_status >= 200 && *http_status <= 299)
-      *http_status = 0;
    return result;
 }
 
