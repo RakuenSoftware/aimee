@@ -2171,6 +2171,8 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddNumberToObject(resp, "best_round", result.best_round);
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
+   cJSON_AddNumberToObject(resp, "participants_required_failed",
+                           result.participants_required_failed);
    cJSON_AddNumberToObject(resp, "items_round", result.items_round);
    cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);

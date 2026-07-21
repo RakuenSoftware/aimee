@@ -12,7 +12,7 @@
 
 /* --- stubs for agent exec functions --- */
 
-static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */
+static int g_parallel_mode = 0; /* 0=all, 1=only-first, 9=last-fails, 10=first-fails */
 static int g_aggregator_mode = 0;
 static int g_reason_mode = 0;
 static int g_scorer_calls = 0; /* counts run_quality_scorer ("reason" + score prompt) invocations */
@@ -112,6 +112,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       char buf[128];
       snprintf(out[i].agent_name, sizeof(out[i].agent_name), "%s",
                tasks[i].agent ? tasks[i].agent : "");
+      if ((g_parallel_mode == 9 && i == count - 1) || (g_parallel_mode == 10 && i == 0))
+         continue;
       if (g_parallel_mode == 2 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"issues\":[{\"severity\":\"blocking\",\"category\":\"api\","
                                   "\"location\":\"src/a.c:10\",\"summary\":\"same bug\","
@@ -772,9 +774,97 @@ static void test_roundtable_degrades_on_min_success(void)
    /* Partial-failure metadata: panel of 3, only 1 participant responded. */
    assert(result.participants_total == 3);
    assert(result.participants_failed == 2);
+   assert(result.participants_required_failed == 2);
    delegate_roundtable_result_free(&result);
    g_parallel_mode = 0;
    printf("  test_roundtable_degrades_on_min_success: ok\n");
+}
+
+static void test_roundtable_optional_failure_is_reported_without_degrading(void)
+{
+   reset_modes();
+   g_parallel_mode = 9;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.required_participants = 2;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft with one unavailable optional seat", &opts,
+                                    &result);
+   assert(rc == 0);
+   assert(result.degraded == 0);
+   assert(result.participants_total == 3);
+   assert(result.participants_failed == 1);
+   assert(result.participants_required_failed == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_optional_failure_is_reported_without_degrading: ok\n");
+}
+
+static void test_roundtable_required_failure_degrades_even_with_optional_success(void)
+{
+   reset_modes();
+   g_parallel_mode = 10;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.required_participants = 2;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft missing one required seat", &opts, &result);
+   assert(rc == 0);
+   assert(result.degraded == 1);
+   assert(result.participants_required_failed == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_required_failure_degrades_even_with_optional_success: ok\n");
+}
+
+static void test_roundtable_required_malformed_review_degrades_when_repair_fails(void)
+{
+   reset_modes();
+   g_parallel_mode = 3;
+   g_repair_mode = 2;
+   config_t cfg = make_cfg(1, 1, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.required_participants = 1;
+   roundtable_result_t result;
+   int rc =
+       delegate_roundtable_run(&acfg, &cfg, "review with malformed required seat", &opts, &result);
+   assert(rc == 0);
+   assert(result.degraded == 1);
+   assert(result.participants_failed == 1);
+   assert(result.participants_required_failed == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_required_malformed_review_degrades_when_repair_fails: ok\n");
+}
+
+static void test_roundtable_rejects_required_prefix_larger_than_panel(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.required_participants = 4;
+   roundtable_result_t result;
+   assert(delegate_roundtable_run(&acfg, &cfg, "invalid required prefix", &opts, &result) == -1);
+   assert(g_parallel_calls == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_rejects_required_prefix_larger_than_panel: ok\n");
 }
 
 static void test_roundtable_preflight_cap_warns_observed_cap_stops(void)
@@ -1156,6 +1246,7 @@ static void test_panel_fills_every_agent_capacity_diversity_first(void)
             "MiniMax-M3");
    snprintf(cfg.ensemble_reference_personas[0], sizeof(cfg.ensemble_reference_personas[0]),
             "security");
+   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "MiniMax-M3");
 
    ensemble_filter_panel_authorization(&cfg, &acfg);
    ensemble_filter_panel_availability(&cfg, &acfg);
@@ -1164,6 +1255,7 @@ static void test_panel_fills_every_agent_capacity_diversity_first(void)
    assert(cfg.ensemble_reference_count == 14);
    assert(strcmp(cfg.ensemble_reference_models[0], "MiniMax-M3") == 0);
    assert(strcmp(cfg.ensemble_reference_personas[0], "security") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "MiniMax-M3") == 0);
    /* Diversity pass seats codex before any repeated provider seat. */
    assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
    int codex_count = 0, minimax_count = 0;
@@ -1211,6 +1303,35 @@ static void test_panel_prioritizes_distinct_providers(void)
    assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
    assert(strcmp(cfg.ensemble_reference_models[2], "anthropic-b") == 0);
    printf("  test_panel_prioritizes_distinct_providers: ok\n");
+}
+
+static void test_panel_treats_providerless_agents_as_distinct(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 3;
+   const char *names[] = {"legacy-a", "legacy-b", "codex"};
+   for (int i = 0; i < acfg.agent_count; i++)
+   {
+      agent_t *ag = &acfg.agents[i];
+      ag->enabled = 1;
+      ag->max_parallel = 1;
+      snprintf(ag->name, sizeof(ag->name), "%s", names[i]);
+      snprintf(ag->roles[0], sizeof(ag->roles[0]), "review");
+      ag->role_count = 1;
+   }
+   snprintf(acfg.agents[2].provider, sizeof(acfg.agents[2].provider), "chatgpt");
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   ensemble_fill_panel_capacity(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 3);
+   /* An absent provider is scoped to the agent name, so unrelated legacy
+    * agents are both represented during the provider-diversity pass. */
+   assert(strcmp(cfg.ensemble_reference_models[0], "legacy-a") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "legacy-b") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[2], "codex") == 0);
+   printf("  test_panel_treats_providerless_agents_as_distinct: ok\n");
 }
 
 static void test_panel_persona_name_assignment(void)
@@ -1296,6 +1417,24 @@ static void test_roundtable_captures_original_request_alignment(void)
    assert(strcmp(out.original_request_alignment, "drifted") == 0);
    assert(strstr(out.original_request_alignment_summary, "unrequested dashboard") != NULL);
    assert(strcmp(out.original_request_alignment_sources, "minimax") == 0);
+
+   results[1].response =
+       "{\"original_request_alignment\":{\"status\":\"aligned\",\"summary\":\"\"},"
+       "\"items\":[]}";
+   memset(&out, 0, sizeof out);
+   capture_round_review_items(results, 2, &out, 2);
+   assert(strcmp(out.original_request_alignment, "aligned") == 0);
+   assert(strstr(out.original_request_alignment_summary, "requested scheduler") != NULL);
+
+   /* A stricter verdict without its required rationale remains stricter and
+    * fails closed; it must not inherit an earlier aligned explanation. */
+   results[1].response =
+       "{\"original_request_alignment\":{\"status\":\"drifted\",\"summary\":\"\"},"
+       "\"items\":[]}";
+   memset(&out, 0, sizeof out);
+   capture_round_review_items(results, 2, &out, 2);
+   assert(strcmp(out.original_request_alignment, "drifted") == 0);
+   assert(strstr(out.original_request_alignment_summary, "no explanation") != NULL);
 
    memset(&out, 0, sizeof out);
    capture_round_review_items(&results[2], 1, &out, 3);
@@ -1594,10 +1733,12 @@ static void test_roundtable_malformed_review_json_repair_counts_successful(void)
    opts.mode = ROUNDTABLE_REVIEW;
    opts.turns = ROUNDTABLE_PARALLEL;
    opts.max_rounds = 1;
+   opts.required_participants = 1;
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, "review malformed json repair", &opts, &result);
    assert(rc == 0);
    assert(result.degraded == 0);
+   assert(result.participants_required_failed == 0);
    assert(g_named_calls == 1);
    assert(result.item_count == 1);
    assert(strcmp(result.items[0].location, "src/fixed.c:9") == 0);
@@ -1663,6 +1804,10 @@ int main(void)
    test_roundtable_folds_cost_to_parent_session();
    test_roundtable_sequential_uses_named_agents();
    test_roundtable_degrades_on_min_success();
+   test_roundtable_optional_failure_is_reported_without_degrading();
+   test_roundtable_required_failure_degrades_even_with_optional_success();
+   test_roundtable_required_malformed_review_degrades_when_repair_fails();
+   test_roundtable_rejects_required_prefix_larger_than_panel();
    test_roundtable_preflight_cap_warns_observed_cap_stops();
    test_roundtable_keep_best_not_last();
    test_roundtable_post_fanout_cap_keeps_prior_best();
@@ -1676,6 +1821,7 @@ int main(void)
    test_specific_panel_pin_is_hard_requirement();
    test_panel_fills_every_agent_capacity_diversity_first();
    test_panel_prioritizes_distinct_providers();
+   test_panel_treats_providerless_agents_as_distinct();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_captures_original_request_alignment();

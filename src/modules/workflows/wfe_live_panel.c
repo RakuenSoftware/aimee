@@ -293,12 +293,14 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
        * short of a full panel is a failed attempt. */
       cfg.ensemble_reference_count = nlens;
       cfg.ensemble_reference_persona_count = nlens;
+      char required_models[WFE_PANEL_MAX][128];
       for (int i = 0; i < nlens; i++)
       {
          snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i], "%s",
                   seat[i]);
          snprintf(cfg.ensemble_reference_personas[i], sizeof cfg.ensemble_reference_personas[i],
                   "%s", required[i]);
+         snprintf(required_models[i], sizeof required_models[i], "%s", seat[i]);
       }
       /* Preset/lens bindings above are positive must-use seats. They do not cap
        * the panel: fill every remaining eligible provider slot, diversity first,
@@ -307,7 +309,27 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       ensemble_filter_panel_authorization(&cfg, &acfg);
       ensemble_filter_panel_availability(&cfg, &acfg);
       ensemble_fill_panel_capacity(&cfg, &acfg);
-      cfg.ensemble_min_successful = cfg.ensemble_reference_count;
+      /* Both filters only remove/compact and fill only appends. Therefore any
+       * removed required seat necessarily changes this positional prefix. */
+      int required_intact = cfg.ensemble_reference_count >= nlens;
+      for (int i = 0; required_intact && i < nlens; i++)
+         if (strcmp(cfg.ensemble_reference_models[i], required_models[i]) != 0)
+            required_intact = 0;
+      if (!required_intact)
+      {
+         aimee_log(LOG_WARN, "wfe-panel",
+                   "required seat prefix changed after filtering/fill (%d/%d seats)%s",
+                   cfg.ensemble_reference_count, nlens, final ? " -> degrade" : " -> retry");
+         if (final)
+         {
+            rc_final = 0;
+            break;
+         }
+         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
+         nanosleep(&nap, NULL);
+         continue;
+      }
+      cfg.ensemble_min_successful = nlens;
       cfg.roundtable_replay_verify_enabled = 0;
 
       roundtable_opts_t opts;
@@ -316,6 +338,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       opts.turns = ROUNDTABLE_PARALLEL;
       opts.max_rounds = 1;
       opts.deadline_ms = WFE_PANEL_DEADLINE_MS;
+      opts.required_participants = nlens;
 
       roundtable_result_t rt;
       memset(&rt, 0, sizeof rt);
@@ -326,10 +349,12 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          break;
       }
 
-      if (rt.participants_failed > 0 || rt.degraded)
+      if (rt.participants_required_failed > 0 || rt.degraded)
       {
-         aimee_log(LOG_WARN, "wfe-panel", "panel attempt: %d/%d panelist(s) failed%s%s",
-                   rt.participants_failed, rt.participants_total, rt.degraded ? " (degraded)" : "",
+         aimee_log(LOG_WARN, "wfe-panel",
+                   "panel attempt: %d/%d required and %d/%d total panelist(s) failed%s%s",
+                   rt.participants_required_failed, nlens, rt.participants_failed,
+                   rt.participants_total, rt.degraded ? " (degraded)" : "",
                    final ? " -> degrade" : " -> re-seat and retry");
          delegate_roundtable_result_free(&rt);
          if (final)

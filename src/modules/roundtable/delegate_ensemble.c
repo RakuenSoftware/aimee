@@ -65,6 +65,8 @@ static void shuffle_indices(int *indices, int count)
 
 static int count_successful(const agent_result_t *results, int count)
 {
+   /* A usable participant result is exactly a non-empty response. Review mode
+    * nulls an unrecoverably malformed response before calling this helper. */
    int n = 0;
    for (int i = 0; i < count; i++)
    {
@@ -72,6 +74,16 @@ static int count_successful(const agent_result_t *results, int count)
          n++;
    }
    return n;
+}
+
+static void record_adopted_round(roundtable_result_t *out, int round, int failed,
+                                 int required_failed)
+{
+   out->best_round = round;
+   out->participants_failed = failed;
+   out->participants_required_failed = required_failed;
+   if (required_failed > 0)
+      out->degraded = 1;
 }
 
 /* Balance-match a JSON object starting at text[start]=='{'. Scans forward
@@ -1800,6 +1812,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       local.max_rounds = 1;
    if (local.converge_threshold < 0)
       local.converge_threshold = 10;
+   if (local.required_participants > ref_count)
+   {
+      aimee_log(LOG_WARN, "delegate_roundtable",
+                "required participant prefix %d exceeds effective panel %d; failing closed",
+                local.required_participants, ref_count);
+      return -1;
+   }
    if (local.brief_truncated)
       out->truncated = 1;
 
@@ -1822,6 +1841,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 
    out->participants_total = ref_count; /* panel size per round (== MoA source) */
    out->participants_failed = 0;        /* set to the best round's count as it is chosen */
+   out->participants_required_failed = 0;
 
    for (int round = 1; round <= local.max_rounds; round++)
    {
@@ -1889,14 +1909,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             free(results[i].response);
          goto fail;
       }
-      /* Partial-failure metadata: participants that returned no usable response
-       * this round (raw model results, before review-JSON repair). Recorded into
-       * out->participants_failed wherever this round is adopted as best_round, so
-       * the surfaced count matches the returned artifact's provenance. */
-      int round_failed = ref_count - count_successful(results, ref_count);
-      aimee_log(LOG_INFO, "roundtable.progress",
-                "round %d/%d: %d/%d panelists responded; synthesizing", round, local.max_rounds,
-                ref_count - round_failed, ref_count);
+      int required_count =
+          local.required_participants > 0 ? local.required_participants : ref_count;
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;
@@ -1933,7 +1947,6 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                else
                {
                   free(fixed);
-                  out->degraded = 1;
                   free(results[i].response);
                   results[i].response = NULL;
                   snprintf(results[i].error, sizeof(results[i].error), "%s",
@@ -1955,6 +1968,23 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          capture_round_review_items(results, ref_count, out, round);
       }
 
+      /* Count usable results after review-JSON repair. The required prefix is
+       * caller-authored coverage; automatically filled seats are best-effort.
+       * Both totals remain observable, but optional quota failures cannot make
+       * an otherwise complete required panel degraded. */
+      int round_failed = ref_count - count_successful(results, ref_count);
+      int round_required_failed = required_count - count_successful(results, required_count);
+      for (int i = 0; i < required_count; i++)
+         if (!results[i].response || !results[i].response[0])
+            aimee_log(LOG_WARN, "roundtable.required",
+                      "round %d required seat %d (%s) returned no usable response%s%s", round, i,
+                      cfg->ensemble_reference_models[i], results[i].error[0] ? ": " : "",
+                      results[i].error);
+      aimee_log(LOG_INFO, "roundtable.progress",
+                "round %d/%d: %d/%d panelists responded (%d/%d required); synthesizing", round,
+                local.max_rounds, ref_count - round_failed, ref_count,
+                required_count - round_required_failed, required_count);
+
       double round_cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
       out->cost_usd += round_cost;
       out->rounds_run = round;
@@ -1966,8 +1996,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          {
             free(best_artifact);
             best_artifact = xstrdup0(results[best].response);
-            out->best_round = round;
-            out->participants_failed = round_failed;
+            record_adopted_round(out, round, round_failed, round_required_failed);
          }
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
@@ -1997,8 +2026,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                free(best_artifact);
                best_artifact = xstrdup0(results[best].response);
                best_score = score;
-               out->best_round = round;
-               out->participants_failed = round_failed;
+               record_adopted_round(out, round, round_failed, round_required_failed);
             }
          }
          for (int i = 0; i < ref_count; i++)
@@ -2056,8 +2084,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(chair_adj);
          if (cfg->roundtable_replay_verify_enabled)
             roundtable_artifact_append_rejected(&best_artifact, out);
-         out->best_round = round;
-         out->participants_failed = round_failed;
+         record_adopted_round(out, round, round_failed, round_required_failed);
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
          break;
@@ -2133,8 +2160,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(best_artifact);
          best_artifact = xstrdup0(agg_result.response);
          best_score = score;
-         out->best_round = round;
-         out->participants_failed = round_failed;
+         record_adopted_round(out, round, round_failed, round_required_failed);
       }
       free(agg_result.response);
 

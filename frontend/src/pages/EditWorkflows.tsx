@@ -115,10 +115,16 @@ function readParticipants(node: GNode): Participant[] {
   const strs = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   if (Array.isArray(panel.required) || Array.isArray(panel.personas)) {
-	const pins = (panel.pins || {}) as Record<string, unknown>;
-	const legacy = Array.isArray(panel.personas) && !panel.pins;
-	const pers = legacy ? strs(panel.personas) : strs(panel.required);
-	const dels = legacy ? strs(panel.required) : pers.map((persona) => typeof pins[persona] === "string" ? String(pins[persona]) : "");
+    const pins = (panel.pins || {}) as Record<string, unknown>;
+    // Legacy panels stored delegates in required and lenses in personas. Read
+    // that shape until the next edit migrates it to required=lenses + pins.
+    const legacy = Array.isArray(panel.personas) && !panel.pins;
+    const pers = legacy ? strs(panel.personas) : strs(panel.required);
+    const dels = legacy
+      ? strs(panel.required)
+      : pers.map((persona) =>
+          typeof pins[persona] === "string" ? String(pins[persona]) : "",
+        );
     const n = Math.max(dels.length, pers.length);
     const out: Participant[] = [];
     for (let i = 0; i < n; i++)
@@ -1118,10 +1124,14 @@ function NodeInspector({
         const lenses = cleaned.map((x) => x.persona).filter(Boolean);
         if (lenses.length) panel.required = lenses;
         else delete panel.required;
-		delete panel.personas;
-		const pins = Object.fromEntries(cleaned.filter((x) => x.persona && x.delegate).map((x) => [x.persona, x.delegate]));
-		if (Object.keys(pins).length) panel.pins = pins;
-		else delete panel.pins;
+        delete panel.personas;
+        const pins = Object.fromEntries(
+          cleaned
+            .filter((x) => x.persona && x.delegate)
+            .map((x) => [x.persona, x.delegate]),
+        );
+        if (Object.keys(pins).length) panel.pins = pins;
+        else delete panel.pins;
         if (Object.keys(panel).length) params.panel = panel;
         else delete params.panel;
         if (q > 0) params.quorum = q;

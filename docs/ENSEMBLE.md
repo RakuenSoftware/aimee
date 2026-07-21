@@ -58,6 +58,24 @@ drift. WFE gates fail closed on `drifted`, `unclear`, or an omitted assessment,
 so implementation quality cannot accidentally earn approval for work that does
 not answer the request.
 
+Roundtable participation metadata follows three rules:
+
+- `participants_failed` counts unusable responses in the adopted best round;
+  `participants_required_failed` counts the subset in its caller-authored,
+  required prefix. The latter is additive response metadata.
+- Automatically filled capacity seats are always attempted and remain visible
+  in the total, but their transient failures do not by themselves degrade a
+  roundtable whose required seats all responded. Their usable reviews still
+  contribute normally to the consolidated artifact.
+- `required_participants == 0` preserves the legacy all-required behavior. A
+  value larger than the effective panel fails closed before invoking a model.
+
+`degraded` describes the run as a whole and is intentionally sticky across
+rounds: truncation, a failed required seat, insufficient successful responses,
+an aggregator failure, or verification degradation cannot be hidden merely by
+selecting a later artifact. Consequently, an adopted round with zero required
+failures does not clear an earlier run-level degradation.
+
 ```bash
 aimee ensemble roundtable "Is this migration plan sound?" --mode review
 #   --mode review|draft        review an artifact, or collaboratively draft one

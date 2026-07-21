@@ -56,6 +56,10 @@ typedef struct
    /* Originating session: panel + aggregator runs fold their cost onto it via
     * db1_cost_fold_record, so the ensemble is accounted like a delegate. */
    const char *parent_session_id;
+   /* Leading effective-panel seats [0..required_participants) are caller-authored
+    * must-use lenses. Later auto-filled seats are best-effort. Zero means every
+    * participant is required (legacy/default). Values above panel size fail. */
+   int required_participants;
 } roundtable_opts_t;
 
 /* Replay-verification evidence (Part A of the replayable-verification proposal).
@@ -113,9 +117,11 @@ typedef struct
    int deadline_hit;
    int cancelled;
    int best_round;
-   int participants_total;  /* reference models per round (panel size) */
-   int participants_failed; /* participants that returned no usable response in the final round run
-                             */
+   int participants_total;           /* reference models per round (panel size) */
+   int participants_failed;          /* unusable responses in the adopted best round */
+   /* Failures in the adopted best round's required prefix. This is always <=
+    * participants_failed; degraded remains run-level and sticky across rounds. */
+   int participants_required_failed;
    double cost_usd;
    /* Explicit assessment of whether the reviewed direction still serves the
     * originating request. `unclear` is fail-closed for workflow gates: a panel

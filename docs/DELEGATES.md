@@ -400,13 +400,17 @@ happened in the result rather than silently dropping the failures:
 |-------|---------|
 | `participants_total` | Reference models fanned out (the panel size) |
 | `participants_failed` | Participants that returned no usable response (for `roundtable`, the count from the round whose artifact was selected, the `best_round`) |
+| `participants_required_failed` *(roundtable)* | Failed participants in the adopted best round's caller-authored required prefix; always less than or equal to `participants_failed` |
 | `degraded` | The run returned the best single candidate instead of a synthesized answer (e.g. fewer than `min_successful` answered) |
 | `cost_capped` | The run stopped early because the observed cost reached `max_cost_usd` |
 | `deadline_hit` *(roundtable)* | The per-run `deadline_ms` elapsed; the best artifact so far is returned |
 
-`participants_failed > 0` with `degraded = 0` means the panel lost some members
-but still had enough to synthesize, the answer is sound but thinner than a full
-panel. `degraded = 1` means the result is a single survivor's answer.
+`participants_failed > 0` with `degraded = 0` means only best-effort capacity
+seats failed while every required participant answered. Their failures remain
+observable but do not turn a complete required panel into a failed gate.
+`degraded` is run-level and sticky across roundtable rounds, so an earlier
+truncation, required-seat failure, or verification degradation cannot be hidden
+by selecting a later artifact.
 
 ## Configuration Reference
 
