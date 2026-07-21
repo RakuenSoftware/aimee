@@ -73,7 +73,10 @@ available through `SSH_AUTH_SOCK`. It invokes no shell, signs every module, veri
 and builds the complete index before changing the attestation directory. A malformed prior directory
 or any signing failure leaves it unchanged. Initial installation uses an atomic rename; renewal uses
 `renameat2(RENAME_EXCHANGE)` and fails without changing the directory when the filesystem lacks that
-operation.
+operation. The helper pins the parent, staging, and existing target directories by open descriptors
+and rechecks their directory-entry identities around installation. It performs no automatic rollback
+or recursive root cleanup: aborted staging trees and the verified prior generation from a renewal
+remain as mode-`0700` quarantine directories for explicit operator inspection and removal.
 
 ## Current GitHub repository binding
 

@@ -149,16 +149,17 @@ def _existing_attestations_are_well_formed(
     path: Path,
     module_ids: set[str],
     *,
+    pinned_fd: int | None = None,
     owner_identity: str,
     owner_key: str,
     reviewer_identity: str,
     reviewer_key: str,
     toolchain: contract.LockedToolchain,
 ) -> None:
-    if not path.exists() and not path.is_symlink():
+    if pinned_fd is None and not path.exists() and not path.is_symlink():
         return
     try:
-        info = path.lstat()
+        info = os.fstat(pinned_fd) if pinned_fd is not None else path.lstat()
     except OSError as exc:
         fail("existing-attestations", str(exc))
     if not stat.S_ISDIR(info.st_mode):
@@ -226,7 +227,7 @@ def _sign(
     identity: str,
     toolchain: contract.LockedToolchain,
     root: Path,
-    parent_fd: int,
+    root_fd: int,
 ) -> bytes:
     public_path = root / f"signer-{contract.sha256(identity.encode())}.pub"
     public_path.write_text(public_key + "\n", encoding="ascii")
@@ -249,7 +250,7 @@ def _sign(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
-        pass_fds=(parent_fd,),
+        pass_fds=(root_fd,),
         env={
             "HOME": os.fspath(isolated_home),
             "LANG": "C",
@@ -305,9 +306,34 @@ def _assert_parent_path(parent: Path, expected: os.stat_result) -> None:
         fail("parent-race", "attestation parent changed during signing")
 
 
-def _staging_directory(parent_fd: int) -> tuple[str, Path]:
-    proc_parent = Path(f"/proc/self/fd/{parent_fd}")
-    if not proc_parent.is_dir():
+def _open_pinned_directory(parent_fd: int, name: str, *, missing_ok: bool) -> int | None:
+    try:
+        return os.open(
+            name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=parent_fd,
+        )
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        raise
+    except OSError as exc:
+        fail("directory-pin", f"cannot pin {name!r}: {exc}")
+
+
+def _assert_entry_inode(
+    parent_fd: int, name: str, expected: os.stat_result, *, rule: str
+) -> None:
+    try:
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        fail(rule, f"pinned directory {name!r} disappeared")
+    if not stat.S_ISDIR(current.st_mode) or not _same_inode(current, expected):
+        fail(rule, f"pinned directory {name!r} changed")
+
+
+def _staging_directory(parent_fd: int) -> tuple[str, int, Path]:
+    if not Path(f"/proc/self/fd/{parent_fd}").is_dir():
         fail("atomic-replace", "pinned /proc directory access is unavailable")
     for _ in range(32):
         name = f".attestations-{secrets.token_hex(12)}"
@@ -315,7 +341,9 @@ def _staging_directory(parent_fd: int) -> tuple[str, Path]:
             os.mkdir(name, mode=0o700, dir_fd=parent_fd)
         except FileExistsError:
             continue
-        return name, proc_parent / name
+        staging_fd = _open_pinned_directory(parent_fd, name, missing_ok=False)
+        assert staging_fd is not None
+        return name, staging_fd, Path(f"/proc/self/fd/{staging_fd}")
     fail("staging", "cannot allocate a unique staging directory")
 
 
@@ -344,7 +372,8 @@ def build_attestations(args: argparse.Namespace) -> None:
     )
     staging: Path | None = None
     staging_name: str | None = None
-    installed = False
+    staging_fd: int | None = None
+    prior_fd: int | None = None
     try:
         try:
             fcntl.flock(parent_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -352,22 +381,25 @@ def build_attestations(args: argparse.Namespace) -> None:
             fail("signing-busy", "another attestation replacement holds the parent lock")
         parent_info = os.fstat(parent_fd)
         _assert_parent_path(target_parent, parent_info)
-        proc_parent = Path(f"/proc/self/fd/{parent_fd}")
-        target = proc_parent / "attestations"
-        _existing_attestations_are_well_formed(
-            target,
-            module_ids,
-            owner_identity=args.owner_identity,
-            owner_key=owner_key,
-            reviewer_identity=args.reviewer_identity,
-            reviewer_key=reviewer_key,
-            toolchain=toolchain,
-        )
-        try:
-            prior_info = os.stat("attestations", dir_fd=parent_fd, follow_symlinks=False)
-        except FileNotFoundError:
+        prior_fd = _open_pinned_directory(parent_fd, "attestations", missing_ok=True)
+        if prior_fd is None:
             prior_info = None
-        staging_name, staging = _staging_directory(parent_fd)
+        else:
+            prior_info = os.fstat(prior_fd)
+            _existing_attestations_are_well_formed(
+                Path(f"/proc/self/fd/{prior_fd}"),
+                module_ids,
+                pinned_fd=prior_fd,
+                owner_identity=args.owner_identity,
+                owner_key=owner_key,
+                reviewer_identity=args.reviewer_identity,
+                reviewer_key=reviewer_key,
+                toolchain=toolchain,
+            )
+            _assert_entry_inode(
+                parent_fd, "attestations", prior_info, rule="target-race"
+            )
+        staging_name, staging_fd, staging = _staging_directory(parent_fd)
         index: list[dict[str, str]] = []
         for module_id in sorted(module_ids):
             descriptor_relative = Path("src/modules") / module_id / "module.yaml"
@@ -411,7 +443,7 @@ def build_attestations(args: argparse.Namespace) -> None:
                 ("reviewer", args.reviewer_identity, reviewer_key),
             ):
                 signature = _sign(
-                    subject_raw, public_key, identity, toolchain, staging, parent_fd
+                    subject_raw, public_key, identity, toolchain, staging, staging_fd
                 )
                 signature_path = staging / f"{module_id}.{role}.sig"
                 signature_path.write_bytes(signature)
@@ -430,6 +462,7 @@ def build_attestations(args: argparse.Namespace) -> None:
         _existing_attestations_are_well_formed(
             staging,
             module_ids,
+            pinned_fd=staging_fd,
             owner_identity=args.owner_identity,
             owner_key=owner_key,
             reviewer_identity=args.reviewer_identity,
@@ -437,38 +470,23 @@ def build_attestations(args: argparse.Namespace) -> None:
             toolchain=toolchain,
         )
         _assert_parent_path(target_parent, parent_info)
-        staged_info = os.stat(staging_name, dir_fd=parent_fd, follow_symlinks=False)
+        staged_info = os.fstat(staging_fd)
+        _assert_entry_inode(parent_fd, staging_name, staged_info, rule="staging-race")
         if prior_info is not None:
-            try:
-                current_prior = os.stat(
-                    "attestations", dir_fd=parent_fd, follow_symlinks=False
-                )
-            except FileNotFoundError:
-                fail("target-race", "validated attestation directory disappeared")
-            if not _same_inode(prior_info, current_prior):
-                fail("target-race", "validated attestation directory changed")
+            _assert_entry_inode(
+                parent_fd, "attestations", prior_info, rule="target-race"
+            )
+            _assert_entry_inode(parent_fd, staging_name, staged_info, rule="staging-race")
             _renameat2(
                 parent_fd, staging_name, parent_fd, "attestations", RENAME_EXCHANGE
             )
-            try:
-                moved_prior = os.stat(
-                    staging_name, dir_fd=parent_fd, follow_symlinks=False
-                )
-                installed_info = os.stat(
-                    "attestations", dir_fd=parent_fd, follow_symlinks=False
-                )
-                _assert_parent_path(target_parent, parent_info)
-                if not _same_inode(prior_info, moved_prior) or not _same_inode(
-                    staged_info, installed_info
-                ):
-                    fail("target-race", "atomic exchange moved unexpected inodes")
-            except Exception:
-                _renameat2(
-                    parent_fd, staging_name, parent_fd, "attestations", RENAME_EXCHANGE
-                )
-                raise
-            installed = True
-            shutil.rmtree(staging, ignore_errors=True)
+            _assert_parent_path(target_parent, parent_info)
+            _assert_entry_inode(
+                parent_fd, staging_name, prior_info, rule="target-race"
+            )
+            _assert_entry_inode(
+                parent_fd, "attestations", staged_info, rule="target-race"
+            )
         else:
             try:
                 os.stat("attestations", dir_fd=parent_fd, follow_symlinks=False)
@@ -479,25 +497,15 @@ def build_attestations(args: argparse.Namespace) -> None:
             _renameat2(
                 parent_fd, staging_name, parent_fd, "attestations", RENAME_NOREPLACE
             )
-            try:
-                installed_info = os.stat(
-                    "attestations", dir_fd=parent_fd, follow_symlinks=False
-                )
-                _assert_parent_path(target_parent, parent_info)
-                if not _same_inode(staged_info, installed_info):
-                    fail("target-race", "atomic install moved an unexpected inode")
-            except Exception:
-                os.rename(
-                    "attestations",
-                    staging_name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                )
-                raise
-            installed = True
+            _assert_parent_path(target_parent, parent_info)
+            _assert_entry_inode(
+                parent_fd, "attestations", staged_info, rule="target-race"
+            )
     finally:
-        if not installed and staging is not None and staging.exists():
-            shutil.rmtree(staging)
+        if prior_fd is not None:
+            os.close(prior_fd)
+        if staging_fd is not None:
+            os.close(staging_fd)
         os.close(parent_fd)
 
 

@@ -12,7 +12,9 @@ import shutil
 import subprocess
 import struct
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -367,6 +369,77 @@ class ModuleDocContractTests(unittest.TestCase):
                 )
             finally:
                 contract.GIT_OPERATION_TIMEOUT_SECONDS = previous
+
+    def test_decision_budget_boundaries_fail_closed(self) -> None:
+        budget = contract.GitDecisionBudget()
+        budget.git_operations = contract.MAX_DECISION_GIT_OPERATIONS
+        self.assert_rule("git-operation-budget", budget.consume_git_operation)
+        budget.evidence_references = contract.MAX_DECISION_EVIDENCE_REFERENCES
+        self.assert_rule("document-evidence-budget", budget.consume_evidence_reference)
+        budget.distinct_blob_bytes = contract.MAX_DECISION_DISTINCT_BLOB_BYTES
+        self.assert_rule(
+            "git-byte-budget", lambda: budget.cache_blob(("repo", "a" * 40, "x"), b"x")
+        )
+
+    def test_decision_deadline_kills_git_and_prevents_late_spawn(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+            (repo / "x").write_text("x\n", encoding="ascii")
+            subprocess.run(["git", "add", "x"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+            commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            reader = contract.GitBlobReader(repo, commit)
+            reader.budget.git_deadline = time.monotonic() + 0.1
+            started = time.monotonic()
+            self.assert_rule("git-timeout", lambda: reader._git_bounded(
+                1024, "-c", "alias.wait=!sleep 2", "wait"
+            ))
+            self.assertLess(time.monotonic() - started, 1.0)
+            reader.budget.git_deadline = time.monotonic() - 1
+            with mock.patch.object(contract.subprocess, "Popen") as popen:
+                self.assert_rule(
+                    "git-timeout", lambda: reader._git_bounded(1024, "rev-parse", "HEAD")
+                )
+                popen.assert_not_called()
+            self.assertGreater(
+                contract.GitDecisionBudget().git_deadline, time.monotonic()
+            )
+
+    def test_git_output_ceilings_and_cross_reader_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+            (repo / "evidence.txt").write_text("shared\n", encoding="ascii")
+            subprocess.run(["git", "add", "evidence.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+            commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            budget = contract.GitDecisionBudget()
+            token = contract._ACTIVE_GIT_BUDGET.set(budget)
+            try:
+                first = contract.GitBlobReader(repo, commit)
+                second = contract.GitBlobReader(repo, commit)
+                self.assertEqual(first.read_blob("evidence.txt"), b"shared\n")
+                operations = budget.git_operations
+                self.assertEqual(second.read_blob("evidence.txt"), b"shared\n")
+                self.assertEqual(budget.git_operations, operations)
+                self.assert_rule(
+                    "git-output-size", lambda: first._git_bounded(1, "rev-parse", "HEAD")
+                )
+                previous = contract.MAX_GIT_STDERR_BYTES
+                contract.MAX_GIT_STDERR_BYTES = 1
+                try:
+                    self.assert_rule(
+                        "git-stderr-size", lambda: first._git_bounded(1024, "invalid-command")
+                    )
+                finally:
+                    contract.MAX_GIT_STDERR_BYTES = previous
+            finally:
+                contract._ACTIVE_GIT_BUDGET.reset(token)
 
     def test_git_blob_size_boundary_precedes_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

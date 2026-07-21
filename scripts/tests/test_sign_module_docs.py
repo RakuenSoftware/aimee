@@ -123,7 +123,7 @@ class SignModuleDocsTests(unittest.TestCase):
                 parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
             )
             try:
-                name, staging = signer._staging_directory(parent_fd)
+                name, staging_fd, staging = signer._staging_directory(parent_fd)
                 self.assertEqual(stat.S_IMODE(staging.stat().st_mode), 0o700)
                 moved = root / "moved-modules"
                 parent.rename(moved)
@@ -133,7 +133,39 @@ class SignModuleDocsTests(unittest.TestCase):
                 (staging / "pinned").write_text("yes", encoding="ascii")
                 self.assertTrue((moved / name / "pinned").is_file())
                 self.assertFalse((attacker / name).exists())
+                os.close(staging_fd)
             finally:
+                os.close(parent_fd)
+
+    def test_pinned_directory_detects_name_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            target = parent / "attestations"
+            target.mkdir()
+            (target / "marker").write_text("validated", encoding="ascii")
+            parent_fd = os.open(
+                parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            )
+            target_fd = signer._open_pinned_directory(
+                parent_fd, "attestations", missing_ok=False
+            )
+            assert target_fd is not None
+            expected = os.fstat(target_fd)
+            try:
+                target.rename(parent / "validated-away")
+                target.mkdir()
+                (target / "marker").write_text("substitution", encoding="ascii")
+                self.assertEqual(
+                    (Path(f"/proc/self/fd/{target_fd}") / "marker").read_text(
+                        encoding="ascii"
+                    ),
+                    "validated",
+                )
+                self.assert_rule("target-race", lambda: signer._assert_entry_inode(
+                    parent_fd, "attestations", expected, rule="target-race"
+                ))
+            finally:
+                os.close(target_fd)
                 os.close(parent_fd)
 
     def test_end_to_end_agent_signing_and_malformed_prior_preservation(self) -> None:

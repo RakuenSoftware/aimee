@@ -59,6 +59,7 @@ MAX_DECISION_EVIDENCE_REFERENCES = 2_048
 MAX_DECISION_DISTINCT_BLOB_BYTES = 67_108_864
 MAX_DECISION_GIT_OPERATIONS = 2_048
 GIT_OPERATION_TIMEOUT_SECONDS = 10
+MAX_DECISION_GIT_WALL_SECONDS = 60
 MAX_GIT_STDERR_BYTES = 65_536
 
 SECTIONS = (
@@ -589,6 +590,7 @@ class GitDecisionBudget:
         self.evidence_references = 0
         self.distinct_blob_bytes = 0
         self.blobs: dict[tuple[str, str, str], bytes] = {}
+        self.git_deadline = time.monotonic() + MAX_DECISION_GIT_WALL_SECONDS
 
     def consume_git_operation(self) -> None:
         self.git_operations += 1
@@ -630,10 +632,14 @@ class GitBlobReader:
 
     def _git_bounded(self, max_bytes: int, *arguments: str) -> bytes:
         self.budget.consume_git_operation()
+        remaining_decision = self.budget.git_deadline - time.monotonic()
+        if remaining_decision <= 0:
+            fail("git-timeout", "decision exhausted its Git wall-clock budget")
         process = subprocess.Popen(
             ["git", *arguments], cwd=self.repository, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            start_new_session=True,
         )
         assert process.stdout is not None and process.stderr is not None
         selector = selectors.DefaultSelector()
@@ -641,13 +647,23 @@ class GitBlobReader:
         selector.register(process.stderr, selectors.EVENT_READ, "stderr")
         output = bytearray()
         errors = bytearray()
-        deadline = time.monotonic() + GIT_OPERATION_TIMEOUT_SECONDS
+        deadline = time.monotonic() + min(
+            GIT_OPERATION_TIMEOUT_SECONDS, remaining_decision
+        )
+
+        def terminate() -> None:
+            if process.poll() is not None:
+                return
+            try:
+                os.killpg(process.pid, 9)
+            except ProcessLookupError:
+                pass
+            process.wait()
         try:
             while selector.get_map():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    process.kill()
-                    process.wait()
+                    terminate()
                     fail("git-timeout", "Git operation exceeded its wall-clock limit")
                 events = selector.select(remaining)
                 if not events:
@@ -661,20 +677,17 @@ class GitBlobReader:
                     sink.extend(chunk)
                     ceiling = max_bytes if key.data == "stdout" else MAX_GIT_STDERR_BYTES
                     if len(sink) > ceiling:
-                        process.kill()
-                        process.wait()
+                        terminate()
                         rule = "git-output-size" if key.data == "stdout" else "git-stderr-size"
                         fail(rule, f"Git {key.data} exceeds {ceiling} bytes")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                process.kill()
-                process.wait()
+                terminate()
                 fail("git-timeout", "Git operation exceeded its wall-clock limit")
             try:
                 returncode = process.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+                terminate()
                 fail("git-timeout", "Git operation exceeded its wall-clock limit")
             if returncode != 0:
                 fail("git-object", bytes(errors).decode("utf-8", "replace").strip())
@@ -682,8 +695,7 @@ class GitBlobReader:
         finally:
             selector.close()
             if process.poll() is None:
-                process.kill()
-                process.wait()
+                terminate()
             process.stdout.close()
             process.stderr.close()
 
