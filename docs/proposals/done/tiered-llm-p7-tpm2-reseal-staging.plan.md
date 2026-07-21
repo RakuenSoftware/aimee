@@ -1,6 +1,7 @@
 # P7-reseal-c bounded vault re-wrap staging and promotion
 
-- **State:** proposed implementation slice.
+- **State:** delivered and validated on PostgreSQL 17 (CT260), including the
+  standalone AES-KW mock driver and concurrency/failure gate.
 - **Depends on:** P7-reseal-a prepared TPM2 receipts and P7-reseal-b primary barrier.
 
 ## Scope and enablement boundary
@@ -25,7 +26,8 @@ Add `kb_vault_rewrap_operation`, keyed by a canonical lowercase 32-hex
 `operation_id`, with unique `request_id` (1..200 bytes), actor (1..575 bytes),
 state, seal epoch, fencing token, old/new nonnegative signed-64-bit generation,
 opaque receipt (1..4096 bytes) plus its SHA-256,
-inventory/stage counts and SHA-256s, failure class, and timestamps. Legal states
+inventory/stage counts and SHA-256s, a lowercase class token (never free-form
+diagnostic text), and timestamps. Legal states
 are:
 
 `preparing -> custody_prepared -> wraps_staged -> reseal_committing -> resealed -> promoted`
@@ -55,7 +57,9 @@ Add append-only `kb_vault_rewrap_worm` with primary key
 domain `aimee-vault-rewrap-worm-v1` plus network-order length-prefixed UTF-8
 operation ID and event kind; plain concatenation is forbidden. The row binds
 operation, seal epoch, fence, state, inventory/stage/receipt digests, actor, and a
-content-free detail of at most 1000 bytes. Triggers reject UPDATE, DELETE, and
+content-free detail of at most 1000 bytes. Failure checkpoints may contain only
+the operation state plus the bounded lowercase class token; exception text and
+operator-supplied diagnostics are forbidden. Triggers reject UPDATE, DELETE, and
 TRUNCATE. Begin writes `intent`; resealed, abort, and recovery-required write
 their checkpoint/terminal events in the same transaction as the state change.
 P7-reseal-d adds completed and the idempotent off-database drain.

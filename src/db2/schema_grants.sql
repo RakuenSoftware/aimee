@@ -24,6 +24,29 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
   REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
+  -- P7-reseal-c is migration-owner orchestration only. The broad bootstrap grant
+  -- above must never make its operation ledger, staged wraps, outbox, or helper
+  -- functions visible to the runtime role on either first apply or re-apply.
+  REVOKE ALL ON TABLE kb_vault_rewrap_operation, kb_vault_rewrap_dek_stage,
+    kb_vault_rewrap_check_stage, kb_vault_rewrap_worm FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_rewrap_worm_block(),
+    org_vault_rewrap_pack_text(TEXT), org_vault_rewrap_pack_bytes(BYTEA),
+    org_vault_rewrap_worm_append(TEXT,TEXT,TEXT,TEXT),
+    org_vault_rewrap_begin(TEXT,TEXT,TEXT,BIGINT,BIGINT),
+    org_vault_rewrap_record_prepared(TEXT,BIGINT,BYTEA,BYTEA),
+    org_vault_rewrap_assert_live(TEXT,BIGINT,BOOLEAN),
+    org_vault_rewrap_status(TEXT),
+    org_vault_rewrap_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
+    org_vault_rewrap_check_page(TEXT,BIGINT,TEXT,INTEGER),
+    org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
+    org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA),
+    org_vault_rewrap_digests(TEXT), org_vault_rewrap_stage_finish(TEXT,BIGINT),
+    org_vault_rewrap_mark_committing(TEXT,BIGINT),
+    org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
+    org_vault_rewrap_promote(TEXT,BIGINT),
+    org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
+    org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)
+    FROM aimee_kb_runtime;
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
   ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_kb_runtime;

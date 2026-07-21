@@ -71,6 +71,12 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_barrier_pg_test.sql
 echo "== P7 primary vault maintenance barrier concurrency gate =="
 "$ROOT/scripts/p7_vault_barrier_concurrency.sh" "$DB_URL"
 
+echo "== P7 whole-vault re-wrap concurrency and failure assertions =="
+"$ROOT/scripts/p7_vault_rewrap_concurrency.sh" "$DB_URL"
+
+echo "== P7 whole-vault re-wrap staging and promotion assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_rewrap_pg_test.sql"
+
 echo "== P2a org-model catalog + entitlement isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 
