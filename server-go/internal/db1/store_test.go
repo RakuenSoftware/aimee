@@ -114,6 +114,31 @@ func TestParkedRootStillConsumesAdmissionCapacity(t *testing.T) {
 	}
 }
 
+func TestTurnCountExcludesAdministrativeEvents(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	createTestItem(t, store, "wi_turns")
+	if err := store.Move(ctx, "wi_turns", "plan_gate", "plan", "advance", "approved", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Park(ctx, "wi_turns", "plan", "turn_cap", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(ctx, "wi_turns"); err != nil {
+		t.Fatal(err)
+	}
+	if parked, err := store.RecordRetry(ctx, "wi_turns", "plan", "plan", "refine", 3, 0); err != nil || parked {
+		t.Fatalf("record retry: parked=%v err=%v", parked, err)
+	}
+	turns, err := store.TurnCount(ctx, "wi_turns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turns != 2 {
+		t.Fatalf("turns=%d want=2 (advance + loop only)", turns)
+	}
+}
+
 func TestWorkflowBudgetAggregatesChildrenAndParksWholeTree(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

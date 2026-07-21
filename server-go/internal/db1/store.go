@@ -427,7 +427,12 @@ FROM lifecycle_event WHERE work_item_id = ? AND id > ? ORDER BY id ASC LIMIT ?`,
 
 func (s *Store) TurnCount(ctx context.Context, workItemID string) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_event WHERE work_item_id=? AND kind!='create'`, workItemID).Scan(&count)
+	// A turn is an executed workflow transition. Administrative events such as
+	// transient parks, operator resumes, and gates remain in the audit log but
+	// must not consume execution budget; otherwise an unavailable dependency can
+	// exhaust max_turns without the workflow running and every resume immediately
+	// parks again.
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_event WHERE work_item_id=? AND kind IN ('advance','loop')`, workItemID).Scan(&count)
 	return count, err
 }
 
