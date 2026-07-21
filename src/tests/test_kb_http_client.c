@@ -196,6 +196,7 @@ static void request_validation(void)
                                 .total_timeout_ms = 1};
    kb_http_response_t response = {.status = 999};
    capture_t capture = {.gate = KB_HTTP_GATE_DELIVER};
+   assert(kb_http_request_validate(&request) == KB_HTTP_INVALID_ARGUMENT);
    assert(kb_http_tls_exchange(&request, &response, capture_headers, capture_body, &capture) ==
           KB_HTTP_INVALID_ARGUMENT);
    assert(response.status == 0);
@@ -215,6 +216,36 @@ static void request_validation(void)
           KB_HTTP_INVALID_ARGUMENT);
 }
 
+static void origin_path_validation(void)
+{
+   kb_http_header_t headers[] = {{"host", "bedrock-runtime.us-east-1.amazonaws.com"}};
+   kb_http_request_t request = {.authority = headers[0].value,
+                                .method = "POST",
+                                .target = "/",
+                                .headers = headers,
+                                .header_count = 1,
+                                .body = (const unsigned char *)"{}",
+                                .body_len = 2,
+                                .response_body_max = 64,
+                                .connect_timeout_ms = 1,
+                                .total_timeout_ms = 1};
+   static const char *const valid[] = {"/", "/model/a%3Ab/converse",
+                                       "/a/b:c@d!$&'()*+,;=-._~"};
+   for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++)
+   {
+      request.target = valid[i];
+      assert(kb_http_request_validate(&request) == KB_HTTP_OK);
+   }
+   char raw_non_ascii[] = {'/', 'x', (char)0xc3, (char)0xa9, 0};
+   const char *invalid[] = {"//x", "/x\\y", "/x%", "/x%0", "/x%GG", "/x%0g",
+                            "/x?y", "/x#y", "/x y", "/x\ty", raw_non_ascii};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+   {
+      request.target = invalid[i];
+      assert(kb_http_request_validate(&request) == KB_HTTP_INVALID_ARGUMENT);
+   }
+}
+
 int main(void)
 {
    content_length_boundaries();
@@ -223,6 +254,7 @@ int main(void)
    post_completion_surplus();
    malformed_matrix();
    request_validation();
+   origin_path_validation();
    puts("kb http client: strict parser and request validation passed");
    return 0;
 }

@@ -56,11 +56,26 @@ struct kb_http_response_parser
    kb_http_body_fn body_cb;
    void *context;
    kb_http_gate_t gate;
+   int64_t deadline_ns; /* zero for pure parser use */
 };
+
+static int64_t now_ns(void);
+static kb_http_result_t parser_fail(kb_http_response_parser_t *p, kb_http_result_t result);
+
+static kb_http_result_t parser_deadline(kb_http_response_parser_t *p)
+{
+   if (p->deadline_ns)
+   {
+      int64_t now = now_ns();
+      if (now < 0 || now >= p->deadline_ns)
+         return parser_fail(p, KB_HTTP_TIMEOUT);
+   }
+   return KB_HTTP_MORE;
+}
 
 static int token_char(unsigned char c)
 {
-   if (isalnum(c))
+   if (c < 0x80 && isalnum(c))
       return 1;
    return strchr("!#$%&'*+-.^_`|~", c) != NULL;
 }
@@ -208,12 +223,16 @@ static kb_http_result_t parse_headers(kb_http_response_parser_t *p)
       p->response.framing = KB_HTTP_FRAMING_CHUNKED;
       p->state = PARSER_CHUNK_SIZE;
    }
+   if (parser_deadline(p) != KB_HTTP_MORE)
+      return p->terminal;
    kb_http_gate_t gate = p->headers_cb(&p->response, p->context);
    if (gate != KB_HTTP_GATE_DELIVER && gate != KB_HTTP_GATE_DISCARD &&
        gate != KB_HTTP_GATE_ABORT)
       return parser_fail(p, KB_HTTP_CALLBACK_ABORT);
    if (gate == KB_HTTP_GATE_ABORT)
       return parser_fail(p, KB_HTTP_CALLBACK_ABORT);
+   if (parser_deadline(p) != KB_HTTP_MORE)
+      return p->terminal;
    p->gate = p->response.status >= 200 && p->response.status <= 299 ? gate
                                                                     : KB_HTTP_GATE_DISCARD;
    return KB_HTTP_MORE;
@@ -242,11 +261,15 @@ static kb_http_result_t deliver(kb_http_response_parser_t *p, const unsigned cha
 {
    if (!length || p->gate == KB_HTTP_GATE_DISCARD)
       return KB_HTTP_MORE;
+   if (parser_deadline(p) != KB_HTTP_MORE)
+      return p->terminal;
    kb_http_body_action_t action = p->body_cb(bytes, length, p->context);
    if (action == KB_HTTP_BODY_CALLER_ABORT)
       return parser_fail(p, KB_HTTP_CALLBACK_ABORT);
    if (action != KB_HTTP_BODY_CONTINUE)
       return parser_fail(p, KB_HTTP_INTERNAL_ERROR);
+   if (parser_deadline(p) != KB_HTTP_MORE)
+      return p->terminal;
    return KB_HTTP_MORE;
 }
 
@@ -423,6 +446,12 @@ static int deadline_poll_ms(int64_t deadline)
    return ms > INT_MAX ? INT_MAX : (int)ms;
 }
 
+static int deadline_expired(int64_t deadline)
+{
+   int64_t now = now_ns();
+   return now < 0 || now >= deadline;
+}
+
 typedef struct
 {
    pthread_mutex_t mutex;
@@ -545,7 +574,11 @@ static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
       struct pollfd pfd = {.fd = fd, .events = events};
       int rc = poll(&pfd, 1, timeout);
       if (rc > 0)
+      {
+         if (deadline_expired(deadline))
+            return KB_HTTP_TIMEOUT;
          return (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) ? KB_HTTP_IO_ERROR : KB_HTTP_OK;
+      }
       if (rc == 0)
          return KB_HTTP_TIMEOUT;
       if (errno != EINTR)
@@ -610,7 +643,11 @@ static kb_http_result_t ssl_handshake(SSL *ssl, int64_t deadline)
 {
    for (;;)
    {
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
       int rc = SSL_connect(ssl);
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
       if (rc == 1)
          return KB_HTTP_OK;
       kb_http_result_t wait = ssl_wait(ssl, rc, deadline);
@@ -625,8 +662,12 @@ static kb_http_result_t ssl_write_all(SSL *ssl, const unsigned char *bytes, size
    size_t offset = 0;
    while (offset < length)
    {
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
       size_t written = 0;
       int rc = SSL_write_ex(ssl, bytes + offset, length - offset, &written);
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
       if (rc == 1)
       {
          if (!written)
@@ -647,25 +688,50 @@ static int authority_valid(const char *host)
    if (!n || n == 256 || host[0] == '.' || host[n - 1] == '.')
       return 0;
    for (size_t i = 0; i < n; i++)
-      if (!(isalnum((unsigned char)host[i]) || host[i] == '-' || host[i] == '.'))
+      if ((unsigned char)host[i] >= 0x80 ||
+          !(isalnum((unsigned char)host[i]) || host[i] == '-' || host[i] == '.'))
          return 0;
    return 1;
 }
 
-static int request_valid(const kb_http_request_t *r)
+static int hex_digit(unsigned char c)
+{
+   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static int origin_path_valid(const char *target)
+{
+   size_t length = target ? strnlen(target, 4096) : 0;
+   if (!length || length == 4096 || target[0] != '/' || target[1] == '/')
+      return 0;
+   for (size_t i = 1; i < length; i++)
+   {
+      unsigned char c = (unsigned char)target[i];
+      if (c == '%')
+      {
+         if (i + 2 >= length || !hex_digit((unsigned char)target[i + 1]) ||
+             !hex_digit((unsigned char)target[i + 2]))
+            return 0;
+         i += 2;
+         continue;
+      }
+      if (c < 0x80 && (isalnum(c) || strchr("/-._~!$&'()*+,;=:@", c)))
+         continue;
+      return 0; /* includes backslash, raw non-ASCII, query, fragment, and controls */
+   }
+   return 1;
+}
+
+kb_http_result_t kb_http_request_validate(const kb_http_request_t *r)
 {
    if (!r || !authority_valid(r->authority) || r->connect_timeout_ms <= 0 ||
        r->total_timeout_ms <= 0 ||
-       strcmp(r->method ? r->method : "", "POST") != 0 || !r->target || r->target[0] != '/' ||
-       r->target[1] == '/' || strchr(r->target, '?') || strchr(r->target, '#') ||
-       strnlen(r->target, 4096) == 4096 || !r->headers || !r->header_count ||
+       strcmp(r->method ? r->method : "", "POST") != 0 || !origin_path_valid(r->target) ||
+       !r->headers || !r->header_count ||
        r->header_count > KB_HTTP_REQUEST_HEADERS_MAX || (!r->body && r->body_len) ||
        r->body_len > KB_HTTP_BODY_MAX || !r->response_body_max ||
        r->response_body_max > KB_HTTP_BODY_MAX)
-      return 0;
-   for (const unsigned char *p = (const unsigned char *)r->target; *p; p++)
-      if (*p <= 0x20 || *p == 0x7f)
-         return 0;
+      return KB_HTTP_INVALID_ARGUMENT;
    int host_count = 0;
    for (size_t i = 0; i < r->header_count; i++)
    {
@@ -674,27 +740,27 @@ static int request_valid(const kb_http_request_t *r)
       size_t vn = value ? strnlen(value, 16384) : 0;
       if (!nn || nn == 128 || !value || vn == 16384 || !vn || value[0] == ' ' ||
           value[vn - 1] == ' ')
-         return 0;
+         return KB_HTTP_INVALID_ARGUMENT;
       for (size_t j = 0; j < nn; j++)
          if (!token_char((unsigned char)name[j]))
-            return 0;
+            return KB_HTTP_INVALID_ARGUMENT;
       for (size_t j = 0; j < vn; j++)
          if ((unsigned char)value[j] < 0x20 || (unsigned char)value[j] == 0x7f)
-            return 0;
+            return KB_HTTP_INVALID_ARGUMENT;
       if (strcasecmp(name, "content-length") == 0 || strcasecmp(name, "transfer-encoding") == 0 ||
           strcasecmp(name, "connection") == 0)
-         return 0;
+         return KB_HTTP_INVALID_ARGUMENT;
       if (strcasecmp(name, "host") == 0)
       {
          host_count++;
          if (strcmp(value, r->authority) != 0)
-            return 0;
+            return KB_HTTP_INVALID_ARGUMENT;
       }
       for (size_t j = 0; j < i; j++)
          if (strcasecmp(name, r->headers[j].name) == 0)
-            return 0;
+            return KB_HTTP_INVALID_ARGUMENT;
    }
-   return host_count == 1;
+   return host_count == 1 ? KB_HTTP_OK : KB_HTTP_INVALID_ARGUMENT;
 }
 
 static SSL_CTX *client_context(void)
@@ -766,7 +832,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
 {
    if (response)
       memset(response, 0, sizeof(*response));
-   if (!response || !headers_cb || !body_cb || !request_valid(request))
+   if (!response || !headers_cb || !body_cb || kb_http_request_validate(request) != KB_HTTP_OK)
       return KB_HTTP_INVALID_ARGUMENT;
    int64_t now = now_ns();
    if (now < 0 || request->total_timeout_ms > INT_MAX / 1000000)
@@ -826,11 +892,24 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
                                          context);
    if (result != KB_HTTP_OK)
       goto done;
+   parser->deadline_ns = deadline;
    for (;;)
    {
       unsigned char buffer[16384];
       size_t got = 0;
+      if (deadline_expired(deadline))
+      {
+         result = KB_HTTP_TIMEOUT;
+         break;
+      }
       int rc = SSL_read_ex(ssl, buffer, sizeof(buffer), &got);
+      if (deadline_expired(deadline))
+      {
+         if (rc == 1 && got)
+            OPENSSL_cleanse(buffer, got);
+         result = KB_HTTP_TIMEOUT;
+         break;
+      }
       if (rc == 1)
       {
          if (!got)
@@ -838,8 +917,13 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
             result = KB_HTTP_IO_ERROR;
             break;
          }
-         result = kb_http_response_parser_feed(parser, buffer, got);
+         if (deadline_expired(deadline))
+            result = KB_HTTP_TIMEOUT;
+         else
+            result = kb_http_response_parser_feed(parser, buffer, got);
          OPENSSL_cleanse(buffer, got);
+         if (result == KB_HTTP_MORE && deadline_expired(deadline))
+            result = KB_HTTP_TIMEOUT;
          if (result != KB_HTTP_MORE)
             break;
          continue;
@@ -847,7 +931,8 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
       int error = SSL_get_error(ssl, rc);
       if (error == SSL_ERROR_ZERO_RETURN || (error == SSL_ERROR_SYSCALL && rc == 0))
       {
-         result = kb_http_response_parser_finish_eof(parser);
+         result = deadline_expired(deadline) ? KB_HTTP_TIMEOUT
+                                             : kb_http_response_parser_finish_eof(parser);
          break;
       }
       if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)

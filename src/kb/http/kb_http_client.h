@@ -79,6 +79,9 @@ typedef struct
    int total_timeout_ms;
 } kb_http_request_t;
 
+/* Pure request validation used by exchange and focused tests. */
+kb_http_result_t kb_http_request_validate(const kb_http_request_t *request);
+
 /* Opaque strict response parser. Exposed so framing can be exhaustively tested without I/O.
  * feed returns KB_HTTP_MORE until EOF, or a terminal error/abort. finish_eof succeeds only
  * after exact Content-Length or the complete zero-chunk + empty-trailer terminator. */
