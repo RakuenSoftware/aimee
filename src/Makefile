@@ -741,7 +741,8 @@ else ifeq ($(UNAME_S),Darwin)
 				else \
 					echo "  libpq: not found (server boundary ok)"; \
 				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | grep -Eq 'db2_|PQ[A-Z]'; then \
+				if command -v readelf >/dev/null 2>&1 && \
+				   readelf -Ws "$$bin" | awk '$$7 != "UND" && $$8 ~ /^(db2_|PQ[A-Z])/ { found=1 } END { exit !found }'; then \
 					echo "  ERROR: DB2 symbols present in DB1-only server"; \
 					fail=1; \
 				else \
@@ -819,7 +820,8 @@ else
 				else \
 					echo "  libpq: not found (server boundary ok)"; \
 				fi; \
-				if command -v readelf >/dev/null 2>&1 && readelf -Ws "$$bin" | grep -Eq 'db2_|PQ[A-Z]'; then \
+				if command -v readelf >/dev/null 2>&1 && \
+				   readelf -Ws "$$bin" | awk '$$7 != "UND" && $$8 ~ /^(db2_|PQ[A-Z])/ { found=1 } END { exit !found }'; then \
 					echo "  ERROR: DB2 symbols present in DB1-only server"; \
 					fail=1; \
 				else \
@@ -1615,10 +1617,9 @@ clang-tidy:
 
 static-analysis: cppcheck clang-tidy
 
-# Depends on the CLI binary: test_build_integrity.sh exercises `../aimee hooks
-# pre` at runtime, so the binary must exist (CI runs `make build-integrity` in a
-# clean checkout without a separate build step).
-build-integrity: $(BINARY)
+# The integrity script executes the CLI hook path and inspects every shipped
+# artifact, so a clean CI checkout must build the full shipped set first.
+build-integrity: check-linking
 	./tests/test_build_integrity.sh
 
 build-variants:
