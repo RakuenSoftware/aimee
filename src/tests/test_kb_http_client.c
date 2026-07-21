@@ -7,6 +7,7 @@
 #include <openssl/ssl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,7 +17,7 @@
 
 typedef struct
 {
-   int headers_called, body_called, abort_body;
+   int headers_called, body_called, abort_body, raise_sigpipe;
    kb_http_gate_t gate;
    kb_http_response_t response;
    unsigned char body[1024];
@@ -39,6 +40,8 @@ static kb_http_body_action_t capture_body(const unsigned char *bytes, size_t len
    assert(capture->headers_called == 1);
    assert(length > 0);
    capture->body_called++;
+   if (capture->raise_sigpipe)
+      assert(raise(SIGPIPE) == 0);
    if (capture->abort_body)
       return KB_HTTP_BODY_CALLER_ABORT;
    assert(capture->body_len + length <= sizeof(capture->body));
@@ -381,11 +384,58 @@ static void resolver_rejects_non_https_port(void)
    assert(kb_http_client_test__parse_resolver_response(wire, sizeof(wire)) == KB_HTTP_OK);
 }
 
-static void sigpipe_mask_failure_policy(void)
+static volatile sig_atomic_t sigpipe_hits;
+
+static void count_sigpipe(int signal_number)
 {
-   assert(kb_http_client_test__sigpipe_mask_policy(0) == KB_HTTP_OK);
-   assert(kb_http_client_test__sigpipe_mask_policy(EINVAL) == KB_HTTP_INTERNAL_ERROR);
-   assert(kb_http_client_test__sigpipe_mask_policy(ENOMEM) == KB_HTTP_INTERNAL_ERROR);
+   if (signal_number == SIGPIPE)
+      sigpipe_hits++;
+}
+
+static void sigpipe_transport_isolation(void)
+{
+   struct sigaction action = {.sa_handler = count_sigpipe}, old_action;
+   sigemptyset(&action.sa_mask);
+   assert(sigaction(SIGPIPE, &action, &old_action) == 0);
+
+   sigset_t pipe_set, caller_mask, active_mask, after_mask;
+   sigemptyset(&pipe_set);
+   sigaddset(&pipe_set, SIGPIPE);
+   assert(pthread_sigmask(SIG_UNBLOCK, &pipe_set, &caller_mask) == 0);
+   assert(pthread_sigmask(SIG_SETMASK, NULL, &active_mask) == 0);
+   assert(!sigismember(&active_mask, SIGPIPE));
+
+   int sockets[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+   assert(close(sockets[1]) == 0);
+   errno = 0;
+   assert(kb_http_client_test__nosigpipe_bio_write(sockets[0]) < 0);
+   assert(errno == EPIPE && sigpipe_hits == 0);
+   assert(pthread_sigmask(SIG_SETMASK, NULL, &after_mask) == 0);
+   assert(!sigismember(&after_mask, SIGPIPE));
+   assert(close(sockets[0]) == 0);
+
+   static const unsigned char wire[] = "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx";
+   capture_t capture = {.gate = KB_HTTP_GATE_DELIVER, .raise_sigpipe = 1};
+   assert(parse_parts(wire, sizeof(wire) - 1, sizeof(wire) - 1, 8, &capture) == KB_HTTP_OK);
+   assert(sigpipe_hits == 1);
+
+   assert(pthread_sigmask(SIG_BLOCK, &pipe_set, NULL) == 0);
+   assert(raise(SIGPIPE) == 0);
+   sigset_t pending;
+   assert(sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE));
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+   assert(close(sockets[1]) == 0);
+   errno = 0;
+   assert(kb_http_client_test__nosigpipe_bio_write(sockets[0]) < 0 && errno == EPIPE);
+   assert(sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE));
+   assert(close(sockets[0]) == 0);
+   struct timespec zero = {0};
+   assert(sigtimedwait(&pipe_set, NULL, &zero) == SIGPIPE);
+   assert(sigpending(&pending) == 0 && !sigismember(&pending, SIGPIPE));
+
+   assert(pthread_sigmask(SIG_SETMASK, &caller_mask, NULL) == 0);
+   assert(sigaction(SIGPIPE, &old_action, NULL) == 0);
 }
 
 static void callbacks_complete_synchronously(void)
@@ -413,7 +463,7 @@ int main(void)
    origin_path_validation();
    authenticated_tls_eof_policy();
    poll_readiness_precedes_hangup();
-   sigpipe_mask_failure_policy();
+   sigpipe_transport_isolation();
    callbacks_complete_synchronously();
    resolver_hang_releases_capacity();
    resolver_cancellation_releases_exact_children();

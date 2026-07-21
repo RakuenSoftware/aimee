@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <netdb.h>
 #include <openssl/crypto.h>
+#include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
@@ -1147,6 +1148,145 @@ static kb_http_result_t ssl_wait(SSL *ssl, int rc, int64_t deadline)
    return KB_HTTP_TLS_ERROR;
 }
 
+typedef struct
+{
+   int fd;
+} nosigpipe_bio_state_t;
+
+static int nosigpipe_bio_create(BIO *bio)
+{
+   nosigpipe_bio_state_t *state = calloc(1, sizeof(*state));
+   if (!state)
+      return 0;
+   state->fd = -1;
+   BIO_set_data(bio, state);
+   BIO_set_init(bio, 0);
+   BIO_set_shutdown(bio, BIO_NOCLOSE);
+   return 1;
+}
+
+static int nosigpipe_bio_destroy(BIO *bio)
+{
+   if (!bio)
+      return 0;
+   nosigpipe_bio_state_t *state = BIO_get_data(bio);
+   if (state)
+   {
+      if (BIO_get_shutdown(bio) == BIO_CLOSE && BIO_get_init(bio) && state->fd >= 0)
+         close(state->fd);
+      free(state);
+   }
+   BIO_set_data(bio, NULL);
+   BIO_set_init(bio, 0);
+   return 1;
+}
+
+static int nosigpipe_bio_read(BIO *bio, char *bytes, int length)
+{
+   nosigpipe_bio_state_t *state = BIO_get_data(bio);
+   if (!state || state->fd < 0 || !bytes || length <= 0)
+      return 0;
+   BIO_clear_retry_flags(bio);
+   int result = (int)recv(state->fd, bytes, (size_t)length, 0);
+   if (result < 0 && BIO_sock_should_retry(result))
+      BIO_set_retry_read(bio);
+   return result;
+}
+
+static int nosigpipe_bio_write(BIO *bio, const char *bytes, int length)
+{
+   nosigpipe_bio_state_t *state = BIO_get_data(bio);
+   if (!state || state->fd < 0 || !bytes || length <= 0)
+      return 0;
+   BIO_clear_retry_flags(bio);
+   int result = (int)send(state->fd, bytes, (size_t)length, MSG_NOSIGNAL);
+   if (result < 0 && BIO_sock_should_retry(result))
+      BIO_set_retry_write(bio);
+   return result;
+}
+
+static long nosigpipe_bio_ctrl(BIO *bio, int command, long argument, void *pointer)
+{
+   nosigpipe_bio_state_t *state = BIO_get_data(bio);
+   switch (command)
+   {
+   case BIO_C_SET_FD:
+      if (!state || !pointer)
+         return 0;
+      if (BIO_get_shutdown(bio) == BIO_CLOSE && BIO_get_init(bio) && state->fd >= 0)
+         close(state->fd);
+      state->fd = *(int *)pointer;
+      BIO_set_shutdown(bio, (int)argument);
+      BIO_set_init(bio, 1);
+      return 1;
+   case BIO_C_GET_FD:
+      if (!state || !BIO_get_init(bio))
+         return -1;
+      if (pointer)
+         *(int *)pointer = state->fd;
+      return state->fd;
+   case BIO_CTRL_GET_CLOSE:
+      return BIO_get_shutdown(bio);
+   case BIO_CTRL_SET_CLOSE:
+      BIO_set_shutdown(bio, (int)argument);
+      return 1;
+   case BIO_CTRL_FLUSH:
+      return 1;
+   default:
+      return 0;
+   }
+}
+
+static BIO_METHOD *nosigpipe_bio_method;
+static pthread_once_t nosigpipe_bio_once = PTHREAD_ONCE_INIT;
+
+static void nosigpipe_bio_method_init(void)
+{
+   int type = BIO_get_new_index();
+   if (type < 0)
+      return;
+   BIO_METHOD *method = BIO_meth_new(type | BIO_TYPE_SOURCE_SINK, "aimee MSG_NOSIGNAL socket");
+   if (!method || BIO_meth_set_create(method, nosigpipe_bio_create) != 1 ||
+       BIO_meth_set_destroy(method, nosigpipe_bio_destroy) != 1 ||
+       BIO_meth_set_read(method, nosigpipe_bio_read) != 1 ||
+       BIO_meth_set_write(method, nosigpipe_bio_write) != 1 ||
+       BIO_meth_set_ctrl(method, nosigpipe_bio_ctrl) != 1)
+   {
+      BIO_meth_free(method);
+      return;
+   }
+   nosigpipe_bio_method = method; /* Process-lifetime OpenSSL method. */
+}
+
+static BIO *nosigpipe_socket_bio(int fd)
+{
+   if (fd < 0 || pthread_once(&nosigpipe_bio_once, nosigpipe_bio_method_init) != 0 ||
+       !nosigpipe_bio_method)
+      return NULL;
+   BIO *bio = BIO_new(nosigpipe_bio_method);
+   if (!bio || BIO_ctrl(bio, BIO_C_SET_FD, BIO_NOCLOSE, &fd) != 1)
+   {
+      BIO_free(bio);
+      return NULL;
+   }
+   return bio;
+}
+
+__attribute__((visibility("hidden"))) int kb_http_client_test__nosigpipe_bio_write(int fd)
+{
+   BIO *bio = nosigpipe_socket_bio(fd);
+   if (!bio)
+   {
+      errno = EINVAL;
+      return -1;
+   }
+   int result = BIO_write(bio, "x", 1);
+   int saved_errno = errno;
+   BIO_free(bio);
+   errno = saved_errno;
+   return result;
+}
+
 static kb_http_result_t ssl_handshake(SSL *ssl, int64_t deadline)
 {
    for (;;)
@@ -1356,17 +1496,6 @@ static kb_http_result_t build_request_bytes(const kb_http_request_t *r, unsigned
    return KB_HTTP_OK;
 }
 
-static kb_http_result_t sigpipe_mask_policy(int mask_result)
-{
-   return mask_result == 0 ? KB_HTTP_OK : KB_HTTP_INTERNAL_ERROR;
-}
-
-__attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__sigpipe_mask_policy(int mask_result)
-{
-   return sigpipe_mask_policy(mask_result);
-}
-
 kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
                                       kb_http_response_t *response, kb_http_headers_fn headers_cb,
                                       kb_http_body_fn body_cb, void *context)
@@ -1387,22 +1516,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
                         ? request->connect_timeout_ms
                         : request->total_timeout_ms;
    int64_t connect_deadline_ns = now + (int64_t)connect_ms * 1000000LL;
-   sigset_t pipe_set, old_mask, initially_pending;
-   sigemptyset(&pipe_set);
-   sigaddset(&pipe_set, SIGPIPE);
-   sigemptyset(&initially_pending);
-   kb_http_result_t result = sigpipe_mask_policy(pthread_sigmask(SIG_BLOCK, &pipe_set, &old_mask));
-   /* A failed mask leaves SIGPIPE safety unknown.  Fail before resolver or socket I/O. */
-   if (result != KB_HTTP_OK)
-      return result;
-   int pipe_blocked = 1;
-   if (sigpending(&initially_pending) != 0)
-   {
-      /* No I/O has occurred.  Best-effort restoration is safe even if it fails:
-       * the current thread then retains the protective blocked SIGPIPE mask. */
-      (void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
-      return KB_HTTP_INTERNAL_ERROR;
-   }
+   kb_http_result_t result;
    char service[16];
    snprintf(service, sizeof(service), "%d", 443);
    struct addrinfo *addresses = NULL;
@@ -1420,12 +1534,15 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
       goto done;
    ctx = client_context();
    ssl = ctx ? SSL_new(ctx) : NULL;
-   if (!ssl || SSL_set_fd(ssl, fd) != 1 || SSL_set_tlsext_host_name(ssl, request->authority) != 1 ||
+   BIO *transport_bio = ssl ? nosigpipe_socket_bio(fd) : NULL;
+   if (!ssl || !transport_bio || SSL_set_tlsext_host_name(ssl, request->authority) != 1 ||
        SSL_set1_host(ssl, request->authority) != 1)
    {
+      BIO_free(transport_bio);
       result = KB_HTTP_TLS_ERROR;
       goto done;
    }
+   SSL_set_bio(ssl, transport_bio, transport_bio); /* SSL owns the single shared BIO reference. */
    result = ssl_handshake(ssl, deadline);
    if (result != KB_HTTP_OK)
       goto done;
@@ -1516,19 +1633,5 @@ done:
    SSL_CTX_free(ctx);
    if (fd >= 0)
       close(fd);
-   if (pipe_blocked)
-   {
-      sigset_t pending;
-      if (sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) &&
-          !sigismember(&initially_pending, SIGPIPE))
-      {
-         struct timespec zero = {0};
-         (void)sigtimedwait(&pipe_set, NULL, &zero);
-      }
-      /* If restoration fails, leave SIGPIPE blocked.  That changes only this
-       * thread's mask and cannot terminate the process.  Preserve the exchange
-       * result because response callbacks may already have been delivered. */
-      (void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
-   }
    return result;
 }
