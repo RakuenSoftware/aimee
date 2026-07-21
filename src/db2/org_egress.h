@@ -45,6 +45,7 @@ int db2_org_egress_settle(int64_t id, const char *owner_token, int64_t generatio
                           const char *state, int http_status, int64_t prompt_tokens,
                           int64_t completion_tokens, int64_t cache_read_tokens,
                           int64_t cache_write_tokens, const char *outcome_class,
+                          const char *settlement_basis,
                           int *out_ok);
 int db2_org_egress_recover(int limit, int64_t *out_count);
 

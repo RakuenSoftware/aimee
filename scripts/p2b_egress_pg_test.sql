@@ -218,10 +218,10 @@ BEGIN
     RAISE EXCEPTION 'P2b FAIL: ownership write fence validation';
   END IF;
   ok := org_egress_dispatch_settle(a.dispatch_id,
-    'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,'succeeded',200,10,5,0,0,'complete');
+    'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,'succeeded',200,10,5,0,0,'complete','actual');
   IF NOT ok THEN RAISE EXCEPTION 'P2b FAIL: owner settle refused'; END IF;
   IF org_egress_dispatch_settle(a.dispatch_id,
-    'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,'succeeded',200,10,5,0,0,'again') THEN
+    'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,'succeeded',200,10,5,0,0,'complete','actual') THEN
     RAISE EXCEPTION 'P2b FAIL: terminal double settle accepted';
   END IF;
   SELECT state INTO st FROM org_egress_dispatch WHERE id=a.dispatch_id;
@@ -236,6 +236,69 @@ BEGIN
     RAISE EXCEPTION 'P2b FAIL: terminal WORM mutation accepted';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
+
+  -- Completion certainty and billing disposition are independent.  A complete
+  -- authenticated provider denial is durable denied but conservatively charges
+  -- the reservation; definite pre-write failure settles zero; ambiguity charges
+  -- the reservation and remains indeterminate.
+  SELECT * INTO a FROM org_egress_admit(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'issuer-a','01','cert:issuer-a:01','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    982001,982010,'p2b-model',
+    'bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc',60);
+  SELECT * INTO b FROM org_egress_dispatch_begin(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    'bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd','denied-instance',60);
+  ok := org_egress_dispatch_settle(a.dispatch_id,
+    'bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd',b.owner_generation,
+    'denied',403,0,0,0,0,'provider_denied','reservation');
+  IF NOT ok OR (SELECT state FROM org_egress_dispatch WHERE id=a.dispatch_id)<>'denied' OR
+     (SELECT realized_usd<>reserved_max_usd FROM org_egress_dispatch
+       WHERE id=a.dispatch_id) OR
+     (SELECT state FROM org_token_audit WHERE request_id=
+       'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')<>'settled_denied' THEN
+    RAISE EXCEPTION 'P2b FAIL: provider denial completion/billing split';
+  END IF;
+
+  SELECT * INTO a FROM org_egress_admit(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'issuer-a','01','cert:issuer-a:01','cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    982001,982010,'p2b-model',
+    'cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd',60);
+  SELECT * INTO b FROM org_egress_dispatch_begin(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    'cececececececececececececececece','prewrite-instance',60);
+  ok := org_egress_dispatch_settle(a.dispatch_id,
+    'cececececececececececececececece',b.owner_generation,
+    'failed',0,0,0,0,0,'prewrite_failed','zero');
+  IF NOT ok OR (SELECT state FROM org_egress_dispatch WHERE id=a.dispatch_id)<>'failed' OR
+     (SELECT realized_usd FROM org_egress_dispatch WHERE id=a.dispatch_id)<>0 OR
+     (SELECT state FROM org_token_audit WHERE request_id=
+       'cccccccc-cccc-4ccc-8ccc-cccccccccccc')<>'settled_failed' THEN
+    RAISE EXCEPTION 'P2b FAIL: definite pre-write settlement';
+  END IF;
+
+  SELECT * INTO a FROM org_egress_admit(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'issuer-a','01','cert:issuer-a:01','dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    982001,982010,'p2b-model',
+    'dededededededededededededededededededededededededededededededede',60);
+  SELECT * INTO b FROM org_egress_dispatch_begin(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    'dfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdf','uncertain-instance',60);
+  ok := org_egress_dispatch_settle(a.dispatch_id,
+    'dfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdf',b.owner_generation,
+    'uncertain',0,0,0,0,0,'transport_ambiguous','reservation');
+  IF NOT ok OR (SELECT state FROM org_egress_dispatch WHERE id=a.dispatch_id)<>'uncertain' OR
+     (SELECT realized_usd<>reserved_max_usd FROM org_egress_dispatch
+       WHERE id=a.dispatch_id) OR
+     (SELECT state FROM org_token_audit WHERE request_id=
+       'dddddddd-dddd-4ddd-8ddd-dddddddddddd')<>'indeterminate' THEN
+    RAISE EXCEPTION 'P2b FAIL: ambiguous settlement';
+  END IF;
 
   -- Stale admitted recovers to failed and releases its reservation at zero.
   SELECT * INTO a FROM org_egress_admit(
@@ -253,6 +316,31 @@ BEGIN
     RAISE EXCEPTION 'P2b FAIL: stale admitted recovery';
   END IF;
 
+  -- An expired owner cannot settle in a fresh transaction; recovery revokes its
+  -- generation and charges the reservation as indeterminate.
+  SELECT * INTO a FROM org_egress_admit(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'issuer-a','01','cert:issuer-a:01','eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    982001,982010,'p2b-model',
+    'efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef',60);
+  SELECT * INTO b FROM org_egress_dispatch_begin(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    'f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0','expired-instance',60);
+  UPDATE org_egress_dispatch SET lease_expires_at=now()-interval '1 minute'
+    WHERE id=a.dispatch_id;
+  IF org_egress_dispatch_settle(a.dispatch_id,
+      'f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0',b.owner_generation,
+      'succeeded',200,1,1,0,0,'complete','actual') THEN
+    RAISE EXCEPTION 'P2b FAIL: expired owner settled';
+  END IF;
+  n := org_egress_recover(100);
+  IF n<1 OR (SELECT state FROM org_egress_dispatch WHERE id=a.dispatch_id)<>'uncertain' OR
+     (SELECT state FROM org_token_audit WHERE request_id=
+       'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')<>'indeterminate' THEN
+    RAISE EXCEPTION 'P2b FAIL: stale dispatch recovery';
+  END IF;
+
   -- Authenticated usage above the admission ceiling charges the complete
   -- liability, records the overage, and fences this binding from new work.
   SELECT spend_usd INTO spend_before FROM org_budget_counter
@@ -268,7 +356,7 @@ BEGIN
     'abababababababababababababababab','overage-instance',60);
   ok := org_egress_dispatch_settle(a.dispatch_id,
     'abababababababababababababababab',b.owner_generation,
-    'succeeded',200,100000000,0,0,0,'complete');
+    'succeeded',200,100000000,0,0,0,'complete','actual');
   IF NOT ok OR NOT (SELECT overage_fenced FROM org_egress_binding
       WHERE team_id=982001 AND model_id='p2b-model') OR
      (SELECT overage_usd FROM org_egress_dispatch WHERE id=a.dispatch_id) <= 0 OR

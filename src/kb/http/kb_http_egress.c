@@ -215,13 +215,14 @@ static int sign_callback(const unsigned char *plaintext, size_t plaintext_len, v
 
 static int settle(const kb_principal_t *transport, int64_t team, int64_t id,
                   const char *owner, int64_t generation, const char *state, int http,
-                  const aimee_response_t *response, const char *outcome)
+                  const aimee_response_t *response, const char *outcome,
+                  const char *basis)
 {
    if (db2_tenant_scope_begin(transport,team)!=0) return -1;
    int ok=0; int rc=db2_org_egress_settle(id,owner,generation,state,http,
        response ? response->usage_in : 0, response ? response->usage_out : 0,
        response ? response->usage_cache_read : 0, response ? response->usage_cache_write : 0,
-       outcome,&ok);
+       outcome,basis,&ok);
    if (rc || !ok) { db2_tenant_scope_rollback(); return -1; }
    return db2_tenant_scope_commit()==0 ? 0 : -1;
 }
@@ -330,8 +331,9 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
        * non-OK status.  Its public enum does not prove otherwise, so retain the
        * full reservation and forbid any retry under this request ID. */
       (void)settle(transport,team,dispatch_id,owner,generation,"uncertain",0,NULL,
-                   "vault_outcome_uncertain");
+                   "vault_outcome_uncertain","reservation");
       snprintf(out,(size_t)out_cap,"{\"error\":\"dispatch unavailable\"}");
+      status=504;
    }
    else if (renew_dispatch_lease(transport,team,dispatch_id,owner,generation)!=0)
    {
@@ -349,22 +351,36 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
       else
       {
          kb_bedrock_result_t br=kb_bedrock_authorized_wire_dispatch(target,&wire,&response,&http,&vendor_possible);
-         const char *terminal=br==KB_BEDROCK_OK?"succeeded":vendor_possible?"uncertain":"failed";
-         const char *klass=br==KB_BEDROCK_OK?"complete":vendor_possible?"transport_ambiguous":"prewrite_failed";
+         int complete_ok=br==KB_BEDROCK_OK&&http==200;
+         int complete_denial=br==KB_BEDROCK_PROVIDER_ERROR&&http>0&&
+                             (http<200||http>299);
+         int definite_prewrite=http==0&&!vendor_possible;
+         const char *terminal=complete_ok?"succeeded":complete_denial?"denied":
+                              definite_prewrite?"failed":"uncertain";
+         const char *klass=complete_ok?"complete":complete_denial?"provider_denied":
+                           definite_prewrite?"prewrite_failed":"transport_ambiguous";
+         const char *basis=complete_ok?"actual":definite_prewrite?"zero":"reservation";
+         int durable_http=complete_ok?200:complete_denial?http:0;
          int settled=0;
-         int settle_rc=db2_org_egress_settle(dispatch_id,owner,generation,terminal,http,
-             br==KB_BEDROCK_OK?response.usage_in:0,br==KB_BEDROCK_OK?response.usage_out:0,
-             br==KB_BEDROCK_OK?response.usage_cache_read:0,
-             br==KB_BEDROCK_OK?response.usage_cache_write:0,klass,&settled);
+         int settle_rc=db2_org_egress_settle(dispatch_id,owner,generation,terminal,durable_http,
+             complete_ok?response.usage_in:0,complete_ok?response.usage_out:0,
+             complete_ok?response.usage_cache_read:0,
+             complete_ok?response.usage_cache_write:0,klass,basis,&settled);
          if (settle_rc!=0 || !settled)
          {
             db2_tenant_scope_rollback();
             snprintf(out,(size_t)out_cap,"{\"error\":\"ambiguous settlement\"}");
+            status=504;
          }
          else if (db2_tenant_scope_commit()!=0)
-            snprintf(out,(size_t)out_cap,"{\"error\":\"ambiguous settlement\"}");
-         else if (br==KB_BEDROCK_OK && render_success(&response,model_id,request_id,team,out,out_cap)==0) status=200;
-         else { snprintf(out,(size_t)out_cap,"{\"error\":\"provider dispatch failed\"}"); status=br==KB_BEDROCK_PROVIDER_ERROR&&http?http:503; }
+         { snprintf(out,(size_t)out_cap,"{\"error\":\"ambiguous settlement\"}"); status=504; }
+         else if (complete_ok && render_success(&response,model_id,request_id,team,out,out_cap)==0)
+            status=200;
+         else
+         {
+            snprintf(out,(size_t)out_cap,"{\"error\":\"provider dispatch failed\"}");
+            status=(complete_denial||definite_prewrite)?502:504;
+         }
       }
    }
    aimee_response_free(&response); kb_bedrock_wire_request_clear(&wire); kb_bedrock_authorized_target_clear(&target);

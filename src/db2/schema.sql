@@ -6687,10 +6687,12 @@ BEGIN
   RETURN true;
 END; $$;
 
+DROP FUNCTION IF EXISTS org_egress_dispatch_settle(
+  BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT);
 CREATE OR REPLACE FUNCTION org_egress_dispatch_settle(
   p_id BIGINT,p_token TEXT,p_generation BIGINT,p_state TEXT,p_http INT,
   p_prompt BIGINT,p_completion BIGINT,p_cache_read BIGINT,p_cache_write BIGINT,
-  p_outcome TEXT
+  p_outcome TEXT,p_basis TEXT
 ) RETURNS BOOLEAN
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 DECLARE d org_egress_dispatch%ROWTYPE; v_cost NUMERIC(38,10); v_budget NUMERIC(38,10);
@@ -6699,23 +6701,32 @@ DECLARE d org_egress_dispatch%ROWTYPE; v_cost NUMERIC(38,10); v_budget NUMERIC(3
 BEGIN
   IF p_id IS NULL OR p_id<1 OR p_token IS NULL OR p_token!~'^[0-9a-f]{32}$' OR
      p_generation IS NULL OR p_generation<1 OR p_state IS NULL OR
-     p_state NOT IN ('succeeded','failed','uncertain') OR p_http IS NULL OR
+     p_state NOT IN ('succeeded','denied','failed','uncertain') OR p_http IS NULL OR
      p_http<0 OR p_http>599 OR p_prompt IS NULL OR p_completion IS NULL OR
      p_cache_read IS NULL OR p_cache_write IS NULL OR p_prompt<0 OR p_completion<0 OR
-     p_cache_read<0 OR p_cache_write<0 THEN
+     p_cache_read<0 OR p_cache_write<0 OR p_outcome IS NULL OR p_basis IS NULL OR
+     p_basis NOT IN ('actual','zero','reservation') THEN
     RAISE EXCEPTION 'org_egress_dispatch_settle: invalid input' USING ERRCODE='22023';
   END IF;
-  IF (p_state='succeeded' AND p_http NOT BETWEEN 200 AND 299) OR
-     (p_state='failed' AND (p_http<>0 OR COALESCE(p_outcome,'')<>'prewrite_failed' OR
-       p_prompt<>0 OR p_completion<>0 OR p_cache_read<>0 OR p_cache_write<>0)) THEN
+  IF (p_state='succeeded' AND (p_http<>200 OR p_basis<>'actual' OR p_outcome<>'complete')) OR
+     (p_state='denied' AND (p_http=0 OR p_http BETWEEN 200 AND 299 OR
+       p_basis<>'reservation' OR p_outcome<>'provider_denied')) OR
+     (p_state='failed' AND (p_http<>0 OR p_basis<>'zero' OR
+       p_outcome<>'prewrite_failed')) OR
+     (p_state='uncertain' AND (p_http<>0 OR p_basis<>'reservation' OR
+       p_outcome NOT IN ('transport_ambiguous','vault_outcome_uncertain'))) OR
+     (p_state<>'succeeded' AND
+       (p_prompt<>0 OR p_completion<>0 OR p_cache_read<>0 OR p_cache_write<>0)) THEN
     RAISE EXCEPTION 'org_egress_dispatch_settle: invalid outcome classification'
       USING ERRCODE='22023';
   END IF;
   SELECT * INTO d FROM org_egress_dispatch WHERE id=p_id FOR UPDATE;
   IF NOT FOUND OR d.state<>'dispatching' OR d.owner_token<>p_token OR
-     d.owner_generation<>p_generation THEN RETURN false; END IF;
-  IF p_state='uncertain' THEN
+     d.owner_generation<>p_generation OR d.lease_expires_at<=now() THEN RETURN false; END IF;
+  IF p_basis='reservation' THEN
     v_cost:=d.reserved_max_usd;
+  ELSIF p_basis='zero' THEN
+    v_cost:=0;
   ELSE
     SELECT org_token_estimate_cost(d.billable_model,d.pricing_version,p_prompt,p_completion,
       p_cache_read,p_cache_write) INTO v_cost;
@@ -6724,8 +6735,8 @@ BEGIN
     END IF;
   END IF;
   v_input:=p_prompt::numeric+p_cache_read::numeric+p_cache_write::numeric;
-  IF v_input>d.max_input_tokens OR p_completion>d.max_output_tokens OR
-     v_cost>d.reserved_max_usd THEN v_over:=true; END IF;
+  IF p_basis='actual' AND (v_input>d.max_input_tokens OR
+     p_completion>d.max_output_tokens OR v_cost>d.reserved_max_usd) THEN v_over:=true; END IF;
   v_overage:=CASE WHEN v_over THEN GREATEST(v_cost-d.reserved_max_usd,0) ELSE 0 END;
   v_budget:=CASE WHEN v_over THEN v_cost ELSE LEAST(v_cost,d.reserved_max_usd) END;
   IF v_over THEN
@@ -6739,7 +6750,8 @@ BEGIN
   END IF;
   SELECT org_token_audit_settle(d.authority_id,d.request_id,
     CASE p_state WHEN 'succeeded' THEN 'settled_success'
-      WHEN 'uncertain' THEN 'indeterminate' ELSE 'settled_failed' END,
+      WHEN 'denied' THEN 'settled_denied' WHEN 'uncertain' THEN 'indeterminate'
+      ELSE 'settled_failed' END,
     d.model_id,p_prompt,p_completion,p_cache_read,p_cache_write,v_cost,
     to_char(CURRENT_DATE,'YYYY-MM-DD')) INTO v_settled;
   IF NOT v_settled THEN
@@ -6755,7 +6767,7 @@ BEGIN
     raw_completion_tokens=p_completion::text,raw_cache_read_tokens=p_cache_read::text,
     raw_cache_write_tokens=p_cache_write::text,realized_usd=v_cost,overage_usd=v_overage,
     liability_overflow=false,
-    outcome_class=left(COALESCE(p_outcome,''),64),owner_token='',owner_instance='',
+    outcome_class=p_outcome,owner_token='',owner_instance='',
     lease_expires_at=NULL,updated_at=pg_now_text() WHERE id=d.id;
   RETURN true;
 EXCEPTION WHEN numeric_value_out_of_range THEN
@@ -6818,5 +6830,5 @@ REVOKE ALL ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) FRO
 REVOKE ALL ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_dispatch_owner_guard(BIGINT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_budget_settle_overage(TEXT,TEXT,NUMERIC) FROM PUBLIC;
-REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
