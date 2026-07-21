@@ -233,6 +233,50 @@ func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testin
 	}
 }
 
+func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	workspace := filepath.Join(root, "workspace")
+	publisher := filepath.Join(root, "publisher")
+	runGit(t, root, "init", "--bare", remote)
+	runGit(t, root, "init", workspace)
+	runGit(t, workspace, "config", "user.email", "test@example.invalid")
+	runGit(t, workspace, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(workspace, "seed"), []byte("seed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workspace, "add", ".")
+	runGit(t, workspace, "commit", "-m", "seed")
+	runGit(t, workspace, "branch", "-M", "testing")
+	runGit(t, workspace, "remote", "add", "origin", remote)
+	runGit(t, workspace, "push", "-u", "origin", "testing")
+	runGit(t, root, "clone", "--branch", "testing", remote, publisher)
+	runGit(t, publisher, "config", "user.email", "test@example.invalid")
+	runGit(t, publisher, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(publisher, "new-proposal"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, publisher, "add", ".")
+	runGit(t, publisher, "commit", "-m", "new proposal")
+	runGit(t, publisher, "push", "origin", "testing")
+
+	ref, err := refreshScanRef(t.Context(), workspace, "testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref != "origin/testing" {
+		t.Fatalf("ref=%q", ref)
+	}
+	listing, err := gitOutput(t.Context(), workspace, "ls-tree", "--name-only", ref)
+	if err != nil || !strings.Contains(string(listing), "new-proposal") {
+		t.Fatalf("listing=%q err=%v", listing, err)
+	}
+	localListing, err := gitOutput(t.Context(), workspace, "ls-tree", "--name-only", "testing")
+	if err != nil || strings.Contains(string(localListing), "new-proposal") {
+		t.Fatalf("local branch unexpectedly moved: %q err=%v", localListing, err)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", dir}, args...)...)

@@ -2014,11 +2014,8 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
 {
    if (!method || !path || !resp || resp_cap <= 0)
       return err_json(resp, resp_cap, 400, "bad request");
-   const char *wfe_engine = getenv("AIMEE_WFE_ENGINE");
-   if (wfe_engine && strcmp(wfe_engine, "go") == 0 &&
-       ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
-        strcmp(path, "/v1/trigger/fire") == 0 ||
-        strcmp(path, "/v1/dev/submit") == 0))
+   if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
+       strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
       return err_json(resp, resp_cap, 410, "Go WFE control plane owns this endpoint");
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sync"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -284,10 +285,33 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 }
 
 func (e *Engine) parkOnError(ctx context.Context, item db1.WorkItem, reason string, cause error) error {
-	if err := e.db.Park(ctx, item.ID, item.Stage, reason, 0); err != nil {
+	detail := reason
+	if cause != nil {
+		detail += ": " + safeDiagnostic(cause.Error())
+	}
+	if err := e.db.ParkWithDetail(ctx, item.ID, item.Stage, reason, detail, 0); err != nil {
 		return fmt.Errorf("%s: %v; park failed: %w", reason, cause, err)
 	}
 	return nil
+}
+
+var diagnosticRedactions = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(`(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+`), `${1}[REDACTED]`},
+	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@`), `${1}[REDACTED]@`},
+	{regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|token|password|secret)["']?\s*[:=]\s*["']?)[^\s,"';}]+`), `${1}[REDACTED]`},
+}
+
+// safeDiagnostic preserves the complete diagnostic—including arbitrarily long
+// tool output—while removing common credential forms before durable storage.
+// Artifact and review payloads are never routed through this function.
+func safeDiagnostic(detail string) string {
+	for _, redaction := range diagnosticRedactions {
+		detail = redaction.pattern.ReplaceAllString(detail, redaction.replacement)
+	}
+	return detail
 }
 
 func maxIterations(node wfe.Node) int {

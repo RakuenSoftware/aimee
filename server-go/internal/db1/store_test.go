@@ -76,9 +76,36 @@ func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 	if admitted != cap {
 		t.Fatalf("admitted=%d want=%d", admitted, cap)
 	}
-	count, err := store.RunnableRootCount(context.Background())
+	count, err := store.ActiveRootCount(context.Background())
 	if err != nil || count != cap {
 		t.Fatalf("count=%d err=%v", count, err)
+	}
+}
+
+func TestParkedRootStillConsumesAdmissionCapacity(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	first := CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "parked", WorkflowName: "build", StartStage: "feature"}
+	if err := store.AdmitRoot(ctx, first, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ParkWithDetail(ctx, first.ID, first.StartStage, "runner_unavailable", "fork/exec git: resource temporarily unavailable", 0); err != nil {
+		t.Fatal(err)
+	}
+	second := CreateWorkItem{ID: "wi_waiting", Repo: "repo", ProposalPath: "waiting", WorkflowName: "build", StartStage: "draft"}
+	if err := store.AdmitRoot(ctx, second, 1); !errors.Is(err, ErrAdmissionFull) {
+		t.Fatalf("admit with parked active root: %v", err)
+	}
+	count, err := store.ActiveRootCount(ctx)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	events, err := store.Events(ctx, first.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := events[len(events)-1].Detail; got != "fork/exec git: resource temporarily unavailable" {
+		t.Fatalf("pause detail=%q", got)
 	}
 }
 

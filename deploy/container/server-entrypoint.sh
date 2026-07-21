@@ -23,8 +23,8 @@ server_pid=""
 wfe_pid=""
 export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
 case "$AIMEE_WFE_ENGINE" in
-    go|c) ;;
-    *) printf '[server-entrypoint] fatal: AIMEE_WFE_ENGINE must be exactly go or c\n' >&2; exit 2 ;;
+    go) ;;
+    *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"

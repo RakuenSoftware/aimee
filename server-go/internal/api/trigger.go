@@ -102,9 +102,11 @@ func (s *Server) triggerRequests() []triggerFireRequest {
 }
 
 func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) error {
-	if request.Ref == "" {
-		request.Ref = defaultScanRef(ctx, request.Workspace)
+	ref, err := refreshScanRef(ctx, request.Workspace, request.Ref)
+	if err != nil {
+		return err
 	}
+	request.Ref = ref
 	directory := request.Event
 	if directory == "" {
 		directory = "docs/proposals/pending"
@@ -138,8 +140,33 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 	return nil
 }
 
-func defaultScanRef(ctx context.Context, workspace string) string {
-	return "HEAD"
+func refreshScanRef(ctx context.Context, workspace, configured string) (string, error) {
+	if _, err := gitOutput(ctx, workspace, "remote", "get-url", "origin"); err != nil {
+		if configured != "" {
+			return configured, nil
+		}
+		return "HEAD", nil
+	}
+	if _, err := gitOutput(ctx, workspace, "fetch", "--quiet", "--prune", "origin"); err != nil {
+		return "", fmt.Errorf("refresh origin before proposal scan: %w", err)
+	}
+	if configured == "" {
+		ref, err := gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+		if err != nil || strings.TrimSpace(string(ref)) == "" {
+			return "HEAD", nil
+		}
+		return strings.TrimSpace(string(ref)), nil
+	}
+	// A simple branch name means the live remote-tracking branch when one
+	// exists. Fully-qualified refs, SHAs, and explicit origin/* refs retain the
+	// exact UI-authored meaning.
+	if !strings.Contains(configured, "/") {
+		remote := "origin/" + configured
+		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", remote+"^{commit}"); err == nil {
+			return remote, nil
+		}
+	}
+	return configured, nil
 }
 
 func paramText(params map[string]any, key string) string {

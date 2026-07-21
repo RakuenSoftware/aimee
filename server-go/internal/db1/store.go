@@ -209,12 +209,12 @@ func (s *Store) createWorkItem(ctx context.Context, in CreateWorkItem, cap int) 
 	}
 	defer tx.Rollback()
 	if cap > 0 {
-		var runnable int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_work_item WHERE parent_id='' AND state='active' AND pause_reason=''`).Scan(&runnable); err != nil {
+		var active int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_work_item WHERE parent_id='' AND state='active'`).Scan(&active); err != nil {
 			return fmt.Errorf("count admitted root workflows: %w", err)
 		}
-		if runnable >= cap {
-			return fmt.Errorf("%w (%d/%d runnable root workflows)", ErrAdmissionFull, runnable, cap)
+		if active >= cap {
+			return fmt.Errorf("%w (%d/%d active root workflows)", ErrAdmissionFull, active, cap)
 		}
 	}
 	_, err = tx.ExecContext(ctx, `
@@ -371,15 +371,16 @@ func (s *Store) Children(ctx context.Context, parentID string) ([]WorkItem, erro
 	return out, nil
 }
 
-// RunnableRootCount is the admission pressure that matters: top-level runs
-// that can actually consume a scheduler slot. Parked runs do not permanently
-// prevent new proposals from entering while workers are free.
-func (s *Store) RunnableRootCount(ctx context.Context) (int, error) {
+// ActiveRootCount is the admission pressure that matters: every admitted,
+// nonterminal top-level run. Transient parks remain active because the
+// scheduler owns their automatic retry; excluding them would turn a temporary
+// runner outage into unbounded queue growth.
+func (s *Store) ActiveRootCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_work_item
-WHERE parent_id='' AND state='active' AND pause_reason=''`).Scan(&count)
+WHERE parent_id='' AND state='active'`).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("count runnable root workflows: %w", err)
+		return 0, fmt.Errorf("count active root workflows: %w", err)
 	}
 	return count, nil
 }
@@ -593,9 +594,20 @@ func (s *Store) StageLoopCount(ctx context.Context, workItemID, stage string) (i
 	return count, err
 }
 
+// Park records the stable pause reason as both item state and event detail.
+// Call ParkWithDetail when an operator-safe diagnostic should accompany it.
 func (s *Store) Park(ctx context.Context, workItemID, stage, reason string, costUSD float64) error {
+	return s.ParkWithDetail(ctx, workItemID, stage, reason, reason, costUSD)
+}
+
+// ParkWithDetail keeps the stable, machine-readable pause reason on the work
+// item while retaining the complete diagnostic cause in the append-only event.
+func (s *Store) ParkWithDetail(ctx context.Context, workItemID, stage, reason, detail string, costUSD float64) error {
 	if workItemID == "" || stage == "" || reason == "" {
 		return errors.New("work item, stage, and pause reason are required")
+	}
+	if detail == "" {
+		detail = reason
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -616,7 +628,7 @@ WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason=''`
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail, cost_usd)
-VALUES (?, ?, 'pause', 'go-wfe', ?, ?)`, workItemID, stage, reason, costUSD); err != nil {
+VALUES (?, ?, 'pause', 'go-wfe', ?, ?)`, workItemID, stage, detail, costUSD); err != nil {
 		return fmt.Errorf("record park transition: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,89 @@ func (r *scriptedRunner) Run(_ context.Context, req StepRequest) (StepResult, er
 type artifactRoutingRunner struct {
 	t    *testing.T
 	call int
+}
+
+type recoveringRunner struct{ calls int }
+
+func (r *recoveringRunner) Run(_ context.Context, _ StepRequest) (StepResult, error) {
+	r.calls++
+	if r.calls == 1 {
+		return StepResult{}, errors.New("temporary runner outage")
+	}
+	return StepResult{Status: StepAdvanced}, nil
+}
+
+func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal("wi_recover", []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	first := db1.CreateWorkItem{ID: "wi_recover", Repo: "repo", ProposalPath: "recover", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
+	if err := store.AdmitRoot(t.Context(), first, 1); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recoveringRunner{}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowEngine.Advance(t.Context(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	blocked := db1.CreateWorkItem{ID: "wi_blocked", Repo: "repo", ProposalPath: "blocked", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
+	if err := store.AdmitRoot(t.Context(), blocked, 1); !errors.Is(err, db1.ErrAdmissionFull) {
+		t.Fatalf("admission while transiently parked: %v", err)
+	}
+	if resumed, err := store.ResumeTransient(t.Context(), "runner_unavailable", 0); err != nil || resumed != 1 {
+		t.Fatalf("resumed=%d err=%v", resumed, err)
+	}
+	if _, err := workflowEngine.Advance(t.Context(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(t.Context(), first.ID)
+	if err != nil || item.State != "accepted" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := artifacts.PutProposal(blocked.ID, []byte("next")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdmitRoot(t.Context(), blocked, 1); err != nil {
+		t.Fatalf("admission after recovery: %v", err)
+	}
+}
+
+func TestSafeDiagnosticRedactsSecretsWithoutTruncating(t *testing.T) {
+	tail := strings.Repeat("diagnostic detail λ ", 100_000) + "END"
+	got := safeDiagnostic("Authorization: Bearer abc123 https://user:pass@example.test/path token=hidden " + tail)
+	for _, secret := range []string{"abc123", "user:pass", "hidden"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("diagnostic leaked %q", secret)
+		}
+	}
+	if !strings.HasSuffix(got, tail) {
+		t.Fatal("diagnostic tail was truncated or changed")
+	}
 }
 
 func (r *artifactRoutingRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {

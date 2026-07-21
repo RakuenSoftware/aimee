@@ -34,8 +34,6 @@
 #include "server_compute_impl.h"
 #include "skill_review.h"
 #include "trigger_scheduler.h"
-#include "wfe_live_delegate.h"
-#include "wfe_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
@@ -2293,13 +2291,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    trigger_scheduler_init();
    server_delegate_monitor_init();
    server_coord_dispatcher_init(ctx);
-   /* Autonomous development is core functionality (default-on): register the
-    * workflow engine's live providers + executors so submitted proposals can run
-    * end-to-end server-side. Registration runs nothing on its own — a run begins
-    * only when intake creates a work item and the autonomy driver advances it. */
-   const char *wfe_engine = getenv("AIMEE_WFE_ENGINE");
-   if (!(wfe_engine && strcmp(wfe_engine, "go") == 0))
-      wfe_autonomy_register();
+   /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
+    * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
     * precede any toolset_registry_init() / build_tools_array(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
@@ -2327,7 +2320,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
-   wfe_scheduler_init();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual
     * `vault set`. No-op unless a secret source is configured. */
@@ -2409,7 +2401,6 @@ void server_shutdown(server_ctx_t *ctx)
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
    server_coord_dispatcher_shutdown();
-   wfe_scheduler_shutdown();
    /* Reap any per-webuser code-server editors so they don't outlive us (WP-I). */
    webuser_editor_shutdown();
    /* Drain request handlers while compute/async lanes are still available for

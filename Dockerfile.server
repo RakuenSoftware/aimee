@@ -136,6 +136,7 @@ RUN apt-get update \
         nodejs \
         npm \
         openssh-client \
+        tini \
         tmux \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
@@ -289,4 +290,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -s -o /dev/null -w '%{http_code}' \
         http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$'
 
-ENTRYPOINT ["aimee-server-entrypoint"]
+ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]
