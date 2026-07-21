@@ -3990,7 +3990,7 @@ $(TESTPREFIX)/unit-test-memory-provider: $(OBJDIR)/tests/test_memory_provider.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-plugin-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
-                     $(OBJDIR)/plugin_c_hook.o \
+                     $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                      $(OBJDIR)/log.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

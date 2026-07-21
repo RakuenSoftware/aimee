@@ -1,4 +1,4 @@
-/* plugin_c_hook.h: in-process C function hook registry.
+/* pre_llm_hook.h: required in-process PRE_LLM_CALL hook registry.
  *
  * Part of the pluggable context engine surface described in
  * docs/proposals/pending/plugin-extension-surface-and-context-engine.md.
