@@ -4,6 +4,14 @@ This directory defines the protected repository half of module-document attestat
 is an independently deployed service. Pull requests cannot replace its code, issuer profile, trust
 policy, repository credential, or SSHSIG toolchain.
 
+`scripts/module_doc_contract.py` supplies the deterministic validation and decision engine. The
+deployment supplies a pinned JOSE implementation for JWS/JWKS verification, a read-only repository
+client, a replay store, and the repository-scoped check publisher. The engine calls cryptographic
+verification before claim normalization, then resolves repository coordinates before reading the
+candidate commit. A callback name is not proof of either operation; deployment integration tests
+must exercise invalid signatures, stale keys, redirects, repository mismatches, replay, and check
+publication permissions.
+
 ## Provider-neutral OIDC configuration
 
 The service accepts named issuer profiles conforming to `issuer-profile.example.json` and
@@ -47,7 +55,9 @@ service configuration.
 1. Deploy the reviewed verifier release and its closed issuer profile.
 2. Install the repository-scoped publisher app without organization `admin:org`.
 3. Configure `MODULE_DOC_VERIFIER_URL` and `MODULE_DOC_VERIFIER_AUDIENCE` as protected repository
-   variables.
+   variables. The trigger remains skipped while `MODULE_DOC_ATTESTATION_ENABLED` is absent or not
+   exactly `true`; once the verifier is ready, set it to `true`. An active trigger fails closed when
+   either endpoint variable is absent.
 4. Enroll genuine owner and reviewer public keys in the protected service trust policy.
 5. Pin the required `module-doc-attestation` context to the publisher app.
 6. Only then open the descriptor-v2 and signed-document migration PR.

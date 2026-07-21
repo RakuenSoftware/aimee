@@ -19,6 +19,7 @@ import subprocess
 import struct
 import tempfile
 from typing import Callable, NamedTuple, NoReturn
+from urllib.parse import urlsplit
 
 
 MODULE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -32,6 +33,15 @@ REFERENCE_RE = re.compile(
     r"path:(?P<path>[A-Za-z0-9][A-Za-z0-9._/-]*)(?:#L(?P<line>[1-9][0-9]*))?)$"
 )
 TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+MAX_JSON_BYTES = 1_048_576
+MAX_JSON_DEPTH = 32
+MAX_JSON_ITEMS = 4096
+MAX_GOVERNED_BLOB_BYTES = 2_097_152
+MAX_DESCRIPTOR_BYTES = 65_536
+MAX_DOCUMENT_BYTES = 262_144
+MAX_SUBJECT_BYTES = 4_096
+MAX_SIGNATURE_BYTES = 16_384
+MAX_INDEX_BYTES = 65_536
 
 SECTIONS = (
     "Purpose and non-goals",
@@ -90,6 +100,8 @@ def _reject_number(value: str) -> NoReturn:
 
 
 def strict_json_bytes(raw: bytes) -> object:
+    if len(raw) > MAX_JSON_BYTES:
+        fail("json-size", f"JSON exceeds {MAX_JSON_BYTES} bytes")
     if raw.startswith(b"\xef\xbb\xbf"):
         fail("json-bom", "UTF-8 BOM is forbidden")
     try:
@@ -103,23 +115,31 @@ def strict_json_bytes(raw: bytes) -> object:
             parse_float=_reject_number,
             parse_constant=_reject_number,
         )
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
+        if isinstance(exc, RecursionError):
+            fail("json-depth", "JSON nesting exceeds the parser limit")
         fail("json-parse", f"{exc.msg} at {exc.lineno}:{exc.colno}")
     _reject_surrogates(value)
     return value
 
 
-def _reject_surrogates(value: object) -> None:
+def _reject_surrogates(value: object, depth: int = 0) -> None:
+    if depth > MAX_JSON_DEPTH:
+        fail("json-depth", f"JSON nesting exceeds {MAX_JSON_DEPTH}")
     if isinstance(value, str):
         if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
             fail("json-surrogate", "surrogate code point is forbidden")
     elif isinstance(value, list):
+        if len(value) > MAX_JSON_ITEMS:
+            fail("json-items", f"array exceeds {MAX_JSON_ITEMS} entries")
         for item in value:
-            _reject_surrogates(item)
+            _reject_surrogates(item, depth + 1)
     elif isinstance(value, dict):
+        if len(value) > MAX_JSON_ITEMS:
+            fail("json-items", f"object exceeds {MAX_JSON_ITEMS} entries")
         for key, item in value.items():
-            _reject_surrogates(key)
-            _reject_surrogates(item)
+            _reject_surrogates(key, depth + 1)
+            _reject_surrogates(item, depth + 1)
 
 
 def _exact_object(value: object, keys: set[str], rule: str) -> dict[str, object]:
@@ -134,6 +154,30 @@ def _string(value: object, rule: str) -> str:
     if not isinstance(value, str) or not value:
         fail(rule, "expected non-empty string")
     return value
+
+
+def _exact_https_url(value: object, rule: str, *, allow_query: bool = False) -> str:
+    text = _string(value, rule)
+    if not text.isascii() or any(ord(char) < 33 or ord(char) > 126 for char in text):
+        fail(rule, "URL must be printable ASCII without whitespace")
+    try:
+        parsed = urlsplit(text)
+        port = parsed.port
+    except ValueError as exc:
+        fail(rule, f"malformed URL: {exc}")
+    if parsed.scheme != "https" or not parsed.hostname:
+        fail(rule, "URL must use HTTPS with a non-empty authority")
+    if parsed.username is not None or parsed.password is not None:
+        fail(rule, "URL userinfo is forbidden")
+    if parsed.fragment or (parsed.query and not allow_query):
+        fail(rule, "URL query or fragment is forbidden")
+    if any(char.isalpha() and char != char.lower() for char in parsed.netloc) or "%" in text or "//" in parsed.path:
+        fail(rule, "URL must use a canonical lowercase host and unambiguous path")
+    if port is not None and not 1 <= port <= 65535:
+        fail(rule, "URL port is invalid")
+    if text.endswith("/"):
+        fail(rule, "URL must not end with a slash")
+    return text
 
 
 def validate_oidc_profile(value: object) -> dict[str, object]:
@@ -157,18 +201,15 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
     name = _string(profile["name"], "oidc-profile-name")
     if not MODULE_ID_RE.fullmatch(name):
         fail("oidc-profile-name", "name must use canonical identifier syntax")
-    for field in ("issuer", "audience"):
-        text = _string(profile[field], f"oidc-{field}")
-        if field == "issuer" and (not text.startswith("https://") or text.endswith("/")):
-            fail("oidc-issuer", "issuer must be an exact HTTPS URL without trailing slash")
+    _exact_https_url(profile["issuer"], "oidc-issuer")
+    _string(profile["audience"], "oidc-audience")
 
     jwks = _exact_object(
         profile["jwks"],
         {"uri", "tls_spki_sha256", "key_thumbprints_sha256", "max_age_seconds"},
         "oidc-jwks-shape",
     )
-    if not _string(jwks["uri"], "oidc-jwks-uri").startswith("https://"):
-        fail("oidc-jwks-uri", "JWKS URI must use HTTPS")
+    _exact_https_url(jwks["uri"], "oidc-jwks-uri", allow_query=True)
     pins = jwks["tls_spki_sha256"]
     if not isinstance(pins, list) or not pins or not all(isinstance(pin, str) and HEX_64_RE.fullmatch(pin) for pin in pins):
         fail("oidc-jwks-pins", "at least one lowercase SHA-256 SPKI pin is required")
@@ -186,7 +227,11 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
 
     algorithms = profile["allowed_algorithms"]
     allowed = {"EdDSA", "ES256", "RS256", "PS256"}
-    if not isinstance(algorithms, list) or not algorithms or algorithms != sorted(set(algorithms)):
+    if not isinstance(algorithms, list) or not algorithms or not all(
+        isinstance(item, str) for item in algorithms
+    ):
+        fail("oidc-algorithms", "allowed_algorithms must be a non-empty string array")
+    if algorithms != sorted(set(algorithms)):
         fail("oidc-algorithms", "allowed_algorithms must be a sorted unique non-empty array")
     if any(type(item) is not str or item not in allowed for item in algorithms):
         fail("oidc-algorithms", "algorithm is not in the closed allowlist")
@@ -220,8 +265,7 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
         profile["repository_api"], {"base_url", "tls_spki_sha256", "response_schema"},
         "repository-api-shape",
     )
-    if not _string(api["base_url"], "repository-api-url").startswith("https://"):
-        fail("repository-api-url", "repository API must use HTTPS")
+    _exact_https_url(api["base_url"], "repository-api-url")
     if not isinstance(api["tls_spki_sha256"], list) or not api["tls_spki_sha256"]:
         fail("repository-api-pins", "repository API requires SPKI pins")
     if any(not isinstance(pin, str) or not HEX_64_RE.fullmatch(pin) for pin in api["tls_spki_sha256"]):
@@ -289,9 +333,18 @@ def normalize_verified_oidc_claims(
         if claim_name not in claims:
             fail("oidc-mapped-claim", f"claim mapped to {field!r} is missing")
         value = claims[claim_name]
-        if not isinstance(value, (str, int)) or isinstance(value, bool) or value == "":
-            fail("oidc-mapped-claim", f"claim mapped to {field!r} has invalid type")
-        workload[field] = str(value)
+        if field == "attempt":
+            if type(value) is int and value >= 1:
+                normalized = str(value)
+            elif isinstance(value, str) and re.fullmatch(r"[1-9][0-9]*", value):
+                normalized = value
+            else:
+                fail("oidc-attempt", "attempt must be a positive canonical decimal")
+        else:
+            if not isinstance(value, str) or not value:
+                fail("oidc-mapped-claim", f"claim mapped to {field!r} must be a non-empty string")
+            normalized = value
+        workload[field] = normalized
     predicates = profile["predicates"]
     assert isinstance(predicates, dict)
     for field, expected in predicates.items():
@@ -333,6 +386,8 @@ def validate_candidate_target(value: object) -> dict[str, str]:
     ):
         if not isinstance(target[field], str) or not target[field]:
             fail("candidate-target-field", f"{field} must be a non-empty string")
+    if not re.fullmatch(r"[1-9][0-9]*", target["attempt"]):
+        fail("candidate-target-attempt", "attempt must be a positive canonical decimal")
     return target
 
 
@@ -366,7 +421,9 @@ def replay_binding(workload: dict[str, object], target: dict[str, object]) -> st
     return sha256("\0".join(fields).encode("utf-8"))
 
 
-def validate_v2_metadata(value: object, *, optional: bool) -> dict[str, object]:
+def validate_v2_metadata(
+    value: object, *, optional: bool, known_ids: set[str] | None = None
+) -> dict[str, object]:
     """Validate descriptor-v2 additions without enabling v2 production yet."""
     base = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
     keys = base | {"docs", "sources", "public_headers", "surfaces"}
@@ -380,12 +437,32 @@ def validate_v2_metadata(value: object, *, optional: bool) -> dict[str, object]:
         fail("v2-module-id", "invalid module ID")
     if descriptor["docs"] != f"docs/modules/{module_id}.md":
         fail("v2-doc-path", "docs path must be derived from the module ID")
+    dependencies = descriptor["dependencies"]
+    if not isinstance(dependencies, list) or any(
+        not isinstance(item, str) or not MODULE_ID_RE.fullmatch(item) for item in dependencies
+    ):
+        fail("v2-dependencies", "dependencies must be an array of canonical module IDs")
+    if dependencies != sorted(set(dependencies)):
+        fail("v2-dependencies", "dependencies must be sorted and unique")
+    if module_id in dependencies:
+        fail("v2-dependencies", "module cannot depend on itself")
+    if known_ids is not None and any(item not in known_ids for item in dependencies):
+        fail("v2-dependencies", "dependency is absent from the protected inventory")
+    runtime = _exact_object(
+        descriptor["runtime_toggle"], {"supported"}, "v2-runtime-toggle"
+    )
+    if type(runtime["supported"]) is not bool:
+        fail("v2-runtime-toggle", "runtime_toggle.supported must be boolean")
+    if not optional and runtime["supported"]:
+        fail("v2-runtime-toggle", "required modules cannot support runtime disablement")
+    if optional and type(descriptor["enabled_by_default"]) is not bool:
+        fail("v2-default", "optional enabled_by_default must be boolean")
     for field in ("sources", "public_headers"):
         entries = descriptor[field]
-        if not isinstance(entries, list) or entries != sorted(set(entries)):
-            fail("v2-pattern-order", f"{field} must be a sorted unique array")
-        if any(not isinstance(item, str) for item in entries):
+        if not isinstance(entries, list) or any(not isinstance(item, str) for item in entries):
             fail("v2-pattern-type", f"{field} entries must be strings")
+        if entries != sorted(set(entries)):
+            fail("v2-pattern-order", f"{field} must be a sorted unique array")
     for pattern in descriptor["sources"]:
         match = SOURCE_PATTERN_RE.fullmatch(pattern)
         if not match or match.group("module") != module_id:
@@ -437,7 +514,7 @@ class GitBlobReader:
         if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
             fail("git-path", "path is not canonical")
 
-    def read_blob(self, path: str) -> bytes:
+    def read_blob(self, path: str, *, max_bytes: int = MAX_GOVERNED_BLOB_BYTES) -> bytes:
         self.canonical_path(path)
         record = self._git("ls-tree", "-z", "--full-tree", self.commit, "--", path)
         entries = [entry for entry in record.split(b"\0") if entry]
@@ -453,8 +530,35 @@ class GitBlobReader:
             fail("git-entry", "repository returned a different path")
         if mode != b"100644" or kind != b"blob" or not re.fullmatch(rb"[0-9a-f]{40}", object_id):
             fail("git-mode", f"{path!r} must be a mode 100644 blob")
+        size_raw = self._git("cat-file", "-s", object_id.decode("ascii"))
+        try:
+            size = int(size_raw.decode("ascii").strip())
+        except (UnicodeDecodeError, ValueError):
+            fail("git-object", f"cannot determine size for {path!r}")
+        if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_GOVERNED_BLOB_BYTES:
+            fail("git-object-size", "requested blob limit is outside the verifier ceiling")
+        if size > max_bytes:
+            fail("git-object-size", f"{path!r} exceeds {max_bytes} bytes")
         raw = self._git("cat-file", "blob", object_id.decode("ascii"))
+        if len(raw) != size:
+            fail("git-object-size", f"{path!r} size changed while reading immutable object")
         return raw
+
+    def list_directory(self, path: str) -> dict[str, tuple[str, str]]:
+        self.canonical_path(path)
+        record = self._git("ls-tree", "-z", f"{self.commit}:{path}")
+        result: dict[str, tuple[str, str]] = {}
+        for entry in (item for item in record.split(b"\0") if item):
+            try:
+                metadata, name = entry.split(b"\t", 1)
+                mode, kind, object_id = metadata.split(b" ", 2)
+                decoded = name.decode("ascii", "strict")
+            except (ValueError, UnicodeDecodeError):
+                fail("git-entry", f"malformed directory entry beneath {path!r}")
+            if not decoded or "/" in decoded or decoded in result:
+                fail("git-entry", f"non-canonical or duplicate entry beneath {path!r}")
+            result[decoded] = (mode.decode("ascii"), kind.decode("ascii"))
+        return result
 
     def resolve_reference(self, reference: str) -> None:
         match = REFERENCE_RE.fullmatch(reference)
@@ -463,12 +567,40 @@ class GitBlobReader:
         path = match.group("path")
         if not path:
             return
-        raw = self.read_blob(path)
+        raw = self.read_blob(path, max_bytes=MAX_GOVERNED_BLOB_BYTES)
         if match.group("line") is not None:
             requested = int(match.group("line"))
             line_count = len(raw.splitlines())
             if requested > line_count:
                 fail("document-evidence-line", f"line {requested} exceeds {line_count} lines in {path}")
+
+    def expand_source_pattern(self, pattern: str, module_id: str) -> tuple[str, ...]:
+        match = SOURCE_PATTERN_RE.fullmatch(pattern)
+        if not match or match.group("module") != module_id:
+            fail("v2-source-pattern", f"invalid or cross-module source pattern {pattern!r}")
+        directory = f"src/modules/{module_id}"
+        if match.group("literal"):
+            directory += f"/{match.group('literal')}"
+        suffix = f".{match.group('suffix')}"
+        record = self._git("ls-tree", "-z", f"{self.commit}:{directory}")
+        paths: list[str] = []
+        for entry in (item for item in record.split(b"\0") if item):
+            try:
+                metadata, name = entry.split(b"\t", 1)
+                mode, kind, _ = metadata.split(b" ", 2)
+                decoded = name.decode("ascii", "strict")
+            except (ValueError, UnicodeDecodeError):
+                fail("git-entry", f"malformed tree entry beneath {directory!r}")
+            if b"/" in name or not decoded.endswith(suffix):
+                continue
+            path = f"{directory}/{decoded}"
+            if mode != b"100644" or kind != b"blob":
+                fail("git-mode", f"claimed source {path!r} must be a mode 100644 blob")
+            paths.append(path)
+        result = tuple(sorted(paths, key=lambda item: item.encode("ascii")))
+        if not result:
+            fail("v2-source-empty", f"source pattern {pattern!r} matched no blobs")
+        return result
 
 
 def _validate_reference(
@@ -494,6 +626,8 @@ def parse_module_document(
     resolve_reference: Callable[[str], None] | None = None,
 ) -> None:
     """Parse the exact module-document language and enforce content floors."""
+    if len(raw) > MAX_DOCUMENT_BYTES:
+        fail("document-size", f"document exceeds {MAX_DOCUMENT_BYTES} bytes")
     if not MODULE_ID_RE.fullmatch(module_id):
         fail("document-module-id", "invalid module ID")
     if not raw or not raw.endswith(b"\n"):
@@ -517,6 +651,8 @@ def parse_module_document(
         positions.append(matches[0])
     if positions != sorted(positions):
         fail("document-section-order", "H2 sections are out of order")
+    if positions[0] != 2:
+        fail("document-preamble", "the first H2 must immediately follow the H1 separator")
     unexpected = [line for line in lines if line.startswith("#") and line not in {f"# {module_id} module", *(f"## {s}" for s in SECTIONS)}]
     if unexpected:
         fail("document-heading", f"unexpected heading {unexpected[0]!r}")
@@ -533,20 +669,20 @@ def parse_module_document(
             body = body[:-1]
         if any(body[index] == "" and (index == 0 or index + 1 == len(body) or body[index - 1] == "" or body[index + 1] == "") for index in range(len(body))):
             fail("document-record-spacing", "blank lines may only separate records")
-        records = [item for item in body if item]
-        state = records.pop(0)
+        state = body[0]
+        cursor = 1
         if state == "State: none":
-            if len(records) < 3 or not records[0].startswith("Reason: ") or not records[1].startswith("Implication: ") or not records[2].startswith("Evidence: "):
+            if len(body) < 4 or not body[1].startswith("Reason: ") or not body[2].startswith("Implication: ") or not body[3].startswith("Evidence: "):
                 fail("document-none-block", "none state requires Reason, Implication, Evidence in order", line=start + 3)
             for prefix in ("Reason: ", "Implication: "):
-                prose = records[0 if prefix.startswith("Reason") else 1][len(prefix):]
+                prose = body[1 if prefix.startswith("Reason") else 2][len(prefix):]
                 if not PROSE_RE.fullmatch(prose):
                     fail("document-prose", f"invalid {prefix.strip()} prose")
             _validate_reference(
-                records[2][len("Evidence: "):], line=start + 5, resolver=resolve_reference
+                body[3][len("Evidence: "):], line=start + 5, resolver=resolve_reference
             )
-            records = records[3:]
-        elif any(item.startswith(("Reason: ", "Implication: ", "Evidence: ")) for item in records):
+            cursor = 4
+        elif any(item.startswith(("Reason: ", "Implication: ", "Evidence: ")) for item in body[1:]):
             fail("document-state-label", "none-state labels are forbidden for present state")
 
         expected_projection: list[str] = []
@@ -556,19 +692,24 @@ def parse_module_document(
             expected_projection.append("Public headers: " + (", ".join(projection.public_headers) or "none"))
         elif section_index == 6:
             expected_projection.extend(("Routes: none", "Commands: none", "Protocols: none", "Stages: none"))
-        if records[:len(expected_projection)] != expected_projection:
+        if body[cursor:cursor + len(expected_projection)] != expected_projection:
             fail("document-projection", f"projection mismatch in {SECTIONS[section_index]!r}")
-        records = records[len(expected_projection):]
+        cursor += len(expected_projection)
+        records = [item for item in body[cursor:] if item]
 
         prose_tokens = 0
         evidence_count = 0
+        evidence_started = False
         for record in records:
             if record.startswith("- Evidence: "):
                 _validate_reference(
                     record[len("- Evidence: "):], line=start + 2, resolver=resolve_reference
                 )
                 evidence_count += 1
+                evidence_started = True
                 continue
+            if evidence_started:
+                fail("document-record-order", "prose records cannot follow evidence records")
             prose = record[2:] if record.startswith("- ") else record
             if not PROSE_RE.fullmatch(prose):
                 fail("document-prose", f"invalid record {record!r}")
@@ -621,6 +762,156 @@ def canonical_subject(value: object) -> bytes:
     return (json.dumps(ordered, indent=2, ensure_ascii=True, separators=(",", ": ")) + "\n").encode("ascii")
 
 
+def canonical_attestation_index(entries: list[dict[str, str]]) -> bytes:
+    ordered = {
+        "schema": "aimee.module-doc-attestation-index.v1",
+        "modules": [
+            {"module_id": item["module_id"], "subject_sha256": item["subject_sha256"]}
+            for item in entries
+        ],
+    }
+    return (json.dumps(ordered, indent=2, ensure_ascii=True, separators=(",", ": ")) + "\n").encode("ascii")
+
+
+def validate_attestation_index(raw: bytes, expected: list[dict[str, str]]) -> None:
+    value = strict_json_bytes(raw)
+    index = _exact_object(value, {"schema", "modules"}, "attestation-index-shape")
+    if index["schema"] != "aimee.module-doc-attestation-index.v1":
+        fail("attestation-index-schema", "unsupported schema")
+    modules = index["modules"]
+    if not isinstance(modules, list):
+        fail("attestation-index-modules", "modules must be an array")
+    parsed: list[dict[str, str]] = []
+    for entry in modules:
+        item = _exact_object(entry, {"module_id", "subject_sha256"}, "attestation-index-entry")
+        if not isinstance(item["module_id"], str) or not MODULE_ID_RE.fullmatch(item["module_id"]):
+            fail("attestation-index-module", "invalid module ID")
+        if not isinstance(item["subject_sha256"], str) or not HEX_64_RE.fullmatch(item["subject_sha256"]):
+            fail("attestation-index-hash", "invalid subject hash")
+        parsed.append(item)
+    if parsed != expected:
+        fail("attestation-index-set", "index is missing, extra, stale, duplicated, or misordered")
+    if raw != canonical_attestation_index(parsed):
+        fail("attestation-index-canonical", "index bytes are not canonical")
+
+
+def _validate_v1_preserved(base: object, candidate: dict[str, object], optional: bool) -> None:
+    if not isinstance(base, dict):
+        fail("v2-base-descriptor", "base descriptor must be an object")
+    fields = ["id", "dependencies", "runtime_toggle"]
+    if optional:
+        fields.append("enabled_by_default")
+    for field in fields:
+        if base.get(field) != candidate.get(field):
+            fail("v2-v1-semantics", f"descriptor v2 changed v1 field {field!r}")
+
+
+def validate_module_candidate(
+    candidate: GitBlobReader,
+    base: GitBlobReader,
+    *,
+    required_ids: set[str],
+    optional_ids: set[str],
+    trust_policy_raw: bytes,
+    oidc_iat: int,
+    toolchain: "LockedToolchain",
+) -> str:
+    """Validate the complete atomic descriptor-v2 and signed-document migration."""
+    module_ids = required_ids | optional_ids
+    if not required_ids or not optional_ids or required_ids & optional_ids:
+        fail("candidate-inventory", "protected required and optional inventories must be non-empty and disjoint")
+    verification_time = datetime.fromtimestamp(oidc_iat, tz=timezone.utc)
+    identities = load_canonical_trust_policy(trust_policy_raw, at=verification_time)
+    claimed_paths: dict[str, str] = {}
+    expected_index: list[dict[str, str]] = []
+    expected_attestation_files = {"index.json"}
+
+    for module_id in sorted(module_ids):
+        descriptor_path = f"src/modules/{module_id}/module.yaml"
+        descriptor_raw = candidate.read_blob(descriptor_path, max_bytes=MAX_DESCRIPTOR_BYTES)
+        descriptor = strict_json_bytes(descriptor_raw)
+        validated = validate_v2_metadata(
+            descriptor, optional=module_id in optional_ids, known_ids=module_ids
+        )
+        base_descriptor = strict_json_bytes(
+            base.read_blob(descriptor_path, max_bytes=MAX_DESCRIPTOR_BYTES)
+        )
+        _validate_v1_preserved(base_descriptor, validated, module_id in optional_ids)
+
+        expanded: list[str] = []
+        for pattern in validated["sources"]:
+            for path in candidate.expand_source_pattern(pattern, module_id):
+                if path in claimed_paths:
+                    fail("v2-source-overlap", f"{path!r} is claimed by {claimed_paths[path]!r} and {module_id!r}")
+                claimed_paths[path] = module_id
+                expanded.append(path)
+        if len(expanded) != len(set(expanded)):
+            fail("v2-source-overlap", f"module {module_id!r} has overlapping source patterns")
+
+        document_path = validated["docs"]
+        document_raw = candidate.read_blob(document_path, max_bytes=MAX_DOCUMENT_BYTES)
+
+        def resolve(reference: str) -> None:
+            match = REFERENCE_RE.fullmatch(reference)
+            assert match is not None
+            referenced_module = match.group("module")
+            if referenced_module is not None and referenced_module not in module_ids:
+                fail("document-evidence-module", f"unknown evidence module {referenced_module!r}")
+            candidate.resolve_reference(reference)
+
+        parse_module_document(
+            document_raw,
+            module_id,
+            DocumentProjection(tuple(validated["sources"]), tuple(validated["public_headers"])),
+            resolve_reference=resolve,
+        )
+        subject_path = f"docs/modules/attestations/{module_id}.subject.json"
+        expected_attestation_files.add(f"{module_id}.subject.json")
+        subject_raw = candidate.read_blob(subject_path, max_bytes=MAX_SUBJECT_BYTES)
+        subject_value = strict_json_bytes(subject_raw)
+        canonical = canonical_subject(subject_value)
+        if subject_raw != canonical:
+            fail("subject-canonical", f"subject for {module_id!r} is not canonical")
+        assert isinstance(subject_value, dict)
+        if subject_value["module_id"] != module_id:
+            fail("subject-module", "subject module does not match its path")
+        if subject_value["descriptor_sha256"] != sha256(descriptor_raw):
+            fail("subject-descriptor-hash", f"descriptor hash mismatch for {module_id!r}")
+        if subject_value["document_sha256"] != sha256(document_raw):
+            fail("subject-document-hash", f"document hash mismatch for {module_id!r}")
+        authorize_subject(subject_value, identities, oidc_iat=oidc_iat)
+        for role, field in (("owner", "owner_identity"), ("reviewer", "reviewer_identity")):
+            expected_attestation_files.add(f"{module_id}.{role}.sig")
+            identity = subject_value[field]
+            entry = identities[identity]
+            signature = candidate.read_blob(
+                f"docs/modules/attestations/{module_id}.{role}.sig",
+                max_bytes=MAX_SIGNATURE_BYTES,
+            )
+            verify_sshsig(canonical, signature, identity, entry["public_key"], toolchain)
+        expected_index.append({"module_id": module_id, "subject_sha256": sha256(subject_raw)})
+
+    actual_attestations = candidate.list_directory("docs/modules/attestations")
+    if set(actual_attestations) != expected_attestation_files:
+        fail(
+            "attestation-files",
+            f"missing={sorted(expected_attestation_files-set(actual_attestations))}, "
+            f"extra={sorted(set(actual_attestations)-expected_attestation_files)}",
+        )
+    invalid_mode = next(
+        (name for name, mode_kind in sorted(actual_attestations.items())
+         if mode_kind != ("100644", "blob")),
+        None,
+    )
+    if invalid_mode is not None:
+        fail("git-mode", f"attestation {invalid_mode!r} must be a mode 100644 blob")
+    index_raw = candidate.read_blob(
+        "docs/modules/attestations/index.json", max_bytes=MAX_INDEX_BYTES
+    )
+    validate_attestation_index(index_raw, expected_index)
+    return f"Validated {len(module_ids)} descriptor-v2 documents and {len(module_ids) * 2} human SSHSIG attestations."
+
+
 def validate_trust_policy(value: object, *, at: datetime) -> dict[str, dict[str, object]]:
     policy = _exact_object(value, {"schema", "epoch", "identities"}, "trust-policy-shape")
     if policy["schema"] != "aimee.module-doc-trust.v1":
@@ -646,7 +937,7 @@ def validate_trust_policy(value: object, *, at: datetime) -> dict[str, dict[str,
         not_before = parse_timestamp(item["not_before"], "trust-policy-not-before")
         not_after = parse_timestamp(item["not_after"], "trust-policy-not-after")
         revoked = None if item["revoked_at"] is None else parse_timestamp(item["revoked_at"], "trust-policy-revoked-at")
-        if not_before > at or at > not_after or (revoked is not None and at >= revoked):
+        if not_before > at or at >= not_after or (revoked is not None and at >= revoked):
             fail("trust-policy-authorization", f"identity {identity!r} is not authorized at verification time")
         result[identity] = item
     return result
@@ -758,8 +1049,19 @@ def authorize_subject(
         identity = subject[field]
         if identity not in identities:
             fail("subject-authorization", f"{field} is not enrolled")
-        if identities[identity]["role"] != role:
+        entry = identities[identity]
+        if entry["role"] != role:
             fail("subject-role", f"{field} is not authorized for role {role}")
+        not_before = parse_timestamp(entry["not_before"], "trust-policy-not-before")
+        not_after = parse_timestamp(entry["not_after"], "trust-policy-not-after")
+        revoked = (
+            None if entry["revoked_at"] is None
+            else parse_timestamp(entry["revoked_at"], "trust-policy-revoked-at")
+        )
+        if signed_at < not_before or signed_at >= not_after or (
+            revoked is not None and signed_at >= revoked
+        ):
+            fail("subject-signing-authorization", f"{field} was not authorized at signed_at")
 
 
 def validate_toolchain_lock(value: object) -> dict[str, object]:
@@ -776,13 +1078,36 @@ def validate_toolchain_lock(value: object) -> dict[str, object]:
     return lock
 
 
-def verify_toolchain_binary(lock: dict[str, object], ssh_keygen: Path) -> None:
+_LOCKED_TOOLCHAIN_SENTINEL = object()
+
+
+class LockedToolchain:
+    __slots__ = ("image", "ssh_keygen", "ssh_keygen_sha256")
+
+    def __init__(
+        self, image: str, ssh_keygen: Path, ssh_keygen_sha256: str, sentinel: object
+    ):
+        if sentinel is not _LOCKED_TOOLCHAIN_SENTINEL:
+            fail("toolchain-lock", "LockedToolchain must be created by load_locked_toolchain")
+        self.image = image
+        self.ssh_keygen = ssh_keygen
+        self.ssh_keygen_sha256 = ssh_keygen_sha256
+
+
+def load_locked_toolchain(value: object, ssh_keygen: Path) -> LockedToolchain:
+    lock = validate_toolchain_lock(value)
+    if not ssh_keygen.is_absolute() or not ssh_keygen.is_file():
+        fail("toolchain-binary", "ssh-keygen must be an absolute regular-file path")
     try:
         actual = sha256(ssh_keygen.read_bytes())
     except OSError as exc:
         fail("toolchain-binary", f"cannot read ssh-keygen: {exc}")
     if actual != lock["ssh_keygen_sha256"]:
         fail("toolchain-binary", "ssh-keygen binary does not match deployment lock")
+    return LockedToolchain(
+        lock["image"], ssh_keygen, lock["ssh_keygen_sha256"],
+        _LOCKED_TOOLCHAIN_SENTINEL,
+    )
 
 
 def validate_publisher_result(value: object, target: dict[str, object]) -> dict[str, object]:
@@ -804,8 +1129,69 @@ def validate_publisher_result(value: object, target: dict[str, object]) -> dict[
     return result
 
 
-def verify_sshsig(subject: bytes, signature: bytes, identity: str, public_key: str, ssh_keygen: Path) -> None:
+class VerificationDecision(NamedTuple):
+    workload: dict[str, object]
+    target: dict[str, object]
+    replay_key: str
+    publisher_result: dict[str, object]
+
+
+def evaluate_trigger(
+    request_raw: bytes,
+    profile_raw: bytes,
+    *,
+    wall_time: int,
+    verify_jwt: Callable[[str, dict[str, object]], dict[str, object]],
+    resolve_target: Callable[[dict[str, object], int], dict[str, object]],
+    validate_candidate: Callable[[GitBlobReader, dict[str, object], dict[str, object]], str],
+    repository: Path,
+) -> VerificationDecision:
+    """Orchestrate a fail-closed external verification decision.
+
+    ``verify_jwt`` is the deployment's pinned JOSE implementation and must
+    perform JWS/JWKS verification before returning claims. ``resolve_target``
+    uses the read-only repository installation and accepts no candidate
+    coordinates. ``validate_candidate`` reads only through ``GitBlobReader``
+    and returns a human-readable success summary. Publishing and replay-store
+    writes occur only after this pure decision is returned.
+    """
+    request = strict_json_bytes(request_raw)
+    pull_request, token = validate_trigger_request(request)
+    profile = validate_oidc_profile(strict_json_bytes(profile_raw))
+    verified_claims = verify_jwt(token, profile)
+    workload = normalize_verified_oidc_claims(verified_claims, profile, wall_time=wall_time)
+    target = validate_candidate_target(resolve_target(workload, pull_request))
+    bind_workload_to_target(workload, target, pull_request=pull_request)
+    reader = GitBlobReader(repository, target["candidate_revision"])
+    summary = validate_candidate(reader, workload, target)
+    if not isinstance(summary, str) or not summary:
+        fail("candidate-validation", "candidate validator returned no summary")
+    result = validate_publisher_result(
+        {
+            "schema": "aimee.module-doc-check.v1",
+            "name": "module-doc-attestation",
+            "candidate_revision": target["candidate_revision"],
+            "external_id": target["trigger_check_identity"],
+            "conclusion": "success",
+            "summary": summary,
+        },
+        target,
+    )
+    return VerificationDecision(workload, target, replay_binding(workload, target), result)
+
+
+def verify_sshsig(
+    subject: bytes,
+    signature: bytes,
+    identity: str,
+    public_key: str,
+    toolchain: LockedToolchain,
+) -> None:
     """Verify one Ed25519 SSHSIG without invoking a shell."""
+    if len(signature) > MAX_SIGNATURE_BYTES:
+        fail("sshsig-size", f"signature exceeds {MAX_SIGNATURE_BYTES} bytes")
+    if not isinstance(toolchain, LockedToolchain):
+        fail("toolchain-lock", "SSHSIG verification requires a locked toolchain")
     _validate_sshsig_envelope(signature)
     try:
         signature.decode("ascii", "strict")
@@ -813,8 +1199,6 @@ def verify_sshsig(subject: bytes, signature: bytes, identity: str, public_key: s
         fail("sshsig-armor", "signature armor must be ASCII")
     if not IDENTITY_RE.fullmatch(identity) or not _valid_ed25519_public_key(public_key):
         fail("sshsig-signer", "signer identity or public key is invalid")
-    if not ssh_keygen.is_absolute() or not ssh_keygen.is_file():
-        fail("sshsig-tool", "ssh-keygen must be an absolute regular-file path")
     with tempfile.TemporaryDirectory(prefix="aimee-sshsig-") as tmp:
         root = Path(tmp)
         allowed = root / "allowed_signers"
@@ -822,7 +1206,7 @@ def verify_sshsig(subject: bytes, signature: bytes, identity: str, public_key: s
         allowed.write_text(f"{identity} {public_key}\n", encoding="ascii")
         sig.write_bytes(signature)
         result = subprocess.run(
-            [str(ssh_keygen), "-Y", "verify", "-f", str(allowed), "-I", identity,
+            [str(toolchain.ssh_keygen), "-Y", "verify", "-f", str(allowed), "-I", identity,
              "-n", "aimee.module-doc.v1", "-s", str(sig)],
             input=subject,
             stdout=subprocess.PIPE,

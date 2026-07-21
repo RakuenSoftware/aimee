@@ -17,6 +17,7 @@ permissions: {}
 jobs:
   request-attestation:
     name: module-doc-attestation-trigger
+    if: ${{ vars.MODULE_DOC_ATTESTATION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
