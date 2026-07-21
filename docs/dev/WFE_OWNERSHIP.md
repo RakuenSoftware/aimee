@@ -24,12 +24,17 @@ client.
 The local-only `/v1/internal/forge/execute` resource route is the credential
 boundary between those planes. It accepts only a small typed set of mechanical
 forge operations from a kernel-attested Unix-socket peer. C confines the path to
-the managed WFE worktree root, derives repository identity from the worktree's
-Git common directory, verifies branch shape,
-and applies the shared vault resolution ladder without returning credential
-material. It does not read DB1, choose an operation, interpret a workflow, or
-advance a transition. Go owns those decisions and every resulting lifecycle
-transition.
+the direct-child managed WFE worktree root, derives repository identity from
+the worktree's Git common directory, confines that repository to the
+process-lifetime-canonicalized workspace root, and requires the checked-out branch to
+match the work-item ID and managed feature/slice namespace. Push uses an
+explicit canonical HTTPS destination and refspec under a minimal environment;
+final-PR base validation uses GitHub's authoritative `default_branch`, not the
+checkout-mutable `origin/HEAD`. The request schema rejects unknown fields,
+including caller-supplied repository identity. C applies the shared vault
+resolution ladder without returning credential material. It does not read DB1,
+choose an operation, interpret a workflow, or advance a transition. Go owns
+those decisions and every resulting lifecycle transition.
 
 The image uses `tini` as PID 1. The shell entrypoint supervises the C resource
 plane and Go WFE plane as peers: exit of either terminates the other and exits

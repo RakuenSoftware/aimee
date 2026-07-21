@@ -184,7 +184,7 @@ func (s *Scheduler) drive(ctx context.Context, workItemID string) {
 			policy = policySource()
 		}
 		if policy.MaxTurns > 0 {
-			turns, err := s.db.TurnCount(runCtx, workItemID)
+			turns, err := s.db.ExecutedTurnCount(runCtx, workItemID)
 			if err != nil {
 				s.log.Error("count workflow turns", "work_item", workItemID, "error", err)
 				return

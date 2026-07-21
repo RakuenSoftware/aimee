@@ -28,6 +28,7 @@
 #include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
 #include "util.h"            /* bounded argv execution for structural worktree checks */
 #include <ctype.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -357,6 +358,18 @@ static char *const wfe_git_env[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "GIT_CO
                                     "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null",
                                     NULL};
 
+static pthread_once_t wfe_workspace_once = PTHREAD_ONCE_INIT;
+static char wfe_workspace_real[MAX_PATH_LEN];
+
+static void wfe_workspace_init(void)
+{
+   const char *root = getenv("AIMEE_WORKSPACES_DIR");
+   if (!root || !root[0])
+      root = "/var/lib/aimee-workspaces";
+   if (!realpath(root, wfe_workspace_real))
+      wfe_workspace_real[0] = '\0';
+}
+
 static int wfe_git_capture(const char *dir, const char *const argv[], char *out, size_t out_cap)
 {
    char *captured = NULL;
@@ -443,17 +456,14 @@ static int wfe_managed_repo(const char *workdir_in, const char *head, char *work
       snprintf(err, errlen, "managed repository identity is unavailable");
       return -1;
    }
-   const char *workspace_root = getenv("AIMEE_WORKSPACES_DIR");
-   if (!workspace_root || !workspace_root[0])
-      workspace_root = "/var/lib/aimee-workspaces";
-   char workspace_real[MAX_PATH_LEN];
-   if (!realpath(workspace_root, workspace_real))
+   pthread_once(&wfe_workspace_once, wfe_workspace_init);
+   if (!wfe_workspace_real[0])
    {
       snprintf(err, errlen, "workspace root is unavailable");
       return -1;
    }
-   size_t workspace_len = strlen(workspace_real);
-   if (strncmp(trusted_repo, workspace_real, workspace_len) != 0 ||
+   size_t workspace_len = strlen(wfe_workspace_real);
+   if (strncmp(trusted_repo, wfe_workspace_real, workspace_len) != 0 ||
        trusted_repo[workspace_len] != '/')
    {
       snprintf(err, errlen, "managed repository is outside the workspace root");
@@ -491,15 +501,32 @@ static int wfe_managed_repo(const char *workdir_in, const char *head, char *work
    return 0;
 }
 
-static int wfe_default_base(const char *repo, const char *base)
+static int wfe_default_base(const char *principal, const char *repo, const char *base)
 {
-   const char *argv[] = {"git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD",
-                         NULL};
    char branch[256];
-   if (wfe_git_capture(repo, argv, branch, sizeof(branch)) != 0)
+   char err[256];
+   if (git_pr_default_branch_via_api(principal, repo, branch, sizeof(branch), err, sizeof(err)) !=
+       0)
       return 0;
-   const char *name = strncmp(branch, "origin/", 7) == 0 ? branch + 7 : branch;
-   return strcmp(name, base) == 0;
+   return strcmp(branch, base) == 0;
+}
+
+static int wfe_forge_body_fields_valid(const cJSON *body)
+{
+   static const char *const allowed[] = {"op", "workdir", "head", "base", "title", "number", NULL};
+   for (const cJSON *field = body ? body->child : NULL; field; field = field->next)
+   {
+      int known = 0;
+      for (size_t i = 0; allowed[i]; i++)
+         if (field->string && strcmp(field->string, allowed[i]) == 0)
+         {
+            known = 1;
+            break;
+         }
+      if (!known)
+         return 0;
+   }
+   return 1;
 }
 
 /* Mechanical authenticated forge execution for Go-owned WFE state. The raw
@@ -519,8 +546,9 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    const char *title = route_json_string(body, "title");
    const cJSON *jnumber = body ? cJSON_GetObjectItemCaseSensitive(body, "number") : NULL;
    int number = cJSON_IsNumber(jnumber) ? jnumber->valueint : 0;
-   if (!body || !op || !workdir_in || (head && !wfe_ref_valid(head)) ||
-       (base && !wfe_ref_valid(base)) || (title && strlen(title) > 256))
+   if (!body || !wfe_forge_body_fields_valid(body) || !op || !workdir_in ||
+       (head && !wfe_ref_valid(head)) || (base && !wfe_ref_valid(base)) ||
+       (title && strlen(title) > 256))
    {
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "invalid forge operation request");
@@ -547,9 +575,10 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    }
    int feature_head = head && strncmp(head, "aimee/feat/wi_", 14) == 0;
    int slice_head = head && strncmp(head, "aimee/wi/wi_", 12) == 0;
-   int allowed_open_base = base && ((feature_head && wfe_default_base(trusted_repo, base)) ||
-                                    (slice_head && strncmp(base, "aimee/feat/wi_", 14) == 0));
-   if (strcmp(op, "push") == 0 && head)
+   int allowed_open_base =
+       base && ((feature_head && wfe_default_base(principal, trusted_repo, base)) ||
+                (slice_head && strncmp(base, "aimee/feat/wi_", 14) == 0));
+   if (strcmp(op, "push") == 0 && head && (feature_head || slice_head))
    {
       rc = git_ops_push_dir(principal, workdir, remote, head, &detail, err, sizeof(err));
    }

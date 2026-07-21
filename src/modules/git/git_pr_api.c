@@ -241,7 +241,8 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
    {
       cJSON *j = cJSON_Parse(resp);
       const cJSON *db = j ? cJSON_GetObjectItem(j, "default_branch") : NULL;
-      if (cJSON_IsString(db) && db->valuestring && db->valuestring[0])
+      if (cJSON_IsString(db) && db->valuestring && db->valuestring[0] &&
+          strlen(db->valuestring) < n)
       {
          snprintf(buf, n, "%s", db->valuestring);
          rc = 0;
@@ -249,6 +250,23 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
       cJSON_Delete(j);
    }
    free(resp);
+   return rc;
+}
+
+int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
+                                  size_t out_cap, char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+   gh_ctx_t cx;
+   if (!out || out_cap == 0 || gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   int rc = gh_default_branch(&cx, out, out_cap);
+   gh_ctx_done(&cx);
+   if (rc != 0)
+      snprintf(err, errlen, "cannot resolve authoritative default branch");
    return rc;
 }
 
@@ -506,6 +524,17 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
+   if ((cJSON_IsString(sha) && sha->valuestring &&
+        strlen(sha->valuestring) >= sizeof(out->head_sha)) ||
+       (cJSON_IsString(headref) && headref->valuestring &&
+        strlen(headref->valuestring) >= sizeof(out->head)) ||
+       (cJSON_IsString(baseref) && baseref->valuestring &&
+        strlen(baseref->valuestring) >= sizeof(out->base)))
+   {
+      cJSON_Delete(j);
+      snprintf(err, errlen, "github API: pull request ref is too long");
+      return -1;
+   }
    if (cJSON_IsString(sha) && sha->valuestring)
       snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha->valuestring);
    if (cJSON_IsString(headref) && headref->valuestring)

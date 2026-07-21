@@ -425,7 +425,7 @@ FROM lifecycle_event WHERE work_item_id = ? AND id > ? ORDER BY id ASC LIMIT ?`,
 	return events, nil
 }
 
-func (s *Store) TurnCount(ctx context.Context, workItemID string) (int, error) {
+func (s *Store) ExecutedTurnCount(ctx context.Context, workItemID string) (int, error) {
 	var count int
 	// A turn is an executed workflow transition. Administrative events such as
 	// transient parks, operator resumes, and gates remain in the audit log but

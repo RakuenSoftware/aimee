@@ -34,6 +34,11 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
 int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, char *err,
                             size_t errlen);
 
+/* Resolve the repository's authoritative GitHub default_branch in-process.
+ * Unlike origin/HEAD this value cannot be rewritten by checkout-local refs. */
+int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
+                                  size_t out_cap, char *err, size_t errlen);
+
 /* Like git_pr_create_via_api, but with an EXPLICIT head branch and base — the
  * head need not be checked out in repo_dir (the wfe forge opens PRs for
  * work-item branches while the shared checkout sits on the base). NULL/"" head

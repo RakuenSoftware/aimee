@@ -4653,6 +4653,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [op, workdir]
               properties:
                 op: { type: string, enum: [push, open, info, ci, merge] }

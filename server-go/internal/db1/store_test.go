@@ -114,7 +114,7 @@ func TestParkedRootStillConsumesAdmissionCapacity(t *testing.T) {
 	}
 }
 
-func TestTurnCountExcludesAdministrativeEvents(t *testing.T) {
+func TestExecutedTurnCountExcludesAdministrativeEvents(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	createTestItem(t, store, "wi_turns")
@@ -130,7 +130,7 @@ func TestTurnCountExcludesAdministrativeEvents(t *testing.T) {
 	if parked, err := store.RecordRetry(ctx, "wi_turns", "plan", "plan", "refine", 3, 0); err != nil || parked {
 		t.Fatalf("record retry: parked=%v err=%v", parked, err)
 	}
-	turns, err := store.TurnCount(ctx, "wi_turns")
+	turns, err := store.ExecutedTurnCount(ctx, "wi_turns")
 	if err != nil {
 		t.Fatal(err)
 	}

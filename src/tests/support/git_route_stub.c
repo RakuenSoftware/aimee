@@ -178,6 +178,18 @@ int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, cha
    return -1;
 }
 
+int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
+                                  size_t out_cap, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
 int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const char *head,
                              const char *base, const char *title, const char *body, char *out,
                              size_t out_cap, char *err, size_t errlen)
