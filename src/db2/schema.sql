@@ -6514,11 +6514,576 @@ BEGIN
       AND target_e.cert_serial_norm=r.mgmt_serial_norm
       AND target_e.fingerprint=r.mgmt_fingerprint
       AND target_e.state='active' AND target_e.revoked_at=''
+      AND NULLIF(target_e.expires_at,'')::timestamptz>now()
    WHERE g.singleton=1;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'management status denied' USING ERRCODE='28000';
   END IF;
 END $$;
+
+-- P5-B1 online status signing authority.  This is deliberately a separate,
+-- platform-scoped slot: it cannot name an arbitrary tenant secret and the
+-- status role receives EXECUTE only on the fixed functions below.
+-- These two platform-only tables intentionally have no tenant RLS policy: no
+-- online role has direct table access, the immutable ledger has WORM triggers,
+-- and the dedicated fixed-function definer must cross fleet FORCE-RLS state.
+-- Hardened provisioning and the live PG gate assert the exact negative ACLs.
+CREATE TABLE IF NOT EXISTS kb_management_status_key (
+  singleton SMALLINT PRIMARY KEY CHECK (singleton=1),
+  bootstrap_id TEXT NOT NULL UNIQUE CHECK (bootstrap_id ~ '^[0-9a-f]{64}$'),
+  custody_key_id TEXT NOT NULL UNIQUE CHECK (char_length(custody_key_id) BETWEEN 1 AND 600),
+  wire_key_id TEXT NOT NULL UNIQUE CHECK (char_length(wire_key_id) BETWEEN 1 AND 64),
+  public_key BYTEA NOT NULL CHECK (octet_length(public_key)=32),
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE kb_management_status_key ADD COLUMN IF NOT EXISTS bootstrap_id TEXT;
+ALTER TABLE kb_management_status_key ADD COLUMN IF NOT EXISTS public_key BYTEA;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM public.kb_management_status_key
+      WHERE bootstrap_id IS NULL OR public_key IS NULL) THEN
+    RAISE EXCEPTION 'management status key: legacy populated registry cannot be bootstrapped safely';
+  END IF;
+END $$;
+ALTER TABLE kb_management_status_key ALTER COLUMN bootstrap_id SET NOT NULL;
+ALTER TABLE kb_management_status_key ALTER COLUMN public_key SET NOT NULL;
+ALTER TABLE kb_management_status_key DROP CONSTRAINT IF EXISTS kb_management_status_key_bootstrap_id_check;
+ALTER TABLE kb_management_status_key ADD CONSTRAINT kb_management_status_key_bootstrap_id_check
+  CHECK (bootstrap_id ~ '^[0-9a-f]{64}$');
+ALTER TABLE kb_management_status_key DROP CONSTRAINT IF EXISTS kb_management_status_key_public_key_check;
+ALTER TABLE kb_management_status_key ADD CONSTRAINT kb_management_status_key_public_key_check
+  CHECK (octet_length(public_key)=32);
+
+-- Owner-only first activation of the fixed status slot.  The first durable
+-- commit contains an HWM1-attested but registry-disabled v1 and a staged v2
+-- containing the same seed under version-specific AAD.  External HWM CAS is
+-- never performed in a database transaction.  Generic P7 rotation constraints
+-- and entrypoints remain unchanged.
+DROP FUNCTION IF EXISTS kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+  BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA);
+DROP FUNCTION IF EXISTS kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+  BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA);
+CREATE FUNCTION kb_management_status_key_bootstrap_stage(
+  p_bootstrap_id TEXT,p_custody_key_id TEXT,p_wire_key_id TEXT,p_public_key BYTEA,
+  p_hwm1_attestation BYTEA,
+  p_v1_wrapped_dek BYTEA,p_v1_nonce BYTEA,p_v1_ciphertext BYTEA,p_v1_tag BYTEA,
+  p_v2_wrapped_dek BYTEA,p_v2_nonce BYTEA,p_v2_ciphertext BYTEA,p_v2_tag BYTEA,
+  p_public_key_digest BYTEA,p_v1_envelope_digest BYTEA,p_v2_envelope_digest BYTEA
+) RETURNS TABLE(rotation_id BIGINT,state TEXT,seal_epoch BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$
+DECLARE k public.kb_management_status_key%ROWTYPE;
+        r public.org_vault_rotation%ROWTYPE;
+        v1 public.org_vault_secret%ROWTYPE;
+        v2 public.org_vault_secret%ROWTYPE;
+        v_current BIGINT; v_epoch BIGINT; v_staged_epoch BIGINT;
+        v_staged_public_digest BYTEA; v_staged_v1_digest BYTEA; v_staged_v2_digest BYTEA;
+BEGIN
+  IF p_bootstrap_id !~ '^[0-9a-f]{64}$'
+     OR char_length(COALESCE(p_custody_key_id,'')) NOT BETWEEN 1 AND 600
+     OR char_length(COALESCE(p_wire_key_id,'')) NOT BETWEEN 1 AND 64
+     OR octet_length(p_public_key)<>32 OR octet_length(p_hwm1_attestation)<>64
+     OR octet_length(p_v1_wrapped_dek)<>40 OR octet_length(p_v1_nonce)<>12
+     OR octet_length(p_v1_ciphertext)<>32 OR octet_length(p_v1_tag)<>16
+     OR octet_length(p_v2_wrapped_dek)<>40 OR octet_length(p_v2_nonce)<>12
+     OR octet_length(p_v2_ciphertext)<>32 OR octet_length(p_v2_tag)<>16
+     OR octet_length(p_public_key_digest)<>32 OR octet_length(p_v1_envelope_digest)<>32
+     OR octet_length(p_v2_envelope_digest)<>32
+     OR p_public_key_digest<>pg_catalog.sha256(p_public_key) THEN
+    RAISE EXCEPTION 'management status bootstrap stage: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF p_bootstrap_id<>pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+       'aimee-p5-status-bootstrap-v1|'||p_custody_key_id,'UTF8')),'hex') THEN
+    RAISE EXCEPTION 'management status bootstrap stage: invalid bootstrap id'
+      USING ERRCODE='22023';
+  END IF;
+  v_epoch := public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('kb-management-status-bootstrap-v1',0));
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('orgvault:org:p5-status|management|ed25519'));
+
+  SELECT * INTO k FROM public.kb_management_status_key WHERE singleton=1 FOR UPDATE;
+  IF FOUND THEN
+    SELECT * INTO r FROM public.org_vault_rotation
+     WHERE principal='org:p5-status' AND team_id IS NULL
+       AND agent='management' AND cred='ed25519' FOR UPDATE;
+    SELECT * INTO v1 FROM public.org_vault_secret
+     WHERE principal='org:p5-status' AND agent='management' AND cred='ed25519' AND version=1;
+    SELECT * INTO v2 FROM public.org_vault_secret
+     WHERE principal='org:p5-status' AND agent='management' AND cred='ed25519' AND version=2;
+    SELECT version INTO v_current FROM public.org_vault_current
+     WHERE principal='org:p5-status' AND agent='management' AND cred='ed25519';
+    IF k.bootstrap_id=p_bootstrap_id AND k.custody_key_id=p_custody_key_id
+       AND k.wire_key_id=p_wire_key_id AND k.public_key=p_public_key
+       AND r.key_id=p_custody_key_id AND r.from_version=1 AND r.to_version=2
+       AND r.state IN ('staged','probed','activating','activated')
+       AND v1.wrapped_dek=p_v1_wrapped_dek AND v1.nonce=p_v1_nonce
+       AND v1.ciphertext=p_v1_ciphertext AND v1.tag=p_v1_tag
+       AND v1.hwm_attestation=p_hwm1_attestation
+       AND v2.wrapped_dek=p_v2_wrapped_dek AND v2.nonce=p_v2_nonce
+       AND v2.ciphertext=p_v2_ciphertext AND v2.tag=p_v2_tag
+       AND ((r.state='activated' AND v_current=2 AND k.enabled)
+         OR (r.state<>'activated' AND v_current=1 AND NOT k.enabled)) THEN
+      SELECT (a.detail::jsonb->>'seal_epoch')::BIGINT,
+             pg_catalog.decode(a.detail::jsonb->>'public_key_digest','hex'),
+             pg_catalog.decode(a.detail::jsonb->>'v1_envelope_digest','hex'),
+             pg_catalog.decode(a.detail::jsonb->>'v2_envelope_digest','hex')
+        INTO v_staged_epoch,v_staged_public_digest,v_staged_v1_digest,v_staged_v2_digest
+        FROM public.kb_audit_event a
+       WHERE a.action='management.status.bootstrap.stage'
+         AND a.subject=p_custody_key_id
+         AND a.detail::jsonb->>'bootstrap_id'=p_bootstrap_id
+       ORDER BY a.seq DESC LIMIT 1;
+      IF v_staged_public_digest IS DISTINCT FROM p_public_key_digest
+         OR v_staged_v1_digest IS DISTINCT FROM p_v1_envelope_digest
+         OR v_staged_v2_digest IS DISTINCT FROM p_v2_envelope_digest THEN
+        RAISE EXCEPTION 'management status bootstrap stage: replay mismatch'
+          USING ERRCODE='23505';
+      END IF;
+      IF v_staged_epoch IS DISTINCT FROM v_epoch THEN
+        RAISE EXCEPTION 'management status bootstrap stage: seal epoch changed'
+          USING ERRCODE='40001';
+      END IF;
+      RETURN QUERY SELECT r.id,r.state,v_staged_epoch;
+      RETURN;
+    END IF;
+    RAISE EXCEPTION 'management status bootstrap stage: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.org_vault_current WHERE principal='org:p5-status'
+       AND agent='management' AND cred='ed25519')
+     OR EXISTS (SELECT 1 FROM public.org_vault_secret WHERE principal='org:p5-status'
+       AND agent='management' AND cred='ed25519')
+     OR EXISTS (SELECT 1 FROM public.org_vault_rotation WHERE
+       (principal='org:p5-status' AND agent='management' AND cred='ed25519')
+       OR key_id=p_custody_key_id) THEN
+    RAISE EXCEPTION 'management status bootstrap stage: existing slot conflict'
+      USING ERRCODE='40001';
+  END IF;
+
+  INSERT INTO public.org_vault_secret(principal,team_id,agent,cred,version,
+      wrapped_dek,nonce,ciphertext,tag,hwm_attestation)
+    VALUES('org:p5-status',NULL,'management','ed25519',1,p_v1_wrapped_dek,p_v1_nonce,
+      p_v1_ciphertext,p_v1_tag,p_hwm1_attestation);
+  INSERT INTO public.org_vault_current(principal,agent,cred,version)
+    VALUES('org:p5-status','management','ed25519',1);
+  INSERT INTO public.kb_management_status_key(singleton,bootstrap_id,custody_key_id,
+      wire_key_id,public_key,enabled)
+    VALUES(1,p_bootstrap_id,p_custody_key_id,p_wire_key_id,p_public_key,false);
+  INSERT INTO public.org_vault_rotation(key_id,principal,team_id,agent,cred,
+      from_version,to_version,state,compromise)
+    VALUES(p_custody_key_id,'org:p5-status',NULL,'management','ed25519',1,2,
+      'provision',false) RETURNING id INTO rotation_id;
+  INSERT INTO public.org_vault_secret(principal,team_id,agent,cred,version,
+      wrapped_dek,nonce,ciphertext,tag)
+    VALUES('org:p5-status',NULL,'management','ed25519',2,p_v2_wrapped_dek,p_v2_nonce,
+      p_v2_ciphertext,p_v2_tag);
+  UPDATE public.org_vault_rotation SET state='staged',updated_at=public.pg_now_text()
+   WHERE id=rotation_id;
+  PERFORM public.kb_audit_worm_append('kb','management-status-bootstrap',
+    'vault.rotation.start',p_custody_key_id,'allow',
+    pg_catalog.json_build_object('rotation_id',rotation_id,'from_version',1,
+      'to_version',2,'bootstrap_id',p_bootstrap_id)::text);
+  PERFORM public.kb_audit_worm_append('kb','management-status-bootstrap',
+    'vault.rotation.stage',p_custody_key_id,'allow',
+    pg_catalog.json_build_object('rotation_id',rotation_id,'version',2,
+      'public_key_digest',pg_catalog.encode(pg_catalog.sha256(p_public_key),'hex'))::text);
+  PERFORM public.kb_audit_worm_append('kb','management-status-bootstrap',
+    'management.status.bootstrap.stage',p_custody_key_id,'allow',
+    pg_catalog.json_build_object('rotation_id',rotation_id,'bootstrap_id',p_bootstrap_id,
+      'seal_epoch',v_epoch,
+      'public_key_digest',pg_catalog.encode(p_public_key_digest,'hex'),
+      'v1_envelope_digest',pg_catalog.encode(p_v1_envelope_digest,'hex'),
+      'v2_envelope_digest',pg_catalog.encode(p_v2_envelope_digest,'hex'))::text);
+  state := 'staged';
+  seal_epoch := v_epoch;
+  RETURN NEXT;
+END $$;
+
+DROP FUNCTION IF EXISTS kb_management_status_key_bootstrap_resume(TEXT);
+DROP FUNCTION IF EXISTS kb_management_status_key_bootstrap_resume(TEXT,TEXT);
+CREATE FUNCTION kb_management_status_key_bootstrap_resume(
+  p_bootstrap_id TEXT,p_custody_key_id TEXT)
+RETURNS TABLE(custody_key_id TEXT,wire_key_id TEXT,public_key BYTEA,rotation_id BIGINT,
+  state TEXT,from_version BIGINT,to_version BIGINT,wrapped_dek BYTEA,nonce BYTEA,
+  ciphertext BYTEA,tag BYTEA,hwm1_attestation BYTEA,hwm2_attestation BYTEA,enabled BOOLEAN,
+  seal_epoch BIGINT,public_key_digest BYTEA,v1_envelope_digest BYTEA,
+  v2_envelope_digest BYTEA,v1_wrapped_dek BYTEA,v1_nonce BYTEA,v1_ciphertext BYTEA,v1_tag BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_epoch BIGINT;
+BEGIN
+  IF p_bootstrap_id !~ '^[0-9a-f]{64}$'
+     OR char_length(COALESCE(p_custody_key_id,'')) NOT BETWEEN 1 AND 600
+     OR p_bootstrap_id<>pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+       'aimee-p5-status-bootstrap-v1|'||p_custody_key_id,'UTF8')),'hex') THEN
+    RAISE EXCEPTION 'management status bootstrap resume: invalid input' USING ERRCODE='22023';
+  END IF;
+  v_epoch := public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('kb-management-status-bootstrap-v1',0));
+  IF NOT EXISTS (SELECT 1 FROM public.kb_management_status_key WHERE singleton=1) THEN
+    IF EXISTS (SELECT 1 FROM public.org_vault_current WHERE principal='org:p5-status'
+         AND agent='management' AND cred='ed25519')
+       OR EXISTS (SELECT 1 FROM public.org_vault_secret WHERE principal='org:p5-status'
+         AND agent='management' AND cred='ed25519')
+       OR EXISTS (SELECT 1 FROM public.org_vault_rotation WHERE
+         (principal='org:p5-status' AND agent='management' AND cred='ed25519')
+         OR key_id=p_custody_key_id) THEN
+      RAISE EXCEPTION 'management status bootstrap resume: partial empty state'
+        USING ERRCODE='40001';
+    END IF;
+    RETURN QUERY SELECT p_custody_key_id,NULL::TEXT,NULL::BYTEA,NULL::BIGINT,
+      'empty'::TEXT,1::BIGINT,2::BIGINT,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,
+      NULL::BYTEA,NULL::BYTEA,false,v_epoch,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,
+      NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
+    RETURN;
+  END IF;
+  RETURN QUERY SELECT k.custody_key_id,k.wire_key_id,k.public_key,r.id,r.state,
+      r.from_version,r.to_version,s2.wrapped_dek,s2.nonce,s2.ciphertext,s2.tag,
+      s1.hwm_attestation,s2.hwm_attestation,k.enabled,b.seal_epoch,b.public_key_digest,
+      b.v1_envelope_digest,b.v2_envelope_digest,s1.wrapped_dek,s1.nonce,s1.ciphertext,s1.tag
+    FROM public.kb_management_status_key k
+    JOIN public.org_vault_rotation r ON r.key_id=k.custody_key_id
+      AND r.principal='org:p5-status' AND r.team_id IS NULL
+      AND r.agent='management' AND r.cred='ed25519'
+      AND r.from_version=1 AND r.to_version=2
+    JOIN public.org_vault_secret s1 ON s1.principal=r.principal AND s1.agent=r.agent
+      AND s1.cred=r.cred AND s1.version=1 AND s1.team_id IS NULL
+    JOIN public.org_vault_secret s2 ON s2.principal=r.principal AND s2.agent=r.agent
+      AND s2.cred=r.cred AND s2.version=2 AND s2.team_id IS NULL
+    JOIN LATERAL (SELECT (a.detail::jsonb->>'seal_epoch')::BIGINT AS seal_epoch,
+        pg_catalog.decode(a.detail::jsonb->>'public_key_digest','hex') AS public_key_digest,
+        pg_catalog.decode(a.detail::jsonb->>'v1_envelope_digest','hex') AS v1_envelope_digest,
+        pg_catalog.decode(a.detail::jsonb->>'v2_envelope_digest','hex') AS v2_envelope_digest
+      FROM public.kb_audit_event a
+      WHERE a.action='management.status.bootstrap.stage' AND a.subject=k.custody_key_id
+        AND a.detail::jsonb->>'bootstrap_id'=k.bootstrap_id
+      ORDER BY a.seq DESC LIMIT 1) b ON true
+   WHERE k.singleton=1 AND k.bootstrap_id=p_bootstrap_id
+     AND k.custody_key_id=p_custody_key_id
+     AND b.seal_epoch=v_epoch
+     AND b.public_key_digest=pg_catalog.sha256(k.public_key)
+     AND octet_length(b.v1_envelope_digest)=32
+     AND octet_length(b.v2_envelope_digest)=32
+     AND octet_length(s1.hwm_attestation)=64
+     AND ((r.state IN ('staged','probed','activating') AND NOT k.enabled
+       AND EXISTS (SELECT 1 FROM public.org_vault_current c WHERE c.principal=r.principal
+         AND c.agent=r.agent AND c.cred=r.cred AND c.version=1))
+       OR (r.state='activated' AND k.enabled AND octet_length(s2.hwm_attestation)=64
+       AND EXISTS (SELECT 1 FROM public.org_vault_current c WHERE c.principal=r.principal
+         AND c.agent=r.agent AND c.cred=r.cred AND c.version=2)));
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management status bootstrap resume: inconsistent or missing state'
+      USING ERRCODE='40001';
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_status_key_bootstrap_prepare_activation(
+  p_bootstrap_id TEXT)
+RETURNS TABLE(rotation_id BIGINT,custody_key_id TEXT,expected_version BIGINT,
+  next_version BIGINT,state TEXT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$
+DECLARE k public.kb_management_status_key%ROWTYPE; r public.org_vault_rotation%ROWTYPE;
+BEGIN
+  IF p_bootstrap_id !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'management status bootstrap prepare: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('kb-management-status-bootstrap-v1',0));
+  SELECT * INTO k FROM public.kb_management_status_key
+   WHERE singleton=1 AND bootstrap_id=p_bootstrap_id FOR UPDATE;
+  IF NOT FOUND OR k.enabled THEN
+    RAISE EXCEPTION 'management status bootstrap prepare: registry conflict' USING ERRCODE='40001';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('orgvault:org:p5-status|management|ed25519'));
+  SELECT * INTO r FROM public.org_vault_rotation WHERE key_id=k.custody_key_id
+    AND principal='org:p5-status' AND team_id IS NULL AND agent='management'
+    AND cred='ed25519' AND from_version=1 AND to_version=2 FOR UPDATE;
+  IF NOT FOUND OR r.state NOT IN ('staged','probed','activating') THEN
+    RAISE EXCEPTION 'management status bootstrap prepare: rotation conflict' USING ERRCODE='40001';
+  END IF;
+  IF r.state='staged' THEN
+    UPDATE public.org_vault_rotation SET state='probed',updated_at=public.pg_now_text() WHERE id=r.id;
+    PERFORM public.kb_audit_worm_append('kb','management-status-bootstrap',
+      'vault.rotation.probed',k.custody_key_id,'allow',
+      pg_catalog.json_build_object('rotation_id',r.id,'from_state','staged','to_state','probed')::text);
+    r.state := 'probed';
+  END IF;
+  IF r.state='probed' THEN
+    UPDATE public.org_vault_rotation SET state='activating',updated_at=public.pg_now_text() WHERE id=r.id;
+    PERFORM public.kb_audit_worm_append('kb','management-status-bootstrap',
+      'vault.rotation.activating',k.custody_key_id,'allow',
+      pg_catalog.json_build_object('rotation_id',r.id,'from_state','probed',
+        'to_state','activating')::text);
+    r.state := 'activating';
+  END IF;
+  RETURN QUERY SELECT r.id,k.custody_key_id,1::BIGINT,2::BIGINT,r.state;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_status_key_bootstrap_finalize(
+  p_bootstrap_id TEXT,p_hwm2_attestation BYTEA)
+RETURNS TABLE(custody_key_id TEXT,wire_key_id TEXT,public_key BYTEA,version BIGINT,state TEXT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$
+DECLARE k public.kb_management_status_key%ROWTYPE; r public.org_vault_rotation%ROWTYPE;
+        v_current BIGINT; v_att BYTEA;
+BEGIN
+  IF p_bootstrap_id !~ '^[0-9a-f]{64}$' OR octet_length(p_hwm2_attestation)<>64 THEN
+    RAISE EXCEPTION 'management status bootstrap finalize: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('kb-management-status-bootstrap-v1',0));
+  SELECT * INTO k FROM public.kb_management_status_key
+   WHERE singleton=1 AND bootstrap_id=p_bootstrap_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management status bootstrap finalize: registry conflict' USING ERRCODE='40001';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('orgvault:org:p5-status|management|ed25519'));
+  SELECT * INTO r FROM public.org_vault_rotation WHERE key_id=k.custody_key_id
+    AND principal='org:p5-status' AND team_id IS NULL AND agent='management'
+    AND cred='ed25519' AND from_version=1 AND to_version=2 FOR UPDATE;
+  SELECT c.version INTO v_current FROM public.org_vault_current c
+   WHERE c.principal='org:p5-status' AND c.agent='management' AND c.cred='ed25519' FOR UPDATE;
+  IF r.state='activated' THEN
+    SELECT s.hwm_attestation INTO v_att FROM public.org_vault_secret s
+     WHERE s.principal='org:p5-status' AND s.agent='management'
+       AND s.cred='ed25519' AND s.version=2;
+    IF v_current=2 AND k.enabled AND v_att=p_hwm2_attestation
+       AND r.hwm_attestation=p_hwm2_attestation THEN
+      RETURN QUERY SELECT k.custody_key_id,k.wire_key_id,k.public_key,2::BIGINT,r.state;
+      RETURN;
+    END IF;
+    RAISE EXCEPTION 'management status bootstrap finalize: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  IF r.state<>'activating' OR k.enabled OR v_current<>1 THEN
+    RAISE EXCEPTION 'management status bootstrap finalize: state conflict' USING ERRCODE='40001';
+  END IF;
+  UPDATE public.org_vault_secret AS s SET hwm_attestation=p_hwm2_attestation
+   WHERE s.principal='org:p5-status' AND s.agent='management' AND s.cred='ed25519'
+     AND s.version=2 AND s.hwm_attestation IS NULL RETURNING s.hwm_attestation INTO v_att;
+  IF v_att IS NULL THEN
+    RAISE EXCEPTION 'management status bootstrap finalize: staged row conflict' USING ERRCODE='40001';
+  END IF;
+  UPDATE public.org_vault_current AS c SET version=2,updated_at=public.pg_now_text()
+   WHERE c.principal='org:p5-status' AND c.agent='management'
+     AND c.cred='ed25519' AND c.version=1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management status bootstrap finalize: pointer conflict' USING ERRCODE='40001';
+  END IF;
+  UPDATE public.org_vault_rotation SET state='activated',hwm_attestation=p_hwm2_attestation,
+    updated_at=public.pg_now_text() WHERE id=r.id;
+  UPDATE public.kb_management_status_key SET enabled=true,updated_at=pg_catalog.now()
+   WHERE singleton=1 AND bootstrap_id=p_bootstrap_id AND NOT enabled;
+  PERFORM public.kb_audit_worm_append('kb','management-status-bootstrap',
+    'vault.rotation.activate',k.custody_key_id,'allow',
+    pg_catalog.json_build_object('rotation_id',r.id,'version',2,
+      'bootstrap_id',p_bootstrap_id)::text);
+  RETURN QUERY SELECT k.custody_key_id,k.wire_key_id,k.public_key,2::BIGINT,'activated'::TEXT;
+END $$;
+
+CREATE TABLE IF NOT EXISTS kb_management_status_key_use_intent (
+  use_id TEXT PRIMARY KEY CHECK (use_id ~ '^[0-9a-f]{64}$'),
+  custody_key_id TEXT NOT NULL CHECK (char_length(custody_key_id) BETWEEN 1 AND 600),
+  wire_key_id TEXT NOT NULL CHECK (char_length(wire_key_id) BETWEEN 1 AND 64),
+  version BIGINT NOT NULL CHECK (version>=1),
+  request_digest TEXT NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}$'),
+  hwm_attestation_digest TEXT NOT NULL CHECK (hwm_attestation_digest ~ '^[0-9a-f]{64}$'),
+  caller_issuer TEXT NOT NULL,
+  caller_serial_norm TEXT NOT NULL,
+  caller_fingerprint TEXT NOT NULL CHECK (caller_fingerprint ~ '^[0-9a-f]{64}$'),
+  target_server_id TEXT NOT NULL,
+  target_mgmt_fingerprint TEXT NOT NULL CHECK (target_mgmt_fingerprint ~ '^[0-9a-f]{64}$'),
+  revocation_generation BIGINT NOT NULL CHECK (revocation_generation>=1),
+  seal_epoch BIGINT NOT NULL CHECK (seal_epoch>=1),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS kb_management_status_key_use_no_update ON kb_management_status_key_use_intent;
+CREATE TRIGGER kb_management_status_key_use_no_update BEFORE UPDATE ON kb_management_status_key_use_intent
+  FOR EACH ROW EXECUTE FUNCTION org_worm_block();
+DROP TRIGGER IF EXISTS kb_management_status_key_use_no_delete ON kb_management_status_key_use_intent;
+CREATE TRIGGER kb_management_status_key_use_no_delete BEFORE DELETE ON kb_management_status_key_use_intent
+  FOR EACH ROW EXECUTE FUNCTION org_worm_block();
+DROP TRIGGER IF EXISTS kb_management_status_key_use_no_truncate ON kb_management_status_key_use_intent;
+CREATE TRIGGER kb_management_status_key_use_no_truncate BEFORE TRUNCATE ON kb_management_status_key_use_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION org_worm_block();
+
+DROP FUNCTION IF EXISTS kb_management_status_key_candidate(TEXT,BIGINT);
+CREATE OR REPLACE FUNCTION kb_management_status_key_candidate(
+  p_custody_key_id TEXT,p_wire_key_id TEXT,p_version BIGINT
+) RETURNS TABLE(wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,hwm_attestation BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+  IF COALESCE(p_custody_key_id,'')='' OR COALESCE(p_wire_key_id,'')=''
+     OR p_version IS NULL OR p_version<1 THEN
+    RAISE EXCEPTION 'management status key candidate: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_require_open();
+  RETURN QUERY SELECT s.wrapped_dek,s.nonce,s.ciphertext,s.tag,s.hwm_attestation
+    FROM kb_management_status_key k
+    JOIN org_vault_current c ON c.principal='org:p5-status' AND c.agent='management'
+      AND c.cred='ed25519'
+    JOIN org_vault_secret s ON s.principal=c.principal AND s.agent=c.agent
+      AND s.cred=c.cred AND s.version=c.version
+   WHERE k.singleton=1 AND k.enabled AND k.custody_key_id=p_custody_key_id
+     AND k.wire_key_id=p_wire_key_id
+     AND c.version=p_version AND s.team_id IS NULL
+     AND s.hwm_attestation IS NOT NULL AND octet_length(s.hwm_attestation)>0
+     AND EXISTS (SELECT 1 FROM org_vault_rotation r WHERE r.key_id=k.custody_key_id
+       AND r.principal=c.principal AND r.team_id IS NULL AND r.agent=c.agent
+       AND r.cred=c.cred AND r.to_version=c.version
+       AND r.state='activated')
+     AND NOT EXISTS (SELECT 1 FROM org_vault_rotation r WHERE r.principal=c.principal
+       AND r.agent=c.agent AND r.cred=c.cred AND r.state='activating');
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_status_key_admit(
+  p_use_id TEXT,p_custody_key_id TEXT,p_wire_key_id TEXT,p_version BIGINT,p_request_digest TEXT,
+  p_caller_issuer TEXT,p_caller_serial TEXT,p_caller_fingerprint TEXT,
+  p_target_server TEXT,p_target_fingerprint TEXT,p_generation BIGINT,p_hwm_attestation BYTEA
+) RETURNS TABLE(newly_admitted BOOLEAN,seal_epoch BIGINT,wrapped_dek BYTEA,nonce BYTEA,
+                ciphertext BYTEA,tag BYTEA,hwm_attestation BYTEA)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE i kb_management_status_key_use_intent%ROWTYPE; e org_vault_secret%ROWTYPE;
+        v_epoch BIGINT; v_generation BIGINT; v_attestation_digest TEXT;
+        r kb_server_registry%ROWTYPE;
+BEGIN
+  IF p_use_id !~ '^[0-9a-f]{64}$' OR COALESCE(p_custody_key_id,'')=''
+     OR char_length(COALESCE(p_wire_key_id,'')) NOT BETWEEN 1 AND 64
+     OR p_version IS NULL OR p_version<1 OR p_request_digest !~ '^[0-9a-f]{64}$'
+     OR char_length(p_caller_issuer) NOT BETWEEN 1 AND 600
+     OR p_caller_serial !~ '^[0-9a-f]{1,128}$'
+     OR p_caller_fingerprint !~ '^[0-9a-f]{64}$'
+     OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
+     OR p_target_fingerprint !~ '^[0-9a-f]{64}$' OR p_generation<1
+     OR p_hwm_attestation IS NULL OR octet_length(p_hwm_attestation) NOT BETWEEN 1 AND 512 THEN
+    RAISE EXCEPTION 'management status key admit: invalid input' USING ERRCODE='22023';
+  END IF;
+  v_attestation_digest := encode(sha256(p_hwm_attestation),'hex');
+  v_epoch := org_vault_control_require_open();
+  PERFORM pg_advisory_xact_lock(hashtext('management-status-use:'||p_use_id));
+  SELECT * INTO i FROM kb_management_status_key_use_intent WHERE use_id=p_use_id FOR UPDATE;
+  IF FOUND THEN
+    IF i.custody_key_id=p_custody_key_id AND i.wire_key_id=p_wire_key_id AND i.version=p_version
+       AND i.request_digest=p_request_digest AND i.caller_issuer=p_caller_issuer
+       AND i.hwm_attestation_digest=v_attestation_digest
+       AND i.caller_serial_norm=p_caller_serial AND i.caller_fingerprint=p_caller_fingerprint
+       AND i.target_server_id=p_target_server
+       AND i.target_mgmt_fingerprint=p_target_fingerprint
+       AND i.revocation_generation=p_generation THEN
+      RETURN QUERY SELECT false,i.seal_epoch,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
+      RETURN;
+    END IF;
+    RAISE EXCEPTION 'management status key admit: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  -- Lock enrollment rows before the generation row.  The revocation trigger
+  -- locks in the same enrollment->generation order, linearizing sign vs revoke.
+  PERFORM 1 FROM kb_enrollments x WHERE x.scope='p5-kb-management'
+    AND x.cert_issuer=p_caller_issuer AND x.cert_serial_norm=p_caller_serial
+    AND x.fingerprint=p_caller_fingerprint AND x.state='active' AND x.revoked_at=''
+    AND NULLIF(x.expires_at,'')::timestamptz>now() FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'management status key admit: authority changed' USING ERRCODE='40001'; END IF;
+  SELECT * INTO r FROM kb_server_registry WHERE server_id=p_target_server FOR UPDATE;
+  IF NOT FOUND OR r.status<>'active' OR r.mgmt_fingerprint<>p_target_fingerprint THEN
+    RAISE EXCEPTION 'management status key admit: authority changed' USING ERRCODE='40001';
+  END IF;
+  PERFORM 1 FROM kb_enrollments x WHERE x.scope='p5-server-management'
+    AND x.cert_issuer=r.mgmt_issuer AND x.cert_serial_norm=r.mgmt_serial_norm
+    AND x.fingerprint=r.mgmt_fingerprint AND x.state='active' AND x.revoked_at=''
+    AND NULLIF(x.expires_at,'')::timestamptz>now() FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'management status key admit: authority changed' USING ERRCODE='40001'; END IF;
+  PERFORM 1 FROM kb_team_membership m WHERE m.team=r.team_id AND m.identity_key=
+    'cert:'||replace(replace(p_caller_issuer,'%','%25'),':','%3A')||':'||
+    replace(replace(p_caller_serial,'%','%25'),':','%3A') FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'management status key admit: authority changed' USING ERRCODE='40001'; END IF;
+  SELECT generation INTO v_generation FROM kb_cert_revocation_generation
+    WHERE singleton=1 FOR UPDATE;
+  IF v_generation IS DISTINCT FROM p_generation THEN
+    RAISE EXCEPTION 'management status key admit: authority changed' USING ERRCODE='40001';
+  END IF;
+  PERFORM 1 FROM kb_management_status_key k WHERE k.singleton=1 AND k.enabled
+    AND k.custody_key_id=p_custody_key_id AND k.wire_key_id=p_wire_key_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management status key admit: key registry changed' USING ERRCODE='40001';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('orgvault:org:p5-status|management|ed25519'));
+  IF NOT EXISTS (SELECT 1 FROM org_vault_rotation x
+       WHERE x.key_id=p_custody_key_id AND x.principal='org:p5-status'
+         AND x.team_id IS NULL AND x.agent='management' AND x.cred='ed25519'
+         AND x.to_version=p_version AND x.state='activated')
+     OR EXISTS (SELECT 1 FROM org_vault_rotation x
+       WHERE x.principal='org:p5-status' AND x.agent='management' AND x.cred='ed25519'
+         AND x.state='activating') THEN
+    RAISE EXCEPTION 'management status key admit: key state changed' USING ERRCODE='40001';
+  END IF;
+  SELECT s.* INTO e FROM kb_management_status_key k
+    JOIN org_vault_current c ON c.principal='org:p5-status' AND c.agent='management' AND c.cred='ed25519'
+    JOIN org_vault_secret s ON s.principal=c.principal AND s.agent=c.agent
+      AND s.cred=c.cred AND s.version=c.version
+   WHERE k.singleton=1 AND k.enabled AND k.custody_key_id=p_custody_key_id
+     AND k.wire_key_id=p_wire_key_id
+     AND c.version=p_version AND s.team_id IS NULL FOR UPDATE OF s;
+  IF NOT FOUND OR e.hwm_attestation IS NULL OR e.hwm_attestation IS DISTINCT FROM p_hwm_attestation THEN
+    RAISE EXCEPTION 'management status key admit: attestation mismatch' USING ERRCODE='40001';
+  END IF;
+  INSERT INTO kb_management_status_key_use_intent VALUES
+    (p_use_id,p_custody_key_id,p_wire_key_id,p_version,p_request_digest,v_attestation_digest,
+     p_caller_issuer,p_caller_serial,
+     p_caller_fingerprint,p_target_server,p_target_fingerprint,p_generation,v_epoch,now());
+  PERFORM kb_audit_worm_append('kb-status','management-status-authority','management.status.sign.v1',
+    p_target_server,'allow',json_build_object('use_id',p_use_id,'key_id',p_custody_key_id,
+      'version',p_version,'request_digest',p_request_digest,'caller_fingerprint',p_caller_fingerprint,
+      'hwm_attestation_digest',v_attestation_digest,
+      'target_fingerprint',p_target_fingerprint,'revocation_generation',p_generation,
+      'seal_epoch',v_epoch)::text);
+  RETURN QUERY SELECT true,v_epoch,e.wrapped_dek,e.nonce,e.ciphertext,e.tag,e.hwm_attestation;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_status_key_use_guard(p_seal_epoch BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v BIGINT;
+BEGIN
+  v := org_vault_control_require_open();
+  IF p_seal_epoch IS NULL OR p_seal_epoch<1 OR v<>p_seal_epoch THEN
+    RAISE EXCEPTION 'management status key guard: epoch changed' USING ERRCODE='40001';
+  END IF;
+  RETURN v;
+END $$;
+
+DROP FUNCTION IF EXISTS kb_management_status_key_startup_status();
+CREATE FUNCTION kb_management_status_key_startup_status()
+RETURNS TABLE(seal_epoch BIGINT,sealed BOOLEAN,custody_key_id TEXT,wire_key_id TEXT,
+  public_key BYTEA,enabled BOOLEAN,version BIGINT,hwm_attestation BYTEA)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+  RETURN QUERY WITH c AS (SELECT x.seal_epoch,x.sealed
+      FROM public.org_vault_control_startup_status() x)
+    SELECT c.seal_epoch,c.sealed,k.custody_key_id,k.wire_key_id,k.public_key,
+      COALESCE(k.enabled,false),vc.version,s.hwm_attestation
+    FROM c
+    LEFT JOIN public.kb_management_status_key k ON k.singleton=1
+    LEFT JOIN public.org_vault_current vc ON vc.principal='org:p5-status'
+      AND vc.agent='management' AND vc.cred='ed25519'
+    LEFT JOIN public.org_vault_secret s ON s.principal=vc.principal AND s.agent=vc.agent
+      AND s.cred=vc.cred AND s.version=vc.version;
+END $$;
+
+REVOKE ALL ON TABLE kb_management_status_key,kb_management_status_key_use_intent FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+  BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_bootstrap_resume(TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_bootstrap_prepare_activation(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_candidate(TEXT,TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_use_guard(BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_key_startup_status() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;

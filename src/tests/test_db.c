@@ -217,6 +217,35 @@ static void test_db2_sqlite_rewrap_failure_provenance_migration(void)
    sqlite3_close(db);
 }
 
+static void test_db2_sqlite_management_status_key_shape(void)
+{
+   static const char *registry[] = {"singleton", "custody_key_id", "wire_key_id", "enabled",
+                                    "updated_at"};
+   static const char *intent[] = {"use_id",
+                                  "custody_key_id",
+                                  "wire_key_id",
+                                  "version",
+                                  "request_digest",
+                                  "hwm_attestation_digest",
+                                  "caller_issuer",
+                                  "caller_serial_norm",
+                                  "caller_fingerprint",
+                                  "target_server_id",
+                                  "target_mgmt_fingerprint",
+                                  "revocation_generation",
+                                  "seal_epoch",
+                                  "created_at"};
+   sqlite3 *db = NULL;
+   assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
+   char err[512] = {0};
+   assert(db2_apply_schema_sqlite_shim(db, err, sizeof(err)) == 0);
+   for (size_t i = 0; i < sizeof(registry) / sizeof(registry[0]); ++i)
+      assert(sqlite_column_exists(db, "kb_management_status_key", registry[i]));
+   for (size_t i = 0; i < sizeof(intent) / sizeof(intent[0]); ++i)
+      assert(sqlite_column_exists(db, "kb_management_status_key_use_intent", intent[i]));
+   sqlite3_close(db);
+}
+
 static void test_trigger_run_change_counts(void)
 {
    char path[PATH_MAX];
@@ -822,6 +851,7 @@ int main(void)
    test_key_tables_exist();
    test_db2_sqlite_code_embeddings_body_hash_migration();
    test_db2_sqlite_rewrap_failure_provenance_migration();
+   test_db2_sqlite_management_status_key_shape();
    test_trigger_run_change_counts();
    test_cron_job_history_round_trip();
    test_model_catalog_cache();

@@ -129,6 +129,11 @@ int kb_vault_live_keys_allowed(void)
           (g_selected != KB_CUSTODY_KMS || vault_custody_kms_hwm_ready());
 }
 
+int kb_vault_management_status_keys_allowed(void)
+{
+   return g_selected == KB_CUSTODY_KMS && vault_is_sealed() == 0 && vault_custody_kms_hwm_ready();
+}
+
 int kb_egress_release_allowed(void)
 {
 #if defined(AIMEE_P2B_INTEGRATION_TEST_OVERRIDE)

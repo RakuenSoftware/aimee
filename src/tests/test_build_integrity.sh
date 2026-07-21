@@ -963,6 +963,10 @@ _group_dynlink() {
             fail "aimee-kb: DB1/sqlite symbols present in DB2-only kb"
             dl_fail=1
         fi
+        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'kb_mgmt_status_provision|db2_management_status_provision'; then
+            fail "aimee-kb: offline status-provisioner symbols present in runtime kb"
+            dl_fail=1
+        fi
         # Server must dynamically link ssl and crypto
         if ! ldd "$DLSRV" | grep -q 'libssl'; then
             fail "aimee-server: libssl not dynamically linked"
