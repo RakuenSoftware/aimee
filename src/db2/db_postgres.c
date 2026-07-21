@@ -692,7 +692,7 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
 #define REWRITE_APPEND(src, n)                                                                     \
    do                                                                                              \
    {                                                                                               \
-      if (buf_append(&out, &cap, &olen, (src), (n)) != 0)                                         \
+      if (buf_append(&out, &cap, &olen, (src), (n)) != 0)                                          \
          goto resource_failure_with_output;                                                        \
    } while (0)
 

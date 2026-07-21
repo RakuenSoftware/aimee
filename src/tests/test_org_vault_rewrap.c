@@ -601,8 +601,8 @@ static void test_edge_response_states(void)
    g_empty_rows = 1;
    g_state_response = "custody_prepared";
    assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, 0, 1, &stage_secret, 1,
-                                              &stage_count) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, 0, 1, &stage_secret, 1, &stage_count) ==
+          DB2_VAULT_REWRAP_OK);
    assert(db2_vault_rewrap_source_check_page(tx, op, 1, &stage_cursor, 1, &stage_check, 1,
                                              &stage_count, &stage_next) == DB2_VAULT_REWRAP_OK);
    g_empty_rows = 0;

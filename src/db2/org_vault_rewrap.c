@@ -679,8 +679,8 @@ db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t opid
 {
    static const uint8_t empty = 0;
    if (rows)
-      db2_vault_rewrap_check_clear(
-          rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX : cap);
+      db2_vault_rewrap_check_clear(rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX
+                                                                         : cap);
    if (count)
       *count = 0;
    db2_vault_rewrap_cursor_t after_copy;
@@ -1125,8 +1125,8 @@ db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t oper
 {
    static const uint8_t empty = 0;
    if (rows)
-      db2_vault_rewrap_check_clear(
-          rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX : cap);
+      db2_vault_rewrap_check_clear(rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX
+                                                                         : cap);
    if (count)
       *count = 0;
    db2_vault_rewrap_cursor_t after_copy;
