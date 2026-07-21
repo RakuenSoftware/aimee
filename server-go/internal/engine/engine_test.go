@@ -156,7 +156,7 @@ func TestSafeDiagnosticRedactsSecretsWithoutTruncating(t *testing.T) {
 		t.Fatal("diagnostic tail was truncated or changed")
 	}
 	unterminated := safeDiagnostic("password=\"my secret phrase\\\nnext diagnostic intact\nsecret='two words\\\nlast diagnostic intact")
-	for _, secret := range []string{"my secret phrase", "two words"} {
+	for _, secret := range []string{"my secret phrase", "secret phrase", "two words", "words"} {
 		if strings.Contains(unterminated, secret) {
 			t.Fatalf("unterminated diagnostic leaked %q", secret)
 		}

@@ -197,13 +197,7 @@ func refreshScanRef(ctx context.Context, workspace, configured string) (string, 
 	if configured == "" {
 		ref, err := gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 		if err != nil || strings.TrimSpace(string(ref)) == "" {
-			if _, autoErr := gitOutput(ctx, workspace, "remote", "set-head", "origin", "--auto"); autoErr != nil {
-				return "", fmt.Errorf("resolve refreshed origin default branch: %w", autoErr)
-			}
-			ref, err = gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-			if err != nil || strings.TrimSpace(string(ref)) == "" {
-				return "", errors.New("refreshed origin default branch is unresolved")
-			}
+			return "", errors.New("refreshed origin default branch is unresolved")
 		}
 		remote := strings.TrimSpace(string(ref))
 		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", remote+"^{commit}"); err != nil {
@@ -218,9 +212,25 @@ func refreshScanRef(ctx context.Context, workspace, configured string) (string, 
 	if strings.HasPrefix(configured, "refs/") || fullCommitID(configured) {
 		return configured, nil
 	}
-	remote := configured
-	if !strings.HasPrefix(remote, "origin/") {
-		remote = "origin/" + remote
+	remoteName := "origin"
+	remote := ""
+	if slash := strings.IndexByte(configured, '/'); slash > 0 {
+		candidateRemote := configured[:slash]
+		remotes, _ := gitOutput(ctx, workspace, "remote")
+		for _, name := range strings.Fields(string(remotes)) {
+			if name == candidateRemote {
+				remoteName, remote = candidateRemote, configured
+				break
+			}
+		}
+	}
+	if remote == "" {
+		remote = remoteName + "/" + configured
+	}
+	if remoteName != "origin" {
+		if _, err := gitOutput(ctx, workspace, "fetch", "--quiet", "--prune", remoteName); err != nil {
+			return "", fmt.Errorf("refresh %s before proposal scan: %w", remoteName, err)
+		}
 	}
 	if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", remote+"^{commit}"); err != nil {
 		return "", fmt.Errorf("resolve refreshed branch %q: %w", remote, err)

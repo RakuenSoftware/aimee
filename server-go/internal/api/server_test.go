@@ -257,6 +257,7 @@ func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
 	runGit(t, workspace, "remote", "add", "origin", remote)
 	runGit(t, workspace, "push", "-u", "origin", "testing")
 	runGit(t, remote, "symbolic-ref", "HEAD", "refs/heads/testing")
+	runGit(t, workspace, "remote", "set-head", "origin", "testing")
 	runGit(t, root, "clone", "--branch", "testing", remote, publisher)
 	runGit(t, publisher, "config", "user.email", "test@example.invalid")
 	runGit(t, publisher, "config", "user.name", "Test")
@@ -294,6 +295,14 @@ func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
 	nested, err := refreshScanRef(t.Context(), workspace, "feature/nested")
 	if err != nil || nested != "origin/feature/nested" {
 		t.Fatalf("nested ref=%q err=%v", nested, err)
+	}
+	runGit(t, workspace, "remote", "add", "upstream", remote)
+	qualified, err := refreshScanRef(t.Context(), workspace, "upstream/testing")
+	if err != nil || qualified != "upstream/testing" {
+		t.Fatalf("qualified ref=%q err=%v", qualified, err)
+	}
+	if fullCommitID("abc1234") || !fullCommitID(strings.Repeat("aB", 20)) || !fullCommitID(strings.Repeat("aB", 32)) {
+		t.Fatal("full commit id classification changed")
 	}
 }
 
