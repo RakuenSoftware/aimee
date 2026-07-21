@@ -10,7 +10,6 @@
     "repository_identity": "ci_repository",
     "run_identity": "ci_run",
     "runner_class": "ci_runner",
-    "trigger_check_identity": "ci_trigger_check",
     "workflow_identity": "ci_workflow",
     "workflow_revision": "ci_workflow_revision"
   },

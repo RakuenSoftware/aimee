@@ -90,6 +90,10 @@ WORKLOAD_FIELDS = (
     "actor_identity",
     "runner_class",
 )
+# ``trigger_check_identity`` is derived from normalized fields, not claim-mapped.
+CLAIM_MAPPED_WORKLOAD_FIELDS = tuple(
+    field for field in WORKLOAD_FIELDS if field != "trigger_check_identity"
+)
 SOURCE_PATTERN_RE = re.compile(
     r"^src/modules/(?P<module>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)/"
     r"(?:(?P<literal>[a-z][a-z0-9_-]*)/)?\*\.(?P<suffix>[ch])$"
@@ -314,7 +318,11 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
     if type(skew) is not int or not 0 <= skew <= 60:
         fail("oidc-clock-skew", "clock skew must be in [0, 60]")
 
-    mappings = _exact_object(profile["claim_mappings"], set(WORKLOAD_FIELDS), "oidc-claim-mappings")
+    mappings = _exact_object(
+        profile["claim_mappings"],
+        set(CLAIM_MAPPED_WORKLOAD_FIELDS),
+        "oidc-claim-mappings",
+    )
     for field, claim in mappings.items():
         if not isinstance(claim, str) or not CLAIM_RE.fullmatch(claim):
             fail("oidc-claim-name", f"invalid claim mapping for {field}")
@@ -351,6 +359,25 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
 
 
 STANDARD_CLAIMS = {"iss", "sub", "aud", "iat", "nbf", "exp", "jti"}
+
+
+def derive_trigger_check_identity(
+    repository_identity: str, run_identity: str, attempt: str
+) -> str:
+    """Derive an identity from normalized repository_identity, run_identity, and attempt."""
+    values = {
+        "attempt": attempt,
+        "repository_identity": repository_identity,
+        "run_identity": run_identity,
+    }
+    if not all(isinstance(value, str) and value for value in values.values()):
+        fail("oidc-trigger-identity", "trigger identity inputs must be non-empty strings")
+    if not re.fullmatch(r"[1-9][0-9]*", attempt):
+        fail("oidc-trigger-identity", "attempt must be a positive canonical decimal")
+    encoded = json.dumps(
+        values, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+    return f"sha256:{sha256(encoded)}"
 
 
 def normalize_verified_oidc_claims(
@@ -403,7 +430,7 @@ def normalize_verified_oidc_claims(
     }
     mappings = profile["claim_mappings"]
     assert isinstance(mappings, dict)
-    for field in WORKLOAD_FIELDS:
+    for field in CLAIM_MAPPED_WORKLOAD_FIELDS:
         claim_name = mappings[field]
         if claim_name not in claims:
             fail("oidc-mapped-claim", f"claim mapped to {field!r} is missing")
@@ -420,6 +447,9 @@ def normalize_verified_oidc_claims(
                 fail("oidc-mapped-claim", f"claim mapped to {field!r} must be a non-empty string")
             normalized = value
         workload[field] = normalized
+    workload["trigger_check_identity"] = derive_trigger_check_identity(
+        workload["repository_identity"], workload["run_identity"], workload["attempt"]
+    )
     predicates = profile["predicates"]
     assert isinstance(predicates, dict)
     for field, expected in predicates.items():

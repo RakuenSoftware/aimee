@@ -40,7 +40,9 @@ def locked_toolchain():
 
 
 def oidc_profile() -> dict[str, object]:
-    mappings = {field: f"ci_{field}" for field in contract.WORKLOAD_FIELDS}
+    mappings = {
+        field: f"ci_{field}" for field in contract.CLAIM_MAPPED_WORKLOAD_FIELDS
+    }
     return {
         "schema": "aimee.ci-oidc-profile.v1",
         "name": "protected-ci",
@@ -195,6 +197,12 @@ class ModuleDocContractTests(unittest.TestCase):
         unknown = dict(profile)
         unknown["provider"] = "github"
         self.assert_rule("oidc-profile-shape", lambda: contract.validate_oidc_profile(unknown))
+        claimed_trigger = json.loads(json.dumps(profile))
+        claimed_trigger["claim_mappings"]["trigger_check_identity"] = "ci_trigger_check"
+        self.assert_rule(
+            "oidc-claim-mappings",
+            lambda: contract.validate_oidc_profile(claimed_trigger),
+        )
         no_pin = json.loads(json.dumps(profile))
         no_pin["jwks"]["tls_spki_sha256"] = []
         self.assert_rule("oidc-jwks-pins", lambda: contract.validate_oidc_profile(no_pin))
@@ -230,6 +238,16 @@ class ModuleDocContractTests(unittest.TestCase):
         profile = contract.validate_oidc_profile(oidc_profile())
         token_claims = claims(profile)
         workload = contract.normalize_verified_oidc_claims(token_claims, profile, wall_time=1_800_000_000)
+        self.assertNotIn("ci_trigger_check_identity", token_claims)
+        self.assertEqual(
+            workload["trigger_check_identity"],
+            contract.derive_trigger_check_identity(
+                workload["repository_identity"],
+                workload["run_identity"],
+                workload["attempt"],
+            ),
+        )
+        self.assertRegex(workload["trigger_check_identity"], r"^sha256:[0-9a-f]{64}$")
         target = contract.validate_candidate_target({
             "schema": "aimee.candidate-target.v1",
             "repository_identity": workload["repository_identity"],
@@ -295,6 +313,37 @@ class ModuleDocContractTests(unittest.TestCase):
         self.assert_rule("oidc-attempt", lambda: contract.normalize_verified_oidc_claims(
             bad_attempt, profile, wall_time=1_800_000_000
         ))
+
+    def test_trigger_identity_is_derived_from_the_complete_run_attempt(self) -> None:
+        identity = contract.derive_trigger_check_identity("repository-17", "run-42", "2")
+        self.assertEqual(
+            identity,
+            contract.derive_trigger_check_identity("repository-17", "run-42", "2"),
+        )
+        for repository, run, attempt in (
+            ("repository-18", "run-42", "2"),
+            ("repository-17", "run-43", "2"),
+            ("repository-17", "run-42", "3"),
+        ):
+            with self.subTest(repository=repository, run=run, attempt=attempt):
+                self.assertNotEqual(
+                    identity,
+                    contract.derive_trigger_check_identity(repository, run, attempt),
+                )
+        self.assertEqual(
+            contract.derive_trigger_check_identity(
+                "repository-é", 'run-"42"', "2"
+            ),
+            "sha256:d56311b051331f765ff4651d87d88ce9f760aaed7443bd635d0a414d40771821",
+        )
+        for attempt in ("0", "01", "-1", ""):
+            with self.subTest(attempt=attempt):
+                self.assert_rule(
+                    "oidc-trigger-identity",
+                    lambda attempt=attempt: contract.derive_trigger_check_identity(
+                        "repository-17", "run-42", attempt
+                    ),
+                )
 
     def test_trigger_request_has_no_candidate_coordinates(self) -> None:
         request = {"schema": "aimee.module-doc-trigger.v1", "pull_request": 17, "oidc_token": "a.b.c"}
