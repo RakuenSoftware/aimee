@@ -7,6 +7,7 @@ readonly gate_name='run-p6c-egress-ct260'
 readonly bedrock_host='bedrock-runtime.us-east-1.amazonaws.com'
 readonly team_id='960260'
 readonly live_target='src/build/obj/tests/unit-test-kb-bedrock-live'
+readonly live_resolver='src/build/obj/tests/aimee-kb-resolver'
 
 die() {
   printf '%s: %s\n' "$gate_name" "$1" >&2
@@ -395,6 +396,10 @@ exit_for_deferred_signal
 (( seed_rc == 0 )) || exit "$seed_rc"
 
 make -C src -j"$(nproc)" build/obj/tests/unit-test-kb-bedrock-live >/dev/null
+# The production resolver locates its helper beside /proc/self/exe.  Mirror the
+# installed kb layout for this separately linked live harness; this is the same
+# helper binary and does not introduce a test-only endpoint or resolver seam.
+install -m 755 aimee-kb-resolver "$live_resolver"
 
 start_mock() {
   local case_id=$1
