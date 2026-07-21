@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
+import ipaddress
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import struct
 import tempfile
@@ -24,6 +29,8 @@ from urllib.parse import urlsplit
 
 MODULE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
+SPKI_SHA256_RE = re.compile(r"^[A-Za-z0-9+/]{43}=$")
+JWK_THUMBPRINT_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$")
 CLAIM_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:/-]{0,127}$")
 PROSE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ,.;:()'/_-]*[A-Za-z0-9.)]$")
@@ -81,9 +88,30 @@ class ContractError(ValueError):
     """A fail-closed contract violation with a stable rule identifier."""
 
 
+_DIAGNOSTIC_CONTEXT: ContextVar[tuple[str, str, str] | None] = ContextVar(
+    "module_doc_diagnostic", default=None
+)
+
+
+@contextmanager
+def diagnostic_context(module: str, candidate: str, path: str):
+    token = _DIAGNOSTIC_CONTEXT.set((module, candidate, path))
+    try:
+        yield
+    finally:
+        _DIAGNOSTIC_CONTEXT.reset(token)
+
+
 def fail(rule: str, message: str, *, line: int | None = None) -> NoReturn:
-    location = f" line={line}" if line is not None else ""
-    raise ContractError(f"rule={rule}{location}: {message}")
+    context = _DIAGNOSTIC_CONTEXT.get()
+    if context is None:
+        location = f" line={line}" if line is not None else ""
+        raise ContractError(f"rule={rule}{location}: {message}")
+    module, candidate, path = context
+    raise ContractError(
+        f"rule={rule} module={module} candidate={candidate} path={path} "
+        f"line={line or 0} expected={rule}-contract actual={message}"
+    )
 
 
 def _object_without_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -156,7 +184,13 @@ def _string(value: object, rule: str) -> str:
     return value
 
 
-def _exact_https_url(value: object, rule: str, *, allow_query: bool = False) -> str:
+def _exact_https_url(
+    value: object,
+    rule: str,
+    *,
+    allow_query: bool = False,
+    allow_trailing_slash: bool = False,
+) -> str:
     text = _string(value, rule)
     if not text.isascii() or any(ord(char) < 33 or ord(char) > 126 for char in text):
         fail(rule, "URL must be printable ASCII without whitespace")
@@ -171,11 +205,22 @@ def _exact_https_url(value: object, rule: str, *, allow_query: bool = False) -> 
         fail(rule, "URL userinfo is forbidden")
     if parsed.fragment or (parsed.query and not allow_query):
         fail(rule, "URL query or fragment is forbidden")
-    if any(char.isalpha() and char != char.lower() for char in parsed.netloc) or "%" in text or "//" in parsed.path:
+    hostname = parsed.hostname
+    assert hostname is not None
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        labels = hostname.split(".")
+        if any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in labels
+        ):
+            fail(rule, "URL hostname is not canonical DNS or IP syntax")
+    if any(char.isalpha() and char != char.lower() for char in parsed.netloc) or "%" in text or "//" in parsed.path or "\\" in text:
         fail(rule, "URL must use a canonical lowercase host and unambiguous path")
     if port is not None and not 1 <= port <= 65535:
         fail(rule, "URL port is invalid")
-    if text.endswith("/"):
+    if text.endswith("/") and not allow_trailing_slash:
         fail(rule, "URL must not end with a slash")
     return text
 
@@ -201,25 +246,29 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
     name = _string(profile["name"], "oidc-profile-name")
     if not MODULE_ID_RE.fullmatch(name):
         fail("oidc-profile-name", "name must use canonical identifier syntax")
-    _exact_https_url(profile["issuer"], "oidc-issuer")
+    _exact_https_url(profile["issuer"], "oidc-issuer", allow_trailing_slash=True)
     _string(profile["audience"], "oidc-audience")
 
     jwks = _exact_object(
         profile["jwks"],
-        {"uri", "tls_spki_sha256", "key_thumbprints_sha256", "max_age_seconds"},
+        {"uri", "tls_spki_sha256", "jwk_thumbprints_sha256", "max_age_seconds"},
         "oidc-jwks-shape",
     )
-    _exact_https_url(jwks["uri"], "oidc-jwks-uri", allow_query=True)
+    _exact_https_url(
+        jwks["uri"], "oidc-jwks-uri", allow_query=True, allow_trailing_slash=True
+    )
     pins = jwks["tls_spki_sha256"]
-    if not isinstance(pins, list) or not pins or not all(isinstance(pin, str) and HEX_64_RE.fullmatch(pin) for pin in pins):
-        fail("oidc-jwks-pins", "at least one lowercase SHA-256 SPKI pin is required")
+    if not isinstance(pins, list) or not pins or not all(
+        isinstance(pin, str) and SPKI_SHA256_RE.fullmatch(pin) for pin in pins
+    ):
+        fail("oidc-jwks-pins", "at least one base64 SHA-256 SPKI pin is required")
     if pins != sorted(set(pins)):
         fail("oidc-jwks-pins", "SPKI pins must be sorted and unique")
-    thumbprints = jwks["key_thumbprints_sha256"]
+    thumbprints = jwks["jwk_thumbprints_sha256"]
     if not isinstance(thumbprints, list) or not thumbprints or not all(
-        isinstance(item, str) and HEX_64_RE.fullmatch(item) for item in thumbprints
+        isinstance(item, str) and JWK_THUMBPRINT_RE.fullmatch(item) for item in thumbprints
     ):
-        fail("oidc-jwks-keys", "at least one lowercase SHA-256 JWK thumbprint is required")
+        fail("oidc-jwks-keys", "at least one RFC 7638 SHA-256 JWK thumbprint is required")
     if thumbprints != sorted(set(thumbprints)):
         fail("oidc-jwks-keys", "JWK thumbprints must be sorted and unique")
     if type(jwks["max_age_seconds"]) is not int or not 1 <= jwks["max_age_seconds"] <= 86400:
@@ -268,7 +317,10 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
     _exact_https_url(api["base_url"], "repository-api-url")
     if not isinstance(api["tls_spki_sha256"], list) or not api["tls_spki_sha256"]:
         fail("repository-api-pins", "repository API requires SPKI pins")
-    if any(not isinstance(pin, str) or not HEX_64_RE.fullmatch(pin) for pin in api["tls_spki_sha256"]):
+    if any(
+        not isinstance(pin, str) or not SPKI_SHA256_RE.fullmatch(pin)
+        for pin in api["tls_spki_sha256"]
+    ):
         fail("repository-api-pins", "invalid repository API SPKI pin")
     if api["response_schema"] != "aimee.candidate-target.v1":
         fail("repository-api-schema", "unsupported candidate-target schema")
@@ -828,87 +880,118 @@ def validate_module_candidate(
 
     for module_id in sorted(module_ids):
         descriptor_path = f"src/modules/{module_id}/module.yaml"
-        descriptor_raw = candidate.read_blob(descriptor_path, max_bytes=MAX_DESCRIPTOR_BYTES)
-        descriptor = strict_json_bytes(descriptor_raw)
-        validated = validate_v2_metadata(
-            descriptor, optional=module_id in optional_ids, known_ids=module_ids
-        )
-        base_descriptor = strict_json_bytes(
-            base.read_blob(descriptor_path, max_bytes=MAX_DESCRIPTOR_BYTES)
-        )
-        _validate_v1_preserved(base_descriptor, validated, module_id in optional_ids)
+        with diagnostic_context(module_id, candidate.commit, descriptor_path):
+            descriptor_raw = candidate.read_blob(
+                descriptor_path, max_bytes=MAX_DESCRIPTOR_BYTES
+            )
+            descriptor = strict_json_bytes(descriptor_raw)
+            validated = validate_v2_metadata(
+                descriptor, optional=module_id in optional_ids, known_ids=module_ids
+            )
+            base_descriptor = strict_json_bytes(
+                base.read_blob(descriptor_path, max_bytes=MAX_DESCRIPTOR_BYTES)
+            )
+            _validate_v1_preserved(
+                base_descriptor, validated, module_id in optional_ids
+            )
 
-        expanded: list[str] = []
-        for pattern in validated["sources"]:
-            for path in candidate.expand_source_pattern(pattern, module_id):
-                if path in claimed_paths:
-                    fail("v2-source-overlap", f"{path!r} is claimed by {claimed_paths[path]!r} and {module_id!r}")
-                claimed_paths[path] = module_id
-                expanded.append(path)
-        if len(expanded) != len(set(expanded)):
-            fail("v2-source-overlap", f"module {module_id!r} has overlapping source patterns")
+            expanded: list[str] = []
+            for pattern in validated["sources"]:
+                for path in candidate.expand_source_pattern(pattern, module_id):
+                    if path in claimed_paths:
+                        fail(
+                            "v2-source-overlap",
+                            f"{path!r} is claimed by {claimed_paths[path]!r} and {module_id!r}",
+                        )
+                    claimed_paths[path] = module_id
+                    expanded.append(path)
+            if len(expanded) != len(set(expanded)):
+                fail(
+                    "v2-source-overlap",
+                    f"module {module_id!r} has overlapping source patterns",
+                )
 
         document_path = validated["docs"]
-        document_raw = candidate.read_blob(document_path, max_bytes=MAX_DOCUMENT_BYTES)
+        with diagnostic_context(module_id, candidate.commit, document_path):
+            document_raw = candidate.read_blob(
+                document_path, max_bytes=MAX_DOCUMENT_BYTES
+            )
 
-        def resolve(reference: str) -> None:
-            match = REFERENCE_RE.fullmatch(reference)
-            assert match is not None
-            referenced_module = match.group("module")
-            if referenced_module is not None and referenced_module not in module_ids:
-                fail("document-evidence-module", f"unknown evidence module {referenced_module!r}")
-            candidate.resolve_reference(reference)
+            def resolve(reference: str) -> None:
+                match = REFERENCE_RE.fullmatch(reference)
+                assert match is not None
+                referenced_module = match.group("module")
+                if referenced_module is not None and referenced_module not in module_ids:
+                    fail(
+                        "document-evidence-module",
+                        f"unknown evidence module {referenced_module!r}",
+                    )
+                candidate.resolve_reference(reference)
 
-        parse_module_document(
-            document_raw,
-            module_id,
-            DocumentProjection(tuple(validated["sources"]), tuple(validated["public_headers"])),
-            resolve_reference=resolve,
-        )
+            parse_module_document(
+                document_raw,
+                module_id,
+                DocumentProjection(
+                    tuple(validated["sources"]), tuple(validated["public_headers"])
+                ),
+                resolve_reference=resolve,
+            )
         subject_path = f"docs/modules/attestations/{module_id}.subject.json"
         expected_attestation_files.add(f"{module_id}.subject.json")
-        subject_raw = candidate.read_blob(subject_path, max_bytes=MAX_SUBJECT_BYTES)
-        subject_value = strict_json_bytes(subject_raw)
-        canonical = canonical_subject(subject_value)
-        if subject_raw != canonical:
-            fail("subject-canonical", f"subject for {module_id!r} is not canonical")
-        assert isinstance(subject_value, dict)
-        if subject_value["module_id"] != module_id:
-            fail("subject-module", "subject module does not match its path")
-        if subject_value["descriptor_sha256"] != sha256(descriptor_raw):
-            fail("subject-descriptor-hash", f"descriptor hash mismatch for {module_id!r}")
-        if subject_value["document_sha256"] != sha256(document_raw):
-            fail("subject-document-hash", f"document hash mismatch for {module_id!r}")
-        authorize_subject(subject_value, identities, oidc_iat=oidc_iat)
+        with diagnostic_context(module_id, candidate.commit, subject_path):
+            subject_raw = candidate.read_blob(
+                subject_path, max_bytes=MAX_SUBJECT_BYTES
+            )
+            subject_value = strict_json_bytes(subject_raw)
+            canonical = canonical_subject(subject_value)
+            if subject_raw != canonical:
+                fail("subject-canonical", f"subject for {module_id!r} is not canonical")
+            assert isinstance(subject_value, dict)
+            if subject_value["module_id"] != module_id:
+                fail("subject-module", "subject module does not match its path")
+            if subject_value["descriptor_sha256"] != sha256(descriptor_raw):
+                fail(
+                    "subject-descriptor-hash",
+                    f"descriptor hash mismatch for {module_id!r}",
+                )
+            if subject_value["document_sha256"] != sha256(document_raw):
+                fail(
+                    "subject-document-hash",
+                    f"document hash mismatch for {module_id!r}",
+                )
+            authorize_subject(subject_value, identities, oidc_iat=oidc_iat)
         for role, field in (("owner", "owner_identity"), ("reviewer", "reviewer_identity")):
             expected_attestation_files.add(f"{module_id}.{role}.sig")
             identity = subject_value[field]
             entry = identities[identity]
-            signature = candidate.read_blob(
-                f"docs/modules/attestations/{module_id}.{role}.sig",
-                max_bytes=MAX_SIGNATURE_BYTES,
-            )
-            verify_sshsig(canonical, signature, identity, entry["public_key"], toolchain)
+            signature_path = f"docs/modules/attestations/{module_id}.{role}.sig"
+            with diagnostic_context(module_id, candidate.commit, signature_path):
+                signature = candidate.read_blob(
+                    signature_path, max_bytes=MAX_SIGNATURE_BYTES
+                )
+                verify_sshsig(
+                    canonical, signature, identity, entry["public_key"], toolchain
+                )
         expected_index.append({"module_id": module_id, "subject_sha256": sha256(subject_raw)})
 
-    actual_attestations = candidate.list_directory("docs/modules/attestations")
-    if set(actual_attestations) != expected_attestation_files:
-        fail(
-            "attestation-files",
-            f"missing={sorted(expected_attestation_files-set(actual_attestations))}, "
-            f"extra={sorted(set(actual_attestations)-expected_attestation_files)}",
+    index_path = "docs/modules/attestations/index.json"
+    with diagnostic_context("attestations", candidate.commit, index_path):
+        actual_attestations = candidate.list_directory("docs/modules/attestations")
+        if set(actual_attestations) != expected_attestation_files:
+            fail(
+                "attestation-files",
+                f"missing={sorted(expected_attestation_files-set(actual_attestations))}, "
+                f"extra={sorted(set(actual_attestations)-expected_attestation_files)}",
+            )
+        invalid_mode = next(
+            (name for name, mode_kind in sorted(actual_attestations.items())
+             if mode_kind != ("100644", "blob")),
+            None,
         )
-    invalid_mode = next(
-        (name for name, mode_kind in sorted(actual_attestations.items())
-         if mode_kind != ("100644", "blob")),
-        None,
-    )
-    if invalid_mode is not None:
-        fail("git-mode", f"attestation {invalid_mode!r} must be a mode 100644 blob")
-    index_raw = candidate.read_blob(
-        "docs/modules/attestations/index.json", max_bytes=MAX_INDEX_BYTES
-    )
-    validate_attestation_index(index_raw, expected_index)
+        if invalid_mode is not None:
+            fail("git-mode", f"attestation {invalid_mode!r} must be a mode 100644 blob")
+        index_raw = candidate.read_blob(index_path, max_bytes=MAX_INDEX_BYTES)
+        validate_attestation_index(index_raw, expected_index)
     return f"Validated {len(module_ids)} descriptor-v2 documents and {len(module_ids) * 2} human SSHSIG attestations."
 
 
@@ -1093,11 +1176,31 @@ class LockedToolchain:
         self.ssh_keygen = ssh_keygen
         self.ssh_keygen_sha256 = ssh_keygen_sha256
 
+    def executable(self) -> Path:
+        try:
+            info = self.ssh_keygen.lstat()
+            actual = sha256(self.ssh_keygen.read_bytes())
+        except OSError as exc:
+            fail("toolchain-binary", f"cannot revalidate ssh-keygen: {exc}")
+        if not stat.S_ISREG(info.st_mode) or not os.access(self.ssh_keygen, os.X_OK):
+            fail("toolchain-binary", "ssh-keygen must remain an executable regular file")
+        if actual != self.ssh_keygen_sha256:
+            fail("toolchain-binary", "ssh-keygen changed after toolchain lock")
+        return self.ssh_keygen
+
 
 def load_locked_toolchain(value: object, ssh_keygen: Path) -> LockedToolchain:
     lock = validate_toolchain_lock(value)
-    if not ssh_keygen.is_absolute() or not ssh_keygen.is_file():
-        fail("toolchain-binary", "ssh-keygen must be an absolute regular-file path")
+    try:
+        info = ssh_keygen.lstat()
+    except OSError as exc:
+        fail("toolchain-binary", f"cannot inspect ssh-keygen: {exc}")
+    if (
+        not ssh_keygen.is_absolute()
+        or not stat.S_ISREG(info.st_mode)
+        or not os.access(ssh_keygen, os.X_OK)
+    ):
+        fail("toolchain-binary", "ssh-keygen must be an absolute executable regular-file path")
     try:
         actual = sha256(ssh_keygen.read_bytes())
     except OSError as exc:
@@ -1206,7 +1309,7 @@ def verify_sshsig(
         allowed.write_text(f"{identity} {public_key}\n", encoding="ascii")
         sig.write_bytes(signature)
         result = subprocess.run(
-            [str(toolchain.ssh_keygen), "-Y", "verify", "-f", str(allowed), "-I", identity,
+            [str(toolchain.executable()), "-Y", "verify", "-f", str(allowed), "-I", identity,
              "-n", "aimee.module-doc.v1", "-s", str(sig)],
             input=subject,
             stdout=subprocess.PIPE,

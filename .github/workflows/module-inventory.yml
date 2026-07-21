@@ -126,7 +126,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Test provider-neutral OIDC, document grammar, and SSHSIG contracts
-        run: python3 -I scripts/tests/test_module_doc_contract.py -v
+        run: |
+          python3 -I scripts/tests/test_module_doc_contract.py -v
+          python3 -I scripts/tests/test_sign_module_docs.py -v
 
   proposal-ordering:
     name: proposal-ordering

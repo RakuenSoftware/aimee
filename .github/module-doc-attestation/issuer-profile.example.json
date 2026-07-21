@@ -17,12 +17,12 @@
   "clock_skew_seconds": 60,
   "issuer": "https://issuer.example.invalid",
   "jwks": {
-    "key_thumbprints_sha256": [
-      "3333333333333333333333333333333333333333333333333333333333333333"
+    "jwk_thumbprints_sha256": [
+      "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
     ],
     "max_age_seconds": 3600,
     "tls_spki_sha256": [
-      "1111111111111111111111111111111111111111111111111111111111111111"
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     ],
     "uri": "https://issuer.example.invalid/jwks"
   },
@@ -38,7 +38,7 @@
     "base_url": "https://repository.example.invalid/api",
     "response_schema": "aimee.candidate-target.v1",
     "tls_spki_sha256": [
-      "2222222222222222222222222222222222222222222222222222222222222222"
+      "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
     ]
   },
   "schema": "aimee.ci-oidc-profile.v1"

@@ -1,63 +1,91 @@
 # Module document attestation deployment contract
 
-This directory defines the protected repository half of module-document attestation. The verifier
-is an independently deployed service. Pull requests cannot replace its code, issuer profile, trust
-policy, repository credential, or SSHSIG toolchain.
+This contract separates the provider-neutral verifier engine from the current repository trigger.
+`scripts/module_doc_contract.py` contains no issuer selection or provider enum. The workflow in this
+repository is the GitHub Actions binding; another CI platform needs an equivalent protected trigger
+that produces the same normalized workload and candidate-target records.
 
-`scripts/module_doc_contract.py` supplies the deterministic validation and decision engine. The
-deployment supplies a pinned JOSE implementation for JWS/JWKS verification, a read-only repository
-client, a replay store, and the repository-scoped check publisher. The engine calls cryptographic
-verification before claim normalization, then resolves repository coordinates before reading the
-candidate commit. A callback name is not proof of either operation; deployment integration tests
-must exercise invalid signatures, stale keys, redirects, repository mismatches, replay, and check
-publication permissions.
+## Repository guarantees
 
-## Provider-neutral OIDC configuration
+`scripts/module_doc_contract.py` supplies deterministic parsers, immutable Git-object reads,
+descriptor-v2 validation, document validation, SSHSIG validation, workload-to-candidate binding,
+replay keys, and publisher-result validation. Its decision engine invokes the deployment's
+cryptographic JWT verifier before normalizing claims. It then invokes the read-only repository
+resolver before opening the resolved candidate commit. Function names alone do not establish those
+properties, so deployment integration tests must exercise invalid signatures, stale keys,
+redirects, repository mismatches, replay, and publisher permissions.
 
-The service accepts named issuer profiles conforming to `issuer-profile.example.json` and
-`scripts/module_doc_contract.py`. A profile contains an exact issuer, audience, pinned JWKS
-transport, algorithm allowlist, normalized claim mappings, and immutable workload predicates. It
-does not contain a provider enum. An administrator may configure GitHub, Keycloak, Entra ID, Okta,
-or another conforming issuer without changing verifier code.
+`module-doc-attestation-trigger.yml` is dormant unless the protected repository variable
+`MODULE_DOC_ATTESTATION_ENABLED` is exactly `true`. While active, it fails closed unless the
+verifier URL, audience, and TLS public-key pin are configured. It requests an OIDC token and sends
+only the request schema identifier, token, and pull-request number. It does not send candidate
+content, commits, or refs. The workflow grants only `id-token: write`, performs no checkout, and is
+covered by a static contract test that rejects adding `actions/checkout`.
 
-The example uses reserved `.invalid` endpoints and synthetic claims. It cannot authenticate a real
-deployment. A deployment stores its real profile in the verifier's protected configuration, not in
-a pull-request-controlled branch.
+The trigger check and required `module-doc-attestation` check are different checks. The external
+publisher records the trigger identity as the required check's external identifier and targets only
+the candidate commit independently resolved through the repository API.
 
-## Repository trigger
+## Provider-neutral issuer profiles
 
-`module-doc-attestation-trigger.yml` runs only from the protected base through
-`pull_request_target`. It receives an OIDC token for the configured audience and sends exactly the
-token and pull-request number to the verifier. It never checks out candidate content and has no
-repository credential or secret. The trigger check is not the required attestation check.
+Named issuer profiles conform to `issuer-profile.example.json` and
+`scripts/module_doc_contract.py`. A profile contains the exact issuer and audience, pinned JWKS
+transport and keys, an algorithm allowlist, normalized claim mappings, immutable workload
+predicates, and a pinned repository API. It contains no provider enum. Users may configure any
+conforming issuer without changing verifier code.
 
-The verifier uses its repository-scoped installation to resolve the pull request, protected base,
-candidate commit, refs, run, attempt, and trigger-check identity. It ignores candidate coordinates
-from requests. Its publisher credential may read pull-request and Git objects and create only the
-named `module-doc-attestation` check. It may not push, merge, administer the repository, or create a
-different app's check. The required check is pinned to that publisher app by an administrator.
+The committed example uses reserved `.invalid` endpoints, synthetic claims, and unusable pins. It
+cannot authenticate a deployment. Real profiles belong to protected verifier configuration, never
+to a pull-request-controlled branch.
 
-## Human trust and SSHSIG
+## External deployment prerequisites
 
-Module owners and reviewers are authenticated with distinct Ed25519 SSHSIG signatures in namespace
-`aimee.module-doc.v1`; CI OIDC never substitutes for a human signature. Real identities and public
-keys are enrolled only after this verifier release is deployed. No test key or generated agent key
-is an enrollment candidate.
+The repository does not supply service credentials or claim that these prerequisites are already
+deployed. Before activation, operators must provide:
 
-Before activation, the deployment lock must pin an OpenSSH toolchain image by immutable digest and
-the image's `ssh-keygen` binary by SHA-256. The service verifies both pins before accepting work.
-The repository intentionally does not publish a fabricated image digest or a host-specific binary
-hash; release publication produces those two values and the administrator records them in protected
-service configuration.
+- a pinned JOSE implementation that verifies JWS signatures, JWKS key pins and freshness, issuer,
+  audience, algorithm, and token time before returning claims to the engine;
+- a read-only repository client that translates platform API fields into the normalized repository,
+  workflow, revision, run, attempt, trigger, pull-request, base, and candidate records;
+- a durable replay store that permits only one deterministic result for each engine replay key;
+- a repository-scoped publisher authorized only to create the named attestation check;
+- a canonical trust policy containing genuine human owner and reviewer Ed25519 public keys; and
+- an OpenSSH image selected by immutable digest plus a lock containing the SHA-256 of the exact
+  `ssh-keygen` binary. The deployment enforces the image selection; `load_locked_toolchain` verifies
+  the lock shape and binary hash before the engine can perform SSHSIG verification.
+
+OIDC authenticates the protected workload, not document authors. The deployed trust policy must
+reject test keys and agent-generated keys as human enrollments. Each module requires distinct owner
+and reviewer identities and two Ed25519 SSHSIG signatures in namespace `aimee.module-doc.v1`.
+
+`scripts/sign_module_docs.py` is the human signing helper. It accepts canonical public-key files and
+copies only their public bytes into its mode-`0700` staging directory; matching private keys must be
+available through `SSH_AUTH_SOCK`. It invokes no shell, signs every module, verifies every result,
+and builds the complete index before changing the attestation directory. A malformed prior directory
+or any signing failure leaves it unchanged. Initial installation uses an atomic rename; renewal uses
+`renameat2(RENAME_EXCHANGE)` and fails without changing the directory when the filesystem lacks that
+operation.
+
+## Current GitHub repository binding
+
+The current binding uses a protected-base `pull_request_target` workflow and a repository-scoped
+check-publisher app. Branch protection or a repository ruleset, not this source tree, must pin the
+required `module-doc-attestation` context to that app and prohibit bypasses. Installing this
+repository-scoped app does not require organization-wide administration; specifically, it does not
+require GitHub's `admin:org` scope.
+
+The app credential belongs in the deployed service vault. Its permissions are limited to reading
+pull-request and Git objects and creating its named check. It must not push, merge, administer the
+repository, or create another app's check.
 
 ## Activation order
 
-1. Deploy the reviewed verifier release and its closed issuer profile.
-2. Install the repository-scoped publisher app without organization `admin:org`.
-3. Configure `MODULE_DOC_VERIFIER_URL` and `MODULE_DOC_VERIFIER_AUDIENCE` as protected repository
-   variables. The trigger remains skipped while `MODULE_DOC_ATTESTATION_ENABLED` is absent or not
-   exactly `true`; once the verifier is ready, set it to `true`. An active trigger fails closed when
-   either endpoint variable is absent.
+1. Deploy the reviewed verifier release and a provider-neutral issuer profile.
+2. Install the repository-scoped publisher and configure its least-privilege credential.
+3. Configure `MODULE_DOC_VERIFIER_URL`, `MODULE_DOC_VERIFIER_AUDIENCE`, and
+   `MODULE_DOC_VERIFIER_SPKI` as protected repository variables.
 4. Enroll genuine owner and reviewer public keys in the protected service trust policy.
-5. Pin the required `module-doc-attestation` context to the publisher app.
-6. Only then open the descriptor-v2 and signed-document migration PR.
+5. In branch protection or the repository ruleset, pin `module-doc-attestation` to the publisher and
+   prohibit bypasses.
+6. Set `MODULE_DOC_ATTESTATION_ENABLED` to exactly `true` and verify a negative canary PR fails.
+7. Only then open the descriptor-v2 and signed-document migration PR.

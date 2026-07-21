@@ -46,8 +46,8 @@ def oidc_profile() -> dict[str, object]:
         "audience": "aimee-module-doc-verifier",
         "jwks": {
             "uri": "https://issuer.example.invalid/jwks",
-            "tls_spki_sha256": ["1" * 64],
-            "key_thumbprints_sha256": ["3" * 64],
+            "tls_spki_sha256": ["A" * 43 + "="],
+            "jwk_thumbprints_sha256": ["C" * 43],
             "max_age_seconds": 3600,
         },
         "allowed_algorithms": ["ES256", "RS256"],
@@ -62,7 +62,7 @@ def oidc_profile() -> dict[str, object]:
         },
         "repository_api": {
             "base_url": "https://repository.example.invalid/api",
-            "tls_spki_sha256": ["2" * 64],
+            "tls_spki_sha256": ["B" * 43 + "="],
             "response_schema": "aimee.candidate-target.v1",
         },
     }
@@ -92,12 +92,25 @@ class ModuleDocContractTests(unittest.TestCase):
             raw, "memory", contract.DocumentProjection(("src/modules/memory/*.c",), ())
         )
 
+    def test_protected_diagnostics_are_complete(self) -> None:
+        with self.assertRaises(contract.ContractError) as captured:
+            with contract.diagnostic_context("memory", "a" * 40, "docs/modules/memory.md"):
+                contract.fail("document-test", "bad record", line=7)
+        message = str(captured.exception)
+        for field in (
+            "rule=document-test", "module=memory", f"candidate={'a' * 40}",
+            "path=docs/modules/memory.md", "line=7", "expected=document-test-contract",
+            "actual=bad record",
+        ):
+            self.assertIn(field, message)
+
     def test_workflow_activation_is_dormant_then_fail_closed(self) -> None:
         workflow = (
             REPO_ROOT / ".github/workflows/module-doc-attestation-trigger.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("if: ${{ vars.MODULE_DOC_ATTESTATION_ENABLED == 'true' }}", workflow)
-        self.assertIn("MODULE_DOC_VERIFIER_AUDIENCE and MODULE_DOC_VERIFIER_URL must be configured", workflow)
+        self.assertIn("MODULE_DOC_VERIFIER_SPKI", workflow)
+        self.assertIn("--pinnedpubkey", workflow)
         self.assertNotIn("actions/checkout", workflow)
 
     def test_document_negative_fixtures_have_stable_rules(self) -> None:
@@ -163,6 +176,9 @@ class ModuleDocContractTests(unittest.TestCase):
         example = contract.strict_json_bytes(example_raw)
         self.assertEqual(contract.validate_oidc_profile(example), example)
         self.assertNotIn(b"github", example_raw.lower())
+        trailing_issuer = json.loads(json.dumps(profile))
+        trailing_issuer["issuer"] += "/"
+        self.assertEqual(contract.validate_oidc_profile(trailing_issuer), trailing_issuer)
         unknown = dict(profile)
         unknown["provider"] = "github"
         self.assert_rule("oidc-profile-shape", lambda: contract.validate_oidc_profile(unknown))
@@ -180,6 +196,7 @@ class ModuleDocContractTests(unittest.TestCase):
             ("issuer", "https:///missing-host", "oidc-issuer"),
             ("issuer", "https://issuer.example.invalid/#fragment", "oidc-issuer"),
             ("issuer", "https://Issuer.example.invalid", "oidc-issuer"),
+            ("issuer", "https://issuer.example.invalid\\evil", "oidc-issuer"),
             ("jwks.uri", "https://issuer.example.invalid/jwks#fragment", "oidc-jwks-uri"),
             ("repository_api.base_url", "https://repository.example.invalid/api/", "repository-api-url"),
         )
