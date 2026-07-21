@@ -1,3 +1,4 @@
+#define AIMEE_KB_BEDROCK_TESTING 1
 #include "kb/kb_bedrock_egress.h"
 #include "kb/http/kb_http_client.h"
 #include "tests/support/aws_eventstream_fixture.h"
@@ -6,6 +7,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,15 +23,57 @@ typedef struct
    kb_http_result_t transport_result;
    kb_http_result_t post_body_result;
    int calls, body_calls;
+   kb_bedrock_authorized_target_t *race_target;
+   const aimee_request_t *race_request;
+   const kb_bedrock_credentials_t *race_credentials;
+   kb_bedrock_result_t race_result;
+   kb_bedrock_result_t race_clear_result;
+   int race_status;
 } dispatch_mock_t;
 
 static dispatch_mock_t dispatch_mock;
+
+/* The pure engine target intentionally does not link DB2.  Production resolution is exercised by
+ * the live harness; this symbol only satisfies the production resolver held in the same object. */
+db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id, const char *model_id,
+                                                             db2_bedrock_target_t *out)
+{
+   (void)team_id;
+   (void)model_id;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return DB2_BEDROCK_TARGET_ERROR;
+}
+
+static void *dispatch_same_target(void *unused)
+{
+   (void)unused;
+   aimee_response_t response;
+   kb_bedrock_response_init(&response);
+   dispatch_mock.race_status = 777;
+   dispatch_mock.race_result = kb_bedrock_dispatch_buffered(
+       dispatch_mock.race_target, dispatch_mock.race_request, dispatch_mock.race_credentials,
+       &response, &dispatch_mock.race_status);
+   dispatch_mock.race_clear_result = kb_bedrock_authorized_target_clear(&dispatch_mock.race_target);
+   aimee_response_free(&response);
+   return NULL;
+}
 
 kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
                                       kb_http_response_t *response, kb_http_headers_fn headers_cb,
                                       kb_http_body_fn body_cb, void *context)
 {
    dispatch_mock.calls++;
+   if (dispatch_mock.race_target)
+   {
+      pthread_t contender;
+      assert(pthread_create(&contender, NULL, dispatch_same_target, NULL) == 0);
+      assert(pthread_join(contender, NULL) == 0);
+      assert(dispatch_mock.race_result == KB_BEDROCK_BUSY);
+      assert(dispatch_mock.race_clear_result == KB_BEDROCK_BUSY);
+      assert(dispatch_mock.race_status == 0);
+      dispatch_mock.race_target = NULL;
+   }
    memset(response, 0, sizeof(*response));
    assert(request && request->authority &&
           strstr(request->authority, "bedrock-runtime.") == request->authority);
@@ -115,6 +159,14 @@ static kb_bedrock_credentials_t credentials(void)
                                  .amz_date = "20260101T000000Z",
                                  .date = "20260101"};
    return c;
+}
+
+static kb_bedrock_authorized_target_t *authorized(const db2_bedrock_target_t *raw)
+{
+   kb_bedrock_authorized_target_t *result = NULL;
+   assert(kb_bedrock_test_authorized_target_create(raw, &result) == KB_BEDROCK_OK);
+   assert(result != NULL);
+   return result;
 }
 
 static void request_tests(void)
@@ -875,6 +927,7 @@ static void dispatch_wrapper_tests(void)
    aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_request_t request = {.messages = &message, .n_messages = 1};
    db2_bedrock_target_t t = target("aws", "us-east-1", "model");
+   kb_bedrock_authorized_target_t *authorized_target = authorized(&t);
    kb_bedrock_credentials_t c = credentials();
    aimee_response_t response;
    kb_bedrock_response_init(&response);
@@ -884,18 +937,23 @@ static void dispatch_wrapper_tests(void)
                                      .content_type = "application/json",
                                      .body = good,
                                      .body_len = sizeof(good) - 1,
-                                     .fragment = 3};
-   assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) == KB_BEDROCK_OK);
+                                     .fragment = 3,
+                                     .race_target = authorized_target,
+                                     .race_request = &request,
+                                     .race_credentials = &c};
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
+          KB_BEDROCK_OK);
    assert(status == 200 && response.n_content == 1 && strcmp(response.content[0].text, "ok") == 0 &&
           dispatch_mock.body_calls > 1);
 
    int calls = dispatch_mock.calls;
-   snprintf(t.endpoint, sizeof(t.endpoint), "https://forbidden.example");
+   db2_bedrock_target_t invalid = t;
+   snprintf(invalid.endpoint, sizeof(invalid.endpoint), "https://forbidden.example");
+   kb_bedrock_authorized_target_t *rejected = authorized_target;
    status = 888;
-   assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
+   assert(kb_bedrock_test_authorized_target_create(&invalid, &rejected) ==
           KB_BEDROCK_INVALID_TARGET);
-   assert(status == 0 && response.content == NULL && dispatch_mock.calls == calls);
-   t.endpoint[0] = 0;
+   assert(rejected == NULL && dispatch_mock.calls == calls);
 
    status = 999;
    assert(kb_bedrock_dispatch_buffered(NULL, &request, &c, &response, &status) ==
@@ -904,7 +962,7 @@ static void dispatch_wrapper_tests(void)
 
    dispatch_mock = (dispatch_mock_t){
        .status = 200, .content_type = NULL, .body = good, .body_len = sizeof(good) - 1};
-   assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
           KB_BEDROCK_MALFORMED_RESPONSE);
    assert(status == 0 && dispatch_mock.body_calls == 0 && response.content == NULL);
 
@@ -912,7 +970,7 @@ static void dispatch_wrapper_tests(void)
                                      .content_type = "application/json; charset=utf-8",
                                      .body = good,
                                      .body_len = sizeof(good) - 1};
-   assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
           KB_BEDROCK_MALFORMED_RESPONSE);
    assert(status == 0 && dispatch_mock.body_calls == 0);
 
@@ -920,12 +978,12 @@ static void dispatch_wrapper_tests(void)
                                      .content_type = "application/json",
                                      .body = good,
                                      .body_len = sizeof(good) - 1};
-   assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
           KB_BEDROCK_PROVIDER_ERROR);
    assert(status == 429 && dispatch_mock.body_calls == 0);
 
    dispatch_mock = (dispatch_mock_t){.transport_result = KB_HTTP_TLS_ERROR};
-   assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
+   assert(kb_bedrock_dispatch_buffered(authorized_target, &request, &c, &response, &status) ==
           KB_BEDROCK_TRANSPORT_ERROR);
    assert(status == 0 && response.content == NULL);
 
@@ -937,8 +995,8 @@ static void dispatch_wrapper_tests(void)
                                      .body = stream_body,
                                      .body_len = stream_len,
                                      .fragment = 1};
-   assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
-          KB_BEDROCK_OK);
+   assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, collect_delta, &log,
+                                     &status) == KB_BEDROCK_OK);
    assert(status == 200 && log.count == 5 && dispatch_mock.body_calls == (int)stream_len);
 
    log = (delta_log_t){0};
@@ -948,8 +1006,8 @@ static void dispatch_wrapper_tests(void)
                                      .body_len = stream_len,
                                      .fragment = 13,
                                      .post_body_result = KB_HTTP_MALFORMED_RESPONSE};
-   assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
-          KB_BEDROCK_TRANSPORT_ERROR);
+   assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, collect_delta, &log,
+                                     &status) == KB_BEDROCK_TRANSPORT_ERROR);
    assert(status == 0 && log.count == 4);
    for (int i = 0; i < log.count; i++)
       assert(log.type[i] != AIMEE_DELTA_TURN_STOP);
@@ -960,8 +1018,8 @@ static void dispatch_wrapper_tests(void)
                                      .body = stream_body,
                                      .body_len = stream_len,
                                      .fragment = 7};
-   assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
-          KB_BEDROCK_CALLBACK_ABORT);
+   assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, collect_delta, &log,
+                                     &status) == KB_BEDROCK_CALLBACK_ABORT);
    assert(status == 0 && log.count == 1);
 
    log = (delta_log_t){.abort_after = 5};
@@ -970,8 +1028,8 @@ static void dispatch_wrapper_tests(void)
                                      .body = stream_body,
                                      .body_len = stream_len,
                                      .fragment = 7};
-   assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
-          KB_BEDROCK_CALLBACK_ABORT);
+   assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, collect_delta, &log,
+                                     &status) == KB_BEDROCK_CALLBACK_ABORT);
    assert(status == 0 && log.count == 5 && log.type[4] == AIMEE_DELTA_TURN_STOP);
 
    dispatch_mock = (dispatch_mock_t){.status = 200,
@@ -979,10 +1037,13 @@ static void dispatch_wrapper_tests(void)
                                      .body = stream_body,
                                      .body_len = stream_len - 1,
                                      .fragment = 11};
-   assert(kb_bedrock_dispatch_stream(&t, &request, &c, NULL, NULL, &status) != KB_BEDROCK_OK);
+   assert(kb_bedrock_dispatch_stream(authorized_target, &request, &c, NULL, NULL, &status) !=
+          KB_BEDROCK_OK);
    assert(status == 0);
    free(stream_body);
    aimee_response_free(&response);
+   assert(kb_bedrock_authorized_target_clear(&authorized_target) == KB_BEDROCK_OK);
+   assert(authorized_target == NULL);
 }
 
 int main(void)

@@ -7,11 +7,15 @@
 #include <limits.h>
 #include <math.h>
 #include <openssl/crypto.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define KB_BEDROCK_REQUEST_MAGIC 0xbed60c01U
+#define KB_BEDROCK_TARGET_MAGIC  UINT64_C(0x7f8c5a316bed6a91)
+#define KB_BEDROCK_TARGET_READY  0x91c4a72eU
+#define KB_BEDROCK_TARGET_BUSY   0x3628df05U
 #define KB_JSON_NODE_MAX         16384U
 #define KB_JSON_DEPTH_MAX        64U
 
@@ -28,6 +32,14 @@ struct kb_bedrock_stream
    unsigned char open[64], used[64], kind[64];
    int message_started, message_stopped, metadata, busy, finished, poisoned;
    kb_bedrock_result_t fatal;
+};
+
+struct kb_bedrock_authorized_target
+{
+   uint64_t magic;
+   uint64_t magic_inverse;
+   atomic_uint state;
+   db2_bedrock_target_t raw;
 };
 
 static int ascii_safe(const char *s, size_t max, int empty)
@@ -426,6 +438,8 @@ static const char *policy_id(const db2_bedrock_target_t *t, bedrock_target_type_
    return t->model_id + n;
 }
 
+static int model_path_ok(const char *id);
+
 static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, int streaming)
 {
    if (!t || t->endpoint[0] || !ascii_safe(t->bedrock_api, sizeof(t->bedrock_api), 0) ||
@@ -488,6 +502,112 @@ static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, in
    OPENSSL_cleanse(policy, cap);
    free(policy);
    return ok ? KB_BEDROCK_OK : KB_BEDROCK_INVALID_TARGET;
+}
+
+static kb_bedrock_result_t authorized_target_create(const db2_bedrock_target_t *raw,
+                                                    kb_bedrock_authorized_target_t **out)
+{
+   if (out)
+      *out = NULL;
+   if (!out || !raw)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   kb_bedrock_result_t result = target_policy_check(raw, 0);
+   if (result == KB_BEDROCK_OK)
+      result = target_policy_check(raw, 1);
+   if (result == KB_BEDROCK_OK && !model_path_ok(raw->model_id))
+      result = KB_BEDROCK_INVALID_TARGET;
+   if (result != KB_BEDROCK_OK)
+      return result;
+   kb_bedrock_authorized_target_t *target = calloc(1, sizeof(*target));
+   if (!target)
+      return KB_BEDROCK_INTERNAL_ERROR;
+   target->raw = *raw;
+   atomic_init(&target->state, KB_BEDROCK_TARGET_READY);
+   target->magic = KB_BEDROCK_TARGET_MAGIC;
+   target->magic_inverse = ~KB_BEDROCK_TARGET_MAGIC;
+   *out = target;
+   return KB_BEDROCK_OK;
+}
+
+kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
+                                                         kb_bedrock_authorized_target_t **out)
+{
+   if (out)
+      *out = NULL;
+   db2_bedrock_target_t raw;
+   if (!out || team_id <= 0 || !ascii_safe(model_id, sizeof(raw.model_id), 0))
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   memset(&raw, 0, sizeof(raw));
+   db2_bedrock_target_result_t resolved = db2_model_bedrock_target_resolve(team_id, model_id, &raw);
+   kb_bedrock_result_t result;
+   if (resolved == DB2_BEDROCK_TARGET_OK)
+      result =
+          ascii_safe(raw.model_id, sizeof(raw.model_id), 0) && strcmp(raw.model_id, model_id) == 0
+              ? authorized_target_create(&raw, out)
+              : KB_BEDROCK_INVALID_TARGET;
+   else if (resolved == DB2_BEDROCK_TARGET_UNAVAILABLE || resolved == DB2_BEDROCK_TARGET_INVALID)
+      result = KB_BEDROCK_INVALID_TARGET;
+   else
+      result = KB_BEDROCK_INTERNAL_ERROR;
+   OPENSSL_cleanse(&raw, sizeof(raw));
+   return result;
+}
+
+kb_bedrock_result_t kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **slot)
+{
+   if (!slot)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   if (!*slot)
+      return KB_BEDROCK_OK;
+   kb_bedrock_authorized_target_t *target = *slot;
+   if (target->magic != KB_BEDROCK_TARGET_MAGIC ||
+       target->magic_inverse != ~KB_BEDROCK_TARGET_MAGIC)
+      return KB_BEDROCK_INVALID_TARGET;
+   unsigned expected = KB_BEDROCK_TARGET_READY;
+   if (!atomic_compare_exchange_strong_explicit(&target->state, &expected, 0, memory_order_acq_rel,
+                                                memory_order_acquire))
+      return expected == KB_BEDROCK_TARGET_BUSY ? KB_BEDROCK_BUSY : KB_BEDROCK_POISONED;
+   *slot = NULL;
+   target->magic = 0;
+   target->magic_inverse = 0;
+   OPENSSL_cleanse(target, sizeof(*target));
+   free(target);
+   return KB_BEDROCK_OK;
+}
+
+__attribute__((visibility("hidden"))) kb_bedrock_result_t kb_bedrock_test_authorized_target_create(
+    const db2_bedrock_target_t *raw, kb_bedrock_authorized_target_t **out)
+{
+   return authorized_target_create(raw, out);
+}
+
+static kb_bedrock_result_t authorized_target_acquire(kb_bedrock_authorized_target_t *target,
+                                                     const db2_bedrock_target_t **raw)
+{
+   *raw = NULL;
+   if (!target)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   if (target->magic != KB_BEDROCK_TARGET_MAGIC ||
+       target->magic_inverse != ~KB_BEDROCK_TARGET_MAGIC)
+      return KB_BEDROCK_INVALID_TARGET;
+   unsigned expected = KB_BEDROCK_TARGET_READY;
+   if (!atomic_compare_exchange_strong_explicit(&target->state, &expected, KB_BEDROCK_TARGET_BUSY,
+                                                memory_order_acq_rel, memory_order_acquire))
+      return expected == KB_BEDROCK_TARGET_BUSY ? KB_BEDROCK_BUSY : KB_BEDROCK_POISONED;
+   *raw = &target->raw;
+   return KB_BEDROCK_OK;
+}
+
+static void authorized_target_release(kb_bedrock_authorized_target_t *target)
+{
+   if (target && target->magic == KB_BEDROCK_TARGET_MAGIC &&
+       target->magic_inverse == ~KB_BEDROCK_TARGET_MAGIC)
+   {
+      unsigned expected = KB_BEDROCK_TARGET_BUSY;
+      (void)atomic_compare_exchange_strong_explicit(&target->state, &expected,
+                                                    KB_BEDROCK_TARGET_READY, memory_order_release,
+                                                    memory_order_relaxed);
+   }
 }
 
 void kb_bedrock_wire_request_init(kb_bedrock_wire_request_t *r)
@@ -1621,20 +1741,44 @@ done:
    return result;
 }
 
-kb_bedrock_result_t kb_bedrock_dispatch_buffered(const db2_bedrock_target_t *target,
+kb_bedrock_result_t kb_bedrock_dispatch_buffered(kb_bedrock_authorized_target_t *target,
                                                  const aimee_request_t *request,
                                                  const kb_bedrock_credentials_t *credentials,
                                                  aimee_response_t *response, int *http_status)
 {
-   return dispatch_exchange(target, request, credentials, 0, NULL, NULL, response, http_status);
+   if (http_status)
+      *http_status = 0;
+   if (response)
+      aimee_response_free(response);
+   if (!request || !credentials || !response || !http_status)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   const db2_bedrock_target_t *raw = NULL;
+   kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
+   if (result == KB_BEDROCK_OK)
+   {
+      result = dispatch_exchange(raw, request, credentials, 0, NULL, NULL, response, http_status);
+      authorized_target_release(target);
+   }
+   return result;
 }
 
-kb_bedrock_result_t kb_bedrock_dispatch_stream(const db2_bedrock_target_t *target,
+kb_bedrock_result_t kb_bedrock_dispatch_stream(kb_bedrock_authorized_target_t *target,
                                                const aimee_request_t *request,
                                                const kb_bedrock_credentials_t *credentials,
                                                kb_bedrock_stream_callback_t callback,
                                                void *callback_context, int *http_status)
 {
-   return dispatch_exchange(target, request, credentials, 1, callback, callback_context, NULL,
-                            http_status);
+   if (http_status)
+      *http_status = 0;
+   if (!request || !credentials || !http_status)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   const db2_bedrock_target_t *raw = NULL;
+   kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
+   if (result == KB_BEDROCK_OK)
+   {
+      result = dispatch_exchange(raw, request, credentials, 1, callback, callback_context, NULL,
+                                 http_status);
+      authorized_target_release(target);
+   }
+   return result;
 }

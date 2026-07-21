@@ -81,6 +81,7 @@ kb_bedrock_result_t kb_bedrock_nonstream_parse(const unsigned char *body, size_t
 
 typedef int (*kb_bedrock_stream_callback_t)(const aimee_delta_t *delta, void *context);
 typedef struct kb_bedrock_stream kb_bedrock_stream_t;
+typedef struct kb_bedrock_authorized_target kb_bedrock_authorized_target_t;
 
 kb_bedrock_result_t kb_bedrock_stream_init(kb_bedrock_stream_t **stream,
                                            kb_bedrock_stream_callback_t callback, void *context);
@@ -89,18 +90,34 @@ kb_bedrock_result_t kb_bedrock_stream_feed(kb_bedrock_stream_t *stream, const un
 kb_bedrock_result_t kb_bedrock_stream_finish(kb_bedrock_stream_t *stream);
 kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **stream);
 
-/* Production dispatch derives DNS, Host, SNI, and certificate authority solely from target.
+/* Resolve an entitled catalog model inside the caller's already-active actor/team tenant scope.
+ * The returned target is owned, non-copyable, and must be cleared exactly once.  Its catalog
+ * contents and lifecycle are deliberately opaque so a network caller cannot substitute a raw
+ * db2 target.  Clear returns BUSY rather than racing an active dispatch. */
+kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
+                                                         kb_bedrock_authorized_target_t **target);
+kb_bedrock_result_t kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target);
+
+/* Production dispatch derives DNS, Host, SNI, and certificate authority solely from the
+ * resolver-issued target.
  * `response` must have been initialized with kb_bedrock_response_init (or be a prior dispatch
  * output); success is caller-owned and released with aimee_response_free.  `http_status` is zero
  * until a final response header has been accepted. */
-kb_bedrock_result_t kb_bedrock_dispatch_buffered(const db2_bedrock_target_t *target,
+kb_bedrock_result_t kb_bedrock_dispatch_buffered(kb_bedrock_authorized_target_t *target,
                                                  const aimee_request_t *request,
                                                  const kb_bedrock_credentials_t *credentials,
                                                  aimee_response_t *response, int *http_status);
-kb_bedrock_result_t kb_bedrock_dispatch_stream(const db2_bedrock_target_t *target,
+kb_bedrock_result_t kb_bedrock_dispatch_stream(kb_bedrock_authorized_target_t *target,
                                                const aimee_request_t *request,
                                                const kb_bedrock_credentials_t *credentials,
                                                kb_bedrock_stream_callback_t callback,
                                                void *callback_context, int *http_status);
+
+#ifdef AIMEE_KB_BEDROCK_TESTING
+/* Pure unit-test seam.  Hidden from the production ABI and unavailable unless a test explicitly
+ * opts in before including this header. */
+__attribute__((visibility("hidden"))) kb_bedrock_result_t kb_bedrock_test_authorized_target_create(
+    const db2_bedrock_target_t *raw, kb_bedrock_authorized_target_t **target);
+#endif
 
 #endif

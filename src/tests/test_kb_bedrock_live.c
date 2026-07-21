@@ -60,11 +60,12 @@ int main(int argc, char **argv)
       db2_shutdown();
       return 2;
    }
-   db2_bedrock_target_t target;
-   db2_bedrock_target_result_t resolved = db2_model_bedrock_target_resolve(team, argv[1], &target);
-   if (db2_tenant_scope_commit() != 0 || resolved != DB2_BEDROCK_TARGET_OK)
+   kb_bedrock_authorized_target_t *target = NULL;
+   kb_bedrock_result_t resolved = kb_bedrock_authorized_target_resolve(team, argv[1], &target);
+   if (db2_tenant_scope_commit() != 0 || resolved != KB_BEDROCK_OK)
    {
       fprintf(stderr, "kb_bedrock_live: target unavailable (%d)\n", resolved);
+      kb_bedrock_authorized_target_clear(&target);
       db2_shutdown();
       return 1;
    }
@@ -84,7 +85,7 @@ int main(int argc, char **argv)
    if (streaming)
    {
       stream_probe_t probe = {.abort_nonterminal = stream_abort};
-      result = kb_bedrock_dispatch_stream(&target, &request, &credentials, consume_delta, &probe,
+      result = kb_bedrock_dispatch_stream(target, &request, &credentials, consume_delta, &probe,
                                           &status);
       if (stream_abort)
       {
@@ -95,9 +96,11 @@ int main(int argc, char **argv)
                     "kb_bedrock_live: callback abort mismatch rc=%d status=%d callbacks=%zu "
                     "terminal=%zu\n",
                     result, status, probe.callbacks, probe.terminal);
+            kb_bedrock_authorized_target_clear(&target);
             db2_shutdown();
             return 1;
          }
+         kb_bedrock_authorized_target_clear(&target);
          db2_shutdown();
          puts("kb_bedrock_live: ok (callback abort)");
          return 0;
@@ -109,15 +112,17 @@ int main(int argc, char **argv)
    {
       aimee_response_t response;
       kb_bedrock_response_init(&response);
-      result = kb_bedrock_dispatch_buffered(&target, &request, &credentials, &response, &status);
+      result = kb_bedrock_dispatch_buffered(target, &request, &credentials, &response, &status);
       aimee_response_free(&response);
    }
    if (result != KB_BEDROCK_OK || status != 200)
    {
       fprintf(stderr, "kb_bedrock_live: dispatch failed rc=%d status=%d\n", result, status);
+      kb_bedrock_authorized_target_clear(&target);
       db2_shutdown();
       return 1;
    }
+   kb_bedrock_authorized_target_clear(&target);
    db2_shutdown();
    puts("kb_bedrock_live: ok");
    return 0;
