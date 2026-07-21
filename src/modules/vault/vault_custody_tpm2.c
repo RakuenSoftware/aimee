@@ -1360,18 +1360,6 @@ static void receipt_from_header(const uint8_t *h, vault_tpm2_reseal_receipt_t *r
    SHA256(h, TPM2_RESEAL_BUNDLE_HDR, r->manifest_digest);
 }
 
-static int receipt_equal(const vault_tpm2_reseal_receipt_t *a, const vault_tpm2_reseal_receipt_t *b)
-{
-   return a && b && a->old_generation == b->old_generation &&
-          a->new_generation == b->new_generation &&
-          memcmp(a->operation_id, b->operation_id, sizeof(a->operation_id)) == 0 &&
-          memcmp(a->predecessor_digest, b->predecessor_digest, 32) == 0 &&
-          memcmp(a->capsule_digest, b->capsule_digest, 32) == 0 &&
-          memcmp(a->future_digest, b->future_digest, 32) == 0 &&
-          memcmp(a->new_kek_digest, b->new_kek_digest, 32) == 0 &&
-          memcmp(a->manifest_digest, b->manifest_digest, 32) == 0;
-}
-
 typedef struct
 {
    uint8_t bytes[TPM2_RESEAL_BUNDLE_MAX];
@@ -1479,7 +1467,7 @@ static int reseal_status_locked(const vault_tpm2_reseal_receipt_t *receipt, cons
       *out = VAULT_TPM2_RESEAL_CONFLICT;
       return VAULT_TPM2_RESEAL_INTEGRITY;
    }
-   if ((receipt && !receipt_equal(receipt, &b->receipt)) ||
+   if ((receipt && !vault_reseal_receipt_equal(receipt, &b->receipt)) ||
        b->receipt.old_generation == UINT64_MAX ||
        b->receipt.new_generation != b->receipt.old_generation + 1)
    {

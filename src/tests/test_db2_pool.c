@@ -204,6 +204,27 @@ static void test_poison_on_reset_fail(void)
    db2_pool_shutdown();
 }
 
+static void test_explicit_discard_never_reuses_uncertain_connection(void)
+{
+   install_mock();
+   char e[128] = "";
+   assert(db2_pool_init("mock://x", 1, e, sizeof(e)) == 0);
+   void *a = db2_pool_lease(1000);
+   assert(a);
+   int old_id = ((mock_conn_t *)a)->id;
+   db2_pool_discard(a);
+   assert(g_reset_count == 0);
+   assert(g_close_count == 1);
+   assert(g_open_count == 2);
+   long poisoned = 0;
+   db2_pool_stats(NULL, NULL, NULL, NULL, NULL, NULL, &poisoned);
+   assert(poisoned == 1);
+   mock_conn_t *b = db2_pool_lease(1000);
+   assert(b && b->id != old_id);
+   db2_pool_return(b);
+   db2_pool_shutdown();
+}
+
 /* Reaper observability: a lease held past the ceiling (a missed lease_end) is
  * detected + counted (NOT reclaimed — reclaim-on-death is the WP-B destructor). */
 static void test_reaper_detects_stuck_lease(void)
@@ -233,6 +254,7 @@ int main(void)
    test_exhaustion_timeout();
    test_concurrency_no_double_lease();
    test_poison_on_reset_fail();
+   test_explicit_discard_never_reuses_uncertain_connection();
    test_reaper_detects_stuck_lease();
    printf("db2_pool: all tests passed\n");
    return 0;

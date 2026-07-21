@@ -32,6 +32,7 @@
 #include "vault_crypto.h"
 #include "vault_custody_tpm2.h"
 #include "vault_internal.h"
+#include "vault_reseal_receipt.h"
 #include "vault_server_key.h"
 #include <openssl/crypto.h>
 #include <stdint.h>
@@ -84,22 +85,33 @@ static int receipt_save(const vault_tpm2_reseal_receipt_t *r)
    char path[1200];
    if (receipt_path(path, sizeof(path)) != 0)
       return -1;
+   uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN];
+   if (vault_reseal_receipt_encode(r, wire) != 0)
+      return -1;
    FILE *f = fopen(path, "wb");
-   int ok = f && fwrite(r, 1, sizeof(*r), f) == sizeof(*r) && fflush(f) == 0;
+   int ok = f && fwrite(wire, 1, sizeof(wire), f) == sizeof(wire) && fflush(f) == 0;
    if (f)
       fclose(f);
+   OPENSSL_cleanse(wire, sizeof(wire));
    return ok ? 0 : -1;
 }
 
 static int receipt_load(vault_tpm2_reseal_receipt_t *r)
 {
+   if (!r)
+      return -1;
+   OPENSSL_cleanse(r, sizeof(*r));
    char path[1200];
    if (receipt_path(path, sizeof(path)) != 0)
       return -1;
+   uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN + 1];
    FILE *f = fopen(path, "rb");
-   int ok = f && fread(r, 1, sizeof(*r), f) == sizeof(*r) && fgetc(f) == EOF;
+   size_t n = f ? fread(wire, 1, sizeof(wire), f) : 0;
+   int ok = f && n == VAULT_RESEAL_RECEIPT_V1_LEN && fgetc(f) == EOF &&
+            vault_reseal_receipt_decode(wire, n, r) == 0;
    if (f)
       fclose(f);
+   OPENSSL_cleanse(wire, sizeof(wire));
    return ok ? 0 : -1;
 }
 

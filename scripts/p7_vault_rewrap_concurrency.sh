@@ -113,7 +113,9 @@ fi
 # promoted transaction or the unchanged resealed transaction, never a partial set.
 promote_op=44444444444444444444444444444444
 promote_fence=$(sql -c "SELECT fencing_token FROM org_vault_rewrap_begin('owner','disconnect-promote','$promote_op',22,23)")
-sql -c "SELECT org_vault_rewrap_record_prepared('$promote_op',$promote_fence,'\\x70726f6d6f7465',sha256('\\x70726f6d6f7465'::bytea))" >/dev/null
+# Pinned canonical AIMRSEAL v1 receipt for operation 44..44, generation 22 -> 23.
+promote_receipt_hex=41494d525345414c00010000000000c044444444444444444444444444444444000000000000001600000000000000176666666666666666666666666666666666666666666666666666666666666666777777777777777777777777777777777777777777777777777777777777777788888888888888888888888888888888888888888888888888888888888888889999999999999999999999999999999999999999999999999999999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+sql -c "SELECT org_vault_rewrap_record_prepared('$promote_op',$promote_fence,decode('$promote_receipt_hex','hex'),sha256(decode('$promote_receipt_hex','hex')))" >/dev/null
 sql <<SQL
 BEGIN ISOLATION LEVEL SERIALIZABLE;
 DO \$\$ DECLARE r RECORD; n BYTEA; BEGIN
@@ -123,7 +125,7 @@ DO \$\$ DECLARE r RECORD; n BYTEA; BEGIN
     PERFORM org_vault_rewrap_stage_dek('$promote_op',$promote_fence,r.source_id,r.principal,
       r.agent,r.cred,r.version,r.source_digest,n);
   END LOOP;
-  FOR r IN SELECT * FROM org_vault_rewrap_check_page('$promote_op',$promote_fence,'',128) LOOP
+  FOR r IN SELECT * FROM org_vault_rewrap_check_page('$promote_op',$promote_fence,''::bytea,128) LOOP
     n:=CASE WHEN octet_length(r.kek_check)=0 THEN ''::bytea ELSE
        sha256(convert_to(r.principal,'UTF8')||decode('e1','hex'))||
        substring(sha256(convert_to(r.principal,'UTF8')||decode('e2','hex')) FROM 1 FOR 8) END;
@@ -135,7 +137,7 @@ END \$\$;
 COMMIT;
 SELECT org_vault_rewrap_mark_committing('$promote_op',$promote_fence);
 SELECT org_vault_rewrap_mark_resealed('$promote_op',$promote_fence,
-  sha256('\x70726f6d6f7465'::bytea));
+  sha256(decode('$promote_receipt_hex','hex')));
 CREATE OR REPLACE FUNCTION p7_rewrap_pause_update() RETURNS trigger LANGUAGE plpgsql AS
 \$\$ BEGIN PERFORM pg_sleep(10); RETURN NEW; END \$\$;
 CREATE TRIGGER p7_rewrap_pause_update BEFORE UPDATE OF wrapped_dek ON org_vault_secret
@@ -208,7 +210,7 @@ if [ "$terminal_state" = completed ]; then
 elif [ "$terminal_state" = recovery_required ]; then
   if [ "$recovery_rc" -ne 0 ] ||
      [ "$(sql -c "SELECT count(*) FROM kb_vault_control WHERE singleton=1 AND sealed AND maintenance_kind='tpm2-reseal' AND maintenance_id='$promote_op'")" -ne 1 ] ||
-     ! grep -q '40001' "$tmp/complete-racer.out"; then
+     ! grep -q 'P7C01' "$tmp/complete-racer.out"; then
     echo 'P7 rewrap concurrency FAIL: quarantine winner/barrier/loser mismatch' >&2
     exit 1
   fi

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "vault_crypto.h"   /* VAULT_KEK_LEN */
 #include "vault_internal.h" /* vault_custody_provider_t */
+#include "vault_reseal_receipt.h"
 
 /* vault_custody_tpm2: the FIRST real external-anchor custody provider (P7-tpm2a).
  * It seals the vault's server KEK to a TPM 2.0 under a persistent OWNER-hierarchy
@@ -80,18 +81,6 @@ typedef enum
 {
    VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED = 1,
 } vault_tpm2_cleanup_authorization_t;
-
-typedef struct
-{
-   uint8_t operation_id[16];
-   uint64_t old_generation;
-   uint64_t new_generation;
-   uint8_t predecessor_digest[32];
-   uint8_t capsule_digest[32];
-   uint8_t future_digest[32];
-   uint8_t new_kek_digest[32];
-   uint8_t manifest_digest[32];
-} vault_tpm2_reseal_receipt_t;
 
 int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
                                       uint64_t expected_old_generation,

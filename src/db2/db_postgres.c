@@ -3,6 +3,7 @@
 
 #include "db_postgres.h"
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,10 @@ static int buf_append(char **buf, size_t *cap, size_t *len, const char *src, siz
          ncap *= 2;
       char *tmp = realloc(*buf, ncap);
       if (!tmp)
+      {
+         errno = ENOMEM;
          return -1;
+      }
       *buf = tmp;
       *cap = ncap;
    }
@@ -56,13 +60,19 @@ static int append_param_name(char ***names, int *nn, int *nn_cap, const char *na
       int ncap = *nn_cap ? (*nn_cap) * 2 : 8;
       char **tmp = realloc(*names, (size_t)ncap * sizeof(char *));
       if (!tmp)
+      {
+         errno = ENOMEM;
          return -1;
+      }
       *names = tmp;
       *nn_cap = ncap;
    }
    (*names)[*nn] = strdup(name);
    if (!(*names)[*nn])
+   {
+      errno = ENOMEM;
       return -1;
+   }
    idx = (*nn)++;
    return idx;
 }
@@ -320,7 +330,10 @@ static char *rewrite_db2_text_search(const char *sql)
    size_t cap = in_len * 2 + 256;
    char *out = malloc(cap);
    if (!out)
+   {
+      errno = ENOMEM;
       return NULL;
+   }
    size_t olen = 0;
 #define FTS_APPEND(src, n)                                                                         \
    do                                                                                              \
@@ -333,6 +346,7 @@ static char *rewrite_db2_text_search(const char *sql)
          if (!tmp)                                                                                 \
          {                                                                                         \
             free(out);                                                                             \
+            errno = ENOMEM;                                                                        \
             return NULL;                                                                           \
          }                                                                                         \
          out = tmp;                                                                                \
@@ -520,7 +534,10 @@ static char *prenumber_positional_placeholders(const char *sql)
    size_t cap = in_len * 2 + 64;
    char *out = malloc(cap);
    if (!out)
+   {
+      errno = ENOMEM;
       return NULL;
+   }
    size_t olen = 0;
    int next_num = 1;
 
@@ -535,6 +552,7 @@ static char *prenumber_positional_placeholders(const char *sql)
          if (!tmp)                                                                                 \
          {                                                                                         \
             free(out);                                                                             \
+            errno = ENOMEM;                                                                        \
             return NULL;                                                                           \
          }                                                                                         \
          out = tmp;                                                                                \
@@ -631,18 +649,27 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
                             char *errbuf, size_t errlen)
 {
    if (!sql_in || !out_sql || !out_names || !out_count)
+   {
+      errno = EINVAL;
       return -1;
+   }
 
    /* Step 1a: number bare positional `?` placeholders so the FTS
     * rewriter can duplicate them (MATCH arg reused by bm25) and still
     * dedupe to one $N downstream. */
+   errno = 0;
    char *xlated = prenumber_positional_placeholders(sql_in);
+   if (!xlated && errno == ENOMEM)
+      goto resource_failure;
    if (xlated)
       sql_in = xlated;
 
    /* Step 1b: translate text-search operators (MATCH, bm25, INSERT INTO
     * *_fts) into DB2 tsvector equivalents. */
+   errno = 0;
    char *fts_xlated = rewrite_db2_text_search(sql_in);
+   if (!fts_xlated && errno == ENOMEM)
+      goto resource_failure;
    if (fts_xlated)
    {
       free(xlated);
@@ -654,14 +681,20 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
    char *out = malloc(cap);
    if (!out)
    {
-      free(xlated);
-      return -1;
+      goto resource_failure;
    }
    out[0] = '\0';
    size_t olen = 0;
 
    char **names = NULL;
    int nn = 0, nn_cap = 0;
+
+#define REWRITE_APPEND(src, n)                                                                     \
+   do                                                                                              \
+   {                                                                                               \
+      if (buf_append(&out, &cap, &olen, (src), (n)) != 0)                                          \
+         goto resource_failure_with_output;                                                        \
+   } while (0)
 
    const char *p = sql_in;
    while (*p)
@@ -670,17 +703,17 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
        * SQL '' escape for embedded quotes. */
       if (*p == '\'')
       {
-         buf_append(&out, &cap, &olen, p, 1);
+         REWRITE_APPEND(p, 1);
          p++;
          while (*p)
          {
             if (p[0] == '\'' && p[1] == '\'')
             {
-               buf_append(&out, &cap, &olen, p, 2);
+               REWRITE_APPEND(p, 2);
                p += 2;
                continue;
             }
-            buf_append(&out, &cap, &olen, p, 1);
+            REWRITE_APPEND(p, 1);
             if (*p++ == '\'')
                break;
          }
@@ -690,16 +723,16 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
       /* Double-quoted identifier: copy verbatim. */
       if (*p == '"')
       {
-         buf_append(&out, &cap, &olen, p, 1);
+         REWRITE_APPEND(p, 1);
          p++;
          while (*p && *p != '"')
          {
-            buf_append(&out, &cap, &olen, p, 1);
+            REWRITE_APPEND(p, 1);
             p++;
          }
          if (*p)
          {
-            buf_append(&out, &cap, &olen, p, 1);
+            REWRITE_APPEND(p, 1);
             p++;
          }
          continue;
@@ -710,7 +743,7 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
       {
          while (*p && *p != '\n')
          {
-            buf_append(&out, &cap, &olen, p, 1);
+            REWRITE_APPEND(p, 1);
             p++;
          }
          continue;
@@ -719,16 +752,16 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
       /* SQL block comment: open and close sequences use slash-star / star-slash. */
       if (p[0] == '/' && p[1] == '*')
       {
-         buf_append(&out, &cap, &olen, p, 2);
+         REWRITE_APPEND(p, 2);
          p += 2;
          while (*p && !(p[0] == '*' && p[1] == '/'))
          {
-            buf_append(&out, &cap, &olen, p, 1);
+            REWRITE_APPEND(p, 1);
             p++;
          }
          if (*p)
          {
-            buf_append(&out, &cap, &olen, p, 2);
+            REWRITE_APPEND(p, 2);
             p += 2;
          }
          continue;
@@ -737,7 +770,7 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
       /* Postgres :: cast operator — pass through. */
       if (p[0] == ':' && p[1] == ':')
       {
-         buf_append(&out, &cap, &olen, p, 2);
+         REWRITE_APPEND(p, 2);
          p += 2;
          continue;
       }
@@ -757,6 +790,7 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
             free(out);
             aimee_pg_free_names(names, nn);
             free(xlated);
+            errno = EINVAL;
             return -1;
          }
          char name[128];
@@ -765,16 +799,11 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
 
          int idx = append_param_name(&names, &nn, &nn_cap, name);
          if (idx < 0)
-         {
-            free(out);
-            aimee_pg_free_names(names, nn);
-            free(xlated);
-            return -1;
-         }
+            goto resource_failure_with_output;
 
          char buf[24];
          int nprinted = snprintf(buf, sizeof(buf), "$%d", idx + 1);
-         buf_append(&out, &cap, &olen, buf, (size_t)nprinted);
+         REWRITE_APPEND(buf, (size_t)nprinted);
          continue;
       }
 
@@ -802,19 +831,14 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
          }
          int idx = append_param_name(&names, &nn, &nn_cap, name);
          if (idx < 0)
-         {
-            free(out);
-            aimee_pg_free_names(names, nn);
-            free(xlated);
-            return -1;
-         }
+            goto resource_failure_with_output;
          char buf[24];
          int nprinted = snprintf(buf, sizeof(buf), "$%d", idx + 1);
-         buf_append(&out, &cap, &olen, buf, (size_t)nprinted);
+         REWRITE_APPEND(buf, (size_t)nprinted);
          continue;
       }
 
-      buf_append(&out, &cap, &olen, p, 1);
+      REWRITE_APPEND(p, 1);
       p++;
    }
 
@@ -822,7 +846,19 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
    *out_names = names;
    *out_count = nn;
    free(xlated);
+#undef REWRITE_APPEND
    return 0;
+
+resource_failure_with_output:
+   free(out);
+   aimee_pg_free_names(names, nn);
+resource_failure:
+   free(xlated);
+   errno = ENOMEM;
+   if (errbuf && errlen)
+      snprintf(errbuf, errlen, "out of memory rewriting SQL");
+#undef REWRITE_APPEND
+   return -1;
 }
 
 /* --- libpq-dependent code below ---------------------------------- */
@@ -860,6 +896,12 @@ int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
       snprintf(e, n, "libpq not linked");
    return -1;
 }
+int aimee_pg_exec_sqlstate(void *c, const char *s, char state[6], char *e, size_t n)
+{
+   if (state)
+      state[0] = '\0';
+   return aimee_pg_exec(c, s, e, n);
+}
 int aimee_pg_exec_with_changes(void *c, const char *s, char *e, size_t n, int *a)
 {
    (void)c;
@@ -878,8 +920,15 @@ int aimee_pg_ping(void *c, char *e, size_t n)
 }
 aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
 {
+   return aimee_pg_prepare_ex(c, s, NULL, e, n);
+}
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *s, aimee_pg_prepare_error_t *kind,
+                                     char *e, size_t n)
+{
    (void)c;
    (void)s;
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_RESOURCE;
    if (e && n)
       snprintf(e, n, "libpq not linked");
    return NULL;
@@ -892,6 +941,11 @@ int aimee_pg_reset(aimee_pg_stmt_t *s)
 {
    (void)s;
    return -1;
+}
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *s)
+{
+   (void)s;
+   return "";
 }
 int aimee_pg_bind_int(aimee_pg_stmt_t *s, const char *n, int v)
 {
@@ -1072,6 +1126,28 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return aimee_pg_exec_with_changes(pg_conn, sql, errbuf, errlen, NULL);
 }
 
+int aimee_pg_exec_sqlstate(void *pg_conn, const char *sql, char state[6], char *errbuf,
+                           size_t errlen)
+{
+   if (state)
+      state[0] = '\0';
+   if (!pg_conn || !sql)
+      return -1;
+   PGresult *res = PQexec((PGconn *)pg_conn, sql);
+   ExecStatusType st = PQresultStatus(res);
+   if (st != PGRES_COMMAND_OK && st != PGRES_TUPLES_OK)
+   {
+      const char *value = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+      if (state)
+         snprintf(state, 6, "%s", value ? value : "");
+      copy_err(errbuf, errlen, PQresultErrorMessage(res));
+      PQclear(res);
+      return -1;
+   }
+   PQclear(res);
+   return 0;
+}
+
 int aimee_pg_in_transaction(void *pg_conn)
 {
    if (!pg_conn)
@@ -1127,6 +1203,7 @@ struct aimee_pg_stmt
    int blob_cache_row;
 
    char errmsg[256];
+   char sqlstate[6];
 };
 
 static void pg_clear_blob_cache(aimee_pg_stmt_t *s)
@@ -1142,6 +1219,14 @@ static void pg_clear_blob_cache(aimee_pg_stmt_t *s)
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
+   return aimee_pg_prepare_ex(pg_conn, sql, NULL, errbuf, errlen);
+}
+
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
+                                     char *errbuf, size_t errlen)
+{
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_INVALID;
    if (!pg_conn || !sql)
       return NULL;
 
@@ -1149,11 +1234,17 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    char **names = NULL;
    int nparams = 0;
    if (aimee_pg_rewrite_params(sql, &rewritten, &names, &nparams, errbuf, errlen) != 0)
+   {
+      if (kind && errno == ENOMEM)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       return NULL;
+   }
 
    aimee_pg_stmt_t *s = calloc(1, sizeof(*s));
    if (!s)
    {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       free(rewritten);
       aimee_pg_free_names(names, nparams);
       return NULL;
@@ -1163,9 +1254,20 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    s->names = names;
    s->nparams = nparams;
    s->values = nparams > 0 ? calloc((size_t)nparams, sizeof(char *)) : NULL;
+   if (nparams > 0 && !s->values)
+   {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
+      aimee_pg_free_names(s->names, s->nparams);
+      free(s->sql);
+      free(s);
+      return NULL;
+   }
    s->row_index = -1;
    s->blob_cache_col = -1;
    s->blob_cache_row = -1;
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_OK;
    return s;
 }
 
@@ -1208,7 +1310,13 @@ int aimee_pg_reset(aimee_pg_stmt_t *s)
    s->nrows = 0;
    s->row_index = -1;
    s->executed = 0;
+   s->sqlstate[0] = '\0';
    return 0;
+}
+
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *s)
+{
+   return s ? s->sqlstate : "";
 }
 
 static int lookup_param(const aimee_pg_stmt_t *s, const char *name)
@@ -1346,6 +1454,8 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *errbuf, size_t errlen)
       ExecStatusType st = PQresultStatus(s->result);
       if (st != PGRES_COMMAND_OK && st != PGRES_TUPLES_OK)
       {
+         const char *state = PQresultErrorField(s->result, PG_DIAG_SQLSTATE);
+         snprintf(s->sqlstate, sizeof(s->sqlstate), "%s", state ? state : "");
          copy_err(errbuf, errlen, PQresultErrorMessage(s->result));
          return AIMEE_PG_ERR;
       }
