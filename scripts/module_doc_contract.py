@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-from contextlib import contextmanager
+import copy
+from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
@@ -24,6 +25,7 @@ import stat
 import subprocess
 import struct
 import tempfile
+import threading
 import time
 from typing import Callable, NamedTuple, NoReturn
 from urllib.parse import urlsplit
@@ -616,27 +618,86 @@ class GitDecisionBudget:
     """Bound and deduplicate all Git work performed for one decision."""
 
     def __init__(self) -> None:
+        self.active = True
+        self._closing = False
+        self._in_flight = 0
+        self._condition = threading.Condition()
+        self._local = threading.local()
         self.git_operations = 0
         self.evidence_references = 0
         self.distinct_blob_bytes = 0
         self.blobs: dict[tuple[str, str, str], bytes] = {}
         self.git_deadline = time.monotonic() + MAX_DECISION_GIT_WALL_SECONDS
 
+    def ensure_active(self) -> None:
+        with self._condition:
+            leased = getattr(self._local, "lease_depth", 0) > 0
+            if not self.active or (self._closing and not leased):
+                fail("git-snapshot-lifetime", "Git snapshot capability is no longer active")
+
+    @contextmanager
+    def operation(self):
+        """Lease the snapshot for one complete validator-facing operation."""
+        outermost = False
+        with self._condition:
+            depth = getattr(self._local, "lease_depth", 0)
+            if depth == 0:
+                if not self.active or self._closing:
+                    fail(
+                        "git-snapshot-lifetime",
+                        "Git snapshot capability is no longer active",
+                    )
+                self._in_flight += 1
+                outermost = True
+            self._local.lease_depth = depth + 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._local.lease_depth -= 1
+                if outermost:
+                    self._in_flight -= 1
+                    self._condition.notify_all()
+
+    def close(self) -> None:
+        with self._condition:
+            if not self.active:
+                return
+            if getattr(self._local, "lease_depth", 0) > 0:
+                fail("git-snapshot-lifetime", "cannot close an active operation lease")
+            self._closing = True
+            while self._in_flight:
+                self._condition.wait()
+            self.active = False
+
     def consume_git_operation(self) -> None:
-        self.git_operations += 1
-        if self.git_operations > MAX_DECISION_GIT_OPERATIONS:
-            fail("git-operation-budget", "decision exceeds the Git operation budget")
+        with self._condition:
+            self.ensure_active()
+            self.git_operations += 1
+            if self.git_operations > MAX_DECISION_GIT_OPERATIONS:
+                fail("git-operation-budget", "decision exceeds the Git operation budget")
 
     def consume_evidence_reference(self) -> None:
-        self.evidence_references += 1
-        if self.evidence_references > MAX_DECISION_EVIDENCE_REFERENCES:
-            fail("document-evidence-budget", "decision exceeds the evidence-reference budget")
+        with self._condition:
+            self.ensure_active()
+            self.evidence_references += 1
+            if self.evidence_references > MAX_DECISION_EVIDENCE_REFERENCES:
+                fail("document-evidence-budget", "decision exceeds the evidence-reference budget")
+
+    def cached_blob(self, key: tuple[str, str, str]) -> bytes | None:
+        with self._condition:
+            self.ensure_active()
+            return self.blobs.get(key)
 
     def cache_blob(self, key: tuple[str, str, str], raw: bytes) -> None:
-        self.distinct_blob_bytes += len(raw)
-        if self.distinct_blob_bytes > MAX_DECISION_DISTINCT_BLOB_BYTES:
-            fail("git-byte-budget", "decision exceeds the distinct-blob byte budget")
-        self.blobs[key] = raw
+        with self._condition:
+            self.ensure_active()
+            if key in self.blobs:
+                return
+            self.distinct_blob_bytes += len(raw)
+            if self.distinct_blob_bytes > MAX_DECISION_DISTINCT_BLOB_BYTES:
+                fail("git-byte-budget", "decision exceeds the distinct-blob byte budget")
+            self.blobs[key] = raw
 
 
 _ACTIVE_GIT_BUDGET: ContextVar[GitDecisionBudget | None] = ContextVar(
@@ -647,12 +708,18 @@ _ACTIVE_GIT_BUDGET: ContextVar[GitDecisionBudget | None] = ContextVar(
 class GitBlobReader:
     """Read governed files from one immutable commit, never a working tree."""
 
-    def __init__(self, repository: Path, commit: str):
+    def __init__(
+        self,
+        repository: Path,
+        commit: str,
+        *,
+        budget: GitDecisionBudget | None = None,
+    ):
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             fail("git-candidate", "candidate must be a full lowercase commit ID")
         self.repository = repository
         self.commit = commit
-        self.budget = _ACTIVE_GIT_BUDGET.get() or GitDecisionBudget()
+        self.budget = budget or _ACTIVE_GIT_BUDGET.get() or GitDecisionBudget()
         resolved = self._git("rev-parse", "--verify", f"{commit}^{{commit}}")
         if resolved.decode("ascii").strip() != commit:
             fail("git-candidate", "candidate does not resolve to itself")
@@ -740,11 +807,12 @@ class GitBlobReader:
             fail("git-path", "path is not canonical")
 
     def read_blob(self, path: str, *, max_bytes: int = MAX_GOVERNED_BLOB_BYTES) -> bytes:
+        self.budget.ensure_active()
         self.canonical_path(path)
         if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_GOVERNED_BLOB_BYTES:
             fail("git-object-size", "requested blob limit is outside the verifier ceiling")
         cache_key = (str(self.repository.resolve()), self.commit, path)
-        cached = self.budget.blobs.get(cache_key)
+        cached = self.budget.cached_blob(cache_key)
         if cached is not None:
             if len(cached) > max_bytes:
                 fail("git-object-size", f"{path!r} exceeds {max_bytes} bytes")
@@ -1058,8 +1126,8 @@ def _validate_v1_preserved(base: object, candidate: dict[str, object], optional:
 
 
 def validate_module_candidate(
-    candidate: GitBlobReader,
-    base: GitBlobReader,
+    candidate: CandidateReader,
+    base: CandidateReader,
     *,
     required_ids: set[str],
     optional_ids: set[str],
@@ -1439,45 +1507,158 @@ class VerificationDecision(NamedTuple):
     publisher_result: dict[str, object]
 
 
+class ResolvedCandidate(NamedTuple):
+    """One candidate target bound to the resolver-owned read-only object database."""
+
+    target: dict[str, object]
+    repository: Path
+
+
+class CandidateReader:
+    """Revocable validator-facing view of one immutable commit."""
+
+    __slots__ = ("__reader", "__budget")
+
+    def __init__(self, reader: GitBlobReader, budget: GitDecisionBudget) -> None:
+        self.__reader = reader
+        self.__budget = budget
+
+    @property
+    def commit(self) -> str:
+        with self.__budget.operation():
+            return self.__reader.commit
+
+    def read_blob(self, path: str, *, max_bytes: int = MAX_GOVERNED_BLOB_BYTES) -> bytes:
+        with self.__budget.operation():
+            return self.__reader.read_blob(path, max_bytes=max_bytes)
+
+    def list_directory(self, path: str) -> dict[str, tuple[str, str]]:
+        with self.__budget.operation():
+            return self.__reader.list_directory(path)
+
+    def resolve_reference(self, reference: str) -> None:
+        with self.__budget.operation():
+            self.__reader.resolve_reference(reference)
+
+    def expand_source_pattern(self, pattern: str, module_id: str) -> tuple[str, ...]:
+        with self.__budget.operation():
+            return self.__reader.expand_source_pattern(pattern, module_id)
+
+
+class CandidateValidationContext:
+    """Invocation-scoped readers over one resolver-owned object database."""
+
+    __slots__ = ("candidate", "base", "__budget")
+
+    def __init__(
+        self,
+        repository: Path,
+        candidate_revision: str,
+        base_revision: str,
+        budget: GitDecisionBudget,
+    ) -> None:
+        self.__budget = budget
+        self.__budget.ensure_active()
+        self.candidate = CandidateReader(
+            GitBlobReader(repository, candidate_revision, budget=budget), budget
+        )
+        self.base = CandidateReader(
+            GitBlobReader(repository, base_revision, budget=budget), budget
+        )
+
+    def close(self) -> None:
+        self.__budget.close()
+
+
+@contextmanager
+def _non_suppressing_resolver(
+    manager: AbstractContextManager[ResolvedCandidate],
+):
+    """Run resolver cleanup without allowing it to hide an active failure."""
+    resolved = manager.__enter__()
+    try:
+        yield resolved
+    except BaseException as primary:
+        try:
+            manager.__exit__(type(primary), primary, primary.__traceback__)
+        except BaseException:
+            pass
+        raise
+    else:
+        try:
+            manager.__exit__(None, None, None)
+        except BaseException:
+            fail("resolver-cleanup", "resolver cleanup failed after validation")
+
+
+class _CandidateRejected(Exception):
+    def __init__(self, error: ContractError) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
 def evaluate_trigger(
     request_raw: bytes,
     profile_raw: bytes,
     *,
     wall_time: int,
     verify_jwt: Callable[[str, dict[str, object]], dict[str, object]],
-    resolve_target: Callable[[dict[str, object], int], dict[str, object]],
-    validate_candidate: Callable[[GitBlobReader, dict[str, object], dict[str, object]], str],
-    repository: Path,
+    resolve_target: Callable[
+        [dict[str, object], int], AbstractContextManager[ResolvedCandidate]
+    ],
+    validate_candidate: Callable[
+        [CandidateValidationContext, dict[str, object], dict[str, object]], str
+    ],
 ) -> VerificationDecision:
     """Orchestrate a fail-closed external verification decision.
 
     ``verify_jwt`` is the deployment's pinned JOSE implementation and must
     perform JWS/JWKS verification before returning claims. ``resolve_target``
-    uses the read-only repository installation and accepts no candidate
-    coordinates. ``validate_candidate`` reads only through ``GitBlobReader``
-    and returns a human-readable success summary. Publishing and replay-store
-    writes occur only after this pure decision is returned.
+    opens the read-only object database, accepts no candidate coordinates, and
+    keeps that database live through all Git reads and final validation.
+    ``validate_candidate`` receives one invocation-scoped reader capability and
+    returns a human-readable success summary. The capability cannot perform Git
+    work after the callback returns. Publishing and replay-store writes occur
+    only after this pure decision is returned.
     """
     request = strict_json_bytes(request_raw)
     pull_request, token = validate_trigger_request(request)
     profile = validate_oidc_profile(strict_json_bytes(profile_raw))
     verified_claims = verify_jwt(token, profile)
     workload = normalize_verified_oidc_claims(verified_claims, profile, wall_time=wall_time)
-    target = validate_candidate_target(resolve_target(workload, pull_request))
-    bind_workload_to_target(workload, target, pull_request=pull_request)
-    budget_token = _ACTIVE_GIT_BUDGET.set(GitDecisionBudget())
     try:
-        try:
-            reader = GitBlobReader(repository, target["candidate_revision"])
-            summary = validate_candidate(reader, workload, target)
-            if not isinstance(summary, str) or not summary:
-                fail("candidate-validation", "candidate validator returned no summary")
-            conclusion = "success"
-        except ContractError as exc:
-            summary = str(exc)[:4096]
-            conclusion = "failure"
-    finally:
-        _ACTIVE_GIT_BUDGET.reset(budget_token)
+        manager = resolve_target(copy.deepcopy(workload), pull_request)
+        if not isinstance(manager, AbstractContextManager):
+            fail("target-context", "resolver must return a context manager")
+        with _non_suppressing_resolver(manager) as resolved:
+            if not isinstance(resolved, ResolvedCandidate):
+                fail("target-context", "resolver must yield one ResolvedCandidate")
+            target = dict(validate_candidate_target(resolved.target))
+            bind_workload_to_target(workload, target, pull_request=pull_request)
+            budget = GitDecisionBudget()
+            budget_token = _ACTIVE_GIT_BUDGET.set(budget)
+            try:
+                try:
+                    validation = CandidateValidationContext(
+                        resolved.repository,
+                        target["candidate_revision"],
+                        target["protected_base_revision"],
+                        budget,
+                    )
+                    summary = validate_candidate(
+                        validation, copy.deepcopy(workload), copy.deepcopy(target)
+                    )
+                    if not isinstance(summary, str) or not summary:
+                        fail("candidate-validation", "candidate validator returned no summary")
+                    conclusion = "success"
+                except ContractError as exc:
+                    raise _CandidateRejected(exc) from exc
+            finally:
+                budget.close()
+                _ACTIVE_GIT_BUDGET.reset(budget_token)
+    except _CandidateRejected as rejected:
+        summary = str(rejected.error)[:4096]
+        conclusion = "failure"
     result = validate_publisher_result(
         {
             "schema": "aimee.module-doc-check.v1",
