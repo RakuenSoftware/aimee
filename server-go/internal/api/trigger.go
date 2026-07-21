@@ -116,7 +116,8 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 		return err
 	}
 	for _, candidate := range strings.Split(string(listing), "\n") {
-		if candidate == "" {
+		if candidate == "" || strings.HasPrefix(filepath.Base(candidate), ".") ||
+			!strings.EqualFold(filepath.Ext(candidate), ".md") {
 			continue
 		}
 		request.Proposal = candidate

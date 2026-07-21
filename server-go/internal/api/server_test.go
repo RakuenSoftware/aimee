@@ -202,6 +202,12 @@ func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testin
 	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/auto.md"), []byte(proposal), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/.gitkeep"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/notes.txt"), []byte("not a proposal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, repo, "init")
 	runGit(t, repo, "config", "user.email", "test@example.invalid")
 	runGit(t, repo, "config", "user.name", "Test")
