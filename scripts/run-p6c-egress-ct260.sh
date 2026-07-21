@@ -16,18 +16,22 @@ die() {
 [[ ${EUID:-$(id -u)} -eq 0 ]] || die 'must run as root inside CT260'
 [[ -n ${AIMEE_TEST_PG_URL:-} ]] || die 'AIMEE_TEST_PG_URL is required (CT103 PostgreSQL)'
 
-for command_name in make openssl psql python3; do
+for command_name in flock make openssl psql python3 update-ca-certificates; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing required command: $command_name"
 done
 [[ -x scripts/p6c_bedrock_mock.py ]] || die 'scripts/p6c_bedrock_mock.py is missing or not executable'
 [[ -f src/Makefile ]] || die 'run from the CT260 aimee checkout root'
+unset SSL_CERT_DIR SSL_CERT_FILE
 
 umask 077
+exec 9>/run/lock/aimee-p6c-egress-ct260.lock
+flock -n 9 || die 'another P6c CT260 egress gate owns the global test resources'
+
 scratch_dir=$(mktemp -d /tmp/aimee-p6c-egress.XXXXXX)
 [[ -n $scratch_dir && -d $scratch_dir && $scratch_dir == /tmp/aimee-p6c-egress.* ]] ||
   die 'failed to create bounded scratch directory'
 
-hosts_backup="$scratch_dir/hosts.original"
+hosts_filtered="$scratch_dir/hosts.filtered"
 mock_ready="$scratch_dir/mock.ready"
 mock_counter="$scratch_dir/mock.accepted"
 mock_log="$scratch_dir/mock.log"
@@ -42,12 +46,18 @@ wrong_server_csr="$scratch_dir/wrong-server.csr"
 wrong_server_cert="$scratch_dir/wrong-server.crt"
 wrong_ca_key="$scratch_dir/wrong-ca.key"
 wrong_ca_cert="$scratch_dir/wrong-ca.crt"
+wrong_ca_server_key="$scratch_dir/wrong-ca-server.key"
+wrong_ca_server_csr="$scratch_dir/wrong-ca-server.csr"
+wrong_ca_server_cert="$scratch_dir/wrong-ca-server.crt"
 cert_ext="$scratch_dir/server.ext"
 wrong_cert_ext="$scratch_dir/wrong-server.ext"
 
 mock_pid=''
 hosts_changed=0
+system_ca_installed=0
 db_seeded=0
+readonly hosts_line="127.0.0.1 $bedrock_host # aimee-p6c-egress-ct260 pid=$$"
+readonly system_ca_cert="/usr/local/share/ca-certificates/aimee-p6c-egress-ct260-pid-$$.crt"
 
 stop_mock() {
   if [[ -n $mock_pid ]]; then
@@ -66,8 +76,17 @@ cleanup() {
   set +e
   stop_mock
   if (( hosts_changed )); then
-    cp -p -- "$hosts_backup" /etc/hosts || rc=1
+    if awk -v exact="$hosts_line" '$0 != exact' /etc/hosts >"$hosts_filtered"; then
+      cp -- "$hosts_filtered" /etc/hosts || rc=1
+    else
+      rc=1
+    fi
     hosts_changed=0
+  fi
+  if (( system_ca_installed )); then
+    rm -f -- "$system_ca_cert" || rc=1
+    update-ca-certificates >/dev/null 2>&1 || rc=1
+    system_ca_installed=0
   fi
   if (( db_seeded )); then
     psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" >/dev/null 2>&1 <<'SQL' || rc=1
@@ -90,7 +109,6 @@ SQL
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-cp -p -- /etc/hosts "$hosts_backup"
 if awk -v wanted="$bedrock_host" '
   /^[[:space:]]*#/ { next }
   { for (i = 2; i <= NF; i++) if ($i == wanted) found = 1 }
@@ -98,14 +116,17 @@ if awk -v wanted="$bedrock_host" '
 ' /etc/hosts; then
   die 'Bedrock test hostname already exists in /etc/hosts; refusing ambiguous mutation'
 fi
-hosts_marker="# aimee-p6c-egress-ct260 pid=$$"
-printf '\n%s\n127.0.0.1 %s\n' "$hosts_marker" "$bedrock_host" >>/etc/hosts
+printf '%s\n' "$hosts_line" >>/etc/hosts
 hosts_changed=1
 
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
   -subj '/CN=aimee-p6c-ct260-test-ca' -keyout "$ca_key" -out "$ca_cert" \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign' >/dev/null 2>&1
+
+cp -- "$ca_cert" "$system_ca_cert"
+system_ca_installed=1
+update-ca-certificates >/dev/null
 
 printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
   "$bedrock_host" >"$cert_ext"
@@ -125,6 +146,11 @@ openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
   -subj '/CN=aimee-p6c-wrong-test-ca' -keyout "$wrong_ca_key" -out "$wrong_ca_cert" \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign' >/dev/null 2>&1
+openssl req -new -newkey rsa:2048 -nodes -sha256 -subj "/CN=$bedrock_host" \
+  -keyout "$wrong_ca_server_key" -out "$wrong_ca_server_csr" >/dev/null 2>&1
+openssl x509 -req -sha256 -days 1 -in "$wrong_ca_server_csr" \
+  -CA "$wrong_ca_cert" -CAkey "$wrong_ca_key" -CAcreateserial \
+  -extfile "$cert_ext" -out "$wrong_ca_server_cert" >/dev/null 2>&1
 
 psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" >/dev/null <<'SQL'
 BEGIN;
@@ -196,7 +222,7 @@ assert_count() {
 run_success() {
   local label=$1
   local mode=$2
-  if ! SSL_CERT_FILE="$ca_cert" AIMEE_TEST_TEAM_ID="$team_id" \
+  if ! AIMEE_TEST_TEAM_ID="$team_id" \
       "$live_target" model "$mode" >"$case_log" 2>&1; then
     sed 's/^/live: /' "$case_log" >&2
     sed 's/^/mock: /' "$mock_log" >&2
@@ -208,8 +234,7 @@ run_failure() {
   local label=$1
   local model=$2
   local mode=$3
-  local trust=${4:-$ca_cert}
-  if SSL_CERT_FILE="$trust" AIMEE_TEST_TEAM_ID="$team_id" \
+  if AIMEE_TEST_TEAM_ID="$team_id" \
       "$live_target" "$model" "$mode" >"$case_log" 2>&1; then
     sed 's/^/live: /' "$case_log" >&2
     sed 's/^/mock: /' "$mock_log" >&2
@@ -227,8 +252,13 @@ run_success fragmented-stream-success stream
 assert_count 1
 stop_mock
 
+start_mock fragmented-stream-success
+run_success callback-abort stream-abort
+assert_count 1
+stop_mock
+
 start_mock nonstream-success
-if AIMEE_TEST_WRONG_SECRET=1 SSL_CERT_FILE="$ca_cert" AIMEE_TEST_TEAM_ID="$team_id" \
+if AIMEE_TEST_WRONG_SECRET=1 AIMEE_TEST_TEAM_ID="$team_id" \
     "$live_target" model buffered >"$case_log" 2>&1; then
   die 'wrong-secret unexpectedly succeeded'
 fi
@@ -242,6 +272,11 @@ for case_id in wrong-media non-2xx malformed-framing; do
   stop_mock
 done
 
+start_mock unclean-eof
+run_failure unclean-eof model buffered
+assert_count 1
+stop_mock
+
 for case_id in bad-crc complete-frame-semantic-truncation; do
   start_mock "$case_id"
   run_failure "$case_id" model stream
@@ -249,8 +284,8 @@ for case_id in bad-crc complete-frame-semantic-truncation; do
   stop_mock
 done
 
-start_mock nonstream-success
-run_failure tls-wrong-ca model buffered "$wrong_ca_cert"
+start_mock nonstream-success "$wrong_ca_server_cert" "$wrong_ca_server_key"
+run_failure tls-wrong-ca model buffered
 assert_count 0
 stop_mock
 

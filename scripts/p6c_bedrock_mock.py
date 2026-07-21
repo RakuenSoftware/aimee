@@ -26,10 +26,12 @@ import argparse
 import binascii
 import hashlib
 import hmac
+import io
 import ipaddress
 import json
 import os
 import re
+import socket
 import ssl
 import struct
 import sys
@@ -55,6 +57,7 @@ CASES = (
     "semantic-truncation",
     "complete-frame-semantic-truncation",
     "malformed-framing",
+    "unclean-eof",
 )
 
 AUTH_RE = re.compile(
@@ -62,6 +65,11 @@ AUTH_RE = re.compile(
     r"SignedHeaders=([^,]+), Signature=([0-9a-f]{64})\Z"
 )
 HEADER_NAME_RE = re.compile(r"\A[a-z0-9-]+\Z")
+
+
+def _buffered_bytes_waiting(reader: Any) -> bool:
+    """Return whether a buffered request reader exposes at least one byte."""
+    return bool(reader.peek(1))
 
 
 class DuplicateKey(ValueError):
@@ -384,6 +392,36 @@ class MockHandler(BaseHTTPRequestHandler):
         except (ssl.SSLWantReadError, ssl.SSLWantWriteError, OSError):
             pass
 
+    def _has_surplus_request_bytes(self) -> bool:
+        """Reject bytes beyond Content-Length before producing an oracle result.
+
+        ``rfile`` is buffered, so ``peek`` covers both bytes already consumed from
+        TLS into that buffer and bytes immediately readable from the socket.  The
+        short bounded probe makes a single-write request-plus-surplus test
+        deterministic without waiting for EOF from a normal request/response
+        client.
+        """
+        previous_timeout = self.connection.gettimeout()
+        try:
+            self.connection.settimeout(0.1)
+            return _buffered_bytes_waiting(self.rfile)
+        except (TimeoutError, socket.timeout, ssl.SSLWantReadError):
+            return False
+        finally:
+            self.connection.settimeout(previous_timeout)
+
+    def _drop_without_close_notify(self) -> None:
+        """Close the underlying TCP fd without emitting a TLS close_notify."""
+        try:
+            self.wfile.flush()
+        except OSError:
+            pass
+        try:
+            fd = self.connection.detach()
+        except OSError:
+            return
+        os.close(fd)
+
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         args = self.server.args
         if (
@@ -429,6 +467,9 @@ class MockHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         if len(body) != length:
             self._reject("short-body", len(body))
+            return
+        if self._has_surplus_request_bytes():
+            self._reject("surplus-request-bytes", length)
             return
         if headers["host"] != args.expected_host or headers["content-type"] != "application/json":
             self._reject("authority-media", length)
@@ -486,11 +527,14 @@ class MockHandler(BaseHTTPRequestHandler):
             flush=True,
         )
         self._respond(args.case)
-        self._send_close_notify()
+        if args.case == "unclean-eof":
+            self._drop_without_close_notify()
+        else:
+            self._send_close_notify()
         self.close_connection = True
 
     def _respond(self, case: str) -> None:
-        if case == "nonstream-success":
+        if case in ("nonstream-success", "unclean-eof"):
             body = json.dumps(
                 {
                     "output": {
@@ -576,6 +620,16 @@ def self_test() -> None:
         "/model/model/converse", headers, names, headers["x-amz-content-sha256"], "us-east-1"
     )
     assert len(first) == 64 and hmac.compare_digest(first, second)
+    assert _buffered_bytes_waiting(io.BufferedReader(io.BytesIO(b"surplus")))
+    assert not _buffered_bytes_waiting(io.BufferedReader(io.BytesIO(b"")))
+    assert "unclean-eof" in CASES
+    assert "unclean-eof" not in (
+        "stream-success",
+        "fragmented-stream-success",
+        "bad-crc",
+        "semantic-truncation",
+        "complete-frame-semantic-truncation",
+    )
     print("p6c-bedrock-mock: self-test passed")
 
 
@@ -609,7 +663,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("--region is invalid")
     if args.expected_host is None:
         args.expected_host = f"bedrock-runtime.{args.region}.amazonaws.com"
-    streaming = args.case not in ("nonstream-success", "wrong-media", "non-2xx", "malformed-framing")
+    streaming = args.case not in (
+        "nonstream-success",
+        "wrong-media",
+        "non-2xx",
+        "malformed-framing",
+        "unclean-eof",
+    )
     if args.expected_path is None:
         args.expected_path = "/model/model/converse-stream" if streaming else "/model/model/converse"
     if (
