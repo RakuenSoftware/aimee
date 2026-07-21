@@ -46,6 +46,8 @@ type NativeRunner struct {
 	forge     Forge
 }
 
+const roundtableDelegateRole = "review"
+
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
@@ -219,22 +221,39 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 			prompt += "\n\nACCEPTANCE FEEDBACK THAT THE NEW PACKETS MUST RESOLVE:\n" + string(encoded)
 		}
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: req.WorkItem.Repo})
-	if err != nil {
-		return StepResult{}, err
+	var cost float64
+	var result DelegateResult
+	var content []byte
+	var validationErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		result, validationErr = r.delegate(ctx, req, DelegateRequest{Role: "draft", Persona: paramString(req.Node, "persona", "architect"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: req.WorkItem.Repo})
+		if validationErr != nil {
+			return StepResult{}, validationErr
+		}
+		cost += result.CostUSD
+		content, validationErr = extractJSONObject(result.Response)
+		if validationErr == nil {
+			validationErr = validateStructured(kind, content)
+		}
+		if validationErr == nil {
+			break
+		}
+		// A workflow-level retry previously repeated the identical request without
+		// telling the delegate what was malformed. Keep the complete response and
+		// exact validation error so the next synthesis can repair, not regenerate,
+		// the artifact. The changed prompt is part of DelegateRequest and therefore
+		// receives a distinct durable job key. Do not byte-truncate the artifact:
+		// silent byte limits were the original non-convergence failure mode.
+		prompt += "\n\nYOUR PREVIOUS RESPONSE WAS INVALID (" + validationErr.Error() + "). Repair it and return one complete JSON object only. Do not truncate or omit any field.\n\nCOMPLETE INVALID RESPONSE:\n" + result.Response
 	}
-	content, err := extractJSONObject(result.Response)
-	if err != nil {
-		return StepResult{Status: StepChanges, Detail: err.Error(), CostUSD: result.CostUSD}, nil
-	}
-	if err := validateStructured(kind, content); err != nil {
-		return StepResult{Status: StepChanges, Detail: err.Error(), CostUSD: result.CostUSD}, nil
+	if validationErr != nil {
+		return StepResult{Status: StepChanges, Detail: "structured response remained invalid after corrective synthesis: " + validationErr.Error(), CostUSD: cost}, nil
 	}
 	typeName := "intent"
 	if kind == "packets" {
 		typeName = "plan"
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: typeName, Artifact: string(content), CostUSD: result.CostUSD}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: typeName, Artifact: string(content), CostUSD: cost}, nil
 }
 
 func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepResult, error) {
@@ -273,7 +292,10 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	var cost float64
 	if !docs && paramBool(req.Node, "tdd") {
 		testPrompt := "Write the failing tests required by this task before implementation. Run them to confirm they fail for the intended reason, and leave the tests in the worktree.\n\n" + prompt
-		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Prompt: testPrompt, Workdir: workdir, Tools: true})
+		// implement/document are native branch-producing blocks regardless of the
+		// custom block registry's Produces metadata. This pre-step is committed here,
+		// and the completed implementation is verified before the step advances.
+		testResult, testErr := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "test_persona", "qa"), Delegate: paramString(req.Node, "test_delegate", ""), Prompt: testPrompt, Workdir: workdir, Tools: true, acceptPartial: true})
 		if testErr != nil {
 			return StepResult{}, testErr
 		}
@@ -286,7 +308,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		}
 		prompt += "\n\nTDD: failing tests have already been authored in the worktree. Make them pass without weakening or deleting their assertions."
 	}
-	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true})
+	result, err := r.delegate(ctx, req, DelegateRequest{Role: "code", Persona: paramString(req.Node, "persona", "engineer"), Delegate: paramString(req.Node, "delegate", ""), Prompt: prompt, Workdir: workdir, Tools: true, acceptPartial: true})
 	if err != nil {
 		return StepResult{}, err
 	}
@@ -436,12 +458,33 @@ type panelResponse struct {
 type panelSeat struct {
 	persona, delegate string
 	required          bool
+	pinned            bool
+	ordinal           int
 }
 
 func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepResult, error) {
 	seats := panelSeats(req.Node)
 	if len(seats) == 0 {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable"}, nil
+	}
+	rosterClient, ok := r.agents.(AgentRosterClient)
+	if !ok {
+		return StepResult{Status: StepPending, PauseReason: "panel_wiring_missing", Detail: "agent resource plane does not expose the live eligible roster"}, nil
+	}
+	// gate.roundtable always dispatches the review role. A roster failure cannot
+	// safely fall back to a smaller static panel: without the live enabled-role
+	// roster, WFE cannot know either eligibility or configured capacity. Park and
+	// retry instead of silently violating the operator's UI configuration.
+	roster, err := rosterClient.EligibleAgents(ctx, roundtableDelegateRole)
+	if err != nil {
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: "load eligible roundtable roster: " + err.Error()}, nil
+	}
+	seats, err = fillPanelCapacity(seats, roster)
+	if err != nil {
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
+	}
+	for i := range seats {
+		seats[i].ordinal = i
 	}
 	reviewed, ok := req.Inputs["src"]
 	if !ok {
@@ -501,7 +544,14 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 	for _, seat := range seats {
 		seat := seat
 		go func() {
-			res, err := r.delegate(ctx, req, DelegateRequest{Role: "review", Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree})
+			res, err := r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree})
+			if err != nil && !seat.pinned && seat.delegate != "" {
+				// Capacity assignments are routing hints for this panel run, not UI
+				// pins. If the assigned subscription is temporarily unavailable,
+				// retry through ordinary live eligibility after that failed slot has
+				// released its lease. Never persist the failure as an exclusion.
+				res, err = r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Prompt: prompt, Workdir: req.WorkItem.Worktree, RetryTag: fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate)})
+			}
 			if err != nil {
 				ch <- outcome{seat: seat, err: err}
 				return
@@ -809,12 +859,118 @@ func panelSeats(node wfe.Node) []panelSeat {
 	pins := stringMap(panel["pins"])
 	var out []panelSeat
 	for _, p := range required {
-		out = append(out, panelSeat{p, pins[p], true})
+		delegate := pins[p]
+		out = append(out, panelSeat{persona: p, delegate: delegate, required: true, pinned: delegate != ""})
 	}
 	for _, p := range eligible {
-		out = append(out, panelSeat{p, pins[p], false})
+		delegate := pins[p]
+		out = append(out, panelSeat{persona: p, delegate: delegate, pinned: delegate != ""})
 	}
 	return out
+}
+
+// fillPanelCapacity retains the UI-defined required/eligible persona lenses and
+// positive pins, then assigns every enabled review-capable delegate slot. Slot
+// order is provider/agent-diverse first, followed by round-robin capacity fill.
+// These runtime assignments are not configuration pins and are recomputed from
+// the live roster on every panel run.
+func fillPanelCapacity(configured []panelSeat, roster []EligibleAgent) ([]panelSeat, error) {
+	// Preserve roster order within each provider, then interleave providers before
+	// consuming a second agent from any one provider. Capacity is still exhausted
+	// completely below; diversity changes ordering, never admission.
+	type providerGroup struct {
+		name   string
+		agents []EligibleAgent
+	}
+	var groups []providerGroup
+	for _, agent := range roster {
+		provider := strings.ToLower(strings.TrimSpace(agent.Provider))
+		if provider == "" {
+			provider = "agent:" + agent.Name
+		}
+		groupIndex := -1
+		for i := range groups {
+			if groups[i].name == provider {
+				groupIndex = i
+				break
+			}
+		}
+		if groupIndex < 0 {
+			groups = append(groups, providerGroup{name: provider})
+			groupIndex = len(groups) - 1
+		}
+		groups[groupIndex].agents = append(groups[groupIndex].agents, agent)
+	}
+	orderedRoster := make([]EligibleAgent, 0, len(roster))
+	for agentIndex := 0; ; agentIndex++ {
+		added := false
+		for _, group := range groups {
+			if agentIndex < len(group.agents) {
+				orderedRoster = append(orderedRoster, group.agents[agentIndex])
+				added = true
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	var slots []string
+	for round := 0; ; round++ {
+		added := false
+		for _, agent := range orderedRoster {
+			if round < agent.MaxParallel {
+				slots = append(slots, agent.Name)
+				added = true
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	if len(slots) == 0 {
+		return nil, errors.New("no enabled review-capable delegate slots")
+	}
+	if len(configured) > len(slots) {
+		return nil, fmt.Errorf("configured panel has %d seats but eligible capacity is %d", len(configured), len(slots))
+	}
+	removeSlot := func(name string) bool {
+		for i, slot := range slots {
+			if slot == name {
+				slots = append(slots[:i], slots[i+1:]...)
+				return true
+			}
+		}
+		return false
+	}
+	out := make([]panelSeat, 0, len(slots))
+	for _, seat := range configured {
+		if seat.delegate != "" {
+			if !removeSlot(seat.delegate) {
+				if seat.required {
+					return nil, fmt.Errorf("required delegate %q is disabled, ineligible, or over capacity", seat.delegate)
+				}
+				// An optional positive pin is only eligible while that agent is live
+				// and has capacity. Do not turn its absence into an exclusion or a
+				// required-panel failure; the remaining live slots are still filled.
+				continue
+			}
+		} else {
+			seat.delegate = slots[0]
+			slots = slots[1:]
+		}
+		out = append(out, seat)
+	}
+	personas := make([]string, 0, len(out))
+	for _, seat := range out {
+		personas = append(personas, seat.persona)
+	}
+	// Surplus capacity repeats configured review lenses as optional voters. This
+	// never changes the required bit on the original seats; it lets an all-required
+	// workflow use every enabled agent slot as the operator requested.
+	for i, delegate := range slots {
+		out = append(out, panelSeat{persona: personas[i%len(personas)], delegate: delegate, required: false})
+	}
+	return out, nil
 }
 func stringMap(value any) map[string]string {
 	out := map[string]string{}

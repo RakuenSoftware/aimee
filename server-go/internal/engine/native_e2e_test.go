@@ -22,6 +22,10 @@ type e2eAgents struct {
 	codeRuns int
 }
 
+func (a *e2eAgents) EligibleAgents(_ context.Context, _ string) ([]EligibleAgent, error) {
+	return []EligibleAgent{{Name: "codex", Provider: "chatgpt", MaxParallel: 5}}, nil
+}
+
 func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	switch request.Role {
 	case "review":

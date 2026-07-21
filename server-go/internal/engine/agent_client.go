@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -27,16 +28,39 @@ type DelegateRequest struct {
 	WorkItemID       string
 	Stage            string
 	ExecutionVersion string
+	RetryTag         string
+	// acceptPartial is reserved for native branch-producing blocks whose worktree output
+	// is independently committed and verified by the Go native runner. Structured
+	// and prose blocks must receive a complete resource-plane result.
+	acceptPartial bool
 }
 
 type DelegateResult struct {
 	Response string
 	Agent    string
 	CostUSD  float64
+	Partial  bool
 }
 
 type AgentClient interface {
 	Delegate(context.Context, DelegateRequest) (DelegateResult, error)
+}
+
+type EligibleAgent struct {
+	Name        string
+	Provider    string
+	MaxParallel int
+}
+
+// AgentRosterClient is implemented by resource planes that can expose the live
+// enabled roster. WFE uses it to fill every eligible roundtable slot; it never
+// persists provider failures as exclusions. Production binds the roster endpoint
+// to the same authenticated Unix socket (or explicitly authenticated transport)
+// used by delegate execution; the resource plane owns tenant filtering and exact,
+// case-sensitive role names. BaseURL remains supported for loopback tests and
+// authenticated remote resource-plane deployments.
+type AgentRosterClient interface {
+	EligibleAgents(context.Context, string) ([]EligibleAgent, error)
 }
 
 type AgentHTTPConfig struct {
@@ -61,6 +85,18 @@ type HTTPAgentClient struct {
 func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "http://aimee"
+	}
+	parsedBase, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse agent service URL: %w", err)
+	}
+	host := parsedBase.Hostname()
+	loopback := host == "localhost"
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		loopback = true
+	}
+	if cfg.UnixSocket == "" && cfg.Bearer == "" && !loopback {
+		return nil, errors.New("remote agent service requires an authenticated bearer or Unix socket")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if cfg.UnixSocket != "" {
@@ -89,8 +125,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 	if request.Delegate != "" {
 		payload["via"] = request.Delegate
 	}
-	keyMaterial, _ := json.Marshal(request)
-	key := fmt.Sprintf("%s:%s:%s:%x", request.WorkItemID, request.Stage, request.ExecutionVersion, sha256.Sum256(keyMaterial))
+	key := delegateJobKey(request)
 	var launched struct {
 		JobID int    `json:"job_id"`
 		Error string `json:"error"`
@@ -133,6 +168,26 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		switch status.JobStatus {
 		case "done":
 			return DelegateResult{Response: status.Result, Agent: status.Agent, CostUSD: status.CostUSD}, nil
+		case "partial":
+			if strings.TrimSpace(status.Result) == "" {
+				if c.store != nil {
+					_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
+				}
+				return DelegateResult{}, fmt.Errorf("delegate job %d returned an empty partial result", launched.JobID)
+			}
+			if !request.acceptPartial {
+				if c.store != nil {
+					_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
+				}
+				return DelegateResult{}, fmt.Errorf("delegate job %d returned a partial result for a block that requires completion", launched.JobID)
+			}
+			// A delegate can leave a complete, independently verifiable artifact and
+			// still be labelled partial when its final synthesis fails. Preserve that
+			// artifact and its terminal durable mapping: an identical retry must replay
+			// the same artifact idempotently, not launch overlapping work. Callers that
+			// need corrective synthesis change the prompt, which changes the job key.
+			// The native branch-producing block validates its own output contract.
+			return DelegateResult{Response: status.Result, Agent: status.Agent, CostUSD: status.CostUSD, Partial: true}, nil
 		case "failed", "cancelled", "stopped", "invalid", "not_found":
 			if c.store != nil {
 				_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
@@ -152,6 +207,53 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		case <-ticker.C:
 		}
 	}
+}
+
+func delegateJobKey(request DelegateRequest) string {
+	keyMaterial, _ := json.Marshal(request)
+	return fmt.Sprintf("%s:%s:%s:%x", request.WorkItemID, request.Stage, request.ExecutionVersion, sha256.Sum256(keyMaterial))
+}
+
+func (c *HTTPAgentClient) EligibleAgents(ctx context.Context, role string) ([]EligibleAgent, error) {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return nil, errors.New("eligible-agent role is required")
+	}
+	var response struct {
+		Agents []struct {
+			Name        string   `json:"name"`
+			Provider    string   `json:"provider"`
+			Enabled     bool     `json:"enabled"`
+			PrimaryOnly bool     `json:"primary_only"`
+			MaxParallel int      `json:"max_parallel"`
+			Roles       []string `json:"roles"`
+		} `json:"agents"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/agent/list", nil, &response); err != nil {
+		return nil, err
+	}
+	var eligible []EligibleAgent
+	for _, agent := range response.Agents {
+		agent.Name = strings.TrimSpace(agent.Name)
+		if !agent.Enabled || agent.PrimaryOnly || agent.Name == "" || agent.MaxParallel < 1 {
+			continue
+		}
+		roleOK := false
+		for _, allowed := range agent.Roles {
+			allowed = strings.TrimSpace(allowed)
+			if allowed == "" {
+				continue
+			}
+			if allowed == "all" || allowed == role {
+				roleOK = true
+				break
+			}
+		}
+		if roleOK {
+			eligible = append(eligible, EligibleAgent{Name: agent.Name, Provider: agent.Provider, MaxParallel: agent.MaxParallel})
+		}
+	}
+	return eligible, nil
 }
 
 func (c *HTTPAgentClient) cancelRemote(jobID int, parent context.Context) {

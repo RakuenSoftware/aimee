@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -10,15 +11,45 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+type temporaryFailureAgents struct {
+	mu       sync.Mutex
+	requests []DelegateRequest
+}
+
+type noRosterAgents struct{}
+
+func (noRosterAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, errors.New("unexpected delegate call")
+}
+
+func (a *temporaryFailureAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	a.mu.Lock()
+	a.requests = append(a.requests, request)
+	a.mu.Unlock()
+	if request.Delegate != "" {
+		return DelegateResult{}, errors.New("subscription temporarily exhausted")
+	}
+	return DelegateResult{Response: `{"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
 type recordingAgents struct {
 	mu             sync.Mutex
 	requests       []DelegateRequest
 	reviewResponse string
+	draftResponses []string
+}
+
+func (a *recordingAgents) EligibleAgents(_ context.Context, _ string) ([]EligibleAgent, error) {
+	return []EligibleAgent{
+		{Name: "kimi", Provider: "moonshot", MaxParallel: 1},
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 2},
+	}, nil
 }
 
 func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	a.mu.Lock()
 	a.requests = append(a.requests, request)
+	requestIndex := len(a.requests) - 1
 	a.mu.Unlock()
 	if request.Role == "review" {
 		response := a.reviewResponse
@@ -27,7 +58,35 @@ func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (
 		}
 		return DelegateResult{Response: response}, nil
 	}
+	if requestIndex < len(a.draftResponses) {
+		return DelegateResult{Response: a.draftResponses[requestIndex]}, nil
+	}
 	return DelegateResult{Response: strings.Repeat("complete plan λ\n", 200_000) + "PLAN_END"}, nil
+}
+
+func TestStructuredCorrectiveSynthesisIncludesCompleteInvalidResponse(t *testing.T) {
+	invalid := `{"schema_version":1,"status":"unconfirmed","summary":"scope","rationale":"why","acceptance_criteria":["first",""$AIMEE_HOME"]}`
+	valid := `{"schema_version":1,"status":"unconfirmed","summary":"scope","rationale":"why","acceptance_criteria":["first","$AIMEE_HOME"]}`
+	agents := &recordingAgents{draftResponses: []string{invalid, valid}}
+	runner := &NativeRunner{agents: agents}
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Node:     wfe.Node{ID: "scope"},
+		Proposal: "document recovery",
+	}, "intent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.Artifact != valid {
+		t.Fatalf("result=%+v", result)
+	}
+	if len(agents.requests) != 2 {
+		t.Fatalf("requests=%d", len(agents.requests))
+	}
+	repairPrompt := agents.requests[1].Prompt
+	if !strings.Contains(repairPrompt, invalid) || !strings.Contains(repairPrompt, "PREVIOUS RESPONSE WAS INVALID") {
+		t.Fatalf("repair prompt omitted complete invalid artifact or validation feedback: %q", repairPrompt)
+	}
 }
 
 func TestNativeRoundtableFailsClosedOnOriginalRequestDriftOrOmission(t *testing.T) {
@@ -77,6 +136,19 @@ func TestNativeRoundtableFailsClosedOnOriginalRequestDriftOrOmission(t *testing.
 	}
 }
 
+func TestNativeRoundtableFailsClosedWithoutLiveRosterCapability(t *testing.T) {
+	runner := &NativeRunner{agents: noRosterAgents{}}
+	result, err := runner.roundtable(context.Background(), StepRequest{Node: wfe.Node{Params: map[string]any{
+		"panel": map[string]any{"required": []any{"security"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "panel_wiring_missing" || !strings.Contains(result.Detail, "live eligible roster") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	agents := &recordingAgents{}
 	runner := &NativeRunner{agents: agents}
@@ -119,7 +191,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	if len(agents.requests) != 5 {
 		t.Fatalf("requests=%d", len(agents.requests))
 	}
-	foundPin, foundUnpinned := false, false
+	foundPin, foundDynamicQA := false, false
 	for _, request := range agents.requests {
 		if !strings.Contains(request.Prompt, "ORIGINAL REQUEST:\n"+proposal) || request.Role == "review" && !strings.Contains(request.Prompt, string(reviewed.Content)) {
 			t.Fatal("runner truncated a source artifact")
@@ -130,12 +202,175 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		if request.Persona == "security" && request.Delegate == "kimi" {
 			foundPin = true
 		}
-		if request.Persona == "qa" && request.Delegate == "" {
-			foundUnpinned = true
+		if request.Persona == "qa" && request.Delegate != "" && request.Delegate != "kimi" {
+			foundDynamicQA = true
 		}
 	}
-	if !foundPin || !foundUnpinned {
+	if !foundPin || !foundDynamicQA {
 		t.Fatalf("UI pin semantics not preserved: %+v", agents.requests)
+	}
+}
+
+func TestFillPanelCapacityUsesEverySlotWithDiversityFirst(t *testing.T) {
+	configured := []panelSeat{
+		{persona: "security", delegate: "codex", required: true},
+		{persona: "qa", required: true},
+		{persona: "contrarian", required: false},
+	}
+	roster := []EligibleAgent{
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 3},
+		{Name: "minimax", Provider: "anthropic", MaxParallel: 2},
+	}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 5 {
+		t.Fatalf("seats=%+v", seats)
+	}
+	got := []string{seats[0].delegate, seats[1].delegate, seats[2].delegate, seats[3].delegate, seats[4].delegate}
+	want := []string{"codex", "minimax", "codex", "minimax", "codex"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("delegates=%v want=%v", got, want)
+		}
+	}
+	if !seats[0].required || !seats[1].required || seats[2].required || seats[3].required || seats[4].required {
+		t.Fatalf("required prefix not preserved: %+v", seats)
+	}
+}
+
+func TestFillPanelCapacityInterleavesProvidersBeforeFillingAllSeats(t *testing.T) {
+	configured := []panelSeat{{persona: "correctness"}}
+	roster := []EligibleAgent{
+		{Name: "codex-a", Provider: "openai", MaxParallel: 2},
+		{Name: "codex-b", Provider: "openai", MaxParallel: 1},
+		{Name: "minimax", Provider: "minimax", MaxParallel: 2},
+	}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, seat := range seats {
+		got = append(got, seat.delegate)
+	}
+	want := []string{"codex-a", "minimax", "codex-b", "codex-a", "minimax"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("delegates=%v want=%v", got, want)
+	}
+}
+
+func TestFillPanelCapacityExhaustsAsymmetricCapacity(t *testing.T) {
+	seats, err := fillPanelCapacity([]panelSeat{{persona: "review"}}, []EligibleAgent{
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 3},
+		{Name: "minimax", Provider: "anthropic", MaxParallel: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, seat := range seats {
+		got = append(got, seat.delegate)
+	}
+	if strings.Join(got, ",") != "codex,minimax,codex,codex" {
+		t.Fatalf("asymmetric capacity was not exhausted: %v", got)
+	}
+}
+
+func TestFillPanelCapacityRepeatsAllRequiredLensesWithoutWeakeningThem(t *testing.T) {
+	seats, err := fillPanelCapacity([]panelSeat{{persona: "security", required: true}}, []EligibleAgent{{Name: "codex", MaxParallel: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 3 || !seats[0].required || seats[1].required || seats[2].required {
+		t.Fatalf("required seat semantics changed during capacity fill: %+v", seats)
+	}
+	for _, seat := range seats {
+		if seat.persona != "security" {
+			t.Fatalf("configured review lens was replaced: %+v", seats)
+		}
+	}
+}
+
+func TestFillPanelCapacityCyclesEveryConfiguredLensInMixedPanel(t *testing.T) {
+	seats, err := fillPanelCapacity([]panelSeat{
+		{persona: "security", required: true},
+		{persona: "contrarian"},
+	}, []EligibleAgent{{Name: "codex", MaxParallel: 4}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 4 || seats[2].persona != "security" || seats[3].persona != "contrarian" {
+		t.Fatalf("surplus seats did not cycle every configured lens: %+v", seats)
+	}
+}
+
+func TestFillPanelCapacityUsesDistinctAgentsForRequiredSeatsWhenAvailable(t *testing.T) {
+	configured := []panelSeat{{persona: "security", required: true}, {persona: "qa", required: true}}
+	roster := []EligibleAgent{
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 2},
+		{Name: "minimax", Provider: "anthropic", MaxParallel: 2},
+	}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 4 || seats[0].delegate != "codex" || seats[1].delegate != "minimax" {
+		t.Fatalf("required seats did not consume distinct diversity-first slots: %+v", seats)
+	}
+}
+
+func TestFillPanelCapacityBackfillsUnavailableOptionalPin(t *testing.T) {
+	configured := []panelSeat{{persona: "security", required: true}, {persona: "qa", delegate: "unavailable", pinned: true}}
+	roster := []EligibleAgent{{Name: "codex", MaxParallel: 2}, {Name: "minimax", MaxParallel: 1}}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 3 {
+		t.Fatalf("optional pin under-filled live capacity: %+v", seats)
+	}
+	for _, seat := range seats {
+		if seat.delegate == "unavailable" {
+			t.Fatalf("unavailable optional positive pin survived eligibility: %+v", seats)
+		}
+	}
+}
+
+func TestFillPanelCapacityRejectsUnavailableRequiredPinButSkipsOptionalPin(t *testing.T) {
+	roster := []EligibleAgent{{Name: "codex", MaxParallel: 2}}
+	if _, err := fillPanelCapacity([]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, roster); err == nil {
+		t.Fatal("unavailable required pin accepted")
+	}
+	seats, err := fillPanelCapacity([]panelSeat{{persona: "qa", required: true}, {persona: "security", delegate: "kimi"}}, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 2 || seats[0].delegate != "codex" || seats[1].delegate != "codex" {
+		t.Fatalf("seats=%+v", seats)
+	}
+}
+
+func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.T) {
+	agents := &temporaryFailureAgents{}
+	runner := &NativeRunner{agents: agents}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req,
+		[]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, "review", "hash")
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 {
+		t.Fatalf("dynamic assignment did not recover: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
+	}
+	if len(agents.requests) != 2 || agents.requests[0].Delegate != "kimi" || agents.requests[1].Delegate != "" || agents.requests[1].RetryTag != "eligible-fallback:0:kimi" {
+		t.Fatalf("requests=%+v", agents.requests)
+	}
+
+	agents = &temporaryFailureAgents{}
+	runner.agents = agents
+	_, _, _, _, unreachable = runner.runPanelRound(context.Background(), req,
+		[]panelSeat{{persona: "qa", delegate: "kimi", required: true, pinned: true}}, "review", "hash")
+	if unreachable == "" || len(agents.requests) != 1 {
+		t.Fatalf("explicit pin was silently weakened: requests=%+v unreachable=%q", agents.requests, unreachable)
 	}
 }
 

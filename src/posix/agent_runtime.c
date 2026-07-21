@@ -1294,6 +1294,16 @@ native_provider_http:
          }
          else
          {
+            /* No tool call means the provider omitted synthesis entirely; give
+             * it the same bounded degenerate-response correction used for
+             * reasoning-only content. The final-tool retry below is mutually
+             * exclusive because it requires total_calls > 0. */
+            if (total_calls == 0 && agent_session_retry_degenerate_response(
+                                        messages, &turn, &degenerate_retry_count))
+            {
+               agent_free_parsed_response(&parsed);
+               continue;
+            }
             if (total_calls > 0 &&
                 agent_session_retry_final_tool_violation(
                     messages, "an empty final response", &turn, &max_t, initial_max_t,
