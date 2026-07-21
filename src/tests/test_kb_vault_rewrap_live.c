@@ -25,7 +25,7 @@ static void check_failed(const char *expr, const char *file, int line)
    exit(EXIT_FAILURE);
 }
 #undef assert
-#define assert(expr)                                                                              \
+#define assert(expr)                                                                               \
    do                                                                                              \
    {                                                                                               \
       if (!(expr))                                                                                 \
@@ -38,9 +38,9 @@ static void check_failed(const char *expr, const char *file, int line)
 #define ERR_CAP     512
 
 static const char *const OP = "7123456789abcdef0123456789abcdef";
-static const char *const PRINCIPALS[CHECK_ROWS] = {
-    "p7-rewrap-main", "p7-rewrap-empty", "p7-rewrap-check-only",
-    "p7-rewrap-delim|:name", "p7-rewrap-utf8-Î¼", "p7-rewrap-empty-2"};
+static const char *const PRINCIPALS[CHECK_ROWS] = {"p7-rewrap-main",       "p7-rewrap-empty",
+                                                   "p7-rewrap-check-only", "p7-rewrap-delim|:name",
+                                                   "p7-rewrap-utf8-Î¼",    "p7-rewrap-empty-2"};
 
 typedef struct
 {
@@ -139,14 +139,13 @@ static void seed_salts(const uint8_t old_kek[VAULT_KEK_LEN])
 
       char err[ERR_CAP] = "";
       aimee_pg_stmt_t *st = aimee_pg_prepare(
-          db2_conn(), "INSERT INTO org_vault_salt(principal,salt,kek_check) VALUES(?1,?2,?3)",
-          err, sizeof(err));
+          db2_conn(), "INSERT INTO org_vault_salt(principal,salt,kek_check) VALUES(?1,?2,?3)", err,
+          sizeof(err));
       if (!st)
          die_pg("prepare salt insert", err);
       assert(aimee_pg_bind_text(st, "?1", PRINCIPALS[i]) == 0);
       assert(aimee_pg_bind_blob(st, "?2", salt, sizeof(salt)) == 0);
-      assert(aimee_pg_bind_blob(st, "?3", wrapped,
-                                is_empty ? 0 : VAULT_WRAPPED_DEK_LEN) == 0);
+      assert(aimee_pg_bind_blob(st, "?3", wrapped, is_empty ? 0 : VAULT_WRAPPED_DEK_LEN) == 0);
       if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ERR)
          die_pg("insert salt", err);
       aimee_pg_finalize(st);
@@ -209,9 +208,9 @@ static void verify_bad_old_material(const uint8_t old_kek[VAULT_KEK_LEN],
                                     const uint8_t wrong_kek[VAULT_KEK_LEN])
 {
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT wrapped_dek FROM org_vault_secret ORDER BY id LIMIT 1", err,
-       sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(), "SELECT wrapped_dek FROM org_vault_secret ORDER BY id LIMIT 1",
+                        err, sizeof(err));
    if (!st)
       die_pg("prepare bad-material probe", err);
    if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
@@ -280,17 +279,16 @@ static void record_prepared(int64_t fence, uint8_t receipt_digest[32])
 }
 
 static void stage_secret(const secret_row_t *row, int64_t fence,
-                         const uint8_t old_kek[VAULT_KEK_LEN],
-                         const uint8_t new_kek[VAULT_KEK_LEN])
+                         const uint8_t old_kek[VAULT_KEK_LEN], const uint8_t new_kek[VAULT_KEK_LEN])
 {
    uint8_t dek[VAULT_DEK_LEN] = {0};
    uint8_t new_wrapped[VAULT_WRAPPED_DEK_LEN] = {0};
    assert(vault_dek_unwrap(old_kek, row->wrapped, dek) == 0);
    assert(vault_dek_wrap(new_kek, dek, new_wrapped) == 0);
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rewrap_stage_dek(?1,?2,?3,?4,?5,?6,?7,?8,?9)", err,
-       sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(), "SELECT org_vault_rewrap_stage_dek(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                        err, sizeof(err));
    if (!st)
       die_pg("prepare stage_dek", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -314,8 +312,7 @@ static int load_secret_page(int64_t after, int64_t fence, secret_row_t page[PAGE
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM org_vault_rewrap_secret_page(?1,?2,?3,?4)", err,
-       sizeof(err));
+       db2_conn(), "SELECT * FROM org_vault_rewrap_secret_page(?1,?2,?3,?4)", err, sizeof(err));
    if (!st)
       die_pg("prepare secret page", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -353,8 +350,7 @@ static int load_secret_page(int64_t after, int64_t fence, secret_row_t page[PAGE
 }
 
 static void stage_check(const check_row_t *row, size_t principal_index, int64_t fence,
-                        const uint8_t old_kek[VAULT_KEK_LEN],
-                        const uint8_t new_kek[VAULT_KEK_LEN])
+                        const uint8_t old_kek[VAULT_KEK_LEN], const uint8_t new_kek[VAULT_KEK_LEN])
 {
    uint8_t plain[VAULT_DEK_LEN] = {0};
    uint8_t new_check[VAULT_WRAPPED_DEK_LEN] = {0};
@@ -391,8 +387,7 @@ static int load_check_page(const char *after, int64_t fence, check_row_t page[PA
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM org_vault_rewrap_check_page(?1,?2,?3,?4)", err,
-       sizeof(err));
+       db2_conn(), "SELECT * FROM org_vault_rewrap_check_page(?1,?2,?3,?4)", err, sizeof(err));
    if (!st)
       die_pg("prepare check page", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -481,8 +476,8 @@ static void stage_all(int64_t fence, const uint8_t old_kek[VAULT_KEK_LEN],
    assert(check_total == CHECK_ROWS);
 
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rewrap_stage_finish(?1,?2)", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), "SELECT org_vault_rewrap_stage_finish(?1,?2)",
+                                          err, sizeof(err));
    if (!st)
       die_pg("prepare stage_finish", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -530,9 +525,9 @@ static void verify_promoted(const uint8_t old_kek[VAULT_KEK_LEN],
                      "maintenance_id='7123456789abcdef0123456789abcdef'") == 1);
 
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT version,wrapped_dek FROM org_vault_secret ORDER BY id", err,
-       sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(), "SELECT version,wrapped_dek FROM org_vault_secret ORDER BY id",
+                        err, sizeof(err));
    if (!st)
       die_pg("prepare promoted wraps", err);
    int seen = 0;
@@ -563,8 +558,9 @@ static void verify_promoted(const uint8_t old_kek[VAULT_KEK_LEN],
    aimee_pg_finalize(st);
    assert(seen == SECRET_ROWS);
 
-   st = aimee_pg_prepare(db2_conn(), "SELECT principal,kek_check FROM org_vault_salt "
-                                     "ORDER BY principal COLLATE \"C\"",
+   st = aimee_pg_prepare(db2_conn(),
+                         "SELECT principal,kek_check FROM org_vault_salt "
+                         "ORDER BY principal COLLATE \"C\"",
                          err, sizeof(err));
    if (!st)
       die_pg("prepare promoted checks", err);
