@@ -208,13 +208,15 @@ BEGIN
   -- (org_catalog_entitled()'s projection is UNCHANGED, so account/ARNs/region never leak to
   -- a tenant read). org_bedrock_adapter_supported is a pure predicate (no table access) —
   -- left PUBLIC-callable (harmless), plus an explicit runtime grant for clarity.
-  REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_bedrock_target(BIGINT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_catalog_entitled() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) TO aimee_kb_runtime;
-  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_target(BIGINT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_bedrock_adapter_supported(TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_catalog_remove(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_model_entitle(TEXT,BIGINT) TO aimee_kb_runtime;

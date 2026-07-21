@@ -33,14 +33,17 @@ BEGIN;
 SELECT set_config('aimee.principal', 'owner', true);
 
 INSERT INTO kb_team(id, name) VALUES (960001, 'p6c_alpha');
+INSERT INTO kb_team(id, name) VALUES (960002, 'p6c_beta');
 INSERT INTO kb_team_membership(identity_key, team, is_default)
   VALUES ('oidc:test:p6c_member_a', 960001, 1);
+INSERT INTO kb_team_membership(identity_key, team, is_default)
+  VALUES ('oidc:test:p6c_member_a', 960002, 0);
 
 -- (a) A valid bedrock foundation model (converse, anthropic) upserts and reads back with
 -- provider='bedrock', wire='bedrock', and the routing tuple intact.
 SELECT org_catalog_bedrock_upsert(
   'p6c-claude-foundation', 'Claude on Bedrock', 'converse', 'anthropic', 'foundation',
-  'aws', NULL, ARRAY['us-east-1','us-west-2']::text[], NULL, '', true);
+  'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
 
 DO $$
 DECLARE r org_model_catalog%ROWTYPE;
@@ -58,7 +61,7 @@ BEGIN
     RAISE EXCEPTION 'P6c FAIL: bedrock routing tuple not persisted (api=% family=% type=% part=%)',
       r.bedrock_api, r.model_family, r.bedrock_target_type, r.aws_partition;
   END IF;
-  IF array_length(r.aws_region_set, 1) <> 2 THEN
+  IF r.aws_invoke_region <> 'us-east-1' OR array_length(r.aws_region_set, 1) <> 1 THEN
     RAISE EXCEPTION 'P6c FAIL: aws_region_set not persisted (len=%)',
       array_length(r.aws_region_set, 1);
   END IF;
@@ -66,6 +69,14 @@ BEGIN
     RAISE EXCEPTION 'P6c FAIL: foundation target should carry no account/underlying ARNs';
   END IF;
 END $$;
+
+-- Existing rows are never inferred/backfilled from array order: a migration-null tuple
+-- remains unavailable until an admin re-upserts it through the new signature.
+INSERT INTO org_model_catalog(model_id, display_name, provider, wire, endpoint, enabled,
+  bedrock_api, model_family, bedrock_target_type, aws_partition, aws_account,
+  aws_region_set, underlying_fm_arns, aws_invoke_region)
+VALUES ('p6c-legacy-null', 'legacy', 'bedrock', 'bedrock', '', true, 'converse', 'anthropic',
+  'foundation', 'aws', NULL, ARRAY['us-east-1'], NULL, NULL);
 
 -- Adapter-registry truth table (the pure predicate directly).
 DO $$
@@ -90,6 +101,11 @@ BEGIN
   END IF;
 END $$;
 
+SELECT org_catalog_bedrock_upsert('p6c-disabled', 'Disabled', 'converse', 'anthropic',
+  'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1'], NULL, '', false);
+SELECT org_catalog_bedrock_upsert('p6c-native-invoke', 'Invoke', 'invoke', 'anthropic',
+  'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1'], NULL, '', true);
+
 -- A small helper: assert that a bedrock upsert RAISEs (fail-closed) and writes no row.
 -- Each case runs in its own BEGIN/EXCEPTION block; the SAVEPOINT is unnecessary because
 -- a RAISE inside the definer rolls back only the definer's INSERT (the whole call fails).
@@ -99,7 +115,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-b', 'x', 'invoke', 'meta-llama',
-      'foundation', 'aws', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: (invoke, meta-llama) was accepted';
   EXCEPTION WHEN data_exception THEN NULL;  -- expected 22023
   END;
@@ -113,7 +129,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-c', 'x', 'converse', 'typo-family',
-      'foundation', 'aws', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: (converse, typo-family) was accepted';
   EXCEPTION WHEN data_exception THEN NULL;
   END;
@@ -127,7 +143,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-d', 'x', 'converse', 'anthropic',
-      'cross-region-inference-profile', 'aws', '123456789012',
+      'cross-region-inference-profile', 'aws', 'us-east-1', '123456789012',
       ARRAY['us-east-1']::text[], ARRAY[]::text[], '', true);
     RAISE EXCEPTION 'P6c FAIL: profile target with empty underlying_fm_arns was accepted';
   EXCEPTION WHEN data_exception THEN NULL;
@@ -142,7 +158,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-e', 'x', 'converse', 'anthropic',
-      'application-inference-profile', 'aws', '123456789012',
+      'application-inference-profile', 'aws', 'us-east-1', '123456789012',
       ARRAY['us-east-1']::text[],
       ARRAY['arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3',
             'arn:aws:s3:us-east-1::foundation-model/nope']::text[], '', true);
@@ -159,7 +175,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-e2', 'x', 'converse', 'anthropic',
-      'application-inference-profile', 'aws', '123456789012',
+      'application-inference-profile', 'aws', 'us-east-1', '123456789012',
       ARRAY['us-east-1']::text[],
       ARRAY['arn:aws:bedrock:us-east-1::foundation-model/*']::text[], '', true);
     RAISE EXCEPTION 'P6c FAIL: a wildcard underlying ARN was accepted';
@@ -172,13 +188,13 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-f1', 'x', 'converse', 'anthropic',
-      'foundation', 'gcp', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
+      'foundation', 'gcp', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: invalid partition gcp was accepted';
   EXCEPTION WHEN data_exception THEN NULL;
   END;
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-f2', 'x', 'converse', 'anthropic',
-      'not-a-type', 'aws', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
+      'not-a-type', 'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: invalid target_type was accepted';
   EXCEPTION WHEN data_exception THEN NULL;
   END;
@@ -189,8 +205,47 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-region', 'x', 'converse', 'anthropic',
-      'foundation', 'aws', NULL, ARRAY[]::text[], NULL, '', true);
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY[]::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: empty region_set was accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+END $$;
+
+-- Stored Bedrock endpoints and malformed/oversized/NULL-bearing arrays are rejected.
+DO $$
+BEGIN
+  BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-endpoint', 'x', 'converse', 'anthropic',
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1'], NULL,
+      'https://127.0.0.1:9999', true);
+    RAISE EXCEPTION 'P6c FAIL: stored Bedrock endpoint was accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-rank', 'x', 'converse', 'anthropic',
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY[['us-east-1']], NULL, '', true);
+    RAISE EXCEPTION 'P6c FAIL: multidimensional region array was accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-null-elem', 'x', 'converse', 'anthropic',
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1',NULL]::text[], NULL, '', true);
+    RAISE EXCEPTION 'P6c FAIL: NULL region element was accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-duplicate-region', 'x', 'converse', 'anthropic',
+      'application-inference-profile', 'aws', 'us-east-1', '123456789012',
+      ARRAY['us-east-1','us-east-1']::text[],
+      ARRAY['arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude'], '', true);
+    RAISE EXCEPTION 'P6c FAIL: duplicate destination region was accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-too-many', 'x', 'converse', 'anthropic',
+      'foundation', 'aws', 'us-east-1', NULL,
+      ARRAY(SELECT 'r-' || i::text FROM generate_series(1,65) AS i), NULL, '', true);
+    RAISE EXCEPTION 'P6c FAIL: 65-element region array was accepted';
   EXCEPTION WHEN data_exception THEN NULL;
   END;
 END $$;
@@ -200,7 +255,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-reject-g', 'x', 'converse', 'anthropic',
-      'provisioned', 'aws', 'abc', ARRAY['us-east-1']::text[], NULL, '', true);
+      'provisioned', 'aws', 'us-east-1', 'abc', ARRAY['us-east-1']::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: provisioned target with account=abc was accepted';
   EXCEPTION WHEN data_exception THEN NULL;
   END;
@@ -211,7 +266,7 @@ END $$;
 
 -- A valid provisioned target (12-digit account) upserts fine (positive control for g).
 SELECT org_catalog_bedrock_upsert('p6c-provisioned-ok', 'Prov', 'converse', 'anthropic',
-  'provisioned', 'aws', '123456789012', ARRAY['us-east-1']::text[], NULL, '', true);
+  'provisioned', 'aws', 'us-east-1', '123456789012', ARRAY['us-east-1']::text[], NULL, '', true);
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM org_model_catalog
@@ -222,7 +277,7 @@ END $$;
 
 -- A valid application-inference-profile with well-formed underlying FM ARNs upserts fine.
 SELECT org_catalog_bedrock_upsert('p6c-profile-ok', 'Profile', 'converse', 'anthropic',
-  'application-inference-profile', 'aws', '123456789012',
+  'application-inference-profile', 'aws', 'us-west-2', '123456789012',
   ARRAY['us-east-1','us-west-2']::text[],
   ARRAY['arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet',
         'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-3-haiku']::text[],
@@ -269,7 +324,7 @@ DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-appprofile-empty', 'AppProf', 'converse', 'anthropic',
-      'application-inference-profile', 'aws', '123456789012',
+      'application-inference-profile', 'aws', 'us-east-1', '123456789012',
       ARRAY['us-east-1'], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: application-inference-profile with empty fm-arns accepted';
   EXCEPTION WHEN data_exception THEN NULL;
@@ -295,7 +350,7 @@ DECLARE n0 bigint; n1 bigint; last_action text;
 BEGIN
   SELECT count(*) INTO n0 FROM kb_audit_event;
   PERFORM org_catalog_bedrock_upsert('p6c-audited', 'Audited', 'converse', 'amazon-nova',
-    'foundation', 'aws', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
+    'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
   SELECT count(*) INTO n1 FROM kb_audit_event;
   IF n1 <> n0 + 1 THEN
     RAISE EXCEPTION 'P6c FAIL: bedrock upsert did not append exactly one audit row (% -> %)', n0, n1;
@@ -305,6 +360,14 @@ BEGIN
     RAISE EXCEPTION 'P6c FAIL: newest audit action = % (want org_catalog_bedrock_upsert)', last_action;
   END IF;
 END $$;
+
+-- Bind representative models to the exact team used by the runtime authority checks.
+SELECT org_model_entitle('p6c-claude-foundation', 960001);
+SELECT org_model_entitle('p6c-profile-ok', 960001);
+SELECT org_model_entitle('p6c-legacy-null', 960001);
+SELECT org_model_entitle('p6c-disabled', 960001);
+SELECT org_model_entitle('p6c-native-invoke', 960001);
+SELECT org_model_entitle('p6c-openai', 960001);
 
 -- ----------------------------------------------------------------------------
 -- Drop to the runtime role; RLS + grants now govern every access.
@@ -324,13 +387,47 @@ BEGIN
   END;
 END $$;
 
+-- The sole runtime resolver returns the exact bounded tuple only for this actor, this
+-- request team, this entitlement, and a complete Converse target.
+DO $$
+DECLARE r record;
+BEGIN
+  SELECT * INTO r FROM org_catalog_bedrock_target(960001, 'p6c-profile-ok');
+  IF r.model_id IS NULL OR r.invoke_region <> 'us-west-2' OR r.partition <> 'aws'
+     OR r.account <> '123456789012' OR r.target_type <> 'application-inference-profile'
+     OR r.region_set_json::jsonb <> '["us-east-1","us-west-2"]'::jsonb
+     OR jsonb_array_length(r.underlying_json::jsonb) <> 2 OR r.endpoint <> '' THEN
+    RAISE EXCEPTION 'P6c FAIL: resolver tuple mismatch: %', row_to_json(r);
+  END IF;
+  IF EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960002, 'p6c-profile-ok')) THEN
+    RAISE EXCEPTION 'P6c FAIL: resolver crossed request-team GUC boundary';
+  END IF;
+  IF EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'p6c-provisioned-ok'))
+     OR EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'p6c-disabled'))
+     OR EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'p6c-native-invoke'))
+     OR EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'p6c-openai'))
+     OR EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'p6c-legacy-null'))
+     OR EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'does-not-exist')) THEN
+    RAISE EXCEPTION 'P6c FAIL: unavailable resolver cases leaked a row';
+  END IF;
+END $$;
+
+SELECT set_tenant_context('oidc:test:p6c_other_actor', NULL);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM org_catalog_bedrock_target(960001, 'p6c-profile-ok')) THEN
+    RAISE EXCEPTION 'P6c FAIL: cross-actor resolver access succeeded';
+  END IF;
+END $$;
+SELECT set_tenant_context('oidc:test:p6c_member_a', 960001);
+
 -- (j-cont) admin-only: a non-admin principal calling org_catalog_bedrock_upsert RAISEs
 -- 42501 (the runtime role's principal is a plain member, not an org admin).
 DO $$
 BEGIN
   BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-evil', 'Evil', 'converse', 'anthropic',
-      'foundation', 'aws', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
+      'foundation', 'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
     RAISE EXCEPTION 'P6c FAIL: a non-admin principal wrote a bedrock catalog row';
   EXCEPTION WHEN insufficient_privilege THEN NULL;  -- expected: admin-only (errcode 42501)
   END;
