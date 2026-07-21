@@ -194,6 +194,7 @@ static void output_snapshot(vault_reseal_orchestrator_output_t *o,
    o->fencing_token = s->fencing_token;
    o->old_generation = s->old_generation;
    o->new_generation = s->new_generation;
+   memset(o->failure_class, 0, sizeof(o->failure_class));
    if (s->failure_class[0])
    {
       memcpy(o->failure_class, s->failure_class, sizeof(o->failure_class) - 1);
