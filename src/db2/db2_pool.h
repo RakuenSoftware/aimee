@@ -49,6 +49,11 @@ extern "C"
     * is ignored. */
    void db2_pool_return(void *conn);
 
+   /* Unconditionally discard a leased member after transaction cleanup or
+    * connection integrity failure. The stale handle is never made available to
+    * another caller; the slot is reopened under the normal poison rate cap. */
+   void db2_pool_discard(void *conn);
+
    /* Drain + close all members; stop the reaper. After this db2_pool_active()
     * is false. */
    void db2_pool_shutdown(void);

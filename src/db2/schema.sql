@@ -2448,12 +2448,78 @@ DROP POLICY IF EXISTS p_vault_salt_admin_read ON org_vault_salt;
 CREATE POLICY p_vault_salt_admin_read ON org_vault_salt FOR SELECT
   USING (kb_principal_is_admin());
 
+-- P7 whole-vault maintenance admission barrier.  This singleton is owned by the
+-- database owner and deliberately has no RLS policy or runtime table API.  Later
+-- orchestration slices will add narrowly scoped transitions which take FOR UPDATE;
+-- steady-state entrypoints retain a conflicting FOR SHARE lock until commit.
+CREATE TABLE IF NOT EXISTS kb_vault_control (
+  singleton        SMALLINT PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
+  sealed           BOOLEAN NOT NULL DEFAULT false,
+  seal_epoch       BIGINT NOT NULL DEFAULT 1 CHECK (seal_epoch > 0),
+  maintenance_kind TEXT NOT NULL DEFAULT '' CHECK (char_length(maintenance_kind) <= 64),
+  maintenance_id   TEXT NOT NULL DEFAULT '' CHECK (char_length(maintenance_id) <= 200),
+  fencing_token    BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
+  updated_at       TEXT NOT NULL DEFAULT (pg_now_text()),
+  CHECK ((maintenance_kind = '') = (maintenance_id = '')),
+  CHECK (sealed OR (maintenance_kind = '' AND maintenance_id = ''))
+);
+INSERT INTO kb_vault_control(singleton) VALUES (1) ON CONFLICT (singleton) DO NOTHING;
+ALTER TABLE kb_vault_control ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE kb_vault_control FROM PUBLIC;
+
+-- Narrow startup seam: runtime may synchronize the process-local primary epoch
+-- without receiving direct table access and without requiring the vault open.
+CREATE OR REPLACE FUNCTION org_vault_control_startup_status()
+RETURNS TABLE(seal_epoch BIGINT,sealed BOOLEAN)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+  PERFORM pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  RETURN QUERY SELECT c.seal_epoch,c.sealed
+    FROM public.kb_vault_control AS c
+   WHERE c.singleton=1 FOR SHARE;
+END
+$$;
+REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION org_vault_control_require_open() RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_epoch BIGINT; v_sealed BOOLEAN; v_kind TEXT; v_id TEXT;
+BEGIN
+  PERFORM pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  SELECT seal_epoch,sealed,maintenance_kind,maintenance_id
+    INTO v_epoch,v_sealed,v_kind,v_id
+    FROM kb_vault_control WHERE singleton=1 FOR SHARE;
+  IF NOT FOUND OR v_sealed OR v_kind<>'' OR v_id<>'' THEN
+    RAISE EXCEPTION 'org_vault_control: sealed' USING ERRCODE='55000';
+  END IF;
+  RETURN v_epoch;
+END; $$;
+REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
+
+-- Owner/orchestrator-only writer gate.  It deliberately mutates nothing; later
+-- reseal slices must acquire this lock before their atomic control-row UPDATE.
+-- The fixed 64-bit key is shared only with org_vault_control_require_open.
+CREATE OR REPLACE FUNCTION org_vault_control_lock_exclusive() RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_epoch BIGINT;
+BEGIN
+  PERFORM pg_advisory_xact_lock(-7046029254386353131::BIGINT);
+  SELECT seal_epoch INTO v_epoch FROM kb_vault_control WHERE singleton=1 FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'org_vault_control: missing' USING ERRCODE='55000';
+  END IF;
+  RETURN v_epoch;
+END; $$;
+REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
+
 -- org_vault_salt_ensure: insert the principal's salt row if absent, return the effective
 -- salt (idempotent; the first writer wins so two concurrent unlocks converge on one salt).
 CREATE OR REPLACE FUNCTION org_vault_salt_ensure(p_principal TEXT, p_salt BYTEA) RETURNS BYTEA
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE s BYTEA;
 BEGIN
+  PERFORM org_vault_control_require_open();
   INSERT INTO org_vault_salt(principal, salt) VALUES (p_principal, p_salt)
     ON CONFLICT (principal) DO NOTHING;
   SELECT salt INTO s FROM org_vault_salt WHERE principal = p_principal;
@@ -2482,6 +2548,7 @@ $$;
 CREATE OR REPLACE FUNCTION org_vault_kek_check_set(p_principal TEXT, p_check BYTEA) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
+  PERFORM org_vault_control_require_open();
   UPDATE org_vault_salt SET kek_check = p_check
    WHERE principal = p_principal AND kek_check = '';
 END; $$;
@@ -2499,6 +2566,7 @@ CREATE OR REPLACE FUNCTION org_vault_put(
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v BIGINT; v_rot BOOLEAN := false;
 BEGIN
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:' || p_principal || '|' || p_agent || '|' || p_cred));
   IF to_regclass('public.org_vault_rotation') IS NOT NULL THEN
     EXECUTE 'SELECT EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=$1 AND agent=$2 '
@@ -2564,6 +2632,7 @@ CREATE OR REPLACE FUNCTION org_vault_delete(p_principal TEXT, p_agent TEXT, p_cr
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_rot BOOLEAN := false;
 BEGIN
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||p_principal||'|'||p_agent||'|'||p_cred));
   IF to_regclass('public.org_vault_rotation') IS NOT NULL THEN
     EXECUTE 'SELECT EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=$1 AND agent=$2 '
@@ -2597,6 +2666,7 @@ CREATE OR REPLACE FUNCTION org_vault_rewrap(
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_rot BOOLEAN := false;
 BEGIN
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||p_principal||'|'||p_agent||'|'||p_cred));
   IF to_regclass('public.org_vault_rotation') IS NOT NULL THEN
     EXECUTE 'SELECT EXISTS(SELECT 1 FROM org_vault_rotation WHERE principal=$1 AND agent=$2 '
@@ -2711,6 +2781,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,p_team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_start: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext(
     'orgvault:' || p_principal || '|' || COALESCE(p_agent,'') || '|' || COALESCE(p_cred,'')));
   SELECT c.version,s.team_id INTO v_cur,v_team FROM org_vault_current c
@@ -2772,6 +2843,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_stage: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_stage: unknown rotation'; END IF;
@@ -2817,6 +2889,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_transition: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_transition: unknown rotation'; END IF;
@@ -2847,6 +2920,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_finalize: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'org_vault_rotation_finalize: unknown rotation'; END IF;
@@ -2914,6 +2988,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_claim: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('orgvault:'||r.principal||'|'||r.agent||'|'||r.cred));
   SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
   IF r.state<>p_expected THEN
@@ -2947,6 +3022,7 @@ BEGIN
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_heartbeat: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   UPDATE org_vault_rotation SET claim_until=clock_timestamp()+make_interval(secs=>p_ttl_seconds),
     updated_at=pg_now_text() WHERE id=p_rotation_id AND claim_owner=p_owner AND
     claim_token=p_token AND claim_until>clock_timestamp();
@@ -2970,6 +3046,7 @@ BEGIN
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_release: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   UPDATE org_vault_rotation SET claim_owner='',claim_until=NULL,updated_at=pg_now_text()
     WHERE id=p_rotation_id AND claim_owner=p_owner AND claim_token=p_token;
   IF FOUND THEN
@@ -2989,8 +3066,13 @@ BEGIN
      COALESCE(p_old_ref,'')='' OR char_length(p_old_ref)>512 THEN
     RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: invalid ref' USING ERRCODE='22023';
   END IF;
-  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: not authorized' USING ERRCODE='42501';
+  END IF;
+  PERFORM org_vault_control_require_open();
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'org_vault_rotation_checkpoint_old_ref: not authorized' USING ERRCODE='42501';
   END IF;
   IF r.state<>'provision' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
@@ -3019,15 +3101,21 @@ BEGIN
      p_tag IS NULL OR octet_length(p_tag)<>16 THEN
     RAISE EXCEPTION 'org_vault_rotation_stage_claimed: invalid ref' USING ERRCODE='22023';
   END IF;
-  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_stage_claimed: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   IF r.state<>'provision' OR r.old_vendor_ref='' OR r.claim_owner<>p_owner OR
      r.claim_token<>p_token OR r.claim_until<=clock_timestamp() THEN
     RAISE EXCEPTION 'org_vault_rotation_stage_claimed: stale claim' USING ERRCODE='40001';
   END IF;
   v_version := org_vault_rotation_stage(p_actor,p_rotation_id,p_wrapped_dek,p_nonce,p_ciphertext,p_tag);
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR r.state<>'staged' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_stage_claimed: stale claim' USING ERRCODE='40001';
+  END IF;
   UPDATE org_vault_rotation SET new_vendor_ref=p_new_ref,claim_owner='',claim_until=NULL,
     updated_at=pg_now_text() WHERE id=p_rotation_id;
   RETURN v_version;
@@ -3043,8 +3131,13 @@ BEGIN
      COALESCE(p_operation_key,'')='' OR char_length(p_operation_key)>200 THEN
     RAISE EXCEPTION 'org_vault_rotation_probe_admit: invalid operation key' USING ERRCODE='22023';
   END IF;
-  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_probe_admit: not authorized' USING ERRCODE='42501';
+  END IF;
+  PERFORM org_vault_control_require_open();
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'org_vault_rotation_probe_admit: not authorized' USING ERRCODE='42501';
   END IF;
   IF r.state<>'staged' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
@@ -3073,10 +3166,11 @@ BEGIN
      char_length(COALESCE(p_receipt,''))>512 THEN
     RAISE EXCEPTION 'org_vault_rotation_transition_claimed: receipt too long' USING ERRCODE='22023';
   END IF;
-  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_transition_claimed: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   IF r.state<>p_expected OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
      r.claim_until<=clock_timestamp() THEN
     RAISE EXCEPTION 'org_vault_rotation_transition_claimed: stale claim' USING ERRCODE='40001';
@@ -3090,6 +3184,11 @@ BEGIN
       USING ERRCODE='40001';
   END IF;
   PERFORM org_vault_rotation_transition(p_actor,p_rotation_id,p_expected,p_next,'');
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR r.state<>p_next OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_transition_claimed: stale claim' USING ERRCODE='40001';
+  END IF;
   UPDATE org_vault_rotation SET revoke_receipt=CASE WHEN COALESCE(p_receipt,'')=''
       THEN revoke_receipt ELSE p_receipt END,claim_owner='',claim_until=NULL,updated_at=pg_now_text()
     WHERE id=p_rotation_id;
@@ -3107,15 +3206,21 @@ BEGIN
      char_length(COALESCE(p_error,''))>1000 THEN
     RAISE EXCEPTION 'org_vault_rotation_fail_claimed: invalid phase' USING ERRCODE='22023';
   END IF;
-  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
     RAISE EXCEPTION 'org_vault_rotation_fail_claimed: not authorized' USING ERRCODE='42501';
   END IF;
+  PERFORM org_vault_control_require_open();
   IF r.state<>p_expected OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
      r.claim_until<=clock_timestamp() THEN
     RAISE EXCEPTION 'org_vault_rotation_fail_claimed: stale claim' USING ERRCODE='40001';
   END IF;
   PERFORM org_vault_rotation_transition(p_actor,p_rotation_id,p_expected,'failed',p_error);
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND OR r.state<>'failed' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
+     r.claim_until<=clock_timestamp() THEN
+    RAISE EXCEPTION 'org_vault_rotation_fail_claimed: stale claim' USING ERRCODE='40001';
+  END IF;
   UPDATE org_vault_rotation SET failure_phase=p_phase,claim_owner='',claim_until=NULL,
     updated_at=pg_now_text() WHERE id=p_rotation_id;
 END; $$;
@@ -3131,8 +3236,13 @@ BEGIN
      p_anchor_version IS NULL OR COALESCE(p_evidence,'')='' OR char_length(p_evidence)>512 THEN
     RAISE EXCEPTION 'org_vault_rotation_remediate: evidence required' USING ERRCODE='22023';
   END IF;
-  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id;
   IF NOT FOUND OR NOT org_vault_rotation_authorized(p_actor,r.team_id) THEN
+    RAISE EXCEPTION 'org_vault_rotation_remediate: not authorized' USING ERRCODE='42501';
+  END IF;
+  PERFORM org_vault_control_require_open();
+  SELECT * INTO r FROM org_vault_rotation WHERE id=p_rotation_id FOR UPDATE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'org_vault_rotation_remediate: not authorized' USING ERRCODE='42501';
   END IF;
   IF r.state<>'failed' OR r.claim_owner<>p_owner OR r.claim_token<>p_token OR
@@ -3202,9 +3312,19 @@ CREATE TABLE IF NOT EXISTS org_vault_key_use_intent (
   provider TEXT NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 64),
   model TEXT NOT NULL CHECK (char_length(model) BETWEEN 1 AND 255),
   operation TEXT NOT NULL CHECK (char_length(operation) BETWEEN 1 AND 64),
+  seal_epoch BIGINT NOT NULL CHECK (seal_epoch > 0),
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
   PRIMARY KEY(team_id,authenticated_origin,use_id)
 );
+-- Existing immutable admissions predate the barrier and truthfully belong to its
+-- seeded epoch.  Backfill before making the migration column mandatory.
+ALTER TABLE org_vault_key_use_intent ADD COLUMN IF NOT EXISTS seal_epoch BIGINT;
+UPDATE org_vault_key_use_intent SET seal_epoch=1 WHERE seal_epoch IS NULL;
+ALTER TABLE org_vault_key_use_intent ALTER COLUMN seal_epoch SET NOT NULL;
+ALTER TABLE org_vault_key_use_intent ALTER COLUMN seal_epoch DROP DEFAULT;
+ALTER TABLE org_vault_key_use_intent DROP CONSTRAINT IF EXISTS org_vault_key_use_intent_seal_epoch_check;
+ALTER TABLE org_vault_key_use_intent ADD CONSTRAINT org_vault_key_use_intent_seal_epoch_check
+  CHECK (seal_epoch > 0);
 ALTER TABLE org_vault_key_use_intent ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION org_vault_key_use_candidate(
@@ -3244,14 +3364,17 @@ BEGIN
      s.hwm_attestation IS NOT NULL AND octet_length(s.hwm_attestation)>0;
 END; $$;
 
+-- seal_epoch extends the result shape, so upgrades must replace the old OUT row.
+DROP FUNCTION IF EXISTS org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+  BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA);
 CREATE OR REPLACE FUNCTION org_vault_key_use_admit(
   p_actor TEXT,p_team_id BIGINT,p_authenticated_origin TEXT,p_use_id TEXT,p_key_id TEXT,
   p_principal TEXT,p_agent TEXT,p_cred TEXT,p_version BIGINT,p_request_digest TEXT,
   p_provider TEXT,p_model TEXT,p_operation TEXT,p_hwm_attestation BYTEA
-) RETURNS TABLE(newly_admitted BOOLEAN,wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,
-                hwm_attestation BYTEA)
+) RETURNS TABLE(newly_admitted BOOLEAN,seal_epoch BIGINT,wrapped_dek BYTEA,nonce BYTEA,
+                ciphertext BYTEA,tag BYTEA,hwm_attestation BYTEA)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE i org_vault_key_use_intent%ROWTYPE; e org_vault_secret%ROWTYPE;
+DECLARE i org_vault_key_use_intent%ROWTYPE; e org_vault_secret%ROWTYPE; v_epoch BIGINT;
 BEGIN
   IF COALESCE(p_actor,'')='' OR p_team_id IS NULL OR p_team_id<1 OR
      COALESCE(p_authenticated_origin,'')='' OR char_length(p_authenticated_origin)>575 OR
@@ -3269,6 +3392,7 @@ BEGIN
   IF NOT org_vault_rotation_authorized(p_actor,p_team_id) THEN
     RAISE EXCEPTION 'org_vault_key_use_admit: not authorized' USING ERRCODE='42501';
   END IF;
+  v_epoch := org_vault_control_require_open();
   PERFORM pg_advisory_xact_lock(hashtext('vault-use:'||p_team_id::text||'|'||
     p_authenticated_origin||'|'||p_use_id));
   SELECT * INTO i FROM org_vault_key_use_intent WHERE team_id=p_team_id AND
@@ -3278,7 +3402,8 @@ BEGIN
        i.cred=COALESCE(p_cred,'') AND i.version=p_version AND
        i.request_digest=p_request_digest AND i.provider=p_provider AND i.model=p_model AND
        i.operation=p_operation THEN
-      RETURN QUERY SELECT false,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
+      RETURN QUERY SELECT false,i.seal_epoch,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,
+        NULL::BYTEA;
       RETURN;
     END IF;
     RAISE EXCEPTION 'org_vault_key_use_admit: replay mismatch' USING ERRCODE='23505';
@@ -3306,20 +3431,1152 @@ BEGIN
     RAISE EXCEPTION 'org_vault_key_use_admit: attestation mismatch' USING ERRCODE='40001';
   END IF;
   INSERT INTO org_vault_key_use_intent(team_id,authenticated_origin,use_id,key_id,principal,
-    agent,cred,version,request_digest,provider,model,operation)
+    agent,cred,version,request_digest,provider,model,operation,seal_epoch)
   VALUES(p_team_id,p_authenticated_origin,p_use_id,p_key_id,p_principal,COALESCE(p_agent,''),
-    COALESCE(p_cred,''),p_version,p_request_digest,p_provider,p_model,p_operation);
+    COALESCE(p_cred,''),p_version,p_request_digest,p_provider,p_model,p_operation,v_epoch);
   PERFORM kb_audit_worm_append('kb',p_actor,'vault.key_use',p_key_id,'allow',
     json_build_object('team_id',p_team_id,'origin',p_authenticated_origin,'use_id',p_use_id,
       'principal',p_principal,'agent',COALESCE(p_agent,''),'cred',COALESCE(p_cred,''),
       'version',p_version,'request_digest',p_request_digest,'provider',p_provider,
-      'model',p_model,'operation',p_operation)::text);
-  RETURN QUERY SELECT true,e.wrapped_dek,e.nonce,e.ciphertext,e.tag,e.hwm_attestation;
+      'model',p_model,'operation',p_operation,'seal_epoch',v_epoch)::text);
+  RETURN QUERY SELECT true,v_epoch,e.wrapped_dek,e.nonce,e.ciphertext,e.tag,e.hwm_attestation;
 END; $$;
 
 REVOKE ALL ON TABLE org_vault_key_use_intent FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) FROM PUBLIC;
+
+-- P7-reseal-d1: owner-only whole-vault re-wrap staging, completion, and
+-- fail-closed quarantine. No production caller exists in this slice.
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_operation (
+  operation_id TEXT PRIMARY KEY CHECK (operation_id ~ '^[0-9a-f]{32}$'),
+  request_id TEXT NOT NULL UNIQUE CHECK (octet_length(request_id) BETWEEN 1 AND 200),
+  actor TEXT NOT NULL CHECK (octet_length(actor) BETWEEN 1 AND 575),
+  state TEXT NOT NULL,
+  seal_epoch BIGINT NOT NULL CHECK (seal_epoch > 0),
+  fencing_token BIGINT NOT NULL CHECK (fencing_token > 0),
+  old_generation BIGINT NOT NULL CHECK (old_generation >= 0),
+  new_generation BIGINT NOT NULL CHECK (new_generation = old_generation + 1),
+  receipt BYTEA,
+  receipt_digest BYTEA CHECK (receipt_digest IS NULL OR octet_length(receipt_digest)=32),
+  secret_count BIGINT NOT NULL DEFAULT 0 CHECK (secret_count >= 0),
+  check_count BIGINT NOT NULL DEFAULT 0 CHECK (check_count >= 0),
+  inventory_digest BYTEA CHECK (inventory_digest IS NULL OR octet_length(inventory_digest)=32),
+  stage_digest BYTEA CHECK (stage_digest IS NULL OR octet_length(stage_digest)=32),
+  -- A class token, never exception text or operator-supplied diagnostics: this value
+  -- is copied into the immutable content-free WORM checkpoint.
+  failure_class TEXT NOT NULL DEFAULT '' CHECK (
+    failure_class='' OR failure_class ~ '^[a-z][a-z0-9_]{0,63}$'),
+  failure_from_state TEXT,
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  updated_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  CHECK ((receipt IS NULL AND receipt_digest IS NULL) OR
+         (octet_length(receipt) BETWEEN 1 AND 4096 AND receipt_digest IS NOT NULL))
+);
+ALTER TABLE kb_vault_rewrap_operation
+  ADD COLUMN IF NOT EXISTS failure_from_state TEXT;
+-- P7-reseal-c could already have terminal recovery rows. Recover their exact
+-- source phase from the immutable checkpoint that c wrote before d1 introduced
+-- the dedicated column. Dynamic SQL keeps the fresh-schema path valid because
+-- the WORM table is declared later in this file on first install.
+DO $p7_rewrap_failure_backfill$
+BEGIN
+  IF to_regclass('public.kb_vault_rewrap_worm') IS NOT NULL THEN
+    EXECUTE $sql$
+      UPDATE public.kb_vault_rewrap_operation AS o
+         SET failure_from_state=split_part(split_part(w.detail,';',1),'=',2)
+        FROM public.kb_vault_rewrap_worm AS w
+       WHERE o.state='recovery_required' AND o.failure_from_state IS NULL
+         AND w.operation_id=o.operation_id AND w.event_kind='recovery_required'
+         AND w.detail ~ '^from_state=(reseal_committing|resealed|promoted);class=[a-z][a-z0-9_]{0,63}$'
+         AND split_part(w.detail,';class=',2)=o.failure_class
+    $sql$;
+  END IF;
+END
+$p7_rewrap_failure_backfill$;
+ALTER TABLE kb_vault_rewrap_operation
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_operation_state_check;
+ALTER TABLE kb_vault_rewrap_operation
+  ADD CONSTRAINT kb_vault_rewrap_operation_state_check CHECK (state IN
+    ('preparing','custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
+     'completed','aborted','recovery_required'));
+ALTER TABLE kb_vault_rewrap_operation
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_state_fields_check;
+ALTER TABLE kb_vault_rewrap_operation
+  ADD CONSTRAINT kb_vault_rewrap_state_fields_check CHECK (
+    (state='preparing' AND receipt IS NULL AND inventory_digest IS NULL AND
+      stage_digest IS NULL AND secret_count=0 AND check_count=0 AND failure_class='' AND
+      failure_from_state IS NULL) OR
+    (state='custody_prepared' AND receipt IS NOT NULL AND inventory_digest IS NULL AND
+      stage_digest IS NULL AND secret_count=0 AND check_count=0 AND failure_class='' AND
+      failure_from_state IS NULL) OR
+    (state IN ('wraps_staged','reseal_committing','resealed','promoted') AND
+      receipt IS NOT NULL AND inventory_digest IS NOT NULL AND stage_digest IS NOT NULL AND
+      failure_class='' AND failure_from_state IS NULL) OR
+    (state='completed' AND receipt IS NOT NULL AND inventory_digest IS NOT NULL AND
+      stage_digest IS NOT NULL AND failure_class='' AND failure_from_state IS NULL) OR
+    (state='aborted' AND failure_class<>'' AND
+      failure_from_state IS NULL AND
+      ((receipt IS NULL AND inventory_digest IS NULL AND stage_digest IS NULL AND
+         secret_count=0 AND check_count=0) OR
+       (receipt IS NOT NULL AND inventory_digest IS NULL AND stage_digest IS NULL AND
+         secret_count=0 AND check_count=0) OR
+       (receipt IS NOT NULL AND inventory_digest IS NOT NULL AND stage_digest IS NOT NULL))) OR
+    (state='recovery_required' AND failure_class<>'' AND
+      ((failure_from_state='preparing' AND receipt IS NULL AND inventory_digest IS NULL AND
+         stage_digest IS NULL AND secret_count=0 AND check_count=0) OR
+       (failure_from_state='custody_prepared' AND receipt IS NOT NULL AND
+         inventory_digest IS NULL AND stage_digest IS NULL AND secret_count=0 AND check_count=0) OR
+       (failure_from_state IN ('wraps_staged','reseal_committing','resealed','promoted') AND
+         receipt IS NOT NULL AND inventory_digest IS NOT NULL AND stage_digest IS NOT NULL)))
+  );
+DROP INDEX IF EXISTS idx_kb_vault_rewrap_one_active;
+CREATE UNIQUE INDEX idx_kb_vault_rewrap_one_active
+  ON kb_vault_rewrap_operation((true))
+  WHERE state NOT IN ('aborted','recovery_required','completed');
+
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_dek_stage (
+  operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,
+  source_id BIGINT NOT NULL,
+  principal TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  cred TEXT NOT NULL,
+  version BIGINT NOT NULL CHECK (version > 0),
+  source_digest BYTEA NOT NULL CHECK (octet_length(source_digest)=32),
+  new_wrapped_dek BYTEA NOT NULL CHECK (octet_length(new_wrapped_dek)=40),
+  PRIMARY KEY(operation_id,source_id),
+  UNIQUE(operation_id,principal,agent,cred,version)
+);
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_check_stage (
+  operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,
+  principal TEXT NOT NULL,
+  source_digest BYTEA NOT NULL CHECK (octet_length(source_digest)=32),
+  new_kek_check BYTEA NOT NULL CHECK (octet_length(new_kek_check) IN (0,40)),
+  PRIMARY KEY(operation_id,principal)
+);
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_worm (
+  operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id),
+  event_kind TEXT NOT NULL,
+  event_id TEXT NOT NULL UNIQUE CHECK (event_id ~ '^[0-9a-f]{64}$'),
+  state TEXT NOT NULL,
+  seal_epoch BIGINT NOT NULL,
+  fencing_token BIGINT NOT NULL,
+  receipt_digest BYTEA CHECK (receipt_digest IS NULL OR octet_length(receipt_digest)=32),
+  inventory_digest BYTEA CHECK (inventory_digest IS NULL OR octet_length(inventory_digest)=32),
+  stage_digest BYTEA CHECK (stage_digest IS NULL OR octet_length(stage_digest)=32),
+  actor TEXT NOT NULL CHECK (octet_length(actor) BETWEEN 1 AND 575),
+  detail TEXT NOT NULL DEFAULT '' CHECK (octet_length(detail) <= 1000),
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY(operation_id,event_kind)
+);
+ALTER TABLE kb_vault_rewrap_worm
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_worm_event_kind_check;
+ALTER TABLE kb_vault_rewrap_worm
+  ADD CONSTRAINT kb_vault_rewrap_worm_event_kind_check CHECK
+    (event_kind IN ('intent','resealed','completed','abort','recovery_required'));
+ALTER TABLE kb_vault_rewrap_worm
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_worm_check;
+ALTER TABLE kb_vault_rewrap_worm
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_worm_event_state_check;
+ALTER TABLE kb_vault_rewrap_worm
+  ADD CONSTRAINT kb_vault_rewrap_worm_event_state_check CHECK
+    ((event_kind='intent' AND state='preparing') OR
+     (event_kind='resealed' AND state='resealed') OR
+     (event_kind='completed' AND state='completed') OR
+     (event_kind='abort' AND state='aborted') OR
+     (event_kind='recovery_required' AND state='recovery_required'));
+CREATE OR REPLACE FUNCTION org_vault_rewrap_worm_block() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN RAISE EXCEPTION 'WORM: kb_vault_rewrap_worm is append-only'; END; $$;
+DROP TRIGGER IF EXISTS kb_vault_rewrap_worm_no_update ON kb_vault_rewrap_worm;
+CREATE TRIGGER kb_vault_rewrap_worm_no_update BEFORE UPDATE ON kb_vault_rewrap_worm
+  FOR EACH ROW EXECUTE FUNCTION org_vault_rewrap_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_rewrap_worm_no_delete ON kb_vault_rewrap_worm;
+CREATE TRIGGER kb_vault_rewrap_worm_no_delete BEFORE DELETE ON kb_vault_rewrap_worm
+  FOR EACH ROW EXECUTE FUNCTION org_vault_rewrap_worm_block();
+DROP TRIGGER IF EXISTS kb_vault_rewrap_worm_no_truncate ON kb_vault_rewrap_worm;
+CREATE TRIGGER kb_vault_rewrap_worm_no_truncate BEFORE TRUNCATE ON kb_vault_rewrap_worm
+  FOR EACH STATEMENT EXECUTE FUNCTION org_vault_rewrap_worm_block();
+
+ALTER TABLE kb_vault_rewrap_operation ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_vault_rewrap_dek_stage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_vault_rewrap_check_stage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_vault_rewrap_worm ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE kb_vault_rewrap_operation,kb_vault_rewrap_dek_stage,
+  kb_vault_rewrap_check_stage,kb_vault_rewrap_worm FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_pack_text(p TEXT) RETURNS BYTEA
+LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT int4send(octet_length(convert_to(COALESCE(p,''),'UTF8'))) ||
+         convert_to(COALESCE(p,''),'UTF8');
+$$;
+CREATE OR REPLACE FUNCTION org_vault_rewrap_pack_bytes(p BYTEA) RETURNS BYTEA
+LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT int4send(octet_length(COALESCE(p,''::bytea))) || COALESCE(p,''::bytea);
+$$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_worm_append(p_op TEXT,p_kind TEXT,p_state TEXT,
+  p_detail TEXT DEFAULT '') RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE;
+  w public.kb_vault_rewrap_worm%ROWTYPE; v_event TEXT;
+BEGIN
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation
+    WHERE operation_id=p_op FOR UPDATE;
+  IF p_state<>o.state OR octet_length(COALESCE(p_detail,''))>1000 OR
+     NOT ((p_kind='intent' AND p_state='preparing') OR
+          (p_kind='resealed' AND p_state='resealed') OR
+          (p_kind='completed' AND p_state='completed') OR
+          (p_kind='abort' AND p_state='aborted') OR
+          (p_kind='recovery_required' AND p_state='recovery_required')) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_worm_append: invalid event' USING ERRCODE='22023';
+  END IF;
+  v_event:=encode(sha256(convert_to('aimee-vault-rewrap-worm-v1','UTF8') ||
+    public.org_vault_rewrap_pack_text(p_op) || public.org_vault_rewrap_pack_text(p_kind)),'hex');
+  INSERT INTO public.kb_vault_rewrap_worm(operation_id,event_kind,event_id,state,seal_epoch,
+    fencing_token,receipt_digest,inventory_digest,stage_digest,actor,detail)
+  VALUES(p_op,p_kind,v_event,p_state,o.seal_epoch,o.fencing_token,o.receipt_digest,
+    o.inventory_digest,o.stage_digest,o.actor,COALESCE(p_detail,''))
+  ON CONFLICT (operation_id,event_kind) DO NOTHING;
+  IF NOT FOUND THEN
+    SELECT * INTO STRICT w FROM public.kb_vault_rewrap_worm
+      WHERE operation_id=p_op AND event_kind=p_kind;
+    IF w.event_id<>v_event OR w.state<>p_state OR w.seal_epoch<>o.seal_epoch OR
+       w.fencing_token<>o.fencing_token OR
+       w.receipt_digest IS DISTINCT FROM o.receipt_digest OR
+       w.inventory_digest IS DISTINCT FROM o.inventory_digest OR
+       w.stage_digest IS DISTINCT FROM o.stage_digest OR w.actor<>o.actor OR
+       w.detail<>COALESCE(p_detail,'') THEN
+      RAISE EXCEPTION 'org_vault_rewrap_worm_append: replay mismatch' USING ERRCODE='23505';
+    END IF;
+  END IF;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_begin(p_actor TEXT,p_request TEXT,p_op TEXT,
+  p_old BIGINT,p_new BIGINT)
+RETURNS TABLE(operation_id TEXT,state TEXT,seal_epoch BIGINT,fencing_token BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; c public.kb_vault_control%ROWTYPE;
+BEGIN
+  IF octet_length(COALESCE(p_actor,'')) NOT BETWEEN 1 AND 575 OR
+     octet_length(COALESCE(p_request,'')) NOT BETWEEN 1 AND 200 OR
+     COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_old IS NULL OR p_new IS NULL OR
+     p_old<0 OR p_old=9223372036854775807 OR p_new<>p_old+1 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_begin: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO o FROM public.kb_vault_rewrap_operation WHERE request_id=p_request FOR UPDATE;
+  IF FOUND THEN
+    IF o.operation_id<>p_op OR o.actor<>p_actor OR o.old_generation<>p_old OR o.new_generation<>p_new THEN
+      RAISE EXCEPTION 'org_vault_rewrap_begin: replay mismatch' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT o.operation_id,o.state,o.seal_epoch,o.fencing_token; RETURN;
+  END IF;
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1;
+  IF c.sealed OR c.maintenance_kind<>'' OR c.maintenance_id<>'' OR
+     c.seal_epoch=9223372036854775807 OR c.fencing_token=9223372036854775807 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_begin: busy' USING ERRCODE='55000';
+  END IF;
+  IF EXISTS(SELECT 1 FROM public.org_vault_rotation r WHERE r.state<>'retired') OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation x
+       WHERE x.state NOT IN ('aborted','recovery_required','completed')) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_begin: busy' USING ERRCODE='55000';
+  END IF;
+  UPDATE public.kb_vault_control AS ctl SET sealed=true,seal_epoch=ctl.seal_epoch+1,
+    fencing_token=ctl.fencing_token+1,maintenance_kind='tpm2-reseal',maintenance_id=p_op,
+    updated_at=public.pg_now_text() WHERE ctl.singleton=1
+    RETURNING ctl.seal_epoch,ctl.fencing_token
+      INTO c.seal_epoch,c.fencing_token;
+  INSERT INTO public.kb_vault_rewrap_operation(operation_id,request_id,actor,state,seal_epoch,
+    fencing_token,old_generation,new_generation)
+  VALUES(p_op,p_request,p_actor,'preparing',c.seal_epoch,c.fencing_token,p_old,p_new)
+  RETURNING * INTO o;
+  PERFORM public.org_vault_rewrap_worm_append(p_op,'intent','preparing','');
+  RETURN QUERY SELECT o.operation_id,o.state,o.seal_epoch,o.fencing_token;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_record_prepared(p_op TEXT,p_fence BIGINT,
+  p_receipt BYTEA,p_digest BYTEA) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_receipt IS NULL OR octet_length(p_receipt) NOT BETWEEN 1 AND 4096 OR
+     p_digest IS NULL OR octet_length(p_digest)<>32 OR sha256(p_receipt)<>p_digest THEN
+    RAISE EXCEPTION 'org_vault_rewrap_record_prepared: invalid receipt' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state<>'preparing' THEN
+    IF o.fencing_token=p_fence AND o.receipt=p_receipt AND o.receipt_digest=p_digest AND
+       o.state IN ('custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
+                   'completed','aborted','recovery_required') AND
+       (o.state<>'recovery_required' OR o.failure_from_state<>'preparing') THEN
+      RETURN o.state;
+    END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_record_prepared: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence OR NOT EXISTS(SELECT 1 FROM public.kb_vault_control
+      WHERE singleton=1 AND sealed AND maintenance_kind='tpm2-reseal' AND
+      maintenance_id=p_op AND fencing_token=p_fence) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_record_prepared: stale fence' USING ERRCODE='40001';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='custody_prepared',receipt=p_receipt,
+    receipt_digest=p_digest,updated_at=public.pg_now_text() WHERE operation_id=p_op;
+  RETURN 'custody_prepared';
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_assert_live(p_op TEXT,p_fence BIGINT,
+  p_serializable BOOLEAN DEFAULT false) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+  IF p_serializable AND current_setting('transaction_isolation')<>'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap: serializable required' USING ERRCODE='25001';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM public.kb_vault_control WHERE singleton=1 AND sealed AND
+      maintenance_kind='tpm2-reseal' AND maintenance_id=p_op AND fencing_token=p_fence) OR
+     NOT EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op AND
+      fencing_token=p_fence AND state NOT IN ('aborted','recovery_required','completed')) THEN
+    RAISE EXCEPTION 'org_vault_rewrap: stale fence' USING ERRCODE='40001';
+  END IF;
+END; $$;
+
+DROP FUNCTION IF EXISTS org_vault_rewrap_status(TEXT);
+CREATE FUNCTION org_vault_rewrap_status(p_op TEXT)
+RETURNS TABLE(operation_id TEXT,state TEXT,seal_epoch BIGINT,fencing_token BIGINT,
+  old_generation BIGINT,new_generation BIGINT,receipt_digest BYTEA,secret_count BIGINT,
+  check_count BIGINT,inventory_digest BYTEA,stage_digest BYTEA,failure_class TEXT,
+  failure_from_state TEXT)
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT o.operation_id,o.state,o.seal_epoch,o.fencing_token,o.old_generation,o.new_generation,
+    o.receipt_digest,o.secret_count,o.check_count,o.inventory_digest,o.stage_digest,o.failure_class,
+    o.failure_from_state
+  FROM public.kb_vault_rewrap_operation o WHERE o.operation_id=p_op;
+$$;
+
+-- D2a recovery snapshot: one MVCC row including the canonical receipt bytes.
+-- Kept separate from the delivered status function to preserve that exact API.
+CREATE OR REPLACE FUNCTION org_vault_rewrap_snapshot(p_op TEXT)
+RETURNS TABLE(operation_id TEXT,state TEXT,seal_epoch BIGINT,fencing_token BIGINT,
+  old_generation BIGINT,new_generation BIGINT,receipt BYTEA,receipt_digest BYTEA,
+  secret_count BIGINT,check_count BIGINT,inventory_digest BYTEA,stage_digest BYTEA,
+  failure_class TEXT,failure_from_state TEXT)
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+  SELECT o.operation_id,o.state,o.seal_epoch,o.fencing_token,o.old_generation,o.new_generation,
+    o.receipt,o.receipt_digest,o.secret_count,o.check_count,o.inventory_digest,o.stage_digest,
+    o.failure_class,o.failure_from_state
+  FROM public.kb_vault_rewrap_operation AS o
+  WHERE o.operation_id OPERATOR(pg_catalog.=) p_op;
+$$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_secret_page(p_op TEXT,p_fence BIGINT,
+  p_after BIGINT,p_limit INTEGER)
+RETURNS TABLE(source_id BIGINT,principal TEXT,agent TEXT,cred TEXT,version BIGINT,
+  source_digest BYTEA,wrapped_dek BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 128 OR p_after IS NULL OR p_after<0 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_secret_page: invalid page' USING ERRCODE='22023';
+  END IF;
+  IF current_setting('transaction_isolation')<>'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_secret_page: serializable required' USING ERRCODE='25001';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF o.fencing_token<>p_fence OR o.state<>'custody_prepared' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_secret_page: state conflict' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT s.id,s.principal,s.agent,s.cred,s.version,sha256(s.wrapped_dek),s.wrapped_dek
+    FROM public.org_vault_secret s WHERE s.id>p_after ORDER BY s.id LIMIT p_limit;
+END; $$;
+
+-- D2a replaces the locale-sensitive TEXT cursor with an authoritative UTF-8
+-- BYTEA cursor. Drop the delivered overload so reapplication cannot leave a
+-- second, accidentally executable spelling behind.
+DROP FUNCTION IF EXISTS org_vault_rewrap_check_page(TEXT,BIGINT,TEXT,INTEGER);
+CREATE OR REPLACE FUNCTION org_vault_rewrap_check_page(p_op TEXT,p_fence BIGINT,
+  p_after BYTEA,p_limit INTEGER)
+RETURNS TABLE(principal TEXT,source_digest BYTEA,kek_check BYTEA,principal_cursor BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+     p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 OR p_after IS NULL OR
+     pg_catalog.octet_length(p_after) OPERATOR(pg_catalog.>) 640 OR p_limit IS NULL OR
+     p_limit OPERATOR(pg_catalog.<) 1 OR p_limit OPERATOR(pg_catalog.>) 128 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_check_page: invalid page' USING ERRCODE='22023';
+  END IF;
+  IF pg_catalog.current_setting('transaction_isolation') OPERATOR(pg_catalog.<>) 'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_check_page: serializable required' USING ERRCODE='25001';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation AS x
+    WHERE x.operation_id OPERATOR(pg_catalog.=) p_op FOR UPDATE;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF o.fencing_token OPERATOR(pg_catalog.<>) p_fence OR
+     o.state OPERATOR(pg_catalog.<>) 'custody_prepared' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_check_page: state conflict' USING ERRCODE='P7C01';
+  END IF;
+  RETURN QUERY SELECT s.principal,pg_catalog.sha256(s.kek_check),s.kek_check,
+      pg_catalog.convert_to(s.principal,'UTF8')
+    FROM public.org_vault_salt AS s
+    WHERE pg_catalog.convert_to(s.principal,'UTF8') OPERATOR(pg_catalog.>) p_after
+    ORDER BY pg_catalog.convert_to(s.principal,'UTF8') LIMIT p_limit;
+END; $$;
+REVOKE ALL ON FUNCTION org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_stage_dek(p_op TEXT,p_fence BIGINT,p_source BIGINT,
+  p_principal TEXT,p_agent TEXT,p_cred TEXT,p_version BIGINT,p_source_digest BYTEA,p_new BYTEA)
+RETURNS VOID LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE s public.org_vault_secret%ROWTYPE; x public.kb_vault_rewrap_dek_stage%ROWTYPE;
+  o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_source IS NULL OR p_source<1 OR COALESCE(p_principal,'')='' OR
+     p_agent IS NULL OR p_cred IS NULL OR p_version IS NULL OR p_version<1 OR
+     p_source_digest IS NULL OR octet_length(p_source_digest)<>32 OR
+     p_new IS NULL OR octet_length(p_new)<>40 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_dek: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  SELECT * INTO x FROM public.kb_vault_rewrap_dek_stage
+    WHERE operation_id=p_op AND source_id=p_source;
+  IF FOUND THEN
+    IF o.fencing_token<>p_fence OR x.source_digest<>p_source_digest OR x.new_wrapped_dek<>p_new OR
+       x.principal<>p_principal OR x.agent<>p_agent OR x.cred<>p_cred OR x.version<>p_version THEN
+      RAISE EXCEPTION 'org_vault_rewrap_stage_dek: replay mismatch' USING ERRCODE='23505';
+    END IF;
+    IF o.state NOT IN ('custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
+                       'completed','recovery_required') THEN
+      RAISE EXCEPTION 'org_vault_rewrap_stage_dek: state conflict' USING ERRCODE='40001';
+    END IF;
+    RETURN;
+  END IF;
+  IF o.fencing_token<>p_fence OR o.state<>'custody_prepared' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_dek: state conflict' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  SELECT * INTO STRICT s FROM public.org_vault_secret WHERE id=p_source;
+  IF s.principal<>p_principal OR s.agent<>p_agent OR s.cred<>p_cred OR s.version<>p_version OR
+     p_source_digest IS NULL OR octet_length(p_source_digest)<>32 OR
+     sha256(s.wrapped_dek)<>p_source_digest OR p_new IS NULL OR
+     octet_length(p_new)<>40 OR p_new=s.wrapped_dek THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_dek: source mismatch' USING ERRCODE='40001';
+  END IF;
+  INSERT INTO public.kb_vault_rewrap_dek_stage VALUES
+    (p_op,p_source,p_principal,p_agent,p_cred,p_version,p_source_digest,p_new);
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_stage_check(p_op TEXT,p_fence BIGINT,p_principal TEXT,
+  p_source_digest BYTEA,p_new BYTEA) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE s public.org_vault_salt%ROWTYPE; x public.kb_vault_rewrap_check_stage%ROWTYPE;
+  o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     COALESCE(p_principal,'')='' OR p_source_digest IS NULL OR
+     octet_length(p_source_digest)<>32 OR p_new IS NULL OR
+     octet_length(p_new) NOT IN (0,40) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_check: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  SELECT * INTO x FROM public.kb_vault_rewrap_check_stage
+    WHERE operation_id=p_op AND principal=p_principal;
+  IF FOUND THEN
+    IF o.fencing_token<>p_fence OR x.source_digest<>p_source_digest OR x.new_kek_check<>p_new THEN
+      RAISE EXCEPTION 'org_vault_rewrap_stage_check: replay mismatch' USING ERRCODE='23505';
+    END IF;
+    IF o.state NOT IN ('custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
+                       'completed','recovery_required') THEN
+      RAISE EXCEPTION 'org_vault_rewrap_stage_check: state conflict' USING ERRCODE='40001';
+    END IF;
+    RETURN;
+  END IF;
+  IF o.fencing_token<>p_fence OR o.state<>'custody_prepared' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_check: state conflict' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  SELECT * INTO STRICT s FROM public.org_vault_salt WHERE principal=p_principal;
+  IF p_source_digest IS NULL OR octet_length(p_source_digest)<>32 OR
+     sha256(s.kek_check)<>p_source_digest OR p_new IS NULL OR
+     octet_length(p_new) NOT IN (0,40) OR
+     (octet_length(s.kek_check)=0)<>(octet_length(p_new)=0) OR
+     (octet_length(s.kek_check)>0 AND p_new=s.kek_check) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_check: source mismatch' USING ERRCODE='40001';
+  END IF;
+  INSERT INTO public.kb_vault_rewrap_check_stage VALUES(p_op,p_principal,p_source_digest,p_new);
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_digests(p_op TEXT)
+RETURNS TABLE(secret_count BIGINT,check_count BIGINT,inventory_digest BYTEA,stage_digest BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE r RECORD; sc BIGINT:=0; cc BIGINT:=0; ss BIGINT:=0; cs BIGINT:=0;
+  si BYTEA:=sha256(convert_to('aimee-vault-rewrap-secret-inventory-v1','UTF8'));
+  ci BYTEA:=sha256(convert_to('aimee-vault-rewrap-check-inventory-v1','UTF8'));
+  st BYTEA:=sha256(convert_to('aimee-vault-rewrap-secret-stage-v1','UTF8'));
+  ct BYTEA:=sha256(convert_to('aimee-vault-rewrap-check-stage-v1','UTF8'));
+BEGIN
+  FOR r IN SELECT id,principal,agent,cred,version,wrapped_dek
+      FROM public.org_vault_secret ORDER BY id LOOP
+    si:=sha256(si||decode('53','hex')||int8send(r.id)||
+      public.org_vault_rewrap_pack_text(r.principal)||public.org_vault_rewrap_pack_text(r.agent)||
+      public.org_vault_rewrap_pack_text(r.cred)||int8send(r.version)||
+      public.org_vault_rewrap_pack_bytes(r.wrapped_dek));
+    IF sc=9223372036854775807 THEN
+      RAISE EXCEPTION 'org_vault_rewrap_digests: secret count exhausted' USING ERRCODE='22003';
+    END IF;
+    sc:=sc+1;
+  END LOOP;
+  FOR r IN SELECT principal,kek_check FROM public.org_vault_salt ORDER BY principal COLLATE "C" LOOP
+    ci:=sha256(ci||decode('56','hex')||public.org_vault_rewrap_pack_text(r.principal)||
+      public.org_vault_rewrap_pack_bytes(r.kek_check));
+    IF cc=9223372036854775807 THEN
+      RAISE EXCEPTION 'org_vault_rewrap_digests: check count exhausted' USING ERRCODE='22003';
+    END IF;
+    cc:=cc+1;
+  END LOOP;
+  FOR r IN SELECT source_id,principal,agent,cred,version,source_digest,new_wrapped_dek
+      FROM public.kb_vault_rewrap_dek_stage WHERE operation_id=p_op ORDER BY source_id LOOP
+    st:=sha256(st||decode('53','hex')||int8send(r.source_id)||
+      public.org_vault_rewrap_pack_text(r.principal)||public.org_vault_rewrap_pack_text(r.agent)||
+      public.org_vault_rewrap_pack_text(r.cred)||int8send(r.version)||r.source_digest||
+      public.org_vault_rewrap_pack_bytes(r.new_wrapped_dek));
+    IF ss=9223372036854775807 THEN
+      RAISE EXCEPTION 'org_vault_rewrap_digests: secret stage count exhausted'
+        USING ERRCODE='22003';
+    END IF;
+    ss:=ss+1;
+  END LOOP;
+  FOR r IN SELECT principal,source_digest,new_kek_check
+      FROM public.kb_vault_rewrap_check_stage WHERE operation_id=p_op
+      ORDER BY principal COLLATE "C" LOOP
+    ct:=sha256(ct||decode('56','hex')||public.org_vault_rewrap_pack_text(r.principal)||
+      r.source_digest||public.org_vault_rewrap_pack_bytes(r.new_kek_check));
+    IF cs=9223372036854775807 THEN
+      RAISE EXCEPTION 'org_vault_rewrap_digests: check stage count exhausted'
+        USING ERRCODE='22003';
+    END IF;
+    cs:=cs+1;
+  END LOOP;
+  secret_count:=sc; check_count:=cc;
+  inventory_digest:=sha256(convert_to('aimee-vault-rewrap-inventory-v1','UTF8')||
+    int8send(sc)||si||int8send(cc)||ci);
+  stage_digest:=sha256(convert_to('aimee-vault-rewrap-stage-v1','UTF8')||
+    int8send(ss)||st||int8send(cs)||ct);
+  RETURN NEXT;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_stage_finish(p_op TEXT,p_fence BIGINT) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; d RECORD;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state<>'custody_prepared' THEN
+    IF o.fencing_token=p_fence AND
+       o.state IN ('wraps_staged','reseal_committing','resealed','promoted','aborted',
+                   'completed','recovery_required') AND
+       o.inventory_digest IS NOT NULL AND o.stage_digest IS NOT NULL THEN RETURN o.state; END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: stale fence' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF EXISTS(SELECT 1 FROM public.org_vault_secret s LEFT JOIN public.kb_vault_rewrap_dek_stage x
+      ON x.operation_id=p_op AND x.source_id=s.id WHERE x.source_id IS NULL OR
+      x.principal<>s.principal OR x.agent<>s.agent OR x.cred<>s.cred OR x.version<>s.version OR
+      x.source_digest<>sha256(s.wrapped_dek) OR octet_length(x.new_wrapped_dek)<>40 OR
+      x.new_wrapped_dek=s.wrapped_dek) OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_dek_stage x LEFT JOIN public.org_vault_secret s
+      ON s.id=x.source_id WHERE x.operation_id=p_op AND s.id IS NULL) OR
+     EXISTS(SELECT 1 FROM public.org_vault_salt s LEFT JOIN public.kb_vault_rewrap_check_stage x
+      ON x.operation_id=p_op AND x.principal=s.principal WHERE x.principal IS NULL OR
+      x.source_digest<>sha256(s.kek_check) OR octet_length(x.new_kek_check) NOT IN (0,40) OR
+      (octet_length(s.kek_check)=0)<>(octet_length(x.new_kek_check)=0) OR
+      (octet_length(s.kek_check)>0 AND x.new_kek_check=s.kek_check)) OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_check_stage x LEFT JOIN public.org_vault_salt s
+      ON s.principal=x.principal WHERE x.operation_id=p_op AND s.principal IS NULL) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: inventory mismatch' USING ERRCODE='40001';
+  END IF;
+  SELECT * INTO STRICT d FROM public.org_vault_rewrap_digests(p_op);
+  IF d.secret_count<>(SELECT count(*) FROM public.kb_vault_rewrap_dek_stage WHERE operation_id=p_op)
+     OR d.check_count<>(SELECT count(*) FROM public.kb_vault_rewrap_check_stage WHERE operation_id=p_op) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: count mismatch' USING ERRCODE='40001';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='wraps_staged',secret_count=d.secret_count,
+    check_count=d.check_count,inventory_digest=d.inventory_digest,stage_digest=d.stage_digest,
+    updated_at=public.pg_now_text() WHERE operation_id=p_op;
+  RETURN 'wraps_staged';
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_mark_committing(p_op TEXT,p_fence BIGINT)
+RETURNS TEXT LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_mark_committing: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state<>'wraps_staged' THEN
+    IF o.fencing_token=p_fence AND o.receipt_digest IS NOT NULL AND
+       o.inventory_digest IS NOT NULL AND o.stage_digest IS NOT NULL AND
+       (o.state IN ('reseal_committing','resealed','promoted') OR
+        (o.state='completed' AND EXISTS(SELECT 1 FROM public.kb_vault_rewrap_worm w
+          WHERE w.operation_id=p_op AND w.event_kind='completed' AND w.state='completed' AND
+            w.fencing_token=p_fence AND w.receipt_digest=o.receipt_digest AND
+            w.inventory_digest=o.inventory_digest AND w.stage_digest=o.stage_digest)) OR
+        (o.state='recovery_required' AND
+          o.failure_from_state IN ('reseal_committing','resealed','promoted') AND
+          (o.failure_from_state='reseal_committing' OR EXISTS(SELECT 1
+             FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+               w.event_kind='resealed' AND w.state='resealed' AND
+               w.fencing_token=p_fence AND w.receipt_digest=o.receipt_digest)))) THEN
+      RETURN o.state;
+    END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_mark_committing: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_mark_committing: stale fence' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,false);
+  UPDATE public.kb_vault_rewrap_operation SET state='reseal_committing',
+    updated_at=public.pg_now_text() WHERE operation_id=p_op;
+  RETURN 'reseal_committing';
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_mark_resealed(p_op TEXT,p_fence BIGINT,
+  p_receipt_digest BYTEA) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_receipt_digest IS NULL OR octet_length(p_receipt_digest)<>32 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_mark_resealed: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state<>'reseal_committing' THEN
+    IF o.fencing_token=p_fence AND o.receipt_digest=p_receipt_digest AND
+       (o.state IN ('resealed','promoted') OR
+        (o.state='completed' AND EXISTS(SELECT 1
+          FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+            w.event_kind='completed' AND w.state='completed' AND w.fencing_token=p_fence AND
+            w.receipt_digest=p_receipt_digest AND w.inventory_digest=o.inventory_digest AND
+            w.stage_digest=o.stage_digest)) OR
+        (o.state='recovery_required' AND
+         o.failure_from_state IN ('resealed','promoted') AND EXISTS(SELECT 1
+          FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+            w.event_kind='resealed' AND w.state='resealed' AND w.fencing_token=p_fence AND
+            w.receipt_digest=p_receipt_digest))) THEN
+      RETURN o.state;
+    END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_mark_resealed: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence OR o.receipt_digest<>p_receipt_digest THEN
+    RAISE EXCEPTION 'org_vault_rewrap_mark_resealed: receipt/fence mismatch'
+      USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,false);
+  UPDATE public.kb_vault_rewrap_operation SET state='resealed',updated_at=public.pg_now_text()
+    WHERE operation_id=p_op;
+  PERFORM public.org_vault_rewrap_worm_append(p_op,'resealed','resealed','');
+  RETURN 'resealed';
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_promote(p_op TEXT,p_fence BIGINT) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; d RECORD;
+  v_secrets BIGINT; v_checks BIGINT;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF current_setting('transaction_isolation')<>'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: serializable required' USING ERRCODE='25001';
+  END IF;
+  IF o.state='recovery_required' AND o.fencing_token=p_fence AND
+      o.failure_from_state='promoted' AND EXISTS(SELECT 1
+      FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+        w.event_kind='recovery_required' AND
+        w.detail=('from_state=promoted;class='||o.failure_class)) THEN
+    RETURN 'recovery_required';
+  END IF;
+  IF o.state='completed' AND o.fencing_token=p_fence AND EXISTS(SELECT 1
+      FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+        w.event_kind='completed' AND w.state='completed' AND w.fencing_token=p_fence AND
+        w.receipt_digest=o.receipt_digest AND w.inventory_digest=o.inventory_digest AND
+        w.stage_digest=o.stage_digest) THEN
+    RETURN 'completed';
+  END IF;
+  IF o.state='promoted' THEN
+    IF o.fencing_token=p_fence THEN RETURN 'promoted'; END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_promote: stale fence' USING ERRCODE='40001';
+  END IF;
+  IF o.state<>'resealed' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: stale fence' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF EXISTS(SELECT 1 FROM public.org_vault_secret s
+      LEFT JOIN public.kb_vault_rewrap_dek_stage x
+        ON x.operation_id=p_op AND x.source_id=s.id
+      WHERE x.source_id IS NULL OR x.principal<>s.principal OR x.agent<>s.agent OR
+        x.cred<>s.cred OR x.version<>s.version OR x.source_digest<>sha256(s.wrapped_dek)) OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_dek_stage x
+      LEFT JOIN public.org_vault_secret s ON s.id=x.source_id
+      WHERE x.operation_id=p_op AND s.id IS NULL) OR
+     EXISTS(SELECT 1 FROM public.org_vault_salt s
+      LEFT JOIN public.kb_vault_rewrap_check_stage x
+        ON x.operation_id=p_op AND x.principal=s.principal
+      WHERE x.principal IS NULL OR x.source_digest<>sha256(s.kek_check)) OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_check_stage x
+      LEFT JOIN public.org_vault_salt s ON s.principal=x.principal
+      WHERE x.operation_id=p_op AND s.principal IS NULL) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: inventory mismatch' USING ERRCODE='40001';
+  END IF;
+  SELECT * INTO STRICT d FROM public.org_vault_rewrap_digests(p_op);
+  IF d.secret_count<>o.secret_count OR d.check_count<>o.check_count OR
+     d.inventory_digest<>o.inventory_digest OR d.stage_digest<>o.stage_digest OR
+     o.secret_count<>(SELECT count(*) FROM public.kb_vault_rewrap_dek_stage
+       WHERE operation_id=p_op) OR
+     o.check_count<>(SELECT count(*) FROM public.kb_vault_rewrap_check_stage
+       WHERE operation_id=p_op) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: digest/count mismatch' USING ERRCODE='40001';
+  END IF;
+  UPDATE public.org_vault_secret s SET wrapped_dek=x.new_wrapped_dek
+    FROM public.kb_vault_rewrap_dek_stage x
+    WHERE x.operation_id=p_op AND s.id=x.source_id AND s.principal=x.principal AND
+      s.agent=x.agent AND s.cred=x.cred AND s.version=x.version AND
+      sha256(s.wrapped_dek)=x.source_digest;
+  GET DIAGNOSTICS v_secrets = ROW_COUNT;
+  IF v_secrets<>o.secret_count THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: secret update count mismatch'
+      USING ERRCODE='40001';
+  END IF;
+  UPDATE public.org_vault_salt s SET kek_check=x.new_kek_check
+    FROM public.kb_vault_rewrap_check_stage x
+    WHERE x.operation_id=p_op AND s.principal=x.principal AND
+      sha256(s.kek_check)=x.source_digest;
+  GET DIAGNOSTICS v_checks = ROW_COUNT;
+  IF v_checks<>o.check_count THEN
+    RAISE EXCEPTION 'org_vault_rewrap_promote: check update count mismatch'
+      USING ERRCODE='40001';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='promoted',updated_at=public.pg_now_text()
+    WHERE operation_id=p_op;
+  RETURN 'promoted';
+END; $$;
+
+-- D2a post-promotion verification is a read-only proof over one caller-owned
+-- SERIALIZABLE transaction. It never completes or mutates an operation.
+CREATE OR REPLACE FUNCTION org_vault_rewrap_verify_summary(p_op TEXT,p_fence BIGINT)
+RETURNS TABLE(secret_count BIGINT,check_count BIGINT,receipt_digest BYTEA,
+  inventory_digest BYTEA,stage_digest BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; w public.kb_vault_rewrap_worm%ROWTYPE;
+  r RECORD; ss BIGINT:=0; cs BIGINT:=0;
+  st BYTEA:=pg_catalog.sha256(pg_catalog.convert_to('aimee-vault-rewrap-secret-stage-v1','UTF8'));
+  ct BYTEA:=pg_catalog.sha256(pg_catalog.convert_to('aimee-vault-rewrap-check-stage-v1','UTF8'));
+  computed BYTEA;
+BEGIN
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+     p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF pg_catalog.current_setting('transaction_isolation') OPERATOR(pg_catalog.<>) 'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: serializable required' USING ERRCODE='25001';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation AS x
+    WHERE x.operation_id OPERATOR(pg_catalog.=) p_op FOR UPDATE;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF o.state OPERATOR(pg_catalog.<>) 'promoted' OR
+     o.fencing_token OPERATOR(pg_catalog.<>) p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: state/fence conflict' USING ERRCODE='P7C01';
+  END IF;
+
+  IF o.receipt IS NULL OR
+     pg_catalog.octet_length(o.receipt) OPERATOR(pg_catalog.<>) 208 OR
+     o.receipt_digest IS NULL OR
+     pg_catalog.octet_length(o.receipt_digest) OPERATOR(pg_catalog.<>) 32 OR
+     pg_catalog.sha256(o.receipt) OPERATOR(pg_catalog.<>) o.receipt_digest OR
+     o.inventory_digest IS NULL OR
+     pg_catalog.octet_length(o.inventory_digest) OPERATOR(pg_catalog.<>) 32 OR
+     o.stage_digest IS NULL OR
+     pg_catalog.octet_length(o.stage_digest) OPERATOR(pg_catalog.<>) 32 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: operation evidence mismatch'
+      USING ERRCODE='P7I01';
+  END IF;
+
+  IF o.secret_count OPERATOR(pg_catalog.<>)
+       (SELECT pg_catalog.count(*) FROM public.kb_vault_rewrap_dek_stage AS x
+        WHERE x.operation_id OPERATOR(pg_catalog.=) p_op) OR
+     o.secret_count OPERATOR(pg_catalog.<>)
+       (SELECT pg_catalog.count(*) FROM public.org_vault_secret) OR
+     o.check_count OPERATOR(pg_catalog.<>)
+       (SELECT pg_catalog.count(*) FROM public.kb_vault_rewrap_check_stage AS x
+        WHERE x.operation_id OPERATOR(pg_catalog.=) p_op) OR
+     o.check_count OPERATOR(pg_catalog.<>)
+       (SELECT pg_catalog.count(*) FROM public.org_vault_salt) OR
+     EXISTS(SELECT 1 FROM public.org_vault_secret AS s
+       FULL JOIN (SELECT y.* FROM public.kb_vault_rewrap_dek_stage AS y
+                    WHERE y.operation_id OPERATOR(pg_catalog.=) p_op) AS x
+         ON x.source_id OPERATOR(pg_catalog.=) s.id
+       WHERE s.id IS NULL OR x.source_id IS NULL OR
+         pg_catalog.octet_length(x.source_digest) OPERATOR(pg_catalog.<>) 32 OR
+         pg_catalog.octet_length(x.new_wrapped_dek) OPERATOR(pg_catalog.<>) 40 OR
+         pg_catalog.octet_length(s.wrapped_dek) OPERATOR(pg_catalog.<>) 40 OR
+         x.principal OPERATOR(pg_catalog.<>) s.principal OR
+         x.agent OPERATOR(pg_catalog.<>) s.agent OR
+         x.cred OPERATOR(pg_catalog.<>) s.cred OR
+         x.version OPERATOR(pg_catalog.<>) s.version OR
+         x.new_wrapped_dek OPERATOR(pg_catalog.<>) s.wrapped_dek) OR
+     EXISTS(SELECT 1 FROM public.org_vault_salt AS s
+       FULL JOIN (SELECT y.* FROM public.kb_vault_rewrap_check_stage AS y
+                    WHERE y.operation_id OPERATOR(pg_catalog.=) p_op) AS x
+         ON x.principal OPERATOR(pg_catalog.=) s.principal
+       WHERE s.principal IS NULL OR x.principal IS NULL OR
+         pg_catalog.octet_length(x.source_digest) OPERATOR(pg_catalog.<>) 32 OR
+         pg_catalog.octet_length(x.new_kek_check) NOT IN (0,40) OR
+         pg_catalog.octet_length(s.kek_check) NOT IN (0,40) OR
+         x.new_kek_check OPERATOR(pg_catalog.<>) s.kek_check) THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: promoted inventory mismatch'
+      USING ERRCODE='P7I01';
+  END IF;
+
+  FOR r IN SELECT x.source_id,x.principal,x.agent,x.cred,x.version,x.source_digest,
+      x.new_wrapped_dek FROM public.kb_vault_rewrap_dek_stage AS x
+      WHERE x.operation_id OPERATOR(pg_catalog.=) p_op ORDER BY x.source_id LOOP
+    st:=pg_catalog.sha256(st OPERATOR(pg_catalog.||) pg_catalog.decode('53','hex')
+      OPERATOR(pg_catalog.||) pg_catalog.int8send(r.source_id)
+      OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_text(r.principal)
+      OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_text(r.agent)
+      OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_text(r.cred)
+      OPERATOR(pg_catalog.||) pg_catalog.int8send(r.version)
+      OPERATOR(pg_catalog.||) r.source_digest
+      OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_bytes(r.new_wrapped_dek));
+    IF ss OPERATOR(pg_catalog.=) 9223372036854775807 THEN
+      RAISE EXCEPTION 'org_vault_rewrap_verify_summary: secret count exhausted' USING ERRCODE='22003';
+    END IF;
+    ss:=ss OPERATOR(pg_catalog.+) 1;
+  END LOOP;
+  FOR r IN SELECT x.principal,x.source_digest,x.new_kek_check
+      FROM public.kb_vault_rewrap_check_stage AS x
+      WHERE x.operation_id OPERATOR(pg_catalog.=) p_op
+      ORDER BY pg_catalog.convert_to(x.principal,'UTF8') LOOP
+    ct:=pg_catalog.sha256(ct OPERATOR(pg_catalog.||) pg_catalog.decode('56','hex')
+      OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_text(r.principal)
+      OPERATOR(pg_catalog.||) r.source_digest
+      OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_bytes(r.new_kek_check));
+    IF cs OPERATOR(pg_catalog.=) 9223372036854775807 THEN
+      RAISE EXCEPTION 'org_vault_rewrap_verify_summary: check count exhausted' USING ERRCODE='22003';
+    END IF;
+    cs:=cs OPERATOR(pg_catalog.+) 1;
+  END LOOP;
+  computed:=pg_catalog.sha256(
+    pg_catalog.convert_to('aimee-vault-rewrap-stage-v1','UTF8')
+    OPERATOR(pg_catalog.||) pg_catalog.int8send(ss)
+    OPERATOR(pg_catalog.||) st
+    OPERATOR(pg_catalog.||) pg_catalog.int8send(cs)
+    OPERATOR(pg_catalog.||) ct);
+  IF ss OPERATOR(pg_catalog.<>) o.secret_count OR
+     cs OPERATOR(pg_catalog.<>) o.check_count OR
+     computed OPERATOR(pg_catalog.<>) o.stage_digest THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: stage digest mismatch' USING ERRCODE='P7I01';
+  END IF;
+
+  BEGIN
+    SELECT * INTO STRICT w FROM public.kb_vault_rewrap_worm AS x
+      WHERE x.operation_id OPERATOR(pg_catalog.=) p_op AND
+        x.event_kind OPERATOR(pg_catalog.=) 'resealed';
+  EXCEPTION
+    WHEN NO_DATA_FOUND OR TOO_MANY_ROWS THEN
+      RAISE EXCEPTION 'org_vault_rewrap_verify_summary: checkpoint cardinality mismatch'
+        USING ERRCODE='P7I01';
+  END;
+  IF w.event_id OPERATOR(pg_catalog.<>) pg_catalog.encode(pg_catalog.sha256(
+       pg_catalog.convert_to('aimee-vault-rewrap-worm-v1','UTF8')
+       OPERATOR(pg_catalog.||) public.org_vault_rewrap_pack_text(p_op)
+       OPERATOR(pg_catalog.||)
+       public.org_vault_rewrap_pack_text('resealed')),'hex') OR
+     w.state OPERATOR(pg_catalog.<>) 'resealed' OR
+     w.seal_epoch OPERATOR(pg_catalog.<>) o.seal_epoch OR
+     w.fencing_token OPERATOR(pg_catalog.<>) o.fencing_token OR
+     w.receipt_digest IS DISTINCT FROM o.receipt_digest OR
+     w.inventory_digest IS DISTINCT FROM o.inventory_digest OR
+     w.stage_digest IS DISTINCT FROM o.stage_digest OR
+     w.actor OPERATOR(pg_catalog.<>) o.actor OR w.detail OPERATOR(pg_catalog.<>) '' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_summary: checkpoint mismatch' USING ERRCODE='P7I01';
+  END IF;
+  secret_count:=o.secret_count; check_count:=o.check_count;
+  receipt_digest:=o.receipt_digest; inventory_digest:=o.inventory_digest;
+  stage_digest:=o.stage_digest; RETURN NEXT;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_verify_secret_page(p_op TEXT,p_fence BIGINT,
+  p_after BIGINT,p_limit INTEGER)
+RETURNS TABLE(source_id BIGINT,principal TEXT,agent TEXT,cred TEXT,version BIGINT,wrapped_dek BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+     p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 OR
+     p_after IS NULL OR p_after OPERATOR(pg_catalog.<) 0 OR p_limit IS NULL OR
+     p_limit OPERATOR(pg_catalog.<) 1 OR p_limit OPERATOR(pg_catalog.>) 128 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_secret_page: invalid page' USING ERRCODE='22023';
+  END IF;
+  IF pg_catalog.current_setting('transaction_isolation') OPERATOR(pg_catalog.<>) 'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_secret_page: serializable required' USING ERRCODE='25001';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF NOT EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation AS o
+      WHERE o.operation_id OPERATOR(pg_catalog.=) p_op AND
+        o.fencing_token OPERATOR(pg_catalog.=) p_fence AND
+        o.state OPERATOR(pg_catalog.=) 'promoted') THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_secret_page: state/fence conflict' USING ERRCODE='P7C01';
+  END IF;
+  RETURN QUERY SELECT s.id,s.principal,s.agent,s.cred,s.version,s.wrapped_dek
+    FROM public.org_vault_secret AS s JOIN public.kb_vault_rewrap_dek_stage AS x
+      ON x.operation_id OPERATOR(pg_catalog.=) p_op AND
+         x.source_id OPERATOR(pg_catalog.=) s.id AND
+         x.principal OPERATOR(pg_catalog.=) s.principal AND
+         x.agent OPERATOR(pg_catalog.=) s.agent AND
+         x.cred OPERATOR(pg_catalog.=) s.cred AND
+         x.version OPERATOR(pg_catalog.=) s.version AND
+         x.new_wrapped_dek OPERATOR(pg_catalog.=) s.wrapped_dek
+    WHERE s.id OPERATOR(pg_catalog.>) p_after ORDER BY s.id LIMIT p_limit;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_verify_check_page(p_op TEXT,p_fence BIGINT,
+  p_after BYTEA,p_limit INTEGER)
+RETURNS TABLE(principal TEXT,kek_check BYTEA,principal_cursor BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+     p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 OR p_after IS NULL OR
+     pg_catalog.octet_length(p_after) OPERATOR(pg_catalog.>) 640 OR p_limit IS NULL OR
+     p_limit OPERATOR(pg_catalog.<) 1 OR p_limit OPERATOR(pg_catalog.>) 128 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_check_page: invalid page' USING ERRCODE='22023';
+  END IF;
+  IF pg_catalog.current_setting('transaction_isolation') OPERATOR(pg_catalog.<>) 'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_check_page: serializable required' USING ERRCODE='25001';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  IF NOT EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation AS o
+      WHERE o.operation_id OPERATOR(pg_catalog.=) p_op AND
+        o.fencing_token OPERATOR(pg_catalog.=) p_fence AND
+        o.state OPERATOR(pg_catalog.=) 'promoted') THEN
+    RAISE EXCEPTION 'org_vault_rewrap_verify_check_page: state/fence conflict' USING ERRCODE='P7C01';
+  END IF;
+  RETURN QUERY SELECT s.principal,s.kek_check,pg_catalog.convert_to(s.principal,'UTF8')
+    FROM public.org_vault_salt AS s
+    JOIN public.kb_vault_rewrap_check_stage AS x
+      ON x.operation_id OPERATOR(pg_catalog.=) p_op AND
+        x.principal OPERATOR(pg_catalog.=) s.principal AND
+        x.new_kek_check OPERATOR(pg_catalog.=) s.kek_check
+    WHERE pg_catalog.convert_to(s.principal,'UTF8') OPERATOR(pg_catalog.>) p_after
+    ORDER BY pg_catalog.convert_to(s.principal,'UTF8') LIMIT p_limit;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_complete(p_op TEXT,p_fence BIGINT,
+  p_receipt_digest BYTEA,p_inventory_digest BYTEA,p_stage_digest BYTEA) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; c public.kb_vault_control%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_receipt_digest IS NULL OR octet_length(p_receipt_digest)<>32 OR
+     p_inventory_digest IS NULL OR octet_length(p_inventory_digest)<>32 OR
+     p_stage_digest IS NULL OR octet_length(p_stage_digest)<>32 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state='completed' THEN
+    IF o.fencing_token=p_fence AND o.receipt_digest=p_receipt_digest AND
+       o.inventory_digest=p_inventory_digest AND o.stage_digest=p_stage_digest THEN
+      PERFORM public.org_vault_rewrap_worm_append(p_op,'completed','completed','');
+      RETURN 'completed';
+    END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_complete: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  IF o.state<>'promoted' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: state conflict' USING ERRCODE='P7C01';
+  END IF;
+  IF o.fencing_token<>p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: fence mismatch' USING ERRCODE='P7C01';
+  END IF;
+  IF o.receipt_digest<>p_receipt_digest OR o.inventory_digest<>p_inventory_digest OR
+     o.stage_digest<>p_stage_digest THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: digest mismatch' USING ERRCODE='P7I01';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,false);
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1;
+  IF c.fencing_token=9223372036854775807 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: fence exhausted' USING ERRCODE='22003';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='completed',updated_at=public.pg_now_text()
+    WHERE operation_id=p_op;
+  PERFORM public.org_vault_rewrap_worm_append(p_op,'completed','completed','');
+  UPDATE public.kb_vault_control SET maintenance_kind='',maintenance_id='',
+    fencing_token=fencing_token+1,updated_at=public.pg_now_text() WHERE singleton=1;
+  RETURN 'completed';
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_abort(p_op TEXT,p_fence BIGINT,p_failure TEXT)
+RETURNS TEXT LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; c public.kb_vault_control%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     COALESCE(p_failure,'') !~ '^[a-z][a-z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_abort: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state='aborted' THEN
+    IF o.fencing_token=p_fence AND o.failure_class=p_failure THEN RETURN 'aborted'; END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_abort: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  IF o.state NOT IN ('preparing','custody_prepared','wraps_staged') THEN
+    RAISE EXCEPTION 'org_vault_rewrap_abort: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_abort: stale fence' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,false);
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1;
+  IF c.fencing_token=9223372036854775807 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_abort: fence exhausted' USING ERRCODE='22003';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='aborted',failure_class=p_failure,
+    updated_at=public.pg_now_text() WHERE operation_id=p_op;
+  PERFORM public.org_vault_rewrap_worm_append(p_op,'abort','aborted',p_failure);
+  DELETE FROM public.kb_vault_rewrap_dek_stage WHERE operation_id=p_op;
+  DELETE FROM public.kb_vault_rewrap_check_stage WHERE operation_id=p_op;
+  UPDATE public.kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',
+    fencing_token=fencing_token+1,updated_at=public.pg_now_text() WHERE singleton=1;
+  RETURN 'aborted';
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_recovery_required(p_op TEXT,p_fence BIGINT,
+  p_failure TEXT) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; c public.kb_vault_control%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     COALESCE(p_failure,'') !~ '^[a-z][a-z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_recovery_required: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state='recovery_required' THEN
+    IF o.fencing_token=p_fence AND o.failure_class=p_failure AND
+       o.failure_from_state IN ('preparing','custody_prepared','wraps_staged',
+         'reseal_committing','resealed','promoted') THEN
+      PERFORM public.org_vault_rewrap_worm_append(p_op,'recovery_required','recovery_required',
+        'from_state='||o.failure_from_state||';class='||p_failure);
+      RETURN 'recovery_required';
+    END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_recovery_required: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  IF o.state NOT IN ('preparing','custody_prepared','wraps_staged','reseal_committing',
+                     'resealed','promoted') THEN
+    RAISE EXCEPTION 'org_vault_rewrap_recovery_required: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence THEN
+    RAISE EXCEPTION 'org_vault_rewrap_recovery_required: stale fence' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,false);
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1;
+  IF c.fencing_token=9223372036854775807 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_recovery_required: fence exhausted' USING ERRCODE='22003';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='recovery_required',failure_class=p_failure,
+    failure_from_state=o.state,updated_at=public.pg_now_text() WHERE operation_id=p_op;
+  PERFORM public.org_vault_rewrap_worm_append(p_op,'recovery_required','recovery_required',
+    'from_state='||o.state||';class='||p_failure);
+  UPDATE public.kb_vault_control SET fencing_token=fencing_token+1,
+    updated_at=public.pg_now_text() WHERE singleton=1;
+  RETURN 'recovery_required';
+END; $$;
+
+-- None of this slice's helpers or transition seams is callable by PUBLIC or the
+-- hardened runtime role.  The conditional runtime revoke keeps dev schemas where
+-- that role is absent re-applicable while closing broad/default grants when present.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_worm_block() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_pack_text(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_pack_bytes(BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_worm_append(TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_begin(TEXT,TEXT,TEXT,BIGINT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_record_prepared(TEXT,BIGINT,BYTEA,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_assert_live(TEXT,BIGINT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_status(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_snapshot(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_secret_page(TEXT,BIGINT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_digests(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_stage_finish(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_mark_committing(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_promote(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_verify_summary(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_verify_secret_page(TEXT,BIGINT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_verify_check_page(TEXT,BIGINT,BYTEA,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_abort(TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT) FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;
+    REVOKE ALL ON TABLE public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
+      public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM aimee_kb_runtime;
+    REVOKE ALL ON FUNCTION public.org_vault_rewrap_worm_block(),
+      public.org_vault_rewrap_pack_text(TEXT),public.org_vault_rewrap_pack_bytes(BYTEA),
+      public.org_vault_rewrap_worm_append(TEXT,TEXT,TEXT,TEXT),
+      public.org_vault_rewrap_begin(TEXT,TEXT,TEXT,BIGINT,BIGINT),
+      public.org_vault_rewrap_record_prepared(TEXT,BIGINT,BYTEA,BYTEA),
+      public.org_vault_rewrap_assert_live(TEXT,BIGINT,BOOLEAN),
+      public.org_vault_rewrap_status(TEXT),
+      public.org_vault_rewrap_snapshot(TEXT),
+      public.org_vault_rewrap_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
+      public.org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER),
+      public.org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
+      public.org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA),
+      public.org_vault_rewrap_digests(TEXT),public.org_vault_rewrap_stage_finish(TEXT,BIGINT),
+      public.org_vault_rewrap_mark_committing(TEXT,BIGINT),
+      public.org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
+      public.org_vault_rewrap_promote(TEXT,BIGINT),
+      public.org_vault_rewrap_verify_summary(TEXT,BIGINT),
+      public.org_vault_rewrap_verify_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
+      public.org_vault_rewrap_verify_check_page(TEXT,BIGINT,BYTEA,INTEGER),
+      public.org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA),
+      public.org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
+      public.org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)
+      FROM aimee_kb_runtime;
+  END IF;
+END $$;
 
 -- ============================================================================
 -- P2a ORG MODEL CATALOG + ENTITLEMENT (tiered-llm-p2a, catalog-only). The org's

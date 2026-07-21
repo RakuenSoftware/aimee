@@ -12,7 +12,9 @@ static int g_hwm_fail;
 static int g_verify_fail;
 static int g_candidate_fail;
 static int g_admit_result = 1;
+static int64_t g_admit_epoch = 1;
 static int g_begin_fail;
+static uint64_t g_seen_admitted_epoch;
 static int g_sealed;
 static int g_callback_fail;
 static int g_callback_calls;
@@ -94,9 +96,12 @@ int db2_vault_key_use_admit(const char *actor, int64_t team, const char *origin,
    if (!actor || team != 7 || !origin || !use_id || !key_id || !principal || !agent || !cred ||
        version != 2 || !digest || !provider || !model || !operation || att_len != 3)
       return -1;
-   if (g_admit_result <= 0)
+   if (g_admit_result < 0)
       return g_admit_result;
    memset(out, 0, sizeof(*out));
+   out->seal_epoch = g_admit_epoch;
+   if (g_admit_result == 0)
+      return 0;
    out->version = 2;
    out->ciphertext_len = sizeof(g_secret) - 1;
    memcpy(out->hwm_attestation, "att", 3);
@@ -109,9 +114,10 @@ uint64_t vault_use_epoch_snapshot(void)
    return 9;
 }
 
-int vault_use_begin(uint64_t epoch, uint8_t kek[VAULT_KEK_LEN])
+int vault_use_begin(uint64_t epoch, uint64_t admitted_epoch, uint8_t kek[VAULT_KEK_LEN])
 {
-   if (g_begin_fail || epoch != 9)
+   g_seen_admitted_epoch = admitted_epoch;
+   if (g_begin_fail || epoch != 9 || admitted_epoch != (uint64_t)g_admit_epoch)
       return -1;
    memset(kek, 0x55, VAULT_KEK_LEN);
    return 0;
@@ -194,14 +200,17 @@ static void reset(void)
 {
    g_hwm_fail = g_verify_fail = g_candidate_fail = g_begin_fail = g_sealed = 0;
    g_callback_fail = g_callback_calls = g_scope_open = 0;
+   g_seen_admitted_epoch = 0;
    g_admit_result = 1;
+   g_admit_epoch = 1;
    g_live = 1;
 }
 
 int main(void)
 {
    reset();
-   assert(run() == KB_VAULT_KEY_USE_OK && g_callback_calls == 1);
+   g_admit_epoch = 17;
+   assert(run() == KB_VAULT_KEY_USE_OK && g_callback_calls == 1 && g_seen_admitted_epoch == 17);
    reset();
    g_admit_result = 0;
    assert(run() == KB_VAULT_KEY_USE_REPLAY && g_callback_calls == 0);
@@ -225,6 +234,16 @@ int main(void)
    assert(run() == KB_VAULT_KEY_USE_RETRY && g_callback_calls == 0);
    reset();
    g_admit_result = DB2_VAULT_KEY_USE_INTEGRITY;
+   assert(run() == KB_VAULT_KEY_USE_INTEGRITY && g_callback_calls == 0);
+   reset();
+   g_admit_result = DB2_VAULT_KEY_USE_SEALED;
+   assert(run() == KB_VAULT_KEY_USE_SEALED && g_callback_calls == 0);
+   reset();
+   g_admit_epoch = 0;
+   assert(run() == KB_VAULT_KEY_USE_INTEGRITY && g_callback_calls == 0);
+   reset();
+   g_admit_result = 0;
+   g_admit_epoch = 0;
    assert(run() == KB_VAULT_KEY_USE_INTEGRITY && g_callback_calls == 0);
    reset();
    g_begin_fail = g_sealed = 1;

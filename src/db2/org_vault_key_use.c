@@ -10,6 +10,8 @@
 
 static int classified_error(const char *err)
 {
+   if (err && strstr(err, "org_vault_control: sealed"))
+      return DB2_VAULT_KEY_USE_SEALED;
    return err && (strstr(err, "org_vault_key_use_candidate: invalid input") ||
                   strstr(err, "org_vault_key_use_candidate: not authorized") ||
                   strstr(err, "org_vault_key_use_candidate: unstable key binding") ||
@@ -58,6 +60,64 @@ static int read_envelope(aimee_pg_stmt_t *st, int first, int64_t version,
       return -1;
    }
    return 0;
+}
+
+int db2_vault_control_startup_begin(int64_t *epoch_out, int *sealed_out)
+{
+   if (epoch_out)
+      *epoch_out = 0;
+   if (sealed_out)
+      *sealed_out = 0;
+   if (!epoch_out || !sealed_out)
+      return DB2_VAULT_KEY_USE_ERROR;
+   if (db2_tenant_require_pg() != 0)
+      return DB2_VAULT_KEY_USE_ERROR;
+
+   char err[USE_ERR] = "";
+   if (aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err)) != 0)
+      return DB2_VAULT_KEY_USE_ERROR;
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT seal_epoch,sealed FROM public.org_vault_control_startup_status()", err,
+       sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
+      return DB2_VAULT_KEY_USE_ERROR;
+   }
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int rc = DB2_VAULT_KEY_USE_ERROR;
+   if (step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) && aimee_pg_column_int64(st, 0) > 0)
+   {
+      const char *sealed = aimee_pg_column_text(st, 1);
+      if (sealed &&
+          ((sealed[0] == 't' && sealed[1] == '\0') || (sealed[0] == 'f' && sealed[1] == '\0') ||
+           (sealed[0] == '1' && sealed[1] == '\0') || (sealed[0] == '0' && sealed[1] == '\0')))
+      {
+         int64_t epoch = aimee_pg_column_int64(st, 0);
+         int is_sealed = sealed[0] == 't' || sealed[0] == '1';
+         if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+         {
+            *epoch_out = epoch;
+            *sealed_out = is_sealed;
+            rc = 0;
+         }
+      }
+   }
+   aimee_pg_finalize(st);
+   if (rc != 0)
+      (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
+   return rc;
+}
+
+int db2_vault_control_startup_end(int commit)
+{
+   if (db2_tenant_require_pg() != 0)
+      return DB2_VAULT_KEY_USE_ERROR;
+   char err[USE_ERR] = "";
+   if (commit && aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err)) == 0)
+      return 0;
+   (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
+   return commit ? DB2_VAULT_KEY_USE_ERROR : 0;
 }
 
 int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *key_id,
@@ -141,10 +201,20 @@ int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *auth
    }
    int newly_admitted = b[0] == 't' || b[0] == '1';
    int rc = 0;
-   if (newly_admitted)
-      rc = read_envelope(st, 1, version, out) == 0 ? 0 : DB2_VAULT_KEY_USE_INTEGRITY;
+   if (aimee_pg_column_is_null(st, 1) || aimee_pg_column_int64(st, 1) < 1)
+      rc = DB2_VAULT_KEY_USE_INTEGRITY;
    else
-      for (int col = 1; col <= 5; col++)
+      out->seal_epoch = aimee_pg_column_int64(st, 1);
+   if (newly_admitted)
+   {
+      int64_t seal_epoch = out->seal_epoch;
+      if (rc == 0 && read_envelope(st, 2, version, out) == 0)
+         out->seal_epoch = seal_epoch;
+      else
+         rc = DB2_VAULT_KEY_USE_INTEGRITY;
+   }
+   else
+      for (int col = 2; col <= 6; col++)
          if (!aimee_pg_column_is_null(st, col))
             rc = DB2_VAULT_KEY_USE_INTEGRITY;
    aimee_pg_finalize(st);

@@ -3,6 +3,12 @@
 
 #include <stddef.h>
 
+/* GitHub otherwise synthesizes a squash commit body from the child commits.
+ * That can re-introduce attribution trailers which Aimee already strips from
+ * its own commit/PR text and which protected branches reject. Keep the body
+ * explicitly empty; the PR title remains GitHub's default squash subject. */
+#define GIT_PR_SQUASH_MERGE_JSON "{\"merge_method\":\"squash\",\"commit_message\":\"\"}"
+
 /* git_pr_api — open a GitHub pull request via the REST API, IN-PROCESS, so the
  * forge token rides the Authorization header (aimee-server memory only) and
  * never reaches a child process's environment or argv. This replaces the
@@ -81,8 +87,9 @@ git_pr_ci_t git_pr_ci_grade_json(const char *check_runs_json, const char *combin
  * advance) — only the go/no-go lives here. Pure; unit-tested. */
 int git_pr_ci_permits_merge(git_pr_ci_t ci);
 
-/* Squash-merge PUT /pulls/<n>/merge. Returns 0 merged, 1 already merged,
- * 2 not mergeable (405/409), -1 error. */
+/* Squash-merge PUT /pulls/<n>/merge with an explicitly empty synthesized
+ * commit body. Returns 0 merged, 1 already merged, 2 not mergeable (405/409),
+ * -1 error. */
 int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,
                          size_t errlen);
 

@@ -1,0 +1,102 @@
+# Required-ruleset workflow for feature/core-modularization.
+#
+# The ruleset must pin this file from the default branch and target only the
+# integration branch. The workflow definition and checker are trusted; the
+# pull request checkout is untrusted data only. The checker must never import
+# candidate modules or execute candidate-derived commands. Draft PRs are
+# intentionally validated so a required gate is never silently skipped.
+#
+# The job name is intentionally distinct from `proposal-ordering` in
+# module-inventory.yml because required-check names must not collide. To rotate
+# the checker, merge a reviewed pin update into `testing`, then update the
+# required-workflow ruleset to that immutable `testing` commit.
+name: Required proposal ordering
+
+on:
+  pull_request:
+    branches: [feature/core-modularization]
+
+permissions:
+  contents: read
+
+jobs:
+  aimee-proposal-ordering-required:
+    name: aimee-proposal-ordering-required
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the immutable trusted gate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: 027573e43ef627b877ec2456a733fcf8b54f1fdc
+          path: trusted
+      - name: Verify the trusted gate identity
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_commit=027573e43ef627b877ec2456a733fcf8b54f1fdc
+          expected_origin="https://github.com/$EXPECTED_REPOSITORY"
+          actual_commit=$(git -C trusted rev-parse HEAD)
+          actual_origin=$(git -C trusted config --get remote.origin.url)
+          if [ "$actual_commit" != "$expected_commit" ]; then
+            echo "::error::trusted commit mismatch: expected=$expected_commit actual=$actual_commit"
+            exit 1
+          fi
+          if [ "${actual_origin%.git}" != "$expected_origin" ]; then
+            echo "::error::trusted origin mismatch: expected=$expected_origin actual=$actual_origin"
+            exit 1
+          fi
+          if [ ! -f trusted/scripts/check_proposal_ordering.py ] || \
+             [ -L trusted/scripts/check_proposal_ordering.py ]; then
+            echo "::error::trusted checker must be a regular, non-symlink file"
+            exit 1
+          fi
+      - name: Check out the candidate revision as data
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          path: candidate
+      - name: Verify the candidate revision binding
+        env:
+          EXPECTED_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EXPECTED_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          EXPECTED_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$EXPECTED_BASE_REF" = feature/core-modularization
+          test "$EXPECTED_BASE_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$EXPECTED_SHA" = "$EXPECTED_MERGE_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C candidate rev-parse HEAD^2)" = "$EXPECTED_PR_HEAD_SHA"
+          candidate_origin=$(git -C candidate config --get remote.origin.url)
+          test "${candidate_origin%.git}" = "https://github.com/$EXPECTED_REPOSITORY"
+      - name: Set up the pinned Python runtime
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12.11"
+      - name: Enforce ordering with immutable trusted code
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONSTARTUP -u PYTHONUSERBASE -u PYTHONHOME \
+              -u PYTHONDEBUG -u PYTHONINSPECT -u PYTHONBREAKPOINT \
+              -u PYTHONCASEOK -u PYTHONIOENCODING -u PYTHONUTF8 \
+              -u PYTHONHASHSEED -u PYTHONEXECUTABLE -u PYTHONNOUSERSITE \
+            python3 -I -S trusted/scripts/check_proposal_ordering.py \
+              --config-root "$GITHUB_WORKSPACE/candidate"

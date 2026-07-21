@@ -181,9 +181,20 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
       result = KB_VAULT_KEY_USE_INTEGRITY;
       goto cleanup;
    }
+   if (rc == DB2_VAULT_KEY_USE_SEALED)
+   {
+      db2_tenant_scope_rollback();
+      result = KB_VAULT_KEY_USE_SEALED;
+      goto cleanup;
+   }
    rc = scope_finish(rc);
    if (rc < 0)
       goto cleanup;
+   if (admitted.seal_epoch < 1)
+   {
+      result = KB_VAULT_KEY_USE_INTEGRITY;
+      goto cleanup;
+   }
    if (rc == 0)
    {
       result = KB_VAULT_KEY_USE_REPLAY;
@@ -198,7 +209,7 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
       goto cleanup;
    }
 
-   if (vault_use_begin(epoch, arena->kek) != 0)
+   if (vault_use_begin(epoch, (uint64_t)admitted.seal_epoch, arena->kek) != 0)
    {
       result = vault_is_sealed() ? KB_VAULT_KEY_USE_SEALED : KB_VAULT_KEY_USE_RETRY;
       goto cleanup;

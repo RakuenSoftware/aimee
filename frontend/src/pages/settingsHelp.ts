@@ -40,6 +40,9 @@ export const SECTION_HELP: Record<string, string> = {
 
 // One line per config key. Plain language, states the default.
 export const FIELD_HELP: Record<string, string> = {
+  // Workflow trigger admission (live)
+  "trigger.max_concurrent":
+    "Maximum active runs admitted across all configured triggers. When the cap is reached, new proposals stay pending and are reconsidered on a later scheduler pass. Default 2. 0 or less means uncapped.",
   // Autonomous workflow — run safety caps + auto-resume (live; env override wins)
   "autonomy.max_turns":
     "Cumulative per-run turn cap (persisted audit events) before a run is parked as a runaway backstop. Default 300. Raise for long multi-slice runs; this is the ultimate bound on total run length (auto-resume does NOT reset it).",

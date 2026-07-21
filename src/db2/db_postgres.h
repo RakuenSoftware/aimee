@@ -40,6 +40,13 @@ void aimee_pg_free_names(char **names, int count);
 
 typedef struct aimee_pg_stmt aimee_pg_stmt_t;
 
+typedef enum
+{
+   AIMEE_PG_PREPARE_OK = 0,
+   AIMEE_PG_PREPARE_INVALID,
+   AIMEE_PG_PREPARE_RESOURCE
+} aimee_pg_prepare_error_t;
+
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen);
 void aimee_pg_close(void *pg_conn);
 
@@ -49,6 +56,8 @@ void aimee_pg_close(void *pg_conn);
  * production DB2 connect attempt. */
 int aimee_pg_is_shim(void);
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen);
+int aimee_pg_exec_sqlstate(void *pg_conn, const char *sql, char sqlstate[6], char *errbuf,
+                           size_t errlen);
 int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, size_t errlen,
                                int *affected_out);
 /* 1 if the connection currently has an open (or failed-open) transaction, else 0.
@@ -59,9 +68,13 @@ int aimee_pg_stmt_changes(aimee_pg_stmt_t *stmt);
 int aimee_pg_ping(void *pg_conn, char *errbuf, size_t errlen);
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen);
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql,
+                                     aimee_pg_prepare_error_t *error_kind, char *errbuf,
+                                     size_t errlen);
 void aimee_pg_finalize(aimee_pg_stmt_t *stmt);
 aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *errbuf, size_t errlen);
 int aimee_pg_reset(aimee_pg_stmt_t *stmt);
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *stmt);
 
 int aimee_pg_bind_int(aimee_pg_stmt_t *stmt, const char *name, int value);
 int aimee_pg_bind_int64(aimee_pg_stmt_t *stmt, const char *name, int64_t value);

@@ -14,6 +14,7 @@
 #include "db2_internal.h" /* db2_conn */
 #include "db_postgres.h"  /* aimee_pg_* */
 #include "vault_crypto.h"
+#include "vault_kek_check.h"
 #include "vault_store.h"     /* VAULT_STORE_NO_ENTRY, vault_store_entry_t */
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
 #include "log.h"
@@ -29,15 +30,6 @@
 #define VP_SECRET_MAX 4096 /* max credential plaintext length (matches jsonfile) */
 #define VP_AAD_MAX    VAULT_ENVELOPE_AAD_MAX
 #define VP_MAX_SLOTS  512 /* per-principal slot cap for list/rekey iteration */
-
-/* A fixed 32-byte sentinel AES-KW-wrapped under the KEK is the org vault's key-check
- * verifier (one per principal, in org_vault_salt.kek_check): AES-KW unwrap fails the
- * RFC 3394 ICV under the wrong KEK, so unlock proves a derived KEK is correct without
- * any stored credential. Not secret. Byte-identical to the jsonfile sentinel so the
- * discipline reads the same across backends (the stores are independent regardless). */
-static const uint8_t VP_KEK_CHECK_SENTINEL[VAULT_DEK_LEN] = {
-    0x61, 0x69, 0x6d, 0x65, 0x65, 0x2d, 0x76, 0x61, 0x75, 0x6c, 0x74, 0x2d, 0x6b, 0x65, 0x6b, 0x2d,
-    0x63, 0x68, 0x65, 0x63, 0x6b, 0x2d, 0x76, 0x31, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 
 /* Derive the tenant team_id from a slot principal. A "team:<digits>" principal
  * (optionally followed by a ':' separator) is a team-scoped tenant secret
@@ -208,7 +200,7 @@ static int kek_check_read(void *conn, const char *principal, uint8_t out[VAULT_W
 static int kek_check_set(void *conn, const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
-   if (vault_dek_wrap(kek, VP_KEK_CHECK_SENTINEL, wrapped) != 0)
+   if (vault_kek_check_wrap(kek, wrapped) != 0)
       return -1;
    char err[VP_ERR] = "";
    aimee_pg_stmt_t *st =
@@ -223,17 +215,6 @@ static int kek_check_set(void *conn, const char *principal, const uint8_t kek[VA
 }
 
 /* True if `kek` unwraps `wrapped` to the sentinel. */
-static int kek_check_matches(const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN],
-                             const uint8_t kek[VAULT_KEK_LEN])
-{
-   uint8_t out[VAULT_DEK_LEN];
-   if (vault_dek_unwrap(kek, wrapped, out) != 0)
-      return 0;
-   int ok = memcmp(out, VP_KEK_CHECK_SENTINEL, VAULT_DEK_LEN) == 0;
-   OPENSSL_cleanse(out, sizeof(out));
-   return ok;
-}
-
 static int vault_pg_unlock_check(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
    (void)ctx;
@@ -256,9 +237,9 @@ static int vault_pg_unlock_check(void *ctx, const char *principal, const uint8_t
          return -1;
       if (kek_check_read(conn, principal, wrapped) != 1)
          return -1;
-      return kek_check_matches(wrapped, kek) ? 0 : -1;
+      return vault_kek_check_verify(kek, wrapped);
    }
-   return kek_check_matches(wrapped, kek) ? 0 : -1;
+   return vault_kek_check_verify(kek, wrapped);
 }
 
 /* ── set / get ────────────────────────────────────────────────────────────── */
@@ -628,7 +609,8 @@ static int vault_pg_rekey(void *ctx, const char *principal, const uint8_t old_ke
     * so an empty vault cannot be rekeyed with a wrong old KEK). A principal with no
     * verifier was never unlocked: refuse. */
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
-   if (kek_check_read(conn, principal, wrapped) != 1 || !kek_check_matches(wrapped, old_kek))
+   if (kek_check_read(conn, principal, wrapped) != 1 ||
+       vault_kek_check_verify(old_kek, wrapped) != 0)
       goto rollback;
 
    vp_rewrap_t *plan = calloc(VP_MAX_SLOTS, sizeof(*plan));

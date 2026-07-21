@@ -99,6 +99,10 @@ typedef struct
                   size_t att_cap, size_t *att_len);
    int (*hwm_verify)(void *ctx, const char *key_id, uint64_t version, const uint8_t *att,
                      size_t att_len);
+   /* Async-signal-safe child-side invalidation. After fork the child must not
+    * reuse inherited provider locks, sessions, handles, or plaintext caches;
+    * the process must exec before using custody again. */
+   void (*after_fork_child)(void *ctx);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────
