@@ -155,6 +155,7 @@ jobs:
       - name: Build and test opt-in Make profile
         run: |
           make -C src -j$(nproc) AIMEE_WITH_PLUGIN_LOADER=1 all \
+            build/obj/cmd_plugin.o \
             build/obj/tests/unit-test-plugin build/obj/tests/unit-test-plugin-loader
           ./src/build/obj/tests/unit-test-plugin
           ./src/build/obj/tests/unit-test-plugin-loader
@@ -162,7 +163,7 @@ jobs:
           test -e src/build/obj/modules/plugin-loader/plugin_loader.o
           test -e src/build/obj/cmd_plugin.o
           test -e src/build/obj/server/server_plugin.o
-          strings ./aimee-server | grep -q '^/plugins:$'
+          strings ./aimee-server | grep -Eq '^[[:space:]]*/plugins:$'
           strings ./aimee-server | grep -q 'plugin.list'
 
   build-integrity:
