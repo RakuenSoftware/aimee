@@ -33,14 +33,12 @@ bypass P2b admission.
    targets are rejected. All length arithmetic is overflow checked and writes loop until complete.
 3. **Production endpoint closure.** Production accepts only the partition-correct derived Bedrock
    Runtime host over TLS with hostname verification and the system trust store. The catalog endpoint
-   remains empty. A test-only build flag may change only the socket destination to loopback and
-   supply a test CA; signed Host, SNI, and certificate hostname verification remain the derived AWS
-   authority (the mock certificate carries that SAN). `SSL_set1_host` receives the derived hostname
-   without a port, SNI uses the same hostname, and signed Host must equal it. The override is absent
-   from the production kb
-   binary and refuses non-loopback destinations, plaintext, redirects, and production credentials.
-   The live harness is a separately linked target with fixed known-answer credentials; neither its
-   CA nor connect override is declared in a production header or linked into `aimee-kb`.
+   remains empty. There is no C-level endpoint, socket, port, or CA override. On throwaway CT260 only,
+   `/etc/hosts` resolves the derived AWS hostname to loopback, the mock binds port 443, and a test CA
+   signs a certificate for that exact hostname; Host, DNS name, SNI, SAN verification, port, and wire
+   behavior therefore remain production-exact. `SSL_set1_host` and SNI receive the derived hostname,
+   and signed Host must equal it. The live harness uses fixed known-answer credentials and never
+   accepts production credentials, plaintext, redirects, or arbitrary destinations.
 4. **Bounded strict response parser.** Cap the status/header block, header count, header line, body,
    and chunk metadata. Require one valid HTTP/1.1 final response, reject obs-fold, bare LF,
    duplicate/conflicting Content-Length, simultaneous Transfer-Encoding and Content-Length,
@@ -76,8 +74,7 @@ bypass P2b admission.
 - Add `kb/http/kb_http_client.{c,h}` as a new implementation, not layered over or sharing parsing
   with the legacy `kb_tls_client_request*` helpers. It provides a one-shot binary-safe exchange API
   with distinct
-  `authority` and socket `connect_host` fields (the latter test-only for Bedrock), a headers-gate
-  callback, and:
+  `authority` (always system trust roots and port 443), a headers-gate callback, and:
   - structured request/response metadata types;
   - bounded `getaddrinfo_a` resolution plus nonblocking connect/TLS I/O against one absolute
     monotonic deadline, SNI/hostname verification, and complete-write helpers;
@@ -108,8 +105,9 @@ bypass P2b admission.
    catalog/entitlement actor, enter that actor's tenant scope, call
    `db2_model_bedrock_target_resolve`, and pass that exact owned result into the same dispatch
    function linked by `aimee-kb` for nonstream + stream end to end. The live target links the
-   production resolver/dispatch/transport objects and only adds the isolated socket-override shim;
-   it may not construct a target directly or replace those objects with stubs. For every pre-network
+   production resolver/dispatch/transport objects without a socket/CA override shim; CT260 supplies
+   only its isolated DNS mapping and system test CA. It may not construct a target directly or
+   replace those objects with stubs. For every pre-network
    negative, assert the mock's accepted-request counter is unchanged. Negative cases: wrong secret,
    missing/unentitled or
    unsupported target before network, bad CRC, complete-frame semantic truncation, malformed HTTP
