@@ -123,7 +123,8 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 			return StepResult{}, err
 		}
 	}
-	prompt := block.Prompt + "\n\nORIGINAL PROPOSAL:\n" + req.Proposal
+	// Proposal is the historical wire name for the immutable workflow-entry request.
+	prompt := block.Prompt + "\n\nORIGINAL REQUEST:\n" + req.Proposal
 	for name, input := range req.Inputs {
 		prompt += "\n\nINPUT " + name + " (" + input.Type + "):\n" + string(input.Content)
 	}
@@ -187,7 +188,8 @@ func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string)
 	if !ok {
 		return StepResult{}, errors.New("author.plan missing proposal input")
 	}
-	prompt := "Author a complete implementation plan for the proposal below. Return only the plan; do not truncate it.\n\nPROPOSAL:\n" + string(proposal.Content)
+	// The proposal input is the immutable workflow-entry request; only its schema name is historical.
+	prompt := "Author a complete implementation plan for the original request below. Return only the plan; do not truncate it.\n\nORIGINAL REQUEST:\n" + string(proposal.Content)
 	if req.Feedback != nil {
 		encoded, _ := json.Marshal(req.Feedback)
 		prompt += "\n\nPRIOR REVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)

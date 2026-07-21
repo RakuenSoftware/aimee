@@ -89,6 +89,19 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	if !strings.HasSuffix(planResult.Artifact, "PLAN_END") {
 		t.Fatal("plan response truncated")
 	}
+	plannerPrompt := agents.requests[len(agents.requests)-1].Prompt
+	if len(agents.requests) != 1 || !strings.Contains(plannerPrompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(plannerPrompt, "\n\nPROPOSAL:\n") {
+		t.Fatalf("planner did not frame its source as the original request: %+v", agents.requests)
+	}
+	customBlock := wfe.BlockDefinition{Name: "custom", Custom: true, Produces: "report", Prompt: "Do the work."}
+	_, err = runner.custom(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo"}, Proposal: proposal}, customBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	customPrompt := agents.requests[len(agents.requests)-1].Prompt
+	if len(agents.requests) != 2 || !strings.Contains(customPrompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(customPrompt, "\n\nPROPOSAL:\n") {
+		t.Fatalf("custom block did not frame its source as the original request: %+v", agents.requests)
+	}
 	node := wfe.Node{Block: "gate.roundtable", Params: map[string]any{"quorum": 2, "panel": map[string]any{
 		"required": []any{"security", "qa"}, "eligible": []any{"contrarian"}, "pins": map[string]any{"security": "kimi"},
 	}}}
@@ -103,15 +116,15 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 	agents.mu.Lock()
 	defer agents.mu.Unlock()
-	if len(agents.requests) != 4 {
+	if len(agents.requests) != 5 {
 		t.Fatalf("requests=%d", len(agents.requests))
 	}
 	foundPin, foundUnpinned := false, false
 	for _, request := range agents.requests {
-		if !strings.Contains(request.Prompt, "PROPOSAL_END") || request.Role == "review" && !strings.Contains(request.Prompt, "DIFF_END") {
+		if !strings.Contains(request.Prompt, "ORIGINAL REQUEST:\n"+proposal) || request.Role == "review" && !strings.Contains(request.Prompt, string(reviewed.Content)) {
 			t.Fatal("runner truncated a source artifact")
 		}
-		if request.Role == "review" && (!strings.Contains(request.Prompt, "ORIGINAL REQUEST:") || strings.Contains(request.Prompt, "PROPOSAL:") || strings.Contains(request.Prompt, "complete proposal")) {
+		if request.Role == "review" && (!strings.Contains(request.Prompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(request.Prompt, "\n\nPROPOSAL:\n") || strings.Contains(request.Prompt, "complete proposal")) {
 			t.Fatal("roundtable did not frame the source as the original request")
 		}
 		if request.Persona == "security" && request.Delegate == "kimi" {
