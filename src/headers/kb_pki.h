@@ -49,6 +49,12 @@ extern "C"
     * PEM (the CA's). Returns 0 on success, -1 on error. */
    int kb_pki_ca_fingerprint(const char *ca_cert_pem, char *hex_out, size_t cap);
 
+   /* Extract the immutable identity fields exactly as the TLS peer helpers do:
+    * issuer in OpenSSL's one-line DN form and serial as uppercase hex. Any
+    * output may be NULL when the caller does not need it. */
+   int kb_pki_cert_metadata(const char *cert_pem, char *issuer_out, size_t issuer_cap,
+                            char *serial_out, size_t serial_cap);
+
    /* Issue a client certificate (RSA-2048) for `subject_cn`, signed by `ca`,
     * valid for `valid_secs` seconds from now (keyUsage digitalSignature,
     * extKeyUsage clientAuth). Writes the client cert PEM into cert_pem_out[cert_cap]

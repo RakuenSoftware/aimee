@@ -24,8 +24,17 @@ typedef struct
 
 /* Insert (or upsert on fingerprint) a redeemed-cert record. legacy!=0 marks a
  * cert backfilled at first use rather than at redeem time. Returns 0, else -1. */
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id);
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id);
+
+/* Atomically add a renewed certificate to the old certificate's stable
+ * authority lineage, clone all canonical-principal grants, and append WORM
+ * evidence. Returns 0, or -1 with no partial state. */
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id);
 
 /* List up to `max` rows, most-recent-first. Returns the count written, or -1. */
 int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max);

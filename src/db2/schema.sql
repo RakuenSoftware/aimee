@@ -1991,6 +1991,7 @@ CREATE TABLE IF NOT EXISTS org_token_audit (
 CREATE INDEX IF NOT EXISTS idx_org_audit_team ON org_token_audit(team_id);
 CREATE INDEX IF NOT EXISTS idx_org_audit_state ON org_token_audit(state);
 CREATE INDEX IF NOT EXISTS idx_org_audit_created ON org_token_audit(created_at);
+ALTER TABLE org_token_audit ALTER COLUMN estimated_cost_usd TYPE NUMERIC(38,10);
 
 -- project->team consistency: a non-null project's parent MUST equal team_id. A
 -- plain FK can't express the cross-column rule, so a BEFORE INSERT trigger does.
@@ -2068,6 +2069,7 @@ CREATE TABLE IF NOT EXISTS org_spend_rollup (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_rollup_key
   ON org_spend_rollup(team_id, (COALESCE(project_id, 0)), billable_model, day);
+ALTER TABLE org_spend_rollup ALTER COLUMN cost_usd TYPE NUMERIC(38,10);
 DROP TRIGGER IF EXISTS org_rollup_no_delete ON org_spend_rollup;
 CREATE TRIGGER org_rollup_no_delete BEFORE DELETE ON org_spend_rollup FOR EACH ROW EXECUTE FUNCTION org_worm_block();
 DROP TRIGGER IF EXISTS org_rollup_no_truncate ON org_spend_rollup;
@@ -4665,6 +4667,68 @@ BEGIN
     VALUES (v_seq, pg_now_text(), r, a, ac, s, vd, d, '', v_prev, v_hash);
 END; $$;
 
+-- Atomic certificate renewal lineage. The caller supplies metadata extracted
+-- from the CA-issued certificate; the old certificate instance is locked and
+-- matched exactly. A renewed cert inherits the opaque authority_id and every
+-- grant keyed by the canonical cert principal, or none of the changes commit.
+CREATE OR REPLACE FUNCTION kb_enrollment_renew(
+  p_old_fp TEXT, p_old_issuer TEXT, p_old_serial TEXT, p_scope TEXT,
+  p_new_fp TEXT, p_new_issuer TEXT, p_new_serial TEXT
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  r kb_enrollments%ROWTYPE;
+  v_id BIGINT;
+  v_old_identity TEXT;
+  v_new_identity TEXT;
+BEGIN
+  IF p_old_fp !~ '^[0-9a-f]{64}$' OR p_new_fp !~ '^[0-9a-f]{64}$'
+     OR p_old_issuer = '' OR p_new_issuer = ''
+     OR p_old_serial !~ '^[0-9A-F]+$' OR p_new_serial !~ '^[0-9A-F]+$'
+     OR p_scope = '' OR p_new_issuer <> p_old_issuer OR p_new_fp = p_old_fp
+     OR p_new_serial = p_old_serial THEN
+    RAISE EXCEPTION 'invalid enrollment renewal metadata' USING ERRCODE = '22023';
+  END IF;
+
+  v_old_identity := 'cert:' || p_old_issuer || ':' || p_old_serial;
+  v_new_identity := 'cert:' || p_new_issuer || ':' || p_new_serial;
+  IF current_setting('aimee.principal',true) IS DISTINCT FROM v_old_identity THEN
+    RAISE EXCEPTION 'renewal actor does not own old certificate' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO r FROM kb_enrollments
+   WHERE fingerprint=p_old_fp AND cert_issuer=p_old_issuer
+     AND cert_serial_norm=p_old_serial AND scope=p_scope
+     AND state='active' AND revoked_at=''
+   FOR UPDATE;
+  IF NOT FOUND OR r.authority_id !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'active enrollment not found' USING ERRCODE = '28000';
+  END IF;
+
+  INSERT INTO kb_enrollments(scope,fingerprint,serial,state,authority_id,
+                             cert_issuer,cert_serial_norm)
+    VALUES(p_scope,p_new_fp,p_new_serial,'active',r.authority_id,
+           p_new_issuer,p_new_serial)
+    RETURNING id INTO v_id;
+
+  INSERT INTO kb_team_membership(identity_key,team,is_default,created_at)
+    SELECT v_new_identity,team,is_default,pg_now_text() FROM kb_team_membership
+     WHERE identity_key=v_old_identity;
+  INSERT INTO kb_project_membership(project,identity_key,created_at)
+    SELECT project,v_new_identity,pg_now_text() FROM kb_project_membership
+     WHERE identity_key=v_old_identity;
+  INSERT INTO kb_team_lead(identity_key,team,granted_at,granted_by,revoked_at)
+    SELECT v_new_identity,team,pg_now_text(),v_old_identity,revoked_at FROM kb_team_lead
+     WHERE identity_key=v_old_identity;
+  INSERT INTO kb_admin_grant(identity_key,source,granted_at,granted_by,revoked_at)
+    SELECT v_new_identity,source,pg_now_text(),v_old_identity,revoked_at FROM kb_admin_grant
+     WHERE identity_key=v_old_identity;
+
+  PERFORM kb_audit_worm_append('cert',v_old_identity,'enrollment.renew',r.authority_id,'allow',
+    'old_fp='||p_old_fp||';new_fp='||p_new_fp);
+  RETURN v_id;
+END; $$;
+
 -- org_model_catalog: the org's model offerings (one row per org model). endpoint is
 -- catalog-owned now (may be empty -> provider default) so P2b's strict trust boundary
 -- derives provider/wire/endpoint exclusively from the authoritative catalog — the
@@ -5247,6 +5311,7 @@ CREATE TABLE IF NOT EXISTS org_budget_counter (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_budget_counter_key
   ON org_budget_counter(team_id, (COALESCE(project_id, 0)), period, period_id);
+ALTER TABLE org_budget_counter ALTER COLUMN spend_usd TYPE NUMERIC(38,10);
 
 -- org_budget_reservation: one row per admitted call, keyed idempotently by the
 -- composite (origin_cert_cn, request_id) — the SAME request_id from a DIFFERENT origin
@@ -5273,6 +5338,7 @@ CREATE TABLE IF NOT EXISTS org_budget_reservation (
 CREATE INDEX IF NOT EXISTS idx_org_budget_resv_lease
   ON org_budget_reservation(state, lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_org_budget_resv_team ON org_budget_reservation(team_id);
+ALTER TABLE org_budget_reservation ALTER COLUMN realized_usd TYPE NUMERIC(38,10);
 
 -- org_budget_reservation_alloc: one row per counter a reservation bound (the
 -- ALLOCATIONS model). A single-cap deployment has ONE alloc (the common case stays
@@ -6205,7 +6271,17 @@ CREATE POLICY p_server_registry_heartbeat_update ON kb_server_registry FOR UPDAT
 -- P2b-a buffered Bedrock egress authority. Certificate instances remain the
 -- revocation/audit origin; authority_id is the renewal-stable idempotency owner.
 ALTER TABLE kb_enrollments ADD COLUMN IF NOT EXISTS authority_id TEXT NOT NULL DEFAULT '';
-UPDATE kb_enrollments SET authority_id=substr(fingerprint,1,32) WHERE authority_id='';
+DO $$
+DECLARE r RECORD; v_authority TEXT;
+BEGIN
+  FOR r IN SELECT id,fingerprint FROM kb_enrollments WHERE authority_id='' ORDER BY id FOR UPDATE
+  LOOP
+    v_authority:=substr(r.fingerprint,1,32);
+    UPDATE kb_enrollments SET authority_id=v_authority WHERE id=r.id;
+    PERFORM kb_audit_worm_append('migration','schema','enrollment.authority.backfill',
+      r.id::text,'allow','authority_id='||v_authority);
+  END LOOP;
+END $$;
 ALTER TABLE kb_enrollments ALTER COLUMN authority_id DROP DEFAULT;
 ALTER TABLE kb_enrollments DROP CONSTRAINT IF EXISTS kb_enrollments_authority_id_chk;
 ALTER TABLE kb_enrollments ADD CONSTRAINT kb_enrollments_authority_id_chk
@@ -6262,13 +6338,56 @@ CREATE TABLE IF NOT EXISTS org_egress_dispatch (
   completion_tokens BIGINT NOT NULL DEFAULT 0 CHECK (completion_tokens >= 0),
   cache_read_tokens BIGINT NOT NULL DEFAULT 0 CHECK (cache_read_tokens >= 0),
   cache_write_tokens BIGINT NOT NULL DEFAULT 0 CHECK (cache_write_tokens >= 0),
+  raw_prompt_tokens TEXT NOT NULL DEFAULT '0' CHECK (raw_prompt_tokens ~ '^[0-9]{1,40}$'),
+  raw_completion_tokens TEXT NOT NULL DEFAULT '0' CHECK (raw_completion_tokens ~ '^[0-9]{1,40}$'),
+  raw_cache_read_tokens TEXT NOT NULL DEFAULT '0' CHECK (raw_cache_read_tokens ~ '^[0-9]{1,40}$'),
+  raw_cache_write_tokens TEXT NOT NULL DEFAULT '0' CHECK (raw_cache_write_tokens ~ '^[0-9]{1,40}$'),
   realized_usd NUMERIC(38,10),
+  overage_usd NUMERIC(38,10) NOT NULL DEFAULT 0 CHECK (overage_usd >= 0),
   liability_overflow BOOLEAN NOT NULL DEFAULT false,
   outcome_class TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
   updated_at TEXT NOT NULL DEFAULT (pg_now_text()),
   UNIQUE(authority_id,request_id)
 );
+ALTER TABLE org_egress_dispatch ADD COLUMN IF NOT EXISTS raw_prompt_tokens TEXT NOT NULL DEFAULT '0';
+ALTER TABLE org_egress_dispatch ADD COLUMN IF NOT EXISTS raw_completion_tokens TEXT NOT NULL DEFAULT '0';
+ALTER TABLE org_egress_dispatch ADD COLUMN IF NOT EXISTS raw_cache_read_tokens TEXT NOT NULL DEFAULT '0';
+ALTER TABLE org_egress_dispatch ADD COLUMN IF NOT EXISTS raw_cache_write_tokens TEXT NOT NULL DEFAULT '0';
+ALTER TABLE org_egress_dispatch ADD COLUMN IF NOT EXISTS overage_usd NUMERIC(38,10) NOT NULL DEFAULT 0;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conrelid='org_egress_dispatch'::regclass AND
+            conname='org_egress_dispatch_raw_prompt_tokens_check') THEN
+    ALTER TABLE org_egress_dispatch ADD CONSTRAINT org_egress_dispatch_raw_prompt_tokens_check
+      CHECK (raw_prompt_tokens ~ '^[0-9]{1,40}$');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conrelid='org_egress_dispatch'::regclass AND
+            conname='org_egress_dispatch_raw_completion_tokens_check') THEN
+    ALTER TABLE org_egress_dispatch ADD CONSTRAINT org_egress_dispatch_raw_completion_tokens_check
+      CHECK (raw_completion_tokens ~ '^[0-9]{1,40}$');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conrelid='org_egress_dispatch'::regclass AND
+            conname='org_egress_dispatch_raw_cache_read_tokens_check') THEN
+    ALTER TABLE org_egress_dispatch ADD CONSTRAINT org_egress_dispatch_raw_cache_read_tokens_check
+      CHECK (raw_cache_read_tokens ~ '^[0-9]{1,40}$');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conrelid='org_egress_dispatch'::regclass AND
+            conname='org_egress_dispatch_raw_cache_write_tokens_check') THEN
+    ALTER TABLE org_egress_dispatch ADD CONSTRAINT org_egress_dispatch_raw_cache_write_tokens_check
+      CHECK (raw_cache_write_tokens ~ '^[0-9]{1,40}$');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conrelid='org_egress_dispatch'::regclass AND
+            conname='org_egress_dispatch_overage_usd_check') THEN
+    ALTER TABLE org_egress_dispatch ADD CONSTRAINT org_egress_dispatch_overage_usd_check
+      CHECK (overage_usd >= 0);
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_org_egress_recover
   ON org_egress_dispatch(state,lease_expires_at,id);
 ALTER TABLE org_egress_binding ENABLE ROW LEVEL SECURITY;
@@ -6383,13 +6502,16 @@ BEGIN
      p_digest IS NULL OR p_digest!~'^[0-9a-f]{64}$' OR p_lease IS NULL OR p_lease<1 THEN
     RAISE EXCEPTION 'org_egress_admit: invalid input' USING ERRCODE='22023';
   END IF;
-  IF NOT EXISTS(SELECT 1 FROM kb_enrollments e WHERE e.authority_id=p_authority AND
+  IF p_origin IS DISTINCT FROM ('cert:'||p_issuer||':'||p_serial) OR
+     NOT EXISTS(SELECT 1 FROM kb_enrollments e WHERE e.authority_id=p_authority AND
       e.fingerprint=p_fingerprint AND e.cert_issuer=p_issuer AND
       e.cert_serial_norm=p_serial AND e.state='active' AND e.revoked_at='') OR
      v_actor IS DISTINCT FROM p_origin OR
      NOT EXISTS(SELECT 1 FROM kb_team_membership m WHERE m.identity_key=v_actor AND m.team=p_team) OR
-     (p_project IS NOT NULL AND NOT EXISTS(SELECT 1 FROM kb_project p
-       WHERE p.id=p_project AND p.parent=p_team)) THEN
+     (p_project IS NOT NULL AND
+       (NOT EXISTS(SELECT 1 FROM kb_project p WHERE p.id=p_project AND p.parent=p_team) OR
+        NOT EXISTS(SELECT 1 FROM kb_project_membership pm
+          WHERE pm.project=p_project AND pm.identity_key=v_actor))) THEN
     RAISE EXCEPTION 'org_egress_admit: not authorized' USING ERRCODE='42501';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext('orgegress:'||p_authority||'|'||p_request));
@@ -6397,9 +6519,7 @@ BEGIN
     WHERE x.authority_id=p_authority AND x.request_id=p_request FOR UPDATE;
   IF FOUND THEN
     IF d.team_id IS DISTINCT FROM p_team OR d.project_id IS DISTINCT FROM p_project OR
-       d.model_id IS DISTINCT FROM p_model OR d.request_digest IS DISTINCT FROM p_digest OR
-       d.origin_identity IS DISTINCT FROM p_origin OR
-       d.origin_fingerprint IS DISTINCT FROM p_fingerprint THEN
+       d.model_id IS DISTINCT FROM p_model OR d.request_digest IS DISTINCT FROM p_digest THEN
       RAISE EXCEPTION 'org_egress_admit: replay mismatch' USING ERRCODE='23505';
     END IF;
     RETURN QUERY SELECT 'replay',d.id,d.state,d.reserved_max_usd::text,d.billable_model,
@@ -6415,6 +6535,9 @@ BEGIN
     JOIN org_vault_secret vs ON vs.principal=vc.principal AND vs.agent=vc.agent AND
       vs.cred=vc.cred AND vs.version=vc.version AND vs.team_id=x.team_id
     WHERE x.team_id=p_team AND x.model_id=p_model AND x.enabled AND NOT x.overage_fenced AND
+      EXISTS(SELECT 1 FROM org_vault_rotation vr WHERE vr.key_id=x.key_id AND
+        vr.principal=x.vault_principal AND vr.agent=x.vault_agent AND vr.cred=x.vault_cred AND
+        vr.team_id=x.team_id AND vr.state='activated') AND
       c.enabled AND c.provider='bedrock' AND c.wire='bedrock' AND c.bedrock_api='converse';
   IF NOT FOUND THEN
     RAISE EXCEPTION 'org_egress_admit: not authorized' USING ERRCODE='42501';
@@ -6495,22 +6618,76 @@ BEGIN
   RETURN n=1;
 END; $$;
 
+-- Final vendor-write fence.  The caller must already own a transaction and
+-- keeps it open through the complete network write and terminal settlement;
+-- this row lock makes lease recovery wait and prevents a resumed stale owner
+-- from writing after its generation has been revoked.
+CREATE OR REPLACE FUNCTION org_egress_dispatch_owner_guard(
+  p_id BIGINT,p_token TEXT,p_generation BIGINT
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE d org_egress_dispatch%ROWTYPE;
+BEGIN
+  IF p_id IS NULL OR p_id<1 OR p_token IS NULL OR p_token!~'^[0-9a-f]{32}$' OR
+     p_generation IS NULL OR p_generation<1 THEN
+    RAISE EXCEPTION 'org_egress_dispatch_owner_guard: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO d FROM org_egress_dispatch WHERE id=p_id FOR UPDATE;
+  RETURN FOUND AND d.state='dispatching' AND d.owner_token=p_token AND
+    d.owner_generation=p_generation AND d.lease_expires_at>now();
+END; $$;
+
+-- Incident-only settlement: release the bounded reservation but charge the
+-- complete authenticated liability.  Ordinary P4 settlement deliberately
+-- clamps to the reservation; P2b overage must not hide the excess.
+CREATE OR REPLACE FUNCTION org_egress_budget_settle_overage(
+  p_authority TEXT,p_request TEXT,p_liability NUMERIC
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE r org_budget_reservation%ROWTYPE; a RECORD;
+BEGIN
+  IF p_liability IS NULL OR p_liability<0 THEN
+    RAISE EXCEPTION 'org_egress_budget_settle_overage: invalid liability' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM org_budget_reservation
+    WHERE origin_cert_cn=p_authority AND request_id=p_request FOR UPDATE;
+  IF NOT FOUND OR r.state<>'admitted' THEN RETURN false; END IF;
+  FOR a IN SELECT * FROM org_budget_reservation_alloc WHERE reservation_id=r.id LOOP
+    UPDATE org_budget_counter SET reserved_usd=GREATEST(0,reserved_usd-a.reserved_usd),
+      spend_usd=spend_usd+p_liability,updated_at=pg_now_text()
+      WHERE team_id=r.team_id AND
+        COALESCE(project_id,0)=CASE WHEN a.counter_key LIKE 'P:%'
+          THEN COALESCE(r.project_id,0) ELSE 0 END AND
+        period=a.period AND period_id=a.period_id;
+  END LOOP;
+  UPDATE org_budget_reservation SET state='settled',realized_usd=p_liability,
+    settled_at=pg_now_text() WHERE id=r.id;
+  RETURN true;
+END; $$;
+
 CREATE OR REPLACE FUNCTION org_egress_dispatch_settle(
   p_id BIGINT,p_token TEXT,p_generation BIGINT,p_state TEXT,p_http INT,
   p_prompt BIGINT,p_completion BIGINT,p_cache_read BIGINT,p_cache_write BIGINT,
   p_outcome TEXT
 ) RETURNS BOOLEAN
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE d org_egress_dispatch%ROWTYPE; v_cost NUMERIC(38,10); v_budget NUMERIC(20,10);
-  v_settled BOOLEAN; v_over BOOLEAN:=false;
+DECLARE d org_egress_dispatch%ROWTYPE; v_cost NUMERIC(38,10); v_budget NUMERIC(38,10);
+  v_settled BOOLEAN; v_over BOOLEAN:=false; v_input NUMERIC(38,0);
+  v_overage NUMERIC(38,10):=0;
 BEGIN
   IF p_id IS NULL OR p_id<1 OR p_token IS NULL OR p_token!~'^[0-9a-f]{32}$' OR
      p_generation IS NULL OR p_generation<1 OR p_state IS NULL OR
-     p_state NOT IN ('succeeded','denied','failed','uncertain') OR p_http IS NULL OR
+     p_state NOT IN ('succeeded','failed','uncertain') OR p_http IS NULL OR
      p_http<0 OR p_http>599 OR p_prompt IS NULL OR p_completion IS NULL OR
      p_cache_read IS NULL OR p_cache_write IS NULL OR p_prompt<0 OR p_completion<0 OR
      p_cache_read<0 OR p_cache_write<0 THEN
     RAISE EXCEPTION 'org_egress_dispatch_settle: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF (p_state='succeeded' AND p_http NOT BETWEEN 200 AND 299) OR
+     (p_state='failed' AND (p_http<>0 OR COALESCE(p_outcome,'')<>'prewrite_failed' OR
+       p_prompt<>0 OR p_completion<>0 OR p_cache_read<>0 OR p_cache_write<>0)) THEN
+    RAISE EXCEPTION 'org_egress_dispatch_settle: invalid outcome classification'
+      USING ERRCODE='22023';
   END IF;
   SELECT * INTO d FROM org_egress_dispatch WHERE id=p_id FOR UPDATE;
   IF NOT FOUND OR d.state<>'dispatching' OR d.owner_token<>p_token OR
@@ -6524,13 +6701,18 @@ BEGIN
       v_cost:=d.reserved_max_usd; v_over:=true;
     END IF;
   END IF;
-  IF p_prompt>d.max_input_tokens OR p_completion>d.max_output_tokens OR
+  v_input:=p_prompt::numeric+p_cache_read::numeric+p_cache_write::numeric;
+  IF v_input>d.max_input_tokens OR p_completion>d.max_output_tokens OR
      v_cost>d.reserved_max_usd THEN v_over:=true; END IF;
-  v_budget:=CASE WHEN v_over THEN d.reserved_max_usd
-                 ELSE LEAST(v_cost,d.reserved_max_usd) END;
-  PERFORM org_budget_settle(d.authority_id,d.request_id,v_budget);
+  v_overage:=CASE WHEN v_over THEN GREATEST(v_cost-d.reserved_max_usd,0) ELSE 0 END;
+  v_budget:=CASE WHEN v_over THEN v_cost ELSE LEAST(v_cost,d.reserved_max_usd) END;
+  IF v_over THEN
+    PERFORM org_egress_budget_settle_overage(d.authority_id,d.request_id,v_budget);
+  ELSE
+    PERFORM org_budget_settle(d.authority_id,d.request_id,v_budget);
+  END IF;
   PERFORM org_token_audit_settle(d.authority_id,d.request_id,
-    CASE p_state WHEN 'succeeded' THEN 'settled_success' WHEN 'denied' THEN 'settled_denied'
+    CASE p_state WHEN 'succeeded' THEN 'settled_success'
       WHEN 'uncertain' THEN 'indeterminate' ELSE 'settled_failed' END,
     d.model_id,p_prompt,p_completion,p_cache_read,p_cache_write,v_cost,
     to_char(CURRENT_DATE,'YYYY-MM-DD'));
@@ -6540,7 +6722,10 @@ BEGIN
   END IF;
   UPDATE org_egress_dispatch SET state=p_state,http_status=p_http,prompt_tokens=p_prompt,
     completion_tokens=p_completion,cache_read_tokens=p_cache_read,
-    cache_write_tokens=p_cache_write,realized_usd=v_cost,liability_overflow=false,
+    cache_write_tokens=p_cache_write,raw_prompt_tokens=p_prompt::text,
+    raw_completion_tokens=p_completion::text,raw_cache_read_tokens=p_cache_read::text,
+    raw_cache_write_tokens=p_cache_write::text,realized_usd=v_cost,overage_usd=v_overage,
+    liability_overflow=false,
     outcome_class=left(COALESCE(p_outcome,''),64),owner_token='',owner_instance='',
     lease_expires_at=NULL,updated_at=pg_now_text() WHERE id=d.id;
   RETURN true;
@@ -6548,11 +6733,16 @@ EXCEPTION WHEN numeric_value_out_of_range THEN
   UPDATE org_egress_binding SET overage_fenced=true,updated_at=pg_now_text()
     WHERE team_id=d.team_id AND model_id=d.model_id;
   UPDATE org_egress_dispatch SET state='uncertain',liability_overflow=true,
+    raw_prompt_tokens=COALESCE(p_prompt,0)::text,
+    raw_completion_tokens=COALESCE(p_completion,0)::text,
+    raw_cache_read_tokens=COALESCE(p_cache_read,0)::text,
+    raw_cache_write_tokens=COALESCE(p_cache_write,0)::text,
     outcome_class='liability_overflow',owner_token='',owner_instance='',lease_expires_at=NULL,
     updated_at=pg_now_text() WHERE id=d.id;
   PERFORM org_budget_settle(d.authority_id,d.request_id,d.reserved_max_usd);
   PERFORM org_token_audit_settle(d.authority_id,d.request_id,'indeterminate',d.model_id,
-    0,0,0,0,d.reserved_max_usd,to_char(CURRENT_DATE,'YYYY-MM-DD'));
+    p_prompt,p_completion,p_cache_read,p_cache_write,d.reserved_max_usd,
+    to_char(CURRENT_DATE,'YYYY-MM-DD'));
   RETURN true;
 END; $$;
 
@@ -6591,5 +6781,7 @@ REVOKE ALL ON FUNCTION org_egress_binding_set(BIGINT,TEXT,TEXT,BIGINT,TEXT,TEXT,
 REVOKE ALL ON FUNCTION org_egress_admit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_egress_dispatch_owner_guard(BIGINT,TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_egress_budget_settle_overage(TEXT,TEXT,NUMERIC) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;

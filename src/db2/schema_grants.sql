@@ -283,8 +283,14 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_egress_admit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_owner_guard(BIGINT,TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_egress_recover(INT) TO aimee_kb_runtime;
+
+  -- Certificate renewal is a single SECURITY DEFINER lineage/grant/audit
+  -- mutation. Runtime cannot invoke the underlying WORM appender directly.
+  REVOKE ALL ON FUNCTION kb_enrollment_renew(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_enrollment_renew(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
 
   -- P9a telemetry export + content-free ingest. org_telemetry + org_telemetry_allowlist
   -- are WRITTEN ONLY by the SECURITY DEFINER ingest/allow functions (owned by

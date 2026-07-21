@@ -34,6 +34,7 @@ import socket
 import ssl
 import struct
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from socketserver import BaseRequestHandler, TCPServer
 from typing import Any, Iterable
@@ -345,6 +346,8 @@ def expected_signature(
     signed_names: list[str],
     payload_hash: str,
     region: str,
+    amz_date: str = TEST_AMZ_DATE,
+    date: str = TEST_DATE,
 ) -> str:
     canonical_headers = "".join(
         f"{name}:{headers[name]}\n" for name in signed_names
@@ -353,13 +356,13 @@ def expected_signature(
         f"POST\n{path}\n\n{canonical_headers}\n"
         f"{';'.join(signed_names)}\n{payload_hash}"
     )
-    scope = f"{TEST_DATE}/{region}/bedrock/aws4_request"
+    scope = f"{date}/{region}/bedrock/aws4_request"
     string_to_sign = (
         "AWS4-HMAC-SHA256\n"
-        f"{TEST_AMZ_DATE}\n{scope}\n"
+        f"{amz_date}\n{scope}\n"
         f"{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
     )
-    key_date = _hmac(("AWS4" + TEST_SECRET_KEY).encode("utf-8"), TEST_DATE)
+    key_date = _hmac(("AWS4" + TEST_SECRET_KEY).encode("utf-8"), date)
     key_region = _hmac(key_date, region)
     key_service = _hmac(key_region, "bedrock")
     key_signing = _hmac(key_service, "aws4_request")
@@ -563,7 +566,16 @@ class MockHandler(BaseRequestHandler):
         if not hmac.compare_digest(headers["x-amz-content-sha256"], payload_hash):
             self._reject("payload-hash", length)
             return
-        if headers["x-amz-date"] != TEST_AMZ_DATE:
+        amz_date = headers["x-amz-date"]
+        if args.dynamic_timestamp:
+            try:
+                signed_at = datetime.strptime(amz_date, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+                timestamp_ok = abs((datetime.now(timezone.utc) - signed_at).total_seconds()) <= 300
+            except ValueError:
+                timestamp_ok = False
+        else:
+            timestamp_ok = amz_date == TEST_AMZ_DATE
+        if not timestamp_ok:
             self._reject("timestamp", length)
             return
         token_present = "x-amz-security-token" in headers
@@ -578,7 +590,8 @@ class MockHandler(BaseRequestHandler):
             self._reject("authorization-shape", length)
             return
         access_key, scope, signed_text, signature = match.groups()
-        expected_scope = f"{TEST_DATE}/{args.region}/bedrock/aws4_request"
+        signing_date = amz_date[:8]
+        expected_scope = f"{signing_date}/{args.region}/bedrock/aws4_request"
         signed_names = signed_text.split(";")
         expected_names = sorted(
             [
@@ -597,7 +610,8 @@ class MockHandler(BaseRequestHandler):
         ):
             self._reject("authorization-scope", length)
             return
-        wanted = expected_signature(path, headers, signed_names, payload_hash, args.region)
+        wanted = expected_signature(path, headers, signed_names, payload_hash, args.region,
+                                    amz_date, signing_date)
         if not hmac.compare_digest(signature, wanted):
             self._reject("signature", length)
             return
@@ -763,6 +777,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-host", help="exact signed Host (derived from region by default)")
     parser.add_argument("--expected-path", help="exact encoded origin-form request target")
     parser.add_argument("--no-session-token", action="store_true")
+    parser.add_argument("--dynamic-timestamp", action="store_true")
     parser.add_argument("--counter-file", help="atomically updated accepted-request count")
     parser.add_argument("--observed-file", help="atomically updated observed-request count")
     parser.add_argument("--ready-file", help="created after the TLS listener is ready")

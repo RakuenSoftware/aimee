@@ -29,4 +29,8 @@ int kb_vault_policy_select(const char *custody, char *errbuf, size_t errlen);
  * anchor is implemented yet, this returns false in every runnable config today. */
 int kb_vault_live_keys_allowed(void);
 
+/* P2b release gate. Production stays disabled until the off-host WORM witness
+ * lands; a conspicuous compile-time integration override exists only for CT260. */
+int kb_egress_release_allowed(void);
+
 #endif /* DEC_KB_VAULT_POLICY_H */

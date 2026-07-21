@@ -405,12 +405,16 @@ start_mock() {
   local case_id=$1
   local cert=${2:-$server_cert}
   local key=${3:-$server_key}
+  local -a extra_args=()
+  [[ ${4:-} == no-session-token ]] && extra_args+=(--no-session-token)
+  [[ -n ${5:-} ]] && extra_args+=(--expected-path "$5")
+  [[ ${6:-} == dynamic-timestamp ]] && extra_args+=(--dynamic-timestamp)
   stop_mock
   : >"$mock_log"
   python3 scripts/p6c_bedrock_mock.py --cert "$cert" --key "$key" \
     --bind 127.0.0.1 --port 443 --case "$case_id" \
     --counter-file "$mock_counter" --observed-file "$mock_observed" \
-    --ready-file "$mock_ready" 2>"$mock_log" &
+    --ready-file "$mock_ready" "${extra_args[@]}" 2>"$mock_log" &
   mock_pid=$!
   local attempt=0
   while (( attempt < 100 )); do
@@ -538,5 +542,20 @@ for model_id in p6c-missing p6c-unentitled p6c-unsupported; do
   assert_observed "$pre_network_observed"
 done
 stop_mock
+
+if [[ -n ${AIMEE_P2B_LIVE_TARGET:-} ]]; then
+  [[ -x $AIMEE_P2B_LIVE_TARGET ]] || die 'P2b live target is not executable'
+  install -m 755 aimee-kb-resolver "$(dirname "$AIMEE_P2B_LIVE_TARGET")/aimee-kb-resolver"
+  start_mock nonstream-success "$server_cert" "$server_key" no-session-token \
+    /model/p2b-live-model/converse dynamic-timestamp
+  if ! "$AIMEE_P2B_LIVE_TARGET" >"$case_log" 2>&1; then
+    sed 's/^/p2b-live: /' "$case_log" >&2
+    sed 's/^/mock: /' "$mock_log" >&2
+    die 'P2b live composition unexpectedly failed'
+  fi
+  assert_count 1
+  assert_observed 1
+  stop_mock
+fi
 
 printf '%s: all CT260 TLS/PG gates passed\n' "$gate_name"

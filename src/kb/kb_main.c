@@ -13,6 +13,7 @@
 #include "kb_insights_util.h"
 #include "org_budget.h"
 #include "org_rate.h"
+#include "org_egress.h"
 #include "org_telemetry.h"
 #include "org_model_catalog.h"
 #include "org_vault_key_use.h"
@@ -35,6 +36,7 @@
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "db2/kb_audit_worm.h"
 #include "vault_server_key.h"    /* startup durable seal-epoch synchronization */
 #include <signal.h>
 #include <stdint.h>
@@ -1447,6 +1449,21 @@ int main(int argc, char **argv)
       }
    }
 
+#if defined(AIMEE_P2B_INTEGRATION_TEST_OVERRIDE)
+   if (kb_egress_release_allowed())
+   {
+      LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
+      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b",
+                              "allow", "integration-only build flag active") != 0)
+      {
+         fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+#endif
+
    /* Hidden directories (`.git`, `.aimee`, `.worktrees`, etc.) hold
     * dotfile state, not source code, so they are never indexed. The
     * scanner enforces this at find-time (src/index.c:135); this startup
@@ -1534,10 +1551,24 @@ int main(int argc, char **argv)
 
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("kb", (time_t)g_ctx.start_time);
+   /* P2b recovery owns stale dispatch leases; bounded batches keep startup and
+    * periodic work predictable while the SQL advisory lock makes it singleton. */
+   {
+      int64_t recovered = 0;
+      do { recovered = 0; } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+   }
+   time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
    while (g_ctx.running)
    {
+      time_t now = time(NULL);
+      if (now >= next_egress_recovery)
+      {
+         int64_t recovered = 0;
+         (void)db2_org_egress_recover(100, &recovered);
+         next_egress_recovery = now + 5;
+      }
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }

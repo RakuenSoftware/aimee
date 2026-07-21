@@ -37,6 +37,10 @@ int db2_org_egress_begin(const char *authority_id, const char *request_id,
                          int64_t ttl_secs, int64_t *out_id, int64_t *out_generation);
 int db2_org_egress_heartbeat(int64_t id, const char *owner_token, int64_t generation,
                              int64_t ttl_secs, int *out_ok);
+/* Acquires and retains the dispatch-row lock in the caller's open tenant
+ * transaction.  Commit/rollback releases the vendor-write fence. */
+int db2_org_egress_owner_guard(int64_t id, const char *owner_token,
+                               int64_t generation, int *out_ok);
 int db2_org_egress_settle(int64_t id, const char *owner_token, int64_t generation,
                           const char *state, int http_status, int64_t prompt_tokens,
                           int64_t completion_tokens, int64_t cache_read_tokens,

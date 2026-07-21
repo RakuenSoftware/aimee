@@ -61,10 +61,12 @@ static int authority_generate(char out[33])
 
 static void revcache_put(const char *fp, int revoked); /* defined below */
 
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id)
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id)
 {
-   if (!fingerprint || !fingerprint[0])
+   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] ||
+       !cert_serial_norm || !cert_serial_norm[0])
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -77,25 +79,64 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
     * Normal redeems present a fresh cert (new serial => new fingerprint), so the
     * conflict path is just idempotent-retry / re-registration. */
    const char *sql =
-       "INSERT INTO kb_enrollments (scope, fingerprint, serial, expires_at, legacy, authority_id) "
-       "VALUES (?1, ?2, ?3, ?4, ?5, ?6) "
+       "INSERT INTO kb_enrollments (scope, fingerprint, serial, expires_at, legacy, authority_id, "
+       "cert_issuer, cert_serial_norm) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
        "ON CONFLICT (fingerprint) DO UPDATE SET scope=EXCLUDED.scope, serial=EXCLUDED.serial, "
-       "expires_at=EXCLUDED.expires_at WHERE kb_enrollments.revoked_at='' RETURNING id";
+       "expires_at=EXCLUDED.expires_at WHERE kb_enrollments.revoked_at='' AND "
+       "kb_enrollments.cert_issuer=EXCLUDED.cert_issuer AND "
+       "kb_enrollments.cert_serial_norm=EXCLUDED.cert_serial_norm RETURNING id";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", scope ? scope : "");
    aimee_pg_bind_text(st, "?2", fingerprint);
-   aimee_pg_bind_text(st, "?3", serial ? serial : "");
+   aimee_pg_bind_text(st, "?3", cert_serial_norm);
    aimee_pg_bind_text(st, "?4", expires_at ? expires_at : "");
    aimee_pg_bind_int64(st, "?5", legacy ? 1 : 0);
    aimee_pg_bind_text(st, "?6", authority_id);
+   aimee_pg_bind_text(st, "?7", cert_issuer);
+   aimee_pg_bind_text(st, "?8", cert_serial_norm);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    int64_t id = (step == AIMEE_PG_ROW) ? aimee_pg_column_int64(st, 0) : 0;
    aimee_pg_finalize(st);
    if (step != AIMEE_PG_ROW)
       return -1; /* e.g. conflict on an already-revoked fp: left revoked, no id */
+   if (out_id)
+      *out_id = id;
+   return 0;
+}
+
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id)
+{
+   if (!old_fingerprint || !old_fingerprint[0] || !old_issuer || !old_issuer[0] ||
+       !old_serial_norm || !old_serial_norm[0] || !scope || !scope[0] ||
+       !new_fingerprint || !new_fingerprint[0] || !new_issuer || !new_issuer[0] ||
+       !new_serial_norm || !new_serial_norm[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT kb_enrollment_renew(?1,?2,?3,?4,?5,?6,?7)", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", old_fingerprint);
+   aimee_pg_bind_text(st, "?2", old_issuer);
+   aimee_pg_bind_text(st, "?3", old_serial_norm);
+   aimee_pg_bind_text(st, "?4", scope);
+   aimee_pg_bind_text(st, "?5", new_fingerprint);
+   aimee_pg_bind_text(st, "?6", new_issuer);
+   aimee_pg_bind_text(st, "?7", new_serial_norm);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int64_t id = step == AIMEE_PG_ROW ? aimee_pg_column_int64(st, 0) : 0;
+   aimee_pg_finalize(st);
+   if (step != AIMEE_PG_ROW || id <= 0)
+      return -1;
    if (out_id)
       *out_id = id;
    return 0;

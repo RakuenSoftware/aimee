@@ -57,8 +57,16 @@ static int ascii_safe(const char *s, size_t max, int empty)
 
 static int credential_safe(const kb_bedrock_credentials_t *c)
 {
-   if (!c || !ascii_safe(c->access_key_id, 129, 0) || !ascii_safe(c->secret_access_key, 256, 0) ||
-       (c->session_token && !ascii_safe(c->session_token, AWS_SIGV4_TOKEN_MAX, 1)) ||
+   if (!c || !c->access_key_id || !c->secret_access_key)
+      return 0;
+   size_t access_len = c->access_key_id_len ? c->access_key_id_len : strnlen(c->access_key_id,129);
+   size_t secret_len = c->secret_access_key_len ? c->secret_access_key_len : strnlen(c->secret_access_key,256);
+   size_t token_len = c->session_token_len ? c->session_token_len :
+                      (c->session_token ? strnlen(c->session_token,AWS_SIGV4_TOKEN_MAX) : 0);
+   if (access_len == 0 || access_len >= 129 || secret_len == 0 || secret_len >= 256 ||
+       memchr(c->access_key_id,'\0',access_len) || memchr(c->secret_access_key,'\0',secret_len) ||
+       (!!c->session_token != (token_len != 0)) || token_len >= AWS_SIGV4_TOKEN_MAX ||
+       (c->session_token && memchr(c->session_token,'\0',token_len)) ||
        !c->amz_date || !c->date || strnlen(c->amz_date, 17) != 16 || strnlen(c->date, 9) != 8 ||
        c->amz_date[8] != 'T' || c->amz_date[15] != 'Z' || memcmp(c->amz_date, c->date, 8) != 0)
       return 0;
@@ -68,9 +76,12 @@ static int credential_safe(const kb_bedrock_credentials_t *c)
    for (int i = 0; i < 8; i++)
       if (c->date[i] < '0' || c->date[i] > '9')
          return 0;
-   for (const unsigned char *p = (const unsigned char *)c->access_key_id; *p; p++)
-      if (!((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '-' || *p == '_'))
+   for (size_t i=0;i<access_len;i++)
+   {
+      unsigned char v=(unsigned char)c->access_key_id[i];
+      if (!((v >= 'A' && v <= 'Z') || (v >= '0' && v <= '9') || v == '-' || v == '_'))
          return 0;
+   }
    return 1;
 }
 
@@ -640,6 +651,42 @@ static int model_path_ok(const char *id)
    return 1;
 }
 
+kb_bedrock_result_t kb_bedrock_canonical_body(const aimee_request_t *ir, char **body,
+                                               size_t *body_len)
+{
+   if (body) *body = NULL;
+   if (body_len) *body_len = 0;
+   int oom = 0;
+   if (!ir || !body || !body_len || !request_preflight(ir, &oom))
+      return oom ? KB_BEDROCK_INTERNAL_ERROR : KB_BEDROCK_INVALID_ARGUMENT;
+   cJSON *json = bedrock_converse_build(ir);
+   if (!json)
+      return KB_BEDROCK_INTERNAL_ERROR;
+   char *serialized = malloc(KB_BEDROCK_BODY_MAX + 5U);
+   if (!serialized)
+   {
+      cJSON_Delete(json);
+      return KB_BEDROCK_INTERNAL_ERROR;
+   }
+   if (!cJSON_PrintPreallocated(json, serialized, (int)KB_BEDROCK_BODY_MAX + 5, 0))
+   {
+      cJSON_Delete(json);
+      free(serialized);
+      return KB_BEDROCK_TOO_LARGE;
+   }
+   cJSON_Delete(json);
+   size_t n = strnlen(serialized, KB_BEDROCK_BODY_MAX + 1U);
+   if (n > KB_BEDROCK_BODY_MAX)
+   {
+      OPENSSL_cleanse(serialized, KB_BEDROCK_BODY_MAX + 5U);
+      free(serialized);
+      return KB_BEDROCK_TOO_LARGE;
+   }
+   *body = serialized;
+   *body_len = n;
+   return KB_BEDROCK_OK;
+}
+
 kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *t,
                                                   const aimee_request_t *ir, int streaming,
                                                   const kb_bedrock_credentials_t *c,
@@ -672,28 +719,9 @@ kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *t,
    n = snprintf(q.host, sizeof(q.host), "bedrock-runtime.%s.%s", t->invoke_region, domain);
    if (n < 0 || (size_t)n >= sizeof(q.host))
       return KB_BEDROCK_INVALID_TARGET;
-   cJSON *json = bedrock_converse_build(ir);
-   if (!json)
-      return KB_BEDROCK_INTERNAL_ERROR;
-   q.body = malloc(KB_BEDROCK_BODY_MAX + 5U);
-   if (!q.body)
-   {
-      cJSON_Delete(json);
-      return KB_BEDROCK_INTERNAL_ERROR;
-   }
-   if (!cJSON_PrintPreallocated(json, q.body, (int)KB_BEDROCK_BODY_MAX + 5, 0))
-   {
-      cJSON_Delete(json);
-      kb_bedrock_wire_request_clear(&q);
-      return KB_BEDROCK_TOO_LARGE;
-   }
-   cJSON_Delete(json);
-   q.body_len = strnlen(q.body, KB_BEDROCK_BODY_MAX + 1U);
-   if (q.body_len > KB_BEDROCK_BODY_MAX)
-   {
-      kb_bedrock_wire_request_clear(&q);
-      return KB_BEDROCK_TOO_LARGE;
-   }
+   kb_bedrock_result_t serialized = kb_bedrock_canonical_body(ir, &q.body, &q.body_len);
+   if (serialized != KB_BEDROCK_OK)
+      return serialized;
    aws_sha256_hex((const unsigned char *)q.body, q.body_len, q.payload_hash);
    aws_sigv4_kv_t headers[] = {{"content-type", "application/json"},
                                {"host", q.host},
@@ -709,8 +737,12 @@ kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *t,
                                .region = t->invoke_region,
                                .service = "bedrock",
                                .access_key_id = c->access_key_id,
+                               .access_key_id_len = c->access_key_id_len ? c->access_key_id_len : strlen(c->access_key_id),
                                .secret_access_key = c->secret_access_key,
-                               .session_token = c->session_token};
+                               .secret_access_key_len = c->secret_access_key_len ? c->secret_access_key_len : strlen(c->secret_access_key),
+                               .session_token = c->session_token,
+                               .session_token_len = c->session_token_len ? c->session_token_len :
+                                  (c->session_token ? strlen(c->session_token) : 0)};
    if (aws_sigv4_sign(&sign, &q.sig) != 0)
    {
       kb_bedrock_wire_request_clear(&q);
@@ -720,6 +752,36 @@ kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *t,
    kb_bedrock_wire_request_clear(out);
    *out = q;
    return KB_BEDROCK_OK;
+}
+
+kb_bedrock_result_t kb_bedrock_authorized_wire_build(kb_bedrock_authorized_target_t *target,
+                                                     const aimee_request_t *ir,
+                                                     const kb_bedrock_credential_view_t *view,
+                                                     kb_bedrock_wire_request_t *request)
+{
+   if (!view || !view->access_key_id || !view->secret_access_key ||
+       view->access_key_id_len == 0 || view->access_key_id_len >= 129 ||
+       view->secret_access_key_len == 0 || view->secret_access_key_len >= 256 ||
+       view->session_token_len != 0 || view->session_token != NULL ||
+       memchr(view->access_key_id, '\0', view->access_key_id_len) ||
+       memchr(view->secret_access_key, '\0', view->secret_access_key_len))
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   kb_bedrock_credentials_t credentials = {.access_key_id = (const char *)view->access_key_id,
+                                            .access_key_id_len = view->access_key_id_len,
+                                            .secret_access_key = (const char *)view->secret_access_key,
+                                            .secret_access_key_len = view->secret_access_key_len,
+                                            .session_token = NULL,
+                                            .amz_date = view->amz_date,
+                                            .date = view->date};
+   const db2_bedrock_target_t *raw = NULL;
+   kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
+   if (result == KB_BEDROCK_OK)
+   {
+      result = kb_bedrock_wire_request_build(raw, ir, 0, &credentials, request);
+      authorized_target_release(target);
+   }
+   OPENSSL_cleanse(&credentials, sizeof(credentials));
+   return result;
 }
 
 kb_bedrock_result_t kb_bedrock_wire_request_headers(const kb_bedrock_wire_request_t *r,
@@ -1632,34 +1694,26 @@ static kb_bedrock_result_t map_transport_result(kb_http_result_t result)
    return KB_BEDROCK_TRANSPORT_ERROR;
 }
 
-static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
-                                             const aimee_request_t *ir,
-                                             const kb_bedrock_credentials_t *credentials,
-                                             int streaming, kb_bedrock_stream_callback_t callback,
-                                             void *callback_context, aimee_response_t *response,
-                                             int *http_status)
+static kb_bedrock_result_t dispatch_wire_exchange(
+    const db2_bedrock_target_t *target, kb_bedrock_wire_request_t *wire, int streaming,
+    kb_bedrock_stream_callback_t callback, void *callback_context, aimee_response_t *response,
+    int *http_status, int *vendor_bytes_possible)
 {
    if (http_status)
       *http_status = 0;
    if (response)
       aimee_response_free(response);
-   if (!target || !ir || !credentials || !http_status || (!streaming && !response))
+   if (vendor_bytes_possible)
+      *vendor_bytes_possible = 0;
+   if (!target || !wire || wire->initialized != KB_BEDROCK_REQUEST_MAGIC || !wire->body ||
+       !http_status || (!streaming && !response))
       return KB_BEDROCK_INVALID_ARGUMENT;
-
-   kb_bedrock_wire_request_t wire;
-   kb_bedrock_wire_request_init(&wire);
-   kb_bedrock_result_t result =
-       kb_bedrock_wire_request_build(target, ir, streaming, credentials, &wire);
-   if (result != KB_BEDROCK_OK)
-   {
-      kb_bedrock_wire_request_clear(&wire);
-      return result;
-   }
+   kb_bedrock_result_t result = KB_BEDROCK_OK;
 
    kb_bedrock_header_t engine_headers[KB_BEDROCK_MAX_HEADERS];
    kb_http_header_t http_headers[KB_BEDROCK_MAX_HEADERS];
    size_t header_count = 0;
-   result = kb_bedrock_wire_request_headers(&wire, engine_headers, KB_BEDROCK_MAX_HEADERS,
+   result = kb_bedrock_wire_request_headers(wire, engine_headers, KB_BEDROCK_MAX_HEADERS,
                                             &header_count);
    if (result != KB_BEDROCK_OK)
       goto done;
@@ -1681,13 +1735,13 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
       if (result != KB_BEDROCK_OK)
          goto done;
    }
-   kb_http_request_t request = {.authority = wire.host,
+   kb_http_request_t request = {.authority = wire->host,
                                 .method = "POST",
-                                .target = wire.encoded_path,
+                                .target = wire->encoded_path,
                                 .headers = http_headers,
                                 .header_count = header_count,
-                                .body = (const unsigned char *)wire.body,
-                                .body_len = wire.body_len,
+                                .body = (const unsigned char *)wire->body,
+                                .body_len = wire->body_len,
                                 .response_body_max = KB_BEDROCK_BODY_MAX,
                                 .connect_timeout_ms = 5000,
                                 .total_timeout_ms = 30000};
@@ -1695,6 +1749,9 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
    int publish_status = 0;
    kb_http_result_t transport =
        kb_http_tls_exchange(&request, &metadata, dispatch_headers, dispatch_body, &context);
+   if (vendor_bytes_possible && transport != KB_HTTP_INVALID_ARGUMENT &&
+       transport != KB_HTTP_INTERNAL_ERROR)
+      *vendor_bytes_possible = 1;
    if (context.first_result != KB_BEDROCK_OK)
       result = context.first_result;
    else if (transport != KB_HTTP_OK)
@@ -1733,9 +1790,67 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
       (void)kb_bedrock_stream_clear(&context.stream);
    OPENSSL_cleanse(&context.terminal, sizeof(context.terminal));
 done:
-   kb_bedrock_wire_request_clear(&wire);
    if (result != KB_BEDROCK_OK && response)
       aimee_response_free(response);
+   return result;
+}
+
+static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
+                                             const aimee_request_t *ir,
+                                             const kb_bedrock_credentials_t *credentials,
+                                             int streaming, kb_bedrock_stream_callback_t callback,
+                                             void *callback_context, aimee_response_t *response,
+                                             int *http_status)
+{
+   kb_bedrock_wire_request_t wire;
+   kb_bedrock_wire_request_init(&wire);
+   kb_bedrock_result_t result =
+       kb_bedrock_wire_request_build(target, ir, streaming, credentials, &wire);
+   if (result == KB_BEDROCK_OK)
+      result = dispatch_wire_exchange(target, &wire, streaming, callback, callback_context,
+                                      response, http_status, NULL);
+   kb_bedrock_wire_request_clear(&wire);
+   return result;
+}
+
+static int wire_matches_target(const db2_bedrock_target_t *target,
+                               const kb_bedrock_wire_request_t *wire)
+{
+   if (target_policy_check(target, 0) != KB_BEDROCK_OK || !model_path_ok(target->model_id) ||
+       wire->streaming)
+      return 0;
+   char raw[KB_BEDROCK_RAW_PATH_CAP], encoded[KB_BEDROCK_ENCODED_PATH_CAP];
+   const char *domain = strcmp(target->partition, "aws-cn") == 0 ? "amazonaws.com.cn"
+                                                                  : "amazonaws.com";
+   char host[KB_BEDROCK_HOST_CAP];
+   int n = snprintf(raw, sizeof(raw), "/model/%s/converse", target->model_id);
+   if (n < 0 || (size_t)n >= sizeof(raw) ||
+       aws_uri_encode(raw, 0, encoded, sizeof(encoded)) != 0)
+      return 0;
+   n = snprintf(host, sizeof(host), "bedrock-runtime.%s.%s", target->invoke_region, domain);
+   return n > 0 && (size_t)n < sizeof(host) && strcmp(raw, wire->raw_path) == 0 &&
+          strcmp(encoded, wire->encoded_path) == 0 && strcmp(host, wire->host) == 0;
+}
+
+kb_bedrock_result_t kb_bedrock_authorized_wire_dispatch(
+    kb_bedrock_authorized_target_t *target, kb_bedrock_wire_request_t *wire,
+    aimee_response_t *response, int *http_status, int *vendor_bytes_possible)
+{
+   if (http_status) *http_status = 0;
+   if (vendor_bytes_possible) *vendor_bytes_possible = 0;
+   if (response) aimee_response_free(response);
+   if (!wire || !response || !http_status || !vendor_bytes_possible)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   const db2_bedrock_target_t *raw = NULL;
+   kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
+   if (result == KB_BEDROCK_OK)
+   {
+      result = wire_matches_target(raw, wire)
+                   ? dispatch_wire_exchange(raw, wire, 0, NULL, NULL, response, http_status,
+                                            vendor_bytes_possible)
+                   : KB_BEDROCK_INVALID_TARGET;
+      authorized_target_release(target);
+   }
    return result;
 }
 

@@ -163,6 +163,29 @@ int db2_org_egress_heartbeat(int64_t id, const char *owner_token, int64_t genera
                       owner_token, generation, ttl_secs, out_ok);
 }
 
+int db2_org_egress_owner_guard(int64_t id, const char *owner_token,
+                               int64_t generation, int *out_ok)
+{
+   int g = bind_common_guard();
+   if (g) return g;
+   if (id < 1 || !owner_token || strlen(owner_token) != 32 || generation < 1) return -1;
+   void *conn = db2_conn();
+   char err[256] = "";
+   aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(
+       conn, "SELECT org_egress_dispatch_owner_guard(?1,?2,?3)", err, sizeof(err)) : NULL;
+   if (!st) return -1;
+   aimee_pg_bind_int64(st, "?1", id);
+   aimee_pg_bind_text(st, "?2", owner_token);
+   aimee_pg_bind_int64(st, "?3", generation);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   const char *v = step == AIMEE_PG_ROW ? aimee_pg_column_text(st, 0) : NULL;
+   int ok = v && (v[0] == 't' || v[0] == '1');
+   aimee_pg_finalize(st);
+   if (step != AIMEE_PG_ROW) return egress_error(err);
+   if (out_ok) *out_ok = ok;
+   return 0;
+}
+
 int db2_org_egress_settle(int64_t id, const char *owner_token, int64_t generation,
                           const char *state, int http_status, int64_t prompt_tokens,
                           int64_t completion_tokens, int64_t cache_read_tokens,

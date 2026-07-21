@@ -713,17 +713,24 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   "{\"error\":\"enrollment failed: invalid or already-used token, or bad CSR\"}");
          return 401;
       }
-      /* Persist a queryable enrollment record keyed by the cert's sha256
-       * fingerprint, so the console can list + revoke it. Best-effort: a DB2
-       * outage must not fail the redemption (the cert is already issued).
+      /* Persist the exact immutable certificate identity before releasing the
+       * certificate. A DB outage fails closed: an unregistered certificate
+       * must never escape and become an authority the DB cannot revoke.
        * INVARIANT: this fingerprint MUST equal what kb_tls_peer_fingerprint()
        * computes for the same cert at the mTLS seam (both are sha256 of the cert
        * DER via X509_digest), or revocation checks would silently miss. Live-
        * verified in the S2a integration test. (kb_pki_ca_fingerprint despite its
        * name hashes any cert's DER, not the CA specifically.) */
-      char fp[KB_PKI_FP_HEX] = "";
-      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) == 0)
-         db2_enrollment_insert(scope, fp, "", "", 0, NULL);
+      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", serial[128] = "";
+      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
+          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), serial, sizeof(serial)) != 0 ||
+          db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
+      {
+         free(cert);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"enrollment persistence unavailable\"}");
+         return 503;
+      }
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "client_cert", cert);
       cJSON_AddStringToObject(resp, "scope", scope);
