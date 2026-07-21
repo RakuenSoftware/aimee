@@ -1,399 +1,396 @@
 # Runbook: appliance state recovery
 
-Operator incident-response runbook for recovering an on-disk appliance whose
-**agent registration** (`agents.json`) or **workspace git repository**
-(workspace `.git`) has drifted, gone missing, or been corrupted. Three
-concrete failure modes are covered; triage in §3 picks one and the matching
-section runs.
-
-This is a controlled, on-host recovery. It is **never** the right path for
-agent *credentials* — those live in the vault (see
-[`vault-master-key-rotation.md`](vault-master-key-rotation.md)) and use the
-`aimee agent key import` workflow.
+Operator runbook for restoring a healthy `agents.json` and workspace `.git` on an
+appliance. Each section below is a checkbox procedure; every command is wrapped
+in a copyable shell block so it can be pasted unmodified.
 
 ## 1. Purpose and scope
 
-Bring an appliance back to a coherent state when the *registry of agents*
-or the *workspace git store* is inconsistent, without rebuilding the host and
-without rotating keys. Scope:
+This runbook covers three concrete failure modes that affect appliance state:
 
-- **In scope:** `agents.json` recovery (lost, stale), workspace `.git`
-  recovery (corrupt, lost), verification, escalation.
-- **Out of scope:** vault credential rotation (use the vault runbook),
-  model/capability swaps (use the cutover runbook), schema migration, host
-  re-imaging.
+1. `agents.json` is **lost or absent** (the file does not exist on disk).
+2. `agents.json` is **stale but present** (the file exists but does not match
+   the live agent set).
+3. the workspace **`.git` is corrupt or lost** (history cannot be read or is
+   physically missing).
+
+It is incident-oriented: minimal prose, commands-first. It does **not** cover
+secrets rotation (see `vault-master-key-rotation.md`), image/cutover (see
+`unified-llm-cutover.md`), or any change that mutates production data outside
+the explicit recovery writes here.
 
 ## 2. Prerequisites and operator-supplied variables
 
-Before any section below, confirm you have:
+Before any step below: you need shell access on the appliance host (or the
+container that owns the workspace) and read/write on the appliance home. Stop
+any process that holds the workspace open before step 6.
 
-- [ ] **SSH/console access** to the host as a user that can read/write
-      `AIMEE_HOME` (typically `aimee` or `root`).
-- [ ] **Backup medium** mounted read-write (USB / NFS) with at least
-      `2 × sizeof($AIMEE_HOME)` free, to take a pre-recovery snapshot.
-- [ ] **No live `aimee-server`** writing to the appliance state. Stop it
-      first so a mid-recovery write cannot race the operator.
-- [ ] **The canonical upstream source** for `agents.json` (the operator's
-      known-good copy on the backup medium, or the appliance's documented
-      defaults).
+| Variable | Meaning | Example |
+| --- | --- | --- |
+| `APPLIANCE_HOME` | Root of the appliance state (contains `agents.json` and the workspace) | `/var/lib/aimee` |
+| `AGENTS_JSON_PATH` | Resolved path to `agents.json` (`${APPLIANCE_HOME}/agents.json` by default) | `/var/lib/aimee/agents.json` |
+| `AGENTS_JSON_SOURCE` | Upstream source of truth for agents (a path, URL, or git ref) | `git@aimee:agents/agents.json` |
+| `WORKSPACE_DIR` | Workspace directory whose `.git` is being repaired | `${APPLIANCE_HOME}/workspace` |
+| `BACKUP_DIR` | A scratch directory for pre-recovery snapshots | `/var/tmp/aimee-recovery-$(date +%s)` |
 
-Operator-supplied variables used by every section below. **Set them in
-your shell once** so the fenced blocks run unchanged:
-
-```sh
-# Where the appliance lives on disk.
-export AIMEE_HOME="/var/lib/aimee"
-
-# The workspace git repository to recover. Defaults to the canonical
-# workspace; override if this host runs a non-default workspace.
-export WORKSPACE_DIR="${AIMEE_HOME}/workspace"
-
-# Backup medium (mounted read-write). A pre-recovery snapshot is
-# written under this directory.
-export BACKUP_DIR="/mnt/incident-backup/$(date -u +%Y%m%dT%H%M%SZ)"
-
-# Canonical source for agents.json (path on the backup medium, or a
-# URL the operator has verified out-of-band).
-export AGENTS_JSON_SOURCE="/mnt/known-good/agents.json"
+```
+# Export once per session.
+export APPLIANCE_HOME="/var/lib/aimee"
+export AGENTS_JSON_PATH="${APPLIANCE_HOME}/agents.json"
+export AGENTS_JSON_SOURCE="git@aimee:agents/agents.json"
+export WORKSPACE_DIR="${APPLIANCE_HOME}/workspace"
+export BACKUP_DIR="/var/tmp/aimee-recovery-$(date +%s)"
+mkdir -p "${BACKUP_DIR}"
 ```
 
-| Variable            | Purpose                                              |
-| ------------------- | ---------------------------------------------------- |
-| `AIMEE_HOME`        | Appliance root containing the vault + state files.   |
-| `WORKSPACE_DIR`     | Directory whose `.git` is being repaired.            |
-| `BACKUP_DIR`        | Destination for the pre-recovery snapshot.           |
-| `AGENTS_JSON_SOURCE` | Known-good `agents.json` used by §4.                |
+Confirmation gates: `# Confirm you can reach the host and own the paths.`
 
 ## 3. Failure-mode identification
 
-Run these three checks in order. The first one that fires picks the section.
-If two fire (rare), pick the **lower-numbered section first** — agents.json
-recovery can change what the workspace refs point at, so fix it before the
-git repair.
+Run the four checks below and read the result table that follows to pick the
+matching procedure (§4, §5, or §6).
 
-```sh
-# 3.1 — Is agents.json present and parseable?
-test -s "${AIMEE_HOME}/agents.json" \
-  && jq -e . "${AIMEE_HOME}/agents.json" >/dev/null \
-  && echo "agents.json: present+valid" \
-  || echo "agents.json: MISSING or INVALID  -> §4"
+```
+[ -e "${AGENTS_JSON_PATH}" ]   && echo "agents.json: present"   || echo "agents.json: absent"
+[ -f "${AGENTS_JSON_PATH}" ]   && jq -e . "${AGENTS_JSON_PATH}" >/dev/null && echo "agents.json: valid JSON" || echo "agents.json: invalid/empty"
+[ -d "${WORKSPACE_DIR}/.git" ] && echo "workspace .git: present" || echo "workspace .git: absent"
+( cd "${WORKSPACE_DIR}" && git fsck --no-progress --no-reflogs 2>/dev/null ) && echo "workspace .git: fsck clean" || echo "workspace .git: fsck failed"
 ```
 
-```sh
-# 3.2 — Is the agents.json stale (file present, content drifted)?
-jq -r '.[].id' "${AIMEE_HOME}/agents.json" \
-  | sort -u >/tmp/registered.txt
-curl -fsS http://127.0.0.1:8742/v1/agents \
-  | jq -r '.[].id' | sort -u >/tmp/live.txt
-diff -u /tmp/registered.txt /tmp/live.txt \
-  && echo "agents.json: in sync with live set" \
-  || echo "agents.json: STALE  -> §5"
-```
+| Observable signal | Failure mode | Procedure |
+| --- | --- | --- |
+| `agents.json: absent` (file does not exist) | Lost or absent `agents.json` | §4 |
+| `agents.json: invalid/empty` (file present but not valid JSON) | Lost or absent `agents.json` (treat as missing) | §4 |
+| `agents.json: valid JSON` **and** schema/agent list disagrees with the live set | Stale-but-present `agents.json` | §5 |
+| `workspace .git: absent` **or** `workspace .git: fsck failed` | Corrupt or lost workspace `.git` | §6 |
 
-```sh
-# 3.3 — Is the workspace .git healthy?
-git -C "${WORKSPACE_DIR}" rev-parse --git-dir >/dev/null 2>&1 \
-  || { echo ".git: MISSING  -> §6"; exit 0; }
-git -C "${WORKSPACE_DIR}" fsck --no-dangling --no-progress >/dev/null 2>&1 \
-  && echo ".git: fsck clean" \
-  || echo ".git: CORRUPT  -> §6"
-```
+If more than one row matches, run the lower-numbered procedure first (state
+files before history).
 
-Mapping:
-
-- `agents.json` missing or invalid -> **§4**.
-- `agents.json` present + parseable, but diff against `/v1/agents` non-empty
-  -> **§5**.
-- `agents.json` healthy and in sync, but `git rev-parse` fails or `fsck`
-  fails -> **§6**.
+Confirmation gates: `# Confirm only one failure mode applies before continuing.`
 
 ## 4. Lost or absent agents.json
 
-Symptom: §3.1 reports `MISSING or INVALID`, or the appliance fails to
-boot/serve because `agents.json` cannot be loaded.
+Recovery reconstructs `agents.json` from the upstream source of truth. If the
+upstream is unreachable, fall back to the documented agent defaults block in
+`appliance/agents/defaults.json` inside this repo.
 
-- [ ] **Stop `aimee-server`** so it does not race the restore:
+Steps:
 
-  ```sh
-  systemctl stop aimee-server          # or: docker compose stop aimee-server
-  ```
+- [ ] **Confirm absence and capture a pre-recovery snapshot.** Even though the
+      file is missing, capture the directory listing and any sibling artifacts
+      so the recovery is auditable.
 
-- [ ] **Snapshot the current state** (even if the file is bad — capture
-      what is on disk for forensics):
+```
+test ! -e "${AGENTS_JSON_PATH}" && echo "confirmed: agents.json absent at ${AGENTS_JSON_PATH}"
+mkdir -p "${BACKUP_DIR}"
+( cd "${APPLIANCE_HOME}" && tar --exclude='*.sock' -cf "${BACKUP_DIR}/appliance-home.tar" . )
+```
 
-  ```sh
-  mkdir -p "${BACKUP_DIR}"
-  cp -a "${AIMEE_HOME}/agents.json" "${BACKUP_DIR}/agents.json.bad" 2>/dev/null || true
-  find "${AIMEE_HOME}" -maxdepth 2 -name 'agents.json*' \
-       -exec cp -a --parents {} "${BACKUP_DIR}/" \;
-  ```
+- [ ] **Pull the canonical agents.json from the upstream source.** Adjust the
+      transport (`git`, `curl`, `scp`) to whatever `AGENTS_JSON_SOURCE` actually
+      is.
 
-- [ ] **Decide the source.** Use `AGENTS_JSON_SOURCE` if the operator has
-      a known-good copy; otherwise fall back to the appliance defaults
-      bundled with `aimee-server` (only valid for an empty registration —
-      it will not restore per-agent overrides):
+```
+case "${AGENTS_JSON_SOURCE}" in
+  git@*|git://*|https://*.git)
+    git clone --depth=1 -- "${AGENTS_JSON_SOURCE}" "${BACKUP_DIR}/agents-source"
+    cp -f "${BACKUP_DIR}/agents-source/agents.json" "${AGENTS_JSON_PATH}"
+    ;;
+  http://*|https://*)
+    curl -fsSL -o "${AGENTS_JSON_PATH}" "${AGENTS_JSON_SOURCE}"
+    ;;
+  *)
+    cp -f "${AGENTS_JSON_SOURCE}" "${AGENTS_JSON_PATH}"
+    ;;
+esac
+chmod 0644 "${AGENTS_JSON_PATH}"
+```
 
-  ```sh
-  # Option A — known-good from backup medium (preferred):
-  test -s "${AGENTS_JSON_SOURCE}" \
-    || { echo "AGENTS_JSON_SOURCE not found: ${AGENTS_JSON_SOURCE}"; exit 1; }
-  jq -e . "${AGENTS_JSON_SOURCE}" >/dev/null \
-    || { echo "AGENTS_JSON_SOURCE is not valid JSON: ${AGENTS_JSON_SOURCE}"; exit 1; }
+- [ ] **Fall back to repo defaults when the upstream is unreachable.** Only when
+      `AGENTS_JSON_SOURCE` is empty or every branch above failed.
 
-  # Option B — appliance defaults (empty registration). Use ONLY if the
-  # operator confirms no per-agent state must be preserved:
-  #   : > "${AIMEE_HOME}/agents.json"
-  ```
+```
+DEFAULTS="appliance/agents/defaults.json"
+if [ ! -s "${AGENTS_JSON_PATH}" ] && [ -f "${DEFAULTS}" ]; then
+  jq . "${DEFAULTS}" > "${AGENTS_JSON_PATH}"
+fi
+test -s "${AGENTS_JSON_PATH}" || { echo "FATAL: no agents.json produced"; exit 1; }
+```
 
-- [ ] **Restore `agents.json`** with safe permissions:
+- [ ] **Validate the reconstructed file before any process touches it.**
 
-  ```sh
-  install -m 0640 -o aimee -g aimee \
-    "${AGENTS_JSON_SOURCE}" "${AIMEE_HOME}/agents.json"
-  ```
+```
+jq -e 'type == "object" and (.agents | type == "array")' "${AGENTS_JSON_PATH}" >/dev/null \
+  || { echo "FATAL: reconstructed agents.json is not an object with an agents[] array"; exit 1; }
+jq . "${AGENTS_JSON_PATH}" >/dev/null || { echo "FATAL: agents.json is not valid JSON"; exit 1; }
+```
 
-- [ ] **Restart the server** and confirm `/v1/agent/list` returns the
-      expected ids:
-
-  ```sh
-  systemctl start aimee-server
-  curl -fsS http://127.0.0.1:8742/v1/agent/list | jq -r '.[].id' | sort -u
-  ```
-
-- [ ] Proceed to **§7 (final verification)**.
+Confirmation gates: `# Reconstructed file passes jq + schema checks.`
 
 ## 5. Stale-but-present agents.json
 
-Symptom: `agents.json` parses, but the diff in §3.2 is non-empty. Agents
-that exist in the live set are missing from the file, or the file lists
-agents that no longer exist.
+Reconcile a present-but-wrong file against the live set and the upstream
+source. Do not overwrite on this procedure; always write through a backup.
 
-Recovery is **reconciliation, not overwrite**: take the live set as ground
-truth for which ids must be present, then write back the *full per-id
-records* from the live source (`/v1/agents`) so capabilities/keys/tiers are
-preserved. Never copy individual fields from a stale file into a live
-record — that re-introduces drift.
+Steps:
 
-- [ ] **Stop the server** (you are rewriting registration):
+- [ ] **Snapshot the current agents.json so the rewrite is reversible.**
 
-  ```sh
-  systemctl stop aimee-server
-  ```
+```
+mkdir -p "${BACKUP_DIR}"
+cp -p "${AGENTS_JSON_PATH}" "${BACKUP_DIR}/agents.json.before"
+ls -la "${AGENTS_JSON_PATH}" "${BACKUP_DIR}/agents.json.before"
+```
 
-- [ ] **Snapshot the current state**:
+- [ ] **Build the live agent set from process/runtime signals.** Source the
+      script from wherever the appliance exposes it; the example below
+      inspects the supervisor socket as a stand-in.
 
-  ```sh
-  mkdir -p "${BACKUP_DIR}"
-  cp -a "${AIMEE_HOME}/agents.json" "${BACKUP_DIR}/agents.json.pre-reconcile"
-  ```
+```
+LIVE_JSON="${BACKUP_DIR}/agents.live.json"
+if command -v aimee-supervisor-ctl >/dev/null 2>&1; then
+  aimee-supervisor-ctl --format=json agents > "${LIVE_JSON}" 2>/dev/null || echo '[]' > "${LIVE_JSON}"
+elif [ -S "${APPLIANCE_HOME}/run/supervisor.sock" ]; then
+  curl -fsS --unix-socket "${APPLIANCE_HOME}/run/supervisor.sock" \
+       "http://localhost/agents" > "${LIVE_JSON}" 2>/dev/null || echo '[]' > "${LIVE_JSON}"
+else
+  echo '[]' > "${LIVE_JSON}"
+fi
+jq -e 'type == "array"' "${LIVE_JSON}" >/dev/null || echo '[]' > "${LIVE_JSON}"
+```
 
-- [ ] **Pull the live agent records as ground truth** (the server must be
-      reachable; if it is down, restart it long enough to read `/v1/agents`,
-      then stop it again before the write):
+- [ ] **Pull the upstream canonical agents.json into a sibling file (do not
+      overwrite yet).**
 
-  ```sh
-  systemctl start aimee-server
-  curl -fsS http://127.0.0.1:8742/v1/agents > "${BACKUP_DIR}/live-agents.json"
-  systemctl stop aimee-server
-  jq -e . "${BACKUP_DIR}/live-agents.json" >/dev/null \
-    || { echo "live /v1/agents returned non-JSON"; exit 1; }
-  ```
+```
+UPSTREAM_JSON="${BACKUP_DIR}/agents.upstream.json"
+case "${AGENTS_JSON_SOURCE}" in
+  git@*|git://*|https://*.git)
+    git clone --depth=1 -- "${AGENTS_JSON_SOURCE}" "${BACKUP_DIR}/agents-source"
+    cp -f "${BACKUP_DIR}/agents-source/agents.json" "${UPSTREAM_JSON}"
+    ;;
+  http://*|https://*)
+    curl -fsSL -o "${UPSTREAM_JSON}" "${AGENTS_JSON_SOURCE}"
+    ;;
+  *)
+    cp -f "${AGENTS_JSON_SOURCE}" "${UPSTREAM_JSON}"
+    ;;
+esac
+test -s "${UPSTREAM_JSON}" || { echo "FATAL: could not pull upstream agents.json"; exit 1; }
+```
 
-- [ ] **Write the reconciled file**. The live `GET /v1/agents` response
-      is the authoritative per-id record set; `agents.json` is just that
-      set on disk:
+- [ ] **Reconcile: prefer upstream, but keep any locally-registered agent that
+      is in the live set and absent upstream.** The merge is explicit —
+      operator eyeballs the diff before accepting.
 
-  ```sh
-  jq . "${BACKUP_DIR}/live-agents.json" > "${AIMEE_HOME}/agents.json.tmp"
-  install -m 0640 -o aimee -g aimee \
-    "${AIMEE_HOME}/agents.json.tmp" "${AIMEE_HOME}/agents.json"
-  rm -f "${AIMEE_HOME}/agents.json.tmp"
-  ```
+```
+RECONCILED="${BACKUP_DIR}/agents.reconciled.json"
+jq -s '
+  (.[0].agents // []) as $upstream
+  | (.[1] // []) as $live
+  | {
+      schema: (.[0].schema // "aimee-agents/v1"),
+      agents: (
+        ($upstream + ($live | map(select(.id as $id | ($upstream | map(.id) | index($id)) == null))))
+      )
+    }
+' "${UPSTREAM_JSON}" "${LIVE_JSON}" > "${RECONCILED}"
+jq . "${RECONCILED}"
+```
 
-- [ ] **Diff the disk file against the live source** to confirm the
-      reconcile closed the gap:
+- [ ] **Diff the reconciled version against the on-disk file; abort if the
+      diff exceeds 10% of the file.**
 
-  ```sh
-  diff -u \
-    <(jq -S . "${AIMEE_HOME}/agents.json") \
-    <(jq -S . "${BACKUP_DIR}/live-agents.json") \
-    && echo "reconcile: clean"
-  ```
+```
+diff -u "${AGENTS_JSON_PATH}" "${RECONCILED}" | tee "${BACKUP_DIR}/agents.diff" | head -200
+RECON_LINES=$(jq -r '.agents | length' "${RECONCILED}")
+FILE_LINES=$(jq -r '.agents | length' "${AGENTS_JSON_PATH}")
+awk -v a="${RECON_LINES}" -v b="${FILE_LINES}" 'BEGIN{ if (b==0){exit 0} d=(a-b)/b; if (d<0) d=-d; exit (d>0.10)?1:0 }' \
+  || { echo "FATAL: reconciled file diff exceeds 10% -- escalate (see §8)"; exit 1; }
+```
 
-- [ ] Proceed to **§7 (final verification)**.
+- [ ] **Install the reconciled file atomically** (write to a sibling, then
+      rename).
+
+```
+INSTALL_TMP="${AGENTS_JSON_PATH}.reconciled.tmp"
+install -m 0644 "${RECONCILED}" "${INSTALL_TMP}"
+mv -f "${INSTALL_TMP}" "${AGENTS_JSON_PATH}"
+chmod 0644 "${AGENTS_JSON_PATH}"
+jq -e 'type == "object" and (.agents | type == "array")' "${AGENTS_JSON_PATH}" >/dev/null
+```
+
+Confirmation gates: `# Reconciled file written, diff archived, jq validates.`
 
 ## 6. Corrupt or lost workspace .git
 
-Symptom: `git rev-parse --git-dir` fails, or `git fsck` reports dangling
-or missing objects / bad refs. The workspace tree itself may be intact —
-the goal is to get `.git` back to a state where `git status`/`git log` work
-and the working tree is not lost.
+Repair or reconstruct the workspace's git state. Preservation order: validate
+what is recoverable first, then fsck, then rebuild only what is necessary.
 
-- [ ] **Stop the server** so workspace writes do not race the repair:
+Steps:
 
-  ```sh
-  systemctl stop aimee-server
-  ```
+- [ ] **Stop every process that has the workspace open.** A repair against a
+      live working tree is not safe.
 
-- [ ] **Snapshot the workspace** before touching `.git`. Even a corrupt
-      `.git` plus an intact working tree is recoverable; throwing it away
-      is not:
+```
+pkill -STOP -f "${WORKSPACE_DIR}" 2>/dev/null || true
+systemctl --quiet is-active aimee-supervisor.service \
+  && systemctl stop aimee-supervisor.service || true
+```
 
-  ```sh
-  mkdir -p "${BACKUP_DIR}"
-  rsync -aHAX --numeric-ids "${WORKSPACE_DIR}/" "${BACKUP_DIR}/workspace.snapshot/"
-  ```
+- [ ] **Snapshot the workspace as-is before any repair.** The snapshot is your
+      rollback target.
 
-- [ ] **Diagnose**. Capture the exact `fsck` and `rev-parse` output for
-      the ticket — they determine whether the next step is repair or
-      rebuild:
+```
+( cd "$(dirname "${WORKSPACE_DIR}")" && tar --exclude='*.sock' -cf "${BACKUP_DIR}/workspace.tar" "$(basename "${WORKSPACE_DIR}")" )
+ls -la "${BACKUP_DIR}/workspace.tar"
+```
 
-  ```sh
-  ( git -C "${WORKSPACE_DIR}" rev-parse --git-dir || echo "NO_GIT" ) \
-    | tee    "${BACKUP_DIR}/rev-parse.txt"
-  git -C "${WORKSPACE_DIR}" fsck --no-progress --no-dangling \
-    | tee    "${BACKUP_DIR}/fsck.txt" || true
-  ```
+- [ ] **Run `git fsck` and capture the report.** This is your evidence the
+      directory really is corrupt — do not skip it; escalation (§8) needs it.
 
-- [ ] **Repair path — `.git` exists but `fsck` reports errors.** Use the
-      safe, non-destructive options first; if they do not clear the
-      errors, fall back to repacking from the object database. Never run
-      `git fsck --lost-found` with auto-checkout; review what it finds
-      before restoring:
+```
+if [ -d "${WORKSPACE_DIR}/.git" ]; then
+  ( cd "${WORKSPACE_DIR}" && git fsck --no-progress --no-reflogs --strict 2>&1 | tee "${BACKUP_DIR}/fsck.log" ) || true
+else
+  echo "FATAL: ${WORKSPACE_DIR}/.git absent -- skip fsck, jump to reconstruction" | tee "${BACKUP_DIR}/fsck.log"
+fi
+```
 
-  ```sh
-  # 1. Reflog + unreachable-object salvage (review, do not auto-checkout).
-  git -C "${WORKSPACE_DIR}" fsck --no-progress --unreachable \
-    | tee "${BACKUP_DIR}/fsck.unreachable.txt"
+- [ ] **If `.git` is present, attempt in-place repair with the standard git
+      recovery tools.** Run all three; stop on the first that produces a clean
+      fsck.
 
-  # 2. Repack to coalesce good objects and surface the bad ones.
-  git -C "${WORKSPACE_DIR}" repack -ad
+```
+if [ -d "${WORKSPACE_DIR}/.git" ]; then
+  ( cd "${WORKSPACE_DIR}" && git update-ref --no-deref --no-head HEAD HEAD ) || true
+  ( cd "${WORKSPACE_DIR}" && git reflog expire --expire=now --all ) || true
+  ( cd "${WORKSPACE_DIR}" && git gc --prune=now --aggressive ) || true
+  ( cd "${WORKSPACE_DIR}" && git fsck --no-progress --no-reflogs --strict ) \
+    && { echo "recovery: gc + reflog repair succeeded"; } || echo "recovery: gc + reflog repair did NOT clear fsck"
+fi
+```
 
-  # 3. Re-check; if still dirty, the object database is partially lost —
-  #    skip to the rebuild path below.
-  git -C "${WORKSPACE_DIR}" fsck --no-dangling --no-progress
-  ```
+- [ ] **If `.git` is absent, re-clone from the upstream remote and rebuild the
+      working tree on top.** Only do this when no other clone exists on disk.
 
-- [ ] **Rebuild path — `.git` is missing or `fsck` cannot be cleared.**
-      Re-initialize `.git` in place over the working tree, then rebuild
-      the working-tree refs from the snapshot's working files (the tree
-      is the source of truth; the new history is whatever `git add` +
-      a single bootstrap commit captures):
-
-  ```sh
-  # 1. Move the broken .git aside (do NOT delete — keep it under BACKUP_DIR).
-  if [ -d "${WORKSPACE_DIR}/.git" ]; then
-    mv "${WORKSPACE_DIR}/.git" "${BACKUP_DIR}/workspace.snapshot/.git.broken"
+```
+if [ ! -d "${WORKSPACE_DIR}/.git" ]; then
+  ORIGIN_URL="$(git -C "${APPLIANCE_HOME}" config --get remote.origin.url 2>/dev/null || true)"
+  if [ -z "${ORIGIN_URL}" ]; then
+    ORIGIN_URL="${AGENTS_JSON_SOURCE%/agents.json}"
   fi
+  mv "${WORKSPACE_DIR}" "${BACKUP_DIR}/workspace.missing"
+  git clone -- "${ORIGIN_URL}" "${WORKSPACE_DIR}"
+fi
+```
 
-  # 2. Re-init.
-  git -C "${WORKSPACE_DIR}" init -q
+- [ ] **Restore any non-tracked local state from the workspace snapshot**
+      (config, hooks, `.git/local`). This is the only step that copies files
+      back from the pre-repair tar.
 
-  # 3. Re-stage and bootstrap-commit the recovered tree.
-  git -C "${WORKSPACE_DIR}" -c user.name="recovery" \
-                            -c user.email="recovery@localhost" \
-      add -A
-  git -C "${WORKSPACE_DIR}" -c user.name="recovery" \
-                            -c user.email="recovery@localhost" \
-      commit -q -m "recovered working tree (history not preserved)"
-  ```
+```
+( cd "${WORKSPACE_DIR}" && tar -xf "${BACKUP_DIR}/workspace.tar" \
+    --wildcards '*/.git/hooks/*' \
+    --wildcards '*/.git/config' \
+    --wildcards '*/.git/local/*' 2>/dev/null ) || true
+git -C "${WORKSPACE_DIR}" config --local --get-regexp '.*' | head -50 > "${BACKUP_DIR}/git-config.snapshot"
+```
 
-- [ ] **Repair refs / remote tracking** if the rebuild path was used, by
-      re-adding the upstream and re-fetching. Without the original
-      remote URL the history *cannot* be restored — this is a deliberate
-      stop condition; see §8:
+- [ ] **Re-run `git fsck` to confirm the workspace is healthy before resuming
+      service.**
 
-  ```sh
-  # Only run if the operator knows the original remote URL.
-  git -C "${WORKSPACE_DIR}" remote add origin <ORIGIN_URL>
-  git -C "${WORKSPACE_DIR}" fetch --prune origin
-  git -C "${WORKSPACE_DIR}" reset --hard origin/<BRANCH>   # only if appropriate
-  ```
+```
+( cd "${WORKSPACE_DIR}" && git fsck --no-progress --no-reflogs --strict ) \
+  || { echo "FATAL: workspace still fails fsck -- escalate (see §8)"; }
+git -C "${WORKSPACE_DIR}" status --porcelain > "${BACKUP_DIR}/status.porcelain"
+```
 
-- [ ] **Sanity-check** the repaired/rebuilt repo:
+- [ ] **Resume service.**
 
-  ```sh
-  git -C "${WORKSPACE_DIR}" status
-  git -C "${WORKSPACE_DIR}" fsck --no-dangling --no-progress
-  ```
+```
+pkill -CONT -f "${WORKSPACE_DIR}" 2>/dev/null || true
+systemctl --quiet is-enabled aimee-supervisor.service \
+  && systemctl start aimee-supervisor.service || true
+```
 
-- [ ] Proceed to **§7 (final verification)**.
+Confirmation gates: `# Final fsck clean; supervisor back in active state.`
 
 ## 7. Final verification
 
-Run **every** box below. A passing final verification means the recovery
-is done; a single failing box is a stop condition (§8).
+Run this block exactly once after whichever procedure above succeeded. Every
+check must pass; on any failure, jump to §8.
 
-- [ ] **`agents.json` parses and is in sync with the live set**:
+- [ ] **`agents.json` exists, is valid JSON, and matches the documented
+      schema.**
 
-  ```sh
-  jq -e . "${AIMEE_HOME}/agents.json" >/dev/null
-  jq -r '.[].id' "${AIMEE_HOME}/agents.json" | sort -u >/tmp/r.txt
-  curl -fsS http://127.0.0.1:8742/v1/agents \
-    | jq -r '.[].id' | sort -u >/tmp/l.txt
-  diff -u /tmp/r.txt /tmp/l.txt
-  ```
+```
+test -s "${AGENTS_JSON_PATH}"
+jq -e 'type == "object" and (.agents | type == "array" and length > 0)' "${AGENTS_JSON_PATH}" >/dev/null
+jq . "${AGENTS_JSON_PATH}" >/dev/null
+```
 
-- [ ] **Server is up and a smoke-test agent responds**:
+- [ ] **Live agent count and on-disk agent count agree.**
 
-  ```sh
-  systemctl status aimee-server --no-pager
-  aimee delegate <smoke-agent-id> "ping" --persona engineer
-  ```
+```
+LIVE_COUNT=$([ -S "${APPLIANCE_HOME}/run/supervisor.sock" ] \
+  && curl -fsS --unix-socket "${APPLIANCE_HOME}/run/supervisor.sock" "http://localhost/agents" 2>/dev/null \
+     | jq 'length' || echo 0)
+FILE_COUNT=$(jq '.agents | length' "${AGENTS_JSON_PATH}")
+[ "${LIVE_COUNT}" -gt 0 ] && [ "${FILE_COUNT}" -gt 0 ]
+[ "${LIVE_COUNT}" -eq "${FILE_COUNT}" ] || echo "WARN: live/file agent count differ (${LIVE_COUNT} vs ${FILE_COUNT})"
+```
 
-- [ ] **Workspace `.git` is clean (only required if §6 was run)**:
+- [ ] **Workspace git is healthy and the working tree is clean.**
 
-  ```sh
-  git -C "${WORKSPACE_DIR}" fsck --no-dangling --no-progress
-  git -C "${WORKSPACE_DIR}" status --porcelain
-  ```
+```
+git -C "${WORKSPACE_DIR}" fsck --no-progress --no-reflogs --strict
+git -C "${WORKSPACE_DIR}" rev-parse --verify HEAD >/dev/null
+git -C "${WORKSPACE_DIR}" status --porcelain
+```
 
-- [ ] **Pre-recovery snapshot is retained** under `${BACKUP_DIR}` until the
-      operator confirms the recovery in a follow-up window (24h minimum):
+- [ ] **Recovery artifacts are archived to `${BACKUP_DIR}` and listed for the
+      postmortem.**
 
-  ```sh
-  ls -la "${BACKUP_DIR}"
-  ```
+```
+ls -la "${BACKUP_DIR}"
+echo "RECOVERY_ARTIFACTS=${BACKUP_DIR}" >> "${BACKUP_DIR}/MANIFEST"
+```
 
-- [ ] **Incident log entry written** (short — what broke, which section
-      ran, the diff/snapshot paths):
+- [ ] **Operator records the incident closure note** (date, procedure run, link
+      to `${BACKUP_DIR}/MANIFEST`) in the on-call channel.
 
-  ```sh
-  printf 'incident=%s host=%s section=%s snapshot=%s\n' \
-    "appliance-state-recovery" "$(hostname)" "<§4|§5|§6>" "${BACKUP_DIR}" \
-    >> "${AIMEE_HOME}/var/log/recovery.log"
-  ```
+Confirmation gates: `# All four checks above completed without aborts.`
 
 ## 8. Escalation/stop conditions
 
-Stop the runbook and escalate (page the on-call owner of the `aimee-server`
-service and open a sev-2 incident) if **any** of the following is true:
+Stop and escalate to the platform owner **immediately** when any of the
+following is true. Do not continue past the point where the condition was hit;
+do not invent workarounds.
 
-- [ ] **`AGENTS_JSON_SOURCE` is missing AND** there is no appliance-default
-      path the operator can stand on. Do **not** invent an empty
-      `agents.json` on a host that previously had registered agents —
-      that silently orphans every per-agent record. Stop and escalate.
-- [ ] **`git fsck` reports "bad" objects after §6's repair path.** Partial
-      object loss is unrecoverable from the host alone; it requires the
-      last known-good snapshot from off-host backup or the upstream
-      remote. Stop and escalate.
-- [ ] **The original remote URL for `WORKSPACE_DIR` is unknown.** The
-      rebuild path can salvage the working tree but cannot restore
-      history; without the remote, the repo is permanently degraded.
-      Stop and escalate before any further write.
-- [ ] **`diff` in §5 (or §7) does not converge after two attempts.**
-      The reconcile loop is not closing — likely a schema or endpoint
-      change upstream. Stop, escalate with the captured diff, do not
-      force-write.
-- [ ] **The pre-recovery snapshot (§4/§5/§6) cannot be written** (backup
-      medium full, read-only, or missing). Do **not** proceed: every
-      recovery step here is reversible only via that snapshot. Mount a
-      writable backup medium, then resume from §2.
-- [ ] **The server fails to start after any restore.** A clean restart is
-      the verification gate (§7); if it does not start, the recovered
-      state is not safe to bring online. Stop and escalate with the
-      server journal:
+- [ ] The reconstructed `agents.json` is empty, invalid JSON, or fails the jq
+      schema check after the §4 / §5 install step. Treatment requires re-pull
+      from a verified source; escalate to whoever owns `AGENTS_JSON_SOURCE`.
+- [ ] The reconciled diff in §5 exceeds the 10% threshold and the operator
+      cannot explain the divergence in two sentences. Escalate before writing
+      the file; the on-disk state must not be overwritten by an unverified
+      merge.
+- [ ] `git fsck` reports **dangling objects**, **missing tree**, or
+      **unreachable commits** that the §6 recovery does **not** clear. This is
+      a sign of disk/storage damage beyond a single workspace — escalate.
+- [ ] Step §6 re-clones a workspace that has no `AGENTS_JSON_SOURCE`-derivable
+      upstream and no `.git/config` snapshot to recover from. Escalate; do not
+      pick an arbitrary remote.
+- [ ] The supervisor service will not start after §6 completes (the workspace
+      is "fixed" but the appliance is still down). Escalate; recovery is
+      incomplete.
+- [ ] Any step above produces a non-zero exit that the runbook did not
+      anticipate (i.e. a `FATAL:` printed from a guard that was supposed to be
+      impossible). Capture the full transcript into `${BACKUP_DIR}` and
+      escalate.
+- [ ] The on-call channel confirms another operator is already inside the same
+      appliance. Stop, post a handoff in the channel, wait for ack; do not
+      interleave recovery writes.
 
-  ```sh
-  journalctl -u aimee-server -n 200 --no-pager
-  ```
+Confirmation gates: `# Escalation ticket open; ${BACKUP_DIR} archived.`
