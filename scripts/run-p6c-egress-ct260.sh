@@ -16,7 +16,7 @@ die() {
 [[ ${EUID:-$(id -u)} -eq 0 ]] || die 'must run as root inside CT260'
 [[ -n ${AIMEE_TEST_PG_URL:-} ]] || die 'AIMEE_TEST_PG_URL is required (CT103 PostgreSQL)'
 
-for command_name in flock make openssl psql python3 update-ca-certificates; do
+for command_name in flock make openssl psql python3 stat update-ca-certificates; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing required command: $command_name"
 done
 [[ -x scripts/p6c_bedrock_mock.py ]] || die 'scripts/p6c_bedrock_mock.py is missing or not executable'
@@ -52,11 +52,15 @@ wrong_ca_server_csr="$scratch_dir/wrong-ca-server.csr"
 wrong_ca_server_cert="$scratch_dir/wrong-ca-server.crt"
 cert_ext="$scratch_dir/server.ext"
 wrong_cert_ext="$scratch_dir/wrong-server.ext"
+db_lock_state="$scratch_dir/db-lock.state"
+db_lock_log="$scratch_dir/db-lock.log"
 
 mock_pid=''
 hosts_changed=0
-system_ca_installed=0
+system_ca_owned=0
+system_ca_inode=''
 db_seeded=0
+db_lock_pid=''
 deferred_signal=''
 readonly hosts_line="127.0.0.1 $bedrock_host # aimee-p6c-egress-ct260 pid=$$"
 readonly system_ca_cert="/usr/local/share/ca-certificates/aimee-p6c-egress-ct260-pid-$$.crt"
@@ -72,8 +76,19 @@ stop_mock() {
   rm -f -- "$mock_ready"
 }
 
+stop_db_lock() {
+  if [[ -n $db_lock_pid ]]; then
+    if kill -0 "$db_lock_pid" 2>/dev/null; then
+      kill "$db_lock_pid" 2>/dev/null || true
+    fi
+    wait "$db_lock_pid" 2>/dev/null || true
+    db_lock_pid=''
+  fi
+}
+
 cleanup() {
   local rc=$?
+  local current_ca_inode
   trap - EXIT
   set +e
   stop_mock
@@ -85,16 +100,36 @@ cleanup() {
     fi
     hosts_changed=0
   fi
-  if (( system_ca_installed )); then
-    rm -f -- "$system_ca_cert" || rc=1
-    update-ca-certificates >/dev/null 2>&1 || rc=1
-    system_ca_installed=0
+  if (( system_ca_owned )); then
+    current_ca_inode=$(stat -Lc '%d:%i' "$system_ca_cert" 2>/dev/null)
+    if [[ $current_ca_inode == "$system_ca_inode" ]]; then
+      rm -f -- "$system_ca_cert" || rc=1
+      update-ca-certificates >/dev/null 2>&1 || rc=1
+    else
+      rc=1
+    fi
+    system_ca_owned=0
   fi
   if (( db_seeded )); then
     psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" >/dev/null 2>&1 <<'SQL' || rc=1
 BEGIN;
+DO $guard$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM org_model_entitlement
+     WHERE model_id IN ('model','p6c-unentitled','p6c-unsupported')
+       AND NOT (
+         team_id = 960260
+         AND model_id IN ('model','p6c-unsupported')
+       )
+  ) THEN
+    RAISE EXCEPTION 'P6c CT catalog has unexpected entitlement references';
+  END IF;
+END $guard$;
 DELETE FROM org_model_entitlement
- WHERE team_id = 960260 OR model_id IN ('model','p6c-unentitled','p6c-unsupported');
+ WHERE team_id = 960260
+   AND model_id IN ('model','p6c-unsupported');
 DELETE FROM org_model_catalog
  WHERE model_id IN ('model','p6c-unentitled','p6c-unsupported');
 DELETE FROM kb_team_membership
@@ -104,6 +139,7 @@ COMMIT;
 SQL
     db_seeded=0
   fi
+  stop_db_lock
   find "$scratch_dir" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || rc=1
   rmdir -- "$scratch_dir" 2>/dev/null || rc=1
   exit "$rc"
@@ -113,6 +149,12 @@ restore_termination_traps() {
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
+}
+
+defer_termination_traps() {
+  trap 'defer_termination HUP' HUP
+  trap 'defer_termination INT' INT
+  trap 'defer_termination TERM' TERM
 }
 
 defer_termination() {
@@ -147,8 +189,34 @@ openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign' >/dev/null 2>&1
 
-system_ca_installed=1
-cp -- "$ca_cert" "$system_ca_cert"
+[[ ! -e $system_ca_cert && ! -L $system_ca_cert ]] ||
+  die 'temporary system CA destination already exists'
+defer_termination_traps
+ca_create_rc=0
+set -o noclobber
+exec 8>"$system_ca_cert" || ca_create_rc=$?
+set +o noclobber
+if (( ca_create_rc == 0 )); then
+  if system_ca_inode=$(stat -Lc '%d:%i' "/proc/$$/fd/8"); then
+    system_ca_owned=1
+    while IFS= read -r cert_line; do
+      printf '%s\n' "$cert_line" >&8 || {
+        ca_create_rc=$?
+        break
+      }
+    done <"$ca_cert"
+  else
+    ca_create_rc=$?
+    rm -f -- "$system_ca_cert" || true
+  fi
+  exec 8>&-
+fi
+if (( ca_create_rc == 0 )); then
+  openssl x509 -in "$system_ca_cert" -noout >/dev/null 2>&1 || ca_create_rc=$?
+fi
+restore_termination_traps
+exit_for_deferred_signal
+(( ca_create_rc == 0 )) || die 'failed to exclusively create temporary system CA'
 update-ca-certificates >/dev/null
 
 printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
@@ -175,9 +243,29 @@ openssl x509 -req -sha256 -days 1 -in "$wrong_ca_server_csr" \
   -CA "$wrong_ca_cert" -CAkey "$wrong_ca_key" -CAcreateserial \
   -extfile "$cert_ext" -out "$wrong_ca_server_cert" >/dev/null 2>&1
 
-trap 'defer_termination HUP' HUP
-trap 'defer_termination INT' INT
-trap 'defer_termination TERM' TERM
+: >"$db_lock_state"
+: >"$db_lock_log"
+psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" \
+  >/dev/null 2>"$db_lock_log" <<SQL &
+SELECT pg_advisory_lock(960260, 6006);
+\\! printf '%s\n' p6c-db-lock-held > '$db_lock_state'
+SELECT pg_sleep(86400);
+SQL
+db_lock_pid=$!
+lock_attempt=0
+while (( lock_attempt < 600 )); do
+  grep -Fxq 'p6c-db-lock-held' "$db_lock_state" && break
+  kill -0 "$db_lock_pid" 2>/dev/null || {
+    sed 's/^/db-lock: /' "$db_lock_log" >&2
+    die 'database advisory-lock session exited before acquisition'
+  }
+  sleep 0.05
+  ((lock_attempt += 1))
+done
+grep -Fxq 'p6c-db-lock-held' "$db_lock_state" ||
+  die 'database advisory-lock acquisition timed out'
+
+defer_termination_traps
 seed_rc=0
 psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" >/dev/null <<'SQL' || seed_rc=$?
 BEGIN;
