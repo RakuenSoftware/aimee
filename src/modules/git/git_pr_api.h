@@ -34,6 +34,11 @@ int git_pr_create_via_api(const char *principal, const char *repo_dir, const cha
 int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, char *err,
                             size_t errlen);
 
+/* Resolve the repository's authoritative GitHub default_branch in-process.
+ * Unlike origin/HEAD this value cannot be rewritten by checkout-local refs. */
+int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
+                                  size_t out_cap, char *err, size_t errlen);
+
 /* Like git_pr_create_via_api, but with an EXPLICIT head branch and base — the
  * head need not be checked out in repo_dir (the wfe forge opens PRs for
  * work-item branches while the shared checkout sits on the base). NULL/"" head
@@ -42,6 +47,11 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
                              const char *base, const char *title, const char *body, char *out,
                              size_t out_cap, char *err, size_t errlen);
 
+/* Find the existing open PR for an exact head/base pair. Returns 1 + URL,
+ * 0 when absent, or -1 on API/validation failure. */
+int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
+                             const char *base, char *out, size_t out_cap, char *err, size_t errlen);
+
 /* One GET /pulls/<n> snapshot: is the PR open, merged, mergeable? */
 typedef struct
 {
@@ -49,6 +59,7 @@ typedef struct
    int merged;        /* merged flag */
    int mergeable;     /* 1 mergeable, 0 conflicting, -1 unknown (GitHub still computing) */
    char head_sha[72]; /* head commit (for CI lookups) */
+   char head[128];    /* head.ref: source branch */
    char base[128];    /* base.ref: the branch this PR merges INTO (empty if unknown) */
 } git_pr_info_t;
 

@@ -19,6 +19,24 @@ else
     fail "server entrypoint ignored explicit command override"
 fi
 
+# The server image intentionally supervises multiple long-lived planes. Its
+# entrypoint shell therefore cannot be PID 1: orphaned git/agent grandchildren
+# would accumulate as zombies until the appliance could no longer fork.
+if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
+   grep -qF 'ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]' ../Dockerfile.server; then
+    pass "server image uses a PID 1 subreaper"
+else
+    fail "server image must install and enter through tini"
+fi
+
+if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
+   grep -q 'wfe_autonomy_register();' server/server.c ||
+   grep -q 'wfe_scheduler_init();' server/server.c; then
+    fail "C WFE runtime ownership is still reachable"
+else
+    pass "Go is the exclusive WFE runtime owner"
+fi
+
 case "$MODE" in
     default) echo "build-integrity:" ;;
     --build-variants) echo "build-variants:" ;;

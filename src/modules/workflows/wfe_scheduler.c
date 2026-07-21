@@ -533,6 +533,12 @@ static void *wfe_scheduler_loop(void *arg)
 
 void wfe_scheduler_init(void)
 {
+   const char *engine = getenv("AIMEE_WFE_ENGINE");
+   if (engine && strcmp(engine, "go") == 0)
+   {
+      aimee_log(LOG_INFO, "wfe-sched", "disabled; Go WFE owns scheduling and execution");
+      return;
+   }
    pthread_mutex_lock(&g_lock);
    if (g_started)
    {

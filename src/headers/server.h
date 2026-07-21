@@ -193,6 +193,8 @@ typedef struct
    compute_pool_t pool;
    compute_pool_t request_pool;
    int request_pool_initialized;
+   compute_pool_t orchestration_pool;
+   int orchestration_pool_initialized;
    pthread_mutex_t session_pools_mutex;
    int session_pools_initialized;
    int session_threads;

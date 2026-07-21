@@ -4687,6 +4687,70 @@ paths:
                   kb:
                     type: object
                     additionalProperties: true
+  /internal/forge/execute:
+    post:
+      summary: Mechanically execute an authenticated forge operation for Go WFE
+      description: >
+        Internal Unix-socket-only resource-plane seam. The Go WFE supplies an
+        already-decided typed operation; C confines it to a managed WFE
+        worktree and repository, retains the credential, and performs only the
+        authenticated transport. This endpoint owns no workflow state or
+        lifecycle decision and is unavailable over TCP/TLS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [op, workdir]
+              properties:
+                op: { type: string, enum: [push, open, info, ci, merge] }
+                workdir: { type: string }
+                head:
+                  oneOf:
+                    - { type: string, maxLength: 91, pattern: '^aimee/feat/wi_[A-Za-z0-9_]+$' }
+                    - { type: string, maxLength: 89, pattern: '^aimee/wi/wi_[A-Za-z0-9_]+\.s[0-9a-f]{10}\.g[0-9]+\.[0-9]+$' }
+                base: { type: string }
+                title: { type: string, minLength: 1, maxLength: 256 }
+                number: { type: integer, minimum: 1 }
+              oneOf:
+                - required: [head]
+                  properties: { op: { enum: [push] } }
+                  not:
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
+                - required: [head, base, title]
+                  properties: { op: { enum: [open] } }
+                  not: { required: [number] }
+                - required: [number]
+                  properties: { op: { enum: [info, ci] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                - required: [base, number]
+                  properties: { op: { enum: [merge] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [title] }]
+      responses:
+        "200":
+          description: Mechanical forge operation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                required: [ok]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+        "400":
+          description: Invalid request or forge operation failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Non-UDS caller or unmanaged repository/worktree
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspace/git:
     post:
       summary: Run a git operation on the calling webchat user's project

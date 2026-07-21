@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -35,10 +34,13 @@ func (s *server) proxyWorkflow(w http.ResponseWriter, r *http.Request, method, v
 	}
 	var body []byte
 	if method == http.MethodPost {
-		const maxBody = 1 << 20
-		body, _ = io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-		if len(body) > maxBody {
-			http.Error(w, `{"error":"request too large"}`, http.StatusRequestEntityTooLarge)
+		limit := int64(1 << 20)
+		if v1path == "/v1/workflow/validate" {
+			limit = 4 << 20
+		}
+		var ok bool
+		body, ok = readBoundedBody(w, r, limit)
+		if !ok {
 			return
 		}
 	}
@@ -75,10 +77,9 @@ func (s *server) handleWorkflowBlockItem(w http.ResponseWriter, r *http.Request)
 	switch r.Method {
 	case http.MethodPut:
 		method = http.MethodPut
-		const maxBody = 1 << 20
-		body, _ = io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-		if len(body) > maxBody {
-			writeJSONError(w, http.StatusRequestEntityTooLarge, "request too large")
+		var ok bool
+		body, ok = readBoundedBody(w, r, 1<<20)
+		if !ok {
 			return
 		}
 	case http.MethodDelete:
@@ -113,6 +114,25 @@ func (s *server) handleWorkflowDefs(w http.ResponseWriter, r *http.Request) {
 // GET /api/workflow/triggers — the configured trigger rules that auto-start runs.
 func (s *server) handleWorkflowTriggers(w http.ResponseWriter, r *http.Request) {
 	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/triggers", "")
+}
+
+func (s *server) handleWorkflowConfig(w http.ResponseWriter, r *http.Request) {
+	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/config", "")
+}
+
+func (s *server) handleWorkflowConfigSet(w http.ResponseWriter, r *http.Request) {
+	// Global run policy affects every user's autonomous work. The appliance's
+	// bootstrap administrator is the only web identity allowed to mutate it;
+	// per-user submission and lifecycle endpoints remain available to all users.
+	if currentUser(r) != "admin" {
+		writeJSONError(w, http.StatusForbidden, "administrator access required")
+		return
+	}
+	body, ok := readBoundedBody(w, r, 1<<20)
+	if !ok {
+		return
+	}
+	s.webuserPass(w, r, http.MethodPost, "/v1/workflow/config/set", body)
 }
 
 // POST /api/workflow/validate — validate posted YAML without saving.
@@ -169,10 +189,8 @@ func (s *server) handleWorkflowItems(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case suffix == "/gate" && r.Method == http.MethodPost:
-		const maxBody = 1 << 20
-		body, _ := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-		if len(body) > maxBody {
-			http.Error(w, `{"error":"request too large"}`, http.StatusRequestEntityTooLarge)
+		body, ok := readBoundedBody(w, r, 64<<10)
+		if !ok {
 			return
 		}
 		s.webuserPass(w, r, http.MethodPost, "/v1/workflow/items/"+id+"/gate", body)

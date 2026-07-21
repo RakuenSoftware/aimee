@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, Badge, Spinner, InlineStatus, EmptyState, Button } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
-import { loadConfig, saveConfigValue } from "../setup/configApi";
 
 /* ---- API types (mirror the enriched /api/workflow/items* envelopes) ---- */
 
@@ -40,6 +39,8 @@ interface Trigger {
   template: string;
   workspace: string;
   max_spend_usd?: number;
+  origin?: "config" | "workflow";
+  last_error?: string;
 }
 
 const POLL_MS = 4000;
@@ -90,6 +91,21 @@ async function postJSON<T>(url: string, body: unknown): Promise<{ status: number
     /* empty body ok */
   }
   return { status: r.status, data };
+}
+
+async function loadWorkflowConfig(): Promise<Record<string, unknown>> {
+  try {
+    return (await getJSON<{ config: Record<string, unknown> }>("/api/workflow/config")).config || {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveWorkflowConfig(key: string, value: unknown, previousVersion?: string): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+  const response = await postJSON<{ ok?: boolean; key?: string; value?: unknown; error?: string }>("/api/workflow/config/set", { key, value, ...(previousVersion ? { previous_version: previousVersion } : {}) });
+  return response.status >= 200 && response.status < 300 && response.data.ok === true && response.data.key === key && !response.data.error
+    ? { ok: true, value: response.data.value ?? value }
+    : { ok: false, error: response.data.error || `save failed (${response.status})` };
 }
 
 // A bare method call (POST/DELETE) with no body — used for the lifecycle actions.
@@ -185,6 +201,7 @@ export default function WorkflowActions() {
   const [draft, setDraft] = useState<Draft>(loadDraft);
   const [defs, setDefs] = useState<string[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
+  const [triggerVersion, setTriggerVersion] = useState("");
   const [triggersOpen, setTriggersOpen] = useState(true);
   const [submitMsg, setSubmitMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -206,8 +223,8 @@ export default function WorkflowActions() {
       .then((d) => setDefs((d.defs || []).map((x) => x.name)))
       .catch(() => setDefs([]));
     // Configured trigger rules — what auto-starts runs (read-only view).
-    getJSON<{ triggers: Trigger[] }>("/api/workflow/triggers")
-      .then((d) => setTriggers(d.triggers || []))
+    getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers")
+      .then((d) => { setTriggers(d.triggers || []); setTriggerVersion(d.version || ""); })
       .catch(() => setTriggers([]));
   }, [refreshList]);
 
@@ -461,6 +478,9 @@ export default function WorkflowActions() {
         )}
         <TriggersPanel
           triggers={triggers}
+          onChange={setTriggers}
+          version={triggerVersion}
+          onVersion={setTriggerVersion}
           open={triggersOpen}
           onToggle={() => setTriggersOpen((v) => !v)}
         />
@@ -614,13 +634,19 @@ export default function WorkflowActions() {
 // Run policy: trigger admission plus the autonomy safety caps that govern how many
 // workflows start and how far each one drives (trigger -> PR). Kept here under
 // Workflows because that is exactly what they tune. Config-backed + live; exported
-// AIMEE_AUTONOMY_* values still override the matching autonomy fields.
+// Values saved here are the live runtime authority.
 const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool" }[] = [
   {
     key: "trigger.max_concurrent",
     label: "Trigger admission cap",
     kind: "int",
     help: "Maximum active runs admitted across configured triggers. New proposals remain queued for a later scheduler pass when the cap is reached. Default 2. 0 = uncapped.",
+  },
+  {
+    key: "trigger.scan_interval_secs",
+    label: "Proposal scan interval",
+    kind: "int",
+    help: "Seconds between live scans of configured pending-proposal directories. Default 5.",
   },
   {
     key: "autonomy.auto_resume_cap_parks",
@@ -656,7 +682,7 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
     key: "autonomy.concurrency",
     label: "Concurrency",
     kind: "int",
-    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 8.",
+    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
   },
 ];
 
@@ -668,12 +694,12 @@ function RunPolicyPanel() {
   const [saving, setSaving] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    if (open && cfg === null) loadConfig().then(setCfg);
+    if (open && cfg === null) loadWorkflowConfig().then(setCfg);
   }, [open, cfg]);
   const save = async (key: string, value: unknown) => {
     setSaving(key);
     setErr(null);
-    const r = await saveConfigValue(key, value);
+    const r = await saveWorkflowConfig(key, value);
     setSaving(null);
     if (r.ok) setCfg((c) => ({ ...(c || {}), [key]: r.value }));
     else setErr(`${key}: ${r.error}`);
@@ -695,9 +721,7 @@ function RunPolicyPanel() {
           ) : (
             <>
               <div style={{ fontSize: 11, color: "#999", lineHeight: 1.4, marginBottom: 6 }}>
-                Admission, safety caps, and auto-resume for autonomous runs. Changes apply live;
-                an exported <code>AIMEE_AUTONOMY_*</code> env var overrides matching autonomy
-                fields.
+                Admission, safety caps, and auto-resume for autonomous runs. Changes apply live.
               </div>
               {RUN_POLICY_FIELDS.map((f) => (
                 <div
@@ -747,13 +771,56 @@ function RunPolicyPanel() {
 // submit (the + New proposal button).
 function TriggersPanel({
   triggers,
+  onChange,
+  version,
+  onVersion,
   open,
   onToggle,
 }: {
   triggers: Trigger[];
+  onChange: (triggers: Trigger[]) => void;
+  version: string;
+  onVersion: (version: string) => void;
   open: boolean;
   onToggle: () => void;
 }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const persist = async (next: Trigger[]) => {
+    setSaving(true);
+    setError("");
+    const value = next.filter((t) => t.origin !== "workflow").map((t) => ({
+      source: t.source || "watch-dir",
+      event: t.event || "docs/proposals/pending",
+      schedule: t.schedule,
+      mode: t.mode || "autonomous",
+      pipeline: {
+        template: t.template,
+        workspace: t.workspace,
+        ...(t.max_spend_usd ? { max_spend_usd: t.max_spend_usd } : {}),
+      },
+    }));
+    const result = await saveWorkflowConfig("trigger_rules", value, version);
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.error || "save failed; reloading current trigger configuration");
+      try {
+        const current = await getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers");
+        onChange(current.triggers || []);
+        onVersion(current.version || "");
+      } catch { /* preserve the visible error */ }
+    } else {
+      const current = await getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers");
+      onChange(current.triggers || []);
+      onVersion(current.version || "");
+    }
+  };
+  const add = () => onChange([...triggers, { source: "watch-dir", event: "docs/proposals/pending", schedule: "", mode: "autonomous", template: "build", workspace: "" }]);
+  const remove = (index: number) => persist(triggers.filter((_, i) => i !== index));
+  const update = (index: number, patch: Partial<Trigger>) => {
+    const next = triggers.map((t, i) => i === index ? { ...t, ...patch } : t);
+    onChange(next);
+  };
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
       <div
@@ -769,12 +836,34 @@ function TriggersPanel({
         <div style={{ marginTop: 6 }}>
           {triggers.length === 0 ? (
             <div style={{ fontSize: 12, color: "#999", lineHeight: 1.4 }}>
-              No triggers configured — runs start from a manual submit (+ New proposal). Add a{" "}
-              <code>trigger_rules</code> entry in <code>aimee.yaml</code> to auto-start runs.
+              No triggers configured — runs start from a manual submit (+ New proposal).
             </div>
           ) : (
-            triggers.map((t, i) => <TriggerCard key={i} t={t} />)
+            triggers.map((t, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <TriggerCard t={t} />
+                {t.origin === "workflow" ? (
+                  <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>Configured by the saved workflow’s trigger.watch-dir start node. Edit that node to change or disarm it.</div>
+                ) : (<>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 4 }}>
+                  <input value={t.workspace} placeholder="workspace path" style={inp} onChange={(e) => update(i, { workspace: e.target.value })} />
+                  <input value={t.template} placeholder="workflow" style={inp} onChange={(e) => update(i, { template: e.target.value })} />
+                  <input value={t.event} placeholder="docs/proposals/pending" style={inp} onChange={(e) => update(i, { event: e.target.value })} />
+                  <input value={t.schedule} placeholder="git ref (auto if blank)" style={inp} onChange={(e) => update(i, { schedule: e.target.value })} />
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  <select value={t.mode} style={inp} onChange={(e) => update(i, { mode: e.target.value })}>
+                    <option value="autonomous">autonomous</option><option value="interactive">interactive</option>
+                  </select>
+                  <Button size="sm" onClick={() => persist(triggers)} disabled={saving || !t.workspace || !t.template}>save</Button>
+                  <Button size="sm" onClick={() => remove(i)} disabled={saving}>remove</Button>
+                </div>
+                </>)}
+              </div>
+            ))
           )}
+          <Button size="sm" onClick={add} disabled={saving}>+ trigger</Button>
+          {error && <div style={{ color: "#c00", fontSize: 11 }}>{error}</div>}
         </div>
       )}
     </div>
@@ -815,6 +904,7 @@ function TriggerCard({ t }: { t: Trigger }) {
           variant={interactive ? "warning" : "success"}
         />
       </div>
+      {t.last_error && <div style={{ marginTop: 4, color: "#c00", fontSize: 11 }}>{t.last_error}</div>}
       {t.workspace && (
         <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace", marginTop: 3, overflowWrap: "anywhere" }}>
           {t.workspace}

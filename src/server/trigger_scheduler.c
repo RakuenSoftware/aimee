@@ -1370,10 +1370,14 @@ static void sched_tick(void)
    time_t now = time(NULL);
    struct tm tm;
    localtime_r(&now, &tm);
+   const char *engine = getenv("AIMEE_WFE_ENGINE");
+   int go_wfe = engine && strcmp(engine, "go") == 0;
 
    for (int i = 0; i < cfg.trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
    {
       const trigger_rule_t *rule = &cfg.trigger_rules[i];
+      if (go_wfe)
+         break; /* Go is the sole owner of every WFE admission source. */
       const trigger_source_t *src = trigger_source_find(rule->source);
       if (!src)
          continue; /* unknown source (e.g. a webhook handled on its own ingress) */
@@ -1423,7 +1427,8 @@ static void sched_tick(void)
 
    /* Armed workflows (triggers-as-blocks): saved workflows whose start node is
     * a trigger block file runs through the same plumbing as trigger_rules. */
-   sched_tick_armed(now, cfg.trigger_max_concurrent);
+   if (!go_wfe)
+      sched_tick_armed(now, cfg.trigger_max_concurrent);
 
    /* Skill curator: idle-guarded; safe to call on every tick. */
    if (cfg.skills_curator_enabled)

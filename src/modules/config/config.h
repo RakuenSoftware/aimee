@@ -1949,7 +1949,8 @@ typedef struct config
    char db2_vector_corpus_index[16];
    int64_t db2_vector_corpus_diskann_threshold;
    /* Mixture-of-Agents ensemble (ensemble.*).
-    * ensemble_reference_models: diverse model/agent names for the fan-out.
+    * ensemble_reference_models: positive must-use agent pins. Runtime fills all
+    * other enabled, eligible agent capacity, provider-diversity first.
     * ensemble_aggregator: agent name for the synthesis pass.
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means

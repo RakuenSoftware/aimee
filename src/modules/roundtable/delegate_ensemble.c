@@ -65,6 +65,8 @@ static void shuffle_indices(int *indices, int count)
 
 static int count_successful(const agent_result_t *results, int count)
 {
+   /* A usable participant result is exactly a non-empty response. Review mode
+    * nulls an unrecoverably malformed response before calling this helper. */
    int n = 0;
    for (int i = 0; i < count; i++)
    {
@@ -72,6 +74,16 @@ static int count_successful(const agent_result_t *results, int count)
          n++;
    }
    return n;
+}
+
+static void record_adopted_round(roundtable_result_t *out, int round, int failed,
+                                 int required_failed)
+{
+   out->best_round = round;
+   out->participants_failed = failed;
+   out->participants_required_failed = required_failed;
+   if (required_failed > 0)
+      out->degraded = 1;
 }
 
 /* Balance-match a JSON object starting at text[start]=='{'. Scans forward
@@ -642,19 +654,32 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
        mode == ROUNDTABLE_REVIEW
-           ? "You have NO filesystem, git, shell, or tool access in this review: the SHARED "
-             "ARTIFACT above is the complete and authoritative material under review. Judge it on "
-             "its own contents only. Never claim to have read files, run git, or grepped — and "
+           ? "You have no filesystem, git, shell, or write access in this review. The SHARED "
+             "ARTIFACT is the authoritative change under review; use the offered read-only Aimee "
+             "index tools for surrounding repository facts. Never claim to have read files or run "
+             "git — and "
              "never report a finding like \"the change is not applied / not in the tree\" (you "
              "cannot observe the tree; the artifact is the change). "
-             "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
-             "\"category\":\"correctness|security|performance|maintainability|style\","
+             "First compare the proposed direction to the ORIGINAL REQUEST in TASK. A useful "
+             "refinement that advances that request is aligned. Replacing it with a different "
+             "goal, architecture, or deliverable without a basis in the request is drifted, "
+             "regardless of the replacement's local quality. If the request is unavailable or "
+             "the relationship cannot be established, use unclear; never infer approval from "
+             "missing context. Give this assessment before evaluating implementation quality. "
+             "A drifted assessment MUST also produce a blocking item in category "
+             "original_request_alignment that cites the conflicting request clause and change. "
+             "Return only JSON: {\"original_request_alignment\":{"
+             "\"status\":\"aligned|drifted|unclear\",\"summary\":\"comparison to the ask\"},"
+             "\"items\":[{\"severity\":\"blocking|suggestion|nit\","
+             "\"category\":\"correctness|security|performance|maintainability|style|"
+             "original_request_alignment\","
              "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
              "\"recommendation\":\"...\","
              "\"evidence\":{\"kind\":\"refs|symbol|search|none\",\"target\":\"symbol or search "
              "term\",\"project\":\"\",\"count\":0,\"factual\":true}}],\"overall\":\"...\"}. "
-             "evidence lets the CHAIR VERIFY your claim against the code index (you do NOT run "
-             "it — just name what the chair should check): kind=refs target=<fn> count=<claimed "
+             "evidence lets the CHAIR replay your claim against the code index (use your read-only "
+             "tools, then name the query the chair should repeat): kind=refs target=<fn> "
+             "count=<claimed "
              "call sites>; kind=symbol target=<symbol> (does it exist); kind=search target=<term>. "
              "Ground every finding with checkable evidence — name the refs/symbol/search the chair "
              "can check, even for an interpretive concern. Set factual=true ONLY for a checkable "
@@ -684,7 +709,8 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    const char *head_note =
        mode == ROUNDTABLE_REVIEW
            ? "OUTPUT CONTRACT: reply with ONE raw JSON object "
-             "{\"items\":[...],\"overall\":\"...\"} "
+             "{\"original_request_alignment\":{\"status\":\"aligned|drifted|unclear\","
+             "\"summary\":\"...\"},\"items\":[...],\"overall\":\"...\"} "
              "and nothing else — no prose, no markdown fences. Full schema is in the ROUND "
              "INSTRUCTION below.\n\n"
            : "";
@@ -788,7 +814,9 @@ static char *build_round_synthesis_prompt(const char *task, const char *prior_ar
    if (mode == ROUNDTABLE_REVIEW)
       n = snprintf(buf + pos, cap - pos,
                    "TASK: Produce the consolidated review as a SINGLE JSON object "
-                   "{\"items\":[{\"severity\":...,\"category\":...,\"location\":...,"
+                   "{\"original_request_alignment\":{\"status\":"
+                   "\"aligned|drifted|unclear\",\"summary\":...},\"items\":[{\"severity\":...,"
+                   "\"category\":...,\"location\":...,"
                    "\"summary\":...,\"recommendation\":...}],\"overall\":...}. "
                    "Output ONLY that JSON object — no analysis, no reasoning, no step-by-step "
                    "commentary, no markdown fences, no text before or after. Emitting the final "
@@ -1050,7 +1078,9 @@ static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int par
       return -1;
    char *prompt = xasprintf3(
        "Repair this malformed roundtable review into valid JSON only. Preserve every issue. "
-       "Use shape {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
+       "Use shape {\"original_request_alignment\":{\"status\":"
+       "\"aligned|drifted|unclear\",\"summary\":\"comparison to the ask\"},"
+       "\"items\":[{\"severity\":\"blocking|suggestion|nit\","
        "\"category\":\"correctness|security|performance|maintainability|style\","
        "\"location\":\"file:line or section\",\"summary\":\"one sentence\"}]}. "
        "Do not add commentary.\n\nMALFORMED REVIEW:\n",
@@ -1087,11 +1117,11 @@ static int review_saturated(char prev[][128], int prev_count, char cur[][128], i
 
 /* Diverse default review lineup, round-robined across the panel by the
  * participant's stable position in reference_models (not the shuffled slot), so
- * persona<->model pairing is reproducible run to run. Pairs the contrarian
- * `reviewer` with the constructive `reviewer-constructive`: one tries to break
- * the change, one assesses it as written. */
-static const char *const PANEL_DEFAULT_PERSONAS[] = {"security", "architect", "qa", "reviewer",
-                                                     "reviewer-constructive"};
+ * persona<->model pairing is reproducible run to run. The first lens checks
+ * original-request alignment before the security/architecture/QA and paired
+ * contrarian/constructive implementation-quality lenses. */
+static const char *const PANEL_DEFAULT_PERSONAS[] = {
+    "original-request", "security", "architect", "qa", "reviewer", "reviewer-constructive"};
 #define PANEL_DEFAULT_PERSONA_COUNT                                                                \
    ((int)(sizeof(PANEL_DEFAULT_PERSONAS) / sizeof(PANEL_DEFAULT_PERSONAS[0])))
 
@@ -1286,23 +1316,40 @@ int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
    return 1;
 }
 
-void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
+int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg, char *err,
+                                 size_t err_n)
 {
-   if (cfg->ensemble_reference_count > 0)
-      return;
-   int n = 0;
-   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
+   if (err && err_n)
+      err[0] = '\0';
+   if (!cfg || !acfg)
+      return -1;
+   int pinned[MAX_AGENTS];
+   memset(pinned, 0, sizeof pinned);
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
-      if (!ensemble_panelist_eligible(cfg, &acfg->agents[i]))
+      const char *name = cfg->ensemble_reference_models[i];
+      if (!name[0] || rt_seat_is_random(name))
          continue;
-      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
-               acfg->agents[i].name);
-      n++;
+      const agent_t *ag = agent_find((agent_config_t *)acfg, name);
+      const char *reason = NULL;
+      if (!ag || !ensemble_panelist_eligible(cfg, ag))
+         reason = "is not enabled and eligible for review";
+      else if (!agent_is_available_for_routing(ag))
+         reason = "is not currently available";
+      if (!reason)
+      {
+         int idx = (int)(ag - acfg->agents);
+         int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
+         if (idx >= 0 && idx < acfg->agent_count && ++pinned[idx] > capacity)
+            reason = "is pinned more times than its configured max_parallel capacity";
+      }
+      if (!reason)
+         continue;
+      if (err && err_n)
+         snprintf(err, err_n, "required roundtable agent '%s' %s", name, reason);
+      return -1;
    }
-   cfg->ensemble_reference_count = n;
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   return 0;
 }
 
 void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
@@ -1451,6 +1498,106 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
                cfg->ensemble_reference_models[0]);
 }
 
+void ensemble_fill_panel_capacity(config_t *cfg, const agent_config_t *acfg)
+{
+   if (!cfg || !acfg)
+      return;
+
+   int seated[MAX_AGENTS];
+   memset(seated, 0, sizeof(seated));
+
+   /* The surviving configured entries are positive pins. Count them against
+    * their agent's capacity, but never use their presence to exclude another
+    * eligible agent. */
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   {
+      const agent_t *ag = agent_find((agent_config_t *)acfg, cfg->ensemble_reference_models[i]);
+      if (!ag)
+         continue;
+      int idx = (int)(ag - acfg->agents);
+      if (idx >= 0 && idx < acfg->agent_count)
+         seated[idx]++;
+   }
+
+   /* Provider diversity first: seat one agent for every distinct provider not
+    * already represented by a pin. A missing provider name is scoped to the
+    * agent name so unrelated legacy agents are never collapsed together. */
+   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS; i++)
+   {
+      const agent_t *ag = &acfg->agents[i];
+      if (seated[i] > 0 || !ensemble_panelist_eligible(cfg, ag) ||
+          !agent_is_available_for_routing(ag))
+         continue;
+      const char *provider = ag->provider[0] ? ag->provider : ag->name;
+      int provider_already_seated = 0;
+      for (int j = 0; j < acfg->agent_count; j++)
+      {
+         if (seated[j] <= 0)
+            continue;
+         const agent_t *other = &acfg->agents[j];
+         const char *other_provider = other->provider[0] ? other->provider : other->name;
+         if (strcmp(provider, other_provider) == 0)
+         {
+            provider_already_seated = 1;
+            break;
+         }
+      }
+      if (provider_already_seated)
+         continue;
+      int pos = cfg->ensemble_reference_count++;
+      snprintf(cfg->ensemble_reference_models[pos], sizeof(cfg->ensemble_reference_models[pos]),
+               "%s", ag->name);
+      cfg->ensemble_reference_personas[pos][0] = '\0';
+      seated[i] = 1;
+   }
+
+   /* Agent diversity second: represent every other eligible agent before any
+    * already-seated agent consumes a second slot. */
+   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS; i++)
+   {
+      const agent_t *ag = &acfg->agents[i];
+      if (seated[i] > 0 || !ensemble_panelist_eligible(cfg, ag) ||
+          !agent_is_available_for_routing(ag))
+         continue;
+      int pos = cfg->ensemble_reference_count++;
+      snprintf(cfg->ensemble_reference_models[pos], sizeof(cfg->ensemble_reference_models[pos]),
+               "%s", ag->name);
+      cfg->ensemble_reference_personas[pos][0] = '\0';
+      seated[i] = 1;
+   }
+
+   /* Then fill the panel round-robin. Repeating an agent name is intentional:
+    * each entry is one concurrent participant invocation, and max_parallel is
+    * that agent's seat capacity rather than a uniqueness constraint. */
+   int added;
+   do
+   {
+      added = 0;
+      for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS;
+           i++)
+      {
+         const agent_t *ag = &acfg->agents[i];
+         if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag))
+            continue;
+         int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
+         if (seated[i] >= capacity)
+            continue;
+         int pos = cfg->ensemble_reference_count++;
+         snprintf(cfg->ensemble_reference_models[pos], sizeof(cfg->ensemble_reference_models[pos]),
+                  "%s", ag->name);
+         cfg->ensemble_reference_personas[pos][0] = '\0';
+         seated[i]++;
+         added = 1;
+      }
+   } while (added && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS);
+
+   if (cfg->ensemble_reference_persona_count < cfg->ensemble_reference_count)
+      cfg->ensemble_reference_persona_count = cfg->ensemble_reference_count;
+   if (!cfg->ensemble_aggregator[0] && cfg->ensemble_reference_count > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
+}
+
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
                           delegate_ensemble_result_t *out)
 {
@@ -1585,6 +1732,14 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
 {
    dstr_t s;
    dstr_init(&s);
+   dstr_appendf(&s, "## Original-request alignment\n\n**%s**: %s",
+                out->original_request_alignment[0] ? out->original_request_alignment : "unclear",
+                out->original_request_alignment_summary[0]
+                    ? out->original_request_alignment_summary
+                    : "The panel did not provide an alignment assessment.");
+   if (out->original_request_alignment_sources[0])
+      dstr_appendf(&s, " _(sources: %s)_", out->original_request_alignment_sources);
+   dstr_append_str(&s, "\n");
    static const char *const sevs[] = {"blocking", "suggestion", "nit"};
    static const char *const heads[] = {"## Blocking", "## Suggestions", "## Nits"};
    int emitted = 0;
@@ -1601,7 +1756,7 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
          done[i] = 1;
          if (!group_started)
          {
-            dstr_appendf(&s, "%s%s\n", emitted ? "\n" : "", heads[g]);
+            dstr_appendf(&s, "\n%s\n", heads[g]);
             group_started = 1;
          }
          dstr_appendf(&s, "- **%s**", it->category[0] ? it->category : "review");
@@ -1657,6 +1812,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       local.max_rounds = 1;
    if (local.converge_threshold < 0)
       local.converge_threshold = 10;
+   if (local.required_participants > ref_count)
+   {
+      aimee_log(LOG_WARN, "delegate_roundtable",
+                "required participant prefix %d exceeds effective panel %d; failing closed",
+                local.required_participants, ref_count);
+      return -1;
+   }
    if (local.brief_truncated)
       out->truncated = 1;
 
@@ -1679,6 +1841,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 
    out->participants_total = ref_count; /* panel size per round (== MoA source) */
    out->participants_failed = 0;        /* set to the best round's count as it is chosen */
+   out->participants_required_failed = 0;
 
    for (int round = 1; round <= local.max_rounds; round++)
    {
@@ -1746,14 +1909,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             free(results[i].response);
          goto fail;
       }
-      /* Partial-failure metadata: participants that returned no usable response
-       * this round (raw model results, before review-JSON repair). Recorded into
-       * out->participants_failed wherever this round is adopted as best_round, so
-       * the surfaced count matches the returned artifact's provenance. */
-      int round_failed = ref_count - count_successful(results, ref_count);
-      aimee_log(LOG_INFO, "roundtable.progress",
-                "round %d/%d: %d/%d panelists responded; synthesizing", round, local.max_rounds,
-                ref_count - round_failed, ref_count);
+      int required_count =
+          local.required_participants > 0 ? local.required_participants : ref_count;
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;
@@ -1790,7 +1947,6 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                else
                {
                   free(fixed);
-                  out->degraded = 1;
                   free(results[i].response);
                   results[i].response = NULL;
                   snprintf(results[i].error, sizeof(results[i].error), "%s",
@@ -1812,6 +1968,23 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          capture_round_review_items(results, ref_count, out, round);
       }
 
+      /* Count usable results after review-JSON repair. The required prefix is
+       * caller-authored coverage; automatically filled seats are best-effort.
+       * Both totals remain observable, but optional quota failures cannot make
+       * an otherwise complete required panel degraded. */
+      int round_failed = ref_count - count_successful(results, ref_count);
+      int round_required_failed = required_count - count_successful(results, required_count);
+      for (int i = 0; i < required_count; i++)
+         if (!results[i].response || !results[i].response[0])
+            aimee_log(LOG_WARN, "roundtable.required",
+                      "round %d required seat %d (%s) returned no usable response%s%s", round, i,
+                      cfg->ensemble_reference_models[i], results[i].error[0] ? ": " : "",
+                      results[i].error);
+      aimee_log(LOG_INFO, "roundtable.progress",
+                "round %d/%d: %d/%d panelists responded (%d/%d required); synthesizing", round,
+                local.max_rounds, ref_count - round_failed, ref_count,
+                required_count - round_required_failed, required_count);
+
       double round_cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
       out->cost_usd += round_cost;
       out->rounds_run = round;
@@ -1823,8 +1996,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          {
             free(best_artifact);
             best_artifact = xstrdup0(results[best].response);
-            out->best_round = round;
-            out->participants_failed = round_failed;
+            record_adopted_round(out, round, round_failed, round_required_failed);
          }
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
@@ -1854,8 +2026,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                free(best_artifact);
                best_artifact = xstrdup0(results[best].response);
                best_score = score;
-               out->best_round = round;
-               out->participants_failed = round_failed;
+               record_adopted_round(out, round, round_failed, round_required_failed);
             }
          }
          for (int i = 0; i < ref_count; i++)
@@ -1913,8 +2084,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(chair_adj);
          if (cfg->roundtable_replay_verify_enabled)
             roundtable_artifact_append_rejected(&best_artifact, out);
-         out->best_round = round;
-         out->participants_failed = round_failed;
+         record_adopted_round(out, round, round_failed, round_required_failed);
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
          break;
@@ -1990,8 +2160,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(best_artifact);
          best_artifact = xstrdup0(agg_result.response);
          best_score = score;
-         out->best_round = round;
-         out->participants_failed = round_failed;
+         record_adopted_round(out, round, round_failed, round_required_failed);
       }
       free(agg_result.response);
 

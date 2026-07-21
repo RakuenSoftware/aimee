@@ -35,8 +35,6 @@
 #include "server_compute_impl.h"
 #include "skill_review.h"
 #include "trigger_scheduler.h"
-#include "wfe_live_delegate.h"
-#include "wfe_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
@@ -90,7 +88,8 @@ typedef struct
    const char *method;
    server_method_handler_t handler;
 } server_method_dispatch_t;
-#define SERVER_REQUEST_POOL_MAX_THREADS 4
+#define SERVER_REQUEST_POOL_MAX_THREADS   4
+#define SERVER_ORCHESTRATION_POOL_THREADS 16
 static const server_method_dispatch_t server_dispatch_table[];
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -114,6 +113,21 @@ static void server_request_pool_shutdown(server_ctx_t *ctx)
    compute_pool_unregister_secondary(&ctx->request_pool);
    compute_pool_shutdown(&ctx->request_pool);
    ctx->request_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_shutdown(server_ctx_t *ctx)
+{
+   if (!ctx || !ctx->orchestration_pool_initialized)
+      return;
+   compute_pool_unregister_secondary(&ctx->orchestration_pool);
+   compute_pool_shutdown(&ctx->orchestration_pool);
+   ctx->orchestration_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_close(server_ctx_t *ctx)
+{
+   if (ctx && ctx->orchestration_pool_initialized)
+      compute_pool_close(&ctx->orchestration_pool);
 }
 
 int server_compute_budget_acquire(server_ctx_t *ctx)
@@ -2227,9 +2241,27 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    }
    ctx->request_pool_initialized = 1;
    compute_pool_register_secondary(&ctx->request_pool, "requests");
+   /* Provider-backed orchestration is mostly blocked on remote I/O. Give it a
+    * dedicated bounded lane so generic background work cannot consume its
+    * coordinators; per-agent admission still owns actual provider concurrency. */
+   if (compute_pool_init(&ctx->orchestration_pool, SERVER_ORCHESTRATION_POOL_THREADS) != 0)
+   {
+      LOG_ERROR("server", "failed to initialize orchestration pool");
+      server_request_pool_shutdown(ctx);
+      server_session_pools_shutdown(ctx);
+      compute_pool_shutdown(&ctx->pool);
+      pthread_mutex_destroy(&ctx->conns_mutex);
+      close(fd);
+      platform_evloop_destroy(&ctx->evloop);
+      unlink(socket_path);
+      return -1;
+   }
+   ctx->orchestration_pool_initialized = 1;
+   compute_pool_register_secondary(&ctx->orchestration_pool, "orchestration");
    if (pthread_mutex_init(&ctx->compute_budget_mutex, NULL) != 0)
    {
       LOG_ERROR("server", "failed to initialize compute budget mutex");
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2243,6 +2275,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    {
       LOG_ERROR("server", "failed to initialize compute budget condition");
       pthread_mutex_destroy(&ctx->compute_budget_mutex);
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2298,11 +2331,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    trigger_scheduler_init();
    server_delegate_monitor_init();
    server_coord_dispatcher_init(ctx);
-   /* Autonomous development is core functionality (default-on): register the
-    * workflow engine's live providers + executors so submitted proposals can run
-    * end-to-end server-side. Registration runs nothing on its own — a run begins
-    * only when intake creates a work item and the autonomy driver advances it. */
-   wfe_autonomy_register();
+   /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
+    * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
     * precede any toolset_registry_init() / build_tools_array(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
@@ -2330,7 +2360,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
-   wfe_scheduler_init();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual
     * `vault set`. No-op unless a secret source is configured. */
@@ -2412,19 +2441,25 @@ void server_shutdown(server_ctx_t *ctx)
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
    server_coord_dispatcher_shutdown();
-   wfe_scheduler_shutdown();
    /* Reap any per-webuser code-server editors so they don't outlive us (WP-I). */
    webuser_editor_shutdown();
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
+   /* Close orchestration admission first, but do not join coordinators until the
+    * provider turns on which they may be waiting have been cancelled. */
+   server_orchestration_pool_close(ctx);
    /* Cancel every in-flight turn BEFORE draining: turns now outlive their client
     * connections (server-owned turn lifecycle), so a long detached turn would
     * otherwise block the drain indefinitely. The atomic cancel flags are
     * observed by the workers within one poll tick; the drain then completes
     * bounded. Presence is torn down after the drain, so a still-running worker
     * never emits onto a closed ring. */
-   turn_registry_cancel_all();
+   turn_registry_begin_shutdown();
+   /* Every queued/running async operation is now bounded by a pool worker and
+    * every provider turn has observed cancellation. Drain before shared stores
+    * and provider state are torn down. */
+   server_orchestration_pool_shutdown(ctx);
    /* Let async chat/tool workers finish while the compute pool is still
     * available to drain any queued server-side jobs they interact with. */
    server_compute_async_drain();

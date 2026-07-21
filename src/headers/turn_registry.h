@@ -54,8 +54,7 @@ extern "C"
     * so a cancel arriving immediately is never lost. Returns the entry (caller
     * caches the pointer for lock-free cancel reads) or NULL on collision (the
     * session already has an in-flight entry — a bug under the turn-lock
-    * invariant) or when the table is full. On NULL the caller runs the turn
-    * without a registry entry (still bounded by token/deadline limits). */
+    * invariant), when the table is full, or after shutdown admission has closed. */
    turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id);
 
    /* Request cancellation of session_id's in-flight turn. `owner_principal`, when
@@ -85,6 +84,14 @@ extern "C"
    /* Flag every in-flight turn for cancellation (server shutdown). Returns the
     * number flagged. Sets flags only; the owning workers do the reaping. */
    int turn_registry_cancel_all(void);
+
+   /* Atomically close turn admission and flag every already-published turn for
+    * cancellation. Once begun, shutdown is a persistent fence: later publish
+    * attempts fail until the process exits. Returns the number flagged. */
+   int turn_registry_begin_shutdown(void);
+
+   /* True after turn_registry_begin_shutdown established the admission fence. */
+   int turn_registry_is_shutting_down(void);
 
    /* --- pending-steer store (chat.interrupt) ---
     * One pending steering message per session. chat.interrupt stashes the

@@ -1,5 +1,5 @@
 /* test_agent_parallel.c: the real agent_run_parallel deadline-preemption path —
- * a hung worker must be abandoned at the deadline, not wedge the whole fan-out.
+ * a slow worker must be cancelled and joined at the deadline, not detached.
  * Links the real server/agent_parallel.o against stubbed agent exec functions. */
 #include "aimee.h"
 #include "agent_config.h"
@@ -22,6 +22,15 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
 {
    (void)creds;
 }
+static __thread atomic_int *g_request_cancel;
+void agent_set_request_cancel(atomic_int *flag)
+{
+   g_request_cancel = flag;
+}
+int agent_request_cancelled(void)
+{
+   return g_request_cancel && atomic_load(g_request_cancel);
+}
 void aimee_log(int level, const char *tag, const char *fmt, ...)
 {
    (void)level;
@@ -38,7 +47,8 @@ static void sleep_ms(int ms)
    struct timespec ts = {ms / 1000, (long)(ms % 1000) * 1000000L};
    nanosleep(&ts, NULL);
 }
-static atomic_int g_slow_inputs_intact;
+static atomic_int g_wave_active;
+static atomic_int g_wave_high_water;
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                     const char *system_prompt, const char *user_prompt, int max_tokens,
                     double temperature, agent_result_t *out)
@@ -52,12 +62,22 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    memset(out, 0, sizeof(*out));
    if (name && strcmp(name, "slow") == 0)
    {
-      sleep_ms(3000);
-      atomic_store(&g_slow_inputs_intact, strcmp(name, "slow") == 0 &&
-                                              strcmp(role, "review") == 0 &&
-                                              strcmp(system_prompt, "system-owned") == 0 &&
-                                              strcmp(user_prompt, "prompt-owned") == 0 &&
-                                              strcmp(cfg->default_agent, "config-owned") == 0);
+      for (int elapsed = 0; elapsed < 3000 && !agent_request_cancelled(); elapsed += 10)
+         sleep_ms(10);
+      if (agent_request_cancelled())
+      {
+         snprintf(out->error, sizeof(out->error), "cancelled");
+         return -1;
+      }
+   }
+   else if (name && strcmp(name, "wave") == 0)
+   {
+      int active = atomic_fetch_add(&g_wave_active, 1) + 1;
+      int high = atomic_load(&g_wave_high_water);
+      while (active > high && !atomic_compare_exchange_weak(&g_wave_high_water, &high, active))
+         ;
+      sleep_ms(100);
+      atomic_fetch_sub(&g_wave_active, 1);
    }
    out->response = strdup("ok");
    out->success = 1;
@@ -120,21 +140,16 @@ static long now_ms(void)
    return t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 
-static void test_deadline_abandons_hung_worker(void)
+static void test_deadline_cancels_and_joins_slow_worker(void)
 {
    agent_task_t tasks[3];
    memset(tasks, 0, sizeof(tasks));
    tasks[0].agent = "fast0";
    tasks[0].role = "review";
-   char *slow_name = strdup("slow");
-   char *slow_role = strdup("review");
-   char *slow_system = strdup("system-owned");
-   char *slow_prompt = strdup("prompt-owned");
-   assert(slow_name && slow_role && slow_system && slow_prompt);
-   tasks[1].agent = slow_name;
-   tasks[1].role = slow_role;
-   tasks[1].system_prompt = slow_system;
-   tasks[1].user_prompt = slow_prompt;
+   tasks[1].agent = "slow";
+   tasks[1].role = "review";
+   tasks[1].system_prompt = "system-owned";
+   tasks[1].user_prompt = "prompt-owned";
    tasks[2].agent = "fast2";
    tasks[2].role = "review";
    agent_result_t out[3];
@@ -142,38 +157,23 @@ static void test_deadline_abandons_hung_worker(void)
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", "config-owned");
-   atomic_store(&g_slow_inputs_intact, 0);
 
    long t0 = now_ms();
    int succ = agent_run_parallel(&cfg, tasks, 3, out, 200 /* ms deadline */);
    long elapsed = now_ms() - t0;
 
-   /* Returned at ~the deadline, not after the 3000ms slow worker. */
+   /* Cooperative cancellation makes the join transitive without waiting for
+    * the slow worker's full 3000ms simulated call. */
    assert(elapsed < 2000);
    assert(succ == 2);
    assert(out[0].success == 1 && out[0].response);
    assert(out[2].success == 1 && out[2].response);
-   assert(out[1].success == 0); /* slow worker abandoned -> failed slot */
+   assert(out[1].success == 0); /* slow worker cancelled -> failed slot */
    assert(out[1].response == NULL);
-   /* Returning at the deadline transfers every borrowed input to the detached
-    * worker. Mutating the caller's task strings and config must not affect the
-    * still-running call. The old implementation retained these pointers and
-    * crashed in strlen/vfprintf once the roundtable freed them. */
-   memset(slow_name, 'x', strlen(slow_name));
-   memset(slow_role, 'x', strlen(slow_role));
-   memset(slow_system, 'x', strlen(slow_system));
-   memset(slow_prompt, 'x', strlen(slow_prompt));
-   snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", "mutated");
-   for (int i = 0; i < 40 && !atomic_load(&g_slow_inputs_intact); i++)
-      sleep_ms(100);
-   assert(atomic_load(&g_slow_inputs_intact) == 1);
-   free(slow_name);
-   free(slow_role);
-   free(slow_system);
-   free(slow_prompt);
+   assert(strcmp(out[1].error, "cancelled") == 0);
    free(out[0].response);
    free(out[2].response);
-   printf("  test_deadline_abandons_hung_worker: ok (%ldms, %d ok)\n", elapsed, succ);
+   printf("  test_deadline_cancels_and_joins_slow_worker: ok (%ldms, %d ok)\n", elapsed, succ);
 }
 
 static void test_no_deadline_runs_all(void)
@@ -197,6 +197,77 @@ static void test_no_deadline_runs_all(void)
       free(out[i].response);
    }
    printf("  test_no_deadline_runs_all: ok\n");
+}
+
+static void test_no_deadline_ignores_generic_compute_width(void)
+{
+   enum
+   {
+      task_count = 14
+   };
+   agent_task_t tasks[task_count];
+   agent_result_t out[task_count];
+   memset(tasks, 0, sizeof(tasks));
+   memset(out, 0, sizeof(out));
+   for (int i = 0; i < task_count; i++)
+   {
+      tasks[i].agent = "wave";
+      tasks[i].role = "review";
+   }
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   atomic_store(&g_wave_active, 0);
+   atomic_store(&g_wave_high_water, 0);
+   g_aimee_compute_threads_override = 2;
+   assert(agent_run_parallel(&cfg, tasks, task_count, out, 0) == task_count);
+   g_aimee_compute_threads_override = 0;
+   assert(atomic_load(&g_wave_high_water) == task_count);
+   for (int i = 0; i < task_count; i++)
+      free(out[i].response);
+   printf("  test_no_deadline_ignores_generic_compute_width: ok (%d concurrent)\n",
+          atomic_load(&g_wave_high_water));
+}
+
+typedef struct
+{
+   agent_config_t cfg;
+   agent_task_t tasks[40];
+   agent_result_t out[40];
+   int success;
+} panel_call_t;
+
+static void *run_test_panel(void *arg)
+{
+   panel_call_t *call = arg;
+   call->success = agent_run_parallel(&call->cfg, call->tasks, 40, call->out, 0);
+   return NULL;
+}
+
+static void test_process_limit_is_shared_across_panels(void)
+{
+   panel_call_t calls[2];
+   memset(calls, 0, sizeof(calls));
+   for (int p = 0; p < 2; p++)
+      for (int i = 0; i < 40; i++)
+      {
+         calls[p].tasks[i].agent = "wave";
+         calls[p].tasks[i].role = "review";
+      }
+   atomic_store(&g_wave_active, 0);
+   atomic_store(&g_wave_high_water, 0);
+   pthread_t callers[2];
+   assert(pthread_create(&callers[0], NULL, run_test_panel, &calls[0]) == 0);
+   assert(pthread_create(&callers[1], NULL, run_test_panel, &calls[1]) == 0);
+   pthread_join(callers[0], NULL);
+   pthread_join(callers[1], NULL);
+   assert(calls[0].success == 40);
+   assert(calls[1].success == 40);
+   assert(atomic_load(&g_wave_high_water) <= 64);
+   for (int p = 0; p < 2; p++)
+      for (int i = 0; i < 40; i++)
+         free(calls[p].out[i].response);
+   printf("  test_process_limit_is_shared_across_panels: ok (%d concurrent)\n",
+          atomic_load(&g_wave_high_water));
 }
 
 /* use_tools picks the tools-enabled runner — the difference between a review
@@ -266,8 +337,10 @@ static void test_use_tools_routes_to_tools_runner(void)
 int main(void)
 {
    printf("agent_parallel tests\n");
-   test_deadline_abandons_hung_worker();
+   test_deadline_cancels_and_joins_slow_worker();
    test_no_deadline_runs_all();
+   test_no_deadline_ignores_generic_compute_width();
+   test_process_limit_is_shared_across_panels();
    test_use_tools_routes_to_tools_runner();
    printf("all tests passed\n");
    return 0;

@@ -81,36 +81,46 @@ static long wfe_panel_seat_wait_secs(void)
  * (severity/category/location/summary/recommendation + replayable evidence). */
 static char *build_review_task(const wfe_review_packet_t *pkt)
 {
+   static const char *fmt =
+       "Review the CHANGE UNDER REVIEW below AGAINST the ORIGINAL REQUEST below.\n\n"
+       "FOCUS: %s\n\nORIGINAL REQUEST:\n%s\n\n"
+       "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
+       "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "
+       "The diff shows what CHANGED; it does not show whether the change is REAL. Look "
+       "the rest up — do not infer it from the diff:\n"
+       "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "
+       "Name the path from a real entrypoint to this code in the artifact that actually "
+       "ships. Code with no caller, or whose only caller needs a binary or config the "
+       "deployment lacks, is inert — that is a blocking defect no matter how correct the "
+       "code reads.\n"
+       "2. PRODUCT: every added file must be something we ship. Search for what writes it. "
+       "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"
+       "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "
+       "confirm the replacement it points people to actually exists and works on the "
+       "surface it targets. A rule with no working alternative is breakage.\n\n"
+       "For every item, location is \"file:line\" from the change wherever possible, and a "
+       "blocking severity REQUIRES reproducible factual evidence about this code.";
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
    const char *proposal = (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)";
    const char *diff = (pkt->diff && pkt->diff[0])
                           ? pkt->diff
                           : "(no code diff — review the plan/proposal artifact against the ask)";
-   size_t cap = 1024 + strlen(focus) + strlen(proposal) + strlen(diff);
+   /* The former buffer already used strlen() of the complete request and diff,
+    * despite formatting only 4000 request bytes. Exact sizing therefore reduces
+    * allocation while making silent content truncation impossible. */
+   int needed = snprintf(NULL, 0, fmt, focus, proposal, diff);
+   if (needed < 0)
+      return NULL;
+   size_t cap = (size_t)needed + 1;
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
-   snprintf(buf, cap,
-            "Review the CHANGE UNDER REVIEW below AGAINST what was asked.\n\n"
-            "FOCUS: %s\n\nORIGINAL PROPOSAL/REQUEST:\n%.4000s\n\n"
-            "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
-            "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "
-            "The diff shows what CHANGED; it does not show whether the change is REAL. Look "
-            "the rest up — do not infer it from the diff:\n"
-            "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "
-            "Name the path from a real entrypoint to this code in the artifact that actually "
-            "ships. Code with no caller, or whose only caller needs a binary or config the "
-            "deployment lacks, is inert — that is a blocking defect no matter how correct the "
-            "code reads.\n"
-            "2. PRODUCT: every added file must be something we ship. Search for what writes it. "
-            "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"
-            "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "
-            "confirm the replacement it points people to actually exists and works on the "
-            "surface it targets. A rule with no working alternative is breakage.\n\n"
-            "For every item, location is \"file:line\" from the change wherever possible, and a "
-            "blocking severity REQUIRES reproducible factual evidence about this code.",
-            focus, proposal, diff);
+   if (snprintf(buf, cap, fmt, focus, proposal, diff) != needed)
+   {
+      free(buf);
+      return NULL;
+   }
    return buf;
 }
 
@@ -293,12 +303,41 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
        * short of a full panel is a failed attempt. */
       cfg.ensemble_reference_count = nlens;
       cfg.ensemble_reference_persona_count = nlens;
+      char required_models[WFE_PANEL_MAX][128];
       for (int i = 0; i < nlens; i++)
       {
          snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i], "%s",
                   seat[i]);
          snprintf(cfg.ensemble_reference_personas[i], sizeof cfg.ensemble_reference_personas[i],
                   "%s", required[i]);
+         snprintf(required_models[i], sizeof required_models[i], "%s", seat[i]);
+      }
+      /* Preset/lens bindings above are positive must-use seats. They do not cap
+       * the panel: fill every remaining eligible provider slot, diversity first,
+       * so a 10-seat codex plus a 4-seat MiniMax roster actually runs 14
+       * concurrent reviews rather than one invocation per provider name. */
+      ensemble_filter_panel_authorization(&cfg, &acfg);
+      ensemble_filter_panel_availability(&cfg, &acfg);
+      ensemble_fill_panel_capacity(&cfg, &acfg);
+      /* Both filters only remove/compact and fill only appends. Therefore any
+       * removed required seat necessarily changes this positional prefix. */
+      int required_intact = cfg.ensemble_reference_count >= nlens;
+      for (int i = 0; required_intact && i < nlens; i++)
+         if (strcmp(cfg.ensemble_reference_models[i], required_models[i]) != 0)
+            required_intact = 0;
+      if (!required_intact)
+      {
+         aimee_log(LOG_WARN, "wfe-panel",
+                   "required seat prefix changed after filtering/fill (%d/%d seats)%s",
+                   cfg.ensemble_reference_count, nlens, final ? " -> degrade" : " -> retry");
+         if (final)
+         {
+            rc_final = 0;
+            break;
+         }
+         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
+         nanosleep(&nap, NULL);
+         continue;
       }
       cfg.ensemble_min_successful = nlens;
       cfg.roundtable_replay_verify_enabled = 0;
@@ -309,6 +348,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       opts.turns = ROUNDTABLE_PARALLEL;
       opts.max_rounds = 1;
       opts.deadline_ms = WFE_PANEL_DEADLINE_MS;
+      opts.required_participants = nlens;
 
       roundtable_result_t rt;
       memset(&rt, 0, sizeof rt);
@@ -319,10 +359,12 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          break;
       }
 
-      if (rt.participants_failed > 0 || rt.degraded)
+      if (rt.participants_required_failed > 0 || rt.degraded)
       {
-         aimee_log(LOG_WARN, "wfe-panel", "panel attempt: %d/%d panelist(s) failed%s%s",
-                   rt.participants_failed, rt.participants_total, rt.degraded ? " (degraded)" : "",
+         aimee_log(LOG_WARN, "wfe-panel",
+                   "panel attempt: %d/%d required and %d/%d total panelist(s) failed%s%s",
+                   rt.participants_required_failed, nlens, rt.participants_failed,
+                   rt.participants_total, rt.degraded ? " (degraded)" : "",
                    final ? " -> degrade" : " -> re-seat and retry");
          delegate_roundtable_result_free(&rt);
          if (final)

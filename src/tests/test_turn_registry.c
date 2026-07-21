@@ -135,6 +135,21 @@ static void test_steer_set_take(void)
    printf("ok: steer_set_take\n");
 }
 
+static void test_shutdown_fences_late_turns(void)
+{
+   turn_entry_t *e = turn_registry_publish("sess-shutdown-existing", "t");
+   assert(e);
+   assert(turn_registry_is_shutting_down() == 0);
+   assert(turn_registry_begin_shutdown() >= 1);
+   assert(turn_registry_is_shutting_down() == 1);
+   assert(turn_entry_cancelled(e) == 1);
+   assert(turn_registry_publish("sess-shutdown-late", "t") == NULL);
+   turn_registry_clear(e);
+   /* Clearing the final entry cannot reopen admission. */
+   assert(turn_registry_publish("sess-shutdown-later", "t") == NULL);
+   printf("ok: shutdown fences late turns\n");
+}
+
 int main(void)
 {
    turn_registry_init();
@@ -144,6 +159,7 @@ int main(void)
    test_cancel_all();
    test_reaped();
    test_steer_set_take();
+   test_shutdown_fences_late_turns(); /* persistent fence: must be last */
    printf("all turn_registry tests passed\n");
    return 0;
 }
