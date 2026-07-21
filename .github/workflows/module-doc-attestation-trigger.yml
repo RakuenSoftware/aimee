@@ -1,0 +1,58 @@
+name: Module document attestation trigger
+
+# This protected-base workflow never checks out or executes pull-request code.
+# It authenticates the trigger; the separately deployed verifier resolves Git
+# objects and publishes the required module-doc-attestation check.
+on:
+  pull_request_target:
+    branches: [feature/core-modularization]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: module-doc-attestation-trigger-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  request-attestation:
+    name: module-doc-attestation-trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      id-token: write
+    env:
+      VERIFIER_AUDIENCE: ${{ vars.MODULE_DOC_VERIFIER_AUDIENCE }}
+      VERIFIER_URL: ${{ vars.MODULE_DOC_VERIFIER_URL }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Request protected external verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${VERIFIER_AUDIENCE}" || -z "${VERIFIER_URL}" ]]; then
+            echo "::error::MODULE_DOC_VERIFIER_AUDIENCE and MODULE_DOC_VERIFIER_URL must be configured"
+            exit 1
+          fi
+          case "${VERIFIER_URL}" in
+            https://*) ;;
+            *) echo "::error::MODULE_DOC_VERIFIER_URL must use HTTPS"; exit 1 ;;
+          esac
+
+          audience=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["VERIFIER_AUDIENCE"], safe=""))')
+          token_response=$(curl --silent --show-error --fail-with-body --max-redirs 0 \
+            --proto '=https' --tlsv1.2 \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${audience}")
+          oidc_token=$(TOKEN_RESPONSE="${token_response}" python3 -c \
+            'import json, os; value=json.loads(os.environ["TOKEN_RESPONSE"]); token=value.get("value"); assert isinstance(token, str) and token; print(token)')
+          echo "::add-mask::${oidc_token}"
+
+          request=$(OIDC_TOKEN="${oidc_token}" python3 -c \
+            'import json, os; print(json.dumps({"schema":"aimee.module-doc-trigger.v1","pull_request":int(os.environ["PR_NUMBER"]),"oidc_token":os.environ["OIDC_TOKEN"]}, separators=(",", ":")))')
+          printf '%s' "${request}" | curl --silent --show-error --fail-with-body --max-redirs 0 \
+              --proto '=https' --tlsv1.2 \
+              -H 'Content-Type: application/json' \
+              --data-binary @- \
+              --output /dev/null \
+              "${VERIFIER_URL}"
