@@ -1,6 +1,6 @@
 # P2b-a — buffered kb Bedrock egress authority
 
-- **State:** proposed implementation slice; requires roundtable convergence before code.
+- **State:** plan review v2; first-round blockers incorporated, requires convergence before code.
 - **Depends on:** P1 identity/RLS, P2a catalog, P3a pricing/audit, P4a budget,
   P4b rate, P6a/P6b/P6c Bedrock cores, and P7 signed-HWM use-in-place.
 - **Scope boundary:** one real, certificate-authenticated, non-streaming Bedrock Converse
@@ -17,6 +17,9 @@ to create an owned signed Bedrock request; cleanses the key before network I/O; 
 the request through the P6 transport; and returns an OpenAI-chat response rendered
 from canonical IR. The key, provider target, credential slot, price, and endpoint are
 never caller-controlled and never leave kb.
+This slice proves the complete live path in the integration environment but remains
+production-release-disabled until the real off-host WORM witness slice lands; it does
+not claim a bypass-backed production gate.
 
 ## Fixed first-slice protocol
 
@@ -50,19 +53,28 @@ credential is logged or persisted.
 
 ## Transport identity and HTTP boundary
 
-1. Extend `kb_reqctx` with a distinct verified transport principal, copied and
-   cleared with the actor. `kb_tls_serve_conn` obtains issuer and serial from the
+1. Extend `kb_reqctx` with a distinct verified certificate-instance principal plus
+   the verified leaf SHA-256 fingerprint, copied and cleared with the actor.
+   `kb_tls_serve_conn` obtains issuer and serial from the
    verified peer certificate and constructs the canonical principal with the existing
-   identity helper. The authority/idempotency origin is the canonical
+   identity helper. The certificate authority, audit, and P7 key-use origin is the canonical
    `cert:<issuer>:<serial>` identity key. CN remains a display/scope label only and
    cannot select team, key, model, or idempotency ownership. Keep actor storage intact
    for P5, but P2b-a rejects a missing certificate transport principal and resolves
-   with `actor=NULL`.
-2. Harden the mTLS HTTP reader before exposing egress: parse exactly one
-   case-insensitive `Content-Length`, reject duplicates/conflicts, signs, junk,
-   transfer-encoding, overlong header lines, and lengths above a dedicated bounded
-   egress cap; distinguish incomplete header/body from a complete request; never pass
-   bytes beyond the declared body. Apply socket/SSL read and write deadlines.
+   with `actor=NULL`. The listener's cached revocation check remains a fast prefilter
+   only. The atomic admission definer must require an existing active enrollment for
+   the exact fingerprint and matching normalized issuer/serial, and recheck
+   `state/revoked_at` on the primary in the same transaction as every other authority
+   decision. Unknown, mismatched, retired, revoked, or DB-unavailable certificates
+   fail closed.
+2. Harden the mTLS HTTP reader before exposing egress: reject any Transfer-Encoding
+   and malformed or duplicate `Content-Length` globally; permit absent length only
+   for a method/route that accepts no body and reject any body octets in that case.
+   Require exactly one canonical nonnegative `Content-Length` for egress and every
+   other body-bearing route. Reject signs, junk, overlong header lines, and lengths
+   above a dedicated bounded egress cap; distinguish incomplete header/body from a
+   complete request; never pass bytes beyond the declared body. Apply socket/SSL read
+   and write deadlines. Preserve bodyless GET behavior for enrollment/metrics routes.
 3. Replace the listener's single blocking connection loop with a fixed-size bounded
    worker pool and bounded accepted-fd queue. Saturation closes/refuses without
    allocating request-sized buffers. Each worker owns one connection, always clears
@@ -109,18 +121,28 @@ not hash raw JSON bytes. Equivalent accepted JSON encodings must produce one dig
 semantically different requests must not collide. This 64-lowercase-hex digest is the
 P7 key-use digest.
 
-For this conservative first slice, reserve the binding's entire `max_input_tokens`
-plus the request's explicit `max_tokens` (which must not exceed
-`max_output_tokens`). This knowingly over-reserves but cannot understate provider
-input usage. A new definer/wrapper computes a NUMERIC maximum using only the pinned
+For this conservative first slice, reserve the binding's entire provider-documented
+`max_input_tokens` plus its entire `max_output_tokens`, not merely the requested
+completion limit. The request's explicit `max_tokens` must not exceed that output
+limit. Accepted IR features and the serialized P6 body remain bounded, and binding
+ceilings are operator-validated against the provider model limits. A new
+definer/wrapper computes a NUMERIC maximum using only the pinned
 immutable price row and returns the price version plus decimal amount; unpriced,
 overflowing, negative, or out-of-range results fail closed. Settlement uses actual
-non-negative IR usage counts and the same pinned version; usage above either admitted
-ceiling is an integrity event and settles the reservation at its full maximum.
+non-negative IR usage counts and the same pinned version.
+
+Provider-reported usage above either admitted ceiling must not be hidden by P4a's
+`LEAST(realized,reserved_max)`. Add a dedicated atomic overage settlement path that
+records the full observed liability in audit/rollup and an explicit overage amount,
+settles/releases the reservation, and fences that team/model from further egress until
+operator remediation. The fence is checked by the atomic admission resolver. This is
+an integrity incident: the hard pre-dispatch cap prevented all spend the gateway could
+legitimately predict, while accounting still reflects the provider's larger real
+liability instead of silently truncating it.
 
 ## Durable admission and dispatch state machine
 
-Add private `org_egress_dispatch`, unique on `(origin_identity,request_id)`, with
+Add private `org_egress_dispatch`, unique on `(team_id,request_id)`, with
 immutable request digest, team/project/model/binding/price/reserved-maximum fields and
 states:
 
@@ -135,18 +157,24 @@ truncate. Runtime has only SECURITY DEFINER operations.
 
 One short PostgreSQL transaction performs:
 
-1. certificate-only identity resolution and exact team/project validation;
+1. exact active-enrollment/revocation recheck, certificate-only identity resolution,
+   and exact team/project validation;
 2. private binding/catalog/pricing resolution;
-3. idempotency claim on `(canonical origin,request_id,digest)`;
+3. the dispatch row as the first idempotency claim after team resolution, using
+   `INSERT ... ON CONFLICT` plus a row lock on `(team,request_id)`;
 4. `org_rate_check`;
 5. budget reservation at the conservative maximum;
-6. `org_token_audit_start`; and
-7. dispatch-row insertion in `admitted`.
+6. `org_token_audit_start`, then commit the already-inserted `admitted` claim.
 
 Any denial/error rolls the whole transaction back, including the rate-window bump.
 An exact existing request returns its durable state and never re-admits, reuses a key,
-or dispatches; a digest/binding mismatch is an integrity conflict. Concurrent twins
-have one owner. The route changes `admitted -> dispatching` durably before calling the
+or dispatches; a digest/origin/binding mismatch is an integrity conflict. The team-
+scoped idempotency namespace deliberately survives certificate renewal and membership
+migration, so retrying an old request after renewal cannot acquire a new dispatch
+right. The immutable row still records the exact certificate instance/origin for
+audit. Concurrent twins serialize on the row: the loser waits, ends its aborted/no-op
+transaction, rereads state in a fresh transaction, and never executes rate/budget/
+audit admission. The route changes `admitted -> dispatching` durably before calling the
 vault. From that point no automatic code path may retry credential use or vendor
 dispatch.
 
@@ -154,9 +182,14 @@ If key admission/signing is definitively refused before an intent can have commi
 settle `failed` at zero. If key-use returns replay, integrity, or any result that can
 mean the intent committed without producing an owned request, mark `uncertain` and
 retain/charge the full reservation. This avoids inventing a safe retry across the P7
-commit/callback crash gap. Crash recovery sweeps stale `admitted` or `dispatching`
-rows to `uncertain`, pairs them with `org_budget_settle_expired`, and moves the token
-audit to `indeterminate`; it never touches a key or network.
+commit/callback crash gap. Crash recovery does not compose around the existing global
+`db2_org_budget_settle_expired` sweep. Add one request-correlated SECURITY DEFINER
+recovery operation that locks a bounded batch of stale dispatch rows and, for each
+exact `(team,request_id,origin)`, atomically changes dispatch to `uncertain`, settles
+that exact reservation at its maximum, and changes the exact token audit to
+`indeterminate`. Include a production startup plus periodic recovery runner in this
+slice, coordinated by a singleton advisory lock and bounded batches. It never touches
+a key or network. Process death followed by restart must converge without operator DML.
 
 For an authenticated complete vendor response, settle dispatch, budget, and token
 audit in one transaction. Success records actual usage/cost. A proven provider denial
@@ -177,10 +210,14 @@ surface into two ownership-safe operations:
 - a dispatcher accepts only the opaque target plus that owned signed request and does
   TLS/network/response decoding without any raw credential parameter.
 
-The P7 callback strictly parses one bounded vault plaintext JSON object containing
+The P7 callback uses a length-aware, allocation-free scanner over the borrowed locked
+arena to strictly parse one bounded vault plaintext JSON object containing
 `access_key_id`, `secret_access_key`, and optional `session_token`, rejects duplicate
-or unknown keys, points credential views into the locked arena, builds the signed
-owned request, and returns. The existing P7 cleanup completes before any DNS, socket,
+or unknown keys, rejects escapes rather than decoding into heap strings, accepts a
+non-NUL-terminated buffer, points offset/length credential views into the locked
+arena, builds the signed owned request, and returns. Any unavoidable temporary is
+allocated inside the locked nondumpable arena and cleansed before return; ordinary
+cJSON is forbidden for credential plaintext. The existing P7 cleanup completes before any DNS, socket,
 TLS, or write. Clear the signed request on every exit, including authorization and
 transport failures. Deprecate the combined raw-credential dispatch entry point from
 production kb callers; pure P6 tests may retain an internal test wrapper.
@@ -194,13 +231,15 @@ and may settle zero, but never redispatch under the same request ID.
 ## WORM witness release gate
 
 P7's local WORM intent is necessary but the off-host witness/outbox is not yet landed.
-Add one explicit egress readiness predicate/configuration seam: production org-key
-egress defaults disabled unless the off-host WORM witness reports ready. The CT260
-test profile may enable a conspicuously named test-only override only with a real
-custody/HWM provider and must emit a startup warning plus a WORM event. File/mock
-custody remains forbidden. The override is unavailable in hardened/production builds.
-When the remaining P7 witness slice lands it replaces the predicate implementation,
-not the route contract.
+Add one explicit egress readiness predicate/configuration seam. Hardened/production
+org-key egress is unconditionally release-disabled in this slice; there is no override
+in a production build and P2b-a is classified integration-live, production-pending.
+The CT260 development gate may enable a conspicuously named lower-level test override
+only with a real custody/HWM provider and must emit a startup warning plus a WORM
+event, but that run is not represented as production release validation. File/mock
+custody remains forbidden. The remaining P7 witness slice must implement the real
+predicate and run a second CT260 hardened-build gate before the feature is called
+production-live; it replaces the predicate implementation, not the route contract.
 
 ## HTTP status contract
 
@@ -240,23 +279,30 @@ roundtable-reviewed after the live gate and every valid finding is fixed before 
 - Strict-envelope corpus/fuzzer: duplicate/unknown keys, numeric edge cases, UTF-8,
   depth/node/body caps, mismatched model/stream, missing/unbounded max tokens, and
   canonical digest equivalence/difference.
-- Identity: issuer+serial—not CN—owns team and idempotency; same CN/different serial is
+- Identity: issuer+serial—not CN—owns authorization while `(team,request_id)` owns
+  idempotency; primary admission rejects unknown/revoked/mismatched fingerprint and
+  issuer/serial even when the listener cache says active; same CN/different serial is
   distinct; same serial/different issuer is distinct; transport/actor confusion and
-  worker-thread residue deny.
+  worker-thread residue deny. An uncertain request retried after cert renewal and
+  membership migration produces no second P7 intent or vendor send.
 - Atomic admission: rate increment rolls back on budget/audit/dispatch failure; budget
   rolls back on later failure; exact replay never increments, reserves, audits, signs,
   or sends; conflicting replay denies; concurrent twins produce one owner.
 - Pricing: unpriced/pointer change/overflow/zero ceiling deny; maximum reservation is
-  conservative; actual settlement uses pinned version; over-ceiling usage charges max.
-- Vault split: plaintext parser is strict; callback performs no network; secret key is
+  conservative; actual settlement uses pinned version; over-ceiling usage records the
+  full liability and activates the team/model fence before another admission.
+- Vault split: allocation-free plaintext parser is strict over non-NUL buffers and
+  rejects escapes/duplicates; callback performs no network; secret key is
   absent from owned request after callback; arenas and all copies cleanse under
   ASAN/UBSAN/leak checks; seal and HWM failures never send.
 - State/failpoints at every boundary: after admission, after dispatching, after P7
   intent, after signed-request build, before first byte, after partial write, after
   authenticated headers/body, and before settlement. No failpoint permits a second
-  dispatch. Sweeper makes stale work uncertain/content-free.
-- HTTP workers: slowloris/read timeout, malformed Content-Length, saturation, shutdown,
-  SIGPIPE, cancellation, and response-size bounds.
+  dispatch. Startup and periodic request-correlated recovery make stale work
+  uncertain/content-free and settle only the matching reservation/audit.
+- HTTP workers: slowloris/read timeout, malformed Content-Length, body octets without
+  length, bodyless `/v1/enroll/ca` regression, heartbeat/renew framing, saturation,
+  shutdown, SIGPIPE, cancellation, and response-size bounds.
 - Static scans assert no org key/server vault path, no credential/authorization/body in
   logs/DB fixtures, and no route-accessible raw target/credential seam.
 
@@ -275,7 +321,8 @@ roundtable-reviewed after the live gate and every valid finding is fixed before 
    window, reservation settlement, token audit/rollup, dispatch terminal row, P7
    intent, and WORM event. Scan process environment, files, logs, DB, response, and
    server-side fixtures for the secret canary and prompt canary.
-5. Prove unentitled, wrong-team/project, disabled/unpriced binding, revoked cert,
+5. Prove unentitled, wrong-team/project, disabled/unpriced binding, revoked cert
+   changed on the primary after the listener prefilter, cert-renewal replay,
    sealed/HWM rollback, budget/rate refusal, bad mock TLS, provider error, partial
    response, timeout, and crash failpoints produce the specified durable outcomes and
    zero unintended sends. Retry every request ID and show the mock observed at most
@@ -288,7 +335,8 @@ roundtable-reviewed after the live gate and every valid finding is fixed before 
 - P5 OIDC actor propagation and the server→kb blended-roster/proxy topology.
 - Generic Anthropic/OpenAI/Responses vendors, STS/role assumption and credential
   caches, regional failover, and automatic retry.
-- Off-host WORM outbox/witness implementation, operator reconciliation of uncertain
-  requests, scheduled expiry service, and compromise fencing (remaining P7).
+- Off-host WORM outbox/witness implementation and hardened production-release gate,
+  operator reconciliation of genuinely ambiguous vendor outcomes, and compromise
+  fencing beyond the P2b overage fence (remaining P7). Startup/periodic stale-dispatch
+  recovery is included here, not deferred.
 - P8 thin-client certificate presentation/runtime integration.
-
