@@ -74,8 +74,8 @@ void agent_set_route_health_filter(int (*fn)(const char *agent_name));
  *   flag unreachable for a claude-oauth-as-primary box (the OAuth flow names
  *   the agent "claude", which then equals config.provider), so `primary_only`
  *   is now the sole per-agent gate and unchecking it opts the primary into
- *   self-delegation. Roundtable panels keep their own primary exclusion
- *   (delegate_ensemble.c) so a panel second opinion is never the primary.
+ *   self-delegation. Roundtable panels use explicit role-based eligibility
+ *   (delegate_ensemble.c), with no identity-based exclusion of the primary.
  * The structural rule — a claude-CLI agent that is not server-hosted can never
  * execute as a delegate — is enforced unconditionally in
  * agent_is_available_for_routing, so even filter-less builds (CLI/tests) never

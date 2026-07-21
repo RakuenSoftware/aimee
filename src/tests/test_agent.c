@@ -210,8 +210,10 @@ static void test_agent_route_policy_filter(void)
    cfg.agents[1].cost_tier = 1;
    cfg.agents[1].enabled = 1;
 
-   /* Baseline: the default agent is preferred. */
+   /* The default is a primary-session preference, not an unpinned delegate pin. */
+   agent_routing_set_primary_turn(1);
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   agent_routing_set_primary_turn(0);
 
    /* With the policy filter registered, the excluded agent is unroutable
     * EVERYWHERE — including as the preferred default — and routing falls back
@@ -220,7 +222,7 @@ static void test_agent_route_policy_filter(void)
    assert(agent_is_available_for_routing(&cfg.agents[0]) == 0);
    assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
    agent_set_route_policy_filter(NULL);
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]); /* sole cheapest peer */
 }
 
 /* The server's live predicate consults agent_routing_primary_turn() so the
@@ -379,7 +381,13 @@ static void test_agent_route(void)
    cfg.agents[1].enabled = 1;
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
    cfg.agents[1].cost_tier = 0;
+   /* Equal eligible peers are both used despite an explicit primary default. */
+   agent_t *first = agent_route(&cfg, "summarize");
+   agent_t *second = agent_route(&cfg, "summarize");
+   assert(first != NULL && second != NULL && first != second);
+   agent_routing_set_primary_turn(1);
    assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
+   agent_routing_set_primary_turn(0);
    memset(&cfg, 0, sizeof(cfg));
    cfg.agent_count = 2;
    strcpy(cfg.agents[0].name, "missing-cli");

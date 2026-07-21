@@ -273,6 +273,24 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
          return &cfg->agents[i];
    return NULL;
 }
+int agent_has_role(const agent_t *agent, const char *role)
+{
+   if (!agent || !role)
+      return 0;
+   for (int i = 0; i < agent->role_count; i++)
+      if (strcmp(agent->roles[i], role) == 0 || strcmp(agent->roles[i], "all") == 0)
+         return 1;
+   return 0;
+}
+int agent_is_exec_role(const agent_t *agent, const char *role)
+{
+   if (!agent || !role)
+      return 0;
+   for (int i = 0; i < agent->exec_role_count; i++)
+      if (strcmp(agent->exec_roles[i], role) == 0 || strcmp(agent->exec_roles[i], "all") == 0)
+         return 1;
+   return 0;
+}
 /* Stub: treat the agent literally named "claude" as the CLI-only agent. */
 int agent_is_claude_cli(const agent_t *agent)
 {
@@ -902,15 +920,26 @@ static void test_default_panel_excludes_claude_cli(void)
 {
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
-   acfg.agent_count = 3;
+   acfg.agent_count = 4;
    acfg.agents[0].enabled = 1;
    snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "mistral");
+   snprintf(acfg.agents[0].roles[0], sizeof(acfg.agents[0].roles[0]), "review");
+   acfg.agents[0].role_count = 1;
    acfg.agents[1].enabled = 1;
    snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* CLI-only per stub */
+   snprintf(acfg.agents[1].roles[0], sizeof(acfg.agents[1].roles[0]), "review");
+   acfg.agents[1].role_count = 1;
    acfg.agents[2].enabled = 1;
    snprintf(acfg.agents[2].name, MAX_AGENT_NAME, "codex");
+   snprintf(acfg.agents[2].roles[0], sizeof(acfg.agents[2].roles[0]), "review");
+   acfg.agents[2].role_count = 1;
+   acfg.agents[3].enabled = 1;
+   snprintf(acfg.agents[3].name, MAX_AGENT_NAME, "code-only");
+   snprintf(acfg.agents[3].roles[0], sizeof(acfg.agents[3].roles[0]), "code");
+   acfg.agents[3].role_count = 1;
 
-   /* default: claude-CLI is skipped, aggregator defaults to the first seated */
+   /* default: claude-CLI and the enabled-but-wrong-role agent are skipped;
+    * aggregator defaults to the first seated. */
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    ensemble_default_panel_from_agents(&cfg, &acfg);
@@ -976,22 +1005,25 @@ static void test_panel_filter_drops_unauthorized_claude(void)
    acfg.agent_count = 2;
    acfg.agents[0].enabled = 1;
    snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "mistral");
+   snprintf(acfg.agents[0].roles[0], sizeof(acfg.agents[0].roles[0]), "review");
+   acfg.agents[0].role_count = 1;
    acfg.agents[1].enabled = 1;
    snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* claude-CLI per stub */
+   snprintf(acfg.agents[1].roles[0], sizeof(acfg.agents[1].roles[0]), "review");
+   acfg.agents[1].role_count = 1;
 
-   /* An EXPLICIT reference_models list naming an unauthorized claude drops it,
-    * keeps an ad-hoc (non-agent) model id, and repoints the aggregator. */
+   /* A positive pin must name a configured eligible agent. Unauthorized and
+    * ad-hoc names are both dropped, and the aggregator is repointed. */
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.ensemble_reference_count = 3;
    snprintf(cfg.ensemble_reference_models[0], 128, "mistral");
    snprintf(cfg.ensemble_reference_models[1], 128, "claude");
-   snprintf(cfg.ensemble_reference_models[2], 128, "adhoc-model"); /* not an agent -> kept */
+   snprintf(cfg.ensemble_reference_models[2], 128, "adhoc-model"); /* not an agent -> dropped */
    snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
    ensemble_filter_panel_authorization(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 2);
+   assert(cfg.ensemble_reference_count == 1);
    assert(strcmp(cfg.ensemble_reference_models[0], "mistral") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[1], "adhoc-model") == 0);
    assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0); /* repointed off the dropped claude */
 
    /* Authorized (primary_only=0) + server-hosted claude survives the
@@ -1008,66 +1040,66 @@ static void test_panel_filter_drops_unauthorized_claude(void)
    printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
 }
 
-static void test_panel_excludes_primary(void)
+static void test_panel_does_not_implicitly_exclude_primary(void)
 {
-   /* The PRIMARY agent (config.provider) is never seated on — nor allowed to
-    * aggregate — its own review panel, even when it is an authorized,
-    * server-hosted claude that would otherwise pass the claude-CLI gate. Matched
-    * by agent name (the primary passthrough is named after the provider) or by
-    * the agent's provider tag. */
+   /* Primary-provider identity is not a hidden negative roster. If the agents
+    * are enabled, review-capable, and not primary_only, they remain eligible. */
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    acfg.agent_count = 3;
    acfg.agents[0].enabled = 1;
    snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "codex");
    snprintf(acfg.agents[0].provider, sizeof(acfg.agents[0].provider), "openai");
+   snprintf(acfg.agents[0].roles[0], sizeof(acfg.agents[0].roles[0]), "review");
+   acfg.agents[0].role_count = 1;
    acfg.agents[1].enabled = 1;
    acfg.agents[1].is_server_hosted = 1; /* would otherwise be an authorized claude */
    snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* the primary passthrough */
+   snprintf(acfg.agents[1].roles[0], sizeof(acfg.agents[1].roles[0]), "review");
+   acfg.agents[1].role_count = 1;
    acfg.agents[2].enabled = 1;
    snprintf(acfg.agents[2].name, MAX_AGENT_NAME, "claude-api"); /* different name ... */
    snprintf(acfg.agents[2].provider, sizeof(acfg.agents[2].provider),
             "claude"); /* ... primary provider */
+   snprintf(acfg.agents[2].roles[0], sizeof(acfg.agents[2].roles[0]), "review");
+   acfg.agents[2].role_count = 1;
 
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   /* claude is authorized by default (primary_only=0); the point of this test is
-    * that the PRIMARY exclusion still applies regardless. */
+   /* claude is authorized by default (primary_only=0). */
    snprintf(cfg.provider, sizeof(cfg.provider), "claude"); /* PRIMARY = claude */
 
    /* per-agent predicate */
    assert(ensemble_panelist_eligible(&cfg, &acfg.agents[0]) == 1); /* codex/openai — seated */
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 0); /* claude by name — excluded */
-   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) ==
-          0); /* claude by provider — excluded */
+   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[1]) == 1);
+   assert(ensemble_panelist_eligible(&cfg, &acfg.agents[2]) == 1);
 
-   /* explicit reference_models: both primary-provider seats dropped, aggregator repointed */
+   /* Explicit positive pins remain intact. */
    cfg.ensemble_reference_count = 3;
    snprintf(cfg.ensemble_reference_models[0], 128, "codex");
    snprintf(cfg.ensemble_reference_models[1], 128, "claude");
    snprintf(cfg.ensemble_reference_models[2], 128, "claude-api");
    snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
    ensemble_filter_panel_authorization(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 1);
+   assert(cfg.ensemble_reference_count == 3);
    assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "codex") == 0); /* repointed off the primary */
+   assert(strcmp(cfg.ensemble_aggregator, "claude") == 0);
 
-   /* seeding from enabled agents also never seats the primary */
+   /* Unpinned seeding includes every eligible review agent. */
    config_t seed_cfg;
    memset(&seed_cfg, 0, sizeof(seed_cfg));
    snprintf(seed_cfg.provider, sizeof(seed_cfg.provider), "claude");
    ensemble_default_panel_from_agents(&seed_cfg, &acfg);
-   assert(seed_cfg.ensemble_reference_count == 1); /* only codex */
+   assert(seed_cfg.ensemble_reference_count == 3);
    assert(strcmp(seed_cfg.ensemble_reference_models[0], "codex") == 0);
 
-   printf("  test_panel_excludes_primary: ok\n");
+   printf("  test_panel_does_not_implicitly_exclude_primary: ok\n");
 }
 
 static void test_panel_filter_drops_unavailable(void)
 {
-   /* A configured panelist that is enabled but NOT runtime-usable (a bearer HTTP
-    * agent with no resolvable key) is dropped so it can't degrade the round; an
-    * ad-hoc model id that names no configured agent is left as-is. */
+   /* A configured panelist that is enabled but NOT runtime-usable is dropped;
+    * an ad-hoc name is not a configured agent and is dropped too. */
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    acfg.agent_count = 1;
@@ -1079,12 +1111,11 @@ static void test_panel_filter_drops_unavailable(void)
    memset(&cfg, 0, sizeof(cfg));
    cfg.ensemble_reference_count = 2;
    snprintf(cfg.ensemble_reference_models[0], 128, "unkeyed");     /* configured + no key -> drop */
-   snprintf(cfg.ensemble_reference_models[1], 128, "adhoc-model"); /* not an agent -> kept */
+   snprintf(cfg.ensemble_reference_models[1], 128, "adhoc-model"); /* not an agent -> dropped */
    snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "unkeyed");
    ensemble_filter_panel_availability(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 1);
-   assert(strcmp(cfg.ensemble_reference_models[0], "adhoc-model") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "adhoc-model") == 0); /* repointed off the dropped seat */
+   assert(cfg.ensemble_reference_count == 0);
+   assert(cfg.ensemble_aggregator[0] == '\0');
    printf("  test_panel_filter_drops_unavailable: ok\n");
 }
 
@@ -1520,7 +1551,7 @@ int main(void)
    test_roundtable_review_brief_and_items_return();
    test_default_panel_excludes_claude_cli();
    test_panel_filter_drops_unauthorized_claude();
-   test_panel_excludes_primary();
+   test_panel_does_not_implicitly_exclude_primary();
    test_panel_filter_drops_unavailable();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
