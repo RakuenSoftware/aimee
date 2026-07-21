@@ -232,7 +232,13 @@ int main(int argc, char **argv)
            (pr != VAULT_TPM2_RESEAL_INTEGRITY || status != VAULT_TPM2_RESEAL_CONFLICT)) ||
           (!want_ok && !want_absent &&
            (pr == VAULT_TPM2_RESEAL_OK || !bytes_zero((const uint8_t *)&receipt, sizeof(receipt)))))
+      {
+         fprintf(stderr,
+                 "test_vault_tpm2: prepared discover mismatch command=%s result=%d status=%d "
+                 "receipt_zero=%d\n",
+                 cmd, pr, (int)status, bytes_zero((const uint8_t *)&receipt, sizeof(receipt)));
          return die("prepared discover classification/output mismatch");
+      }
       OPENSSL_cleanse(&receipt, sizeof(receipt));
       printf("test_vault_tpm2: %s OK status=%d\n", cmd, (int)status);
       return 0;
