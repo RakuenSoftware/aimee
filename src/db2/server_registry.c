@@ -152,9 +152,6 @@ int db2_server_registry_get(int64_t team, const char *id, db2_server_row_t *r)
    void *c = db2_conn();
    if (!c)
       return -1;
-   void *c = db2_conn();
-   if (!c)
-      return -1;
    char e[256];
    aimee_pg_stmt_t *s = aimee_pg_prepare(
        c,
@@ -186,6 +183,9 @@ int db2_server_registry_get(int64_t team, const char *id, db2_server_row_t *r)
 int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapshot_t *r)
 {
    if (db2_tenant_require_pg() != 0 || !id || !r)
+      return -1;
+   void *c = db2_conn();
+   if (!c)
       return -1;
    char e[256];
    aimee_pg_stmt_t *s = aimee_pg_prepare(
