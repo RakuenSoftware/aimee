@@ -6,6 +6,7 @@
 #include "vault_store.h"
 #include "vault_internal.h" /* vault_store_backend_t seam */
 #include "vault_crypto.h"
+#include "vault_kek_check.h"
 #include "config.h"        /* config_default_dir */
 #include "platform_path.h" /* platform_mkdir_p */
 #include "cJSON.h"
@@ -29,14 +30,6 @@ static pthread_mutex_t g_vault_write_mu = PTHREAD_MUTEX_INITIALIZER;
 #define VAULT_FILE_VERSION 1
 #define VAULT_SECRET_MAX   4096 /* max credential plaintext length */
 #define VAULT_AAD_MAX      320  /* "principal|agent|cred" (160 + 64 + 64 + seps) */
-
-/* A fixed 32-byte sentinel AES-KW-wrapped under the KEK is the vault's key-check
- * verifier: it lets unlock + rekey prove a derived KEK is correct WITHOUT any
- * stored credential, closing the empty-vault rekey fail-open. (Not secret — its
- * only role is that AES-KW unwrap fails the RFC 3394 ICV under the wrong KEK.) */
-static const uint8_t VAULT_KEK_CHECK_SENTINEL[VAULT_DEK_LEN] = {
-    0x61, 0x69, 0x6d, 0x65, 0x65, 0x2d, 0x76, 0x61, 0x75, 0x6c, 0x74, 0x2d, 0x6b, 0x65, 0x6b, 0x2d,
-    0x63, 0x68, 0x65, 0x63, 0x6b, 0x2d, 0x76, 0x31, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 
 /* Detach + free the (agent,cred) entry from the creds array if present. */
 static void remove_cred(cJSON *creds, cJSON *entry)
@@ -776,21 +769,18 @@ static int jsonfile_salt_readonly(void *ctx, const char *principal, uint8_t salt
 static int kek_check_matches(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
 {
    cJSON *jc = cJSON_GetObjectItemCaseSensitive(root, "kek_check");
-   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], out[VAULT_DEK_LEN];
+   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
    if (!cJSON_IsString(jc) ||
-       b64url_decode(jc->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN ||
-       vault_dek_unwrap(kek, wrapped, out) != 0)
+       b64url_decode(jc->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN)
       return 0;
-   int ok = memcmp(out, VAULT_KEK_CHECK_SENTINEL, VAULT_DEK_LEN) == 0;
-   OPENSSL_cleanse(out, sizeof(out));
-   return ok;
+   return vault_kek_check_verify(kek, wrapped) == 0;
 }
 
 /* Wrap the sentinel under `kek` into the root's kek_check field. 0 on success. */
 static int kek_check_set(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
 {
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
-   if (vault_dek_wrap(kek, VAULT_KEK_CHECK_SENTINEL, wrapped) != 0)
+   if (vault_kek_check_wrap(kek, wrapped) != 0)
       return -1;
    char *enc = b64url_encode(wrapped, sizeof(wrapped));
    if (!enc)

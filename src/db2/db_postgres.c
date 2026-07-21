@@ -860,6 +860,12 @@ int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
       snprintf(e, n, "libpq not linked");
    return -1;
 }
+int aimee_pg_exec_sqlstate(void *c, const char *s, char state[6], char *e, size_t n)
+{
+   if (state)
+      state[0] = '\0';
+   return aimee_pg_exec(c, s, e, n);
+}
 int aimee_pg_exec_with_changes(void *c, const char *s, char *e, size_t n, int *a)
 {
    (void)c;
@@ -892,6 +898,11 @@ int aimee_pg_reset(aimee_pg_stmt_t *s)
 {
    (void)s;
    return -1;
+}
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *s)
+{
+   (void)s;
+   return "";
 }
 int aimee_pg_bind_int(aimee_pg_stmt_t *s, const char *n, int v)
 {
@@ -1072,6 +1083,28 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return aimee_pg_exec_with_changes(pg_conn, sql, errbuf, errlen, NULL);
 }
 
+int aimee_pg_exec_sqlstate(void *pg_conn, const char *sql, char state[6], char *errbuf,
+                           size_t errlen)
+{
+   if (state)
+      state[0] = '\0';
+   if (!pg_conn || !sql)
+      return -1;
+   PGresult *res = PQexec((PGconn *)pg_conn, sql);
+   ExecStatusType st = PQresultStatus(res);
+   if (st != PGRES_COMMAND_OK && st != PGRES_TUPLES_OK)
+   {
+      const char *value = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+      if (state)
+         snprintf(state, 6, "%s", value ? value : "");
+      copy_err(errbuf, errlen, PQresultErrorMessage(res));
+      PQclear(res);
+      return -1;
+   }
+   PQclear(res);
+   return 0;
+}
+
 int aimee_pg_in_transaction(void *pg_conn)
 {
    if (!pg_conn)
@@ -1127,6 +1160,7 @@ struct aimee_pg_stmt
    int blob_cache_row;
 
    char errmsg[256];
+   char sqlstate[6];
 };
 
 static void pg_clear_blob_cache(aimee_pg_stmt_t *s)
@@ -1208,7 +1242,13 @@ int aimee_pg_reset(aimee_pg_stmt_t *s)
    s->nrows = 0;
    s->row_index = -1;
    s->executed = 0;
+   s->sqlstate[0] = '\0';
    return 0;
+}
+
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *s)
+{
+   return s ? s->sqlstate : "";
 }
 
 static int lookup_param(const aimee_pg_stmt_t *s, const char *name)
@@ -1346,6 +1386,8 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *errbuf, size_t errlen)
       ExecStatusType st = PQresultStatus(s->result);
       if (st != PGRES_COMMAND_OK && st != PGRES_TUPLES_OK)
       {
+         const char *state = PQresultErrorField(s->result, PG_DIAG_SQLSTATE);
+         snprintf(s->sqlstate, sizeof(s->sqlstate), "%s", state ? state : "");
          copy_err(errbuf, errlen, PQresultErrorMessage(s->result));
          return AIMEE_PG_ERR;
       }

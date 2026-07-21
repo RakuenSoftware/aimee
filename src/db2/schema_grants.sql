@@ -38,6 +38,7 @@ BEGIN
     org_vault_rewrap_record_prepared(TEXT,BIGINT,BYTEA,BYTEA),
     org_vault_rewrap_assert_live(TEXT,BIGINT,BOOLEAN),
     org_vault_rewrap_status(TEXT),
+    org_vault_rewrap_snapshot(TEXT),
     org_vault_rewrap_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
     org_vault_rewrap_check_page(TEXT,BIGINT,TEXT,INTEGER),
     org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
@@ -46,6 +47,9 @@ BEGIN
     org_vault_rewrap_mark_committing(TEXT,BIGINT),
     org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
     org_vault_rewrap_promote(TEXT,BIGINT),
+    org_vault_rewrap_verify_summary(TEXT,BIGINT),
+    org_vault_rewrap_verify_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
+    org_vault_rewrap_verify_check_page(TEXT,BIGINT,BYTEA,INTEGER),
     org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA),
     org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
     org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)

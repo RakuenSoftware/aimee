@@ -7,6 +7,7 @@
 #include "db2.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
+#include "db2/org_vault_rewrap.h"
 #include "modules/vault/vault_crypto.h"
 
 #include <assert.h>
@@ -598,6 +599,174 @@ static void verify_promoted(const uint8_t old_kek[VAULT_KEK_LEN],
    assert(seen == CHECK_ROWS);
 }
 
+static int byte_cursor_gt(const uint8_t *a, size_t an, const uint8_t *b, size_t bn)
+{
+   size_t common = an < bn ? an : bn;
+   int cmp = common ? memcmp(a, b, common) : 0;
+   return cmp > 0 || (cmp == 0 && an > bn);
+}
+
+static void verify_promoted_bounded(int64_t fence)
+{
+   char err[ERR_CAP] = "";
+   exec_sql("BEGIN ISOLATION LEVEL SERIALIZABLE");
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT * FROM org_vault_rewrap_verify_summary(?1,?2)", err, sizeof(err));
+   assert(st);
+   assert(aimee_pg_bind_text(st, "?1", OP) == 0);
+   assert(aimee_pg_bind_int64(st, "?2", fence) == 0);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_int64(st, 0) == SECRET_ROWS);
+   assert(aimee_pg_column_int64(st, 1) == CHECK_ROWS);
+   assert(aimee_pg_column_bytes(st, 2) == 32);
+   assert(aimee_pg_column_bytes(st, 3) == 32);
+   assert(aimee_pg_column_bytes(st, 4) == 32);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+
+   int64_t after_id = 0;
+   int secret_seen = 0;
+   do
+   {
+      st = aimee_pg_prepare(db2_conn(),
+                            "SELECT * FROM org_vault_rewrap_verify_secret_page(?1,?2,?3,?4)", err,
+                            sizeof(err));
+      assert(st);
+      assert(aimee_pg_bind_text(st, "?1", OP) == 0);
+      assert(aimee_pg_bind_int64(st, "?2", fence) == 0);
+      assert(aimee_pg_bind_int64(st, "?3", after_id) == 0);
+      assert(aimee_pg_bind_int(st, "?4", 128) == 0);
+      int page = 0;
+      while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         int64_t id = aimee_pg_column_int64(st, 0);
+         assert(id > after_id && aimee_pg_column_bytes(st, 5) == VAULT_WRAPPED_DEK_LEN);
+         after_id = id;
+         page++;
+      }
+      aimee_pg_finalize(st);
+      secret_seen += page;
+      if (page < 128)
+         break;
+   } while (1);
+   assert(secret_seen == SECRET_ROWS);
+
+   uint8_t after_principal[640];
+   size_t after_len = 0;
+   int check_seen = 0;
+   do
+   {
+      st = aimee_pg_prepare(db2_conn(),
+                            "SELECT * FROM org_vault_rewrap_verify_check_page(?1,?2,?3,?4)", err,
+                            sizeof(err));
+      assert(st);
+      assert(aimee_pg_bind_text(st, "?1", OP) == 0);
+      assert(aimee_pg_bind_int64(st, "?2", fence) == 0);
+      assert(aimee_pg_bind_blob(st, "?3", after_principal, (int)after_len) == 0);
+      assert(aimee_pg_bind_int(st, "?4", 128) == 0);
+      int page = 0;
+      while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *principal = aimee_pg_column_text(st, 0);
+         const void *cursor = aimee_pg_column_blob(st, 2);
+         int cursor_n = aimee_pg_column_bytes(st, 2);
+         size_t principal_n = strlen(principal);
+         assert(cursor && cursor_n > 0 && (size_t)cursor_n <= sizeof(after_principal));
+         assert(principal_n == (size_t)cursor_n &&
+                memcmp(principal, cursor, (size_t)cursor_n) == 0);
+         assert(byte_cursor_gt(cursor, (size_t)cursor_n, after_principal, after_len));
+         memcpy(after_principal, cursor, (size_t)cursor_n);
+         after_len = (size_t)cursor_n;
+         assert(aimee_pg_column_bytes(st, 1) == 0 ||
+                aimee_pg_column_bytes(st, 1) == VAULT_WRAPPED_DEK_LEN);
+         page++;
+      }
+      aimee_pg_finalize(st);
+      check_seen += page;
+      if (page < 128)
+         break;
+   } while (1);
+   assert(check_seen == CHECK_ROWS);
+   exec_sql("COMMIT");
+}
+
+static void verify_typed_wrapper(int64_t fence, const uint8_t new_kek[VAULT_KEK_LEN])
+{
+   uint8_t opid[16];
+   assert(vault_reseal_operation_id_from_hex(OP, opid) == 0);
+   db2_vault_rewrap_tx_t *tx = NULL;
+   db2_vault_rewrap_snapshot_t summary;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, opid, fence, &summary) == DB2_VAULT_REWRAP_OK);
+   assert(summary.secret_count == SECRET_ROWS && summary.check_count == CHECK_ROWS);
+
+   int64_t after = 0;
+   int64_t secret_seen = 0;
+   while (secret_seen < summary.secret_count)
+   {
+      db2_vault_rewrap_secret_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
+      size_t count = 0;
+      assert(db2_vault_rewrap_verify_secret_page(tx, opid, fence, after, DB2_VAULT_REWRAP_PAGE_MAX,
+                                                 rows, DB2_VAULT_REWRAP_PAGE_MAX,
+                                                 &count) == DB2_VAULT_REWRAP_OK);
+      assert(count > 0);
+      for (size_t i = 0; i < count; i++)
+      {
+         uint8_t expected[VAULT_DEK_LEN], actual[VAULT_DEK_LEN];
+         make_dek(rows[i].version, expected);
+         assert(vault_dek_unwrap(new_kek, rows[i].wrapped_dek, actual) == 0);
+         assert(CRYPTO_memcmp(expected, actual, sizeof(actual)) == 0);
+         OPENSSL_cleanse(expected, sizeof(expected));
+         OPENSSL_cleanse(actual, sizeof(actual));
+         after = rows[i].source_id;
+      }
+      OPENSSL_cleanse(rows, sizeof(rows));
+      secret_seen += (int64_t)count;
+   }
+
+   db2_vault_rewrap_cursor_t cursor = {0}, next = {0};
+   int64_t check_seen = 0;
+   while (check_seen < summary.check_count)
+   {
+      db2_vault_rewrap_check_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
+      size_t count = 0;
+      assert(db2_vault_rewrap_verify_check_page(tx, opid, fence, &cursor, DB2_VAULT_REWRAP_PAGE_MAX,
+                                                rows, DB2_VAULT_REWRAP_PAGE_MAX, &count,
+                                                &next) == DB2_VAULT_REWRAP_OK);
+      assert(count > 0);
+      for (size_t i = 0; i < count; i++)
+      {
+         size_t idx = principal_index(rows[i].principal);
+         if (idx == 1 || idx == 5)
+            assert(rows[i].kek_check_len == 0);
+         else
+         {
+            uint8_t expected[VAULT_DEK_LEN], actual[VAULT_DEK_LEN];
+            make_check_plain(idx, expected);
+            assert(rows[i].kek_check_len == VAULT_WRAPPED_DEK_LEN);
+            assert(vault_dek_unwrap(new_kek, rows[i].kek_check, actual) == 0);
+            assert(CRYPTO_memcmp(expected, actual, sizeof(actual)) == 0);
+            OPENSSL_cleanse(expected, sizeof(expected));
+            OPENSSL_cleanse(actual, sizeof(actual));
+         }
+      }
+      cursor = next;
+      OPENSSL_cleanse(rows, sizeof(rows));
+      check_seen += (int64_t)count;
+   }
+   assert(db2_vault_rewrap_verify_crypto_ack(tx, opid, fence) == DB2_VAULT_REWRAP_OK);
+   db2_vault_rewrap_tx_rollback(&tx);
+   assert(tx == NULL);
+
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, opid, fence, &summary) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_crypto_ack(tx, opid, fence) == DB2_VAULT_REWRAP_INVALID);
+   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_INVALID && tx != NULL);
+   db2_vault_rewrap_tx_rollback(&tx);
+   db2_vault_rewrap_snapshot_clear(&summary);
+   OPENSSL_cleanse(opid, sizeof(opid));
+}
+
 int main(void)
 {
    const char *url = getenv("AIMEE_TEST_PG_URL");
@@ -638,6 +807,8 @@ int main(void)
    transition("SELECT org_vault_rewrap_promote(?1,?2)", fence, NULL);
    exec_sql("COMMIT");
    verify_promoted(old_kek, new_kek);
+   verify_promoted_bounded(fence);
+   verify_typed_wrapper(fence, new_kek);
 
    OPENSSL_cleanse(old_kek, sizeof(old_kek));
    OPENSSL_cleanse(new_kek, sizeof(new_kek));

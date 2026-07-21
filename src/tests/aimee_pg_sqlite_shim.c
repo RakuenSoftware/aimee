@@ -638,6 +638,14 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return 0;
 }
 
+int aimee_pg_exec_sqlstate(void *pg_conn, const char *sql, char state[6], char *errbuf,
+                           size_t errlen)
+{
+   if (state)
+      state[0] = '\0';
+   return aimee_pg_exec(pg_conn, sql, errbuf, errlen);
+}
+
 int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, size_t errlen,
                                int *affected_out)
 {
@@ -713,6 +721,12 @@ int aimee_pg_reset(aimee_pg_stmt_t *stmt)
    sqlite3_reset(stmt->st);
    sqlite3_clear_bindings(stmt->st);
    return 0;
+}
+
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *stmt)
+{
+   (void)stmt;
+   return "";
 }
 
 int aimee_pg_stmt_changes(aimee_pg_stmt_t *stmt)

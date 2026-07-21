@@ -60,9 +60,17 @@ DECLARE funcs TEXT[]:=ARRAY['org_vault_rewrap_abort','org_vault_rewrap_assert_li
   'org_vault_rewrap_mark_committing','org_vault_rewrap_mark_resealed',
   'org_vault_rewrap_pack_bytes','org_vault_rewrap_pack_text','org_vault_rewrap_promote',
   'org_vault_rewrap_record_prepared','org_vault_rewrap_recovery_required',
-  'org_vault_rewrap_secret_page','org_vault_rewrap_stage_check',
+  'org_vault_rewrap_secret_page','org_vault_rewrap_snapshot','org_vault_rewrap_stage_check',
   'org_vault_rewrap_stage_dek','org_vault_rewrap_stage_finish','org_vault_rewrap_status',
+  'org_vault_rewrap_verify_check_page','org_vault_rewrap_verify_secret_page',
+  'org_vault_rewrap_verify_summary',
   'org_vault_rewrap_worm_append','org_vault_rewrap_worm_block'];
+DECLARE d2funcs TEXT[]:=ARRAY['org_vault_rewrap_snapshot','org_vault_rewrap_verify_check_page',
+  'org_vault_rewrap_verify_secret_page','org_vault_rewrap_verify_summary'];
+DECLARE d2sigs TEXT[]:=ARRAY['org_vault_rewrap_snapshot(text)',
+  'org_vault_rewrap_verify_check_page(text, bigint, bytea, integer)',
+  'org_vault_rewrap_verify_secret_page(text, bigint, bigint, integer)',
+  'org_vault_rewrap_verify_summary(text, bigint)'];
 DECLARE f RECORD;
 BEGIN
   IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -124,7 +132,10 @@ BEGIN
       RAISE EXCEPTION 'P7 rewrap FAIL: runtime has effective execute through membership on %',
         f.proname;
     END IF;
-    IF NOT f.proconfig @> ARRAY['search_path=pg_catalog, public, pg_temp']::TEXT[] OR
+    IF (f.proname=ANY(d2funcs) AND
+          NOT f.proconfig @> ARRAY['search_path=pg_catalog']::TEXT[]) OR
+       (NOT (f.proname=ANY(d2funcs)) AND
+          NOT f.proconfig @> ARRAY['search_path=pg_catalog, public, pg_temp']::TEXT[]) OR
        (f.proname NOT IN ('org_vault_rewrap_pack_bytes','org_vault_rewrap_pack_text',
                           'org_vault_rewrap_worm_block') AND
         (NOT f.prosecdef OR f.provolatile<>'v')) THEN
@@ -134,6 +145,13 @@ BEGIN
   IF (SELECT count(DISTINCT p.proname) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='public' AND p.proname=ANY(funcs))<>cardinality(funcs) THEN
     RAISE EXCEPTION 'P7 rewrap FAIL: owner function inventory incomplete';
+  END IF;
+  IF EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname=ANY(d2funcs) AND
+        (p.proname||'('||pg_catalog.oidvectortypes(p.proargtypes)||')')<>ALL(d2sigs)) OR
+     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='public' AND p.proname=ANY(d2funcs))<>cardinality(d2sigs) THEN
+    RAISE EXCEPTION 'P7 rewrap FAIL: D2a exact overload inventory drift';
   END IF;
 END $$;
 
