@@ -72,14 +72,15 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 }
 
 func TestExtractJSONObjectIgnoresProviderSuffix(t *testing.T) {
+	expected := `{"schema_version":1,"summary":"brace } and escaped quote \" stay data","acceptance_criteria":["done"]}`
 	response := "```json\n" +
-		`{"schema_version":1,"summary":"brace } and escaped quote \" stay data","acceptance_criteria":["done"]}` +
+		expected +
 		"\n```\n$ git status\n" + `{"diagnostic":true}`
 	doc, err := extractJSONObject(response)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(doc); !strings.Contains(got, `"schema_version":1`) || strings.Contains(got, "diagnostic") {
+	if got := string(doc); got != expected {
 		t.Fatalf("wrong object extracted: %s", got)
 	}
 }
@@ -91,5 +92,29 @@ func TestExtractJSONObjectSkipsMalformedObjectPreamble(t *testing.T) {
 	}
 	if got := string(doc); got != `{"verdict":"approve","findings":[]}` {
 		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectDoesNotPromoteNestedMalformedPayload(t *testing.T) {
+	if doc, err := extractJSONObject(`{"broken":,"payload":{"verdict":"approve","findings":[]}}`); err == nil {
+		t.Fatalf("accepted nested payload from malformed outer object: %s", doc)
+	}
+}
+
+func TestExtractJSONObjectReturnsFirstAdjacentObject(t *testing.T) {
+	doc, err := extractJSONObject(`{"a":1}{"b":2}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != `{"a":1}` {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectRejectsTruncatedAndProseResponses(t *testing.T) {
+	for _, response := range []string{`{"a":"unterminated\\`, "provider returned prose", "{"} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("accepted invalid response %q as %s", response, doc)
+		}
 	}
 }

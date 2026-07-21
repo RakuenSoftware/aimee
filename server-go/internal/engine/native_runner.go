@@ -890,34 +890,25 @@ func firstNonempty(value, fallback string) string {
 }
 
 func extractJSONObject(text string) ([]byte, error) {
-	for start := strings.IndexByte(text, '{'); start >= 0; {
-		if end, ok := balancedJSONObjectEnd(text, start); ok {
-			doc := []byte(text[start:end])
-			var value map[string]any
-			if json.Unmarshal(doc, &value) == nil {
-				return doc, nil
-			}
-		}
-		next := strings.IndexByte(text[start+1:], '{')
-		if next < 0 {
-			break
-		}
-		start += next + 1
-	}
-	return nil, errors.New("delegate returned no valid JSON object")
-}
-
-// balancedJSONObjectEnd returns the byte immediately after a complete object.
-// Delegate providers sometimes append prose, shell snippets, or a second JSON
-// value despite an "only JSON" prompt. Parsing first-'{' through last-'}' turns
-// that harmless suffix into an infinite workflow refinement loop. Balance one
-// object at a time while honoring quoted braces and escapes instead.
-func balancedJSONObjectEnd(text string, start int) (int, bool) {
+	// Delegate providers sometimes append prose, shell snippets, or a second JSON
+	// value despite an "only JSON" prompt. Parsing first-'{' through last-'}' turns
+	// that harmless suffix into an infinite workflow refinement loop. Balance one
+	// candidate at a time while honoring quoted braces and escapes instead. A
+	// balanced but malformed outer object is skipped atomically: a valid-looking
+	// nested object must never be promoted to the provider's top-level response.
+	start := -1
 	depth := 0
 	inString := false
 	escaped := false
-	for i := start; i < len(text); i++ {
+	for i := 0; i < len(text); i++ {
 		c := text[i]
+		if start < 0 {
+			if c == '{' {
+				start = i
+				depth = 1
+			}
+			continue
+		}
 		if inString {
 			if escaped {
 				escaped = false
@@ -938,14 +929,18 @@ func balancedJSONObjectEnd(text string, start int) (int, bool) {
 		case '}':
 			depth--
 			if depth == 0 {
-				return i + 1, true
-			}
-			if depth < 0 {
-				return 0, false
+				doc := []byte(text[start : i+1])
+				var value map[string]any
+				if json.Unmarshal(doc, &value) == nil {
+					return doc, nil
+				}
+				start = -1
+				inString = false
+				escaped = false
 			}
 		}
 	}
-	return 0, false
+	return nil, errors.New("delegate returned no valid JSON object")
 }
 func validateStructured(kind string, doc []byte) error {
 	var root map[string]any
