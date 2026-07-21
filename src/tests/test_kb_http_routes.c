@@ -17,10 +17,15 @@
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
+#include "kb_identity.h"
 #include "kb_paths.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+
+extern int g_test_registry_heartbeat_allow;
+extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
+    g_test_registry_serial[129], g_test_registry_fingerprint[65];
 
 #include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
 
@@ -2232,6 +2237,31 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
 
+   /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
+    * authority function; none of it is accepted from JSON or the CN label. */
+   {
+      const char *hb = "{\"server_id\":\"srv-a\",\"health\":\"ok\",\"version\":\"1.0\"}";
+      char req[512], want_issuer[601], raw_serial[129], want_serial[129], want_fp[65];
+      assert(kb_pki_cert_metadata(ccert, want_issuer, sizeof(want_issuer), raw_serial,
+                                  sizeof(raw_serial)) == 0);
+      assert(kb_cert_serial_normalize(raw_serial, want_serial, sizeof(want_serial)) == 0);
+      assert(kb_pki_ca_fingerprint(ccert, want_fp, sizeof(want_fp)) == 0);
+      snprintf(req, sizeof(req),
+               "POST /v1/server/heartbeat HTTP/1.1\r\nContent-Length: %zu\r\nConnection: "
+               "close\r\n\r\n%s",
+               strlen(hb), hb);
+      g_test_registry_heartbeat_allow = 1;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "200 OK"));
+      assert(strcmp(g_test_registry_server_id, "srv-a") == 0);
+      assert(strcmp(g_test_registry_issuer, want_issuer) == 0);
+      assert(strcmp(g_test_registry_serial, want_serial) == 0);
+      assert(strcmp(g_test_registry_fingerprint, want_fp) == 0);
+      g_test_registry_heartbeat_allow = 0;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "403 Forbidden"));
+   }
+
    /* a CROSS-scope request (project=otherproj) is denied 403 — the scope came
     * from the client certificate (project:alpha), not the request. */
    mtls_request(sctx, cctx,
@@ -2456,6 +2486,10 @@ static void test_mtls_listener(void)
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
+      assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
+      g_test_registry_heartbeat_allow = 0;
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);

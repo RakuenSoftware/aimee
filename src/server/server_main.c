@@ -17,6 +17,7 @@
 #include "mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_kb_heartbeat.h"
 #include "cli_session_pty.h"
 #include "presence.h"
 #include "turn_registry.h"
@@ -291,11 +292,15 @@ static int run_server(const char *socket_path, log_level_t log_level)
    install_signal_handlers();
 
    g_ctx.running = 1;
+   const char *server_id = getenv("AIMEE_SERVER_ID");
+   if (server_kb_heartbeat_start(server_id) != 0)
+      LOG_WARN("server.kb", "AIMEE_SERVER_ID is required and must be valid for remote kb mTLS");
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("server", g_ctx.start_time);
    startup_notify(notify_fd, "ok\n");
    int rc = server_run(&g_ctx);
 
+   server_kb_heartbeat_stop();
    server_http_stop();
    server_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("server", getpid());

@@ -181,16 +181,17 @@ static const char *http_reason(int status)
 /* Certificate-bound server heartbeat. The server_id is untrusted input but the
  * DB update is keyed by both server_id and the verified peer cert CN, so a
  * certificate cannot refresh another registry row. */
-static int mtls_server_heartbeat(const char *cn, const char *body, char *resp, int cap)
+static int mtls_server_heartbeat(const char *issuer, const char *serial, const char *fingerprint,
+                                 const char *body, char *resp, int cap)
 {
    cJSON *j = body ? cJSON_Parse(body) : NULL;
    cJSON *sid = j ? cJSON_GetObjectItemCaseSensitive(j, "server_id") : NULL;
    cJSON *health = j ? cJSON_GetObjectItemCaseSensitive(j, "health") : NULL;
    cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
-   int ok =
-       cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
-       db2_server_registry_heartbeat(cJSON_GetStringValue(sid), cn, cJSON_GetStringValue(health),
-                                     cJSON_GetStringValue(version)) == 0;
+   int ok = cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
+            db2_server_registry_heartbeat(cJSON_GetStringValue(sid), issuer, serial, fingerprint,
+                                          cJSON_GetStringValue(health),
+                                          cJSON_GetStringValue(version)) == 0;
    cJSON_Delete(j);
    snprintf(resp, (size_t)cap, ok ? "{\"ok\":true}" : "{\"error\":\"heartbeat rejected\"}");
    return ok ? 200 : 403;
@@ -473,7 +474,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
    {
       status = (strcmp(method, "POST") == 0)
-                   ? mtls_server_heartbeat(cn, body, resp, KB_TLS_RESP_MAX)
+                   ? mtls_server_heartbeat(transport.issuer, transport.subject, fp, body, resp,
+                                           KB_TLS_RESP_MAX)
                    : 405;
       if (status == 405)
          snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");

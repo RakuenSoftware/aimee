@@ -6242,9 +6242,32 @@ CREATE TABLE IF NOT EXISTS kb_server_registry (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS client_issuer TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS client_serial_norm TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS client_fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS mgmt_issuer TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS mgmt_serial_norm TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS mgmt_fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS enrollment_op TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS client_csr_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS mgmt_csr_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb_server_registry ADD COLUMN IF NOT EXISTS activation_expires_at TIMESTAMPTZ;
+ALTER TABLE kb_server_registry DROP CONSTRAINT IF EXISTS kb_server_registry_status_chk;
+ALTER TABLE kb_server_registry ADD CONSTRAINT kb_server_registry_status_chk
+  CHECK (status IN ('pending','active','revoked','expired'));
 ALTER TABLE kb_server_registry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_server_registry FORCE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_kb_server_registry_team ON kb_server_registry(team_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_enrollment_op ON kb_server_registry(enrollment_op)
+  WHERE enrollment_op <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_client_cert
+  ON kb_server_registry(client_issuer,client_serial_norm) WHERE client_serial_norm <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_mgmt_cert
+  ON kb_server_registry(mgmt_issuer,mgmt_serial_norm) WHERE mgmt_serial_norm <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_client_fp ON kb_server_registry(client_fingerprint)
+  WHERE client_fingerprint <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbsrv_mgmt_fp ON kb_server_registry(mgmt_fingerprint)
+  WHERE mgmt_fingerprint <> '';
 
 -- Registry reads are tenant-scoped even when the HTTP caller supplies a team
 -- selector.  The selector narrows the result; it never grants membership.  The
@@ -6269,6 +6292,161 @@ CREATE POLICY p_server_registry_heartbeat_update ON kb_server_registry FOR UPDAT
          (SELECT team FROM kb_team_membership
             WHERE identity_key = current_setting('aimee.principal', true))
          OR cert_cn = current_setting('aimee.principal', true));
+
+-- P5-A registry mutations are owner-run, audited state transitions. Runtime has
+-- no direct table access (schema_grants.sql) and cannot choose an owner identity.
+CREATE OR REPLACE FUNCTION kb_server_registry_pending(
+  p_operation TEXT, p_server_id TEXT, p_team BIGINT, p_endpoint TEXT,
+  p_client_cn TEXT, p_mgmt_cn TEXT, p_client_csr_digest TEXT,
+  p_mgmt_csr_digest TEXT, p_ttl_seconds INT
+) RETURNS TABLE(server_id TEXT,status TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_actor TEXT := current_setting('aimee.principal',true); r kb_server_registry%ROWTYPE;
+BEGIN
+  IF v_actor IS NULL OR v_actor='' OR NOT (kb_principal_is_admin() OR is_team_lead(p_team)) THEN
+    RAISE EXCEPTION 'registry pending not authorized' USING ERRCODE='42501';
+  END IF;
+  IF p_operation !~ '^[0-9a-f]{32}$' OR p_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
+     OR char_length(p_endpoint) NOT BETWEEN 1 AND 511
+     OR char_length(p_client_cn) NOT BETWEEN 1 AND 255
+     OR char_length(p_mgmt_cn) NOT BETWEEN 1 AND 255
+     OR p_client_cn=p_mgmt_cn
+     OR p_client_csr_digest !~ '^[0-9a-f]{64}$'
+     OR p_mgmt_csr_digest !~ '^[0-9a-f]{64}$'
+     OR p_client_csr_digest=p_mgmt_csr_digest
+     OR p_ttl_seconds NOT BETWEEN 60 AND 3600 THEN
+    RAISE EXCEPTION 'invalid registry pending input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM kb_server_registry WHERE enrollment_op=p_operation FOR UPDATE;
+  IF FOUND THEN
+    IF r.server_id<>p_server_id OR r.team_id<>p_team OR r.endpoint<>p_endpoint
+       OR r.cert_cn<>p_client_cn OR r.mgmt_cert_cn<>p_mgmt_cn
+       OR r.client_csr_digest<>p_client_csr_digest OR r.mgmt_csr_digest<>p_mgmt_csr_digest
+       OR r.owner_subject<>v_actor THEN
+      RAISE EXCEPTION 'registry pending idempotency conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT r.server_id,r.status; RETURN;
+  END IF;
+  INSERT INTO kb_server_registry(server_id,cert_cn,mgmt_cert_cn,owner_subject,team_id,
+    endpoint,status,enrollment_op,client_csr_digest,mgmt_csr_digest,activation_expires_at)
+  VALUES(p_server_id,p_client_cn,p_mgmt_cn,v_actor,p_team,p_endpoint,'pending',p_operation,
+    p_client_csr_digest,p_mgmt_csr_digest,now()+make_interval(secs=>p_ttl_seconds));
+  PERFORM kb_audit_worm_append('operator',v_actor,'server.registry.pending',p_server_id,'allow',
+    'operation='||p_operation||';team='||p_team::text);
+  RETURN QUERY SELECT p_server_id,'pending'::TEXT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_server_registry_finalize(
+  p_operation TEXT, p_client_csr_digest TEXT, p_mgmt_csr_digest TEXT,
+  p_client_issuer TEXT, p_client_serial TEXT, p_client_fp TEXT,
+  p_mgmt_issuer TEXT, p_mgmt_serial TEXT, p_mgmt_fp TEXT
+) RETURNS TABLE(server_id TEXT,status TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE r kb_server_registry%ROWTYPE; v_actor TEXT := current_setting('aimee.principal',true);
+BEGIN
+  IF v_actor IS NULL OR v_actor='' THEN RAISE EXCEPTION 'missing principal' USING ERRCODE='42501'; END IF;
+  IF p_operation !~ '^[0-9a-f]{32}$' OR p_client_csr_digest !~ '^[0-9a-f]{64}$'
+     OR p_mgmt_csr_digest !~ '^[0-9a-f]{64}$' OR p_client_fp !~ '^[0-9a-f]{64}$'
+     OR p_mgmt_fp !~ '^[0-9a-f]{64}$' OR p_client_fp=p_mgmt_fp
+     OR char_length(p_client_issuer) NOT BETWEEN 1 AND 600
+     OR char_length(p_mgmt_issuer) NOT BETWEEN 1 AND 600
+     OR p_client_serial !~ '^[0-9a-f]{1,128}$' OR p_mgmt_serial !~ '^[0-9a-f]{1,128}$' THEN
+    RAISE EXCEPTION 'invalid registry finalize input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO r FROM kb_server_registry WHERE enrollment_op=p_operation FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'registry pending not found' USING ERRCODE='P0002'; END IF;
+  IF r.owner_subject<>v_actor OR NOT (kb_principal_is_admin() OR is_team_lead(r.team_id)) THEN
+    RAISE EXCEPTION 'registry finalize not authorized' USING ERRCODE='42501';
+  END IF;
+  IF r.client_csr_digest<>p_client_csr_digest OR r.mgmt_csr_digest<>p_mgmt_csr_digest THEN
+    RAISE EXCEPTION 'registry finalize idempotency conflict' USING ERRCODE='23505';
+  END IF;
+  IF r.status='active' THEN
+    IF r.client_issuer<>p_client_issuer OR r.client_serial_norm<>p_client_serial
+       OR r.client_fingerprint<>p_client_fp OR r.mgmt_issuer<>p_mgmt_issuer
+       OR r.mgmt_serial_norm<>p_mgmt_serial OR r.mgmt_fingerprint<>p_mgmt_fp THEN
+      RAISE EXCEPTION 'registry finalize certificate conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT r.server_id,r.status; RETURN;
+  END IF;
+  IF r.status<>'pending' OR r.activation_expires_at<=now() THEN
+    IF r.status='pending' THEN
+      UPDATE kb_server_registry SET status='expired',updated_at=now()
+        WHERE kb_server_registry.server_id=r.server_id;
+      PERFORM kb_audit_worm_append('operator',v_actor,'server.registry.expired',r.server_id,
+        'deny','operation='||p_operation);
+      RETURN QUERY SELECT r.server_id,'expired'::TEXT; RETURN;
+    END IF;
+    RAISE EXCEPTION 'registry operation inactive' USING ERRCODE='55000';
+  END IF;
+  INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,legacy,cert_issuer,
+    cert_serial_norm,authority_id) VALUES
+    ('p5-server-client',p_client_fp,p_client_serial,'active',r.activation_expires_at::TEXT,0,
+      p_client_issuer,p_client_serial,substr(p_client_fp,1,32)),
+    ('p5-server-management',p_mgmt_fp,p_mgmt_serial,'active',r.activation_expires_at::TEXT,0,
+      p_mgmt_issuer,p_mgmt_serial,substr(p_mgmt_fp,1,32));
+  UPDATE kb_server_registry SET status='active',client_issuer=p_client_issuer,
+    client_serial_norm=p_client_serial,client_fingerprint=p_client_fp,
+    mgmt_issuer=p_mgmt_issuer,mgmt_serial_norm=p_mgmt_serial,mgmt_fingerprint=p_mgmt_fp,
+    updated_at=now() WHERE kb_server_registry.server_id=r.server_id;
+  PERFORM kb_audit_worm_append('operator',v_actor,'server.registry.active',r.server_id,'allow',
+    'operation='||p_operation);
+  RETURN QUERY SELECT r.server_id,'active'::TEXT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_server_registry_heartbeat(
+  p_server_id TEXT,p_issuer TEXT,p_serial TEXT,p_fingerprint TEXT,p_health TEXT,p_version TEXT
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE n INT;
+BEGIN
+  IF char_length(p_health)>127 OR char_length(p_version)>63 THEN
+    RAISE EXCEPTION 'heartbeat field too long' USING ERRCODE='22023';
+  END IF;
+  UPDATE kb_server_registry r SET health=p_health,version=p_version,last_seen=now(),updated_at=now()
+   WHERE r.server_id=p_server_id AND r.status='active' AND r.client_issuer=p_issuer
+     AND r.client_serial_norm=p_serial AND r.client_fingerprint=p_fingerprint
+     AND EXISTS (SELECT 1 FROM kb_enrollments e WHERE e.scope='p5-server-client'
+       AND e.cert_issuer=p_issuer AND e.cert_serial_norm=p_serial AND e.fingerprint=p_fingerprint
+       AND e.state='active' AND e.revoked_at='');
+  GET DIAGNOSTICS n=ROW_COUNT;
+  RETURN n=1;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_server_registry_list(p_team BIGINT)
+RETURNS SETOF kb_server_registry LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF NOT (kb_principal_is_admin() OR is_team_lead(p_team)
+      OR EXISTS(SELECT 1 FROM kb_team_membership WHERE team=p_team
+        AND identity_key=current_setting('aimee.principal',true))) THEN
+    RAISE EXCEPTION 'registry list not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT * FROM kb_server_registry r WHERE r.team_id=p_team ORDER BY r.server_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_server_registry_snapshot(p_team BIGINT,p_server_id TEXT)
+RETURNS TABLE(server_id TEXT,endpoint TEXT,status TEXT,mgmt_issuer TEXT,mgmt_serial_norm TEXT,
+  mgmt_fingerprint TEXT,enrollment_state TEXT,revoked_at TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF NOT (kb_principal_is_admin() OR is_team_lead(p_team)
+      OR EXISTS(SELECT 1 FROM kb_team_membership WHERE team=p_team
+        AND identity_key=current_setting('aimee.principal',true))) THEN
+    RAISE EXCEPTION 'registry snapshot not authorized' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT r.server_id,r.endpoint,r.status,r.mgmt_issuer,r.mgmt_serial_norm,
+    r.mgmt_fingerprint,e.state,e.revoked_at FROM kb_server_registry r
+    LEFT JOIN kb_enrollments e ON e.scope='p5-server-management'
+      AND e.cert_issuer=r.mgmt_issuer AND e.cert_serial_norm=r.mgmt_serial_norm
+      AND e.fingerprint=r.mgmt_fingerprint
+    WHERE r.team_id=p_team AND r.server_id=p_server_id;
+END $$;
+
+REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_server_registry_list(BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) FROM PUBLIC;
 
 -- P2b-a buffered Bedrock egress authority. Certificate instances remain the
 -- revocation/audit origin; authority_id is the renewal-stable idempotency owner.
