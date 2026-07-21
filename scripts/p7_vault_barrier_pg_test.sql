@@ -124,7 +124,10 @@ END $$;
 -- The guarded set is deliberately exact and every member carries a direct call.
 DO $$
 DECLARE expected TEXT[] := ARRAY[
-  'kb_management_status_key_admit','kb_management_status_key_candidate',
+  'kb_management_status_key_admit','kb_management_status_key_bootstrap_finalize',
+  'kb_management_status_key_bootstrap_prepare_activation',
+  'kb_management_status_key_bootstrap_resume','kb_management_status_key_bootstrap_stage',
+  'kb_management_status_key_candidate',
   'kb_management_status_key_use_guard',
   'org_vault_delete','org_vault_kek_check_set','org_vault_key_use_admit','org_vault_put',
   'org_vault_rewrap','org_vault_rotation_checkpoint_old_ref','org_vault_rotation_claim',
@@ -137,6 +140,9 @@ DECLARE expected TEXT[] := ARRAY[
 DECLARE actual TEXT[];
 DECLARE writers TEXT[];
 DECLARE expected_writers TEXT[] := ARRAY[
+  'kb_management_status_key_bootstrap_finalize',
+  'kb_management_status_key_bootstrap_prepare_activation',
+  'kb_management_status_key_bootstrap_stage',
   'org_vault_delete','org_vault_kek_check_set','org_vault_key_use_admit','org_vault_put',
   'org_vault_rewrap','org_vault_rewrap_promote','org_vault_rotation_checkpoint_old_ref','org_vault_rotation_claim',
   'org_vault_rotation_fail_claimed','org_vault_rotation_finalize',
