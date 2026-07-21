@@ -11,15 +11,15 @@ import argparse
 import ctypes
 from datetime import datetime, timezone
 import errno
+import fcntl
 import json
 import os
 from pathlib import Path, PurePosixPath
-import re
+import secrets
 import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 
 import module_doc_contract as contract
 
@@ -29,6 +29,7 @@ INVENTORY_PATH = Path("tests/baselines/modules/canonical-inventory.yaml")
 ATTESTATION_PATH = Path("docs/modules/attestations")
 AT_FDCWD = -100
 RENAME_EXCHANGE = 2
+RENAME_NOREPLACE = 1
 
 
 class SigningError(ValueError):
@@ -225,10 +226,13 @@ def _sign(
     identity: str,
     toolchain: contract.LockedToolchain,
     root: Path,
+    parent_fd: int,
 ) -> bytes:
     public_path = root / f"signer-{contract.sha256(identity.encode())}.pub"
     public_path.write_text(public_key + "\n", encoding="ascii")
     os.chmod(public_path, 0o600)
+    isolated_home = root / ".signing-home"
+    isolated_home.mkdir(mode=0o700, exist_ok=True)
     auth_sock = os.environ.get("SSH_AUTH_SOCK")
     if not auth_sock:
         fail("ssh-agent", "SSH_AUTH_SOCK is required")
@@ -245,15 +249,30 @@ def _sign(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
-        env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin", "SSH_AUTH_SOCK": auth_sock},
+        pass_fds=(parent_fd,),
+        env={
+            "HOME": os.fspath(isolated_home),
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": "/usr/bin:/bin",
+            "SSH_AUTH_SOCK": auth_sock,
+        },
     )
     if result.returncode != 0:
         fail("sign", result.stderr.decode("utf-8", "replace").strip() or "ssh-keygen rejected signing")
+    # verify_sshsig parses the envelope namespace/hash/key type, then uses the
+    # exact public key as an allowed-signer binding through the locked binary.
     contract.verify_sshsig(subject, result.stdout, identity, public_key, toolchain)
     return result.stdout
 
 
-def _rename_exchange(old: Path, new: Path) -> None:
+def _renameat2(
+    old_dir_fd: int,
+    old_name: str,
+    new_dir_fd: int,
+    new_name: str,
+    flags: int,
+) -> None:
     libc = ctypes.CDLL(None, use_errno=True)
     renameat2 = getattr(libc, "renameat2", None)
     if renameat2 is None:
@@ -261,12 +280,43 @@ def _rename_exchange(old: Path, new: Path) -> None:
     renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
     renameat2.restype = ctypes.c_int
     if renameat2(
-        AT_FDCWD, os.fsencode(old), AT_FDCWD, os.fsencode(new), RENAME_EXCHANGE
+        old_dir_fd, os.fsencode(old_name), new_dir_fd, os.fsencode(new_name), flags
     ) != 0:
         error = ctypes.get_errno()
         if error in {errno.ENOSYS, errno.EINVAL, errno.EXDEV}:
-            fail("atomic-replace", "filesystem does not support atomic directory exchange")
+            fail("atomic-replace", "filesystem does not support the required atomic rename")
         fail("atomic-replace", os.strerror(error))
+
+
+def _rename_exchange(old: Path, new: Path) -> None:
+    _renameat2(AT_FDCWD, os.fspath(old), AT_FDCWD, os.fspath(new), RENAME_EXCHANGE)
+
+
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
+def _assert_parent_path(parent: Path, expected: os.stat_result) -> None:
+    try:
+        current = parent.lstat()
+    except OSError as exc:
+        fail("parent-race", f"cannot revalidate attestation parent: {exc}")
+    if not stat.S_ISDIR(current.st_mode) or not _same_inode(current, expected):
+        fail("parent-race", "attestation parent changed during signing")
+
+
+def _staging_directory(parent_fd: int) -> tuple[str, Path]:
+    proc_parent = Path(f"/proc/self/fd/{parent_fd}")
+    if not proc_parent.is_dir():
+        fail("atomic-replace", "pinned /proc directory access is unavailable")
+    for _ in range(32):
+        name = f".attestations-{secrets.token_hex(12)}"
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            continue
+        return name, proc_parent / name
+    fail("staging", "cannot allocate a unique staging directory")
 
 
 def build_attestations(args: argparse.Namespace) -> None:
@@ -287,21 +337,37 @@ def build_attestations(args: argparse.Namespace) -> None:
         _regular_file(args.toolchain_lock.resolve(), max_bytes=contract.MAX_DESCRIPTOR_BYTES)
     )
     toolchain = contract.load_locked_toolchain(lock, args.ssh_keygen.resolve())
-    target = repo / ATTESTATION_PATH
     target_parent = _repository_directory(repo, ATTESTATION_PATH.parent)
-    _existing_attestations_are_well_formed(
-        target,
-        module_ids,
-        owner_identity=args.owner_identity,
-        owner_key=owner_key,
-        reviewer_identity=args.reviewer_identity,
-        reviewer_key=reviewer_key,
-        toolchain=toolchain,
+    parent_fd = os.open(
+        target_parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
     )
-    staging = Path(tempfile.mkdtemp(prefix=".attestations-", dir=target_parent))
-    os.chmod(staging, 0o700)
+    staging: Path | None = None
+    staging_name: str | None = None
     installed = False
     try:
+        try:
+            fcntl.flock(parent_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail("signing-busy", "another attestation replacement holds the parent lock")
+        parent_info = os.fstat(parent_fd)
+        _assert_parent_path(target_parent, parent_info)
+        proc_parent = Path(f"/proc/self/fd/{parent_fd}")
+        target = proc_parent / "attestations"
+        _existing_attestations_are_well_formed(
+            target,
+            module_ids,
+            owner_identity=args.owner_identity,
+            owner_key=owner_key,
+            reviewer_identity=args.reviewer_identity,
+            reviewer_key=reviewer_key,
+            toolchain=toolchain,
+        )
+        try:
+            prior_info = os.stat("attestations", dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            prior_info = None
+        staging_name, staging = _staging_directory(parent_fd)
         index: list[dict[str, str]] = []
         for module_id in sorted(module_ids):
             descriptor_relative = Path("src/modules") / module_id / "module.yaml"
@@ -344,31 +410,95 @@ def build_attestations(args: argparse.Namespace) -> None:
                 ("owner", args.owner_identity, owner_key),
                 ("reviewer", args.reviewer_identity, reviewer_key),
             ):
-                signature = _sign(subject_raw, public_key, identity, toolchain, staging)
+                signature = _sign(
+                    subject_raw, public_key, identity, toolchain, staging, parent_fd
+                )
                 signature_path = staging / f"{module_id}.{role}.sig"
                 signature_path.write_bytes(signature)
                 os.chmod(signature_path, 0o644)
             index.append({"module_id": module_id, "subject_sha256": contract.sha256(subject_raw)})
         for public_path in staging.glob("signer-*.pub"):
             public_path.unlink()
+        signing_home = staging / ".signing-home"
+        if signing_home.exists():
+            shutil.rmtree(signing_home)
         index_path = staging / "index.json"
         index_path.write_bytes(contract.canonical_attestation_index(index))
         os.chmod(index_path, 0o644)
-        expected = {"index.json"}
-        for module_id in module_ids:
-            expected.update({f"{module_id}.subject.json", f"{module_id}.owner.sig", f"{module_id}.reviewer.sig"})
-        if {entry.name for entry in staging.iterdir()} != expected:
-            fail("self-test", "staging directory is incomplete")
-        if target.exists():
-            _rename_exchange(staging, target)
+        # Re-read and cryptographically verify the exact bytes that will be
+        # installed, including canonical subjects and the recomputed index.
+        _existing_attestations_are_well_formed(
+            staging,
+            module_ids,
+            owner_identity=args.owner_identity,
+            owner_key=owner_key,
+            reviewer_identity=args.reviewer_identity,
+            reviewer_key=reviewer_key,
+            toolchain=toolchain,
+        )
+        _assert_parent_path(target_parent, parent_info)
+        staged_info = os.stat(staging_name, dir_fd=parent_fd, follow_symlinks=False)
+        if prior_info is not None:
+            try:
+                current_prior = os.stat(
+                    "attestations", dir_fd=parent_fd, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                fail("target-race", "validated attestation directory disappeared")
+            if not _same_inode(prior_info, current_prior):
+                fail("target-race", "validated attestation directory changed")
+            _renameat2(
+                parent_fd, staging_name, parent_fd, "attestations", RENAME_EXCHANGE
+            )
+            try:
+                moved_prior = os.stat(
+                    staging_name, dir_fd=parent_fd, follow_symlinks=False
+                )
+                installed_info = os.stat(
+                    "attestations", dir_fd=parent_fd, follow_symlinks=False
+                )
+                _assert_parent_path(target_parent, parent_info)
+                if not _same_inode(prior_info, moved_prior) or not _same_inode(
+                    staged_info, installed_info
+                ):
+                    fail("target-race", "atomic exchange moved unexpected inodes")
+            except Exception:
+                _renameat2(
+                    parent_fd, staging_name, parent_fd, "attestations", RENAME_EXCHANGE
+                )
+                raise
             installed = True
             shutil.rmtree(staging, ignore_errors=True)
         else:
-            os.replace(staging, target)
+            try:
+                os.stat("attestations", dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                fail("target-race", "attestation directory appeared during signing")
+            _renameat2(
+                parent_fd, staging_name, parent_fd, "attestations", RENAME_NOREPLACE
+            )
+            try:
+                installed_info = os.stat(
+                    "attestations", dir_fd=parent_fd, follow_symlinks=False
+                )
+                _assert_parent_path(target_parent, parent_info)
+                if not _same_inode(staged_info, installed_info):
+                    fail("target-race", "atomic install moved an unexpected inode")
+            except Exception:
+                os.rename(
+                    "attestations",
+                    staging_name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                )
+                raise
             installed = True
     finally:
-        if not installed and staging.exists():
+        if not installed and staging is not None and staging.exists():
             shutil.rmtree(staging)
+        os.close(parent_fd)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

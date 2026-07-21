@@ -51,7 +51,7 @@ jobs:
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${audience}")
           oidc_token=$(TOKEN_RESPONSE="${token_response}" python3 -c \
-            'import json, os; value=json.loads(os.environ["TOKEN_RESPONSE"]); token=value.get("value"); assert isinstance(token, str) and token; print(token)')
+            'import json, os, sys; value=json.loads(os.environ["TOKEN_RESPONSE"]); token=value.get("value"); (isinstance(token, str) and token) or sys.exit("OIDC response lacks a non-empty token"); print(token)')
           echo "::add-mask::${oidc_token}"
 
           request=$(OIDC_TOKEN="${oidc_token}" python3 -c \

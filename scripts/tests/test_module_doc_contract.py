@@ -112,6 +112,11 @@ class ModuleDocContractTests(unittest.TestCase):
         self.assertIn("MODULE_DOC_VERIFIER_SPKI", workflow)
         self.assertIn("--pinnedpubkey", workflow)
         self.assertNotIn("actions/checkout", workflow)
+        inventory_workflow = (
+            REPO_ROOT / ".github/workflows/module-inventory.yml"
+        ).read_text(encoding="utf-8")
+        for executable in ("ssh-keygen", "ssh-agent", "ssh-add"):
+            self.assertIn(f"command -v {executable}", inventory_workflow)
 
     def test_document_negative_fixtures_have_stable_rules(self) -> None:
         positive = (FIXTURES / "positive/module.md").read_bytes()
@@ -165,6 +170,12 @@ class ModuleDocContractTests(unittest.TestCase):
             unknown_module, "memory",
             contract.DocumentProjection(("src/modules/memory/*.c",), ()),
             resolve_reference=resolve,
+        ))
+        evidence = b"- Evidence: path:scripts/module_doc_contract.py#L1\n"
+        excessive = positive.replace(evidence, evidence * 52, 1)
+        self.assert_rule("document-evidence-budget", lambda: contract.parse_module_document(
+            excessive, "memory",
+            contract.DocumentProjection(("src/modules/memory/*.c",), ()),
         ))
 
     def test_profile_is_provider_neutral_and_closed(self) -> None:
@@ -234,6 +245,22 @@ class ModuleDocContractTests(unittest.TestCase):
         contract.bind_workload_to_target(workload, target, pull_request=1708)
         self.assertRegex(contract.replay_binding(workload, target), r"^[0-9a-f]{64}$")
         self.assertRegex(contract.replay_token_identity(workload), r"^[0-9a-f]{64}$")
+        original_binding = contract.replay_binding(workload, target)
+        for field, value in workload.items():
+            changed = dict(workload)
+            changed[field] = value + 1 if type(value) is int else f"{value}-changed"
+            with self.subTest(replay_workload_field=field):
+                self.assertNotEqual(original_binding, contract.replay_binding(changed, target))
+        for field, value in target.items():
+            changed = dict(target)
+            changed[field] = value + 1 if type(value) is int else f"{value}-changed"
+            with self.subTest(replay_target_field=field):
+                self.assertNotEqual(original_binding, contract.replay_binding(workload, changed))
+        left = dict(workload, subject="a\0b", audience="c")
+        right = dict(workload, subject="a", audience="b\0c")
+        self.assertNotEqual(
+            contract.replay_binding(left, target), contract.replay_binding(right, target)
+        )
         for field, rule in (("run_identity", "target-run-binding"), ("attempt", "target-run-binding")):
             mismatch = dict(target)
             mismatch[field] = "different"
@@ -315,7 +342,10 @@ class ModuleDocContractTests(unittest.TestCase):
             commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
             reader = contract.GitBlobReader(repo, commit)
             self.assertEqual(reader.read_blob("evidence.txt"), b"one\ntwo\n")
+            operations = reader.budget.git_operations
             reader.resolve_reference("path:evidence.txt#L2")
+            reader.resolve_reference("path:evidence.txt#L2")
+            self.assertEqual(reader.budget.git_operations, operations)
             self.assert_rule("document-evidence-line", lambda: reader.resolve_reference("path:evidence.txt#L3"))
             evidence.unlink()
             evidence.symlink_to("target")
@@ -324,6 +354,19 @@ class ModuleDocContractTests(unittest.TestCase):
             symlink_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
             symlink_reader = contract.GitBlobReader(repo, symlink_commit)
             self.assert_rule("git-mode", lambda: symlink_reader.read_blob("evidence.txt"))
+
+    def test_git_operation_timeout_is_a_contract_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            previous = contract.GIT_OPERATION_TIMEOUT_SECONDS
+            contract.GIT_OPERATION_TIMEOUT_SECONDS = 0
+            try:
+                self.assert_rule(
+                    "git-timeout", lambda: contract.GitBlobReader(repo, "a" * 40)
+                )
+            finally:
+                contract.GIT_OPERATION_TIMEOUT_SECONDS = previous
 
     def test_git_blob_size_boundary_precedes_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -640,6 +683,24 @@ class ModuleDocContractTests(unittest.TestCase):
             signature = signed.stdout
             toolchain = locked_toolchain()
             contract.verify_sshsig(subject, signature, "owner@example", canonical_key, toolchain)
+            other_key = root / "other-key"
+            subprocess.run(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other_key)],
+                check=True,
+            )
+            other_public = " ".join(
+                other_key.with_suffix(".pub").read_text(encoding="ascii").split()[:2]
+            )
+            self.assert_rule("sshsig-verify", lambda: contract.verify_sshsig(
+                subject, signature, "owner@example", other_public, toolchain
+            ))
+            wrong_namespace = subprocess.run(
+                ["ssh-keygen", "-Y", "sign", "-f", str(key), "-n", "other.namespace"],
+                input=subject, check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            self.assert_rule("sshsig-namespace", lambda: contract.verify_sshsig(
+                subject, wrong_namespace.stdout, "owner@example", canonical_key, toolchain
+            ))
             self.assert_rule("sshsig-verify", lambda: contract.verify_sshsig(
                 subject + b"x", signature, "owner@example", canonical_key, toolchain
             ))

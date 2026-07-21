@@ -15,6 +15,12 @@ resolver before opening the resolved candidate commit. Function names alone do n
 properties, so deployment integration tests must exercise invalid signatures, stale keys,
 redirects, repository mismatches, replay, and publisher permissions.
 
+Each decision has explicit ceilings for evidence records, distinct blob bytes, Git operations, and
+Git wall-clock time. Immutable blobs are cached by repository, commit, and path, so repeated evidence
+records cannot multiply object reads. Replay bindings use canonical JSON over every normalized
+workload and candidate-target field; the token identity separately binds the exact issuer and token
+identifier without delimiter ambiguity.
+
 `module-doc-attestation-trigger.yml` is dormant unless the protected repository variable
 `MODULE_DOC_ATTESTATION_ENABLED` is exactly `true`. While active, it fails closed unless the
 verifier URL, audience, and TLS public-key pin are configured. It requests an OIDC token and sends
@@ -48,8 +54,9 @@ deployed. Before activation, operators must provide:
 - a read-only repository client that translates platform API fields into the normalized repository,
   workflow, revision, run, attempt, trigger, pull-request, base, and candidate records;
 - a durable replay store that atomically binds each token replay key to one decision replay key and
-  persisted result before publication. Exact retries reuse that result; a changed tuple for the same
-  token fails;
+  persisted result before publication. The decision key covers the complete normalized workload and
+  candidate-target records. Exact retries reuse that result; any changed field for the same token
+  fails;
 - a repository-scoped publisher authorized only to create the named attestation check;
 - a canonical trust policy containing genuine human owner and reviewer Ed25519 public keys; and
 - an OpenSSH image selected by immutable digest plus a lock containing the SHA-256 of the exact

@@ -128,6 +128,8 @@ jobs:
       - name: Test provider-neutral OIDC, document grammar, and SSHSIG contracts
         run: |
           command -v ssh-keygen
+          command -v ssh-agent
+          command -v ssh-add
           python3 -I scripts/tests/test_module_doc_contract.py -v
           python3 -I scripts/tests/test_sign_module_docs.py -v
 

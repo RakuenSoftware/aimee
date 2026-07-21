@@ -5,11 +5,19 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import json
+import os
 from pathlib import Path
+import shutil
+import stat
 import struct
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from argparse import Namespace
+from datetime import datetime, timezone
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -106,11 +114,159 @@ class SignModuleDocsTests(unittest.TestCase):
             self.assertEqual((target / "new").read_text(encoding="ascii"), "new")
             self.assertEqual((staged / "old").read_text(encoding="ascii"), "old")
 
+    def test_staging_directory_is_bound_to_open_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parent = root / "modules"
+            parent.mkdir()
+            parent_fd = os.open(
+                parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            )
+            try:
+                name, staging = signer._staging_directory(parent_fd)
+                self.assertEqual(stat.S_IMODE(staging.stat().st_mode), 0o700)
+                moved = root / "moved-modules"
+                parent.rename(moved)
+                attacker = root / "attacker"
+                attacker.mkdir()
+                parent.symlink_to(attacker, target_is_directory=True)
+                (staging / "pinned").write_text("yes", encoding="ascii")
+                self.assertTrue((moved / name / "pinned").is_file())
+                self.assertFalse((attacker / name).exists())
+            finally:
+                os.close(parent_fd)
+
+    def test_end_to_end_agent_signing_and_malformed_prior_preservation(self) -> None:
+        for command in ("ssh-keygen", "ssh-agent", "ssh-add"):
+            self.assertIsNotNone(shutil.which(command), f"{command} is required")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir()
+            inventory = repo / signer.INVENTORY_PATH
+            inventory.parent.mkdir(parents=True)
+            inventory.write_text(json.dumps({
+                "schema_version": 1, "required": ["config"], "optional": ["runtime-web"]
+            }, indent=2) + "\n", encoding="ascii")
+            (repo / "evidence.txt").write_text("evidence\n", encoding="ascii")
+            template = (
+                REPO_ROOT / "tests/fixtures/module-doc-contract/positive/module.md"
+            ).read_bytes()
+            template = template.replace(
+                b"Sources: src/modules/memory/*.c", b"Sources: none"
+            ).replace(
+                b"path:scripts/module_doc_contract.py#L1", b"path:evidence.txt#L1"
+            )
+            for module_id, optional in (("config", False), ("runtime-web", True)):
+                descriptor = {
+                    "descriptor_version": 2,
+                    "id": module_id,
+                    "dependencies": [],
+                    "runtime_toggle": {"supported": optional},
+                    "docs": f"docs/modules/{module_id}.md",
+                    "sources": [],
+                    "public_headers": [],
+                    "surfaces": {"routes": [], "commands": [], "protocols": [], "stages": []},
+                }
+                if optional:
+                    descriptor["enabled_by_default"] = True
+                descriptor_path = repo / "src/modules" / module_id / "module.yaml"
+                descriptor_path.parent.mkdir(parents=True)
+                descriptor_path.write_text(
+                    json.dumps(descriptor, indent=2) + "\n", encoding="ascii"
+                )
+                document_path = repo / "docs/modules" / f"{module_id}.md"
+                document_path.parent.mkdir(parents=True, exist_ok=True)
+                document_path.write_bytes(
+                    template.replace(
+                        b"# memory module", f"# {module_id} module".encode("ascii"), 1
+                    )
+                )
+
+            keys = root / "keys"
+            keys.mkdir()
+            private_paths: list[Path] = []
+            public_paths: list[Path] = []
+            for label in ("owner", "reviewer"):
+                private = keys / label
+                subprocess.run(
+                    ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private)],
+                    check=True,
+                )
+                canonical = " ".join(
+                    private.with_suffix(".pub").read_text(encoding="ascii").split()[:2]
+                )
+                public = keys / f"canonical-{label}.pub"
+                public.write_text(canonical + "\n", encoding="ascii")
+                private_paths.append(private)
+                public_paths.append(public)
+
+            executable = Path(shutil.which("ssh-keygen"))
+            lock_path = root / "toolchain.json"
+            lock_path.write_text(json.dumps({
+                "schema": "aimee.sshsig-toolchain.v1",
+                "image": "registry.example.invalid/aimee/sshsig@sha256:" + "a" * 64,
+                "ssh_keygen_sha256": contract.sha256(executable.read_bytes()),
+            }, indent=2) + "\n", encoding="ascii")
+            socket_path = root / "agent.sock"
+            agent = subprocess.Popen(
+                ["ssh-agent", "-D", "-a", str(socket_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                for _ in range(200):
+                    if socket_path.exists():
+                        break
+                    time.sleep(0.01)
+                self.assertTrue(socket_path.exists(), "ssh-agent socket did not appear")
+                agent_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SSH_AUTH_SOCK": str(socket_path)}
+                for private in private_paths:
+                    subprocess.run(
+                        ["ssh-add", str(private)], env=agent_env, check=True,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                previous_sock = os.environ.get("SSH_AUTH_SOCK")
+                os.environ["SSH_AUTH_SOCK"] = str(socket_path)
+                try:
+                    args = Namespace(
+                        repo=repo,
+                        owner_identity="owner@example",
+                        owner_public_key=public_paths[0],
+                        reviewer_identity="reviewer@example",
+                        reviewer_public_key=public_paths[1],
+                        signed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        toolchain_lock=lock_path,
+                        ssh_keygen=executable,
+                    )
+                    signer.build_attestations(args)
+                    target = repo / signer.ATTESTATION_PATH
+                    self.assertEqual(len(list(target.iterdir())), 7)
+                    tampered = target / "config.owner.sig"
+                    tampered.write_bytes(tampered.read_bytes() + b"x")
+                    snapshot = {
+                        entry.name: entry.read_bytes() for entry in target.iterdir()
+                    }
+                    self.assert_rule("sshsig-armor", lambda: signer.build_attestations(args))
+                    self.assertEqual(
+                        {entry.name: entry.read_bytes() for entry in target.iterdir()},
+                        snapshot,
+                    )
+                finally:
+                    if previous_sock is None:
+                        os.environ.pop("SSH_AUTH_SOCK", None)
+                    else:
+                        os.environ["SSH_AUTH_SOCK"] = previous_sock
+            finally:
+                agent.terminate()
+                agent.wait(timeout=5)
+
     def test_helper_never_invokes_a_shell_or_accepts_private_key_argument(self) -> None:
         source = (REPO_ROOT / "scripts/sign_module_docs.py").read_text(encoding="utf-8")
         self.assertNotIn("shell=True", source)
         self.assertNotIn("private-key", source)
         self.assertIn('"SSH_AUTH_SOCK": auth_sock', source)
+        self.assertIn('"HOME": os.fspath(isolated_home)', source)
         self.assertIn('public_path.write_text(public_key + "\\n"', source)
 
 

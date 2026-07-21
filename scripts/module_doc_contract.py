@@ -19,10 +19,12 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import selectors
 import stat
 import subprocess
 import struct
 import tempfile
+import time
 from typing import Callable, NamedTuple, NoReturn
 from urllib.parse import urlsplit
 
@@ -52,6 +54,12 @@ MAX_INDEX_BYTES = 65_536
 MAX_INTEGER_DIGITS = 20
 MAX_TREE_BYTES = 1_048_576
 MAX_TREE_ENTRIES = 4_096
+MAX_DOCUMENT_EVIDENCE_REFERENCES = 64
+MAX_DECISION_EVIDENCE_REFERENCES = 2_048
+MAX_DECISION_DISTINCT_BLOB_BYTES = 67_108_864
+MAX_DECISION_GIT_OPERATIONS = 2_048
+GIT_OPERATION_TIMEOUT_SECONDS = 10
+MAX_GIT_STDERR_BYTES = 65_536
 
 SECTIONS = (
     "Purpose and non-goals",
@@ -476,15 +484,26 @@ def bind_workload_to_target(
 
 
 def replay_binding(workload: dict[str, object], target: dict[str, object]) -> str:
-    fields = (
-        workload["issuer"], workload["token_id"], workload["repository_identity"],
-        workload["run_identity"], workload["attempt"], workload["trigger_check_identity"],
-        str(target["pull_request"]), target["protected_base_revision"],
-        target["candidate_revision"],
-    )
-    if any(not isinstance(item, str) or not item for item in fields):
-        fail("replay-binding", "binding fields must be non-empty strings")
-    return sha256("\0".join(fields).encode("utf-8"))
+    expected_workload = {
+        "issuer", "subject", "audience", "issued_at", "not_before", "expires_at",
+        "token_id", *WORKLOAD_FIELDS,
+    }
+    expected_target = {
+        "schema", "repository_identity", "pull_request", "protected_base_revision",
+        "candidate_revision", "base_ref", "head_ref", "workflow_identity",
+        "workflow_revision", "run_identity", "attempt", "trigger_check_identity",
+    }
+    if set(workload) != expected_workload or set(target) != expected_target:
+        fail("replay-binding", "replay records must have their complete normalized shapes")
+    record = {"target": target, "workload": workload}
+    try:
+        encoded = json.dumps(
+            record, ensure_ascii=True, allow_nan=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        fail("replay-binding", f"replay record is not canonical JSON: {exc}")
+    return sha256(encoded)
 
 
 def replay_token_identity(workload: dict[str, object]) -> str:
@@ -492,7 +511,11 @@ def replay_token_identity(workload: dict[str, object]) -> str:
     token_id = workload.get("token_id")
     if not isinstance(issuer, str) or not issuer or not isinstance(token_id, str) or not token_id:
         fail("replay-binding", "issuer and token ID must be non-empty strings")
-    return sha256(f"{issuer}\0{token_id}".encode("utf-8"))
+    encoded = json.dumps(
+        {"issuer": issuer, "token_id": token_id}, ensure_ascii=True,
+        sort_keys=True, separators=(",", ":"),
+    ).encode("ascii")
+    return sha256(encoded)
 
 
 def validate_v2_metadata(
@@ -558,6 +581,37 @@ class DocumentProjection(NamedTuple):
     public_headers: tuple[str, ...]
 
 
+class GitDecisionBudget:
+    """Bound and deduplicate all Git work performed for one decision."""
+
+    def __init__(self) -> None:
+        self.git_operations = 0
+        self.evidence_references = 0
+        self.distinct_blob_bytes = 0
+        self.blobs: dict[tuple[str, str, str], bytes] = {}
+
+    def consume_git_operation(self) -> None:
+        self.git_operations += 1
+        if self.git_operations > MAX_DECISION_GIT_OPERATIONS:
+            fail("git-operation-budget", "decision exceeds the Git operation budget")
+
+    def consume_evidence_reference(self) -> None:
+        self.evidence_references += 1
+        if self.evidence_references > MAX_DECISION_EVIDENCE_REFERENCES:
+            fail("document-evidence-budget", "decision exceeds the evidence-reference budget")
+
+    def cache_blob(self, key: tuple[str, str, str], raw: bytes) -> None:
+        self.distinct_blob_bytes += len(raw)
+        if self.distinct_blob_bytes > MAX_DECISION_DISTINCT_BLOB_BYTES:
+            fail("git-byte-budget", "decision exceeds the distinct-blob byte budget")
+        self.blobs[key] = raw
+
+
+_ACTIVE_GIT_BUDGET: ContextVar[GitDecisionBudget | None] = ContextVar(
+    "module_doc_git_budget", default=None
+)
+
+
 class GitBlobReader:
     """Read governed files from one immutable commit, never a working tree."""
 
@@ -566,39 +620,70 @@ class GitBlobReader:
             fail("git-candidate", "candidate must be a full lowercase commit ID")
         self.repository = repository
         self.commit = commit
+        self.budget = _ACTIVE_GIT_BUDGET.get() or GitDecisionBudget()
         resolved = self._git("rev-parse", "--verify", f"{commit}^{{commit}}")
         if resolved.decode("ascii").strip() != commit:
             fail("git-candidate", "candidate does not resolve to itself")
 
     def _git(self, *arguments: str) -> bytes:
-        result = subprocess.run(
-            ["git", *arguments], cwd=self.repository, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, check=False,
-            env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
-        )
-        if result.returncode != 0:
-            fail("git-object", result.stderr.decode("utf-8", "replace").strip())
-        return result.stdout
+        return self._git_bounded(65_536, *arguments)
 
     def _git_bounded(self, max_bytes: int, *arguments: str) -> bytes:
+        self.budget.consume_git_operation()
         process = subprocess.Popen(
             ["git", *arguments], cwd=self.repository, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
         )
         assert process.stdout is not None and process.stderr is not None
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        output = bytearray()
+        errors = bytearray()
+        deadline = time.monotonic() + GIT_OPERATION_TIMEOUT_SECONDS
         try:
-            output = process.stdout.read(max_bytes + 1)
-            if len(output) > max_bytes:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    fail("git-timeout", "Git operation exceeded its wall-clock limit")
+                events = selector.select(remaining)
+                if not events:
+                    continue
+                for key, _ in events:
+                    chunk = os.read(key.fd, 65_536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    sink = output if key.data == "stdout" else errors
+                    sink.extend(chunk)
+                    ceiling = max_bytes if key.data == "stdout" else MAX_GIT_STDERR_BYTES
+                    if len(sink) > ceiling:
+                        process.kill()
+                        process.wait()
+                        rule = "git-output-size" if key.data == "stdout" else "git-stderr-size"
+                        fail(rule, f"Git {key.data} exceeds {ceiling} bytes")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 process.kill()
-                process.communicate()
-                fail("git-tree-size", f"git tree output exceeds {max_bytes} bytes")
-            stderr = process.stderr.read()
-            returncode = process.wait()
+                process.wait()
+                fail("git-timeout", "Git operation exceeded its wall-clock limit")
+            try:
+                returncode = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                fail("git-timeout", "Git operation exceeded its wall-clock limit")
             if returncode != 0:
-                fail("git-object", stderr.decode("utf-8", "replace").strip())
-            return output
+                fail("git-object", bytes(errors).decode("utf-8", "replace").strip())
+            return bytes(output)
         finally:
+            selector.close()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
             process.stdout.close()
             process.stderr.close()
 
@@ -612,6 +697,14 @@ class GitBlobReader:
 
     def read_blob(self, path: str, *, max_bytes: int = MAX_GOVERNED_BLOB_BYTES) -> bytes:
         self.canonical_path(path)
+        if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_GOVERNED_BLOB_BYTES:
+            fail("git-object-size", "requested blob limit is outside the verifier ceiling")
+        cache_key = (str(self.repository.resolve()), self.commit, path)
+        cached = self.budget.blobs.get(cache_key)
+        if cached is not None:
+            if len(cached) > max_bytes:
+                fail("git-object-size", f"{path!r} exceeds {max_bytes} bytes")
+            return cached
         record = self._git("ls-tree", "-z", "--full-tree", self.commit, "--", path)
         entries = [entry for entry in record.split(b"\0") if entry]
         if len(entries) != 1:
@@ -631,13 +724,12 @@ class GitBlobReader:
             size = int(size_raw.decode("ascii").strip())
         except (UnicodeDecodeError, ValueError):
             fail("git-object", f"cannot determine size for {path!r}")
-        if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_GOVERNED_BLOB_BYTES:
-            fail("git-object-size", "requested blob limit is outside the verifier ceiling")
         if size > max_bytes:
             fail("git-object-size", f"{path!r} exceeds {max_bytes} bytes")
-        raw = self._git("cat-file", "blob", object_id.decode("ascii"))
+        raw = self._git_bounded(max_bytes, "cat-file", "blob", object_id.decode("ascii"))
         if len(raw) != size:
             fail("git-object-size", f"{path!r} size changed while reading immutable object")
+        self.budget.cache_blob(cache_key, raw)
         return raw
 
     def list_directory(self, path: str) -> dict[str, tuple[str, str]]:
@@ -662,6 +754,7 @@ class GitBlobReader:
         return result
 
     def resolve_reference(self, reference: str) -> None:
+        self.budget.consume_evidence_reference()
         match = REFERENCE_RE.fullmatch(reference)
         if not match:
             fail("document-evidence", f"invalid evidence reference {reference!r}")
@@ -764,6 +857,18 @@ def parse_module_document(
         fail("document-heading", f"unexpected heading {unexpected[0]!r}")
 
     total_tokens = 0
+    document_evidence_references = 0
+
+    def validate_doc_reference(reference: str, line: int) -> None:
+        nonlocal document_evidence_references
+        document_evidence_references += 1
+        if document_evidence_references > MAX_DOCUMENT_EVIDENCE_REFERENCES:
+            fail(
+                "document-evidence-budget",
+                f"document exceeds {MAX_DOCUMENT_EVIDENCE_REFERENCES} evidence references",
+            )
+        _validate_reference(reference, line=line, resolver=resolve_reference)
+
     for section_index, start in enumerate(positions):
         end = positions[section_index + 1] if section_index + 1 < len(positions) else len(lines)
         body = lines[start + 1:end]
@@ -784,9 +889,7 @@ def parse_module_document(
                 prose = body[1 if prefix.startswith("Reason") else 2][len(prefix):]
                 if not PROSE_RE.fullmatch(prose):
                     fail("document-prose", f"invalid {prefix.strip()} prose")
-            _validate_reference(
-                body[3][len("Evidence: "):], line=start + 5, resolver=resolve_reference
-            )
+            validate_doc_reference(body[3][len("Evidence: "):], start + 5)
             cursor = 4
         elif any(item.startswith(("Reason: ", "Implication: ", "Evidence: ")) for item in body[1:]):
             fail("document-state-label", "none-state labels are forbidden for present state")
@@ -808,9 +911,7 @@ def parse_module_document(
         evidence_started = False
         for record in records:
             if record.startswith("- Evidence: "):
-                _validate_reference(
-                    record[len("- Evidence: "):], line=start + 2, resolver=resolve_reference
-                )
+                validate_doc_reference(record[len("- Evidence: "):], start + 2)
                 evidence_count += 1
                 evidence_started = True
                 continue
@@ -1320,15 +1421,19 @@ def evaluate_trigger(
     workload = normalize_verified_oidc_claims(verified_claims, profile, wall_time=wall_time)
     target = validate_candidate_target(resolve_target(workload, pull_request))
     bind_workload_to_target(workload, target, pull_request=pull_request)
+    budget_token = _ACTIVE_GIT_BUDGET.set(GitDecisionBudget())
     try:
-        reader = GitBlobReader(repository, target["candidate_revision"])
-        summary = validate_candidate(reader, workload, target)
-        if not isinstance(summary, str) or not summary:
-            fail("candidate-validation", "candidate validator returned no summary")
-        conclusion = "success"
-    except ContractError as exc:
-        summary = str(exc)[:4096]
-        conclusion = "failure"
+        try:
+            reader = GitBlobReader(repository, target["candidate_revision"])
+            summary = validate_candidate(reader, workload, target)
+            if not isinstance(summary, str) or not summary:
+                fail("candidate-validation", "candidate validator returned no summary")
+            conclusion = "success"
+        except ContractError as exc:
+            summary = str(exc)[:4096]
+            conclusion = "failure"
+    finally:
+        _ACTIVE_GIT_BUDGET.reset(budget_token)
     result = validate_publisher_result(
         {
             "schema": "aimee.module-doc-check.v1",
