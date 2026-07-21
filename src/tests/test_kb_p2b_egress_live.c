@@ -59,6 +59,26 @@ static kb_principal_t owner(void)
    return p;
 }
 
+static int egress_request(int port, const char *ca, const char *cert, const char *key,
+                          const char *request_id, int64_t team, char *response,
+                          size_t response_cap)
+{
+   char body[2048];
+   int n = snprintf(body, sizeof(body),
+                    "{\"request_id\":\"%s\",\"team_id\":%lld,"
+                    "\"model_id\":\"p2b-live-model\",\"stream\":false,"
+                    "\"payload\":{\"model\":\"p2b-live-model\",\"messages\":[{"
+                    "\"role\":\"user\",\"content\":\"reply with ok\"}],"
+                    "\"max_tokens\":16,\"stream\":false}}",
+                    request_id, (long long)team);
+   assert(n > 0 && (size_t)n < sizeof(body));
+   int status = 0;
+   assert(kb_tls_client_request("localhost", port, ca, cert, key, "POST",
+                                "/v1/llm/egress", body, response, response_cap,
+                                &status) == 0);
+   return status;
+}
+
 int main(void)
 {
    if (getenv("AIMEE_P2B_EXPECT_DISABLED"))
@@ -153,16 +173,10 @@ int main(void)
       fprintf(stderr, "P2b enrolled membership unresolved identity=%s rc=%d\n", identity,
               scope_rc);
    assert(scope_rc == 0 && db2_tenant_scope_commit() == 0);
-   const char *body =
-       "{\"request_id\":\"11111111-1111-4111-8111-111111111111\","
-       "\"team_id\":982260,\"model_id\":\"p2b-live-model\",\"stream\":false,"
-       "\"payload\":{\"model\":\"p2b-live-model\",\"messages\":[{\"role\":\"user\","
-       "\"content\":\"reply with ok\"}],\"max_tokens\":16,\"stream\":false}}";
    char response[262144];
-   int status = 0;
-   assert(kb_tls_client_request("localhost", mtls_port, ca, cert, client_key, "POST",
-                                "/v1/llm/egress", body, response, sizeof(response),
-                                &status) == 0);
+   int status = egress_request(mtls_port, ca, cert, client_key,
+                               "11111111-1111-4111-8111-111111111111", team,
+                               response, sizeof(response));
    if (status != 200)
       fprintf(stderr, "P2b route status=%d response=%s reserved=%lld in_flight=%lld failed=%lld "
                       "key_uses=%lld\n", status, response,
@@ -177,6 +191,69 @@ int main(void)
    assert(scalar("SELECT count(*) FROM org_egress_dispatch WHERE team_id=982260 AND "
                  "state='succeeded' AND prompt_tokens>=0 AND completion_tokens>0") == 1);
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=982260") == 1);
+
+   /* Exact replay is durable and never re-dispatches. */
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "11111111-1111-4111-8111-111111111111", team,
+                           response, sizeof(response));
+   assert(status == 409 && strstr(response, "request already recorded"));
+
+   /* Both private refusal classes collapse to 429 and stop before P7/network. */
+   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(scalar("SELECT org_rate_policy_set('team','982260',3600,0)") > 0);
+   assert(db2_tenant_scope_commit() == 0);
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "22222222-2222-4222-8222-222222222222", team,
+                           response, sizeof(response));
+   assert(status == 429);
+   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(scalar("SELECT org_rate_policy_set('team','982260',3600,100)") > 0);
+   assert(scalar("SELECT org_budget_set(982260,NULL,'day',(SELECT spend_usd+reserved_usd "
+                 "FROM org_budget_counter WHERE team_id=982260 AND project_id IS NULL "
+                 "AND period='day'),NULL)") > 0);
+   assert(db2_tenant_scope_commit() == 0);
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "33333333-3333-4333-8333-333333333333", team,
+                           response, sizeof(response));
+   assert(status == 429);
+   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(scalar("SELECT org_budget_set(982260,NULL,'day',1000,NULL)") > 0);
+   assert(db2_tenant_scope_commit() == 0);
+
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "44444444-4444-4444-8444-444444444444", team + 1,
+                           response, sizeof(response));
+   assert(status == 403);
+
+   /* Authenticated complete provider denial is 502/durable denied and charges
+    * the reservation; retry remains a no-send 409. */
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "55555555-5555-4555-8555-555555555555", team,
+                           response, sizeof(response));
+   assert(status == 502);
+   assert(scalar("SELECT count(*) FROM org_egress_dispatch WHERE request_id="
+                 "'55555555-5555-4555-8555-555555555555' AND state='denied' AND "
+                 "http_status=429 AND realized_usd=reserved_max_usd") == 1);
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "55555555-5555-4555-8555-555555555555", team,
+                           response, sizeof(response));
+   assert(status == 409);
+
+   /* Partial authenticated response is ambiguous, charges the reservation,
+    * returns 504, and cannot be dispatched again. */
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "66666666-6666-4666-8666-666666666666", team,
+                           response, sizeof(response));
+   assert(status == 504);
+   assert(scalar("SELECT count(*) FROM org_egress_dispatch WHERE request_id="
+                 "'66666666-6666-4666-8666-666666666666' AND state='uncertain' AND "
+                 "http_status=0 AND realized_usd=reserved_max_usd") == 1);
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "66666666-6666-4666-8666-666666666666", team,
+                           response, sizeof(response));
+   assert(status == 409);
+
+   assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=982260") == 3);
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(dek, sizeof(dek));

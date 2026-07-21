@@ -546,15 +546,15 @@ stop_mock
 if [[ -n ${AIMEE_P2B_LIVE_TARGET:-} ]]; then
   [[ -x $AIMEE_P2B_LIVE_TARGET ]] || die 'P2b live target is not executable'
   install -m 755 aimee-kb-resolver "$(dirname "$AIMEE_P2B_LIVE_TARGET")/aimee-kb-resolver"
-  start_mock nonstream-success "$server_cert" "$server_key" no-session-token \
+  start_mock p2b-matrix "$server_cert" "$server_key" no-session-token \
     /model/p2b-live-model/converse dynamic-timestamp
   if ! "$AIMEE_P2B_LIVE_TARGET" >"$case_log" 2>&1; then
     sed 's/^/p2b-live: /' "$case_log" >&2
     sed 's/^/mock: /' "$mock_log" >&2
     die 'P2b live composition unexpectedly failed'
   fi
-  assert_count 1
-  assert_observed 1
+  assert_count 3
+  assert_observed 3
   stop_mock
 fi
 

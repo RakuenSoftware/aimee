@@ -60,6 +60,7 @@ CASES = (
     "complete-frame-semantic-truncation",
     "malformed-framing",
     "unclean-eof",
+    "p2b-matrix",
 )
 
 AUTH_RE = re.compile(
@@ -626,12 +627,28 @@ class MockHandler(BaseRequestHandler):
             flush=True,
         )
         self._respond(args.case)
-        if args.case == "unclean-eof":
+        if args.case == "unclean-eof" or (
+            args.case == "p2b-matrix" and self.server.accepted == 3
+        ):
             self._drop_without_close_notify()
         else:
             self._send_close_notify()
 
     def _respond(self, case: str) -> None:
+        if case == "p2b-matrix":
+            if self.server.accepted == 1:
+                self._respond("nonstream-success")
+                return
+            if self.server.accepted == 2:
+                self._respond("non-2xx")
+                return
+            if self.server.accepted == 3:
+                self.connection.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    b"Content-Length: 100\r\nConnection: close\r\n\r\n{\"output\":"
+                )
+                return
+            raise AssertionError("unexpected p2b matrix dispatch")
         if case in ("nonstream-success", "unclean-eof"):
             body = json.dumps(
                 {
