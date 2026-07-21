@@ -256,6 +256,7 @@ func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
 	runGit(t, workspace, "branch", "-M", "testing")
 	runGit(t, workspace, "remote", "add", "origin", remote)
 	runGit(t, workspace, "push", "-u", "origin", "testing")
+	runGit(t, remote, "symbolic-ref", "HEAD", "refs/heads/testing")
 	runGit(t, root, "clone", "--branch", "testing", remote, publisher)
 	runGit(t, publisher, "config", "user.email", "test@example.invalid")
 	runGit(t, publisher, "config", "user.name", "Test")
@@ -280,6 +281,19 @@ func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
 	localListing, err := gitOutput(t.Context(), workspace, "ls-tree", "--name-only", "testing")
 	if err != nil || strings.Contains(string(localListing), "new-proposal") {
 		t.Fatalf("local branch unexpectedly moved: %q err=%v", localListing, err)
+	}
+	defaultRef, err := refreshScanRef(t.Context(), workspace, "")
+	if err != nil || defaultRef != "origin/testing" {
+		t.Fatalf("default ref=%q err=%v", defaultRef, err)
+	}
+	if _, err := refreshScanRef(t.Context(), workspace, "missing"); err == nil {
+		t.Fatal("missing remote branch silently fell back to a local ref")
+	}
+	runGit(t, publisher, "checkout", "-b", "feature/nested")
+	runGit(t, publisher, "push", "origin", "feature/nested")
+	nested, err := refreshScanRef(t.Context(), workspace, "feature/nested")
+	if err != nil || nested != "origin/feature/nested" {
+		t.Fatalf("nested ref=%q err=%v", nested, err)
 	}
 }
 

@@ -165,20 +165,47 @@ func refreshScanRef(ctx context.Context, workspace, configured string) (string, 
 	if configured == "" {
 		ref, err := gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 		if err != nil || strings.TrimSpace(string(ref)) == "" {
-			return "HEAD", nil
+			if _, autoErr := gitOutput(ctx, workspace, "remote", "set-head", "origin", "--auto"); autoErr != nil {
+				return "", fmt.Errorf("resolve refreshed origin default branch: %w", autoErr)
+			}
+			ref, err = gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+			if err != nil || strings.TrimSpace(string(ref)) == "" {
+				return "", errors.New("refreshed origin default branch is unresolved")
+			}
 		}
-		return strings.TrimSpace(string(ref)), nil
+		remote := strings.TrimSpace(string(ref))
+		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", remote+"^{commit}"); err != nil {
+			return "", fmt.Errorf("resolve refreshed default branch %q: %w", remote, err)
+		}
+		return remote, nil
 	}
-	// A simple branch name means the live remote-tracking branch when one
-	// exists. Fully-qualified refs, SHAs, and explicit origin/* refs retain the
-	// exact UI-authored meaning.
-	if !strings.Contains(configured, "/") {
-		remote := "origin/" + configured
-		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", remote+"^{commit}"); err == nil {
-			return remote, nil
+	// Fully-qualified refs and immutable commit IDs retain their exact
+	// UI-authored meaning. Every other value is an ordinary remote branch name,
+	// including names with slashes, and must resolve on the freshly fetched
+	// origin rather than silently falling back to a stale local branch.
+	if strings.HasPrefix(configured, "refs/") || fullCommitID(configured) {
+		return configured, nil
+	}
+	remote := configured
+	if !strings.HasPrefix(remote, "origin/") {
+		remote = "origin/" + remote
+	}
+	if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", remote+"^{commit}"); err != nil {
+		return "", fmt.Errorf("resolve refreshed branch %q: %w", remote, err)
+	}
+	return remote, nil
+}
+
+func fullCommitID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
 		}
 	}
-	return configured, nil
+	return true
 }
 
 func paramText(params map[string]any, key string) string {

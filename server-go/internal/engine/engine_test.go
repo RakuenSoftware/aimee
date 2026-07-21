@@ -155,6 +155,17 @@ func TestSafeDiagnosticRedactsSecretsWithoutTruncating(t *testing.T) {
 	if !strings.HasSuffix(got, tail) {
 		t.Fatal("diagnostic tail was truncated or changed")
 	}
+	unterminated := safeDiagnostic("password=\"my secret phrase\\\nnext diagnostic intact\nsecret='two words\\\nlast diagnostic intact")
+	for _, secret := range []string{"my secret phrase", "two words"} {
+		if strings.Contains(unterminated, secret) {
+			t.Fatalf("unterminated diagnostic leaked %q", secret)
+		}
+	}
+	for _, preserved := range []string{"next diagnostic intact", "last diagnostic intact"} {
+		if !strings.Contains(unterminated, preserved) {
+			t.Fatalf("unterminated redaction removed %q", preserved)
+		}
+	}
 }
 
 func (r *artifactRoutingRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
