@@ -392,12 +392,40 @@ class ModuleDocContractTests(unittest.TestCase):
             subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
             commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
             reader = contract.GitBlobReader(repo, commit)
+            real_popen = contract.subprocess.Popen
+            reader.budget.git_deadline = time.monotonic() + 0.02
+            def delayed_popen(*args, **kwargs):
+                time.sleep(0.04)
+                return real_popen(*args, **kwargs)
+            with mock.patch.object(
+                contract.subprocess, "Popen", side_effect=delayed_popen
+            ):
+                self.assert_rule("git-timeout", lambda: reader._git_bounded(
+                    1024, "rev-parse", "HEAD"
+                ))
             reader.budget.git_deadline = time.monotonic() + 0.1
             started = time.monotonic()
             self.assert_rule("git-timeout", lambda: reader._git_bounded(
                 1024, "-c", "alias.wait=!sleep 2", "wait"
             ))
             self.assertLess(time.monotonic() - started, 1.0)
+            child_pid_path = repo / "orphan.pid"
+            reader.budget.git_deadline = time.monotonic() + 0.1
+            self.assert_rule("git-timeout", lambda: reader._git_bounded(
+                1024, "-c",
+                f"alias.orphan=!sh -c 'sleep 5 & echo $! > {child_pid_path}'",
+                "orphan",
+            ))
+            child_pid = int(child_pid_path.read_text(encoding="ascii").strip())
+            state_path = Path(f"/proc/{child_pid}/stat")
+            for _ in range(100):
+                if not state_path.exists() or state_path.read_text().split()[2] == "Z":
+                    break
+                time.sleep(0.01)
+            self.assertTrue(
+                not state_path.exists() or state_path.read_text().split()[2] == "Z",
+                "Git descendant survived process-group timeout",
+            )
             reader.budget.git_deadline = time.monotonic() - 1
             with mock.patch.object(contract.subprocess, "Popen") as popen:
                 self.assert_rule(

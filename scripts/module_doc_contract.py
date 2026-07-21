@@ -647,19 +647,22 @@ class GitBlobReader:
         selector.register(process.stderr, selectors.EVENT_READ, "stderr")
         output = bytearray()
         errors = bytearray()
-        deadline = time.monotonic() + min(
-            GIT_OPERATION_TIMEOUT_SECONDS, remaining_decision
+        deadline = min(
+            self.budget.git_deadline,
+            time.monotonic() + GIT_OPERATION_TIMEOUT_SECONDS,
         )
 
         def terminate() -> None:
-            if process.poll() is not None:
-                return
             try:
                 os.killpg(process.pid, 9)
             except ProcessLookupError:
                 pass
-            process.wait()
+            if process.poll() is None:
+                process.wait()
         try:
+            if time.monotonic() >= deadline:
+                terminate()
+                fail("git-timeout", "decision expired while starting a Git operation")
             while selector.get_map():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -694,8 +697,7 @@ class GitBlobReader:
             return bytes(output)
         finally:
             selector.close()
-            if process.poll() is None:
-                terminate()
+            terminate()
             process.stdout.close()
             process.stderr.close()
 
