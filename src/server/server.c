@@ -123,6 +123,12 @@ static void server_orchestration_pool_shutdown(server_ctx_t *ctx)
    ctx->orchestration_pool_initialized = 0;
 }
 
+static void server_orchestration_pool_close(server_ctx_t *ctx)
+{
+   if (ctx && ctx->orchestration_pool_initialized)
+      compute_pool_close(&ctx->orchestration_pool);
+}
+
 int server_compute_budget_acquire(server_ctx_t *ctx)
 {
    pthread_mutex_lock(&ctx->compute_budget_mutex);
@@ -2435,9 +2441,9 @@ void server_shutdown(server_ctx_t *ctx)
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
-   /* This closes orchestration admission and authoritatively drains every
-    * queued/running roundtable or aggregate before shared stores are torn down. */
-   server_orchestration_pool_shutdown(ctx);
+   /* Close orchestration admission first, but do not join coordinators until the
+    * provider turns on which they may be waiting have been cancelled. */
+   server_orchestration_pool_close(ctx);
    /* Cancel every in-flight turn BEFORE draining: turns now outlive their client
     * connections (server-owned turn lifecycle), so a long detached turn would
     * otherwise block the drain indefinitely. The atomic cancel flags are
@@ -2445,6 +2451,10 @@ void server_shutdown(server_ctx_t *ctx)
     * bounded. Presence is torn down after the drain, so a still-running worker
     * never emits onto a closed ring. */
    turn_registry_cancel_all();
+   /* Every queued/running async operation is now bounded by a pool worker and
+    * every provider turn has observed cancellation. Drain before shared stores
+    * and provider state are torn down. */
+   server_orchestration_pool_shutdown(ctx);
    /* Let async chat/tool workers finish while the compute pool is still
     * available to drain any queued server-side jobs they interact with. */
    server_compute_async_drain();

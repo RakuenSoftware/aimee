@@ -958,12 +958,6 @@ static void op_run_worker_run(void *arg)
    compute_pool_clear_job();
 }
 
-static void *op_run_worker_thread(void *arg)
-{
-   op_run_worker_run(arg);
-   return NULL;
-}
-
 static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
                                   int preflight_caps, char *resp, int cap)
 {
@@ -1035,9 +1029,10 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    j->created = created;
 
    server_ctx_t *ctx = server_active_ctx();
-   int llm_orchestrator = strcmp(op_method, "delegate.roundtable") == 0 ||
-                          strcmp(op_method, "delegate.aggregate") == 0;
-   if (llm_orchestrator && ctx)
+   /* Every async operation has the same server-owned lifecycle. Keeping them in
+    * one dedicated pool prevents a newly registered coordinator from silently
+    * falling back to the generic compute lane, and makes shutdown authoritative. */
+   if (ctx && ctx->orchestration_pool_initialized)
    {
       if (compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j) != 0)
       {
@@ -1051,36 +1046,18 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
          return err_json(resp, cap, 503, "orchestration queue full");
       }
    }
-   else if (ctx)
-   {
-      if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
-      {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"compute queue full\"}");
-         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-         free(failed);
-         free(j->line);
-         free(j);
-         free(queued);
-         return err_json(resp, cap, 503, "compute queue full");
-      }
-   }
    else
    {
-      pthread_t th;
-      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
-      {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"could not start run\"}");
-         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-         free(failed);
-         free(j->line);
-         free(j);
-         free(queued);
-         return err_json(resp, cap, 500, "could not start run");
-      }
-      pthread_detach(th);
+      char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                     "{\"error\":\"orchestration unavailable\"}");
+      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+      free(failed);
+      free(j->line);
+      free(j);
+      free(queued);
+      return err_json(resp, cap, 503, "orchestration unavailable");
    }
+
    int n = snprintf(resp, (size_t)cap, "%s", queued);
    free(queued);
    return (n > 0 && n < cap) ? 200 : 200;

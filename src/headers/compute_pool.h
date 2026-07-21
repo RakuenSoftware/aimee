@@ -60,10 +60,16 @@ typedef struct
 /* Initialize pool with given number of worker threads. Returns 0 on success. */
 int compute_pool_init(compute_pool_t *pool, int num_threads);
 
-/* Submit work to the pool. Returns 0 on success, -1 if queue is full. */
+/* Submit work to the pool. Returns 0 on success, -1 if the queue is full or
+ * admission has been closed. */
 int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg);
 
-/* Shut down pool: signal all workers, wait for completion. */
+/* Close admission without waiting for queued/running work. Idempotent. This is
+ * the first half of a two-phase shutdown when callers must cancel dependencies
+ * before joining workers. */
+void compute_pool_close(compute_pool_t *pool);
+
+/* Shut down pool: close admission, drain queued work, and join every worker. */
 void compute_pool_shutdown(compute_pool_t *pool);
 
 /* Worker-side: record this thread's current job. Must be called from a thread

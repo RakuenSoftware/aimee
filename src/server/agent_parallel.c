@@ -18,7 +18,43 @@
 #include <string.h>
 #include <time.h>
 
-#define AGENT_PARALLEL_SAFETY_MAX 64
+#define AGENT_PARALLEL_PROCESS_MAX 64
+
+/* Bound fan-out workers across the whole process, not once per panel. Provider
+ * admission remains authoritative for actual model concurrency; this limiter
+ * only prevents many simultaneous coordinators from materializing an unbounded
+ * number of pthreads while they wait for those provider slots. */
+static pthread_mutex_t g_parallel_permit_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_parallel_permit_cond = PTHREAD_COND_INITIALIZER;
+static int g_parallel_permits_active = 0;
+
+static int parallel_permit_acquire(const struct timespec *deadline)
+{
+   pthread_mutex_lock(&g_parallel_permit_mutex);
+   while (g_parallel_permits_active >= AGENT_PARALLEL_PROCESS_MAX)
+   {
+      int rc = deadline ? pthread_cond_timedwait(&g_parallel_permit_cond, &g_parallel_permit_mutex,
+                                                 deadline)
+                        : pthread_cond_wait(&g_parallel_permit_cond, &g_parallel_permit_mutex);
+      if (deadline && rc == ETIMEDOUT)
+      {
+         pthread_mutex_unlock(&g_parallel_permit_mutex);
+         return -1;
+      }
+   }
+   g_parallel_permits_active++;
+   pthread_mutex_unlock(&g_parallel_permit_mutex);
+   return 0;
+}
+
+static void parallel_permit_release(void)
+{
+   pthread_mutex_lock(&g_parallel_permit_mutex);
+   if (g_parallel_permits_active > 0)
+      g_parallel_permits_active--;
+   pthread_cond_broadcast(&g_parallel_permit_cond);
+   pthread_mutex_unlock(&g_parallel_permit_mutex);
+}
 
 /* Completion barrier for the deadline path: workers flip their `done` flag and
  * bump `done_count` under `mtx`, signalling `cv`, so the caller can
@@ -47,6 +83,7 @@ typedef struct
    agent_config_t cfg_owned;
    agent_task_t task_owned;
    int owns_inputs;
+   int owns_process_permit;
 } parallel_ctx_t;
 
 static void parallel_ctx_release_inputs(parallel_ctx_t *ctx)
@@ -107,6 +144,11 @@ static void *parallel_worker(void *arg)
       agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
                    ctx->task->max_tokens, temp, ctx->result);
    parallel_ctx_release_inputs(ctx);
+   if (ctx->owns_process_permit)
+   {
+      ctx->owns_process_permit = 0;
+      parallel_permit_release();
+   }
    if (ctx->sync)
    {
       pthread_mutex_lock(&ctx->sync->mtx);
@@ -116,21 +158,6 @@ static void *parallel_worker(void *arg)
       pthread_mutex_unlock(&ctx->sync->mtx);
    }
    return NULL;
-}
-
-/* Provider admission owns agent concurrency. The generic compute pool must not
- * silently reduce an eligible panel's width; only an explicit operator safety
- * cap may serialize the fan-out. */
-static int parallel_worker_ceiling(int task_count)
-{
-   const char *env = getenv("AIMEE_PARALLEL_MAX");
-   if (env && env[0])
-   {
-      int v = atoi(env);
-      if (v >= 1)
-         return v < AGENT_PARALLEL_SAFETY_MAX ? v : AGENT_PARALLEL_SAFETY_MAX;
-   }
-   return task_count < AGENT_PARALLEL_SAFETY_MAX ? task_count : AGENT_PARALLEL_SAFETY_MAX;
 }
 
 /* Deadline-bounded fan-out: spawn all workers, wait on a completion barrier until
@@ -166,36 +193,6 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    pthread_cond_init(&sync->cv, NULL);
    agent_request_creds_snapshot(creds);
 
-   int spawned_count = 0;
-   for (int i = 0; i < task_count; i++)
-   {
-      memset(&out[i], 0, sizeof(out[i]));
-      cells[i] = calloc(1, sizeof(agent_result_t));
-      if (!cells[i])
-         continue; /* slot stays a failed result; never spawned */
-      if (parallel_ctx_own_inputs(&ctxs[i], cfg, &tasks[i]) != 0)
-      {
-         free(cells[i]);
-         cells[i] = NULL;
-         continue;
-      }
-      ctxs[i].result = cells[i];
-      ctxs[i].creds = creds;
-      ctxs[i].sync = sync;
-      ctxs[i].done = &done[i];
-      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
-      {
-         spawned[i] = 1;
-         spawned_count++;
-      }
-      else
-      {
-         parallel_ctx_release_inputs(&ctxs[i]);
-         free(cells[i]);
-         cells[i] = NULL;
-      }
-   }
-
    struct timespec abs;
    clock_gettime(CLOCK_REALTIME, &abs);
    abs.tv_sec += deadline_ms / 1000;
@@ -204,6 +201,47 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    {
       abs.tv_sec++;
       abs.tv_nsec -= 1000000000L;
+   }
+
+   for (int i = 0; i < task_count; i++)
+      memset(&out[i], 0, sizeof(out[i]));
+
+   int spawned_count = 0;
+   for (int i = 0; i < task_count; i++)
+   {
+      if (parallel_permit_acquire(&abs) != 0)
+         break;
+      cells[i] = calloc(1, sizeof(agent_result_t));
+      if (!cells[i])
+      {
+         parallel_permit_release();
+         continue; /* slot stays a failed result; never spawned */
+      }
+      if (parallel_ctx_own_inputs(&ctxs[i], cfg, &tasks[i]) != 0)
+      {
+         parallel_permit_release();
+         free(cells[i]);
+         cells[i] = NULL;
+         continue;
+      }
+      ctxs[i].result = cells[i];
+      ctxs[i].creds = creds;
+      ctxs[i].sync = sync;
+      ctxs[i].done = &done[i];
+      ctxs[i].owns_process_permit = 1;
+      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
+      {
+         spawned[i] = 1;
+         spawned_count++;
+      }
+      else
+      {
+         ctxs[i].owns_process_permit = 0;
+         parallel_permit_release();
+         parallel_ctx_release_inputs(&ctxs[i]);
+         free(cells[i]);
+         cells[i] = NULL;
+      }
    }
 
    pthread_mutex_lock(&sync->mtx);
@@ -321,26 +359,22 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       ctxs[i].creds = &creds;
    }
 
-   int ceiling = parallel_worker_ceiling(task_count);
-   int wave_start = 0;
-   while (wave_start < task_count)
+   for (int i = 0; i < task_count; i++)
    {
-      int wave_end = wave_start + ceiling;
-      if (wave_end > task_count)
-         wave_end = task_count;
-
-      for (int i = wave_start; i < wave_end; i++)
+      if (parallel_permit_acquire(NULL) != 0)
+         continue;
+      ctxs[i].owns_process_permit = 1;
+      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
+         thread_ok[i] = 1;
+      else
       {
-         if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
-            thread_ok[i] = 1;
+         ctxs[i].owns_process_permit = 0;
+         parallel_permit_release();
       }
-      for (int i = wave_start; i < wave_end; i++)
-      {
-         if (thread_ok[i])
-            pthread_join(threads[i], NULL);
-      }
-      wave_start = wave_end;
    }
+   for (int i = 0; i < task_count; i++)
+      if (thread_ok[i])
+         pthread_join(threads[i], NULL);
 
    free(thread_ok);
    free(threads);

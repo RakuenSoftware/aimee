@@ -239,6 +239,48 @@ static void test_no_deadline_ignores_generic_compute_width(void)
           atomic_load(&g_wave_high_water));
 }
 
+typedef struct
+{
+   agent_config_t cfg;
+   agent_task_t tasks[40];
+   agent_result_t out[40];
+   int success;
+} panel_call_t;
+
+static void *run_test_panel(void *arg)
+{
+   panel_call_t *call = arg;
+   call->success = agent_run_parallel(&call->cfg, call->tasks, 40, call->out, 0);
+   return NULL;
+}
+
+static void test_process_limit_is_shared_across_panels(void)
+{
+   panel_call_t calls[2];
+   memset(calls, 0, sizeof(calls));
+   for (int p = 0; p < 2; p++)
+      for (int i = 0; i < 40; i++)
+      {
+         calls[p].tasks[i].agent = "wave";
+         calls[p].tasks[i].role = "review";
+      }
+   atomic_store(&g_wave_active, 0);
+   atomic_store(&g_wave_high_water, 0);
+   pthread_t callers[2];
+   assert(pthread_create(&callers[0], NULL, run_test_panel, &calls[0]) == 0);
+   assert(pthread_create(&callers[1], NULL, run_test_panel, &calls[1]) == 0);
+   pthread_join(callers[0], NULL);
+   pthread_join(callers[1], NULL);
+   assert(calls[0].success == 40);
+   assert(calls[1].success == 40);
+   assert(atomic_load(&g_wave_high_water) <= 64);
+   for (int p = 0; p < 2; p++)
+      for (int i = 0; i < 40; i++)
+         free(calls[p].out[i].response);
+   printf("  test_process_limit_is_shared_across_panels: ok (%d concurrent)\n",
+          atomic_load(&g_wave_high_water));
+}
+
 /* use_tools picks the tools-enabled runner — the difference between a review
  * panelist that can look up whether a change is reachable and one that can only
  * squint at the diff. Both routes (by name, and by role) must honour it, and a task
@@ -309,6 +351,7 @@ int main(void)
    test_deadline_abandons_hung_worker();
    test_no_deadline_runs_all();
    test_no_deadline_ignores_generic_compute_width();
+   test_process_limit_is_shared_across_panels();
    test_use_tools_routes_to_tools_runner();
    printf("all tests passed\n");
    return 0;

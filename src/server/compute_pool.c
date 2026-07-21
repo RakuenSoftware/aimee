@@ -151,7 +151,7 @@ int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg)
 {
    pthread_mutex_lock(&pool->mutex);
 
-   if (pool->queue_count >= COMPUTE_QUEUE_SIZE)
+   if (pool->shutdown || pool->queue_count >= COMPUTE_QUEUE_SIZE)
    {
       pthread_mutex_unlock(&pool->mutex);
       return -1;
@@ -180,12 +180,17 @@ int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg)
    return 0;
 }
 
-void compute_pool_shutdown(compute_pool_t *pool)
+void compute_pool_close(compute_pool_t *pool)
 {
    pthread_mutex_lock(&pool->mutex);
    pool->shutdown = 1;
    pthread_cond_broadcast(&pool->work_available);
    pthread_mutex_unlock(&pool->mutex);
+}
+
+void compute_pool_shutdown(compute_pool_t *pool)
+{
+   compute_pool_close(pool);
 
    for (int i = 0; i < pool->thread_count; i++)
       pthread_join(pool->threads[i], NULL);
