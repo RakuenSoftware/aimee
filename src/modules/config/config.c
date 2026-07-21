@@ -840,8 +840,6 @@ static void config_set_defaults(config_t *cfg)
    config_kb_curator_defaults(cfg); /* kb.curator.* + kb.evidence.embed.* */
    cfg->skills_review_enabled = 0;
    cfg->skills_review_nudge_interval = 10;
-   cfg->skills_curator_enabled = 0;
-   cfg->skills_curator_interval_hours = 168;
    cfg->skills_stale_after_days = 30;
    cfg->skills_archive_after_days = 90;
    cfg->skills_dispatch_enabled = 1;

@@ -1874,8 +1874,6 @@ typedef struct config
    /* Skill lifecycle and review settings (skills.*). */
    int skills_review_enabled;
    int skills_review_nudge_interval;
-   int skills_curator_enabled;
-   int skills_curator_interval_hours;
    int skills_stale_after_days;
    int skills_archive_after_days;
    int skills_dispatch_enabled;

@@ -359,7 +359,7 @@ DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/m
             index.c extractors.c extractors_extra.c extractors_new_langs.c code_treesitter.c modules/css/css_analyze.c modules/css/css_oracle.c modules/css/css_render_oracle.c modules/css/css_render_cmd.c \
             context_discover.c tasks.c modules/learning/learning_router.c modules/learning/learning_implicit.c dogfood.c working_profile.c modules/guardrails/guardrails.c modules/guardrails/guardrails_orchestrator.c modules/guardrails/guardrails_action_audit.c modules/guardrails/guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c modules/guardrails/guardrails_semantic.c modules/guardrails/guardrails_blast_radius.c gateway_policy.c gateway_pipeline.c gateway_delegate.c \
             modules/workspace/workspace.c worktree_gc.c modules/workspace/workspace_manifest.c modules/workspace/workspace_handle.c server/agent_config.c cmd_describe.c \
-            history.c role_templates.c modules/skill/skill.c modules/skill/skill_rollback.c modules/skill/skill_review.c modules/skill/skill_curator.c conversation.c \
+            history.c role_templates.c modules/skill/skill.c modules/skill/skill_rollback.c modules/skill/skill_review.c conversation.c \
             trajectory_export.c trajectory_batch.c \
             modules/memory/memory_profile_pack.c wiki_render.c \
             kb/kb.c kb/kb_fusion.c kb/kb_neardup.c kb/kb_conventions.c sketch.c modules/learning/learning_evidence.c kb/kb_calibrate.c kb/kb_demote.c kb/kb_features.c kb/kb_ranker.c kb/kb_ranker_fit.c kb/kb_detect.c \
