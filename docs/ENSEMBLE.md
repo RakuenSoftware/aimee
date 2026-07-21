@@ -36,7 +36,9 @@ aimee delegate aggregate "Design a migration plan for the auth schema"
 
 Configured by `ensemble.*` (see [Settings](SETTINGS.md)):
 
-- `ensemble.reference_models` — diverse model/agent names for the fan-out.
+- `ensemble.reference_models` — positive must-use model/agent pins. Pins never
+  exclude another eligible agent; runtime fills every eligible agent's
+  `max_parallel` capacity, spreading seats across providers before repeats.
 - `ensemble.reference_personas` — optional per-reference persona overrides.
 - `ensemble.aggregator` — the agent that synthesizes the final answer.
 - `ensemble.min_successful` — min references that must succeed before degrading (default 2).
@@ -45,10 +47,34 @@ Configured by `ensemble.*` (see [Settings](SETTINGS.md)):
 ## roundtable — review / debate panel
 
 Runs multiple rounds; each round's panel sees the prior round and returns the
-best round's artifact. Each panelist runs **without file tools** and gets a
-**distinct persona** (security, architect, QA, contrarian, constructive
-reviewer), so it reviews the artifact you give it instead of wandering the
-filesystem — and tool-less models (e.g. codex) can still participate.
+best round's artifact. Review panelists get read-only Aimee index tools and a
+diverse persona lineup (original-request alignment, security, architect, QA,
+contrarian, constructive reviewer).
+
+Every review must explicitly report `original_request_alignment` as `aligned`,
+`drifted`, or `unclear`, with a comparison to the originating request. A useful
+refinement remains aligned; substituting an unrelated goal or deliverable is
+drift. WFE gates fail closed on `drifted`, `unclear`, or an omitted assessment,
+so implementation quality cannot accidentally earn approval for work that does
+not answer the request.
+
+Roundtable participation metadata follows three rules:
+
+- `participants_failed` counts unusable responses in the adopted best round;
+  `participants_required_failed` counts the subset in its caller-authored,
+  required prefix. The latter is additive response metadata.
+- Automatically filled capacity seats are always attempted and remain visible
+  in the total, but their transient failures do not by themselves degrade a
+  roundtable whose required seats all responded. Their usable reviews still
+  contribute normally to the consolidated artifact.
+- `required_participants == 0` preserves the legacy all-required behavior. A
+  value larger than the effective panel fails closed before invoking a model.
+
+`degraded` describes the run as a whole and is intentionally sticky across
+rounds: truncation, a failed required seat, insufficient successful responses,
+an aggregator failure, or verification degradation cannot be hidden merely by
+selecting a later artifact. Consequently, an adopted round with zero required
+failures does not clear an earlier run-level degradation.
 
 ```bash
 aimee ensemble roundtable "Is this migration plan sound?" --mode review

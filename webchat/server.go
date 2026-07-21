@@ -194,6 +194,8 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workflow/defs", s.requireAuth(s.handleWorkflowDefs))
 	mux.HandleFunc("/api/workflow/defs/", s.requireAuth(s.handleWorkflowDefs))
 	mux.HandleFunc("/api/workflow/triggers", s.requireAuth(s.handleWorkflowTriggers))
+	mux.HandleFunc("/api/workflow/config", s.requireAuth(s.handleWorkflowConfig))
+	mux.HandleFunc("/api/workflow/config/set", s.requireAuth(s.handleWorkflowConfigSet))
 	mux.HandleFunc("/api/workflow/validate", s.requireAuth(s.handleWorkflowValidate))
 	mux.HandleFunc("/api/workflow/save", s.requireAuth(s.handleWorkflowSave))
 	mux.HandleFunc("/api/workflow/items", s.requireAuth(s.handleWorkflowItems))

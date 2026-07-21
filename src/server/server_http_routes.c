@@ -1070,12 +1070,6 @@ static void op_run_worker_run(void *arg)
    compute_pool_clear_job();
 }
 
-static void *op_run_worker_thread(void *arg)
-{
-   op_run_worker_run(arg);
-   return NULL;
-}
-
 static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
                                   int preflight_caps, char *resp, int cap)
 {
@@ -1147,35 +1141,37 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    j->created = created;
 
    server_ctx_t *ctx = server_active_ctx();
-   if (ctx)
+   /* Every async operation has the same server-owned lifecycle. Keeping them in
+    * one dedicated pool prevents a newly registered coordinator from silently
+    * falling back to the generic compute lane, and makes shutdown authoritative. */
+   if (ctx && ctx->orchestration_pool_initialized)
    {
-      if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
+      int submit_rc = compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j);
+      if (submit_rc != COMPUTE_POOL_SUBMIT_OK)
       {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"compute queue full\"}");
+         const char *message = submit_rc == COMPUTE_POOL_SUBMIT_CLOSED ? "orchestration unavailable"
+                                                                       : "orchestration queue full";
+         char detail[96];
+         snprintf(detail, sizeof(detail), "{\"error\":\"%s\"}", message);
+         char *failed = op_run_snapshot(id, op_method, "failed", created, detail);
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
          free(j);
          free(queued);
-         return err_json(resp, cap, 503, "compute queue full");
+         return err_json(resp, cap, 503, message);
       }
    }
    else
    {
-      pthread_t th;
-      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
-      {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"could not start run\"}");
-         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-         free(failed);
-         free(j->line);
-         free(j);
-         free(queued);
-         return err_json(resp, cap, 500, "could not start run");
-      }
-      pthread_detach(th);
+      char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                     "{\"error\":\"orchestration unavailable\"}");
+      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+      free(failed);
+      free(j->line);
+      free(j);
+      free(queued);
+      return err_json(resp, cap, 503, "orchestration unavailable");
    }
 
    int n = snprintf(resp, (size_t)cap, "%s", queued);
@@ -1944,6 +1940,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
+     * requires a kernel-attested uid: principal, making this route UDS-only. */
+    {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_internal_forge_execute},
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
@@ -2104,6 +2104,9 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
 {
    if (!method || !path || !resp || resp_cap <= 0)
       return err_json(resp, resp_cap, 400, "bad request");
+   if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
+       strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
+      return err_json(resp, resp_cap, 410, "Go WFE control plane owns this endpoint");
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)

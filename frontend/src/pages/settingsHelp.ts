@@ -51,7 +51,7 @@ export const FIELD_HELP: Record<string, string> = {
   "autonomy.stale_abandon_secs":
     "Grace period before a run parked in a cap/stuck backstop is reaped → abandoned. Default 3600 (1 h). 0 disables the reaper.",
   "autonomy.concurrency":
-    "Max autonomous runs driven concurrently per scheduler sweep. Default 8.",
+    "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
   "autonomy.auto_resume_cap_parks":
     "When on (default), the scheduler auto-resumes a wall-cap park to give a long run a fresh wall window instead of leaving it to be reaped — so autonomous runs drive to completion unattended. Bounded by max_resumes. Turn-cap parks are never auto-resumed (raise max_turns instead).",
   "autonomy.max_resumes":

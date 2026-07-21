@@ -48,7 +48,7 @@ func (s *server) v1RequestWebuserT(ctx context.Context, username, method, path s
 	if token == "" || username == "" {
 		return http.StatusUnauthorized, nil, errNoVaultTrust
 	}
-	sock := s.aimeeHTTPSockPath()
+	sock := s.aimeeHTTPSockPathFor(path)
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{

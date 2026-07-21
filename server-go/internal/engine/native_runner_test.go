@@ -1,0 +1,525 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/wfe"
+)
+
+type temporaryFailureAgents struct {
+	mu       sync.Mutex
+	requests []DelegateRequest
+}
+
+type noRosterAgents struct{}
+
+func (noRosterAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, errors.New("unexpected delegate call")
+}
+
+func (a *temporaryFailureAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	a.mu.Lock()
+	a.requests = append(a.requests, request)
+	a.mu.Unlock()
+	if request.Delegate != "" {
+		return DelegateResult{}, errors.New("subscription temporarily exhausted")
+	}
+	return DelegateResult{Response: `{"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
+type recordingAgents struct {
+	mu             sync.Mutex
+	requests       []DelegateRequest
+	reviewResponse string
+	draftResponses []string
+}
+
+func (a *recordingAgents) EligibleAgents(_ context.Context, _ string) ([]EligibleAgent, error) {
+	return []EligibleAgent{
+		{Name: "kimi", Provider: "moonshot", MaxParallel: 1},
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 2},
+	}, nil
+}
+
+func (a *recordingAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	a.mu.Lock()
+	a.requests = append(a.requests, request)
+	requestIndex := len(a.requests) - 1
+	a.mu.Unlock()
+	if request.Role == "review" {
+		response := a.reviewResponse
+		if response == "" {
+			response = `{"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
+		}
+		return DelegateResult{Response: response}, nil
+	}
+	if requestIndex < len(a.draftResponses) {
+		return DelegateResult{Response: a.draftResponses[requestIndex]}, nil
+	}
+	return DelegateResult{Response: strings.Repeat("complete plan λ\n", 200_000) + "PLAN_END"}, nil
+}
+
+func TestStructuredCorrectiveSynthesisIncludesCompleteInvalidResponse(t *testing.T) {
+	invalid := `{"schema_version":1,"status":"unconfirmed","summary":"scope","rationale":"why","acceptance_criteria":["first",""$AIMEE_HOME"]}`
+	valid := `{"schema_version":1,"status":"unconfirmed","summary":"scope","rationale":"why","acceptance_criteria":["first","$AIMEE_HOME"]}`
+	agents := &recordingAgents{draftResponses: []string{invalid, valid}}
+	runner := &NativeRunner{agents: agents}
+	result, err := runner.structured(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{Repo: "/repo"},
+		Node:     wfe.Node{ID: "scope"},
+		Proposal: "document recovery",
+	}, "intent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.Artifact != valid {
+		t.Fatalf("result=%+v", result)
+	}
+	if len(agents.requests) != 2 {
+		t.Fatalf("requests=%d", len(agents.requests))
+	}
+	repairPrompt := agents.requests[1].Prompt
+	if !strings.Contains(repairPrompt, invalid) || !strings.Contains(repairPrompt, "PREVIOUS RESPONSE WAS INVALID") {
+		t.Fatalf("repair prompt omitted complete invalid artifact or validation feedback: %q", repairPrompt)
+	}
+}
+
+func TestNativeRoundtableFailsClosedOnOriginalRequestDriftOrOmission(t *testing.T) {
+	tests := []struct {
+		name, response, wantStatus string
+		wantFindings               int
+	}{
+		{"drifted-with-finding", `{"original_request_alignment":{"status":"drifted","summary":"builds an unrelated dashboard"},"verdict":"changes","findings":[{"id":"bug","severity":"blocking","location":"x.go:1","summary":"concrete bug","recommendation":"fix it"}]}`, "drifted", 2},
+		{"unclear", `{"original_request_alignment":{"status":"unclear","summary":"request context is insufficient"},"verdict":"approve","findings":[]}`, "unclear", 1},
+		{"unknown", `{"original_request_alignment":{"status":"partial","summary":"only partly related"},"verdict":"approve","findings":[]}`, "unclear", 1},
+		{"missing", `{"verdict":"approve","findings":[]}`, "unclear", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			agents := &recordingAgents{reviewResponse: tc.response}
+			runner := &NativeRunner{agents: agents}
+			node := wfe.Node{Block: "gate.roundtable", Params: map[string]any{
+				"quorum": 1, "max_rounds": 1,
+				"panel": map[string]any{"required": []any{"original-request"}},
+			}}
+			reviewed := wfe.Artifact{Type: "plan", Content: []byte("unrelated direction")}
+			reviewed.Hash = wfe.Hash(reviewed.Content)
+			result, err := runner.roundtable(context.Background(), StepRequest{
+				WorkItem: db1.WorkItem{Repo: "/repo", Worktree: "/worktree"},
+				Node:     node, Proposal: "fix the scheduler", Inputs: map[string]wfe.Artifact{"src": reviewed},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != StepChanges || result.Feedback == nil || len(result.Feedback.Findings) < tc.wantFindings {
+				t.Fatalf("result=%+v", result)
+			}
+			if !strings.Contains(result.Feedback.Findings[0].Summary, "alignment is "+tc.wantStatus) {
+				t.Fatalf("finding=%+v", result.Feedback.Findings[0])
+			}
+			if tc.name == "drifted-with-finding" {
+				seenAlignment, seenBug := false, false
+				for _, finding := range result.Feedback.Findings {
+					seenAlignment = seenAlignment || strings.HasSuffix(finding.ID, "-original-request-alignment")
+					seenBug = seenBug || finding.ID == "bug"
+				}
+				if !seenAlignment || !seenBug {
+					t.Fatalf("alignment or concrete finding lost: %+v", result.Feedback.Findings)
+				}
+			}
+		})
+	}
+}
+
+func TestNativeRoundtableFailsClosedWithoutLiveRosterCapability(t *testing.T) {
+	runner := &NativeRunner{agents: noRosterAgents{}}
+	result, err := runner.roundtable(context.Background(), StepRequest{Node: wfe.Node{Params: map[string]any{
+		"panel": map[string]any{"required": []any{"security"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "panel_wiring_missing" || !strings.Contains(result.Detail, "live eligible roster") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents}
+	proposal := strings.Repeat("proposal 漢字\n", 200_000) + "PROPOSAL_END"
+	proposalArtifact := wfe.Artifact{Type: "proposal", Content: []byte(proposal), Hash: wfe.Hash([]byte(proposal))}
+	planResult, err := runner.author(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo"}, Node: wfe.Node{Params: map[string]any{}}, Proposal: proposal, Inputs: map[string]wfe.Artifact{"proposal": proposalArtifact}}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(planResult.Artifact, "PLAN_END") {
+		t.Fatal("plan response truncated")
+	}
+	plannerPrompt := agents.requests[len(agents.requests)-1].Prompt
+	if len(agents.requests) != 1 || !strings.Contains(plannerPrompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(plannerPrompt, "\n\nPROPOSAL:\n") {
+		t.Fatalf("planner did not frame its source as the original request: %+v", agents.requests)
+	}
+	customBlock := wfe.BlockDefinition{Name: "custom", Custom: true, Produces: "report", Prompt: "Do the work."}
+	_, err = runner.custom(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo"}, Proposal: proposal}, customBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	customPrompt := agents.requests[len(agents.requests)-1].Prompt
+	if len(agents.requests) != 2 || !strings.Contains(customPrompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(customPrompt, "\n\nPROPOSAL:\n") {
+		t.Fatalf("custom block did not frame its source as the original request: %+v", agents.requests)
+	}
+	node := wfe.Node{Block: "gate.roundtable", Params: map[string]any{"quorum": 2, "panel": map[string]any{
+		"required": []any{"security", "qa"}, "eligible": []any{"contrarian"}, "pins": map[string]any{"security": "kimi"},
+	}}}
+	reviewed := wfe.Artifact{Type: "frozen_diff", Content: []byte(strings.Repeat("diff\n", 300_000) + "DIFF_END")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo", Worktree: "/worktree"}, Node: node, Proposal: proposal, Inputs: map[string]wfe.Artifact{"src": reviewed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced {
+		t.Fatalf("result=%+v", result)
+	}
+	agents.mu.Lock()
+	defer agents.mu.Unlock()
+	if len(agents.requests) != 5 {
+		t.Fatalf("requests=%d", len(agents.requests))
+	}
+	foundPin, foundDynamicQA := false, false
+	for _, request := range agents.requests {
+		if !strings.Contains(request.Prompt, "ORIGINAL REQUEST:\n"+proposal) || request.Role == "review" && !strings.Contains(request.Prompt, string(reviewed.Content)) {
+			t.Fatal("runner truncated a source artifact")
+		}
+		if request.Role == "review" && (!strings.Contains(request.Prompt, "ORIGINAL REQUEST:\n"+proposal) || strings.Contains(request.Prompt, "\n\nPROPOSAL:\n") || strings.Contains(request.Prompt, "complete proposal")) {
+			t.Fatal("roundtable did not frame the source as the original request")
+		}
+		if request.Persona == "security" && request.Delegate == "kimi" {
+			foundPin = true
+		}
+		if request.Persona == "qa" && request.Delegate != "" && request.Delegate != "kimi" {
+			foundDynamicQA = true
+		}
+	}
+	if !foundPin || !foundDynamicQA {
+		t.Fatalf("UI pin semantics not preserved: %+v", agents.requests)
+	}
+}
+
+func TestFillPanelCapacityUsesEverySlotWithDiversityFirst(t *testing.T) {
+	configured := []panelSeat{
+		{persona: "security", delegate: "codex", required: true},
+		{persona: "qa", required: true},
+		{persona: "contrarian", required: false},
+	}
+	roster := []EligibleAgent{
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 3},
+		{Name: "minimax", Provider: "anthropic", MaxParallel: 2},
+	}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 5 {
+		t.Fatalf("seats=%+v", seats)
+	}
+	got := []string{seats[0].delegate, seats[1].delegate, seats[2].delegate, seats[3].delegate, seats[4].delegate}
+	want := []string{"codex", "minimax", "codex", "minimax", "codex"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("delegates=%v want=%v", got, want)
+		}
+	}
+	if !seats[0].required || !seats[1].required || seats[2].required || seats[3].required || seats[4].required {
+		t.Fatalf("required prefix not preserved: %+v", seats)
+	}
+}
+
+func TestFillPanelCapacityInterleavesProvidersBeforeFillingAllSeats(t *testing.T) {
+	configured := []panelSeat{{persona: "correctness"}}
+	roster := []EligibleAgent{
+		{Name: "codex-a", Provider: "openai", MaxParallel: 2},
+		{Name: "codex-b", Provider: "openai", MaxParallel: 1},
+		{Name: "minimax", Provider: "minimax", MaxParallel: 2},
+	}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, seat := range seats {
+		got = append(got, seat.delegate)
+	}
+	want := []string{"codex-a", "minimax", "codex-b", "codex-a", "minimax"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("delegates=%v want=%v", got, want)
+	}
+}
+
+func TestFillPanelCapacityExhaustsAsymmetricCapacity(t *testing.T) {
+	seats, err := fillPanelCapacity([]panelSeat{{persona: "review"}}, []EligibleAgent{
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 3},
+		{Name: "minimax", Provider: "anthropic", MaxParallel: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, seat := range seats {
+		got = append(got, seat.delegate)
+	}
+	if strings.Join(got, ",") != "codex,minimax,codex,codex" {
+		t.Fatalf("asymmetric capacity was not exhausted: %v", got)
+	}
+}
+
+func TestFillPanelCapacityRepeatsAllRequiredLensesWithoutWeakeningThem(t *testing.T) {
+	seats, err := fillPanelCapacity([]panelSeat{{persona: "security", required: true}}, []EligibleAgent{{Name: "codex", MaxParallel: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 3 || !seats[0].required || seats[1].required || seats[2].required {
+		t.Fatalf("required seat semantics changed during capacity fill: %+v", seats)
+	}
+	for _, seat := range seats {
+		if seat.persona != "security" {
+			t.Fatalf("configured review lens was replaced: %+v", seats)
+		}
+	}
+}
+
+func TestFillPanelCapacityCyclesEveryConfiguredLensInMixedPanel(t *testing.T) {
+	seats, err := fillPanelCapacity([]panelSeat{
+		{persona: "security", required: true},
+		{persona: "contrarian"},
+	}, []EligibleAgent{{Name: "codex", MaxParallel: 4}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 4 || seats[2].persona != "security" || seats[3].persona != "contrarian" {
+		t.Fatalf("surplus seats did not cycle every configured lens: %+v", seats)
+	}
+}
+
+func TestFillPanelCapacityUsesDistinctAgentsForRequiredSeatsWhenAvailable(t *testing.T) {
+	configured := []panelSeat{{persona: "security", required: true}, {persona: "qa", required: true}}
+	roster := []EligibleAgent{
+		{Name: "codex", Provider: "chatgpt", MaxParallel: 2},
+		{Name: "minimax", Provider: "anthropic", MaxParallel: 2},
+	}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 4 || seats[0].delegate != "codex" || seats[1].delegate != "minimax" {
+		t.Fatalf("required seats did not consume distinct diversity-first slots: %+v", seats)
+	}
+}
+
+func TestFillPanelCapacityBackfillsUnavailableOptionalPin(t *testing.T) {
+	configured := []panelSeat{{persona: "security", required: true}, {persona: "qa", delegate: "unavailable", pinned: true}}
+	roster := []EligibleAgent{{Name: "codex", MaxParallel: 2}, {Name: "minimax", MaxParallel: 1}}
+	seats, err := fillPanelCapacity(configured, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 3 {
+		t.Fatalf("optional pin under-filled live capacity: %+v", seats)
+	}
+	for _, seat := range seats {
+		if seat.delegate == "unavailable" {
+			t.Fatalf("unavailable optional positive pin survived eligibility: %+v", seats)
+		}
+	}
+}
+
+func TestFillPanelCapacityRejectsUnavailableRequiredPinButSkipsOptionalPin(t *testing.T) {
+	roster := []EligibleAgent{{Name: "codex", MaxParallel: 2}}
+	if _, err := fillPanelCapacity([]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, roster); err == nil {
+		t.Fatal("unavailable required pin accepted")
+	}
+	seats, err := fillPanelCapacity([]panelSeat{{persona: "qa", required: true}, {persona: "security", delegate: "kimi"}}, roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seats) != 2 || seats[0].delegate != "codex" || seats[1].delegate != "codex" {
+		t.Fatalf("seats=%+v", seats)
+	}
+}
+
+func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.T) {
+	agents := &temporaryFailureAgents{}
+	runner := &NativeRunner{agents: agents}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req,
+		[]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, "review", "hash")
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 {
+		t.Fatalf("dynamic assignment did not recover: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
+	}
+	if len(agents.requests) != 2 || agents.requests[0].Delegate != "kimi" || agents.requests[1].Delegate != "" || agents.requests[1].RetryTag != "eligible-fallback:0:kimi" {
+		t.Fatalf("requests=%+v", agents.requests)
+	}
+
+	agents = &temporaryFailureAgents{}
+	runner.agents = agents
+	_, _, _, _, unreachable = runner.runPanelRound(context.Background(), req,
+		[]panelSeat{{persona: "qa", delegate: "kimi", required: true, pinned: true}}, "review", "hash")
+	if unreachable == "" || len(agents.requests) != 1 {
+		t.Fatalf("explicit pin was silently weakened: requests=%+v unreachable=%q", agents.requests, unreachable)
+	}
+}
+
+func TestExtractJSONObjectIgnoresProviderSuffix(t *testing.T) {
+	expected := `{"schema_version":1,"summary":"brace } and escaped quote \" stay data","acceptance_criteria":["done"]}`
+	response := "```json\n" +
+		expected +
+		"\n```\n$ git status\n" + `{"diagnostic":true}`
+	doc, err := extractJSONObject(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != expected {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+	if strings.Contains(string(doc), "diagnostic") {
+		t.Fatalf("extracted trailing provider diagnostic: %s", doc)
+	}
+}
+
+func TestExtractJSONObjectSkipsMalformedObjectPreamble(t *testing.T) {
+	doc, err := extractJSONObject(`explanation {not json} then {"verdict":"approve","findings":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != `{"verdict":"approve","findings":[]}` {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectDoesNotPromoteNestedMalformedPayload(t *testing.T) {
+	for _, response := range []string{
+		`{"broken":,"payload":{"verdict":"approve","findings":[]}}`,
+		`{"a":]}`,
+		`{"broken":[} {"verdict":"approve","findings":[]} ]}`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("accepted nested or mismatched payload %q as %s", response, doc)
+		}
+	}
+}
+
+func TestExtractJSONObjectDoesNotPromoteObjectFromTopLevelArray(t *testing.T) {
+	for _, response := range []string{
+		`[{"ok":true}]`,
+		`[broken,{"ok":true}]`,
+		`[[{"ok":true}]]`,
+		`[{"ok":true}`,
+		`[{"a":1,`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("promoted nested array object from %q as %s", response, doc)
+		}
+	}
+}
+
+func TestExtractJSONObjectReturnsFirstAdjacentObject(t *testing.T) {
+	doc, err := extractJSONObject(`{"a":1}{"b":2}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != `{"a":1}` {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectAcceptsClosingBraceInsideString(t *testing.T) {
+	expected := `{"a":"}"}`
+	doc, err := extractJSONObject(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != expected {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectRejectsTruncatedAndProseResponses(t *testing.T) {
+	for _, response := range []string{
+		`{"a":"unterminated\\`,
+		`{"a":"unterminated\`,
+		`{"a":"\\\"}{"b":1}`,
+		"provider returned prose",
+		"{",
+		`provider { broken {"a":1}`,
+		`{"a":}}`,
+		`{,}`,
+		`{"a":1,}`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("accepted invalid response %q as %s", response, doc)
+		}
+	}
+}
+
+func TestExtractJSONObjectSkipsManyDisjointMalformedCandidates(t *testing.T) {
+	const malformedCandidates = 10_000
+	for _, malformed := range []string{`{,}`, `{"a":null,}`} {
+		response := strings.Repeat(malformed, malformedCandidates) + `{"ok":true}`
+		doc, err := extractJSONObject(response)
+		if err != nil {
+			t.Fatalf("failed after %d copies of %q: %v", malformedCandidates, malformed, err)
+		}
+		if got := string(doc); got != `{"ok":true}` {
+			t.Fatalf("wrong object extracted after %d copies of %q: %s", malformedCandidates, malformed, got)
+		}
+	}
+}
+
+func TestExtractJSONObjectSkipsMalformedTokenCandidates(t *testing.T) {
+	for _, malformed := range []string{`{"a":}}`, `{,}`, `{"a":1,}`} {
+		doc, err := extractJSONObject(malformed + `{"ok":true}`)
+		if err != nil {
+			t.Fatalf("failed to recover after %q: %v", malformed, err)
+		}
+		if got := string(doc); got != `{"ok":true}` {
+			t.Fatalf("wrong object extracted after %q: %s", malformed, got)
+		}
+	}
+}
+
+func TestExtractJSONObjectHandlesEscapedQuotesWithoutStateLeak(t *testing.T) {
+	for _, expected := range []string{
+		`{"a":"x\\\"y"}`,
+		`{"a":"\\\""}`,
+	} {
+		response := expected + `{"ok":true}`
+		doc, err := extractJSONObject(response)
+		if err != nil {
+			t.Fatalf("failed escaped-string input %q: %v", response, err)
+		}
+		if got := string(doc); got != expected {
+			t.Fatalf("wrong escaped-string candidate from %q: %s", response, got)
+		}
+	}
+
+	if doc, err := extractJSONObject("{\"a\":\"\\"); err == nil {
+		t.Fatalf("accepted odd-backslash unterminated string as %s", doc)
+	}
+}
+
+func TestExtractJSONObjectFailsClosedAfterMismatchedCandidate(t *testing.T) {
+	for _, response := range []string{
+		`{"a":[}{"ok":true}`,
+		`[} {"ok":true}`,
+		`["x",{"a":[} {"ok":true}]`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("accepted object after ambiguous framing %q as %s", response, doc)
+		}
+	}
+}

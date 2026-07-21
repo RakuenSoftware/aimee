@@ -120,6 +120,23 @@ int wfe_panel_verdicts_from_roundtable(const roundtable_result_t *rt, const char
       out[i].kind = WFE_V_APPROVE; /* refined below by the items */
    }
 
+   /* Alignment is a gate invariant, not an ordinary code-index fact. The
+    * request and artifact are both already in the review packet, so replaying a
+    * symbol lookup cannot validate this semantic comparison. Fail closed on
+    * drift or an omitted/unclear assessment and attach it to lens 0. */
+   if (strcmp(rt->original_request_alignment, "aligned") != 0)
+   {
+      const char *status =
+          rt->original_request_alignment[0] ? rt->original_request_alignment : "unclear";
+      snprintf(out[0].feedback, sizeof out[0].feedback,
+               "- [blocking] original request: alignment is %s: %s", status,
+               rt->original_request_alignment_summary[0]
+                   ? rt->original_request_alignment_summary
+                   : "the panel did not compare the direction to the original request");
+      out[0].kind = WFE_V_REQUEST_CHANGES;
+      out[0].high_sev_blockers++;
+   }
+
    for (int k = 0; k < rt->item_count; k++)
    {
       const roundtable_review_item_t *it = &rt->items[k];

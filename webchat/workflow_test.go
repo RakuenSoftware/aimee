@@ -9,6 +9,16 @@ import (
 	"testing"
 )
 
+func TestWorkflowGlobalConfigRequiresAdministrator(t *testing.T) {
+	s := &server{}
+	req := withUser(httptest.NewRequest(http.MethodPost, "/api/workflow/config/set", strings.NewReader(`{"key":"trigger.max_concurrent","value":2}`)), "alice")
+	rr := httptest.NewRecorder()
+	s.handleWorkflowConfigSet(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403", rr.Code)
+	}
+}
+
 // The Workflow Actions lifecycle controls (Start/Pause/Stop/Delete) call
 // /api/workflow/items/<id>/{pause,resume,stop} (POST) and DELETE
 // /api/workflow/items/<id>. Regression: these once fell through the item proxy's
@@ -123,9 +133,9 @@ func TestWorkflowItemsRejectsTraversal(t *testing.T) {
 		"/api/workflow/items/wi123..evil",
 		"/api/workflow/items/..",
 		"/api/workflow/items/wi123..",
-		"/api/workflow/items/..wi.s0",   // leading traversal mixed with legit dots
-		"/api/workflow/items/wi%25s0",   // %25 -> '%' in the id: percent still rejected
-		"/api/workflow/items/a%2Fb",     // %2F -> '/': a smuggled separator is refused
+		"/api/workflow/items/..wi.s0", // leading traversal mixed with legit dots
+		"/api/workflow/items/wi%25s0", // %25 -> '%' in the id: percent still rejected
+		"/api/workflow/items/a%2Fb",   // %2F -> '/': a smuggled separator is refused
 	} {
 		s := &server{cfg: startFakeV1(t, http.NewServeMux())}
 		req := withUser(httptest.NewRequest(http.MethodGet, apiPath, nil), "alice")
