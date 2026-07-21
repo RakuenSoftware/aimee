@@ -1,0 +1,14 @@
+{
+  "descriptor_version": 1,
+  "id": "skills",
+  "dependencies": [
+    "config",
+    "ir",
+    "memory",
+    "module-runtime",
+    "tools"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

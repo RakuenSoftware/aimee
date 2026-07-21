@@ -1,0 +1,20 @@
+{
+  "descriptor_version": 1,
+  "id": "workflows",
+  "dependencies": [
+    "audit",
+    "config",
+    "delegates",
+    "execution-policy",
+    "ir",
+    "module-runtime",
+    "routing",
+    "skills",
+    "tools",
+    "workspace"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  }
+}

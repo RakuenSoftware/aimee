@@ -1,0 +1,12 @@
+{
+  "descriptor_version": 1,
+  "id": "audit",
+  "dependencies": [
+    "config",
+    "module-runtime",
+    "vault"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

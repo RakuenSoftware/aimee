@@ -1,0 +1,12 @@
+{
+  "descriptor_version": 1,
+  "id": "execution-policy",
+  "dependencies": [
+    "config",
+    "ir",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

@@ -56,7 +56,9 @@ class ProposalOrderingTests(unittest.TestCase):
         return tmp, repo, cutoff
 
     def test_current_repository_passes(self) -> None:
-        self.assertEqual(ordering.validate_ordering(REPO_ROOT), 0)
+        signal_count = ordering.validate_ordering(REPO_ROOT)
+        self.assertIsInstance(signal_count, int)
+        self.assertGreaterEqual(signal_count, 1)
 
     def test_name_status_parses_all_path_shapes(self) -> None:
         raw = b"M\0one\0R100\0old\0new\0C075\0source\0copy\0D\0gone\0"

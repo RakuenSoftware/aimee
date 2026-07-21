@@ -1,0 +1,14 @@
+{
+  "descriptor_version": 1,
+  "id": "plugin-loader",
+  "dependencies": [
+    "audit",
+    "config",
+    "execution-policy",
+    "module-runtime"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  }
+}

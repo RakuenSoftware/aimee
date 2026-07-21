@@ -1,0 +1,15 @@
+{
+  "descriptor_version": 1,
+  "id": "gateway",
+  "dependencies": [
+    "config",
+    "execution-policy",
+    "ir",
+    "module-runtime",
+    "protocols",
+    "translation"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

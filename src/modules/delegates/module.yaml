@@ -1,0 +1,18 @@
+{
+  "descriptor_version": 1,
+  "id": "delegates",
+  "dependencies": [
+    "audit",
+    "config",
+    "execution-policy",
+    "ir",
+    "module-runtime",
+    "routing",
+    "tools",
+    "vault",
+    "workspace"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

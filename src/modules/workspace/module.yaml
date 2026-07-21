@@ -1,0 +1,13 @@
+{
+  "descriptor_version": 1,
+  "id": "workspace",
+  "dependencies": [
+    "config",
+    "execution-policy",
+    "module-runtime",
+    "vault"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}
