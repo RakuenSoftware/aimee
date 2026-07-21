@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 )
 
 var (
@@ -302,6 +303,13 @@ func syncDir(path string) error {
 	}
 	defer dir.Close()
 	if err := dir.Sync(); err != nil {
+		// Some durable appliance filesystems (including SmoothFS) make file
+		// fsync durable but reject fsync on directory descriptors with EINVAL or
+		// ENOTSUP. The rename/write has already succeeded; treat only those
+		// explicit "operation unsupported" results as the portable fallback.
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+			return nil
+		}
 		return fmt.Errorf("sync artifact directory: %w", err)
 	}
 	return nil
