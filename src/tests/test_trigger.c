@@ -112,6 +112,8 @@ static char g_symref_out[256];      /* canned `git symbolic-ref` stdout ("" -> r
 static char g_lstree_out[8192];     /* canned `git ls-tree` stdout */
 static char g_lstree_ref[256];      /* captured ref arg passed to ls-tree */
 static char g_lstree_pathspec[512]; /* captured pathspec arg passed to ls-tree */
+static char g_fetch_branch[256];    /* captured remote refspec branch */
+static int g_fetch_rc;              /* 0 lets a scheduled-ref refresh succeed */
 static struct
 {
    char sha[41];
@@ -132,7 +134,9 @@ static int g_notify_count; /* wfe_scheduler_notify() invocations */
 
 static void trig_stub_reset(void)
 {
-   g_symref_out[0] = g_lstree_out[0] = g_lstree_ref[0] = g_lstree_pathspec[0] = '\0';
+   g_symref_out[0] = g_lstree_out[0] = g_lstree_ref[0] = g_lstree_pathspec[0] = g_fetch_branch[0] =
+       '\0';
+   g_fetch_rc = 1;
    g_nblobs = 0;
    g_ncreated = 0;
    g_notify_count = 0;
@@ -156,7 +160,7 @@ int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
    if (!argv || !argv[0])
       return 1;
 
-   int is_lstree = 0, is_catfile = 0, is_symref = 0, dashdash = -1;
+   int is_lstree = 0, is_catfile = 0, is_symref = 0, is_fetch = 0, dashdash = -1;
    const char *sha = NULL, *ref = NULL;
    for (int i = 0; argv[i]; i++)
    {
@@ -170,8 +174,19 @@ int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
          is_catfile = 1;
       if (strcmp(argv[i], "symbolic-ref") == 0)
          is_symref = 1;
+      if (strcmp(argv[i], "fetch") == 0)
+         is_fetch = 1;
       if (strcmp(argv[i], "--") == 0)
          dashdash = i;
+   }
+   if (is_fetch)
+   {
+      for (int i = 0; argv[i]; i++)
+         if (strncmp(argv[i], "+refs/heads/", 12) == 0)
+            snprintf(g_fetch_branch, sizeof g_fetch_branch, "%s", argv[i]);
+      if (out)
+         *out = strdup("");
+      return g_fetch_rc;
    }
    if (is_symref)
    {
@@ -217,12 +232,27 @@ int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, ch
       if (strcmp(g_created[i].repo, repo) == 0 && strcmp(g_created[i].path, proposal_path) == 0)
       {
          if (out_id && out_id_len > 0)
-            snprintf(out_id, out_id_len, "wi_existing");
+            snprintf(out_id, out_id_len, "wi_%d", i + 1);
          return 1;
       }
    if (out_id && out_id_len > 0)
       out_id[0] = '\0';
    return 0;
+}
+
+int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
+{
+   int idx = work_item_id && strncmp(work_item_id, "wi_", 3) == 0 ? atoi(work_item_id + 3) - 1 : -1;
+   if (!out || idx < 0 || idx >= g_ncreated)
+      return 0;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->work_item_id, sizeof out->work_item_id, "wi_%d", idx + 1);
+   snprintf(out->repo, sizeof out->repo, "%s", g_created[idx].repo);
+   snprintf(out->proposal_path, sizeof out->proposal_path, "%s", g_created[idx].path);
+   snprintf(out->workflow_name, sizeof out->workflow_name, "%s", g_created[idx].wf);
+   snprintf(out->mode, sizeof out->mode, "%s", g_created[idx].mode);
+   snprintf(out->state, sizeof out->state, "%s", g_created[idx].state);
+   return 1;
 }
 
 int wfe_work_item_create(const char *workflow_name, const char *repo, const char *proposal_path,
@@ -272,6 +302,8 @@ int db1_work_item_list(db1_work_item_t **out)
       snprintf(items[i].work_item_id, sizeof items[i].work_item_id, "wi_%d", i + 1);
       snprintf(items[i].proposal_path, sizeof items[i].proposal_path, "%s", g_created[i].path);
       snprintf(items[i].state, sizeof items[i].state, "%s", g_created[i].state);
+      snprintf(items[i].workflow_name, sizeof items[i].workflow_name, "%s", g_created[i].wf);
+      snprintf(items[i].mode, sizeof items[i].mode, "%s", g_created[i].mode);
    }
    *out = items;
    return g_ncreated;
@@ -931,6 +963,24 @@ static void test_scan_proposals_custom_event_and_schedule(void)
    printf("  PASS: test_scan_proposals_custom_event_and_schedule\n");
 }
 
+static void test_scheduled_ref_refreshes_origin(void)
+{
+   trig_stub_reset();
+   g_fetch_rc = 0;
+   char ref[256];
+   trigger_resolve_ref("/repo/aimee", "testing", ref, sizeof(ref));
+   assert(strcmp(ref, "origin/testing") == 0);
+   assert(strcmp(g_fetch_branch, "+refs/heads/testing:refs/remotes/origin/testing") == 0);
+
+   /* Unsafe/unusual schedules are never interpolated into a fetch refspec. */
+   trig_stub_reset();
+   g_fetch_rc = 0;
+   trigger_resolve_ref("/repo/aimee", "bad:ref", ref, sizeof(ref));
+   assert(strcmp(ref, "bad:ref") == 0);
+   assert(g_fetch_branch[0] == '\0');
+   printf("  PASS: test_scheduled_ref_refreshes_origin\n");
+}
+
 static void test_scan_proposals_rejects_unsafe_ref_and_path(void)
 {
    snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-%d", (int)getpid());
@@ -1096,6 +1146,47 @@ static void test_scan_proposals_enforces_max_concurrent(void)
    printf("  PASS: test_scan_proposals_enforces_max_concurrent\n");
 }
 
+/* A pre-autonomy trigger row must neither occupy an autonomous slot nor
+ * permanently deduplicate the proposal for the current workflow lane. */
+static void test_scan_proposals_supersedes_legacy_interactive_binding(void)
+{
+   trig_stub_reset();
+   snprintf(g_home, sizeof g_home, "/tmp/aimee-trigtest-legacy-%d", (int)getpid());
+   mkdir(g_home, 0700);
+   snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
+   snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
+   snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# A\n");
+   g_nblobs = 1;
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\t"
+            "docs/proposals/pending/a.md\n");
+
+   snprintf(g_created[0].wf, sizeof g_created[0].wf, "build-triggered");
+   snprintf(g_created[0].repo, sizeof g_created[0].repo, "/repo/aimee");
+   snprintf(g_created[0].path, sizeof g_created[0].path, "%s/triggers/proposals/%s.md", g_home,
+            g_blobs[0].sha);
+   snprintf(g_created[0].mode, sizeof g_created[0].mode, "interactive");
+   snprintf(g_created[0].state, sizeof g_created[0].state, "active");
+   g_ncreated = 1;
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+
+   scan_proposals(&rule, 1);
+   assert(g_ncreated == 2);
+   assert(strcmp(g_created[1].wf, "build") == 0);
+   assert(strcmp(g_created[1].mode, "autonomous") == 0);
+   assert(strstr(g_created[1].path, ".build.autonomous.md") != NULL);
+
+   /* The deterministic lane-scoped replacement deduplicates subsequent scans. */
+   scan_proposals(&rule, 1);
+   assert(g_ncreated == 2);
+   printf("  PASS: test_scan_proposals_supersedes_legacy_interactive_binding\n");
+}
+
 /* The trigger-source registry: rules dispatch by source name; a scanner source
  * is due on every pass, cron only on a schedule match, and an unknown source
  * is skipped (no registry row -> no fire). */
@@ -1186,10 +1277,12 @@ int main(void)
    test_scan_proposals_honors_explicit_mode();
    test_scan_proposals_requires_workspace_and_workflow();
    test_scan_proposals_custom_event_and_schedule();
+   test_scheduled_ref_refreshes_origin();
    test_scan_proposals_rejects_unsafe_ref_and_path();
    test_scan_proposals_notifies_scheduler();
    test_scan_proposals_applies_cost_cap();
    test_scan_proposals_enforces_max_concurrent();
+   test_scan_proposals_supersedes_legacy_interactive_binding();
    test_trigger_source_registry();
    test_proposal_name_matches();
    printf("All tests passed.\n");
