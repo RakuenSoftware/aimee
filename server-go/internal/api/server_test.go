@@ -141,6 +141,9 @@ nodes:
 	if err := os.WriteFile(filepath.Join(proposalDir, "large.md"), []byte(proposal), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink("large.md", filepath.Join(proposalDir, "linked.md")); err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, repo, "init")
 	runGit(t, repo, "config", "user.email", "test@example.invalid")
 	runGit(t, repo, "config", "user.name", "Test")
@@ -179,6 +182,13 @@ nodes:
 	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already filed") {
 		t.Fatalf("duplicate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	linkedBody := []byte(`{"source":"proposals","proposal":"linked","workspace":` +
+		strconv.Quote(repo) + `,"ref":"HEAD","pipeline":"build","mode":"autonomous"}`)
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(linkedBody)))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "not found") {
+		t.Fatalf("symlink status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

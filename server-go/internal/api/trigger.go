@@ -346,12 +346,16 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if err != nil {
 		return "", "", err
 	}
-	listing, err := gitOutput(ctx, workspace, "ls-tree", "-r", "-z", "--name-only", commit, "--", cleanDirectory)
+	listing, err := gitOutput(ctx, workspace, "ls-tree", "-r", "-z", commit, "--", cleanDirectory)
 	if err != nil {
 		return "", "", fmt.Errorf("list pending proposals: %w", err)
 	}
 	proposalPath := ""
-	for _, candidate := range strings.Split(string(listing), "\x00") {
+	for _, record := range strings.Split(string(listing), "\x00") {
+		candidate, regular := regularTreePath(record)
+		if !regular {
+			continue
+		}
 		if proposalMatches(candidate, request.Proposal) {
 			if proposalPath != "" && proposalPath != candidate {
 				return "", "", fmt.Errorf("proposal selector %q is ambiguous", request.Proposal)
