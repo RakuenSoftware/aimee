@@ -4701,6 +4701,8 @@ CREATE TABLE IF NOT EXISTS org_model_catalog (
      'cross-region-inference-profile')),
   aws_partition TEXT CHECK (aws_partition IS NULL OR aws_partition IN
     ('aws','aws-us-gov','aws-cn')),
+  aws_invoke_region TEXT CHECK (aws_invoke_region IS NULL OR
+    aws_invoke_region ~ '^[a-z0-9-]{1,63}$'),
   aws_account TEXT,
   aws_region_set TEXT[],
   underlying_fm_arns TEXT[],
@@ -4717,9 +4719,14 @@ ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS bedrock_api TEXT;
 ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS model_family TEXT;
 ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS bedrock_target_type TEXT;
 ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_partition TEXT;
+ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_invoke_region TEXT;
 ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_account TEXT;
 ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS aws_region_set TEXT[];
 ALTER TABLE org_model_catalog ADD COLUMN IF NOT EXISTS underlying_fm_arns TEXT[];
+ALTER TABLE org_model_catalog DROP CONSTRAINT IF EXISTS org_model_catalog_invoke_region_chk;
+ALTER TABLE org_model_catalog ADD CONSTRAINT org_model_catalog_invoke_region_chk CHECK
+  (aws_invoke_region IS NULL OR
+   aws_invoke_region ~ '^[a-z0-9-]{1,63}$');
 ALTER TABLE org_model_catalog DROP CONSTRAINT IF EXISTS org_model_catalog_wire_check;
 ALTER TABLE org_model_catalog DROP CONSTRAINT IF EXISTS org_model_catalog_wire_chk;
 ALTER TABLE org_model_catalog ADD CONSTRAINT org_model_catalog_wire_chk
@@ -4859,15 +4866,27 @@ $$;
 -- bedrock_target_t that P6a bedrock_session_policy will accept. Every array element is
 -- charset-validated BEFORE use (no raw concatenation; the arrays are bound parameters, not
 -- built literals). Sets provider='bedrock', wire='bedrock'.
-CREATE OR REPLACE FUNCTION org_catalog_bedrock_upsert(
-  p_model_id TEXT, p_display_name TEXT, p_api TEXT, p_family TEXT, p_target_type TEXT,
-  p_partition TEXT, p_account TEXT, p_region_set TEXT[], p_underlying_fm_arns TEXT[],
-  p_endpoint TEXT, p_enabled BOOLEAN
-) RETURNS BIGINT
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_id BIGINT; v_elem TEXT;
+DO $drop_obsolete_bedrock_upsert$
 BEGIN
-  IF NOT kb_principal_is_admin() THEN
+  IF pg_catalog.to_regprocedure(
+       'public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean)')
+     IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean) FROM PUBLIC';
+    EXECUTE 'REVOKE ALL ON FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean) FROM aimee_kb_runtime';
+    EXECUTE 'DROP FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean)';
+  END IF;
+END $drop_obsolete_bedrock_upsert$;
+
+CREATE OR REPLACE FUNCTION public.org_catalog_bedrock_upsert(
+  p_model_id TEXT, p_display_name TEXT, p_api TEXT, p_family TEXT, p_target_type TEXT,
+  p_partition TEXT, p_invoke_region TEXT, p_account TEXT, p_region_set TEXT[],
+  p_underlying_fm_arns TEXT[], p_endpoint TEXT, p_enabled BOOLEAN
+) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE v_id BIGINT; v_elem TEXT; v_region TEXT;
+BEGIN
+  IF NOT public.kb_principal_is_admin() THEN
     RAISE EXCEPTION 'org_catalog_bedrock_upsert: admin only' USING ERRCODE = '42501';
   END IF;
   -- model_id doubles as the P6a target id (already CHECK'd 1..200 on the column); also
@@ -4882,7 +4901,7 @@ BEGIN
   END IF;
   -- Fail-closed adapter registry: reject any (api, family) pair with no registered adapter
   -- (covers an empty/NULL/unknown/typo family and (invoke, non-anthropic)).
-  IF NOT org_bedrock_adapter_supported(p_api, p_family) THEN
+  IF NOT public.org_bedrock_adapter_supported(p_api, p_family) THEN
     RAISE EXCEPTION 'org_catalog_bedrock_upsert: no adapter for (api=%, family=%)',
       p_api, p_family USING ERRCODE = '22023';
   END IF;
@@ -4896,21 +4915,49 @@ BEGIN
     RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid partition %', p_partition
       USING ERRCODE = '22023';
   END IF;
-  -- region_set: non-empty, every element non-empty/non-whitespace + safe charset.
-  IF p_region_set IS NULL OR array_length(p_region_set, 1) IS NULL THEN
-    RAISE EXCEPTION 'org_catalog_bedrock_upsert: region_set is empty' USING ERRCODE = '22023';
+  IF p_invoke_region IS NULL OR p_invoke_region !~ '^[a-z0-9-]{1,63}$' THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid invoke_region'
+      USING ERRCODE = '22023';
+  END IF;
+  IF COALESCE(p_endpoint, '') <> '' THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: stored endpoint must be empty'
+      USING ERRCODE = '22023';
+  END IF;
+  -- Both arrays have an exact one-dimensional, non-NULL, bounded representation.
+  IF p_region_set IS NULL OR array_ndims(p_region_set) <> 1 OR cardinality(p_region_set) < 1
+     OR cardinality(p_region_set) > 64 OR array_position(p_region_set, NULL) IS NOT NULL THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid region_set shape'
+      USING ERRCODE = '22023';
   END IF;
   FOREACH v_elem IN ARRAY p_region_set LOOP
-    IF v_elem IS NULL OR btrim(v_elem) = '' OR v_elem !~ '^[A-Za-z0-9_.:/-]{1,255}$' THEN
+    IF v_elem IS NULL OR v_elem !~ '^[a-z0-9-]{1,63}$' THEN
       RAISE EXCEPTION 'org_catalog_bedrock_upsert: invalid region_set element'
         USING ERRCODE = '22023';
     END IF;
   END LOOP;
+  IF (SELECT count(*) FROM (SELECT DISTINCT r FROM unnest(p_region_set) AS x(r)) AS d)
+       <> cardinality(p_region_set) THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: region_set contains duplicates'
+      USING ERRCODE = '22023';
+  END IF;
+  IF p_target_type NOT IN
+       ('application-inference-profile','cross-region-inference-profile') THEN
+    IF cardinality(p_region_set) <> 1 OR p_region_set[1] <> p_invoke_region THEN
+      RAISE EXCEPTION 'org_catalog_bedrock_upsert: non-profile region_set must equal invoke_region'
+        USING ERRCODE = '22023';
+    END IF;
+    IF p_underlying_fm_arns IS NOT NULL THEN
+      RAISE EXCEPTION 'org_catalog_bedrock_upsert: non-profile target cannot carry underlying ARNs'
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
   -- A *-inference-profile target is underivable without resolved underlying FM ARNs; each
   -- must be charset-safe FIRST, then a same-partition foundation-model ARN with NO wildcard
   -- or cross-service prefix (mirrors P6a fm_arn_valid). Validate charset BEFORE the shape.
   IF p_target_type IN ('application-inference-profile','cross-region-inference-profile') THEN
-    IF p_underlying_fm_arns IS NULL OR array_length(p_underlying_fm_arns, 1) IS NULL THEN
+    IF p_underlying_fm_arns IS NULL OR array_ndims(p_underlying_fm_arns) <> 1
+       OR cardinality(p_underlying_fm_arns) < 1 OR cardinality(p_underlying_fm_arns) > 64
+       OR array_position(p_underlying_fm_arns, NULL) IS NOT NULL THEN
       RAISE EXCEPTION 'org_catalog_bedrock_upsert: inference-profile target requires underlying_fm_arns'
         USING ERRCODE = '22023';
     END IF;
@@ -4920,8 +4967,20 @@ BEGIN
           USING ERRCODE = '22023';
       END IF;
       IF v_elem !~ ('^arn:' || p_partition ||
-                    ':bedrock:[A-Za-z0-9-]+::foundation-model/[A-Za-z0-9_.:/-]+$') THEN
+                    ':bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9_.:/-]+$') THEN
         RAISE EXCEPTION 'org_catalog_bedrock_upsert: underlying_fm_arns element is not a same-partition foundation-model ARN'
+          USING ERRCODE = '22023';
+      END IF;
+      v_region := split_part(v_elem, ':', 4);
+      IF NOT (v_region = ANY(p_region_set)) THEN
+        RAISE EXCEPTION 'org_catalog_bedrock_upsert: underlying ARN region is not a destination'
+          USING ERRCODE = '22023';
+      END IF;
+    END LOOP;
+    FOREACH v_region IN ARRAY p_region_set LOOP
+      IF NOT EXISTS (SELECT 1 FROM unnest(p_underlying_fm_arns) AS a(arn)
+                     WHERE split_part(a.arn, ':', 4) = v_region) THEN
+        RAISE EXCEPTION 'org_catalog_bedrock_upsert: destination region has no underlying ARN'
           USING ERRCODE = '22023';
       END IF;
     END LOOP;
@@ -4932,15 +4991,18 @@ BEGIN
     IF p_account IS NULL OR p_account !~ '^[0-9]{12}$' THEN
       RAISE EXCEPTION 'org_catalog_bedrock_upsert: % target requires a 12-digit aws_account',
         p_target_type USING ERRCODE = '22023';
-    END IF;
+      END IF;
+  ELSIF p_account IS NOT NULL AND p_account <> '' THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: foundation target cannot carry aws_account'
+      USING ERRCODE = '22023';
   END IF;
-  PERFORM pg_advisory_xact_lock(hashtext('orgcatalog:' || p_model_id));
-  INSERT INTO org_model_catalog(model_id, display_name, provider, wire, endpoint, enabled,
-      bedrock_api, model_family, bedrock_target_type, aws_partition, aws_account,
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('orgcatalog:' || p_model_id));
+  INSERT INTO public.org_model_catalog(model_id, display_name, provider, wire, endpoint, enabled,
+      bedrock_api, model_family, bedrock_target_type, aws_partition, aws_invoke_region, aws_account,
       aws_region_set, underlying_fm_arns)
     VALUES (p_model_id, COALESCE(p_display_name,''), 'bedrock', 'bedrock',
             COALESCE(p_endpoint,''), COALESCE(p_enabled, true),
-            p_api, p_family, p_target_type, p_partition, p_account,
+            p_api, p_family, p_target_type, p_partition, p_invoke_region, p_account,
             p_region_set, p_underlying_fm_arns)
     ON CONFLICT (model_id) DO UPDATE SET
       display_name = EXCLUDED.display_name,
@@ -4952,19 +5014,86 @@ BEGIN
       model_family = EXCLUDED.model_family,
       bedrock_target_type = EXCLUDED.bedrock_target_type,
       aws_partition = EXCLUDED.aws_partition,
+      aws_invoke_region = EXCLUDED.aws_invoke_region,
       aws_account = EXCLUDED.aws_account,
       aws_region_set = EXCLUDED.aws_region_set,
       underlying_fm_arns = EXCLUDED.underlying_fm_arns,
-      updated_at = pg_now_text()
+      updated_at = public.pg_now_text()
     RETURNING id INTO v_id;
-  PERFORM kb_audit_worm_append('owner-admin', current_setting('aimee.principal', true),
+  PERFORM public.kb_audit_worm_append('owner-admin',
+    pg_catalog.current_setting('aimee.principal', true),
     'org_catalog_bedrock_upsert', p_model_id, 'ok',
     json_build_object('api', p_api, 'family', p_family, 'target_type', p_target_type,
-                      'partition', p_partition, 'regions', array_length(p_region_set, 1),
-                      'enabled', COALESCE(p_enabled, true),
-                      'display_name', COALESCE(p_display_name,''))::text);
+                      'partition', p_partition, 'invoke_region', p_invoke_region,
+                      'regions', cardinality(p_region_set),
+                      'underlying_arns', COALESCE(cardinality(p_underlying_fm_arns), 0),
+                      'enabled', COALESCE(p_enabled, true))::text);
   RETURN v_id;
 END; $$;
+
+-- Actor- and exact-team-bound runtime authority resolver. Every unavailable condition
+-- deliberately collapses to zero rows; callers receive no catalog-existence oracle.
+CREATE OR REPLACE FUNCTION public.org_catalog_bedrock_target(p_team_id BIGINT, p_model_id TEXT)
+RETURNS TABLE(model_id TEXT, bedrock_api TEXT, model_family TEXT, target_type TEXT,
+              partition TEXT, account TEXT, invoke_region TEXT, region_set_json TEXT,
+              underlying_json TEXT, endpoint TEXT)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp AS $$
+  SELECT c.model_id, c.bedrock_api, c.model_family, c.bedrock_target_type,
+         c.aws_partition, COALESCE(c.aws_account, ''), c.aws_invoke_region,
+         pg_catalog.to_json(c.aws_region_set)::text,
+         COALESCE(pg_catalog.to_json(c.underlying_fm_arns)::text, '[]'), c.endpoint
+    FROM public.org_model_catalog AS c
+   WHERE p_team_id > 0
+     AND p_model_id IS NOT NULL
+     AND pg_catalog.current_setting('aimee.team', true) = p_team_id::text
+     AND EXISTS (SELECT 1 FROM public.kb_team_membership AS m
+                  WHERE m.team = p_team_id
+                    AND m.identity_key = pg_catalog.current_setting('aimee.principal', true))
+     AND EXISTS (SELECT 1 FROM public.org_model_entitlement AS e
+                  WHERE e.team_id = p_team_id AND e.model_id = c.model_id)
+     AND c.model_id = p_model_id
+     AND c.enabled
+     AND c.provider = 'bedrock' AND c.wire = 'bedrock' AND c.endpoint = ''
+     AND c.bedrock_api = 'converse'
+     AND public.org_bedrock_adapter_supported(c.bedrock_api, c.model_family)
+     AND c.bedrock_target_type IN
+       ('foundation','provisioned','custom','application-inference-profile',
+        'cross-region-inference-profile')
+     AND c.aws_partition IN ('aws','aws-us-gov','aws-cn')
+     AND c.aws_invoke_region ~ '^[a-z0-9-]{1,63}$'
+     AND pg_catalog.array_ndims(c.aws_region_set) = 1
+     AND pg_catalog.cardinality(c.aws_region_set) BETWEEN 1 AND 64
+     AND pg_catalog.array_position(c.aws_region_set, NULL) IS NULL
+     AND NOT EXISTS (SELECT 1 FROM pg_catalog.unnest(c.aws_region_set) AS r(region)
+                      WHERE r.region !~ '^[a-z0-9-]{1,63}$')
+     AND (SELECT pg_catalog.count(*) FROM
+            (SELECT DISTINCT region FROM pg_catalog.unnest(c.aws_region_set) AS x(region)) AS d)
+         = pg_catalog.cardinality(c.aws_region_set)
+     AND CASE
+       WHEN c.bedrock_target_type IN ('foundation','provisioned','custom') THEN
+         pg_catalog.cardinality(c.aws_region_set) = 1
+         AND c.aws_region_set[1] = c.aws_invoke_region
+         AND COALESCE(pg_catalog.cardinality(c.underlying_fm_arns), 0) = 0
+       ELSE
+         pg_catalog.array_ndims(c.underlying_fm_arns) = 1
+         AND pg_catalog.cardinality(c.underlying_fm_arns) BETWEEN 1 AND 64
+         AND pg_catalog.array_position(c.underlying_fm_arns, NULL) IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM pg_catalog.unnest(c.underlying_fm_arns) AS a(arn)
+            WHERE a.arn !~ ('^arn:' || c.aws_partition ||
+                  ':bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9_.:/-]+$')
+               OR NOT (pg_catalog.split_part(a.arn, ':', 4) = ANY(c.aws_region_set)))
+         AND NOT EXISTS (
+           SELECT 1 FROM pg_catalog.unnest(c.aws_region_set) AS r(region)
+            WHERE NOT EXISTS (
+              SELECT 1 FROM pg_catalog.unnest(c.underlying_fm_arns) AS a(arn)
+               WHERE pg_catalog.split_part(a.arn, ':', 4) = r.region))
+       END
+     AND CASE WHEN c.bedrock_target_type = 'foundation'
+              THEN c.aws_account IS NULL OR c.aws_account = ''
+              ELSE c.aws_account ~ '^[0-9]{12}$' END;
+$$;
 
 -- org_catalog_remove: admin-gated delete of a catalog row. Deletes the model's
 -- entitlements EXPLICITLY first (auditing the count), then the catalog row — no silent
@@ -5040,7 +5169,8 @@ END; $$;
 REVOKE ALL ON FUNCTION kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_entitled() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
-REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_catalog_bedrock_target(BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;
