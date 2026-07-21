@@ -103,7 +103,7 @@ def load_inventory(repo: Path) -> tuple[set[str], set[str]]:
     value = load_json(repo / INVENTORY_PATH)
     if not isinstance(value, dict) or set(value) != {"schema_version", "required", "optional"}:
         fail("inventory-shape", "canonical inventory keys differ from v1")
-    if value["schema_version"] != 1:
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         fail("inventory-version", "canonical inventory schema_version must be 1")
     groups: list[set[str]] = []
     for label in ("required", "optional"):
@@ -238,10 +238,13 @@ def discover(root: Path) -> list[Path]:
 
 def validate_roots(repo: Path, roots: list[Path], allow_empty: bool) -> int:
     required, optional = load_inventory(repo)
+    production_root = repo / "src/modules"
+    resolved_roots = [root if root.is_absolute() else repo / root for root in roots]
+    if allow_empty and resolved_roots != [production_root]:
+        fail("allow-empty-scope", "--allow-empty is restricted to src/modules")
     seen: dict[str, Path] = {}
     count = 0
-    for root in roots:
-        resolved = root if root.is_absolute() else repo / root
+    for root, resolved in zip(roots, resolved_roots, strict=True):
         files = discover(resolved)
         if not files and not allow_empty:
             fail("no-descriptors-found", f"no module.yaml files under {root}")

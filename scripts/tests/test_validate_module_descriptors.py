@@ -61,6 +61,13 @@ class DescriptorTests(unittest.TestCase):
         validator.check_schema(REPO_ROOT)
         parsed = json.loads(validator.schema_bytes())
         self.assertEqual(parsed, validator.schema())
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / validator.SCHEMA_PATH
+            path.parent.mkdir(parents=True)
+            path.write_text("{}\n", encoding="utf-8")
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=schema-drift"):
+                validator.check_schema(repo)
 
     def test_schema_keyword_subset_is_closed_and_exercised(self) -> None:
         allowed = {
@@ -93,6 +100,16 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(required, set(raw["required"]))
         self.assertEqual(optional, set(raw["optional"]))
         self.assertFalse(required & optional)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / validator.INVENTORY_PATH
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"schema_version": True, "required": ["memory"], "optional": ["x"]}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=inventory-version"):
+                validator.load_inventory(repo)
 
     def test_descriptor_key_and_version_mutations(self) -> None:
         missing = self.required()
@@ -160,7 +177,26 @@ class DescriptorTests(unittest.TestCase):
             root = Path(tmp)
             with self.assertRaisesRegex(validator.DescriptorError, "rule=no-descriptors-found"):
                 validator.validate_roots(REPO_ROOT, [root], allow_empty=False)
-            self.assertEqual(validator.validate_roots(REPO_ROOT, [root], allow_empty=True), 0)
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=allow-empty-scope"):
+                validator.validate_roots(REPO_ROOT, [root], allow_empty=True)
+        self.assertEqual(
+            validator.validate_roots(REPO_ROOT, [Path("src/modules")], allow_empty=True), 0
+        )
+
+    def test_parser_resource_limits(self) -> None:
+        tmp, path = self.write_raw(b" " * (validator.MAX_BYTES + 1))
+        try:
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=input-size"):
+                validator.load_json(path)
+        finally:
+            tmp.cleanup()
+        nested: object = True
+        for _ in range(validator.MAX_DEPTH + 1):
+            nested = [nested]
+        with self.assertRaisesRegex(validator.DescriptorError, "rule=json-depth"):
+            validator._check_domain(nested)
+        with self.assertRaisesRegex(validator.DescriptorError, "rule=json-array-size"):
+            validator._check_domain([None] * (validator.MAX_ARRAY + 1))
 
     def test_strict_json_rejections(self) -> None:
         cases = (
