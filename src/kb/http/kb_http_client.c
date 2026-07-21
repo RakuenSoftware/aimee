@@ -835,7 +835,8 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
    if (!response || !headers_cb || !body_cb || kb_http_request_validate(request) != KB_HTTP_OK)
       return KB_HTTP_INVALID_ARGUMENT;
    int64_t now = now_ns();
-   if (now < 0 || request->total_timeout_ms > INT_MAX / 1000000)
+   /* total_timeout_ms is a positive int, so conversion to nanoseconds fits int64_t. */
+   if (now < 0)
       return KB_HTTP_INVALID_ARGUMENT;
    int64_t total_ns = (int64_t)request->total_timeout_ms * 1000000LL;
    if (now > INT64_MAX - total_ns)
