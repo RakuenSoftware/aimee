@@ -519,6 +519,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-org-telemetry \
                $(TESTPREFIX)/unit-test-aws-auth \
                $(TESTPREFIX)/unit-test-org-model-catalog-target \
+               $(TESTPREFIX)/unit-test-kb-mgmt-endpoint \
+               $(TESTPREFIX)/unit-test-kb-mgmt-status \
+               $(TESTPREFIX)/unit-test-server-mgmt-status \
+               $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
                $(TESTPREFIX)/unit-test-aws-eventstream
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
@@ -1728,25 +1732,21 @@ $(TESTPREFIX)/unit-test-kb-mgmt-live: $(OBJDIR)/tests/test_kb_mgmt_live.o \
                                       $(OBJDIR)/kb/http/kb_tls.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-endpoint
 $(TESTPREFIX)/unit-test-kb-mgmt-endpoint: $(OBJDIR)/tests/test_kb_mgmt_endpoint.o \
                                           $(OBJDIR)/kb/kb_mgmt_endpoint.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status
 $(TESTPREFIX)/unit-test-kb-mgmt-status: $(OBJDIR)/tests/test_kb_mgmt_status.o \
                                         $(OBJDIR)/kb/kb_mgmt_status.o \
                                         $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-status
 $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_status.o \
                                             $(OBJDIR)/server/server_mgmt_status.o \
                                             $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o \
                                             $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-authority
 $(TESTPREFIX)/unit-test-kb-mgmt-status-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_status_authority.o \
     $(OBJDIR)/kb/kb_mgmt_status_authority.o $(OBJDIR)/kb/kb_mgmt_status.o \
