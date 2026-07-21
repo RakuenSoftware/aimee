@@ -21,6 +21,21 @@ records cannot multiply object reads. Replay bindings use canonical JSON over ev
 workload and candidate-target field; the token identity separately binds the exact issuer and token
 identifier without delimiter ambiguity.
 
+`trigger_check_identity` is a provider-neutral correlation value, not an OIDC claim or a GitHub
+Checks check-run ID. The contract derives it as a canonical SHA-256 identity from the normalized
+`repository_identity`, `run_identity`, and `attempt`; issuer profiles and repository adapters do not
+supply it. This clarification does not make the overall external verifier deployable.
+
+The derivation preimage is the JSON object with exactly the keys `attempt`, `repository_identity`,
+and `run_identity`, serialized with keys sorted, compact `,` and `:` separators, JSON ASCII escaping,
+and ASCII encoding. Hash those bytes with SHA-256 and prefix the lowercase hex digest with `sha256:`.
+JSON string values are preserved exactly; no Unicode normalization is applied. For example,
+`{"attempt":"2","repository_identity":"repository-\u00e9","run_identity":"run-\"42\""}` produces
+`sha256:d56311b051331f765ff4651d87d88ce9f760aaed7443bd635d0a414d40771821`.
+
+Issuer profiles copied from the earlier example must remove `trigger_check_identity` from
+`claim_mappings`; the closed profile validator now rejects that obsolete mapping.
+
 `module-doc-attestation-trigger.yml` is dormant unless the protected repository variable
 `MODULE_DOC_ATTESTATION_ENABLED` is exactly `true`. While active, it fails closed unless the
 verifier URL, audience, and TLS public-key pin are configured. It requests an OIDC token and sends
