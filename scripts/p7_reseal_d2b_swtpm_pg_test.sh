@@ -120,6 +120,10 @@ scan_hex_canary(){
   hits=$(psql -Atq "$db_url" -c "SELECT
     (SELECT count(*) FROM org_vault_secret WHERE position(decode('$hex','hex') in wrapped_dek)>0)+
     (SELECT count(*) FROM org_vault_salt WHERE position(decode('$hex','hex') in kek_check)>0)+
+    (SELECT count(*) FROM kb_vault_rewrap_dek_stage
+       WHERE position(decode('$hex','hex') in new_wrapped_dek)>0)+
+    (SELECT count(*) FROM kb_vault_rewrap_check_stage
+       WHERE position(decode('$hex','hex') in new_kek_check)>0)+
     (SELECT count(*) FROM kb_vault_rewrap_operation WHERE position(decode('$hex','hex') in receipt)>0)")
   test "$hits" = 0 || die "$label raw key found in PostgreSQL"
 }

@@ -861,7 +861,7 @@ done:
 
 static int default_supported(void)
 {
-#ifdef WITH_TPM2
+#if defined(WITH_TPM2) && defined(__linux__) && defined(MADV_DONTDUMP) && defined(MADV_WIPEONFORK)
    return 1;
 #else
    return 0;
