@@ -83,6 +83,9 @@ func TestExtractJSONObjectIgnoresProviderSuffix(t *testing.T) {
 	if got := string(doc); got != expected {
 		t.Fatalf("wrong object extracted: %s", got)
 	}
+	if strings.Contains(string(doc), "diagnostic") {
+		t.Fatalf("extracted trailing provider diagnostic: %s", doc)
+	}
 }
 
 func TestExtractJSONObjectSkipsMalformedObjectPreamble(t *testing.T) {
@@ -123,9 +126,43 @@ func TestExtractJSONObjectAcceptsClosingBraceInsideString(t *testing.T) {
 }
 
 func TestExtractJSONObjectRejectsTruncatedAndProseResponses(t *testing.T) {
-	for _, response := range []string{`{"a":"unterminated\\`, "provider returned prose", "{", `provider { broken {"a":1}`} {
+	for _, response := range []string{
+		`{"a":"unterminated\\`,
+		`{"a":"unterminated\`,
+		`{"a":"\\\"}{"b":1}`,
+		"provider returned prose",
+		"{",
+		`provider { broken {"a":1}`,
+		`{"a":}}`,
+		`{,}`,
+		`{"a":1,}`,
+	} {
 		if doc, err := extractJSONObject(response); err == nil {
 			t.Fatalf("accepted invalid response %q as %s", response, doc)
+		}
+	}
+}
+
+func TestExtractJSONObjectSkipsManyDisjointMalformedCandidates(t *testing.T) {
+	const malformedCandidates = 10_000
+	response := strings.Repeat(`{,}`, malformedCandidates) + `{"ok":true}`
+	doc, err := extractJSONObject(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != `{"ok":true}` {
+		t.Fatalf("wrong object extracted after %d malformed candidates: %s", malformedCandidates, got)
+	}
+}
+
+func TestExtractJSONObjectSkipsMalformedTokenCandidates(t *testing.T) {
+	for _, malformed := range []string{`{"a":}}`, `{,}`, `{"a":1,}`} {
+		doc, err := extractJSONObject(malformed + `{"ok":true}`)
+		if err != nil {
+			t.Fatalf("failed to recover after %q: %v", malformed, err)
+		}
+		if got := string(doc); got != `{"ok":true}` {
+			t.Fatalf("wrong object extracted after %q: %s", malformed, got)
 		}
 	}
 }

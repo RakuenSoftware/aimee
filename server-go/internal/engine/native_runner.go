@@ -896,6 +896,11 @@ func extractJSONObject(text string) ([]byte, error) {
 	// candidate at a time while honoring quoted braces and escapes instead. A
 	// balanced but malformed outer object is skipped atomically: a valid-looking
 	// nested object must never be promoted to the provider's top-level response.
+	// Candidates never overlap, so every input byte is scanned once and belongs to
+	// at most one json.Unmarshal call. Total work is therefore linear in the input
+	// length without imposing a byte or candidate-count truncation limit. An
+	// unterminated string or escape consumes the remainder and fails closed; there
+	// cannot be a safely identifiable sibling object after malformed string data.
 	start := -1
 	depth := 0
 	inString := false
