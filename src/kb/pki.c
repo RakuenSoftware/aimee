@@ -251,8 +251,7 @@ int kb_pki_cert_metadata(const char *cert_pem, char *issuer_out, size_t issuer_c
    char *serial = bn ? BN_bn2hex(bn) : NULL;
    if (!issuer || !issuer[0] || !serial || !serial[0])
       goto done;
-   if ((issuer_out && strlen(issuer) >= issuer_cap) ||
-       (serial_out && strlen(serial) >= serial_cap))
+   if ((issuer_out && strlen(issuer) >= issuer_cap) || (serial_out && strlen(serial) >= serial_cap))
       goto done;
    if (issuer_out)
       memcpy(issuer_out, issuer, strlen(issuer) + 1);

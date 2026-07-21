@@ -676,12 +676,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                      const char *auth_header, const char *bearer_token, const char *body,
                      int body_len, char *out_buf, int out_cap)
 {
-   /* POST /v1/enroll/redeem — a client redeems its enrollment token for a client
-    * certificate. The single-use token IS the credential, so this route is
-    * intentionally reachable WITHOUT the owner bearer (it sits BEFORE the bearer
-    * auth gate). Body: {"token":..,"csr":..}. The client supplies a CSR — its
-    * private key never leaves it — and gets back the CA-signed client cert + the
-    * granted scope. An invalid / replayed token or a bad CSR is a 401. */
+   /* The single-use enrollment token is the credential, so redeem precedes bearer
+    * auth. The caller supplies a CSR; its private key never leaves the client. */
    if (strcmp(path, "/v1/enroll/redeem") == 0)
    {
       if (strcmp(method, "POST") != 0)
@@ -710,27 +706,19 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       {
          free(cert);
          snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"enrollment failed: invalid or already-used token, or bad CSR\"}");
+                  "{\"error\":\"enrollment failed: invalid or used token, or bad CSR\"}");
          return 401;
       }
-      /* Persist the exact immutable certificate identity before releasing the
-       * certificate. A DB outage fails closed: an unregistered certificate
-       * must never escape and become an authority the DB cannot revoke.
-       * INVARIANT: this fingerprint MUST equal what kb_tls_peer_fingerprint()
-       * computes for the same cert at the mTLS seam (both are sha256 of the cert
-       * DER via X509_digest), or revocation checks would silently miss. Live-
-       * verified in the S2a integration test. (kb_pki_ca_fingerprint despite its
-       * name hashes any cert's DER, not the CA specifically.) */
+      /* Persist the issuer/serial and mTLS certificate-DER SHA-256. Fail closed
+       * rather than release an authority the enrollment database cannot revoke. */
       char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
       if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
-          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial,
-                               sizeof(raw_serial)) != 0 ||
+          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
           kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
           db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
       {
          free(cert);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"enrollment persistence unavailable\"}");
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment persistence unavailable\"}");
          return 503;
       }
       cJSON *resp = cJSON_CreateObject();

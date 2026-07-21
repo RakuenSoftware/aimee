@@ -259,8 +259,7 @@ int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_p
       if (!req)
          goto done;
       int rn = bodyless
-                   ? snprintf(req, cap,
-                              "%s %s HTTP/1.1\r\nHost: %s\r\n%sConnection: close\r\n\r\n",
+                   ? snprintf(req, cap, "%s %s HTTP/1.1\r\nHost: %s\r\n%sConnection: close\r\n\r\n",
                               method, path, host, authorization ? authorization : "")
                    : snprintf(req, cap,
                               "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"

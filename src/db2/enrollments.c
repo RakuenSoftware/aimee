@@ -65,8 +65,8 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
                           const char *cert_serial_norm, const char *expires_at, int legacy,
                           int64_t *out_id)
 {
-   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] ||
-       !cert_serial_norm || !cert_serial_norm[0])
+   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] || !cert_serial_norm ||
+       !cert_serial_norm[0])
       return -1;
    void *conn = db2_conn();
    if (!conn)
@@ -113,16 +113,16 @@ int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
                          const char *new_serial_norm, int64_t *out_id)
 {
    if (!old_fingerprint || !old_fingerprint[0] || !old_issuer || !old_issuer[0] ||
-       !old_serial_norm || !old_serial_norm[0] || !scope || !scope[0] ||
-       !new_fingerprint || !new_fingerprint[0] || !new_issuer || !new_issuer[0] ||
-       !new_serial_norm || !new_serial_norm[0])
+       !old_serial_norm || !old_serial_norm[0] || !scope || !scope[0] || !new_fingerprint ||
+       !new_fingerprint[0] || !new_issuer || !new_issuer[0] || !new_serial_norm ||
+       !new_serial_norm[0])
       return -1;
    void *conn = db2_conn();
    if (!conn)
       return -1;
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT kb_enrollment_renew(?1,?2,?3,?4,?5,?6,?7)", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT kb_enrollment_renew(?1,?2,?3,?4,?5,?6,?7)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", old_fingerprint);
@@ -363,8 +363,8 @@ int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_s
 int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
                                      const char *cert_serial_norm, char out_authority[33])
 {
-   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] ||
-       !cert_serial_norm || !cert_serial_norm[0] || !out_authority)
+   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] || !cert_serial_norm ||
+       !cert_serial_norm[0] || !out_authority)
       return -1;
    out_authority[0] = '\0';
    void *conn = db2_conn();

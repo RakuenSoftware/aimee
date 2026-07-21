@@ -37,7 +37,7 @@
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "db2/kb_audit_worm.h"
-#include "vault_server_key.h"    /* startup durable seal-epoch synchronization */
+#include "vault_server_key.h" /* startup durable seal-epoch synchronization */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1453,8 +1453,8 @@ int main(int argc, char **argv)
    if (kb_egress_release_allowed())
    {
       LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
-      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b",
-                              "allow", "integration-only build flag active") != 0)
+      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b", "allow",
+                              "integration-only build flag active") != 0)
       {
          fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
          db2_shutdown();
@@ -1555,7 +1555,10 @@ int main(int argc, char **argv)
     * periodic work predictable while the SQL advisory lock makes it singleton. */
    {
       int64_t recovered = 0;
-      do { recovered = 0; } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+      do
+      {
+         recovered = 0;
+      } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
    }
    time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal

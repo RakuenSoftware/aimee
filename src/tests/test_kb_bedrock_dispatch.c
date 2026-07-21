@@ -935,13 +935,12 @@ static void dispatch_wrapper_tests(void)
    db2_bedrock_target_t t = target("aws", "us-east-1", "model");
    kb_bedrock_authorized_target_t *authorized_target = authorized(&t);
    kb_bedrock_credentials_t c = credentials();
-   kb_bedrock_credential_view_t cv = {
-       .access_key_id = (const unsigned char *)"AKIDEXAMPLE",
-       .access_key_id_len = sizeof("AKIDEXAMPLE") - 1,
-       .secret_access_key = (const unsigned char *)"secret",
-       .secret_access_key_len = sizeof("secret") - 1,
-       .amz_date = "20260101T000000Z",
-       .date = "20260101"};
+   kb_bedrock_credential_view_t cv = {.access_key_id = (const unsigned char *)"AKIDEXAMPLE",
+                                      .access_key_id_len = sizeof("AKIDEXAMPLE") - 1,
+                                      .secret_access_key = (const unsigned char *)"secret",
+                                      .secret_access_key_len = sizeof("secret") - 1,
+                                      .amz_date = "20260101T000000Z",
+                                      .date = "20260101"};
    kb_bedrock_wire_request_t owned_wire;
    kb_bedrock_wire_request_init(&owned_wire);
    assert(kb_bedrock_authorized_wire_build(authorized_target, &request, &cv, &owned_wire) ==

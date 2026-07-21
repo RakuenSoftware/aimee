@@ -1532,7 +1532,12 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
                          const kb_principal_t *transport, const char *fingerprint, char *out,
                          int out_cap)
 {
-   (void)method; (void)path; (void)body; (void)body_len; (void)transport; (void)fingerprint;
+   (void)method;
+   (void)path;
+   (void)body;
+   (void)body_len;
+   (void)transport;
+   (void)fingerprint;
    snprintf(out, (size_t)out_cap, "{\"error\":\"egress unavailable\"}");
    return 503;
 }
@@ -1555,9 +1560,15 @@ int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
                          const char *new_fingerprint, const char *new_issuer,
                          const char *new_serial_norm, int64_t *out_id)
 {
-   (void)old_fingerprint; (void)old_issuer; (void)old_serial_norm; (void)scope;
-   (void)new_fingerprint; (void)new_issuer; (void)new_serial_norm;
-   if (out_id) *out_id = 2;
+   (void)old_fingerprint;
+   (void)old_issuer;
+   (void)old_serial_norm;
+   (void)scope;
+   (void)new_fingerprint;
+   (void)new_issuer;
+   (void)new_serial_norm;
+   if (out_id)
+      *out_id = 2;
    return 0;
 }
 static void fill_stub_row(db2_enrollment_row_t *r)
@@ -2390,7 +2401,8 @@ static void test_mtls_listener(void)
    char rbody[4096];
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET", "/v1/health",
                                 NULL, rbody, sizeof(rbody), &st) == 0);
-   if (st != 200) fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
+   if (st != 200)
+      fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
    /* the dialer's request carries the client cert's scope (project:beta): a

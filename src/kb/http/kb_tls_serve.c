@@ -34,81 +34,112 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#define KB_TLS_REQ_MAX  (1024 * 1024)
+#define KB_TLS_REQ_MAX    (1024 * 1024)
 #define KB_TLS_HEADER_MAX 16384
-#define KB_TLS_RESP_MAX 262144
+#define KB_TLS_RESP_MAX   262144
 
 static int header_name_char(unsigned char c)
 {
-   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-          (c >= '0' && c <= '9') || strchr("!#$%&'*+-.^_`|~", c) != NULL;
+   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+          strchr("!#$%&'*+-.^_`|~", c) != NULL;
 }
 
 /* Read exactly one strict HTTP/1.1 request. Returns an HTTP error status or 0. */
-static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out,
-                               int *header_out, size_t *body_out)
+static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, int *header_out,
+                               size_t *body_out)
 {
    size_t total = 0, header_len = 0, content_len = 0;
    int have_cl = 0;
    while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
    {
       int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
-      if (n <= 0) return 400;
-      total += (size_t)n; buf[total] = '\0';
+      if (n <= 0)
+         return 400;
+      total += (size_t)n;
+      buf[total] = '\0';
       char *end = strstr(buf, "\r\n\r\n");
-      if (end) { header_len = (size_t)(end + 4 - buf); break; }
+      if (end)
+      {
+         header_len = (size_t)(end + 4 - buf);
+         break;
+      }
    }
-   if (!header_len || header_len > KB_TLS_HEADER_MAX) return 413;
+   if (!header_len || header_len > KB_TLS_HEADER_MAX)
+      return 413;
    for (size_t i = 0; i < header_len; i++)
-      if (buf[i] == '\n' && (i == 0 || buf[i-1] != '\r')) return 400;
+      if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r'))
+         return 400;
    char *line_end = strstr(buf, "\r\n");
-   if (!line_end) return 400;
+   if (!line_end)
+      return 400;
    char method[16], target[1024], version[16], extra;
    *line_end = '\0';
    int fields = sscanf(buf, "%15s %1023s %15s %c", method, target, version, &extra);
    *line_end = '\r';
-   if (fields != 3 || strcmp(version,"HTTP/1.1") || target[0] != '/' ||
-       strstr(target, "://") || strchr(target,'#')) return 400;
+   if (fields != 3 || strcmp(version, "HTTP/1.1") || target[0] != '/' || strstr(target, "://") ||
+       strchr(target, '#'))
+      return 400;
    char *p = line_end + 2;
    char *headers_end = buf + header_len - 2;
-   while (p < headers_end && !(p[0]=='\r' && p[1]=='\n'))
+   while (p < headers_end && !(p[0] == '\r' && p[1] == '\n'))
    {
-      char *e = strstr(p,"\r\n");
-      if (!e || e > headers_end || p[0]==' ' || p[0]=='\t') return 400;
-      char *colon = memchr(p,':',(size_t)(e-p));
-      if (!colon || colon==p || colon[-1]==' ' || colon[-1]=='\t') return 400;
-      for (char *q=p;q<colon;q++) if (!header_name_char((unsigned char)*q)) return 400;
-      for (char *q=colon+1;q<e;q++)
-         if (((unsigned char)*q<0x20 && *q!='\t') || (unsigned char)*q==0x7f) return 400;
-      size_t name_len=(size_t)(colon-p);
-      if (name_len==17 && !strncasecmp(p,"Transfer-Encoding",17)) return 400;
-      if (name_len==14 && !strncasecmp(p,"Content-Length",14))
+      char *e = strstr(p, "\r\n");
+      if (!e || e > headers_end || p[0] == ' ' || p[0] == '\t')
+         return 400;
+      char *colon = memchr(p, ':', (size_t)(e - p));
+      if (!colon || colon == p || colon[-1] == ' ' || colon[-1] == '\t')
+         return 400;
+      for (char *q = p; q < colon; q++)
+         if (!header_name_char((unsigned char)*q))
+            return 400;
+      for (char *q = colon + 1; q < e; q++)
+         if (((unsigned char)*q < 0x20 && *q != '\t') || (unsigned char)*q == 0x7f)
+            return 400;
+      size_t name_len = (size_t)(colon - p);
+      if (name_len == 17 && !strncasecmp(p, "Transfer-Encoding", 17))
+         return 400;
+      if (name_len == 14 && !strncasecmp(p, "Content-Length", 14))
       {
          if (have_cl)
             return 400;
-         have_cl=1;
-         char *v=colon+1; while (v<e && (*v==' '||*v=='\t')) v++;
-         char *ve=e; while (ve>v && (ve[-1]==' '||ve[-1]=='\t')) ve--;
-         if (v==ve || (ve-v>1 && *v=='0')) return 400;
-         size_t value=0;
-         for (char *q=v;q<ve;q++)
-         { if (*q<'0'||*q>'9'||value>(cap-1)/10) return 400; value=value*10+(size_t)(*q-'0'); }
-         content_len=value;
+         have_cl = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         if (v == ve || (ve - v > 1 && *v == '0'))
+            return 400;
+         size_t value = 0;
+         for (char *q = v; q < ve; q++)
+         {
+            if (*q < '0' || *q > '9' || value > (cap - 1) / 10)
+               return 400;
+            value = value * 10 + (size_t)(*q - '0');
+         }
+         content_len = value;
       }
-      p=e+2;
+      p = e + 2;
    }
-   int bodyless = !strcmp(method,"GET") || !strcmp(method,"HEAD");
-   if ((bodyless && have_cl) || (!bodyless && !have_cl)) return 400;
-   if (content_len > cap - header_len - 1) return 413;
-   if (total > header_len + content_len) return 400;
+   int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
+   if ((bodyless && have_cl) || (!bodyless && !have_cl))
+      return 400;
+   if (content_len > cap - header_len - 1)
+      return 413;
+   if (total > header_len + content_len)
+      return 400;
    while (total < header_len + content_len)
    {
-      int n=SSL_read(ssl,buf+total,(int)(header_len+content_len-total));
-      if (n<=0)
+      int n = SSL_read(ssl, buf + total, (int)(header_len + content_len - total));
+      if (n <= 0)
          return 400;
-      total+=(size_t)n;
+      total += (size_t)n;
    }
-   buf[total]='\0'; *total_out=(int)total; *header_out=(int)header_len; *body_out=content_len;
+   buf[total] = '\0';
+   *total_out = (int)total;
+   *header_out = (int)header_len;
+   *body_out = content_len;
    return 0;
 }
 
@@ -241,7 +272,7 @@ static int mtls_renew(const char *scope_cn, const char *old_fp, const char *old_
    if (metadata_ok && db2_tenant_scope_begin(&renew_actor, 0) == 0)
    {
       persisted = db2_enrollment_renew(old_fp, old_issuer, old_serial_norm, scope_cn, new_fp,
-                                        new_issuer, new_serial, NULL);
+                                       new_issuer, new_serial, NULL);
       if (persisted == 0)
          persisted = db2_tenant_scope_commit();
       else
@@ -288,17 +319,23 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    if (!buf || !resp)
       goto done;
 
-   int total = 0, header_len = 0; size_t declared_body = 0;
-   int read_status = strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len,
-                                         &declared_body);
+   int total = 0, header_len = 0;
+   size_t declared_body = 0;
+   int read_status =
+       strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body);
    if (read_status)
    {
-      const char *b = read_status == 413 ? "{\"error\":\"request too large\"}"
-                                         : "{\"error\":\"bad request\"}";
+      const char *b =
+          read_status == 413 ? "{\"error\":\"request too large\"}" : "{\"error\":\"bad request\"}";
       char head[160];
-      int hn = snprintf(head,sizeof(head),"HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
-                        read_status,read_status==413?"Payload Too Large":"Bad Request",strlen(b));
-      SSL_write(ssl,head,hn); SSL_write(ssl,b,(int)strlen(b)); goto done;
+      int hn = snprintf(head, sizeof(head),
+                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
+                        "%zu\r\nConnection: close\r\n\r\n",
+                        read_status, read_status == 413 ? "Payload Too Large" : "Bad Request",
+                        strlen(b));
+      SSL_write(ssl, head, hn);
+      SSL_write(ssl, b, (int)strlen(b));
+      goto done;
    }
 
    char method[16] = {0}, path[1024] = {0};
@@ -415,8 +452,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
     * CN bearer. The exact verified issuer/serial/fingerprint are carried in. */
    else if (have_cert && strcmp(cpath, "/v1/llm/egress") == 0)
    {
-      status = kb_http_egress_route(method, cpath, body, body_len, &transport, fp,
-                                    resp, KB_TLS_RESP_MAX);
+      status = kb_http_egress_route(method, cpath, body, body_len, &transport, fp, resp,
+                                    KB_TLS_RESP_MAX);
    }
    /* Cert rotation: an authenticated client renews its cert for its CURRENT
     * verified scope (the cert is the credential — no token needed). */
@@ -429,8 +466,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       }
       else
       {
-         status = mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp,
-                             KB_TLS_RESP_MAX);
+         status =
+             mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp, KB_TLS_RESP_MAX);
       }
    }
    else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
@@ -482,7 +519,7 @@ static volatile int g_mtls_running = 0;
 static pthread_t g_mtls_thread;
 static SSL_CTX *g_mtls_ctx = NULL;
 
-#define KB_MTLS_WORKERS 8
+#define KB_MTLS_WORKERS   8
 #define KB_MTLS_QUEUE_CAP 32
 static pthread_t g_mtls_workers[KB_MTLS_WORKERS];
 static int g_mtls_workers_started = 0;

@@ -30,7 +30,8 @@ static int64_t scalar(const char *sql)
    if (!st || aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
    {
       fprintf(stderr, "p2b live SQL failed: %s\n", err);
-      if (st) aimee_pg_finalize(st);
+      if (st)
+         aimee_pg_finalize(st);
       return -1;
    }
    int64_t value = aimee_pg_column_int64(st, 0);
@@ -42,10 +43,10 @@ static int add_member(const char *identity, int64_t team)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
-       "INSERT INTO kb_team_membership(identity_key,team,is_default) VALUES (?1,?2,1)",
+       db2_conn(), "INSERT INTO kb_team_membership(identity_key,team,is_default) VALUES (?1,?2,1)",
        err, sizeof(err));
-   if (!st) return -1;
+   if (!st)
+      return -1;
    aimee_pg_bind_text(st, "?1", identity);
    aimee_pg_bind_int64(st, "?2", team);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
@@ -56,12 +57,13 @@ static int add_member(const char *identity, int64_t team)
 static int revoke_enrollment(const char *fingerprint)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
-       "UPDATE kb_enrollments SET state='revoked',revoked_at=pg_now_text() "
-       "WHERE fingerprint=?1",
-       err, sizeof(err));
-   if (!st) return -1;
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "UPDATE kb_enrollments SET state='revoked',revoked_at=pg_now_text() "
+                        "WHERE fingerprint=?1",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
    aimee_pg_bind_text(st, "?1", fingerprint);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    int changed = aimee_pg_stmt_changes(st);
@@ -76,8 +78,7 @@ static kb_principal_t owner(void)
 }
 
 static int egress_request(int port, const char *ca, const char *cert, const char *key,
-                          const char *request_id, int64_t team, char *response,
-                          size_t response_cap)
+                          const char *request_id, int64_t team, char *response, size_t response_cap)
 {
    char body[2048];
    int n = snprintf(body, sizeof(body),
@@ -89,9 +90,8 @@ static int egress_request(int port, const char *ca, const char *cert, const char
                     request_id, (long long)team);
    assert(n > 0 && (size_t)n < sizeof(body));
    int status = 0;
-   assert(kb_tls_client_request("localhost", port, ca, cert, key, "POST",
-                                "/v1/llm/egress", body, response, response_cap,
-                                &status) == 0);
+   assert(kb_tls_client_request("localhost", port, ca, cert, key, "POST", "/v1/llm/egress", body,
+                                response, response_cap, &status) == 0);
    return status;
 }
 
@@ -101,10 +101,10 @@ int main(void)
    {
       kb_principal_t transport = {.kind = KB_PRIN_CERT, .authenticated = 1};
       char response[256] = "";
-      int status = kb_http_egress_route(
-          "POST", "/v1/llm/egress", "{}", 2, &transport,
-          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          response, sizeof(response));
+      int status =
+          kb_http_egress_route("POST", "/v1/llm/egress", "{}", 2, &transport,
+                               "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                               response, sizeof(response));
       assert(status == 503 && strstr(response, "egress unavailable"));
       puts("PASS: hardened P2b artifact denies before parsing, DB, vault, or network");
       return 0;
@@ -165,10 +165,9 @@ int main(void)
    assert(mtls_port > 0);
    char conn[1024], ca[KB_PKI_CERT_PEM_MAX], cert[KB_PKI_CERT_PEM_MAX];
    char client_key[KB_PKI_KEY_PEM_MAX];
-   assert(kb_enroll_mint(aimee_home, "localhost", mtls_port, "p2b-live", conn,
-                         sizeof(conn)) == 0);
-   assert(kb_tls_enroll(conn, ca, sizeof(ca), cert, sizeof(cert), client_key,
-                        sizeof(client_key)) == 0);
+   assert(kb_enroll_mint(aimee_home, "localhost", mtls_port, "p2b-live", conn, sizeof(conn)) == 0);
+   assert(kb_tls_enroll(conn, ca, sizeof(ca), cert, sizeof(cert), client_key, sizeof(client_key)) ==
+          0);
    char cert_fp[KB_PKI_FP_HEX], cert_issuer[256], cert_serial[128], identity[512];
    assert(kb_pki_ca_fingerprint(cert, cert_fp, sizeof(cert_fp)) == 0);
    assert(kb_pki_cert_metadata(cert, cert_issuer, sizeof(cert_issuer), cert_serial,
@@ -178,24 +177,25 @@ int main(void)
    assert(kb_identity_key(&probe, identity, sizeof(identity)) == 0);
    assert(add_member(identity, team) == 0);
    char authority[33];
-   int authority_rc = db2_enrollment_authority_resolve(cert_fp, cert_issuer, probe.subject,
-                                                        authority);
+   int authority_rc =
+       db2_enrollment_authority_resolve(cert_fp, cert_issuer, probe.subject, authority);
    if (authority_rc != 0)
-      fprintf(stderr, "P2b enrolled identity unresolved fp=%s issuer=%s serial=%s rc=%d\n",
-              cert_fp, cert_issuer, cert_serial, authority_rc);
+      fprintf(stderr, "P2b enrolled identity unresolved fp=%s issuer=%s serial=%s rc=%d\n", cert_fp,
+              cert_issuer, cert_serial, authority_rc);
    assert(authority_rc == 0);
    int scope_rc = db2_tenant_scope_begin(&probe, team);
    if (scope_rc != 0)
-      fprintf(stderr, "P2b enrolled membership unresolved identity=%s rc=%d\n", identity,
-              scope_rc);
+      fprintf(stderr, "P2b enrolled membership unresolved identity=%s rc=%d\n", identity, scope_rc);
    assert(scope_rc == 0 && db2_tenant_scope_commit() == 0);
    char response[262144];
-   int status = egress_request(mtls_port, ca, cert, client_key,
-                               "11111111-1111-4111-8111-111111111111", team,
-                               response, sizeof(response));
+   int status =
+       egress_request(mtls_port, ca, cert, client_key, "11111111-1111-4111-8111-111111111111", team,
+                      response, sizeof(response));
    if (status != 200)
-      fprintf(stderr, "P2b route status=%d response=%s reserved=%lld in_flight=%lld failed=%lld "
-                      "key_uses=%lld\n", status, response,
+      fprintf(stderr,
+              "P2b route status=%d response=%s reserved=%lld in_flight=%lld failed=%lld "
+              "key_uses=%lld\n",
+              status, response,
               (long long)scalar("SELECT count(*) FROM org_egress_dispatch WHERE state='reserved'"),
               (long long)scalar("SELECT count(*) FROM org_egress_dispatch WHERE state='in_flight'"),
               (long long)scalar("SELECT count(*) FROM org_egress_dispatch WHERE state='failed'"),
@@ -209,18 +209,16 @@ int main(void)
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=982260") == 1);
 
    /* Exact replay is durable and never re-dispatches. */
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "11111111-1111-4111-8111-111111111111", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "11111111-1111-4111-8111-111111111111",
+                           team, response, sizeof(response));
    assert(status == 409 && strstr(response, "request already recorded"));
 
    /* Both private refusal classes collapse to 429 and stop before P7/network. */
    assert(db2_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_rate_policy_set('team','982260',3600,0)") > 0);
    assert(db2_tenant_scope_commit() == 0);
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "22222222-2222-4222-8222-222222222222", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "22222222-2222-4222-8222-222222222222",
+                           team, response, sizeof(response));
    assert(status == 429);
    assert(db2_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_rate_policy_set('team','982260',3600,100)") > 0);
@@ -228,45 +226,39 @@ int main(void)
                  "FROM org_budget_counter WHERE team_id=982260 AND project_id IS NULL "
                  "AND period='day'),NULL)") > 0);
    assert(db2_tenant_scope_commit() == 0);
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "33333333-3333-4333-8333-333333333333", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "33333333-3333-4333-8333-333333333333",
+                           team, response, sizeof(response));
    assert(status == 429);
    assert(db2_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_budget_set(982260,NULL,'day',1000,NULL)") > 0);
    assert(db2_tenant_scope_commit() == 0);
 
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "44444444-4444-4444-8444-444444444444", team + 1,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "44444444-4444-4444-8444-444444444444",
+                           team + 1, response, sizeof(response));
    assert(status == 403);
 
    /* Authenticated complete provider denial is 502/durable denied and charges
     * the reservation; retry remains a no-send 409. */
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "55555555-5555-4555-8555-555555555555", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "55555555-5555-4555-8555-555555555555",
+                           team, response, sizeof(response));
    assert(status == 502);
    assert(scalar("SELECT count(*) FROM org_egress_dispatch WHERE request_id="
                  "'55555555-5555-4555-8555-555555555555' AND state='denied' AND "
                  "http_status=429 AND realized_usd=reserved_max_usd") == 1);
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "55555555-5555-4555-8555-555555555555", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "55555555-5555-4555-8555-555555555555",
+                           team, response, sizeof(response));
    assert(status == 409);
 
    /* Partial authenticated response is ambiguous, charges the reservation,
     * returns 504, and cannot be dispatched again. */
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "66666666-6666-4666-8666-666666666666", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "66666666-6666-4666-8666-666666666666",
+                           team, response, sizeof(response));
    assert(status == 504);
    assert(scalar("SELECT count(*) FROM org_egress_dispatch WHERE request_id="
                  "'66666666-6666-4666-8666-666666666666' AND state='uncertain' AND "
                  "http_status=0 AND realized_usd=reserved_max_usd") == 1);
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "66666666-6666-4666-8666-666666666666", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "66666666-6666-4666-8666-666666666666",
+                           team, response, sizeof(response));
    assert(status == 409);
 
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=982260") == 3);
@@ -276,15 +268,13 @@ int main(void)
                  "'p2b-live-billable',1,'p2b-live-key','team:982260:bedrock',"
                  "'bedrock','iam',1000,100,false)::int") == 1);
    assert(db2_tenant_scope_commit() == 0);
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "77777777-7777-4777-8777-777777777777", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "77777777-7777-4777-8777-777777777777",
+                           team, response, sizeof(response));
    assert(status == 403);
 
    assert(revoke_enrollment(cert_fp) == 0);
-   status = egress_request(mtls_port, ca, cert, client_key,
-                           "88888888-8888-4888-8888-888888888888", team,
-                           response, sizeof(response));
+   status = egress_request(mtls_port, ca, cert, client_key, "88888888-8888-4888-8888-888888888888",
+                           team, response, sizeof(response));
    assert(status == 401);
 
    OPENSSL_cleanse(kek, sizeof(kek));
