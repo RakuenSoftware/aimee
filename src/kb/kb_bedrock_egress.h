@@ -37,11 +37,26 @@ typedef enum
 typedef struct
 {
    const char *access_key_id;
+   size_t access_key_id_len;
    const char *secret_access_key;
+   size_t secret_access_key_len;
    const char *session_token;
+   size_t session_token_len;
    const char *amz_date;
    const char *date;
 } kb_bedrock_credentials_t;
+
+typedef struct
+{
+   const unsigned char *access_key_id;
+   size_t access_key_id_len;
+   const unsigned char *secret_access_key;
+   size_t secret_access_key_len;
+   const unsigned char *session_token;
+   size_t session_token_len;
+   const char *amz_date;
+   const char *date;
+} kb_bedrock_credential_view_t;
 
 typedef struct
 {
@@ -69,6 +84,9 @@ kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *ta
                                                   const aimee_request_t *ir, int streaming,
                                                   const kb_bedrock_credentials_t *credentials,
                                                   kb_bedrock_wire_request_t *request);
+/* Serialize the exact bounded Converse body used for digesting and later signing. */
+kb_bedrock_result_t kb_bedrock_canonical_body(const aimee_request_t *ir, char **body,
+                                              size_t *body_len);
 kb_bedrock_result_t kb_bedrock_wire_request_headers(const kb_bedrock_wire_request_t *request,
                                                     kb_bedrock_header_t *headers, size_t capacity,
                                                     size_t *count);
@@ -98,6 +116,18 @@ kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **stream);
 kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
                                                          kb_bedrock_authorized_target_t **target);
 void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target);
+
+/* Vault-safe split: build/sign while the borrowed credential view is live, then
+ * dispatch the owned credential-free request only after the vault callback returns. */
+kb_bedrock_result_t
+kb_bedrock_authorized_wire_build(kb_bedrock_authorized_target_t *target, const aimee_request_t *ir,
+                                 const kb_bedrock_credential_view_t *credentials,
+                                 kb_bedrock_wire_request_t *request);
+kb_bedrock_result_t kb_bedrock_authorized_wire_dispatch(kb_bedrock_authorized_target_t *target,
+                                                        kb_bedrock_wire_request_t *request,
+                                                        aimee_response_t *response,
+                                                        int *http_status,
+                                                        int *vendor_bytes_possible);
 
 /* Production dispatch derives DNS, Host, SNI, and certificate authority solely from the
  * resolver-issued target.

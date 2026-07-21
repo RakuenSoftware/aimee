@@ -236,6 +236,36 @@ int kb_pki_ca_fingerprint(const char *ca_cert_pem, char *hex_out, size_t cap)
    return rc;
 }
 
+int kb_pki_cert_metadata(const char *cert_pem, char *issuer_out, size_t issuer_cap,
+                         char *serial_out, size_t serial_cap)
+{
+   if ((issuer_out && issuer_cap == 0) || (serial_out && serial_cap == 0))
+      return -1;
+   X509 *cert = x509_from_pem(cert_pem);
+   if (!cert)
+      return -1;
+   int rc = -1;
+   char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+   const ASN1_INTEGER *asn1_serial = X509_get0_serialNumber(cert);
+   BIGNUM *bn = asn1_serial ? ASN1_INTEGER_to_BN(asn1_serial, NULL) : NULL;
+   char *serial = bn ? BN_bn2hex(bn) : NULL;
+   if (!issuer || !issuer[0] || !serial || !serial[0])
+      goto done;
+   if ((issuer_out && strlen(issuer) >= issuer_cap) || (serial_out && strlen(serial) >= serial_cap))
+      goto done;
+   if (issuer_out)
+      memcpy(issuer_out, issuer, strlen(issuer) + 1);
+   if (serial_out)
+      memcpy(serial_out, serial, strlen(serial) + 1);
+   rc = 0;
+done:
+   OPENSSL_free(serial);
+   BN_free(bn);
+   OPENSSL_free(issuer);
+   X509_free(cert);
+   return rc;
+}
+
 /* --- client cert issuance --- */
 
 int kb_pki_issue_client_cert(const kb_pki_ca_t *ca, const char *subject_cn, long valid_secs,

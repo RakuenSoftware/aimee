@@ -5,13 +5,13 @@
 
 ## Delivery status (as of 2026-07-21)
 
-25 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
+26 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
 `testing`. Completed per-slice implementation plans live in `docs/proposals/done/`.
 
 | P | Status | Merged slices | Remaining |
 |---|---|---|---|
 | **P1** Tenancy + identity | ✅ done | schema+RLS, OIDC (iat + fleet JWKS), tenant-write policies + bootstrap, operator CLI | — |
-| **P2** kb egress authority + catalog | 🟡 partial | **P2a** catalog + entitlement | **P2b** egress path (live server↔kb wiring) |
+| **P2** kb egress authority + catalog | 🟡 partial | **P2a** catalog + entitlement, **P2b-a** buffered kb ingress, atomic admission/settlement, vault signing, vendor dispatch + durable replay guard | **P2b-b** server→kb forwarding + true end-to-end streaming |
 | **P3** Cost attribution | ✅ done | **P3a** pricing+WORM-ledger+rollup, **P3b** spend reporting | — |
 | **P4** Budgets + rate limits | ✅ done | **P4a** budget reservation core, **P4b** keyed rate limiter (both concurrency-proven) | — |
 | **P5** OIDC control plane | 🟡 integration | authenticated management route, registry/heartbeat, mTLS client propagation | live two-node server↔kb topology + OIDC propagation |
@@ -21,7 +21,7 @@
 | **P9** Telemetry tiering | 🟡 partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
 | **P10** Shared vault core | ✅ done | core extraction, kb Postgres store, custody selection + seal barrier | — (hardening tracked under P7) |
 
-Remaining work is integration/topology (P2b egress, P5 mgmt channel, P8b/c) plus
+Remaining work is integration/topology (P2b-b server forwarding/streaming, P5 mgmt channel, P8b/c) plus
 the remaining P7 reseal reconciler/enablement — validatable on the dedicated integration
 environment (a throwaway TPM2-equipped CT). The tpm2
 custody provider was validated against a software TPM2 (swtpm), which exercises the identical

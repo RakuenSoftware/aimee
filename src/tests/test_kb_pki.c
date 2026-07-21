@@ -147,6 +147,14 @@ static void test_issue_and_verify(const kb_pki_ca_t *ca)
    assert(strstr(key, "PRIVATE KEY-----"));
    assert_cert_cn(cert, "client:project:alpha");
 
+   char issuer[256], serial[128];
+   assert(kb_pki_cert_metadata(cert, issuer, sizeof(issuer), serial, sizeof(serial)) == 0);
+   assert(strstr(issuer, "CN=aimee-kb-ca") != NULL && serial[0] != '\0');
+   for (const char *p = serial; *p; p++)
+      assert((*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'));
+   assert(kb_pki_cert_metadata("garbage", issuer, sizeof(issuer), serial, sizeof(serial)) == -1);
+   assert(kb_pki_cert_metadata(cert, issuer, 1, serial, sizeof(serial)) == -1);
+
    /* The issued cert chains to its CA. */
    assert(kb_pki_verify_client_cert(ca->cert_pem, cert) == 1);
 
