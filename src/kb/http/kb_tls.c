@@ -9,12 +9,14 @@
 #include <openssl/bn.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/err.h>
 #include "cJSON.h"
 #include "kb_enroll.h" /* connection-string parse */
 #include "kb_pki.h"    /* CA fingerprint for TOFU pinning */
 
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include <netdb.h>
 #include <sys/socket.h>
@@ -239,7 +241,7 @@ int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_p
    char *raw = NULL;
    SSL *ssl = SSL_new(ctx);
    if (!ssl)
-      goto done;
+   { fprintf(stderr, "[DBG fetch_ca] SSL_new fail\n"); goto done; }
    SSL_set_fd(ssl, fd);
    SSL_set_tlsext_host_name(ssl, host); /* SNI */
    SSL_set1_host(ssl, host);            /* verify the server cert's hostname */
@@ -366,7 +368,7 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
    SSL_set_fd(ssl, fd);
    SSL_set_tlsext_host_name(ssl, host);
    if (SSL_connect(ssl) != 1)
-      goto done;
+   { fprintf(stderr, "[DBG fetch_ca] SSL_connect fail\n"); ERR_print_errors_fp(stderr); goto done; }
 
    {
       char req[256];
@@ -374,7 +376,7 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
           snprintf(req, sizeof(req),
                    "GET /v1/enroll/ca HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
       if (SSL_write(ssl, req, rn) <= 0)
-         goto done;
+      { fprintf(stderr, "[DBG fetch_ca] SSL_write fail rn=%d errno=%d\n", rn, errno); ERR_print_errors_fp(stderr); goto done; }
    }
 
    {
@@ -393,8 +395,7 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
       raw[total] = '\0';
 
       const char *bp = strstr(raw, "\r\n\r\n");
-      if (!bp)
-         goto done;
+      if (!bp) { fprintf(stderr, "[DBG fetch_ca] no body sep, total=%zu head=%.180s\n", total, raw); goto done; }
       bp += 4;
       cJSON *j = cJSON_Parse(bp);
       const cJSON *jca = j ? cJSON_GetObjectItemCaseSensitive(j, "ca_cert") : NULL;
@@ -408,7 +409,11 @@ int kb_tls_fetch_ca(const char *host, int port, const char *expected_fp_hex, cha
             snprintf(ca_out, ca_cap, "%s", jca->valuestring);
             rc = 0;
          }
+         else
+            fprintf(stderr, "[DBG fetch_ca] pin fail exp=%.40s got=%.40s plen=%zu cap=%zu\n", expected_fp_hex, fp, strlen(jca->valuestring), ca_cap);
       }
+      else
+         fprintf(stderr, "[DBG fetch_ca] no ca_cert j=%p jca=%p body=%.200s\n", (void*)j, (void*)jca, bp);
       cJSON_Delete(j);
    }
 
@@ -428,6 +433,7 @@ done:
 
 #include <openssl/evp.h>
 #include <openssl/x509.h>
+#include <openssl/err.h>
 
 /* Generate a fresh RSA-2048 keypair: write its PKCS#8 private key PEM into
  * key_pem[key_cap] and a self-signed PEM CSR (CN "client"; the server overrides
