@@ -26,7 +26,6 @@ import argparse
 import binascii
 import hashlib
 import hmac
-import io
 import ipaddress
 import json
 import os
@@ -35,8 +34,8 @@ import socket
 import ssl
 import struct
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from socketserver import BaseRequestHandler, TCPServer
 from typing import Any, Iterable
 
 
@@ -46,6 +45,8 @@ TEST_SESSION_TOKEN = "token"
 TEST_AMZ_DATE = "20260101T000000Z"
 TEST_DATE = "20260101"
 MAX_REQUEST_BODY = 16 * 1024 * 1024
+MAX_REQUEST_HEAD = 64 * 1024
+MAX_REQUEST_HEADERS = 32
 
 CASES = (
     "nonstream-success",
@@ -64,12 +65,82 @@ AUTH_RE = re.compile(
     r"\AAWS4-HMAC-SHA256 Credential=([^/]+)/([^,]+), "
     r"SignedHeaders=([^,]+), Signature=([0-9a-f]{64})\Z"
 )
-HEADER_NAME_RE = re.compile(r"\A[a-z0-9-]+\Z")
+HEADER_NAME_RE = re.compile(rb"\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
+REQUEST_LINE_RE = re.compile(rb"\APOST ([\x21-\x7e]+) HTTP/1\.1\Z")
 
 
-def _immediate_surplus_queued(reader: Any) -> bool:
-    """Return whether a buffered reader exposes an already-queued suffix."""
-    return bool(reader.peek(1))
+class WireError(ValueError):
+    """A safe, body-free reason for rejecting the raw HTTP request."""
+
+
+def _origin_target_valid(target: bytes) -> bool:
+    if not target.startswith(b"/") or target.startswith(b"//"):
+        return False
+    allowed = b"/-._~!$&'()*+,;=:@"
+    index = 1
+    while index < len(target):
+        value = target[index]
+        if value == ord("%"):
+            if index + 2 >= len(target) or not all(
+                byte in b"0123456789abcdefABCDEF" for byte in target[index + 1 : index + 3]
+            ):
+                return False
+            index += 3
+            continue
+        if (
+            ord("0") <= value <= ord("9")
+            or ord("A") <= value <= ord("Z")
+            or ord("a") <= value <= ord("z")
+            or value in allowed
+        ):
+            index += 1
+            continue
+        return False
+    return True
+
+
+def parse_request_head(raw: bytes) -> tuple[str, dict[str, str], int]:
+    """Parse one bounded HTTP/1.1 request head without normalization."""
+    if len(raw) > MAX_REQUEST_HEAD or not raw.endswith(b"\r\n\r\n"):
+        raise WireError("head-framing")
+    if re.search(rb"(?<!\r)\n|\r(?!\n)", raw):
+        raise WireError("line-ending")
+    lines = raw[:-4].split(b"\r\n")
+    if not lines or len(lines) - 1 > MAX_REQUEST_HEADERS:
+        raise WireError("request-lines")
+    match = REQUEST_LINE_RE.fullmatch(lines[0])
+    if not match or not _origin_target_valid(match.group(1)):
+        raise WireError("request-line")
+    target = match.group(1).decode("ascii")
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if not line or line.startswith((b" ", b"\t")):
+            raise WireError("header-fold")
+        colon = line.find(b":")
+        if colon <= 0 or line[colon : colon + 2] != b": ":
+            raise WireError("header-colon")
+        name_bytes = line[:colon]
+        value_bytes = line[colon + 2 :]
+        if not HEADER_NAME_RE.fullmatch(name_bytes):
+            raise WireError("header-name")
+        if (
+            not value_bytes
+            or value_bytes[:1] in (b" ", b"\t")
+            or value_bytes[-1:] in (b" ", b"\t")
+            or any(byte < 0x20 or byte >= 0x7F for byte in value_bytes)
+        ):
+            raise WireError("header-whitespace")
+        name = name_bytes.decode("ascii").lower()
+        if name in headers:
+            raise WireError("header-duplicate")
+        headers[name] = value_bytes.decode("ascii")
+    length_text = headers.get("content-length")
+    if length_text is None or not re.fullmatch(r"[1-9][0-9]*", length_text):
+        raise WireError("content-length")
+    length = int(length_text, 10)
+    if length > MAX_REQUEST_BODY:
+        raise WireError("content-length")
+    return target, headers, length
 
 
 def _exact_sni(server_name: str | None, expected_host: str) -> bool:
@@ -276,7 +347,7 @@ def expected_signature(
     region: str,
 ) -> str:
     canonical_headers = "".join(
-        f"{name}:{' '.join(headers[name].strip().split())}\n" for name in signed_names
+        f"{name}:{headers[name]}\n" for name in signed_names
     )
     canonical_request = (
         f"POST\n{path}\n\n{canonical_headers}\n"
@@ -358,7 +429,7 @@ def _chunked_response(connection: Any, body: bytes) -> None:
     _send_fragmented(connection, b"0\r\n\r\n", (1, 1, 2, 1))
 
 
-class MockServer(HTTPServer):
+class MockServer(TCPServer):
     allow_reuse_address = True
 
     def __init__(self, address: tuple[str, int], args: argparse.Namespace):
@@ -366,6 +437,7 @@ class MockServer(HTTPServer):
         self.accepted = 0
         self.observed = 0
         super().__init__(address, MockHandler)
+        self.server_port = self.server_address[1]
 
     def mark_observed(self) -> None:
         self.observed += 1
@@ -376,12 +448,8 @@ class MockServer(HTTPServer):
         _write_counter(self.args.counter_file, self.accepted)
 
 
-class MockHandler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+class MockHandler(BaseRequestHandler):
     server: MockServer
-
-    def log_message(self, _format: str, *args: object) -> None:
-        return
 
     def _reject(self, reason: str, request_length: int = 0) -> None:
         print(
@@ -395,31 +463,31 @@ class MockHandler(BaseHTTPRequestHandler):
             )
         except OSError:
             pass
-        self.close_connection = True
 
     def _send_close_notify(self) -> None:
         """Send TLS close_notify without waiting for the client's reciprocal alert."""
         try:
-            self.wfile.flush()
             self.connection.setblocking(False)
             self.connection.unwrap()
         except (ssl.SSLWantReadError, ssl.SSLWantWriteError, OSError):
             pass
 
-    def _has_surplus_request_bytes(self) -> bool:
+    def _has_surplus_request_bytes(self, queued: bytes) -> bool:
         """Reject an immediately queued/pipelined suffix after Content-Length.
 
-        ``rfile`` is buffered, so ``peek`` covers both bytes already consumed from
-        TLS into that buffer and bytes immediately readable from the socket.  The
-        bounded probe reliably catches a single-write request-plus-suffix.  It
+        ``queued`` covers bytes received with the declared body, and the bounded
+        socket probe covers bytes immediately readable from TLS.  Together they
+        reliably catch a single-write request-plus-suffix.  This
         cannot prove that a peer will never send bytes later: Content-Length ends
         the request, while this response-before-close protocol cannot wait for
         peer EOF without deadlocking a normal client.
         """
+        if queued:
+            return True
         previous_timeout = self.connection.gettimeout()
         try:
             self.connection.settimeout(0.1)
-            return _immediate_surplus_queued(self.rfile)
+            return bool(self.connection.recv(1))
         except (TimeoutError, socket.timeout, ssl.SSLWantReadError):
             return False
         finally:
@@ -428,34 +496,46 @@ class MockHandler(BaseHTTPRequestHandler):
     def _drop_without_close_notify(self) -> None:
         """Close the underlying TCP fd without emitting a TLS close_notify."""
         try:
-            self.wfile.flush()
-        except OSError:
-            pass
-        try:
             fd = self.connection.detach()
         except OSError:
             return
         os.close(fd)
 
-    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def _read_request(self) -> tuple[str, dict[str, str], bytes, bytes]:
+        buffered = bytearray()
+        marker_at = -1
+        while marker_at < 0:
+            if len(buffered) >= MAX_REQUEST_HEAD:
+                raise WireError("head-too-large")
+            chunk = self.connection.recv(min(16384, MAX_REQUEST_HEAD - len(buffered)))
+            if not chunk:
+                raise WireError("short-head")
+            buffered.extend(chunk)
+            marker_at = buffered.find(b"\r\n\r\n")
+        head_end = marker_at + 4
+        target, headers, length = parse_request_head(bytes(buffered[:head_end]))
+        remainder = bytearray(buffered[head_end:])
+        while len(remainder) < length:
+            chunk = self.connection.recv(min(16384, length - len(remainder)))
+            if not chunk:
+                raise WireError("short-body")
+            remainder.extend(chunk)
+        return target, headers, bytes(remainder[:length]), bytes(remainder[length:])
+
+    def handle(self) -> None:
+        self.connection = self.request
         self.server.mark_observed()
         args = self.server.args
-        if (
-            self.request_version != "HTTP/1.1"
-            or self.path != args.expected_path
-            or not self.path.startswith("/")
-            or "?" in self.path
-        ):
-            self._reject("path")
+        self.connection.settimeout(5.0)
+        try:
+            path, headers, body, queued = self._read_request()
+        except (OSError, WireError) as error:
+            reason = error.args[0] if isinstance(error, WireError) else "request-io"
+            self._reject(str(reason))
             return
-        headers: dict[str, str] = {}
-        for name in self.headers.keys():
-            lower = name.lower()
-            values = self.headers.get_all(name, failobj=[])
-            if not HEADER_NAME_RE.fullmatch(lower) or len(values) != 1 or lower in headers:
-                self._reject("headers")
-                return
-            headers[lower] = values[0]
+        if path != args.expected_path:
+            self._reject("path", len(body))
+            return
         required = {
             "authorization",
             "content-length",
@@ -472,19 +552,8 @@ class MockHandler(BaseHTTPRequestHandler):
         ):
             self._reject("headers")
             return
-        try:
-            length = int(headers["content-length"], 10)
-        except ValueError:
-            self._reject("length")
-            return
-        if length < 1 or length > MAX_REQUEST_BODY or str(length) != headers["content-length"]:
-            self._reject("length")
-            return
-        body = self.rfile.read(length)
-        if len(body) != length:
-            self._reject("short-body", len(body))
-            return
-        if self._has_surplus_request_bytes():
+        length = len(body)
+        if self._has_surplus_request_bytes(queued):
             self._reject("surplus-request-bytes", length)
             return
         if headers["host"] != args.expected_host or headers["content-type"] != "application/json":
@@ -528,7 +597,7 @@ class MockHandler(BaseHTTPRequestHandler):
         ):
             self._reject("authorization-scope", length)
             return
-        wanted = expected_signature(self.path, headers, signed_names, payload_hash, args.region)
+        wanted = expected_signature(path, headers, signed_names, payload_hash, args.region)
         if not hmac.compare_digest(signature, wanted):
             self._reject("signature", length)
             return
@@ -547,7 +616,6 @@ class MockHandler(BaseHTTPRequestHandler):
             self._drop_without_close_notify()
         else:
             self._send_close_notify()
-        self.close_connection = True
 
     def _respond(self, case: str) -> None:
         if case in ("nonstream-success", "unclean-eof"):
@@ -636,12 +704,39 @@ def self_test() -> None:
         "/model/model/converse", headers, names, headers["x-amz-content-sha256"], "us-east-1"
     )
     assert len(first) == 64 and hmac.compare_digest(first, second)
-    with_suffix = io.BufferedReader(io.BytesIO(b"bodyqueued-suffix"))
-    assert with_suffix.read(4) == b"body"
-    assert _immediate_surplus_queued(with_suffix)
-    without_suffix = io.BufferedReader(io.BytesIO(b"body"))
-    assert without_suffix.read(4) == b"body"
-    assert not _immediate_surplus_queued(without_suffix)
+
+    valid_head = (
+        b"POST /model/model/converse HTTP/1.1\r\n"
+        b"Host: bedrock-runtime.us-east-1.amazonaws.com\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: 4\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    parsed_path, parsed_headers, parsed_length = parse_request_head(valid_head)
+    assert parsed_path == "/model/model/converse"
+    assert parsed_headers["host"] == headers["host"]
+    assert parsed_length == 4
+
+    def rejected(raw: bytes) -> bool:
+        try:
+            parse_request_head(raw)
+        except WireError:
+            return True
+        return False
+
+    assert rejected(valid_head.replace(b"Host: ", b"Host: first\r\nHost: "))
+    assert rejected(valid_head.replace(b"Host: ", b"Host : "))
+    assert rejected(valid_head.replace(b"Host: ", b"Host@: "))
+    assert rejected(valid_head.replace(b"Host: ", b"Host:"))
+    assert rejected(valid_head.replace(b"Host: ", b"Host:  "))
+    assert rejected(valid_head.replace(b".com\r\n", b".com \r\n"))
+    assert rejected(valid_head.replace(b"Content-Type:", b"\tContent-Type:"))
+    assert rejected(valid_head.replace(b"Host:", b"Fold: one\r\n two\r\nHost:"))
+    assert rejected(valid_head.replace(b" HTTP/1.1\r\n", b" HTTP/1.1\n"))
+    assert rejected(valid_head.replace(b"POST ", b"GET "))
+    assert rejected(valid_head.replace(b"POST /", b"POST  /"))
+    assert rejected(valid_head.replace(b"/model/model/converse", b"https://example.invalid/"))
+    assert rejected(valid_head.replace(b"HTTP/1.1", b"HTTP/1.0"))
     assert _exact_sni("bedrock-runtime.us-east-1.amazonaws.com", headers["host"])
     assert not _exact_sni(None, headers["host"])
     assert not _exact_sni("wrong.invalid", headers["host"])
