@@ -197,8 +197,10 @@ static void output_snapshot(vault_reseal_orchestrator_output_t *o,
    memset(o->failure_class, 0, sizeof(o->failure_class));
    if (s->failure_class[0])
    {
-      memcpy(o->failure_class, s->failure_class, sizeof(o->failure_class) - 1);
-      o->failure_class[sizeof(o->failure_class) - 1] = '\0';
+      size_t n = strnlen(s->failure_class, sizeof(s->failure_class));
+      if (n >= sizeof(o->failure_class))
+         n = sizeof(o->failure_class) - 1;
+      memcpy(o->failure_class, s->failure_class, n);
    }
 }
 

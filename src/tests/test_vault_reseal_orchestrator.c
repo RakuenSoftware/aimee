@@ -30,6 +30,7 @@ static int g_nv_result = VAULT_TPM2_RESEAL_OK;
 static uint64_t g_nv_generation = 7;
 static int g_secret_page_oversize, g_check_page_oversize, g_check_cursor_stale;
 static int g_unterminated_failure_class;
+static int g_embedded_failure_class;
 static int g_sequence, g_first_order[40], g_last_order[40];
 static int64_t g_secret_count, g_check_count;
 static vault_tpm2_reseal_receipt_t g_receipt;
@@ -146,6 +147,11 @@ static db2_vault_rewrap_result_t snapshot(const uint8_t op[16], db2_vault_rewrap
    s->new_generation = 8;
    if (g_unterminated_failure_class)
       memset(s->failure_class, 'x', sizeof(s->failure_class));
+   else if (g_embedded_failure_class)
+   {
+      s->failure_class[0] = 'x';
+      s->failure_class[2] = 'y';
+   }
    if (g_state != DB2_VAULT_REWRAP_PREPARING && g_state != DB2_VAULT_REWRAP_ABORTED)
    {
       s->has_receipt = 1;
@@ -611,6 +617,7 @@ static void reset_fakes(void)
    g_nv_generation = 7;
    g_secret_page_oversize = g_check_page_oversize = g_check_cursor_stale = 0;
    g_unterminated_failure_class = 0;
+   g_embedded_failure_class = 0;
    g_secret_count = g_check_count = 0;
 }
 
@@ -1054,6 +1061,15 @@ static void validation_before_effects(void)
    g_unterminated_failure_class = 1;
    assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_COMPLETED);
    assert(out.failure_class[sizeof(out.failure_class) - 1] == '\0');
+   assert(memcmp(out.failure_class, "xxxxxxxx", 8) == 0);
+
+   reset_fakes();
+   g_state = DB2_VAULT_REWRAP_COMPLETED;
+   g_status = VAULT_TPM2_RESEAL_INSTALLED;
+   g_embedded_failure_class = 1;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_COMPLETED);
+   assert(out.failure_class[0] == 'x' && out.failure_class[1] == '\0' &&
+          out.failure_class[2] == '\0');
 }
 
 int main(void)
