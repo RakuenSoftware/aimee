@@ -27,7 +27,9 @@
 #include "platform_path.h"
 #include "platform_process.h"
 #include "shutdown_forensics.h"
+#if AIMEE_WITH_PLUGIN_LOADER
 #include "aimee/plugin-loader/plugin_loader.h"
+#endif
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
@@ -237,12 +239,14 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
    guardrails_action_audit_register_reload();
+#if AIMEE_WITH_PLUGIN_LOADER
    {
       char perr[256] = {0};
       plugin_loader_discover_all(perr, sizeof(perr));
       if (perr[0])
          LOG_WARN("server", "plugin discovery: %s", perr);
    }
+#endif
 
    /* DB2 + pgvector startup and supervision are owned by aimee-kb, not
     * aimee-server.  Keep the server on the DB1 side of the service split. */

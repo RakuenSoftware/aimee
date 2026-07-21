@@ -2249,6 +2249,7 @@ int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+#if AIMEE_WITH_PLUGIN_LOADER
 int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -2259,6 +2260,7 @@ int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    free(json);
    return send_and_free(conn, resp);
 }
+#endif
 
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

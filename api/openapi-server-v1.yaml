@@ -2380,14 +2380,17 @@ paths:
     get:
       summary: Plans dashboard
       responses: { "200": { description: Plans, content: { application/json: { schema: { type: object } } } } }
+  # @aimee-if AIMEE_WITH_PLUGIN_LOADER
   /dashboard/plugins:
     get:
       summary: Plugins dashboard
       responses: { "200": { description: Plugins, content: { application/json: { schema: { type: object } } } } }
+  # @aimee-endif AIMEE_WITH_PLUGIN_LOADER
   /dashboard/traces:
     get:
       summary: Traces dashboard
       responses: { "200": { description: Traces, content: { application/json: { schema: { type: object } } } } }
+  # @aimee-if AIMEE_WITH_PLUGIN_LOADER
   /plugins:
     get:
       summary: List installed plugins
@@ -2402,6 +2405,7 @@ paths:
       summary: Disable an installed plugin
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Plugin, content: { application/json: { schema: { type: object } } } } }
+  # @aimee-endif AIMEE_WITH_PLUGIN_LOADER
   /insights/overview:
     get:
       summary: Insights overview

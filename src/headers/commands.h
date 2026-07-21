@@ -225,7 +225,9 @@ void cmd_autopilot(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_autopilot_subcmds(void);
 
 /* cmd_plugin.c */
+#if AIMEE_WITH_PLUGIN_LOADER
 void cmd_plugin(app_ctx_t *ctx, int argc, char **argv);
+#endif
 
 /* cmd_run.c */
 void cmd_run(app_ctx_t *ctx, int argc, char **argv);

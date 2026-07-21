@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import sys
@@ -47,7 +48,7 @@ CONTRACTS = (
             "src/tests/test_plugin_loader.c",
         ),
         document="docs/modules/plugin-loader.md",
-        document_markers=("The link profile remains unconditional",),
+        document_markers=("AIMEE_WITH_PLUGIN_LOADER", "disabled profile"),
     ),
     Contract(
         module="module-runtime-pre-llm-hook",
@@ -227,6 +228,17 @@ def validate(root: Path) -> None:
             "module-include-root", "CMake plugin-loader include root")
     require(cmake.count("set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR") == 1,
             "module-include-root", "CMake module-runtime include root")
+
+    descriptor = json.loads(read(root, "src/modules/plugin-loader/module.yaml"))
+    features = read(root, "src/headers/aimee_features.h")
+    require(descriptor.get("enabled_by_default") is False,
+            "plugin-loader-profile-default", "descriptor must default disabled")
+    require(re.search(r"^AIMEE_WITH_PLUGIN_LOADER\s*\?=\s*0$", makefile, re.MULTILINE) is not None,
+            "plugin-loader-profile-default", "Make must default disabled")
+    require('option(AIMEE_WITH_PLUGIN_LOADER "Build the optional plugin manifest loader" OFF)' in cmake,
+            "plugin-loader-profile-default", "CMake must default disabled")
+    require(re.search(r"^#define AIMEE_WITH_PLUGIN_LOADER 0$", features, re.MULTILINE) is not None,
+            "plugin-loader-profile-default", "header fallback must default disabled")
 
 
 def main() -> int:

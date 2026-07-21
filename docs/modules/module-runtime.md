@@ -10,6 +10,9 @@ registry is at
 `src/modules/module-runtime/pre_llm_hook.c`, with its public contract at
 `src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h`.
 
+It ships in every build profile. The optional `plugin-loader` module defaults to disabled and
+depends on module-runtime; module-runtime has no dependency on plugin-loader.
+
 These ownership slices do not change configuration or activation semantics.
 
 ## Extension ABI and registries
@@ -96,4 +99,5 @@ the preceding plugin-loader move without duplicating a checker per module.
 The legacy `plugin.c`/`plugin.h` mix is split by ownership. The unreferenced `plugin_ctx.c` and
 `plugin_ctx.h` wrapper island was removed after call-site, build-manifest, and installed-header
 inventory found no consumer; the required `plugin_ctx_create` and `plugin_ctx_destroy` symbols remain
-in this module. Plugin-loader link omission remains a separate consumer/profile slice.
+in this module. The plugin-loader profile now omits the optional loader while preserving these
+required contracts.

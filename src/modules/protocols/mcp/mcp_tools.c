@@ -4,7 +4,10 @@
 #include "mcp_skill_tools.h"
 #include "mcp_tools.h"
 #include "mcp_tools_gateway.h"
+#include "aimee_features.h"
+#if AIMEE_WITH_PLUGIN_LOADER
 #include "aimee/plugin-loader/plugin.h"
+#endif
 #include "session_search_tool.h"
 #include "log.h"
 #include <stdio.h>
@@ -1720,6 +1723,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
    if (collapse)
       mcp_collapse_families(tools);
 
+#if AIMEE_WITH_PLUGIN_LOADER
    /* Plugin tools: load registry + project-local, add enabled tools */
    {
       plugin_t plugins[PLUGIN_MAX_PLUGINS];
@@ -1761,6 +1765,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
          cJSON_AddItemToArray(tools, mcp_tool_new(namespaced, desc, schema));
       }
    }
+#endif
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

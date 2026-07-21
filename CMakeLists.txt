@@ -36,6 +36,13 @@ option(AIMEE_LEAN "Lean build profile: size-optimized, no UI" OFF)
 # a release/packaging box build it with no Go, libpq, zstd, PAM, or libsecret
 # toolchain. Composes with AIMEE_LEAN for a size-optimized, stripped binary.
 option(AIMEE_THIN_CLIENT "Build only the aimee thin client (no server/kb/gateway/webchat)" OFF)
+option(AIMEE_WITH_PLUGIN_LOADER "Build the optional plugin manifest loader" OFF)
+
+if(AIMEE_WITH_PLUGIN_LOADER)
+    add_compile_definitions(AIMEE_WITH_PLUGIN_LOADER=1)
+else()
+    add_compile_definitions(AIMEE_WITH_PLUGIN_LOADER=0)
+endif()
 
 include(CTest)
 
@@ -527,8 +534,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client.c
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client_registry.c
     ${AIMEE_SRC_DIR}/modules/module-runtime/extension.c
-    ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin.c
-    ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin_loader.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_provider.c
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
@@ -778,7 +783,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_table.c
     ${AIMEE_SRC_DIR}/cmd_doctor.c
     ${AIMEE_SRC_DIR}/cmd_toolset.c
-    ${AIMEE_SRC_DIR}/cmd_plugin.c
     ${AIMEE_SRC_DIR}/cmd_slop.c
     ${AIMEE_SRC_DIR}/cmd_job.c
     ${AIMEE_SRC_DIR}/cmd_roles.c
@@ -792,6 +796,13 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/aimee_client.c
     ${PLATFORM_CMD_SRCS}
 )
+if(AIMEE_WITH_PLUGIN_LOADER)
+    list(APPEND CORE_SRCS
+        ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin.c
+        ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin_loader.c
+    )
+    list(APPEND CMD_SRCS ${AIMEE_SRC_DIR}/cmd_plugin.c)
+endif()
 # The transport's local Unix-socket path (http_uds_client.c) is POSIX-only;
 # aimee_client.c only references it under AIMEE_POSIX, so Windows omits it.
 if(NOT WIN32)
@@ -976,6 +987,9 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomy.c
     ${PLATFORM_SERVER_SRCS}
 )
+if(NOT AIMEE_WITH_PLUGIN_LOADER)
+    list(REMOVE_ITEM SERVER_SRCS ${AIMEE_SRC_DIR}/server/server_plugin.c)
+endif()
 set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)

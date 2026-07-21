@@ -17,13 +17,16 @@ manifest implementation is `src/modules/plugin-loader/plugin.c`; its canonical c
 
 ## Classification and link profile
 
-The descriptor at `src/modules/plugin-loader/module.yaml` records the target classification as
-optional and disabled by default. That metadata does not describe the current binaries. The link
-profile remains unconditional: Make and CMake still list the discovery source in their core source
-lists. There is no build-time, link-time, or runtime-removal guarantee in this slice.
+The descriptor at `src/modules/plugin-loader/module.yaml` classifies the module as optional and
+default-disabled. Make selects it with `AIMEE_WITH_PLUGIN_LOADER=1` (or omits it with `0`); CMake
+uses `-DAIMEE_WITH_PLUGIN_LOADER=ON|OFF`. Both default to disabled.
 
-The physical owners are now separated. The link profile remains unconditional until a later
-consumer/profile slice proves plugin-loader is absent from the core link closure.
+The disabled profile omits the loader sources and the plugin-management command and server handler
+translation units. Startup discovery, manifest hook/tool aggregation, CLI/HTTP routes, and dashboard
+surfaces are compiled out, including their generated OpenAPI entries. The web GUI also hides its
+plugin drawer when its capability probe gets the absent-route response. The required extension ABI
+remains available from module-runtime. See `docs/validation/core-modularization-slice-11.md` for the
+complete disabled-surface proof.
 
 ## Public contracts
 
@@ -48,13 +51,11 @@ The implementation consumes configuration, Aimee home-path resolution, logging, 
 load-registration contracts, and the memory-provider/context-engine registration bridges it
 installs on dynamic-plugin contexts. Direct consumers of the relocated header are the implementation
 itself, Aimee Runtime startup in `src/server/server_main.c`, and the focused loader test in
-`src/tests/test_plugin_loader.c`.
+`src/tests/test_plugin_loader.c`. The server include and discovery call are both guarded by
+`AIMEE_WITH_PLUGIN_LOADER`, so the disabled profile has no required-to-optional compile or link edge.
 
 The descriptor therefore declares the required `memory` and `response-composition` dependencies in
 addition to `module-runtime`, configuration, execution policy, and audit.
-
-The required server currently invokes discovery during composition. This is migration debt, not
-evidence that an optional module is absent from required code.
 
 ## Configuration and activation
 
@@ -88,16 +89,16 @@ summarizes load failures for the caller.
 ## Tests
 
 `unit-test-plugin-loader` covers empty and missing directories, manifest discovery, precedence,
-capacity limits, required-environment handling, and project-plugin gating. The ownership checker
-also proves the old source and header are gone, the exact canonical files exist, Make and CMake each
-compile one canonical source, the Make test graph uses its canonical object, and every header
-consumer uses the canonical include.
+capacity limits, required-environment handling, and project-plugin gating.
+`scripts/check_module_source_ownership.py` separately proves the old source and header are gone,
+the exact canonical files exist, Make and CMake each compile one canonical source, the Make test
+graph uses its canonical object, and every header consumer uses the canonical include.
 
 ## Compatibility and migration gap
 
 Symbols, function signatures, configuration, discovery order, and error handling are unchanged.
-This slice adds no installed public-header export. There is no forwarding header at
-`src/headers/plugin_loader.h`; any future export or compatibility shim needs an explicit contract
+This slice adds no installed public-header export; there is no forwarding header at
+`src/headers/plugin_loader.h`. Any future export or compatibility shim needs an explicit contract
 decision.
 
 The contract split is complete: `plugin_manifest_parse`, `plugin_load_and_register`, registry
@@ -117,10 +118,9 @@ for the process lifetime. No plugin unload path exists in this slice, so bridge 
 unloaded while a plugin can call it. A future unload-capable slice must invoke `on_shutdown` before
 destroying the context and calling `dlclose` on the handle.
 
-One migration gap remains deliberate and bounded. Required builds still link plugin-loader because
-current dashboard, MCP, CLI, and startup composition surfaces consume installed-plugin state. The
-next slice must either make each surface conditional on plugin-loader selection or replace it with
-a required module-runtime capability query, then prove omission from the object and symbol closure.
+Disabling the loader does not read, migrate, or delete plugin manifests or the
+`plugins/installed.json` registry under the configured Aimee directory. That state remains dormant
+and is read again if a later build enables the loader.
 
 ## Extension and removal rules
 

@@ -200,8 +200,10 @@ const command_t commands[] = {
     {"queue", "Deprecated alias for dispatch", cmd_queue, CMD_TIER_ADVANCED},
     {"sweep", "Deepening sweep: find duplication-across-call-sites seams (analysis-only)",
      cmd_sweep, CMD_TIER_ADVANCED},
+#if AIMEE_WITH_PLUGIN_LOADER
     {"plugin", "Plugin management (install, list, enable, disable, remove)", cmd_plugin,
      CMD_TIER_ADVANCED},
+#endif
     {"cancel", "Cancel active workflows and clean up orphaned state", cmd_cancel,
      CMD_TIER_ADVANCED},
     {"rewind", "Session file-snapshot checkpoints (list, create, add, restore, prune)", cmd_rewind,

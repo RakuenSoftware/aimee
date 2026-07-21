@@ -1,6 +1,7 @@
 #ifndef DEC_AIMEE_H
 #define DEC_AIMEE_H 1
 
+#include "aimee_features.h"
 #include "platform.h"
 #include "aimee_version.h"
 #include <stdbool.h>
