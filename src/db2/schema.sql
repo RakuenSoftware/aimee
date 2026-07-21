@@ -2471,11 +2471,14 @@ REVOKE ALL ON TABLE kb_vault_control FROM PUBLIC;
 -- without receiving direct table access and without requiring the vault open.
 CREATE OR REPLACE FUNCTION org_vault_control_startup_status()
 RETURNS TABLE(seal_epoch BIGINT,sealed BOOLEAN)
-LANGUAGE sql STABLE SECURITY DEFINER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public,pg_temp AS $$
-  SELECT c.seal_epoch,c.sealed
+BEGIN
+  PERFORM pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  RETURN QUERY SELECT c.seal_epoch,c.sealed
     FROM public.kb_vault_control AS c
-   WHERE c.singleton=1;
+   WHERE c.singleton=1 FOR SHARE;
+END
 $$;
 REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
 
@@ -3472,6 +3475,25 @@ CREATE TABLE IF NOT EXISTS kb_vault_rewrap_operation (
 );
 ALTER TABLE kb_vault_rewrap_operation
   ADD COLUMN IF NOT EXISTS failure_from_state TEXT;
+-- P7-reseal-c could already have terminal recovery rows. Recover their exact
+-- source phase from the immutable checkpoint that c wrote before d1 introduced
+-- the dedicated column. Dynamic SQL keeps the fresh-schema path valid because
+-- the WORM table is declared later in this file on first install.
+DO $p7_rewrap_failure_backfill$
+BEGIN
+  IF to_regclass('public.kb_vault_rewrap_worm') IS NOT NULL THEN
+    EXECUTE $sql$
+      UPDATE public.kb_vault_rewrap_operation AS o
+         SET failure_from_state=split_part(split_part(w.detail,';',1),'=',2)
+        FROM public.kb_vault_rewrap_worm AS w
+       WHERE o.state='recovery_required' AND o.failure_from_state IS NULL
+         AND w.operation_id=o.operation_id AND w.event_kind='recovery_required'
+         AND w.detail ~ '^from_state=(reseal_committing|resealed|promoted);class=[a-z][a-z0-9_]{0,63}$'
+         AND split_part(w.detail,';class=',2)=o.failure_class
+    $sql$;
+  END IF;
+END
+$p7_rewrap_failure_backfill$;
 ALTER TABLE kb_vault_rewrap_operation
   DROP CONSTRAINT IF EXISTS kb_vault_rewrap_operation_state_check;
 ALTER TABLE kb_vault_rewrap_operation

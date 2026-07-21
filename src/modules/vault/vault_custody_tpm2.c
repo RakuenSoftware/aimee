@@ -1318,14 +1318,19 @@ static int reseal_lock(void)
    int fd = open(path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0)
       return -1;
+   /* Publish before validation/flock so a fork at every post-open instruction
+    * lets the child handler close its copy. Before flock this is harmless; after
+    * flock it prevents the child from pinning the parent's lock. */
+   g_reseal_lock_fd = fd;
    struct stat st;
    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() || st.st_nlink != 1 ||
        (st.st_mode & 0777) != 0600 || flock(fd, LOCK_EX | LOCK_NB) != 0)
    {
+      (void)flock(fd, LOCK_UN);
+      g_reseal_lock_fd = -1;
       close(fd);
       return -1;
    }
-   g_reseal_lock_fd = fd;
    return fd;
 }
 
@@ -1333,9 +1338,11 @@ static void reseal_unlock(int fd)
 {
    if (fd >= 0)
    {
+      /* Unlock before unpublishing. A fork before the unlock closes the tracked
+       * child copy; a fork after it may inherit an fd but cannot pin a flock. */
+      (void)flock(fd, LOCK_UN);
       if (g_reseal_lock_fd == fd)
          g_reseal_lock_fd = -1;
-      (void)flock(fd, LOCK_UN);
       close(fd);
    }
 }

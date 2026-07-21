@@ -134,7 +134,10 @@ startup-only: it takes the exclusive lock, requires no guard/use active, accepts
 a positive signed-64 epoch once or as an exact replay, and rejects a different
 second initialization. The selected PKCS#11/KMS provider may already be unsealed
 by its startup login; the caller first forces a seal whenever durable control
-says sealed. Initialization cannot unseal or obtain a KEK.
+says sealed. A narrow runtime-safe status function holds the primary shared
+advisory lock in an explicit startup transaction until local initialization has
+completed, closing the status-to-initialize race. Initialization cannot unseal or
+obtain a KEK.
 Provider rebind, seal, fork, and test reset advance the local generation and
 invalidate primary synchronization.
 
@@ -209,6 +212,11 @@ inherited memberships, and the owning role is non-login. D2 adds one narrow
 in-process orchestration authority rather than giving runtime schema-owner
 credentials. SQLite drops/recreates the active-operation index to exclude
 completed.
+
+Schema reapplication backfills pre-d1 `recovery_required` provenance from the
+exact immutable P7-reseal-c WORM detail before validating the stronger constraint.
+The SQLite shim migration adds the mirror column to existing support databases;
+neither shim path gains authoritative transition behavior.
 
 ## Validation gates
 

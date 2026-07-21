@@ -201,6 +201,22 @@ static void test_db2_sqlite_code_embeddings_body_hash_migration(void)
    sqlite3_close(db);
 }
 
+static void test_db2_sqlite_rewrap_failure_provenance_migration(void)
+{
+   sqlite3 *db = NULL;
+   assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
+   db1_apply_pragmas(db, DB_MODE_CLI);
+   assert(sqlite3_exec(db,
+                       "CREATE TABLE kb_vault_rewrap_operation ("
+                       " operation_id TEXT PRIMARY KEY, state TEXT NOT NULL)",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(!sqlite_column_exists(db, "kb_vault_rewrap_operation", "failure_from_state"));
+   char err[512] = {0};
+   assert(db2_apply_schema_sqlite_shim(db, err, sizeof(err)) == 0);
+   assert(sqlite_column_exists(db, "kb_vault_rewrap_operation", "failure_from_state"));
+   sqlite3_close(db);
+}
+
 static void test_trigger_run_change_counts(void)
 {
    char path[PATH_MAX];
@@ -805,6 +821,7 @@ int main(void)
    test_migrations_idempotent();
    test_key_tables_exist();
    test_db2_sqlite_code_embeddings_body_hash_migration();
+   test_db2_sqlite_rewrap_failure_provenance_migration();
    test_trigger_run_change_counts();
    test_cron_job_history_round_trip();
    test_model_catalog_cache();

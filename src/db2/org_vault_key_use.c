@@ -62,7 +62,7 @@ static int read_envelope(aimee_pg_stmt_t *st, int first, int64_t version,
    return 0;
 }
 
-int db2_vault_control_startup_status(int64_t *epoch_out, int *sealed_out)
+int db2_vault_control_startup_begin(int64_t *epoch_out, int *sealed_out)
 {
    if (epoch_out)
       *epoch_out = 0;
@@ -74,11 +74,16 @@ int db2_vault_control_startup_status(int64_t *epoch_out, int *sealed_out)
       return DB2_VAULT_KEY_USE_ERROR;
 
    char err[USE_ERR] = "";
+   if (aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err)) != 0)
+      return DB2_VAULT_KEY_USE_ERROR;
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        db2_conn(), "SELECT seal_epoch,sealed FROM public.org_vault_control_startup_status()", err,
        sizeof(err));
    if (!st)
+   {
+      (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
       return DB2_VAULT_KEY_USE_ERROR;
+   }
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    int rc = DB2_VAULT_KEY_USE_ERROR;
    if (step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) && aimee_pg_column_int64(st, 0) > 0)
@@ -99,7 +104,20 @@ int db2_vault_control_startup_status(int64_t *epoch_out, int *sealed_out)
       }
    }
    aimee_pg_finalize(st);
+   if (rc != 0)
+      (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
    return rc;
+}
+
+int db2_vault_control_startup_end(int commit)
+{
+   if (db2_tenant_require_pg() != 0)
+      return DB2_VAULT_KEY_USE_ERROR;
+   char err[USE_ERR] = "";
+   if (commit && aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err)) == 0)
+      return 0;
+   (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
+   return commit ? DB2_VAULT_KEY_USE_ERROR : 0;
 }
 
 int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *key_id,

@@ -67,8 +67,9 @@ int main(void)
    assert(team_id > 0 && db2_init(url) == 0);
    int64_t startup_epoch = 0;
    int startup_sealed = -1;
-   assert(db2_vault_control_startup_status(&startup_epoch, &startup_sealed) == 0);
+   assert(db2_vault_control_startup_begin(&startup_epoch, &startup_sealed) == 0);
    assert(startup_epoch > 0 && (startup_sealed == 0 || startup_sealed == 1));
+   assert(db2_vault_control_startup_end(1) == 0);
    kb_principal_t caller = owner();
    kb_principal_t transport = origin();
    char policy_err[256] = "";

@@ -217,9 +217,10 @@ BEGIN
   END IF;
   IF NOT EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='public' AND p.proname='org_vault_control_startup_status' AND
-        p.prosecdef AND p.provolatile='s' AND
+        p.prosecdef AND p.provolatile='v' AND
         p.proconfig @> ARRAY['search_path=pg_catalog, public, pg_temp']::TEXT[] AND
-        p.prosrc LIKE '%public.kb_vault_control%') OR
+        p.prosrc LIKE '%pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT)%' AND
+        p.prosrc LIKE '%public.kb_vault_control%' AND p.prosrc LIKE '%FOR SHARE%') OR
      EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
        CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a
        WHERE n.nspname='public' AND p.proname='org_vault_control_startup_status' AND
