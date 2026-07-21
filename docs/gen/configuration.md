@@ -302,7 +302,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 175 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 176 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -386,6 +386,7 @@ The binaries read 175 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
 | `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
 | `AIMEE_LLM_URL` | One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md. |
+| `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_VECTOR_KB_BATCH_SIZE` | Embedding batch size for KB vector ingest. |
 
 ### Database & vectors

@@ -9,6 +9,7 @@
 #include "kb_client_mtls.h"
 #include "kb_enroll.h" /* connection-string parse (for host/port) */
 #include "kb_tls.h"    /* kb_tls_enroll / kb_tls_client_request */
+#include "cJSON.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -121,4 +122,27 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
    char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
    free(resp);
    return out;
+}
+
+int kb_client_mtls_heartbeat(const char *server_id, const char *health, const char *version)
+{
+   if (!server_id || !server_id[0] || strlen(server_id) > 127 || !health || strlen(health) > 127 ||
+       !version || strlen(version) > 63)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "server_id", server_id);
+   cJSON_AddStringToObject(root, "health", health);
+   cJSON_AddStringToObject(root, "version", version);
+   char *body = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!body)
+      return -1;
+   int status = -1;
+   char *response = kb_client_mtls_request("POST", "/v1/server/heartbeat", body, &status);
+   int ok = status == 200 && response != NULL;
+   free(body);
+   free(response);
+   return ok ? 0 : -1;
 }

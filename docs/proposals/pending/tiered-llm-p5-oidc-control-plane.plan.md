@@ -1,6 +1,6 @@
 # P5 implementation plan — security-closed control-plane slices
 
-- **State:** IN PROGRESS. P5-A is the next implementation slice.
+- **State:** IN PROGRESS. P5-A is complete; P5-B is the next implementation slice.
 - **Proposal:** `tiered-llm-p5-oidc-control-plane.md`.
 - **Existing substrate:** P1 composite identity/OIDC/JWKS verification, P7 custody and
   PostgreSQL WORM append, the P8a per-request enrollment revocation seam, and the
@@ -38,6 +38,10 @@ ledger. P5 owns the revocation-generation schema, online status protocol, manage
 token/JWKS contract, durable `jti` store, and management audit state machine.
 
 ## P5-A — exact next slice
+
+**Delivery:** complete. The primary-backed pending/finalize/list/snapshot/heartbeat
+state machine, role-separated two-key issuance, server heartbeat worker, hard-disabled
+management route, and CT260↔CT262 EKU topology matrix are implemented and validated.
 
 ### Security boundary
 

@@ -2486,6 +2486,10 @@ static void test_mtls_listener(void)
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
+      assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
+      g_test_registry_heartbeat_allow = 0;
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);
