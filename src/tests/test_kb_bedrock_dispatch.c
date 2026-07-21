@@ -19,6 +19,7 @@ typedef struct
    size_t body_len;
    size_t fragment;
    kb_http_result_t transport_result;
+   kb_http_result_t post_body_result;
    int calls, body_calls;
 } dispatch_mock_t;
 
@@ -68,6 +69,8 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
          at += take;
       }
    }
+   if (dispatch_mock.post_body_result != KB_HTTP_OK)
+      return dispatch_mock.post_body_result;
    *response = metadata;
    return KB_HTTP_OK;
 }
@@ -908,7 +911,7 @@ static void dispatch_wrapper_tests(void)
                                      .body_len = sizeof(good) - 1};
    assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
           KB_BEDROCK_MALFORMED_RESPONSE);
-   assert(status == 200 && dispatch_mock.body_calls == 0 && response.content == NULL);
+   assert(status == 0 && dispatch_mock.body_calls == 0 && response.content == NULL);
 
    dispatch_mock = (dispatch_mock_t){.status = 200,
                                      .content_type = "application/json; charset=utf-8",
@@ -916,7 +919,7 @@ static void dispatch_wrapper_tests(void)
                                      .body_len = sizeof(good) - 1};
    assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
           KB_BEDROCK_MALFORMED_RESPONSE);
-   assert(status == 200 && dispatch_mock.body_calls == 0);
+   assert(status == 0 && dispatch_mock.body_calls == 0);
 
    dispatch_mock = (dispatch_mock_t){.status = 429,
                                      .content_type = "application/json",
@@ -943,6 +946,19 @@ static void dispatch_wrapper_tests(void)
           KB_BEDROCK_OK);
    assert(status == 200 && log.count == 5 && dispatch_mock.body_calls == (int)stream_len);
 
+   log = (delta_log_t){0};
+   dispatch_mock = (dispatch_mock_t){.status = 200,
+                                     .content_type = "application/vnd.amazon.eventstream",
+                                     .body = stream_body,
+                                     .body_len = stream_len,
+                                     .fragment = 13,
+                                     .post_body_result = KB_HTTP_MALFORMED_RESPONSE};
+   assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
+          KB_BEDROCK_TRANSPORT_ERROR);
+   assert(status == 0 && log.count == 4);
+   for (int i = 0; i < log.count; i++)
+      assert(log.type[i] != AIMEE_DELTA_TURN_STOP);
+
    log = (delta_log_t){.abort_after = 1};
    dispatch_mock = (dispatch_mock_t){.status = 200,
                                      .content_type = "application/vnd.amazon.eventstream",
@@ -951,7 +967,17 @@ static void dispatch_wrapper_tests(void)
                                      .fragment = 7};
    assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
           KB_BEDROCK_CALLBACK_ABORT);
-   assert(status == 200 && log.count == 1);
+   assert(status == 0 && log.count == 1);
+
+   log = (delta_log_t){.abort_after = 5};
+   dispatch_mock = (dispatch_mock_t){.status = 200,
+                                     .content_type = "application/vnd.amazon.eventstream",
+                                     .body = stream_body,
+                                     .body_len = stream_len,
+                                     .fragment = 7};
+   assert(kb_bedrock_dispatch_stream(&t, &request, &c, collect_delta, &log, &status) ==
+          KB_BEDROCK_CALLBACK_ABORT);
+   assert(status == 0 && log.count == 5 && log.type[4] == AIMEE_DELTA_TURN_STOP);
 
    dispatch_mock = (dispatch_mock_t){.status = 200,
                                      .content_type = "application/vnd.amazon.eventstream",
@@ -959,6 +985,7 @@ static void dispatch_wrapper_tests(void)
                                      .body_len = stream_len - 1,
                                      .fragment = 11};
    assert(kb_bedrock_dispatch_stream(&t, &request, &c, NULL, NULL, &status) != KB_BEDROCK_OK);
+   assert(status == 0);
    free(stream_body);
    aimee_response_free(&response);
 }

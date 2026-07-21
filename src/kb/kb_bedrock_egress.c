@@ -1406,7 +1406,36 @@ typedef struct
    unsigned char *body;
    size_t body_len, body_capacity;
    kb_bedrock_stream_t *stream;
+   kb_bedrock_stream_callback_t callback;
+   void *callback_context;
+   aimee_delta_t terminal;
+   int terminal_pending;
 } bedrock_dispatch_context_t;
+
+static int dispatch_stream_delta(const aimee_delta_t *delta, void *opaque)
+{
+   bedrock_dispatch_context_t *context = opaque;
+   if (delta->type == AIMEE_DELTA_TURN_STOP)
+   {
+      if (context->terminal_pending)
+      {
+         context->first_result = KB_BEDROCK_MALFORMED_STREAM;
+         return -1;
+      }
+      context->terminal = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
+                                          .stop_reason = delta->stop_reason,
+                                          .usage_in = delta->usage_in,
+                                          .usage_out = delta->usage_out};
+      context->terminal_pending = 1;
+      return 0;
+   }
+   if (context->callback && context->callback(delta, context->callback_context) != 0)
+   {
+      context->first_result = KB_BEDROCK_CALLBACK_ABORT;
+      return -1;
+   }
+   return 0;
+}
 
 static kb_http_gate_t dispatch_headers(const kb_http_response_t *response, void *opaque)
 {
@@ -1465,7 +1494,8 @@ static kb_http_body_action_t dispatch_body(const unsigned char *bytes, size_t le
       kb_bedrock_result_t result = kb_bedrock_stream_feed(context->stream, bytes, length);
       if (result != KB_BEDROCK_OK)
       {
-         context->first_result = result;
+         if (context->first_result == KB_BEDROCK_OK)
+            context->first_result = result;
          return KB_HTTP_BODY_CALLER_ABORT;
       }
       return KB_HTTP_BODY_CONTINUE;
@@ -1534,10 +1564,12 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
        .streaming = streaming,
        .http_status = http_status,
        .media_type = streaming ? "application/vnd.amazon.eventstream" : "application/json",
-       .first_result = KB_BEDROCK_OK};
+       .first_result = KB_BEDROCK_OK,
+       .callback = callback,
+       .callback_context = callback_context};
    if (streaming)
    {
-      result = kb_bedrock_stream_init(&context.stream, callback, callback_context);
+      result = kb_bedrock_stream_init(&context.stream, dispatch_stream_delta, &context);
       if (result != KB_BEDROCK_OK)
          goto done;
    }
@@ -1561,7 +1593,14 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
    else if (metadata.status != 200)
       result = KB_BEDROCK_PROVIDER_ERROR;
    else if (streaming)
+   {
       result = kb_bedrock_stream_finish(context.stream);
+      if (result == KB_BEDROCK_OK && !context.terminal_pending)
+         result = KB_BEDROCK_INCOMPLETE_STREAM;
+      else if (result == KB_BEDROCK_OK && context.callback &&
+               context.callback(&context.terminal, context.callback_context) != 0)
+         result = KB_BEDROCK_CALLBACK_ABORT;
+   }
    else
       result = kb_bedrock_nonstream_parse(context.body, context.body_len, response);
 
@@ -1572,10 +1611,13 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
    }
    if (context.stream)
       (void)kb_bedrock_stream_clear(&context.stream);
+   OPENSSL_cleanse(&context.terminal, sizeof(context.terminal));
 done:
    kb_bedrock_wire_request_clear(&wire);
    if (result != KB_BEDROCK_OK && response)
       aimee_response_free(response);
+   if (result != KB_BEDROCK_OK && *http_status >= 200 && *http_status <= 299)
+      *http_status = 0;
    return result;
 }
 
