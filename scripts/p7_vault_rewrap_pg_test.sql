@@ -328,7 +328,7 @@ BEGIN
   PERFORM p7_rewrap_expect_error(format(
     'SELECT org_vault_rewrap_abort(%L,%s,%L)',p_op,f,'no_escape'),'40001');
   PERFORM p7_rewrap_expect_error(format(
-    'SELECT org_vault_rewrap_complete(%L,%s,decode(repeat(''00'',32),''hex''),decode(repeat(''00'',32),''hex''),decode(repeat(''00'',32),''hex''))',p_op,f),'40001');
+    'SELECT org_vault_rewrap_complete(%L,%s,decode(repeat(''00'',32),''hex''),decode(repeat(''00'',32),''hex''),decode(repeat(''00'',32),''hex''))',p_op,f),'P7C01');
 
   IF p_target='preparing' THEN
     PERFORM p7_rewrap_expect_error(format(
@@ -551,21 +551,21 @@ SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
   decode(repeat('00',32),'hex'),
   (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
-  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'40001');
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'P7I01');
 SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
   sha256('\x72656365697074'::bytea),decode(repeat('00',32),'hex'),
-  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'40001');
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'P7I01');
 SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
   sha256('\x72656365697074'::bytea),
   (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
-  decode(repeat('00',32),'hex'))$q$,'40001');
+  decode(repeat('00',32),'hex'))$q$,'P7I01');
 SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint-1,
   sha256('\x72656365697074'::bytea),
   (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
-  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'40001');
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'P7C01');
 DO $$ DECLARE f BIGINT:=current_setting('aimee.p7_rewrap_fence')::bigint;
 BEGIN
   UPDATE kb_vault_rewrap_operation SET fencing_token=9223372036854775807
