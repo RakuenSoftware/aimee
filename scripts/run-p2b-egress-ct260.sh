@@ -7,8 +7,7 @@ db=aimee_p2b_live_gate
 work=$(mktemp -d /tmp/aimee-p2b-live.XXXXXX)
 cleanup() {
   runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1 || true
-  find "$work" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
-  rmdir "$work" 2>/dev/null || true
+  case "$work" in /tmp/aimee-p2b-live.*) rm -rf -- "$work" ;; esac
 }
 trap cleanup EXIT
 
@@ -52,6 +51,8 @@ if strings src/build/obj-p2b-hardened/tests/unit-test-kb-p2b-egress-live | \
 fi
 
 export AIMEE_TEST_PG_URL="$url"
+export AIMEE_HOME="$work/aimee-home"
+mkdir -p "$AIMEE_HOME"
 export AIMEE_VAULT_KMS_HELPER="$work/kms-helper"
 export AIMEE_VAULT_KMS_KEY_ID=p2b-live-key
 export AIMEE_VAULT_KMS_HWM_PUBKEY="$work/hwm-public.raw"

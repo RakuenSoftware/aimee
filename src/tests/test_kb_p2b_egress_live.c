@@ -1,6 +1,9 @@
 #include "kb/http/kb_http_egress.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_vault_rotation.h"
+#include "kb_enroll.h"
+#include "kb_pki.h"
+#include "kb_tls.h"
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_internal.h"
 #include "modules/vault/vault_server_key.h"
@@ -9,6 +12,7 @@
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 #include "db2/db2_tenant.h"
+#include "db2/enrollments.h"
 #include "db2/org_vault_key_use.h"
 #include "db2/vault_pg.h"
 
@@ -32,6 +36,21 @@ static int64_t scalar(const char *sql)
    int64_t value = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
    return value;
+}
+
+static int add_member(const char *identity, int64_t team)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO kb_team_membership(identity_key,team,is_default) VALUES (?1,?2,1)",
+       err, sizeof(err));
+   if (!st) return -1;
+   aimee_pg_bind_text(st, "?1", identity);
+   aimee_pg_bind_int64(st, "?2", team);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_DONE ? 0 : -1;
 }
 
 static kb_principal_t owner(void)
@@ -103,19 +122,47 @@ int main(void)
                  "'p2b-live-key','team:982260:bedrock','bedrock','iam',1000,100,true)::int") == 1);
    assert(db2_tenant_scope_commit() == 0);
 
-   kb_principal_t transport = {.kind = KB_PRIN_CERT, .authenticated = 1};
-   snprintf(transport.issuer, sizeof(transport.issuer), "issuer-p2b-live");
-   snprintf(transport.subject, sizeof(transport.subject), "01AB");
+   const char *aimee_home = getenv("AIMEE_HOME");
+   assert(aimee_home && *aimee_home);
+   assert(kb_mtls_start(0, aimee_home, "localhost") == 0);
+   int mtls_port = kb_mtls_bound_port();
+   assert(mtls_port > 0);
+   char conn[1024], ca[KB_PKI_CERT_PEM_MAX], cert[KB_PKI_CERT_PEM_MAX];
+   char client_key[KB_PKI_KEY_PEM_MAX];
+   assert(kb_enroll_mint(aimee_home, "localhost", mtls_port, "p2b-live", conn,
+                         sizeof(conn)) == 0);
+   assert(kb_tls_enroll(conn, ca, sizeof(ca), cert, sizeof(cert), client_key,
+                        sizeof(client_key)) == 0);
+   char cert_fp[KB_PKI_FP_HEX], cert_issuer[256], cert_serial[128], identity[512];
+   assert(kb_pki_ca_fingerprint(cert, cert_fp, sizeof(cert_fp)) == 0);
+   assert(kb_pki_cert_metadata(cert, cert_issuer, sizeof(cert_issuer), cert_serial,
+                               sizeof(cert_serial)) == 0);
+   kb_principal_t probe;
+   assert(kb_principal_from_cert(cert_issuer, cert_serial, "p2b-live", &probe) == 0);
+   assert(kb_identity_key(&probe, identity, sizeof(identity)) == 0);
+   assert(add_member(identity, team) == 0);
+   char authority[33];
+   int authority_rc = db2_enrollment_authority_resolve(cert_fp, cert_issuer, cert_serial,
+                                                        authority);
+   if (authority_rc != 0)
+      fprintf(stderr, "P2b enrolled identity unresolved fp=%s issuer=%s serial=%s rc=%d\n",
+              cert_fp, cert_issuer, cert_serial, authority_rc);
+   assert(authority_rc == 0);
+   int scope_rc = db2_tenant_scope_begin(&probe, team);
+   if (scope_rc != 0)
+      fprintf(stderr, "P2b enrolled membership unresolved identity=%s rc=%d\n", identity,
+              scope_rc);
+   assert(scope_rc == 0 && db2_tenant_scope_commit() == 0);
    const char *body =
        "{\"request_id\":\"11111111-1111-4111-8111-111111111111\","
        "\"team_id\":982260,\"model_id\":\"p2b-live-model\",\"stream\":false,"
        "\"payload\":{\"model\":\"p2b-live-model\",\"messages\":[{\"role\":\"user\","
        "\"content\":\"reply with ok\"}],\"max_tokens\":16,\"stream\":false}}";
    char response[262144];
-   int status = kb_http_egress_route("POST", "/v1/llm/egress", body, (int)strlen(body),
-                                     &transport,
-                                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                     response, sizeof(response));
+   int status = 0;
+   assert(kb_tls_client_request("localhost", mtls_port, ca, cert, client_key, "POST",
+                                "/v1/llm/egress", body, response, sizeof(response),
+                                &status) == 0);
    if (status != 200)
       fprintf(stderr, "P2b route status=%d response=%s reserved=%lld in_flight=%lld failed=%lld "
                       "key_uses=%lld\n", status, response,
@@ -135,7 +182,9 @@ int main(void)
    OPENSSL_cleanse(dek, sizeof(dek));
    OPENSSL_cleanse(wrapped, sizeof(wrapped));
    OPENSSL_cleanse(ciphertext, sizeof(ciphertext));
+   OPENSSL_cleanse(client_key, sizeof(client_key));
+   kb_mtls_stop();
    db2_shutdown();
-   puts("PASS: P2b catalog -> admission -> vault-sign -> TLS dispatch -> IR settlement");
+   puts("PASS: enrolled mTLS -> admission -> vault-sign -> TLS dispatch -> IR settlement");
    return 0;
 }
