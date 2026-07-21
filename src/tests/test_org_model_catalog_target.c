@@ -134,6 +134,23 @@ static void decode_hostile_rows(void)
    memset(&out, 0xa5, sizeof(out));
    assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
+
+   row = foundation_row();
+   row.model_family = "unknown-family";
+   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+
+   row = foundation_row();
+   row.regions_json = "[\"us-west-2\",\"us-west-2\"]";
+   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+
+   char *huge = malloc(DB2_BEDROCK_ARRAY_MAX * DB2_BEDROCK_ARN_CAP + 4096);
+   assert(huge != NULL);
+   memset(huge, ' ', DB2_BEDROCK_ARRAY_MAX * DB2_BEDROCK_ARN_CAP + 4094);
+   huge[DB2_BEDROCK_ARRAY_MAX * DB2_BEDROCK_ARN_CAP + 4094] = 0;
+   row = foundation_row();
+   row.underlying_json = huge;
+   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   free(huge);
 }
 
 static void resolver_result_mapping(void)
@@ -154,6 +171,10 @@ static void resolver_result_mapping(void)
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
    g_step_mode = 1;
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_OK);
+   g_cols[0] = "different-model";
+   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(all_zero(&out, sizeof(out)));
+   g_cols[0] = row.model_id;
    g_cols[7] = "{}";
    memset(&out, 0xa5, sizeof(out));
    assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);

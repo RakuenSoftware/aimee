@@ -234,6 +234,14 @@ BEGIN
   EXCEPTION WHEN data_exception THEN NULL;
   END;
   BEGIN
+    PERFORM org_catalog_bedrock_upsert('p6c-duplicate-region', 'x', 'converse', 'anthropic',
+      'application-inference-profile', 'aws', 'us-east-1', '123456789012',
+      ARRAY['us-east-1','us-east-1']::text[],
+      ARRAY['arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude'], '', true);
+    RAISE EXCEPTION 'P6c FAIL: duplicate destination region was accepted';
+  EXCEPTION WHEN data_exception THEN NULL;
+  END;
+  BEGIN
     PERFORM org_catalog_bedrock_upsert('p6c-too-many', 'x', 'converse', 'anthropic',
       'foundation', 'aws', 'us-east-1', NULL,
       ARRAY(SELECT 'r-' || i::text FROM generate_series(1,65) AS i), NULL, '', true);

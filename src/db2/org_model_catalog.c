@@ -49,11 +49,18 @@ static int raw_nul_escape(const char *json)
    return json && strstr(json, "\\u0000") != NULL;
 }
 
-static int bedrock_json_array(const char *json, char *out, size_t stride, size_t elem_cap,
-                              size_t *out_n)
+/* PostgreSQL constrains these arrays to 64 elements of at most 255/511 bytes,
+ * but the decoder is also an explicit hostile-adapter boundary.  Bound the raw
+ * JSON before cJSON allocates a tree so a corrupt/injected row cannot turn into
+ * an unbounded allocation. */
+#define BEDROCK_REGIONS_JSON_CAP    (DB2_BEDROCK_ARRAY_MAX * (DB2_BEDROCK_REGION_CAP + 3) + 2)
+#define BEDROCK_UNDERLYING_JSON_CAP (DB2_BEDROCK_ARRAY_MAX * (DB2_BEDROCK_ARN_CAP + 3) + 2)
+
+static int bedrock_json_array(const char *json, size_t json_cap, char *out, size_t stride,
+                              size_t elem_cap, size_t *out_n)
 {
    *out_n = 0;
-   if (!json || raw_nul_escape(json))
+   if (!json || strnlen(json, json_cap) == json_cap || raw_nul_escape(json))
       return -1;
    const char *end = NULL;
    cJSON *root = cJSON_ParseWithOpts(json, &end, 1);
@@ -87,6 +94,25 @@ static int region_present(const db2_bedrock_target_t *t, const char *region)
 {
    for (size_t i = 0; i < t->n_regions; i++)
       if (strcmp(t->regions[i], region) == 0)
+         return 1;
+   return 0;
+}
+
+static int regions_unique(const db2_bedrock_target_t *t)
+{
+   for (size_t i = 0; i < t->n_regions; i++)
+      for (size_t j = i + 1; j < t->n_regions; j++)
+         if (strcmp(t->regions[i], t->regions[j]) == 0)
+            return 0;
+   return 1;
+}
+
+static int family_supported(const char *family)
+{
+   static const char *const families[] = {"anthropic", "amazon-nova", "amazon-titan", "meta-llama",
+                                          "mistral",   "cohere",      "ai21"};
+   for (size_t i = 0; i < sizeof(families) / sizeof(families[0]); i++)
+      if (strcmp(family, families[i]) == 0)
          return 1;
    return 0;
 }
@@ -144,16 +170,17 @@ db2_bedrock_target_result_t db2_model_bedrock_target_decode_row(const db2_bedroc
        bedrock_copy(out->account, sizeof(out->account), row->account, 1) != 0 ||
        bedrock_copy(out->invoke_region, sizeof(out->invoke_region), row->invoke_region, 0) != 0 ||
        bedrock_copy(out->endpoint, sizeof(out->endpoint), row->endpoint, 1) != 0 ||
-       bedrock_json_array(row->regions_json, (char *)out->regions, sizeof(out->regions[0]),
-                          sizeof(out->regions[0]), &out->n_regions) != 0 ||
-       bedrock_json_array(row->underlying_json, (char *)out->underlying_fm_arns,
-                          sizeof(out->underlying_fm_arns[0]), sizeof(out->underlying_fm_arns[0]),
-                          &out->n_underlying) != 0)
+       bedrock_json_array(row->regions_json, BEDROCK_REGIONS_JSON_CAP, (char *)out->regions,
+                          sizeof(out->regions[0]), sizeof(out->regions[0]), &out->n_regions) != 0 ||
+       bedrock_json_array(row->underlying_json, BEDROCK_UNDERLYING_JSON_CAP,
+                          (char *)out->underlying_fm_arns, sizeof(out->underlying_fm_arns[0]),
+                          sizeof(out->underlying_fm_arns[0]), &out->n_underlying) != 0)
       goto invalid;
-   if (strcmp(out->bedrock_api, "converse") != 0 || out->endpoint[0] ||
+   if (strcmp(out->bedrock_api, "converse") != 0 || !family_supported(out->model_family) ||
+       out->endpoint[0] ||
        (strcmp(out->partition, "aws") != 0 && strcmp(out->partition, "aws-us-gov") != 0 &&
         strcmp(out->partition, "aws-cn") != 0) ||
-       out->n_regions == 0)
+       out->n_regions == 0 || !regions_unique(out))
       goto invalid;
    if (!region_valid(out->invoke_region))
       goto invalid;
@@ -247,6 +274,8 @@ db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id, co
       if (!aimee_pg_column_is_null(st, i))
          *cols[i] = aimee_pg_column_text(st, i);
    db2_bedrock_target_result_t result = db2_model_bedrock_target_decode_row(&row, out);
+   if (result == DB2_BEDROCK_TARGET_OK && strcmp(out->model_id, model_id) != 0)
+      result = DB2_BEDROCK_TARGET_INVALID;
    step = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
    if (step == AIMEE_PG_ERR)

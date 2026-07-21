@@ -4935,6 +4935,11 @@ BEGIN
         USING ERRCODE = '22023';
     END IF;
   END LOOP;
+  IF (SELECT count(*) FROM (SELECT DISTINCT r FROM unnest(p_region_set) AS x(r)) AS d)
+       <> cardinality(p_region_set) THEN
+    RAISE EXCEPTION 'org_catalog_bedrock_upsert: region_set contains duplicates'
+      USING ERRCODE = '22023';
+  END IF;
   IF p_target_type NOT IN
        ('application-inference-profile','cross-region-inference-profile') THEN
     IF cardinality(p_region_set) <> 1 OR p_region_set[1] <> p_invoke_region THEN
@@ -5062,6 +5067,9 @@ SET search_path = pg_catalog, public, pg_temp AS $$
      AND pg_catalog.array_position(c.aws_region_set, NULL) IS NULL
      AND NOT EXISTS (SELECT 1 FROM pg_catalog.unnest(c.aws_region_set) AS r(region)
                       WHERE r.region !~ '^[a-z0-9-]{1,63}$')
+     AND (SELECT pg_catalog.count(*) FROM
+            (SELECT DISTINCT region FROM pg_catalog.unnest(c.aws_region_set) AS x(region)) AS d)
+         = pg_catalog.cardinality(c.aws_region_set)
      AND CASE
        WHEN c.bedrock_target_type IN ('foundation','provisioned','custom') THEN
          pg_catalog.cardinality(c.aws_region_set) = 1
