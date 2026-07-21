@@ -24,6 +24,8 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
   REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_vault_control_startup_status() TO aimee_kb_runtime;
   -- P7-reseal-c is migration-owner orchestration only. The broad bootstrap grant
   -- above must never make its operation ledger, staged wraps, outbox, or helper
   -- functions visible to the runtime role on either first apply or re-apply.
@@ -44,6 +46,7 @@ BEGIN
     org_vault_rewrap_mark_committing(TEXT,BIGINT),
     org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
     org_vault_rewrap_promote(TEXT,BIGINT),
+    org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA),
     org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
     org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)
     FROM aimee_kb_runtime;
@@ -174,6 +177,8 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
   REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_vault_control_startup_status() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) TO aimee_kb_runtime;
 

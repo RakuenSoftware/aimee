@@ -103,6 +103,17 @@ static int receipt_load(vault_tpm2_reseal_receipt_t *r)
    return ok ? 0 : -1;
 }
 
+static const uint8_t prepared_operation_id[16] = {0x50, 0x37, 0x52, 0x53, 0x41, 0x2d, 0x54, 0x45,
+                                                  0x53, 0x54, 0x2d, 0x4f, 0x50, 0x2d, 0x30, 0x31};
+
+static int bytes_zero(const uint8_t *p, size_t n)
+{
+   uint8_t v = 0;
+   for (size_t i = 0; i < n; i++)
+      v |= p[i];
+   return v == 0;
+}
+
 int main(int argc, char **argv)
 {
    if (argc < 2)
@@ -155,21 +166,135 @@ int main(int argc, char **argv)
       return 0;
    }
 
-   if (strcmp(cmd, "prepared-prepare") == 0)
+   if (strcmp(cmd, "prepared-prepare") == 0 || strcmp(cmd, "prepared-prepare-drop-receipt") == 0)
    {
       if (argc != 4 || hex_to_kek(argv[2], kek) != 0)
-         return die("prepared-prepare <newhexkek(64)> <secret>");
+         return die("prepared-prepare[-drop-receipt] <newhexkek(64)> <secret>");
       uint64_t gen = 0;
-      uint8_t operation_id[16] = {0x50, 0x37, 0x52, 0x53, 0x41, 0x2d, 0x54, 0x45,
-                                  0x53, 0x54, 0x2d, 0x4f, 0x50, 0x2d, 0x30, 0x31};
       vault_tpm2_reseal_receipt_t receipt;
       int pr = vault_custody_tpm2_nv_generation(argv[3], &gen);
       if (pr == 0)
-         pr = vault_custody_tpm2_reseal_prepare(operation_id, gen, kek, argv[3], &receipt);
+         pr = vault_custody_tpm2_reseal_prepare(prepared_operation_id, gen, kek, argv[3], &receipt);
       OPENSSL_cleanse(kek, sizeof(kek));
-      if (pr != VAULT_TPM2_RESEAL_OK || receipt_save(&receipt) != 0)
+      int drop = strcmp(cmd, "prepared-prepare-drop-receipt") == 0;
+      if (pr != VAULT_TPM2_RESEAL_OK || (!drop && receipt_save(&receipt) != 0))
          return die("prepared prepare failed");
+      OPENSSL_cleanse(&receipt, sizeof(receipt));
       printf("test_vault_tpm2: prepared-prepare OK gen=%llu\n", (unsigned long long)gen);
+      return 0;
+   }
+
+   if (strcmp(cmd, "prepared-discover") == 0 || strcmp(cmd, "prepared-discover-absent") == 0 ||
+       strcmp(cmd, "prepared-discover-corrupt") == 0 ||
+       strcmp(cmd, "prepared-discover-busy") == 0 ||
+       strcmp(cmd, "prepared-discover-wrong-op") == 0 ||
+       strcmp(cmd, "prepared-discover-wrong-generation") == 0 ||
+       strcmp(cmd, "prepared-discover-wrong-secret") == 0)
+   {
+      if (argc != 3)
+         return die("prepared-discover* <secret>");
+      uint64_t gen = 0;
+      if (strcmp(cmd, "prepared-discover-wrong-secret") == 0)
+      {
+         vault_tpm2_reseal_receipt_t saved;
+         if (receipt_load(&saved) != 0)
+            return die("prepared receipt missing for wrong-secret discovery");
+         gen = saved.old_generation;
+         OPENSSL_cleanse(&saved, sizeof(saved));
+      }
+      else if (vault_custody_tpm2_nv_generation(argv[2], &gen) != 0)
+         return die("prepared discover NV read failed");
+      uint8_t op[16];
+      memcpy(op, prepared_operation_id, sizeof(op));
+      if (strcmp(cmd, "prepared-discover-wrong-op") == 0)
+         op[0] ^= 0x80;
+      if (strcmp(cmd, "prepared-discover-wrong-generation") == 0)
+         gen++;
+      vault_tpm2_reseal_receipt_t receipt;
+      memset(&receipt, 0x5a, sizeof(receipt));
+      vault_tpm2_reseal_status_t status = VAULT_TPM2_RESEAL_CORRUPT;
+      int pr = vault_custody_tpm2_reseal_discover(op, gen, argv[2], &receipt, &status);
+      int want_ok = strcmp(cmd, "prepared-discover") == 0;
+      int want_absent = strcmp(cmd, "prepared-discover-absent") == 0;
+      int want_busy = strcmp(cmd, "prepared-discover-busy") == 0;
+      int want_corrupt = strcmp(cmd, "prepared-discover-corrupt") == 0;
+      int want_conflict = strcmp(cmd, "prepared-discover-wrong-op") == 0 ||
+                          strcmp(cmd, "prepared-discover-wrong-generation") == 0;
+      if ((want_ok && (pr != VAULT_TPM2_RESEAL_OK || status != VAULT_TPM2_RESEAL_PREPARED ||
+                       bytes_zero((const uint8_t *)&receipt, sizeof(receipt)) ||
+                       receipt_save(&receipt) != 0)) ||
+          (want_absent && (pr != VAULT_TPM2_RESEAL_OK || status != VAULT_TPM2_RESEAL_ABSENT ||
+                           !bytes_zero((const uint8_t *)&receipt, sizeof(receipt)))) ||
+          (want_busy && pr != VAULT_TPM2_RESEAL_BUSY) ||
+          (want_corrupt &&
+           (pr != VAULT_TPM2_RESEAL_INTEGRITY || status != VAULT_TPM2_RESEAL_CORRUPT)) ||
+          (want_conflict &&
+           (pr != VAULT_TPM2_RESEAL_INTEGRITY || status != VAULT_TPM2_RESEAL_CONFLICT)) ||
+          (!want_ok && !want_absent &&
+           (pr == VAULT_TPM2_RESEAL_OK || !bytes_zero((const uint8_t *)&receipt, sizeof(receipt)))))
+      {
+         fprintf(stderr,
+                 "test_vault_tpm2: prepared discover mismatch command=%s result=%d status=%d "
+                 "receipt_zero=%d\n",
+                 cmd, pr, (int)status, bytes_zero((const uint8_t *)&receipt, sizeof(receipt)));
+         return die("prepared discover classification/output mismatch");
+      }
+      OPENSSL_cleanse(&receipt, sizeof(receipt));
+      printf("test_vault_tpm2: %s OK status=%d\n", cmd, (int)status);
+      return 0;
+   }
+
+   if (strcmp(cmd, "prepared-recover") == 0 || strcmp(cmd, "prepared-recover-refused") == 0)
+   {
+      int expect_ok = strcmp(cmd, "prepared-recover") == 0;
+      if ((expect_ok && (argc != 4 || hex_to_kek(argv[2], kek) != 0)) ||
+          (!expect_ok && argc != 3 && argc != 4))
+         return die("prepared-recover <expectedhexkek> <secret> | prepared-recover-refused "
+                    "<secret> [receipt-field]");
+      vault_tpm2_reseal_receipt_t receipt;
+      if (receipt_load(&receipt) != 0)
+         return die("prepared receipt missing");
+      if (!expect_ok && argc == 4)
+      {
+         if (strcmp(argv[3], "operation") == 0)
+            receipt.operation_id[0] ^= 0x80;
+         else if (strcmp(argv[3], "old-generation") == 0)
+            receipt.old_generation++;
+         else if (strcmp(argv[3], "new-generation") == 0)
+            receipt.new_generation++;
+         else if (strcmp(argv[3], "predecessor") == 0)
+            receipt.predecessor_digest[0] ^= 0x80;
+         else if (strcmp(argv[3], "capsule") == 0)
+            receipt.capsule_digest[0] ^= 0x80;
+         else if (strcmp(argv[3], "future") == 0)
+            receipt.future_digest[0] ^= 0x80;
+         else if (strcmp(argv[3], "new-kek") == 0)
+            receipt.new_kek_digest[0] ^= 0x80;
+         else if (strcmp(argv[3], "manifest") == 0)
+            receipt.manifest_digest[0] ^= 0x80;
+         else
+            return die("unknown receipt field mutation");
+      }
+      uint8_t recovered[VAULT_KEK_LEN];
+      memset(recovered, 0x5a, sizeof(recovered));
+      const char *secret = expect_ok ? argv[3] : argv[2];
+      int pr = vault_custody_tpm2_reseal_recover_kek(&receipt, secret, recovered);
+      if ((expect_ok &&
+           (pr != VAULT_TPM2_RESEAL_OK || CRYPTO_memcmp(recovered, kek, sizeof(kek)) != 0)) ||
+          (!expect_ok && (pr == VAULT_TPM2_RESEAL_OK || !bytes_zero(recovered, sizeof(recovered)))))
+         return die("prepared recover result/output mismatch");
+      const vault_custody_provider_t *provider = vault_custody_tpm2_provider();
+      uint8_t unavailable[VAULT_KEK_LEN];
+      memset(unavailable, 0x5a, sizeof(unavailable));
+      if (!provider || provider->is_sealed(provider->ctx) != 1 ||
+          provider->get_kek(provider->ctx, unavailable) == 0 ||
+          !bytes_zero(unavailable, sizeof(unavailable)))
+         return die("prepared recovery changed sealed provider/cache state");
+      OPENSSL_cleanse(recovered, sizeof(recovered));
+      OPENSSL_cleanse(unavailable, sizeof(unavailable));
+      OPENSSL_cleanse(kek, sizeof(kek));
+      OPENSSL_cleanse(&receipt, sizeof(receipt));
+      printf("test_vault_tpm2: %s OK\n", cmd);
       return 0;
    }
 

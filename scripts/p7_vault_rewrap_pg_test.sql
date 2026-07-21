@@ -33,15 +33,18 @@ LANGUAGE plpgsql AS $$
 DECLARE r RECORD; next_wrap BYTEA; next_check BYTEA;
 BEGIN
   FOR r IN SELECT * FROM org_vault_rewrap_secret_page(p_op,p_fence,0,128) LOOP
-    next_wrap:=sha256(int8send(r.source_id)||decode('a1','hex'))||
-      substring(sha256(int8send(r.source_id)||decode('a2','hex')) FROM 1 FOR 8);
+    -- Include the source digest so consecutive promoted test rotations never
+    -- attempt to stage a byte-identical wrap for the same stable source ID.
+    next_wrap:=sha256(r.source_digest||decode('a1','hex'))||
+      substring(sha256(r.source_digest||decode('a2','hex')) FROM 1 FOR 8);
     PERFORM org_vault_rewrap_stage_dek(p_op,p_fence,r.source_id,r.principal,r.agent,r.cred,
       r.version,r.source_digest,next_wrap);
   END LOOP;
   FOR r IN SELECT * FROM org_vault_rewrap_check_page(p_op,p_fence,'',128) LOOP
     next_check:=CASE WHEN octet_length(r.kek_check)=0 THEN ''::bytea ELSE
-      sha256(convert_to(r.principal,'UTF8')||decode('b1','hex'))||
-      substring(sha256(convert_to(r.principal,'UTF8')||decode('b2','hex')) FROM 1 FOR 8) END;
+      sha256(r.source_digest||convert_to(r.principal,'UTF8')||decode('b1','hex'))||
+      substring(sha256(r.source_digest||convert_to(r.principal,'UTF8')||decode('b2','hex'))
+        FROM 1 FOR 8) END;
     PERFORM org_vault_rewrap_stage_check(p_op,p_fence,r.principal,r.source_digest,next_check);
   END LOOP;
 END; $$;
@@ -53,6 +56,7 @@ DECLARE tables TEXT[]:=ARRAY['kb_vault_rewrap_check_stage','kb_vault_rewrap_dek_
   'kb_vault_rewrap_operation','kb_vault_rewrap_worm'];
 DECLARE funcs TEXT[]:=ARRAY['org_vault_rewrap_abort','org_vault_rewrap_assert_live',
   'org_vault_rewrap_begin','org_vault_rewrap_check_page','org_vault_rewrap_digests',
+  'org_vault_rewrap_complete',
   'org_vault_rewrap_mark_committing','org_vault_rewrap_mark_resealed',
   'org_vault_rewrap_pack_bytes','org_vault_rewrap_pack_text','org_vault_rewrap_promote',
   'org_vault_rewrap_record_prepared','org_vault_rewrap_recovery_required',
@@ -66,8 +70,21 @@ BEGIN
       cardinality(tables) OR
      NOT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class x ON x.oid=i.indexrelid
        JOIN pg_namespace n ON n.oid=x.relnamespace WHERE n.nspname='public' AND
-       x.relname='idx_kb_vault_rewrap_one_active' AND i.indisunique AND i.indpred IS NOT NULL) THEN
+       x.relname='idx_kb_vault_rewrap_one_active' AND i.indisunique AND
+       pg_get_expr(i.indpred,i.indrelid) ~ 'aborted' AND
+       pg_get_expr(i.indpred,i.indrelid) ~ 'recovery_required' AND
+       pg_get_expr(i.indpred,i.indrelid) ~ 'completed') THEN
     RAISE EXCEPTION 'P7 rewrap FAIL: table/active-index inventory drift';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND
+       table_name='kb_vault_rewrap_operation' AND column_name='failure_from_state') OR
+     NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='kb_vault_rewrap_operation'::regclass
+       AND conname='kb_vault_rewrap_operation_state_check' AND
+       pg_get_constraintdef(oid) ~ 'completed') OR
+     NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='kb_vault_rewrap_worm'::regclass
+       AND conname='kb_vault_rewrap_worm_event_kind_check' AND
+       pg_get_constraintdef(oid) ~ 'completed') THEN
+    RAISE EXCEPTION 'P7 rewrap FAIL: D1 state/outbox schema drift';
   END IF;
   IF (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
       WHERE c.relname='kb_vault_rewrap_worm' AND NOT t.tgisinternal AND
@@ -212,53 +229,139 @@ SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
   current_setting('aimee.p7_abort_staged_fence')::bigint)$q$,'aborted');
 COMMIT;
 
--- Post-commit failure path: recovery-required is legal only after committing,
--- is immutable/idempotent, advances the fence, and retains the sealed barrier.
-BEGIN;
-SELECT set_config('aimee.p7_recovery_fence',fencing_token::text,false)
-  FROM org_vault_rewrap_begin('owner','request-recovery','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',11,12);
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_record_prepared(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint,
-  '\x7265636f76657279',sha256('\x7265636f76657279'::bytea))$q$,'custody_prepared');
-SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_recovery_required(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint,
-  'too_early')$q$,'40001');
-COMMIT;
-BEGIN ISOLATION LEVEL SERIALIZABLE;
-SELECT p7_rewrap_stage_all('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-  current_setting('aimee.p7_recovery_fence')::bigint);
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint)$q$,
-  'wraps_staged');
-COMMIT;
-BEGIN;
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_mark_committing(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint)$q$,
-  'reseal_committing');
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_mark_committing(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint)$q$,
-  'reseal_committing');
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_recovery_required(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint,
-  'mock_commit_failed')$q$,'recovery_required');
-SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_recovery_required(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint,
-  'different')$q$,'23505');
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_recovery_required(
-  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',current_setting('aimee.p7_recovery_fence')::bigint,
-  'mock_commit_failed')$q$,'recovery_required');
-DO $$ BEGIN
-  IF NOT (SELECT sealed AND maintenance_kind='tpm2-reseal' AND
-      maintenance_id='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' FROM kb_vault_control) OR
-     (SELECT count(*) FROM kb_vault_rewrap_worm WHERE operation_id=
-       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' AND event_kind='recovery_required')<>1 THEN
-    RAISE EXCEPTION 'P7 rewrap FAIL: recovery-required barrier/WORM mismatch';
+-- D1 quarantine is legal from every active phase.  Build each phase through the
+-- owner API, then prove evidence preservation, source provenance, terminal replay,
+-- outbox exactness, fence behavior, and fail-closed outgoing edges.
+CREATE OR REPLACE FUNCTION p7_rewrap_recovery_case(p_op TEXT,p_request TEXT,
+  p_target TEXT,p_old BIGINT) RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE f BIGINT; before_op kb_vault_rewrap_operation%ROWTYPE;
+  after_op kb_vault_rewrap_operation%ROWTYPE; before_fence BIGINT;
+  receipt_bytes BYTEA:=convert_to('receipt-'||p_target,'UTF8');
+  dek_rows BIGINT; check_rows BIGINT; expected_event TEXT;
+BEGIN
+  SELECT fencing_token INTO STRICT f FROM org_vault_rewrap_begin(
+    'owner',p_request,p_op,p_old,p_old+1);
+  IF p_target<>'preparing' THEN
+    PERFORM org_vault_rewrap_record_prepared(p_op,f,receipt_bytes,sha256(receipt_bytes));
   END IF;
-END $$;
--- Test-only owner reset permits the independent promotion scenario.  The public
--- API intentionally has no recovery clear operation in this slice.
-UPDATE kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',
-  updated_at=pg_now_text() WHERE singleton=1;
+  IF p_target IN ('wraps_staged','reseal_committing','resealed','promoted') THEN
+    PERFORM p7_rewrap_stage_all(p_op,f);
+    PERFORM org_vault_rewrap_stage_finish(p_op,f);
+  END IF;
+  IF p_target IN ('reseal_committing','resealed','promoted') THEN
+    PERFORM org_vault_rewrap_mark_committing(p_op,f);
+  END IF;
+  IF p_target IN ('resealed','promoted') THEN
+    PERFORM org_vault_rewrap_mark_resealed(p_op,f,sha256(receipt_bytes));
+  END IF;
+  IF p_target='promoted' THEN
+    PERFORM org_vault_rewrap_promote(p_op,f);
+  END IF;
+  SELECT * INTO STRICT before_op FROM kb_vault_rewrap_operation WHERE operation_id=p_op;
+  SELECT fencing_token INTO STRICT before_fence FROM kb_vault_control WHERE singleton=1;
+  SELECT count(*) INTO dek_rows FROM kb_vault_rewrap_dek_stage WHERE operation_id=p_op;
+  SELECT count(*) INTO check_rows FROM kb_vault_rewrap_check_stage WHERE operation_id=p_op;
+
+  IF p_target='preparing' THEN
+    PERFORM p7_rewrap_expect_error(format(
+      'SELECT org_vault_rewrap_recovery_required(%L,%s,%L)',p_op,f,'Uppercase'),'22023');
+    UPDATE kb_vault_rewrap_operation SET fencing_token=9223372036854775807
+      WHERE operation_id=p_op;
+    UPDATE kb_vault_control SET fencing_token=9223372036854775807 WHERE singleton=1;
+    PERFORM p7_rewrap_expect_error(format(
+      'SELECT org_vault_rewrap_recovery_required(%L,9223372036854775807,%L)',
+      p_op,'fence_exhausted'),'22003');
+    UPDATE kb_vault_rewrap_operation SET fencing_token=f WHERE operation_id=p_op;
+    UPDATE kb_vault_control SET fencing_token=before_fence WHERE singleton=1;
+  END IF;
+
+  IF org_vault_rewrap_recovery_required(p_op,f,'quarantine_test')<>'recovery_required' THEN
+    RAISE EXCEPTION 'P7 rewrap FAIL: quarantine failed from %',p_target;
+  END IF;
+  SELECT * INTO STRICT after_op FROM kb_vault_rewrap_operation WHERE operation_id=p_op;
+  expected_event:=encode(sha256(convert_to('aimee-vault-rewrap-worm-v1','UTF8') ||
+    org_vault_rewrap_pack_text(p_op) ||
+    org_vault_rewrap_pack_text('recovery_required')),'hex');
+  IF after_op.state<>'recovery_required' OR after_op.failure_class<>'quarantine_test' OR
+     after_op.failure_from_state<>p_target OR
+     after_op.receipt IS DISTINCT FROM before_op.receipt OR
+     after_op.receipt_digest IS DISTINCT FROM before_op.receipt_digest OR
+     after_op.secret_count<>before_op.secret_count OR after_op.check_count<>before_op.check_count OR
+     after_op.inventory_digest IS DISTINCT FROM before_op.inventory_digest OR
+     after_op.stage_digest IS DISTINCT FROM before_op.stage_digest OR
+     (SELECT count(*) FROM kb_vault_rewrap_dek_stage WHERE operation_id=p_op)<>dek_rows OR
+     (SELECT count(*) FROM kb_vault_rewrap_check_stage WHERE operation_id=p_op)<>check_rows OR
+     NOT (SELECT sealed AND maintenance_kind='tpm2-reseal' AND maintenance_id=p_op AND
+       fencing_token=before_fence+1 FROM kb_vault_control WHERE singleton=1) OR
+     (SELECT count(*) FROM kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+       w.event_kind='recovery_required' AND w.event_id=expected_event AND
+       w.state='recovery_required' AND w.fencing_token=f AND
+       w.receipt_digest IS NOT DISTINCT FROM before_op.receipt_digest AND
+       w.inventory_digest IS NOT DISTINCT FROM before_op.inventory_digest AND
+       w.stage_digest IS NOT DISTINCT FROM before_op.stage_digest AND
+       w.detail='from_state='||p_target||';class=quarantine_test')<>1 THEN
+    RAISE EXCEPTION 'P7 rewrap FAIL: quarantine evidence/barrier/outbox mismatch from %',p_target;
+  END IF;
+  PERFORM p7_rewrap_expect(format(
+    'SELECT org_vault_rewrap_recovery_required(%L,%s,%L)',p_op,f,'quarantine_test'),
+    'recovery_required');
+  PERFORM p7_rewrap_expect_error(format(
+    'SELECT org_vault_rewrap_recovery_required(%L,%s,%L)',p_op,f,'different'),'23505');
+  PERFORM p7_rewrap_expect_error(format(
+    'SELECT org_vault_rewrap_abort(%L,%s,%L)',p_op,f,'no_escape'),'40001');
+  PERFORM p7_rewrap_expect_error(format(
+    'SELECT org_vault_rewrap_complete(%L,%s,decode(repeat(''00'',32),''hex''),decode(repeat(''00'',32),''hex''),decode(repeat(''00'',32),''hex''))',p_op,f),'40001');
+
+  IF p_target='preparing' THEN
+    PERFORM p7_rewrap_expect_error(format(
+      'SELECT org_vault_rewrap_record_prepared(%L,%s,%L::bytea,sha256(%L::bytea))',
+      p_op,f,'\\x78','\\x78'),'40001');
+  ELSE
+    PERFORM p7_rewrap_expect(format(
+      'SELECT org_vault_rewrap_record_prepared(%L,%s,%L::bytea,%L::bytea)',
+      p_op,f,before_op.receipt,before_op.receipt_digest),'recovery_required');
+  END IF;
+  IF p_target IN ('wraps_staged','reseal_committing','resealed','promoted') THEN
+    PERFORM p7_rewrap_expect(format('SELECT org_vault_rewrap_stage_finish(%L,%s)',p_op,f),
+      'recovery_required');
+  ELSE
+    PERFORM p7_rewrap_expect_error(format('SELECT org_vault_rewrap_stage_finish(%L,%s)',p_op,f),
+      '40001');
+  END IF;
+  IF p_target IN ('reseal_committing','resealed','promoted') THEN
+    PERFORM p7_rewrap_expect(format('SELECT org_vault_rewrap_mark_committing(%L,%s)',p_op,f),
+      'recovery_required');
+  ELSE
+    PERFORM p7_rewrap_expect_error(format('SELECT org_vault_rewrap_mark_committing(%L,%s)',p_op,f),
+      '40001');
+  END IF;
+  IF p_target IN ('resealed','promoted') THEN
+    PERFORM p7_rewrap_expect(format(
+      'SELECT org_vault_rewrap_mark_resealed(%L,%s,%L::bytea)',p_op,f,before_op.receipt_digest),
+      'recovery_required');
+  ELSE
+    PERFORM p7_rewrap_expect_error(format(
+      'SELECT org_vault_rewrap_mark_resealed(%L,%s,decode(repeat(''00'',32),''hex''))',p_op,f),
+      '40001');
+  END IF;
+  IF p_target='promoted' THEN
+    PERFORM p7_rewrap_expect(format('SELECT org_vault_rewrap_promote(%L,%s)',p_op,f),
+      'recovery_required');
+  ELSE
+    PERFORM p7_rewrap_expect_error(format('SELECT org_vault_rewrap_promote(%L,%s)',p_op,f),
+      '40001');
+  END IF;
+  UPDATE kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',
+    updated_at=pg_now_text() WHERE singleton=1;
+END; $$;
+
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT p7_rewrap_recovery_case('b0000000000000000000000000000001','recovery-preparing','preparing',30);
+SELECT p7_rewrap_recovery_case('b0000000000000000000000000000002','recovery-custody','custody_prepared',31);
+SELECT p7_rewrap_recovery_case('b0000000000000000000000000000003','recovery-wraps','wraps_staged',32);
+SELECT p7_rewrap_recovery_case('b0000000000000000000000000000004','recovery-committing','reseal_committing',33);
+SELECT p7_rewrap_recovery_case('b0000000000000000000000000000005','recovery-resealed','resealed',34);
+SELECT p7_rewrap_recovery_case('b0000000000000000000000000000006','recovery-promoted','promoted',35);
 COMMIT;
 
 -- Main successful operation through staging.  Receipt and stage insertions are
@@ -423,9 +526,97 @@ DO $$ BEGIN
     RAISE EXCEPTION 'P7 rewrap FAIL: promotion result/barrier mismatch';
   END IF;
 END $$;
+
+-- Completion validates the entire promoted checkpoint, advances only the fence,
+-- clears maintenance identity, retains staging, and replays from its consumed fence.
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  decode(repeat('00',32),'hex'),
+  (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'40001');
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  sha256('\x72656365697074'::bytea),decode(repeat('00',32),'hex'),
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'40001');
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  sha256('\x72656365697074'::bytea),
+  (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
+  decode(repeat('00',32),'hex'))$q$,'40001');
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint-1,
+  sha256('\x72656365697074'::bytea),
+  (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'40001');
+DO $$ DECLARE f BIGINT:=current_setting('aimee.p7_rewrap_fence')::bigint;
+BEGIN
+  UPDATE kb_vault_rewrap_operation SET fencing_token=9223372036854775807
+    WHERE operation_id='cccccccccccccccccccccccccccccccc';
+  UPDATE kb_vault_control SET fencing_token=9223372036854775807 WHERE singleton=1;
+  PERFORM p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
+    'cccccccccccccccccccccccccccccccc',9223372036854775807,
+    sha256('\x72656365697074'::bytea),
+    (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
+    (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'22003');
+  UPDATE kb_vault_rewrap_operation SET fencing_token=f
+    WHERE operation_id='cccccccccccccccccccccccccccccccc';
+  UPDATE kb_vault_control SET fencing_token=f WHERE singleton=1;
+END $$;
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  sha256('\x72656365697074'::bytea),
+  (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'completed');
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  sha256('\x72656365697074'::bytea),
+  (SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'),
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'completed');
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_complete(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  sha256('\x72656365697074'::bytea),decode(repeat('ff',32),'hex'),
+  (SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc'))$q$,'23505');
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_recovery_required(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  'after_complete')$q$,'40001');
+SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_abort(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  'after_complete')$q$,'40001');
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_record_prepared(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  '\x72656365697074',sha256('\x72656365697074'::bytea))$q$,'completed');
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'completed');
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_mark_committing(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'completed');
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_mark_resealed(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
+  sha256('\x72656365697074'::bytea))$q$,'completed');
+SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_promote(
+  'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'completed');
+DO $$ DECLARE expected_event TEXT;
+BEGIN
+  expected_event:=encode(sha256(convert_to('aimee-vault-rewrap-worm-v1','UTF8') ||
+    org_vault_rewrap_pack_text('cccccccccccccccccccccccccccccccc') ||
+    org_vault_rewrap_pack_text('completed')),'hex');
+  IF NOT (SELECT state='completed' AND failure_from_state IS NULL
+      FROM kb_vault_rewrap_operation WHERE operation_id='cccccccccccccccccccccccccccccccc') OR
+     NOT (SELECT sealed AND maintenance_kind='' AND maintenance_id='' AND
+       fencing_token=current_setting('aimee.p7_rewrap_fence')::bigint+1
+       FROM kb_vault_control WHERE singleton=1) OR
+     NOT EXISTS(SELECT 1 FROM kb_vault_rewrap_dek_stage
+       WHERE operation_id='cccccccccccccccccccccccccccccccc') OR
+     (SELECT count(*) FROM kb_vault_rewrap_worm WHERE operation_id=
+       'cccccccccccccccccccccccccccccccc' AND event_kind='completed' AND state='completed' AND
+       event_id=expected_event AND fencing_token=current_setting('aimee.p7_rewrap_fence')::bigint AND
+       receipt_digest=sha256('\x72656365697074'::bytea) AND detail='')<>1 THEN
+    RAISE EXCEPTION 'P7 rewrap FAIL: completion state/barrier/staging/outbox mismatch';
+  END IF;
+END $$;
 COMMIT;
 
+DROP FUNCTION p7_rewrap_recovery_case(TEXT,TEXT,TEXT,BIGINT);
 DROP FUNCTION p7_rewrap_stage_all(TEXT,BIGINT);
 DROP FUNCTION p7_rewrap_expect_error(TEXT,TEXT);
 DROP FUNCTION p7_rewrap_expect(TEXT,TEXT);
-\echo '== P7-reseal-c PostgreSQL staging/promotion assertions PASSED =='
+\echo '== P7-reseal-d1 PostgreSQL completion/quarantine assertions PASSED =='
