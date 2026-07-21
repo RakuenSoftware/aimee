@@ -1,6 +1,7 @@
 # P7-reseal-d1 recovery, guard, and completion foundations
 
-- **State:** proposed; no production caller or operator enablement in this slice.
+- **State:** delivered and validated on PostgreSQL 17 plus swtpm (CT260), with
+  default and ASAN/UBSAN builds; no production caller or operator enablement.
 - **Depends on:** P7-reseal-a prepared TPM2 artifacts, P7-reseal-b primary
   barrier, and P7-reseal-c bounded staging/promotion.
 
