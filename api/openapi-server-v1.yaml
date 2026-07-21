@@ -4662,6 +4662,22 @@ paths:
                 base: { type: string }
                 title: { type: string, maxLength: 256 }
                 number: { type: integer, minimum: 1 }
+              oneOf:
+                - required: [head]
+                  properties: { op: { enum: [push] } }
+                  not:
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
+                - required: [head, base, title]
+                  properties: { op: { enum: [open] } }
+                  not: { required: [number] }
+                - required: [number]
+                  properties: { op: { enum: [info, ci] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                - required: [base, number]
+                  properties: { op: { enum: [merge] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [title] }]
       responses:
         "200":
           description: Mechanical forge operation completed

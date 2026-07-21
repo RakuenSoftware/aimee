@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,8 +50,9 @@ func TestHTTPForgeExecuteUsesUnixResourcePlane(t *testing.T) {
 
 func TestHTTPForgePushRejectsUnmanagedBranchAndMismatchedOrigin(t *testing.T) {
 	forge := &HTTPForge{}
-	if err := forge.Push(t.Context(), t.TempDir(), t.TempDir(), "main"); err == nil {
-		t.Fatal("unmanaged branch was accepted")
+	if err := forge.Push(t.Context(), t.TempDir(), t.TempDir(), "main"); err == nil ||
+		!strings.Contains(err.Error(), "unmanaged branch") {
+		t.Fatalf("unmanaged branch error = %v", err)
 	}
 	repo := filepath.Join(t.TempDir(), "repo")
 	worktree := filepath.Join(t.TempDir(), "worktree")
@@ -65,8 +67,9 @@ func TestHTTPForgePushRejectsUnmanagedBranchAndMismatchedOrigin(t *testing.T) {
 	if output, err := exec.Command("git", "-C", worktree, "remote", "add", "origin", "https://github.com/acme/two.git").CombinedOutput(); err != nil {
 		t.Fatalf("add worktree origin: %v: %s", err, output)
 	}
-	if err := forge.Push(t.Context(), repo, worktree, "aimee/feat/wi_example"); err == nil {
-		t.Fatal("mismatched worktree origin was accepted")
+	if err := forge.Push(t.Context(), repo, worktree, "aimee/feat/wi_example"); err == nil ||
+		err.Error() != "worktree origin does not match admitted repository" {
+		t.Fatalf("mismatched origin error = %v", err)
 	}
 }
 

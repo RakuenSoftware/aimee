@@ -359,7 +359,7 @@ static char *const wfe_git_env[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "GIT_CO
                                     NULL};
 
 static pthread_once_t wfe_workspace_once = PTHREAD_ONCE_INIT;
-static char wfe_workspace_real[MAX_PATH_LEN];
+static char wfe_workspace_real[MAX_PATH_LEN] = {0};
 
 static void wfe_workspace_init(void)
 {
@@ -501,32 +501,52 @@ static int wfe_managed_repo(const char *workdir_in, const char *head, char *work
    return 0;
 }
 
-static int wfe_default_base(const char *principal, const char *repo, const char *base)
+static int wfe_default_base(const char *principal, const char *repo, const char *base, char *err,
+                            size_t errlen)
 {
    char branch[256];
-   char err[256];
-   if (git_pr_default_branch_via_api(principal, repo, branch, sizeof(branch), err, sizeof(err)) !=
-       0)
-      return 0;
+   if (git_pr_default_branch_via_api(principal, repo, branch, sizeof(branch), err, errlen) != 0)
+      return -1;
    return strcmp(branch, base) == 0;
 }
 
 static int wfe_forge_body_fields_valid(const cJSON *body)
 {
    static const char *const allowed[] = {"op", "workdir", "head", "base", "title", "number", NULL};
+   unsigned seen = 0;
    for (const cJSON *field = body ? body->child : NULL; field; field = field->next)
    {
-      int known = 0;
+      int index = -1;
       for (size_t i = 0; allowed[i]; i++)
          if (field->string && strcmp(field->string, allowed[i]) == 0)
          {
-            known = 1;
+            index = (int)i;
             break;
          }
-      if (!known)
+      if (index < 0 || (seen & (1U << (unsigned)index)))
          return 0;
+      if ((index == 5 && !cJSON_IsNumber(field)) || (index != 5 && !cJSON_IsString(field)))
+         return 0;
+      seen |= 1U << (unsigned)index;
    }
    return 1;
+}
+
+static int wfe_forge_operation_valid(const char *op, const char *head, const char *base,
+                                     const char *title, const cJSON *jnumber, int number)
+{
+   int has_number = jnumber != NULL;
+   if (has_number && (!cJSON_IsNumber(jnumber) || jnumber->valuedouble != (double)number))
+      return 0;
+   if (strcmp(op, "push") == 0)
+      return head && !base && !title && !has_number;
+   if (strcmp(op, "open") == 0)
+      return head && base && title && title[0] && !has_number;
+   if (strcmp(op, "info") == 0 || strcmp(op, "ci") == 0)
+      return !head && !base && !title && has_number && number > 0;
+   if (strcmp(op, "merge") == 0)
+      return !head && base && !title && has_number && number > 0;
+   return 0;
 }
 
 /* Mechanical authenticated forge execution for Go-owned WFE state. The raw
@@ -548,7 +568,8 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    int number = cJSON_IsNumber(jnumber) ? jnumber->valueint : 0;
    if (!body || !wfe_forge_body_fields_valid(body) || !op || !workdir_in ||
        (head && !wfe_ref_valid(head)) || (base && !wfe_ref_valid(base)) ||
-       (title && strlen(title) > 256))
+       (title && strlen(title) > 256) ||
+       !wfe_forge_operation_valid(op, head, base, title, jnumber, number))
    {
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "invalid forge operation request");
@@ -575,33 +596,38 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    }
    int feature_head = head && strncmp(head, "aimee/feat/wi_", 14) == 0;
    int slice_head = head && strncmp(head, "aimee/wi/wi_", 12) == 0;
-   int allowed_open_base =
-       base && ((feature_head && wfe_default_base(principal, trusted_repo, base)) ||
-                (slice_head && strncmp(base, "aimee/feat/wi_", 14) == 0));
    if (strcmp(op, "push") == 0 && head && (feature_head || slice_head))
    {
       rc = git_ops_push_dir(principal, workdir, remote, head, &detail, err, sizeof(err));
    }
-   else if (strcmp(op, "open") == 0 && head && allowed_open_base)
+   else if (strcmp(op, "open") == 0)
    {
-      char *push_out = NULL, url[1024];
-      rc = git_ops_push_dir(principal, workdir, remote, head, &push_out, err, sizeof(err));
-      if (rc != 0)
-         detail = push_out;
-      else
-         free(push_out);
-      if (rc == 0)
+      int base_ok = slice_head && strncmp(base, "aimee/feat/wi_", 14) == 0;
+      if (feature_head)
+         base_ok = wfe_default_base(principal, trusted_repo, base, err, sizeof(err));
+      if (base_ok == 0)
+         snprintf(err, sizeof(err), "pull request base is outside the managed target");
+      if (base_ok == 1)
       {
-         int found = git_pr_find_open_via_api(principal, trusted_repo, head, base, url, sizeof(url),
-                                              err, sizeof(err));
-         if (found == 0)
-            rc = git_pr_create_via_api_ex(principal, trusted_repo, head, base, title,
-                                          "Automated workflow output ready for human review.", url,
-                                          sizeof(url), err, sizeof(err));
+         char *push_out = NULL, url[1024];
+         rc = git_ops_push_dir(principal, workdir, remote, head, &push_out, err, sizeof(err));
+         if (rc != 0)
+            detail = push_out;
          else
-            rc = found == 1 ? 0 : -1;
+            free(push_out);
          if (rc == 0)
-            cJSON_AddStringToObject(out, "url", url);
+         {
+            int found = git_pr_find_open_via_api(principal, trusted_repo, head, base, url,
+                                                 sizeof(url), err, sizeof(err));
+            if (found == 0)
+               rc = git_pr_create_via_api_ex(principal, trusted_repo, head, base, title,
+                                             "Automated workflow output ready for human review.",
+                                             url, sizeof(url), err, sizeof(err));
+            else
+               rc = found == 1 ? 0 : -1;
+            if (rc == 0)
+               cJSON_AddStringToObject(out, "url", url);
+         }
       }
    }
    else if (strcmp(op, "info") == 0 && number > 0)

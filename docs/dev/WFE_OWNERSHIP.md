@@ -29,8 +29,10 @@ the worktree's Git common directory, confines that repository to the
 process-lifetime-canonicalized workspace root, and requires the checked-out branch to
 match the work-item ID and managed feature/slice namespace. Push uses an
 explicit canonical HTTPS destination and refspec under a minimal environment;
-final-PR base validation uses GitHub's authoritative `default_branch`, not the
-checkout-mutable `origin/HEAD`. The request schema rejects unknown fields,
+feature final-PR base validation uses GitHub's authoritative `default_branch`,
+not the checkout-mutable `origin/HEAD`; slice PRs target their managed parent
+feature branch. The request schema rejects unknown or duplicate fields and
+operation/field combinations that are not meaningful for the selected action,
 including caller-supplied repository identity. C applies the shared vault
 resolution ladder without returning credential material. It does not read DB1,
 choose an operation, interpret a workflow, or advance a transition. Go owns

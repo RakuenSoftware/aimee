@@ -223,6 +223,9 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * default is e.g. "testing" would get its PR opened against the wrong branch. */
 static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
 {
+   if (!buf || n == 0)
+      return -1;
+   buf[0] = '\0';
    /* Build the URL directly: gh_get() appends a trailing "/<path>", and GitHub
     * 404s GET /repos/<owner>/<repo>/ (trailing slash) — only the bare form works. */
    char url[512];
@@ -250,6 +253,8 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
       cJSON_Delete(j);
    }
    free(resp);
+   if (rc != 0)
+      buf[0] = '\0';
    return rc;
 }
 
@@ -266,7 +271,10 @@ int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, c
    int rc = gh_default_branch(&cx, out, out_cap);
    gh_ctx_done(&cx);
    if (rc != 0)
+   {
+      out[0] = '\0';
       snprintf(err, errlen, "cannot resolve authoritative default branch");
+   }
    return rc;
 }
 
@@ -519,6 +527,15 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
    const cJSON *basej = cJSON_GetObjectItem(j, "base");
    const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
+   if (!cJSON_IsString(state) || !state->valuestring || !cJSON_IsString(sha) || !sha->valuestring ||
+       !sha->valuestring[0] || !cJSON_IsString(headref) || !headref->valuestring ||
+       !headref->valuestring[0] || !cJSON_IsString(baseref) || !baseref->valuestring ||
+       !baseref->valuestring[0])
+   {
+      cJSON_Delete(j);
+      snprintf(err, errlen, "github API: pull request response is missing required refs");
+      return -1;
+   }
    out->open =
        cJSON_IsString(state) && state->valuestring && strcmp(state->valuestring, "open") == 0;
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;

@@ -427,8 +427,8 @@ FROM lifecycle_event WHERE work_item_id = ? AND id > ? ORDER BY id ASC LIMIT ?`,
 
 func (s *Store) ExecutedTurnCount(ctx context.Context, workItemID string) (int, error) {
 	var count int
-	// A turn is an executed workflow transition. Administrative events such as
-	// transient parks, operator resumes, and gates remain in the audit log but
+	// A turn is exactly an advance or loop execution event. Transient parks,
+	// operator resumes, gates, and retry bookkeeping remain in the audit log but
 	// must not consume execution budget; otherwise an unavailable dependency can
 	// exhaust max_turns without the workflow running and every resume immediately
 	// parks again.
