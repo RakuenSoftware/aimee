@@ -513,6 +513,18 @@ static void assert_no_wildcard(const char *json)
    assert(strstr(json, "bedrock:Converse") == NULL);
 }
 
+static int count_text(const char *haystack, const char *needle)
+{
+   int n = 0;
+   size_t z = strlen(needle);
+   while ((haystack = strstr(haystack, needle)) != NULL)
+   {
+      n++;
+      haystack += z;
+   }
+   return n;
+}
+
 static void test_bedrock_policy(void)
 {
    char out[4096];
@@ -523,6 +535,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "anthropic.claude-3-sonnet-20240229-v1:0"};
@@ -536,6 +549,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "meta.llama3"};
@@ -548,6 +562,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_PROVISIONED,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .account = "123456789012",
@@ -561,6 +576,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_CUSTOM,
                             .partition = "aws-us-gov",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .account = "123456789012",
@@ -576,8 +592,9 @@ static void test_bedrock_policy(void)
                            "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude"};
       bedrock_target_t t = {.type = BEDROCK_TARGET_APP_INFERENCE_PROFILE,
                             .partition = "aws",
-                            .region_set = regions1,
-                            .n_regions = 1,
+                            .invoke_region = "us-east-1",
+                            .region_set = regions2,
+                            .n_regions = 2,
                             .account = "123456789012",
                             .id = "myprofile",
                             .underlying_fm_arns = fms,
@@ -594,6 +611,7 @@ static void test_bedrock_policy(void)
                            "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude"};
       bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
                             .partition = "aws",
+                            .invoke_region = "us-west-2",
                             .region_set = regions2,
                             .n_regions = 2,
                             .account = "123456789012",
@@ -602,6 +620,8 @@ static void test_bedrock_policy(void)
                             .n_underlying = 2};
       assert(bedrock_session_policy(&t, 1, out, sizeof(out)) == 0);
       assert(strstr(out, "inference-profile/us.anthropic.claude") != NULL);
+      assert(count_text(out, "arn:aws:bedrock:us-west-2:123456789012:inference-profile/") == 1);
+      assert(strstr(out, "arn:aws:bedrock:us-east-1:123456789012:inference-profile/") == NULL);
       assert(strstr(out, "\"bedrock:InvokeModelWithResponseStream\"") != NULL);
       assert_no_wildcard(out);
    }
@@ -611,6 +631,7 @@ static void test_bedrock_policy(void)
       /* unknown type */
       bedrock_target_t t = {.type = (bedrock_target_type_t)999,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "x"};
@@ -619,8 +640,11 @@ static void test_bedrock_policy(void)
    }
    {
       /* missing region set */
-      bedrock_target_t t = {
-          .type = BEDROCK_TARGET_FOUNDATION, .partition = "aws", .n_regions = 0, .id = "x"};
+      bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
+                            .partition = "aws",
+                            .invoke_region = "us-east-1",
+                            .n_regions = 0,
+                            .id = "x"};
       assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
       assert(out[0] == '\0');
    }
@@ -628,6 +652,7 @@ static void test_bedrock_policy(void)
       /* profile with empty underlying FM set */
       bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .account = "123456789012",
@@ -640,6 +665,7 @@ static void test_bedrock_policy(void)
       /* invalid partition */
       bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
                             .partition = "gcp",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "x"};
@@ -651,15 +677,18 @@ static void test_bedrock_policy(void)
       const char *bad_wildcard[] = {"arn:aws:bedrock:us-east-1::foundation-model/*"};
       const char *bad_service[] = {"arn:aws:s3:us-east-1::foundation-model/x"};
       const char *bad_shape[] = {"arn:aws:bedrock:us-east-1::provisioned-model/x"};
-      const char *cases[3];
+      const char *bad_account[] = {"arn:aws:bedrock:us-east-1:evil::foundation-model/x"};
+      const char *cases[4];
       cases[0] = bad_wildcard[0];
       cases[1] = bad_service[0];
       cases[2] = bad_shape[0];
-      for (int i = 0; i < 3; i++)
+      cases[3] = bad_account[0];
+      for (int i = 0; i < 4; i++)
       {
          const char *one[] = {cases[i]};
          bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
                                .partition = "aws",
+                               .invoke_region = "us-east-1",
                                .region_set = regions1,
                                .n_regions = 1,
                                .account = "123456789012",
@@ -669,6 +698,45 @@ static void test_bedrock_policy(void)
          assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
          assert(out[0] == '\0');
       }
+   }
+   {
+      /* Authoritative destination regions and underlying ARN regions must agree. */
+      const char *fms[] = {"arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude"};
+      bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
+                            .partition = "aws",
+                            .invoke_region = "us-east-1",
+                            .region_set = regions1,
+                            .n_regions = 1,
+                            .account = "123456789012",
+                            .id = "p",
+                            .underlying_fm_arns = fms,
+                            .n_underlying = 1};
+      assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
+      assert(out[0] == '\0');
+   }
+   {
+      /* The documented maximum is profile ARN + 64 underlying resources. */
+      char arns[64][128];
+      const char *arnp[64];
+      char large[20000];
+      for (size_t i = 0; i < 64; i++)
+      {
+         snprintf(arns[i], sizeof(arns[i]),
+                  "arn:aws:bedrock:us-east-1::foundation-model/test.model-%zu", i);
+         arnp[i] = arns[i];
+      }
+      bedrock_target_t t = {.type = BEDROCK_TARGET_APP_INFERENCE_PROFILE,
+                            .partition = "aws",
+                            .invoke_region = "us-east-1",
+                            .region_set = regions1,
+                            .n_regions = 1,
+                            .account = "123456789012",
+                            .id = "p",
+                            .underlying_fm_arns = arnp,
+                            .n_underlying = 64};
+      assert(bedrock_session_policy(&t, 0, large, sizeof(large)) == 0);
+      assert(count_text(large, "application-inference-profile/p") == 1);
+      assert(count_text(large, "::foundation-model/test.model-") == 64);
    }
    printf("  bedrock policy: 5 types exact + fail-closed (no wildcard, no Converse, "
           "bad-underlying-ARN rejected)\n");

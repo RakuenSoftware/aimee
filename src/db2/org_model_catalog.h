@@ -10,6 +10,7 @@
 #ifndef DEC_DB2_ORG_MODEL_CATALOG_H
 #define DEC_DB2_ORG_MODEL_CATALOG_H 1
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -26,6 +27,57 @@ extern "C"
  * round-trips through the HTTP read, the struct field, and the read-back with NO
  * silent truncation. One size, used end-to-end. */
 #define DB2_MODEL_ENDPOINT_CAP 512
+#define DB2_BEDROCK_ARRAY_MAX  64
+#define DB2_BEDROCK_REGION_CAP 256
+#define DB2_BEDROCK_ARN_CAP    512
+
+   typedef enum
+   {
+      DB2_BEDROCK_TARGET_OK = 0,
+      DB2_BEDROCK_TARGET_UNAVAILABLE,
+      DB2_BEDROCK_TARGET_INVALID,
+      DB2_BEDROCK_TARGET_ERROR
+   } db2_bedrock_target_result_t;
+
+   typedef struct
+   {
+      char model_id[208];
+      char bedrock_api[16];
+      char model_family[112];
+      char target_type[48];
+      char partition[16];
+      char account[16];
+      char invoke_region[DB2_BEDROCK_REGION_CAP];
+      char endpoint[DB2_MODEL_ENDPOINT_CAP];
+      char regions[DB2_BEDROCK_ARRAY_MAX][DB2_BEDROCK_REGION_CAP];
+      size_t n_regions;
+      char underlying_fm_arns[DB2_BEDROCK_ARRAY_MAX][DB2_BEDROCK_ARN_CAP];
+      size_t n_underlying;
+   } db2_bedrock_target_t;
+
+   /* Raw PostgreSQL adapter row. Exposed so the mandatory hostile-row unit can exercise
+    * malformed values PostgreSQL TEXT/JSON itself cannot produce. */
+   typedef struct
+   {
+      const char *model_id;
+      const char *bedrock_api;
+      const char *model_family;
+      const char *target_type;
+      const char *partition;
+      const char *account;
+      const char *invoke_region;
+      const char *regions_json;
+      const char *underlying_json;
+      const char *endpoint;
+   } db2_bedrock_target_row_t;
+
+   db2_bedrock_target_result_t
+   db2_model_bedrock_target_decode_row(const db2_bedrock_target_row_t *row,
+                                       db2_bedrock_target_t *out);
+
+   db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id,
+                                                                const char *model_id,
+                                                                db2_bedrock_target_t *out);
 
    /* One entitled-model row as returned by org_catalog_entitled(). NO credential or
     * slot field — the entitled surface is the authoritative catalog columns only. */

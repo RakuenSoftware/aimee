@@ -517,6 +517,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-substrate-fixtures \
                $(TESTPREFIX)/unit-test-org-telemetry \
                $(TESTPREFIX)/unit-test-aws-auth \
+               $(TESTPREFIX)/unit-test-org-model-catalog-target \
                $(TESTPREFIX)/unit-test-aws-eventstream
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
@@ -620,6 +621,12 @@ $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
                                   $(OBJDIR)/modules/aws/aws_sts.o \
                                   $(OBJDIR)/modules/aws/bedrock_policy.o \
                                   $(OBJDIR)/modules/aws/sts_cache.o \
+                                  $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-org-model-catalog-target: \
+                                  $(OBJDIR)/tests/test_org_model_catalog_target.o \
+                                  $(OBJDIR)/db2/org_model_catalog.o \
                                   $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
