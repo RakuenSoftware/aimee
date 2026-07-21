@@ -3,7 +3,7 @@
  * Part of the pluggable context engine surface described in
  * docs/proposals/pending/plugin-extension-surface-and-context-engine.md.
  */
-#include "headers/plugin_loader.h"
+#include "aimee/plugin-loader/plugin_loader.h"
 #include "headers/log.h"
 #include "config.h"
 #include "headers/aimee_home.h"

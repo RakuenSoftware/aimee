@@ -38,12 +38,17 @@ widening it requires a separately reviewed amendment.
 
 ## Documentation follow-up boundary
 
-Descriptor v2 and substantive individual module documentation are the immediate next
-modularization slice. No intervening slice may add source/surface metadata or placeholder module
-documentation. V2 will atomically migrate all descriptors and add `docs` as one repository-relative
-document path, `sources` and `public_headers` as sorted unique arrays of repository-relative globs,
-and `surfaces` as strict sorted route, command, protocol, and stage ID arrays. Mixed descriptor
-versions will fail validation.
+Descriptor v2 remains the future canonical metadata projection, but it does not gate physical
+source extraction or ordinary substantive module documentation. Extraction slices may add truthful
+module documents through normal review and CI while descriptors remain at v1. They may not add v2
+fields early, claim complete ownership metadata, or add placeholder documentation. V2 will later
+atomically migrate all descriptors and add `docs` as one repository-relative document path,
+`sources` and `public_headers` as sorted unique arrays of repository-relative globs, and `surfaces`
+as strict sorted route, command, protocol, and stage ID arrays. Mixed descriptor versions will fail
+validation.
+
+Slice 8, `core-modularization-slice-8.md`, is the first application of that rule: it adds a
+substantive document for a physical ownership move without claiming descriptor-v2 completeness.
 
 V2 is not acceptable until every descriptor resolves to a substantive `docs/modules/<id>.md` that
 satisfies the approved module-document contract and cites real source/header globs and surface IDs,

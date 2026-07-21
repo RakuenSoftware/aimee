@@ -27,7 +27,7 @@
 #include "platform_path.h"
 #include "platform_process.h"
 #include "shutdown_forensics.h"
-#include "headers/plugin_loader.h"
+#include "aimee/plugin-loader/plugin_loader.h"
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"

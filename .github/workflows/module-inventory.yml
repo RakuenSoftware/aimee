@@ -66,6 +66,10 @@ jobs:
         run: python3 -I -S scripts/check_background_skill_curator_absence.py
       - name: Test background skill-curator absence failure modes
         run: python3 -I scripts/tests/test_check_background_skill_curator_absence.py -v
+      - name: Enforce plugin-loader physical ownership
+        run: python3 -I -S scripts/check_plugin_loader_ownership.py
+      - name: Test plugin-loader ownership failure modes
+        run: python3 -I scripts/tests/test_check_plugin_loader_ownership.py -v
 
   git-core-contract:
     name: git-core-contract

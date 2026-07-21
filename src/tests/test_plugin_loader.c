@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "../headers/plugin.h"
-#include "../headers/plugin_loader.h"
+#include "aimee/plugin-loader/plugin_loader.h"
 #include "platform_test_util.h"
 
 /* Portable recursive mkdir (like mkdir -p) */
