@@ -82,6 +82,28 @@ func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 	}
 }
 
+func TestWorkItemByGitProposalMatchesCommitQualifiedLegacyIdentity(t *testing.T) {
+	store := newTestStore(t)
+	legacy := "git:" + strings.Repeat("a", 40) + ":docs/proposals/pending/p.md:" + strings.Repeat("b", 64) + ":build:autonomous"
+	if err := store.CreateWorkItem(context.Background(), CreateWorkItem{
+		ID: "wi_legacy_git", Repo: "repo", ProposalPath: legacy,
+		WorkflowName: "build", StartStage: "draft",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItemByGitProposal(context.Background(), "repo", strings.Repeat("b", 64), "build", "autonomous")
+	if err != nil || item.ID != "wi_legacy_git" {
+		t.Fatalf("legacy lookup item=%+v err=%v", item, err)
+	}
+}
+
+func TestGitProposalIdentityPinsBlobWorkflowAndMode(t *testing.T) {
+	if got, want := GitProposalIdentity(strings.Repeat("b", 64), "build", "autonomous"),
+		"git:"+strings.Repeat("b", 64)+":build:autonomous"; got != want {
+		t.Fatalf("identity=%q want=%q", got, want)
+	}
+}
+
 func TestParkedRootStillConsumesAdmissionCapacity(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
