@@ -141,7 +141,7 @@ END $guard$;
 SELECT set_config('aimee.principal', 'owner', true);
 INSERT INTO kb_team(id, name) VALUES (960260, 'p6c_ct260_egress');
 INSERT INTO kb_team_membership(identity_key, team, is_default)
-  VALUES ('oidc:test:p6c_member_a', 960260, true);
+  VALUES ('oidc:test:p6c_member_a', 960260, 1);
 SELECT org_catalog_bedrock_upsert(
   'model', 'P6c CT model', 'converse', 'anthropic', 'foundation',
   'aws', 'us-east-1', NULL, ARRAY['us-east-1']::text[], NULL, '', true);
