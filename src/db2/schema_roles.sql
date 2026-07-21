@@ -30,7 +30,10 @@ BEGIN
     CREATE ROLE aimee_kb_runtime NOLOGIN;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status') THEN
-    CREATE ROLE aimee_kb_status NOLOGIN;
+    CREATE ROLE aimee_kb_status NOLOGIN NOINHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status_definer') THEN
+    CREATE ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS;
   END IF;
 END
 $$;
@@ -39,8 +42,13 @@ $$;
 -- properties db2_init boot-asserts (B4/N4): a mismatch here or an operator
 -- over-grant is caught at boot, not silently tolerated.
 ALTER ROLE aimee_kb_runtime NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
-ALTER ROLE aimee_kb_status NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+ALTER ROLE aimee_kb_status NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_migrate NOBYPASSRLS NOSUPERUSER;
+ALTER ROLE aimee_kb_owner NOLOGIN NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+-- This non-login role owns only the four fixed status-authority functions. Its
+-- BYPASSRLS is required for their exact enrollment/registry checks across FORCE
+-- RLS and is not inherited by the execution role.
+ALTER ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 
 -- migrate acts as owner for DDL; runtime never does.
 GRANT aimee_kb_owner TO aimee_kb_migrate;
@@ -50,6 +58,8 @@ GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;
 GRANT USAGE ON SCHEMA public TO aimee_kb_status;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status;
+GRANT USAGE ON SCHEMA public TO aimee_kb_status_definer;
+REVOKE CREATE ON SCHEMA public FROM aimee_kb_status_definer;
 
 -- NOTE: table/sequence/function GRANTs live in schema_grants.sql, applied AFTER
 -- schema.sql (the tables must exist first). Provisioning order is:

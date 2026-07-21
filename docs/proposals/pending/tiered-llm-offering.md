@@ -5,7 +5,7 @@
 
 ## Delivery status (as of 2026-07-21)
 
-28 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
+29 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
 `testing`. Completed per-slice implementation plans live in `docs/proposals/done/`.
 
 | P | Status | Merged slices | Remaining |
@@ -14,7 +14,7 @@
 | **P2** kb egress authority + catalog | 🟡 partial | **P2a** catalog + entitlement, **P2b-a** buffered kb ingress, atomic admission/settlement, vault signing, vendor dispatch + durable replay guard | **P2b-b** server→kb forwarding + true end-to-end streaming |
 | **P3** Cost attribution | ✅ done | **P3a** pricing+WORM-ledger+rollup, **P3b** spend reporting | — |
 | **P4** Budgets + rate limits | ✅ done | **P4a** budget reservation core, **P4b** keyed rate limiter (both concurrency-proven) | — |
-| **P5** OIDC control plane | 🟡 integration | **P5-A** authoritative registry, two-role/two-key PKI, server→kb heartbeat + two-node EKU topology; **P5-B foundation** primary revocation generation, strict signed status, pinned reverse TLS, nonce/HWM verifier, management-client PKI profile | **P5-B composition** custodial authority + full two-node exchange; **P5-C** operator auth + audited writes; **P5-D** console/OIDC propagation |
+| **P5** OIDC control plane | 🟡 integration | **P5-A** authoritative registry, two-role/two-key PKI, server→kb heartbeat + two-node EKU topology; **P5-B foundation** primary revocation generation, strict signed status, pinned reverse TLS, nonce/HWM verifier, management-client PKI profile; **P5-B1a** platform status-key admission + isolated KMS-HWM custody core | **P5-B1b/B2/B3** provisioned mTLS authority, per-instance identity + full two-node exchange; **P5-C** operator auth + audited writes; **P5-D** console/OIDC propagation |
 | **P6** Bedrock + vendor breadth | 🟡 Converse path done | **P6a** SigV4/STS auth, **P6b** eventstream decoder, **P6c-catalog** routing+validation, **P6c-ir** Converse↔IR, **P6c-stream** stream→delta, **P6c-egress-authority** actor/team-bound target resolution + invocation-region policy, **P6c-egress-engine** owned signed requests + strict response/stream IR, **P6c-egress-transport** strict HTTPS + independent CT260 composition | native InvokeModel + pricing rows |
 | **P7** Hardened kb vault | 🟡 integration | seal/PolicyNV, PKCS#11, KMS helper, CA-key custody, per-key DEK re-wrap, signed-HWM + crash-resumable rotation core, fenced provision/probe/revoke/retire driver, steady-state signed-HWM use-in-place + WORM admission, prepared-TPM2 reseal helper + receipt discovery/recovery, primary maintenance barrier, whole-vault inventory/staging/atomic promotion, exclusive local guard + dual-epoch admission, completed/quarantine lifecycle, canonical reseal receipts + typed PG verification foundations, production-uninvoked TPM2/PG whole-vault reconciler | operator discovery/enablement/unseal, external WORM delivery + full kill matrix |
 | **P8** thin-client mTLS | 🟡 partial | **P8a** per-request durable cert revocation (invariant #5) | **P8b/c** client-cert presentation + ramp + enrollment |

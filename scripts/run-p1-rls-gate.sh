@@ -24,6 +24,16 @@ fi
 # Admin URL points at the maintenance db; derive one on the same server.
 ADMIN_URL="${BASE_URL%/*}/postgres"
 TESTDB="aimee_p1_rls_gate"
+SCHEMA_ONLY_DB="aimee_schema_only_gate"
+
+echo "== Schema-only developer load: provisioning $SCHEMA_ONLY_DB =="
+psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $SCHEMA_ONLY_DB;"
+psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $SCHEMA_ONLY_DB;"
+SCHEMA_ONLY_URL="${BASE_URL%/*}/$SCHEMA_ONLY_DB"
+psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -f - >/dev/null
+psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE $SCHEMA_ONLY_DB;"
+echo "== Schema-only developer load: PASSED =="
 
 echo "== P1 RLS gate: provisioning $TESTDB =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
@@ -43,6 +53,12 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p1_rls_isolation_test.sql"
 
 echo "== P5-B status authority + revocation generation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b_status_pg17_test.sql"
+
+echo "== P5-B1 fixed status-key authority assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b1-status-key-pg17-test.sql"
+
+echo "== P5-B1 status-key revoke/rotation/disable/seal concurrency =="
+"$ROOT/scripts/p5b1-status-key-concurrency.sh" "$DB_URL"
 
 echo "== P3a cost-attribution isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p3a_rls_isolation_test.sql"
