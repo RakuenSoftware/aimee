@@ -114,6 +114,10 @@ func (m *WorktreeManager) Cleanup(ctx context.Context, item db1.WorkItem) error 
 	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return errors.New("refusing to clean worktree outside managed root")
 	}
+	// Ensure creates every managed tree with --lock so external GC cannot race a
+	// live workflow. Explicit lifecycle deletion owns this path, so unlock it
+	// before the validated removal; a missing lock is harmless.
+	_, _ = gitText(ctx, item.Repo, "worktree", "unlock", abs)
 	_, err = gitText(ctx, item.Repo, "worktree", "remove", "--force", abs)
 	return err
 }
