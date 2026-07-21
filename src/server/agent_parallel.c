@@ -38,7 +38,51 @@ typedef struct
     * straggler can be abandoned without blocking the join. */
    parallel_sync_t *sync;
    int *done;
+   /* A deadline-bounded caller may return while this worker is still running.
+    * In that path the worker must not retain any caller-owned pointers: the
+    * roundtable's task array is on its stack and its prompt/persona strings are
+    * freed as soon as the barrier returns. */
+   agent_config_t cfg_owned;
+   agent_task_t task_owned;
+   int owns_inputs;
 } parallel_ctx_t;
+
+static void parallel_ctx_release_inputs(parallel_ctx_t *ctx)
+{
+   if (!ctx || !ctx->owns_inputs)
+      return;
+   free((char *)ctx->task_owned.role);
+   free((char *)ctx->task_owned.system_prompt);
+   free((char *)ctx->task_owned.user_prompt);
+   free((char *)ctx->task_owned.agent);
+   memset(&ctx->task_owned, 0, sizeof(ctx->task_owned));
+   ctx->owns_inputs = 0;
+}
+
+static int parallel_ctx_own_inputs(parallel_ctx_t *ctx, const agent_config_t *cfg,
+                                   const agent_task_t *task)
+{
+   if (!ctx || !cfg || !task)
+      return -1;
+   ctx->cfg_owned = *cfg;
+   ctx->task_owned = *task;
+   ctx->task_owned.role = task->role ? strdup(task->role) : NULL;
+   ctx->task_owned.system_prompt = task->system_prompt ? strdup(task->system_prompt) : NULL;
+   ctx->task_owned.user_prompt = task->user_prompt ? strdup(task->user_prompt) : NULL;
+   ctx->task_owned.agent = task->agent ? strdup(task->agent) : NULL;
+   ctx->owns_inputs = 1;
+   if ((task->role && !ctx->task_owned.role) ||
+       (task->system_prompt && !ctx->task_owned.system_prompt) ||
+       (task->user_prompt && !ctx->task_owned.user_prompt) ||
+       (task->agent && !ctx->task_owned.agent))
+   {
+      parallel_ctx_release_inputs(ctx);
+      return -1;
+   }
+   ctx->cfg = &ctx->cfg_owned;
+   ctx->task = &ctx->task_owned;
+   return 0;
+}
 
 static void *parallel_worker(void *arg)
 {
@@ -60,6 +104,7 @@ static void *parallel_worker(void *arg)
    else
       agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
                    ctx->task->max_tokens, temp, ctx->result);
+   parallel_ctx_release_inputs(ctx);
    if (ctx->sync)
    {
       pthread_mutex_lock(&ctx->sync->mtx);
@@ -125,8 +170,12 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
       cells[i] = calloc(1, sizeof(agent_result_t));
       if (!cells[i])
          continue; /* slot stays a failed result; never spawned */
-      ctxs[i].cfg = cfg;
-      ctxs[i].task = &tasks[i];
+      if (parallel_ctx_own_inputs(&ctxs[i], cfg, &tasks[i]) != 0)
+      {
+         free(cells[i]);
+         cells[i] = NULL;
+         continue;
+      }
       ctxs[i].result = cells[i];
       ctxs[i].creds = creds;
       ctxs[i].sync = sync;
@@ -138,6 +187,7 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
       }
       else
       {
+         parallel_ctx_release_inputs(&ctxs[i]);
          free(cells[i]);
          cells[i] = NULL;
       }
