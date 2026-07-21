@@ -299,7 +299,7 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
           request_id,team,has_project,project,model_id,digest,P2B_LEASE_SECONDS,&admission))!=0)
    { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"not authorized\"}"); return ar==DB2_EGRESS_ERR_CONFLICT?409:403; }
    if (admission.outcome==DB2_EGRESS_RATE_REFUSED || admission.outcome==DB2_EGRESS_BUDGET_REFUSED)
-   { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission refused\"}"); return admission.outcome==DB2_EGRESS_RATE_REFUSED?429:402; }
+   { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission refused\"}"); return 429; }
    if (admission.outcome==DB2_EGRESS_REPLAY)
    { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"request already recorded\",\"state\":\"%s\"}",admission.state); return 409; }
    if (ir.max_tokens>admission.max_output_tokens)

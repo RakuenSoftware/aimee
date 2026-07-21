@@ -32,11 +32,16 @@ INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,
 SELECT org_budget_set(982001,NULL,'day',1000.0,NULL);
 SELECT org_egress_binding_set(982001,'p2b-model','p2b-billable',1,'p2b-key',
   'team:982001:bedrock','bedrock','iam',1000,100,true);
+-- Advance the current price after binding so admission can prove that a stale
+-- pinned pointer fails closed; the test restores v1 after the denial.
+SELECT org_pricing_add_version('bedrock','p2b-billable',1.1,2.1,0.6,0.8);
+INSERT INTO org_rate_policy(dim,scope_key,window_seconds,max_count)
+  VALUES ('team','982001',3600,0);
 
 SELECT set_config('aimee.principal','cert:issuer-a:01',true);
 DO $$
 DECLARE a RECORD; b RECORD; ok BOOLEAN; n BIGINT; st TEXT; spend NUMERIC; reserved NUMERIC;
-  spend_before NUMERIC;
+  spend_before NUMERIC; before_count BIGINT;
 BEGIN
   PERFORM kb_enrollment_renew(
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','issuer-a','01','p2b',
@@ -67,6 +72,73 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
   PERFORM set_config('aimee.principal','cert:issuer-a:01',true);
+
+  -- A binding is usable only while both its price and activated custody
+  -- rotation remain current.
+  BEGIN
+    PERFORM * FROM org_egress_admit(
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'issuer-a','01','cert:issuer-a:01','77777777-7777-4777-8777-777777777777',
+      982001,982010,'p2b-model',
+      '7777777777777777777777777777777777777777777777777777777777777777',60);
+    RAISE EXCEPTION 'P2b FAIL: stale pricing pointer admitted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  UPDATE org_model_pricing_current SET version=1 WHERE billable_model='p2b-billable';
+  UPDATE org_vault_current SET version=1
+    WHERE principal='team:982001:bedrock' AND agent='bedrock' AND cred='iam';
+  BEGIN
+    PERFORM * FROM org_egress_admit(
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'issuer-a','01','cert:issuer-a:01','88888888-8888-4888-8888-888888888888',
+      982001,982010,'p2b-model',
+      '8888888888888888888888888888888888888888888888888888888888888888',60);
+    RAISE EXCEPTION 'P2b FAIL: stale custody rotation admitted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  UPDATE org_vault_current SET version=2
+    WHERE principal='team:982001:bedrock' AND agent='bedrock' AND cred='iam';
+
+  -- Refusal outcomes must leave every admission mutation rolled back.  The
+  -- first call refuses on rate; the second passes rate but refuses on budget.
+  SELECT count(*) INTO before_count FROM org_rate_window;
+  SELECT * INTO b FROM org_egress_admit(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'issuer-a','01','cert:issuer-a:01','99999999-9999-4999-8999-999999999999',
+    982001,982010,'p2b-model',
+    '9999999999999999999999999999999999999999999999999999999999999999',60);
+  IF b.outcome<>'rate_refused' OR (SELECT count(*) FROM org_rate_window)<>before_count OR
+     EXISTS(SELECT 1 FROM org_egress_dispatch WHERE request_id=
+       '99999999-9999-4999-8999-999999999999') OR
+     EXISTS(SELECT 1 FROM org_budget_reservation WHERE request_id=
+       '99999999-9999-4999-8999-999999999999') OR
+     EXISTS(SELECT 1 FROM org_token_audit WHERE request_id=
+       '99999999-9999-4999-8999-999999999999') THEN
+    RAISE EXCEPTION 'P2b FAIL: rate refusal consumed admission state';
+  END IF;
+  UPDATE org_rate_policy SET max_count=100 WHERE dim='team' AND scope_key='982001';
+  UPDATE org_budget SET limit_usd=0 WHERE team_id=982001 AND project_id IS NULL;
+  SELECT * INTO b FROM org_egress_admit(
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'issuer-a','01','cert:issuer-a:01','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    982001,982010,'p2b-model',
+    'abababababababababababababababababababababababababababababababab',60);
+  IF b.outcome<>'budget_refused' OR (SELECT count(*) FROM org_rate_window)<>before_count OR
+     EXISTS(SELECT 1 FROM org_budget_counter WHERE team_id=982001) OR
+     EXISTS(SELECT 1 FROM org_egress_dispatch WHERE request_id=
+       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') OR
+     EXISTS(SELECT 1 FROM org_budget_reservation WHERE request_id=
+       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') OR
+     EXISTS(SELECT 1 FROM org_token_audit WHERE request_id=
+       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') THEN
+    RAISE EXCEPTION 'P2b FAIL: budget refusal consumed admission state';
+  END IF;
+  UPDATE org_budget SET limit_usd=1000 WHERE team_id=982001 AND project_id IS NULL;
+
   SELECT * INTO a FROM org_egress_admit(
     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',

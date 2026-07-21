@@ -6538,6 +6538,8 @@ BEGIN
   SELECT x.* INTO b FROM org_egress_binding x JOIN org_model_catalog c ON c.model_id=x.model_id
     JOIN org_model_entitlement e ON e.model_id=x.model_id AND e.team_id=x.team_id
     JOIN org_model_pricing p ON p.billable_model=x.billable_model AND p.version=x.pricing_version
+    JOIN org_model_pricing_current pc ON pc.billable_model=p.billable_model AND
+      pc.version=p.version
     JOIN org_vault_current vc ON vc.principal=x.vault_principal AND
       vc.agent=x.vault_agent AND vc.cred=x.vault_cred
     JOIN org_vault_secret vs ON vs.principal=vc.principal AND vs.agent=vc.agent AND
