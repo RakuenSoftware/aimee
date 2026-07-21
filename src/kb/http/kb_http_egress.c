@@ -222,8 +222,8 @@ static int settle(const kb_principal_t *transport, int64_t team, int64_t id,
        response ? response->usage_in : 0, response ? response->usage_out : 0,
        response ? response->usage_cache_read : 0, response ? response->usage_cache_write : 0,
        outcome,&ok);
-   if (rc || !ok || db2_tenant_scope_commit()!=0) { db2_tenant_scope_rollback(); return -1; }
-   return 0;
+   if (rc || !ok) { db2_tenant_scope_rollback(); return -1; }
+   return db2_tenant_scope_commit()==0 ? 0 : -1;
 }
 
 static int renew_dispatch_lease(const kb_principal_t *transport, int64_t team, int64_t id,
@@ -233,12 +233,8 @@ static int renew_dispatch_lease(const kb_principal_t *transport, int64_t team, i
       return -1;
    int ok = 0;
    int rc = db2_org_egress_heartbeat(id, owner, generation, P2B_LEASE_SECONDS, &ok);
-   if (rc != 0 || !ok || db2_tenant_scope_commit() != 0)
-   {
-      db2_tenant_scope_rollback();
-      return -1;
-   }
-   return 0;
+   if (rc != 0 || !ok) { db2_tenant_scope_rollback(); return -1; }
+   return db2_tenant_scope_commit() == 0 ? 0 : -1;
 }
 
 static int render_success(const aimee_response_t *response, const char *model,
@@ -306,13 +302,20 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission refused\"}"); return admission.outcome==DB2_EGRESS_RATE_REFUSED?429:402; }
    if (admission.outcome==DB2_EGRESS_REPLAY)
    { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"request already recorded\",\"state\":\"%s\"}",admission.state); return 409; }
-   if (ir.max_tokens>admission.max_output_tokens || db2_tenant_scope_commit()!=0)
+   if (ir.max_tokens>admission.max_output_tokens)
    { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission failed\"}"); return 400; }
+   if (db2_tenant_scope_commit()!=0)
+   { kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission unavailable\"}"); return 503; }
    char owner[33]; int64_t dispatch_id=0,generation=0;
-   if (hex_random(owner)||db2_tenant_scope_begin(transport,team)!=0 ||
-       db2_org_egress_begin(authority,request_id,owner,"aimee-kb",P2B_LEASE_SECONDS,&dispatch_id,&generation)!=0 ||
-       db2_tenant_scope_commit()!=0)
-   { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"dispatch unavailable\"}"); return 503; }
+   int claim_failed=hex_random(owner);
+   if (!claim_failed && db2_tenant_scope_begin(transport,team)!=0) claim_failed=1;
+   if (!claim_failed &&
+       db2_org_egress_begin(authority,request_id,owner,"aimee-kb",P2B_LEASE_SECONDS,
+                            &dispatch_id,&generation)!=0)
+   { db2_tenant_scope_rollback(); claim_failed=1; }
+   else if (!claim_failed && db2_tenant_scope_commit()!=0) claim_failed=1;
+   if (claim_failed)
+   { kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"dispatch unavailable\"}"); return 503; }
    kb_bedrock_wire_request_t wire; kb_bedrock_wire_request_init(&wire); sign_context_t sc={.target=target,.ir=&ir,.canonical_body=canonical,.canonical_body_len=canonical_len,.wire=&wire};
    time_t now=time(NULL); struct tm tmv; gmtime_r(&now,&tmv); strftime(sc.amz_date,sizeof(sc.amz_date),"%Y%m%dT%H%M%SZ",&tmv); strftime(sc.date,sizeof(sc.date),"%Y%m%d",&tmv);
    kb_vault_key_use_status_t vu = KB_VAULT_KEY_USE_RETRY;
@@ -353,11 +356,13 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
              br==KB_BEDROCK_OK?response.usage_in:0,br==KB_BEDROCK_OK?response.usage_out:0,
              br==KB_BEDROCK_OK?response.usage_cache_read:0,
              br==KB_BEDROCK_OK?response.usage_cache_write:0,klass,&settled);
-         if (settle_rc!=0 || !settled || db2_tenant_scope_commit()!=0)
+         if (settle_rc!=0 || !settled)
          {
             db2_tenant_scope_rollback();
             snprintf(out,(size_t)out_cap,"{\"error\":\"ambiguous settlement\"}");
          }
+         else if (db2_tenant_scope_commit()!=0)
+            snprintf(out,(size_t)out_cap,"{\"error\":\"ambiguous settlement\"}");
          else if (br==KB_BEDROCK_OK && render_success(&response,model_id,request_id,team,out,out_cap)==0) status=200;
          else { snprintf(out,(size_t)out_cap,"{\"error\":\"provider dispatch failed\"}"); status=br==KB_BEDROCK_PROVIDER_ERROR&&http?http:503; }
       }
