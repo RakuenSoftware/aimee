@@ -198,6 +198,8 @@ run_success() {
   local mode=$2
   if ! SSL_CERT_FILE="$ca_cert" AIMEE_TEST_TEAM_ID="$team_id" \
       "$live_target" model "$mode" >"$case_log" 2>&1; then
+    sed 's/^/live: /' "$case_log" >&2
+    sed 's/^/mock: /' "$mock_log" >&2
     die "$label unexpectedly failed"
   fi
 }
@@ -209,6 +211,8 @@ run_failure() {
   local trust=${4:-$ca_cert}
   if SSL_CERT_FILE="$trust" AIMEE_TEST_TEAM_ID="$team_id" \
       "$live_target" "$model" "$mode" >"$case_log" 2>&1; then
+    sed 's/^/live: /' "$case_log" >&2
+    sed 's/^/mock: /' "$mock_log" >&2
     die "$label unexpectedly succeeded"
   fi
 }
