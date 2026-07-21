@@ -195,7 +195,10 @@ static void output_snapshot(vault_reseal_orchestrator_output_t *o,
    o->old_generation = s->old_generation;
    o->new_generation = s->new_generation;
    if (s->failure_class[0])
-      memcpy(o->failure_class, s->failure_class, sizeof(o->failure_class));
+   {
+      memcpy(o->failure_class, s->failure_class, sizeof(o->failure_class) - 1);
+      o->failure_class[sizeof(o->failure_class) - 1] = '\0';
+   }
 }
 
 static vault_reseal_orchestrator_result_t terminal_edge(const vault_reseal_orchestrator_deps_t *d,
@@ -836,17 +839,23 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
       }
       else if (s.state == DB2_VAULT_REWRAP_PROMOTED && status == VAULT_TPM2_RESEAL_INSTALLED)
       {
-         if (d->custody->guard_seal(guard) != VAULT_MAINTENANCE_OK ||
-             d->custody->guard_unseal(guard, secret, req->provider_secret_len) !=
-                 VAULT_MAINTENANCE_OK)
-            result = VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
+         int seal_result = d->custody->guard_seal(guard);
+         if (seal_result != VAULT_MAINTENANCE_OK)
+            result = guard_operation_result(seal_result);
          else
          {
-            crypto_context_t ctx = {d, &s, workspace, VAULT_RESEAL_ORCHESTRATOR_ERROR};
-            int cb = d->custody->guard_with_active_kek(guard, verify_callback, &ctx);
-            result = guard_callback_result(cb, ctx.result);
-            if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY)
-               result = terminal_edge(d, &s, "verification_integrity", 0);
+            int unseal_result =
+                d->custody->guard_unseal(guard, secret, req->provider_secret_len);
+            if (unseal_result != VAULT_MAINTENANCE_OK)
+               result = guard_operation_result(unseal_result);
+            else
+            {
+               crypto_context_t ctx = {d, &s, workspace, VAULT_RESEAL_ORCHESTRATOR_ERROR};
+               int cb = d->custody->guard_with_active_kek(guard, verify_callback, &ctx);
+               result = guard_callback_result(cb, ctx.result);
+               if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY)
+                  result = terminal_edge(d, &s, "verification_integrity", 0);
+            }
          }
       }
       else

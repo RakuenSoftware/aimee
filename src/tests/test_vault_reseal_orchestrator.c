@@ -29,6 +29,7 @@ static vault_tpm2_reseal_status_t g_prepare_after_status = VAULT_TPM2_RESEAL_PRE
 static int g_nv_result = VAULT_TPM2_RESEAL_OK;
 static uint64_t g_nv_generation = 7;
 static int g_secret_page_oversize, g_check_page_oversize, g_check_cursor_stale;
+static int g_unterminated_failure_class;
 static int g_sequence, g_first_order[40], g_last_order[40];
 static int64_t g_secret_count, g_check_count;
 static vault_tpm2_reseal_receipt_t g_receipt;
@@ -143,6 +144,8 @@ static db2_vault_rewrap_result_t snapshot(const uint8_t op[16], db2_vault_rewrap
    s->fencing_token = 3;
    s->old_generation = 7;
    s->new_generation = 8;
+   if (g_unterminated_failure_class)
+      memset(s->failure_class, 'x', sizeof(s->failure_class));
    if (g_state != DB2_VAULT_REWRAP_PREPARING && g_state != DB2_VAULT_REWRAP_ABORTED)
    {
       s->has_receipt = 1;
@@ -607,6 +610,7 @@ static void reset_fakes(void)
    g_nv_result = VAULT_TPM2_RESEAL_OK;
    g_nv_generation = 7;
    g_secret_page_oversize = g_check_page_oversize = g_check_cursor_stale = 0;
+   g_unterminated_failure_class = 0;
    g_secret_count = g_check_count = 0;
 }
 
@@ -795,6 +799,20 @@ static void callback_result_typing(void)
    g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
    g_status = VAULT_TPM2_RESEAL_PREPARED;
    g_guard_unseal_result = VAULT_MAINTENANCE_INVALID;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY);
+   assert(g_calls[C_GUARD_WITH] == 0);
+
+   reset_fakes();
+   g_state = DB2_VAULT_REWRAP_PROMOTED;
+   g_status = VAULT_TPM2_RESEAL_INSTALLED;
+   g_guard_unseal_result = VAULT_MAINTENANCE_BUSY;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_BUSY);
+   assert(g_calls[C_GUARD_WITH] == 0);
+
+   reset_fakes();
+   g_state = DB2_VAULT_REWRAP_PROMOTED;
+   g_status = VAULT_TPM2_RESEAL_INSTALLED;
+   g_guard_unseal_result = VAULT_MAINTENANCE_WRONG_OWNER;
    assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY);
    assert(g_calls[C_GUARD_WITH] == 0);
 }
@@ -1029,6 +1047,13 @@ static void validation_before_effects(void)
    g_supported = 0;
    assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_UNSUPPORTED);
    assert(g_calls[C_GUARD_BEGIN] == 0 && g_calls[C_SNAPSHOT] == 0);
+
+   reset_fakes();
+   g_state = DB2_VAULT_REWRAP_COMPLETED;
+   g_status = VAULT_TPM2_RESEAL_INSTALLED;
+   g_unterminated_failure_class = 1;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_COMPLETED);
+   assert(out.failure_class[sizeof(out.failure_class) - 1] == '\0');
 }
 
 int main(void)
