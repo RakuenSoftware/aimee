@@ -30,8 +30,9 @@ process-lifetime-canonicalized workspace root, and requires the checked-out bran
 match the work-item ID and managed feature/slice namespace. Push uses an
 explicit canonical HTTPS destination and refspec under a minimal environment;
 feature final-PR base validation uses GitHub's authoritative `default_branch`,
-not the checkout-mutable `origin/HEAD`; slice PRs target their managed parent
-feature branch. The request schema rejects unknown or duplicate fields and
+not the checkout-mutable `origin/HEAD`; dotted slice IDs are accepted only in
+their exact worktree/branch shape, and slice PRs target the exact parent feature
+branch derived from that ID. The request schema rejects unknown or duplicate fields and
 operation/field combinations that are not meaningful for the selected action,
 including caller-supplied repository identity. C applies the shared vault
 resolution ladder without returning credential material. It does not read DB1,

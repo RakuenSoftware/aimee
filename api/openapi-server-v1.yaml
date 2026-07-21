@@ -4658,9 +4658,9 @@ paths:
               properties:
                 op: { type: string, enum: [push, open, info, ci, merge] }
                 workdir: { type: string }
-                head: { type: string }
+                head: { type: string, pattern: '^aimee/(feat|wi)/wi_[A-Za-z0-9_.]+$' }
                 base: { type: string }
-                title: { type: string, maxLength: 256 }
+                title: { type: string, minLength: 1, maxLength: 256 }
                 number: { type: integer, minimum: 1 }
               oneOf:
                 - required: [head]

@@ -527,10 +527,11 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
    const cJSON *basej = cJSON_GetObjectItem(j, "base");
    const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
-   if (!cJSON_IsString(state) || !state->valuestring || !cJSON_IsString(sha) || !sha->valuestring ||
-       !sha->valuestring[0] || !cJSON_IsString(headref) || !headref->valuestring ||
-       !headref->valuestring[0] || !cJSON_IsString(baseref) || !baseref->valuestring ||
-       !baseref->valuestring[0])
+   const char *sha_s = cJSON_IsString(sha) ? sha->valuestring : NULL;
+   const char *head_s = cJSON_IsString(headref) ? headref->valuestring : NULL;
+   const char *base_s = cJSON_IsString(baseref) ? baseref->valuestring : NULL;
+   if (!cJSON_IsString(state) || !state->valuestring || !sha_s || !sha_s[0] || !head_s ||
+       !head_s[0] || !base_s || !base_s[0])
    {
       cJSON_Delete(j);
       snprintf(err, errlen, "github API: pull request response is missing required refs");
@@ -541,23 +542,16 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
-   if ((cJSON_IsString(sha) && sha->valuestring &&
-        strlen(sha->valuestring) >= sizeof(out->head_sha)) ||
-       (cJSON_IsString(headref) && headref->valuestring &&
-        strlen(headref->valuestring) >= sizeof(out->head)) ||
-       (cJSON_IsString(baseref) && baseref->valuestring &&
-        strlen(baseref->valuestring) >= sizeof(out->base)))
+   if (strlen(sha_s) >= sizeof(out->head_sha) || strlen(head_s) >= sizeof(out->head) ||
+       strlen(base_s) >= sizeof(out->base))
    {
       cJSON_Delete(j);
       snprintf(err, errlen, "github API: pull request ref is too long");
       return -1;
    }
-   if (cJSON_IsString(sha) && sha->valuestring)
-      snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha->valuestring);
-   if (cJSON_IsString(headref) && headref->valuestring)
-      snprintf(out->head, sizeof(out->head), "%s", headref->valuestring);
-   if (cJSON_IsString(baseref) && baseref->valuestring)
-      snprintf(out->base, sizeof(out->base), "%s", baseref->valuestring);
+   snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha_s);
+   snprintf(out->head, sizeof(out->head), "%s", head_s);
+   snprintf(out->base, sizeof(out->base), "%s", base_s);
    cJSON_Delete(j);
    return 0;
 }

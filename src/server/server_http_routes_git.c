@@ -349,8 +349,12 @@ static int wfe_item_id_valid(const char *s)
    if (!s || strncmp(s, "wi_", 3) != 0 || strlen(s) > 80)
       return 0;
    for (const unsigned char *p = (const unsigned char *)s + 3; *p; p++)
-      if (!isalnum(*p) && *p != '_')
+   {
+      if (!isalnum(*p) && *p != '_' && *p != '.')
          return 0;
+      if (*p == '.' && (p == (const unsigned char *)s + 3 || !p[1] || p[1] == '.'))
+         return 0;
+   }
    return s[3] != '\0';
 }
 
@@ -359,6 +363,8 @@ static char *const wfe_git_env[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "GIT_CO
                                     NULL};
 
 static pthread_once_t wfe_workspace_once = PTHREAD_ONCE_INIT;
+/* A workspace-root relocation takes effect on process restart, never midway
+ * through credential-bearing work. */
 static char wfe_workspace_real[MAX_PATH_LEN] = {0};
 
 static void wfe_workspace_init(void)
@@ -513,7 +519,6 @@ static int wfe_default_base(const char *principal, const char *repo, const char 
 static int wfe_forge_body_fields_valid(const cJSON *body)
 {
    static const char *const allowed[] = {"op", "workdir", "head", "base", "title", "number", NULL};
-   unsigned seen = 0;
    for (const cJSON *field = body ? body->child : NULL; field; field = field->next)
    {
       int index = -1;
@@ -523,13 +528,29 @@ static int wfe_forge_body_fields_valid(const cJSON *body)
             index = (int)i;
             break;
          }
-      if (index < 0 || (seen & (1U << (unsigned)index)))
+      if (index < 0)
          return 0;
+      for (const cJSON *prior = body->child; prior != field; prior = prior->next)
+         if (prior->string && strcmp(prior->string, field->string) == 0)
+            return 0;
       if ((index == 5 && !cJSON_IsNumber(field)) || (index != 5 && !cJSON_IsString(field)))
          return 0;
-      seen |= 1U << (unsigned)index;
    }
    return 1;
+}
+
+static int wfe_slice_ref_matches_workdir(const char *workdir, const char *prefix, int parent_only,
+                                         const char *ref)
+{
+   const char *item_id = strrchr(workdir, '/');
+   item_id = item_id ? item_id + 1 : workdir;
+   const char *slice_suffix = strstr(item_id, ".s");
+   if (!slice_suffix)
+      return 0;
+   size_t item_len = parent_only ? (size_t)(slice_suffix - item_id) : strlen(item_id);
+   char expected[300];
+   int n = snprintf(expected, sizeof(expected), "%s%.*s", prefix, (int)item_len, item_id);
+   return n > 0 && (size_t)n < sizeof(expected) && strcmp(expected, ref) == 0;
 }
 
 static int wfe_forge_operation_valid(const char *op, const char *head, const char *base,
@@ -602,7 +623,7 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    }
    else if (strcmp(op, "open") == 0)
    {
-      int base_ok = slice_head && strncmp(base, "aimee/feat/wi_", 14) == 0;
+      int base_ok = slice_head && wfe_slice_ref_matches_workdir(workdir, "aimee/feat/", 1, base);
       if (feature_head)
          base_ok = wfe_default_base(principal, trusted_repo, base, err, sizeof(err));
       if (base_ok == 0)
@@ -655,11 +676,12 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
       }
    }
    else if (strcmp(op, "merge") == 0 && number > 0 && base &&
-            strncmp(base, "aimee/feat/wi_", 14) == 0)
+            wfe_slice_ref_matches_workdir(workdir, "aimee/feat/", 1, base))
    {
       git_pr_info_t info;
       rc = git_pr_info_via_api(principal, trusted_repo, number, &info, err, sizeof(err));
-      if (rc == 0 && (strcmp(info.base, base) != 0 || strncmp(info.head, "aimee/wi/wi_", 12) != 0))
+      if (rc == 0 && (strcmp(info.base, base) != 0 ||
+                      !wfe_slice_ref_matches_workdir(workdir, "aimee/wi/", 0, info.head)))
       {
          snprintf(err, sizeof(err), "pull request base mismatch");
          rc = -1;
