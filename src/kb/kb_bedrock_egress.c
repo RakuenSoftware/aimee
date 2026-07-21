@@ -1,4 +1,5 @@
 #include "kb_bedrock_egress.h"
+#include "http/kb_http_client.h"
 
 #include "cJSON.h"
 #include "modules/aws/bedrock_policy.h"
@@ -1396,24 +1397,202 @@ kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **sp)
    return KB_BEDROCK_OK;
 }
 
-int kb_bedrock_dispatch_https(const kb_bedrock_target_t *t, const aimee_request_t *ir, int stream,
-                              const char *ak, const char *sk, const char *tok, const char *amz,
-                              const char *date, const char *ca, const char *cc, char *out,
-                              size_t cap, int *status)
+typedef struct
 {
-   (void)t;
-   (void)ir;
-   (void)stream;
-   (void)ak;
-   (void)sk;
-   (void)tok;
-   (void)amz;
-   (void)date;
-   (void)ca;
-   (void)cc;
-   if (out && cap)
-      out[0] = 0;
-   if (status)
-      *status = 0;
-   return -1;
+   int streaming;
+   int *http_status;
+   const char *media_type;
+   kb_bedrock_result_t first_result;
+   unsigned char *body;
+   size_t body_len, body_capacity;
+   kb_bedrock_stream_t *stream;
+} bedrock_dispatch_context_t;
+
+static kb_http_gate_t dispatch_headers(const kb_http_response_t *response, void *opaque)
+{
+   bedrock_dispatch_context_t *context = opaque;
+   *context->http_status = response->status;
+   if (response->status != 200)
+      return KB_HTTP_GATE_DISCARD;
+   if (strcmp(response->content_type, context->media_type) != 0)
+   {
+      context->first_result = context->streaming ? KB_BEDROCK_MALFORMED_STREAM
+                                                 : KB_BEDROCK_MALFORMED_RESPONSE;
+      return KB_HTTP_GATE_ABORT;
+   }
+   return KB_HTTP_GATE_DELIVER;
+}
+
+static int dispatch_body_reserve(bedrock_dispatch_context_t *context, size_t add)
+{
+   if (add > KB_BEDROCK_BODY_MAX - context->body_len)
+      return -1;
+   size_t need = context->body_len + add;
+   if (need <= context->body_capacity)
+      return 0;
+   size_t capacity = context->body_capacity ? context->body_capacity : 4096U;
+   while (capacity < need)
+   {
+      if (capacity > KB_BEDROCK_BODY_MAX / 2U)
+      {
+         capacity = KB_BEDROCK_BODY_MAX;
+         break;
+      }
+      capacity *= 2U;
+   }
+   unsigned char *next = malloc(capacity);
+   if (!next)
+      return -1;
+   if (context->body_len)
+      memcpy(next, context->body, context->body_len);
+   if (context->body)
+   {
+      OPENSSL_cleanse(context->body, context->body_capacity);
+      free(context->body);
+   }
+   context->body = next;
+   context->body_capacity = capacity;
+   return 0;
+}
+
+static kb_http_body_action_t dispatch_body(const unsigned char *bytes, size_t length, void *opaque)
+{
+   bedrock_dispatch_context_t *context = opaque;
+   if (context->first_result != KB_BEDROCK_OK)
+      return KB_HTTP_BODY_CALLER_ABORT;
+   if (context->streaming)
+   {
+      kb_bedrock_result_t result = kb_bedrock_stream_feed(context->stream, bytes, length);
+      if (result != KB_BEDROCK_OK)
+      {
+         context->first_result = result;
+         return KB_HTTP_BODY_CALLER_ABORT;
+      }
+      return KB_HTTP_BODY_CONTINUE;
+   }
+   if (dispatch_body_reserve(context, length) != 0)
+   {
+      context->first_result =
+          length > KB_BEDROCK_BODY_MAX - context->body_len ? KB_BEDROCK_TOO_LARGE
+                                                           : KB_BEDROCK_INTERNAL_ERROR;
+      return KB_HTTP_BODY_CALLER_ABORT;
+   }
+   memcpy(context->body + context->body_len, bytes, length);
+   context->body_len += length;
+   return KB_HTTP_BODY_CONTINUE;
+}
+
+static kb_bedrock_result_t map_transport_result(kb_http_result_t result)
+{
+   if (result == KB_HTTP_TOO_LARGE)
+      return KB_BEDROCK_TOO_LARGE;
+   if (result == KB_HTTP_INVALID_ARGUMENT)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   if (result == KB_HTTP_INTERNAL_ERROR)
+      return KB_BEDROCK_INTERNAL_ERROR;
+   return KB_BEDROCK_TRANSPORT_ERROR;
+}
+
+static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
+                                             const aimee_request_t *ir,
+                                             const kb_bedrock_credentials_t *credentials,
+                                             int streaming, kb_bedrock_stream_callback_t callback,
+                                             void *callback_context, aimee_response_t *response,
+                                             int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (response)
+      aimee_response_free(response);
+   if (!target || !ir || !credentials || !http_status || (!streaming && !response))
+      return KB_BEDROCK_INVALID_ARGUMENT;
+
+   kb_bedrock_wire_request_t wire;
+   kb_bedrock_wire_request_init(&wire);
+   kb_bedrock_result_t result =
+       kb_bedrock_wire_request_build(target, ir, streaming, credentials, &wire);
+   if (result != KB_BEDROCK_OK)
+   {
+      kb_bedrock_wire_request_clear(&wire);
+      return result;
+   }
+
+   kb_bedrock_header_t engine_headers[KB_BEDROCK_MAX_HEADERS];
+   kb_http_header_t http_headers[KB_BEDROCK_MAX_HEADERS];
+   size_t header_count = 0;
+   result = kb_bedrock_wire_request_headers(&wire, engine_headers, KB_BEDROCK_MAX_HEADERS,
+                                            &header_count);
+   if (result != KB_BEDROCK_OK)
+      goto done;
+   for (size_t i = 0; i < header_count; i++)
+   {
+      http_headers[i].name = engine_headers[i].name;
+      http_headers[i].value = engine_headers[i].value;
+   }
+
+   bedrock_dispatch_context_t context = {
+       .streaming = streaming,
+       .http_status = http_status,
+       .media_type = streaming ? "application/vnd.amazon.eventstream" : "application/json",
+       .first_result = KB_BEDROCK_OK};
+   if (streaming)
+   {
+      result = kb_bedrock_stream_init(&context.stream, callback, callback_context);
+      if (result != KB_BEDROCK_OK)
+         goto done;
+   }
+   kb_http_request_t request = {.authority = wire.host,
+                                .method = "POST",
+                                .target = wire.encoded_path,
+                                .headers = http_headers,
+                                .header_count = header_count,
+                                .body = (const unsigned char *)wire.body,
+                                .body_len = wire.body_len,
+                                .response_body_max = KB_BEDROCK_BODY_MAX,
+                                .connect_timeout_ms = 5000,
+                                .total_timeout_ms = 30000};
+   kb_http_response_t metadata;
+   kb_http_result_t transport =
+       kb_http_tls_exchange(&request, &metadata, dispatch_headers, dispatch_body, &context);
+   if (context.first_result != KB_BEDROCK_OK)
+      result = context.first_result;
+   else if (transport != KB_HTTP_OK)
+      result = map_transport_result(transport);
+   else if (metadata.status != 200)
+      result = KB_BEDROCK_PROVIDER_ERROR;
+   else if (streaming)
+      result = kb_bedrock_stream_finish(context.stream);
+   else
+      result = kb_bedrock_nonstream_parse(context.body, context.body_len, response);
+
+   if (context.body)
+   {
+      OPENSSL_cleanse(context.body, context.body_capacity);
+      free(context.body);
+   }
+   if (context.stream)
+      (void)kb_bedrock_stream_clear(&context.stream);
+done:
+   kb_bedrock_wire_request_clear(&wire);
+   if (result != KB_BEDROCK_OK && response)
+      aimee_response_free(response);
+   return result;
+}
+
+kb_bedrock_result_t kb_bedrock_dispatch_buffered(const db2_bedrock_target_t *target,
+                                                 const aimee_request_t *request,
+                                                 const kb_bedrock_credentials_t *credentials,
+                                                 aimee_response_t *response, int *http_status)
+{
+   return dispatch_exchange(target, request, credentials, 0, NULL, NULL, response, http_status);
+}
+
+kb_bedrock_result_t kb_bedrock_dispatch_stream(const db2_bedrock_target_t *target,
+                                               const aimee_request_t *request,
+                                               const kb_bedrock_credentials_t *credentials,
+                                               kb_bedrock_stream_callback_t callback,
+                                               void *callback_context, int *http_status)
+{
+   return dispatch_exchange(target, request, credentials, 1, callback, callback_context, NULL,
+                            http_status);
 }

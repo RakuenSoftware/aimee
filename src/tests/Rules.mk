@@ -1714,13 +1714,13 @@ $(TESTPREFIX)/unit-test-kb-http-client: $(OBJDIR)/tests/test_kb_http_client.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-bedrock-live: $(OBJDIR)/tests/test_kb_bedrock_live.o \
-                                      $(OBJDIR)/kb/kb_bedrock_egress.o \
-                                      $(OBJDIR)/kb/http/kb_tls.o \
-                                      $(OBJDIR)/server/aimee_backend_bedrock.o \
-                                      $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
-                                      $(OBJDIR)/modules/aws/aws_sigv4.o \
-                                      $(OBJDIR)/modules/aws/aws_eventstream.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(OBJDIR)/server/aimee_backend_bedrock.o \
+                              $(OBJDIR)/server/aimee_ir_stream.o $(OBJDIR)/server/aimee_ir.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-live: $(OBJDIR)/tests/test_kb_mgmt_live.o \
                                       $(OBJDIR)/kb/kb_mgmt_client.o \

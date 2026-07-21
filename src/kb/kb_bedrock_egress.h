@@ -28,6 +28,7 @@ typedef enum
    KB_BEDROCK_INCOMPLETE_STREAM,
    KB_BEDROCK_PROVIDER_ERROR,
    KB_BEDROCK_CALLBACK_ABORT,
+   KB_BEDROCK_TRANSPORT_ERROR,
    KB_BEDROCK_BUSY,
    KB_BEDROCK_POISONED,
    KB_BEDROCK_INTERNAL_ERROR
@@ -88,13 +89,18 @@ kb_bedrock_result_t kb_bedrock_stream_feed(kb_bedrock_stream_t *stream, const un
 kb_bedrock_result_t kb_bedrock_stream_finish(kb_bedrock_stream_t *stream);
 kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **stream);
 
-/* Compatibility-only ABI. It performs no I/O and always fails closed. */
-typedef struct
-{
-   const char *model_id, *region, *partition, *endpoint;
-} kb_bedrock_target_t;
-int kb_bedrock_dispatch_https(const kb_bedrock_target_t *, const aimee_request_t *, int,
-                              const char *, const char *, const char *, const char *, const char *,
-                              const char *, const char *, char *, size_t, int *);
+/* Production dispatch derives DNS, Host, SNI, and certificate authority solely from target.
+ * `response` must have been initialized with kb_bedrock_response_init (or be a prior dispatch
+ * output); success is caller-owned and released with aimee_response_free.  `http_status` is zero
+ * until a final response header has been accepted. */
+kb_bedrock_result_t kb_bedrock_dispatch_buffered(const db2_bedrock_target_t *target,
+                                                 const aimee_request_t *request,
+                                                 const kb_bedrock_credentials_t *credentials,
+                                                 aimee_response_t *response, int *http_status);
+kb_bedrock_result_t kb_bedrock_dispatch_stream(const db2_bedrock_target_t *target,
+                                               const aimee_request_t *request,
+                                               const kb_bedrock_credentials_t *credentials,
+                                               kb_bedrock_stream_callback_t callback,
+                                               void *callback_context, int *http_status);
 
 #endif
