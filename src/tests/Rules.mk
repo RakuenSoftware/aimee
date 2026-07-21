@@ -162,6 +162,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-backend \
                $(TESTPREFIX)/unit-test-aimee-backend-bedrock \
                $(TESTPREFIX)/unit-test-kb-bedrock-dispatch \
+               $(TESTPREFIX)/unit-test-kb-http-client \
                $(TESTPREFIX)/unit-test-vault-kms \
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
@@ -1706,6 +1707,10 @@ $(TESTPREFIX)/unit-test-kb-bedrock-dispatch: $(OBJDIR)/tests/test_kb_bedrock_dis
                                       $(OBJDIR)/modules/aws/aws_sigv4.o \
                                       $(OBJDIR)/modules/aws/aws_eventstream.o \
                                       $(OBJDIR)/modules/aws/bedrock_policy.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-http-client: $(OBJDIR)/tests/test_kb_http_client.o \
+                                      $(OBJDIR)/kb/http/kb_http_client.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-bedrock-live: $(OBJDIR)/tests/test_kb_bedrock_live.o \
