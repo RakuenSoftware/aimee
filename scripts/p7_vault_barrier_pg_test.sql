@@ -124,6 +124,8 @@ END $$;
 -- The guarded set is deliberately exact and every member carries a direct call.
 DO $$
 DECLARE expected TEXT[] := ARRAY[
+  'kb_management_status_key_admit','kb_management_status_key_candidate',
+  'kb_management_status_key_use_guard',
   'org_vault_delete','org_vault_kek_check_set','org_vault_key_use_admit','org_vault_put',
   'org_vault_rewrap','org_vault_rotation_checkpoint_old_ref','org_vault_rotation_claim',
   'org_vault_rotation_fail_claimed','org_vault_rotation_finalize',
@@ -246,7 +248,8 @@ END $$;
 UPDATE kb_vault_control SET sealed=true,maintenance_kind='reseal',maintenance_id='op-guard'
  WHERE singleton=1;
 
--- All 19 entrypoints reject before their advisory/row locks or any mutation.
+-- The established vault entrypoints reject before their advisory/row locks or mutation;
+-- P5-B1's fixed status entrypoints are exercised by p5b1-status-key-pg17-test.sql.
 SELECT p7_expect_sealed($q$SELECT org_vault_salt_ensure('sealed-principal','\x01')$q$);
 SELECT p7_expect_sealed($q$SELECT org_vault_kek_check_set('team:970721:provider:bedrock','\x01')$q$);
 SELECT p7_expect_sealed($q$SELECT org_vault_put('sealed-principal',970721,'a','c',1,'\x01','\x02','\x03','\x04')$q$);

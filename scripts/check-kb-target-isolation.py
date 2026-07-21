@@ -30,6 +30,11 @@ ALLOWED_AGENT_NAMED_SOURCES = {
     "db2/server_registry.c",
 }
 
+STATUS_AUTHORITY_PRIVATE_SOURCES = {
+    "kb/kb_mgmt_status_custody.c",
+    "db2/management_status_key.c",
+}
+
 FORBIDDEN_SOURCE_PREFIXES = (
     "db1/",
     "server_",
@@ -96,6 +101,13 @@ def normalize_object(obj: str) -> str:
     return obj
 
 
+def normalize_dependency_object(obj: str) -> str:
+    for prefix in ("build/obj/", "$(OBJDIR)/"):
+        if obj.startswith(prefix):
+            return obj[len(prefix):]
+    return obj
+
+
 def source_from_object(obj: str) -> str:
     obj = normalize_object(obj)
     if obj.endswith(".o"):
@@ -122,6 +134,45 @@ def check_makefile(makefile: Path) -> list[str]:
                 violations.append(f"{var} includes forbidden source {src}")
             if not (makefile.parent / src).exists():
                 violations.append(f"{var} references missing source {src}")
+            if src in STATUS_AUTHORITY_PRIVATE_SOURCES:
+                violations.append(f"{var} includes status-authority-private source {src}")
+
+    authority_sources = set(words(make_var(makefile, "STATUS_AUTHORITY_SRCS")))
+    if not authority_sources:
+        violations.append("STATUS_AUTHORITY_SRCS group is missing or empty")
+    else:
+        missing = STATUS_AUTHORITY_PRIVATE_SOURCES - authority_sources
+        for src in sorted(missing):
+            violations.append(f"STATUS_AUTHORITY_SRCS omits private source {src}")
+        for src in authority_sources:
+            if not (makefile.parent / src).exists():
+                violations.append(f"STATUS_AUTHORITY_SRCS references missing source {src}")
+
+    authority_objects = {
+        normalize_dependency_object(obj)
+        for obj in words(make_var(makefile, "STATUS_AUTHORITY_OBJS"))
+    }
+    if not authority_objects:
+        violations.append("STATUS_AUTHORITY_OBJS group is missing or empty")
+    else:
+        expected_objects = {src.removesuffix(".c") + ".o" for src in authority_sources}
+        for obj in sorted(expected_objects - authority_objects):
+            violations.append(f"STATUS_AUTHORITY_OBJS omits authority object {obj}")
+        all_objects = {
+            normalize_dependency_object(obj) for obj in words(make_var(makefile, "ALL_OBJS"))
+        }
+        for obj in sorted(authority_objects - all_objects):
+            violations.append(f"ALL_OBJS omits status authority dependency {obj}")
+
+    ordinary_objects = {
+        normalize_object(obj)
+        for var in ("KB_OBJS", "KB_DB2_OBJS")
+        for obj in words(make_var(makefile, var))
+    }
+    for src in sorted(STATUS_AUTHORITY_PRIVATE_SOURCES):
+        private_obj = src.removesuffix(".c") + ".o"
+        if private_obj in ordinary_objects or os.path.basename(private_obj) in ordinary_objects:
+            violations.append(f"ordinary KB object inventory includes status symbol owner {private_obj}")
 
     for obj in words(make_var(makefile, "KB_PLATFORM_OBJS")):
         norm = normalize_object(obj)
@@ -195,7 +246,7 @@ def plant_test() -> int:
         root = Path(tmp)
         mk = root / "Makefile"
         mk.write_text(
-            "KB_SRCS = kb_main.c agent_loop.c db1/db.c kb_client.c\n"
+            "KB_SRCS = kb_main.c agent_loop.c db1/db.c kb_client.c kb/kb_mgmt_status_custody.c\n"
             "KB_DATA_SRCS = kb.c missing_kb.c\n"
             "KB_CORE_SRCS = util.c\n"
             "DB2_SRCS = db2/db2_init.c\n"
@@ -213,6 +264,7 @@ def plant_test() -> int:
             "util.c",
             "db2/db2_init.c",
             "db2/db_postgres.c",
+            "kb/kb_mgmt_status_custody.c",
         ):
             path = root / src
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +291,9 @@ def plant_test() -> int:
             "KB_SRCS includes forbidden source agent_loop.c",
             "KB_SRCS includes forbidden source db1/db.c",
             "KB_SRCS includes forbidden source kb_client.c",
+            "KB_SRCS includes status-authority-private source kb/kb_mgmt_status_custody.c",
+            "STATUS_AUTHORITY_SRCS group is missing or empty",
+            "STATUS_AUTHORITY_OBJS group is missing or empty",
             "KB_DATA_SRCS references missing source missing_kb.c",
             "CMakeLists.txt references missing source ${AIMEE_SRC_DIR}/missing_from_cmake.c",
             "KB_PLATFORM_OBJS includes forbidden object build/obj/delegate_driver.o",
