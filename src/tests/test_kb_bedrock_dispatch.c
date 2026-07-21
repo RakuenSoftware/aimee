@@ -1,4 +1,3 @@
-#define AIMEE_KB_BEDROCK_TESTING 1
 #include "kb/kb_bedrock_egress.h"
 #include "kb/http/kb_http_client.h"
 #include "tests/support/aws_eventstream_fixture.h"
@@ -27,22 +26,27 @@ typedef struct
    const aimee_request_t *race_request;
    const kb_bedrock_credentials_t *race_credentials;
    kb_bedrock_result_t race_result;
-   kb_bedrock_result_t race_clear_result;
    int race_status;
 } dispatch_mock_t;
 
 static dispatch_mock_t dispatch_mock;
+static db2_bedrock_target_result_t resolver_result = DB2_BEDROCK_TARGET_ERROR;
+static db2_bedrock_target_t resolver_target;
 
 /* The pure engine target intentionally does not link DB2.  Production resolution is exercised by
  * the live harness; this symbol only satisfies the production resolver held in the same object. */
 db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id, const char *model_id,
                                                              db2_bedrock_target_t *out)
 {
-   (void)team_id;
-   (void)model_id;
-   if (out)
+   assert(team_id == 42);
+   if (out && resolver_result == DB2_BEDROCK_TARGET_OK)
+   {
+      assert(strcmp(model_id, resolver_target.model_id) == 0);
+      *out = resolver_target;
+   }
+   else if (out)
       memset(out, 0, sizeof(*out));
-   return DB2_BEDROCK_TARGET_ERROR;
+   return resolver_result;
 }
 
 static void *dispatch_same_target(void *unused)
@@ -54,7 +58,6 @@ static void *dispatch_same_target(void *unused)
    dispatch_mock.race_result = kb_bedrock_dispatch_buffered(
        dispatch_mock.race_target, dispatch_mock.race_request, dispatch_mock.race_credentials,
        &response, &dispatch_mock.race_status);
-   dispatch_mock.race_clear_result = kb_bedrock_authorized_target_clear(&dispatch_mock.race_target);
    aimee_response_free(&response);
    return NULL;
 }
@@ -70,7 +73,6 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
       assert(pthread_create(&contender, NULL, dispatch_same_target, NULL) == 0);
       assert(pthread_join(contender, NULL) == 0);
       assert(dispatch_mock.race_result == KB_BEDROCK_BUSY);
-      assert(dispatch_mock.race_clear_result == KB_BEDROCK_BUSY);
       assert(dispatch_mock.race_status == 0);
       dispatch_mock.race_target = NULL;
    }
@@ -164,7 +166,11 @@ static kb_bedrock_credentials_t credentials(void)
 static kb_bedrock_authorized_target_t *authorized(const db2_bedrock_target_t *raw)
 {
    kb_bedrock_authorized_target_t *result = NULL;
-   assert(kb_bedrock_test_authorized_target_create(raw, &result) == KB_BEDROCK_OK);
+   resolver_target = *raw;
+   resolver_result = DB2_BEDROCK_TARGET_OK;
+   assert(kb_bedrock_authorized_target_resolve(42, raw->model_id, &result) == KB_BEDROCK_OK);
+   resolver_result = DB2_BEDROCK_TARGET_ERROR;
+   memset(&resolver_target, 0, sizeof(resolver_target));
    assert(result != NULL);
    return result;
 }
@@ -951,8 +957,12 @@ static void dispatch_wrapper_tests(void)
    snprintf(invalid.endpoint, sizeof(invalid.endpoint), "https://forbidden.example");
    kb_bedrock_authorized_target_t *rejected = authorized_target;
    status = 888;
-   assert(kb_bedrock_test_authorized_target_create(&invalid, &rejected) ==
+   resolver_target = invalid;
+   resolver_result = DB2_BEDROCK_TARGET_OK;
+   assert(kb_bedrock_authorized_target_resolve(42, invalid.model_id, &rejected) ==
           KB_BEDROCK_INVALID_TARGET);
+   resolver_result = DB2_BEDROCK_TARGET_ERROR;
+   memset(&resolver_target, 0, sizeof(resolver_target));
    assert(rejected == NULL && dispatch_mock.calls == calls);
 
    status = 999;
@@ -1042,7 +1052,7 @@ static void dispatch_wrapper_tests(void)
    assert(status == 0);
    free(stream_body);
    aimee_response_free(&response);
-   assert(kb_bedrock_authorized_target_clear(&authorized_target) == KB_BEDROCK_OK);
+   kb_bedrock_authorized_target_clear(&authorized_target);
    assert(authorized_target == NULL);
 }
 

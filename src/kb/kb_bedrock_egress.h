@@ -91,12 +91,13 @@ kb_bedrock_result_t kb_bedrock_stream_finish(kb_bedrock_stream_t *stream);
 kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **stream);
 
 /* Resolve an entitled catalog model inside the caller's already-active actor/team tenant scope.
- * The returned target is owned, non-copyable, and must be cleared exactly once.  Its catalog
- * contents and lifecycle are deliberately opaque so a network caller cannot substitute a raw
- * db2 target.  Clear returns BUSY rather than racing an active dispatch. */
+ * The returned target has one owner, is non-copyable, and must be cleared exactly once.  The
+ * owner must externally synchronize clear and call it only after every dispatch using the target
+ * has returned.  Its catalog contents and lifecycle are deliberately opaque so a network caller
+ * cannot substitute a raw db2 target. */
 kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
                                                          kb_bedrock_authorized_target_t **target);
-kb_bedrock_result_t kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target);
+void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target);
 
 /* Production dispatch derives DNS, Host, SNI, and certificate authority solely from the
  * resolver-issued target.
@@ -112,12 +113,5 @@ kb_bedrock_result_t kb_bedrock_dispatch_stream(kb_bedrock_authorized_target_t *t
                                                const kb_bedrock_credentials_t *credentials,
                                                kb_bedrock_stream_callback_t callback,
                                                void *callback_context, int *http_status);
-
-#ifdef AIMEE_KB_BEDROCK_TESTING
-/* Pure unit-test seam.  Hidden from the production ABI and unavailable unless a test explicitly
- * opts in before including this header. */
-__attribute__((visibility("hidden"))) kb_bedrock_result_t kb_bedrock_test_authorized_target_create(
-    const db2_bedrock_target_t *raw, kb_bedrock_authorized_target_t **target);
-#endif
 
 #endif

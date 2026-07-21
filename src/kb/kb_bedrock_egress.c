@@ -553,32 +553,20 @@ kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const 
    return result;
 }
 
-kb_bedrock_result_t kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **slot)
+void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **slot)
 {
-   if (!slot)
-      return KB_BEDROCK_INVALID_ARGUMENT;
-   if (!*slot)
-      return KB_BEDROCK_OK;
+   if (!slot || !*slot)
+      return;
    kb_bedrock_authorized_target_t *target = *slot;
    if (target->magic != KB_BEDROCK_TARGET_MAGIC ||
-       target->magic_inverse != ~KB_BEDROCK_TARGET_MAGIC)
-      return KB_BEDROCK_INVALID_TARGET;
-   unsigned expected = KB_BEDROCK_TARGET_READY;
-   if (!atomic_compare_exchange_strong_explicit(&target->state, &expected, 0, memory_order_acq_rel,
-                                                memory_order_acquire))
-      return expected == KB_BEDROCK_TARGET_BUSY ? KB_BEDROCK_BUSY : KB_BEDROCK_POISONED;
+       target->magic_inverse != ~KB_BEDROCK_TARGET_MAGIC ||
+       atomic_load_explicit(&target->state, memory_order_acquire) != KB_BEDROCK_TARGET_READY)
+      return;
    *slot = NULL;
    target->magic = 0;
    target->magic_inverse = 0;
    OPENSSL_cleanse(target, sizeof(*target));
    free(target);
-   return KB_BEDROCK_OK;
-}
-
-__attribute__((visibility("hidden"))) kb_bedrock_result_t kb_bedrock_test_authorized_target_create(
-    const db2_bedrock_target_t *raw, kb_bedrock_authorized_target_t **out)
-{
-   return authorized_target_create(raw, out);
 }
 
 static kb_bedrock_result_t authorized_target_acquire(kb_bedrock_authorized_target_t *target,
