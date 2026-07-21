@@ -14,9 +14,11 @@ import (
 )
 
 var (
-	ErrInvalidWorkItem = errors.New("invalid work-item id")
-	ErrImmutable       = errors.New("immutable artifact already has different content")
-	workItemIDPattern  = regexp.MustCompile(`^wi_[A-Za-z0-9_.-]+$`)
+	ErrInvalidWorkItem    = errors.New("invalid work-item id")
+	ErrInvalidNode        = errors.New("invalid workflow node id")
+	ErrImmutable          = errors.New("immutable artifact already has different content")
+	workItemIDPattern     = regexp.MustCompile(`^wi_[A-Za-z0-9_.-]+$`)
+	artifactNodeIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 )
 
 // ArtifactStore owns the durable, lossless documents used by the workflow
@@ -45,6 +47,17 @@ func (s *ArtifactStore) workItemDir(workItemID string) (string, error) {
 		return "", ErrInvalidWorkItem
 	}
 	return filepath.Join(s.root, workItemID), nil
+}
+
+func (s *ArtifactStore) DeleteWorkItem(workItemID string) error {
+	dir, err := s.workItemDir(workItemID)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("delete work-item artifacts: %w", err)
+	}
+	return nil
 }
 
 func (s *ArtifactStore) path(workItemID, name string) (string, error) {
@@ -112,6 +125,55 @@ func (s *ArtifactStore) PutPlan(workItemID string, content []byte) error {
 
 func (s *ArtifactStore) Plan(workItemID string) ([]byte, error) {
 	return s.read(workItemID, "plan.md")
+}
+
+// Artifact is the typed output of one workflow node. Content remains an
+// unrestricted byte slice: a producer either publishes the complete output or
+// returns an error. The hash is derived by the store and is never trusted from
+// an external runner.
+type Artifact struct {
+	Type    string `json:"type"`
+	Content []byte `json:"content"`
+	Hash    string `json:"hash"`
+}
+
+// PutNodeArtifact atomically publishes the latest output for a graph node. Node
+// outputs are mutable across refinement iterations, but they never overwrite
+// the immutable proposal or another node's output.
+func (s *ArtifactStore) PutNodeArtifact(workItemID, nodeID, artifactType string, content []byte) (Artifact, error) {
+	if !artifactNodeIDPattern.MatchString(nodeID) {
+		return Artifact{}, ErrInvalidNode
+	}
+	if artifactType == "" {
+		artifactType = "opaque"
+	}
+	artifact := Artifact{Type: artifactType, Content: content, Hash: Hash(content)}
+	encoded, err := json.Marshal(artifact)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("encode node artifact: %w", err)
+	}
+	if err := s.replace(workItemID, "node-"+nodeID+".json", encoded); err != nil {
+		return Artifact{}, err
+	}
+	return artifact, nil
+}
+
+func (s *ArtifactStore) NodeArtifact(workItemID, nodeID string) (Artifact, error) {
+	if !artifactNodeIDPattern.MatchString(nodeID) {
+		return Artifact{}, ErrInvalidNode
+	}
+	content, err := s.read(workItemID, "node-"+nodeID+".json")
+	if err != nil {
+		return Artifact{}, err
+	}
+	var artifact Artifact
+	if err := json.Unmarshal(content, &artifact); err != nil {
+		return Artifact{}, fmt.Errorf("decode node artifact: %w", err)
+	}
+	if artifact.Type == "" || artifact.Hash != Hash(artifact.Content) {
+		return Artifact{}, errors.New("node artifact failed integrity validation")
+	}
+	return artifact, nil
 }
 
 type Finding struct {

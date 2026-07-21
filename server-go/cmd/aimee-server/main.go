@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/api"
+	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
@@ -37,7 +39,14 @@ func main() {
 		"typed WFE runner endpoint; empty keeps execution disabled")
 	runnerSocket := flag.String("runner-socket", os.Getenv("AIMEE_WFE_RUNNER_SOCKET"),
 		"optional Unix socket for the typed WFE runner")
+	agentURL := flag.String("agent-service-url", os.Getenv("AIMEE_AGENT_SERVICE_URL"),
+		"agent resource-plane base URL used by the native Go WFE runner")
+	agentSocket := flag.String("agent-service-socket", os.Getenv("AIMEE_AGENT_SERVICE_SOCKET"),
+		"agent resource-plane Unix socket used by the native Go WFE runner")
+	agentBearer := flag.String("agent-service-bearer", os.Getenv("AIMEE_AGENT_SERVICE_BEARER"),
+		"optional bearer for the agent resource plane")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
+	configPath := flag.String("config", "", "aimee.yaml path")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 2),
 		"maximum concurrent workflows")
 	bearerToken := flag.String("bearer-token", os.Getenv("AIMEE_API_BEARER_TOKEN"),
@@ -51,6 +60,9 @@ func main() {
 	}
 	if *workflowDir == "" {
 		*workflowDir = filepath.Join(*home, "workflows")
+	}
+	if *configPath == "" {
+		*configPath = filepath.Join(*home, "aimee.yaml")
 	}
 	if *listen != "" && *bearerToken == "" {
 		log.Fatal("TCP listening requires --bearer-token or AIMEE_API_BEARER_TOKEN")
@@ -68,24 +80,110 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler := api.New(store, artifacts, *workflowDir)
+	handler, err := api.New(store, artifacts, *workflowDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	configStore, err := appconfig.NewStore(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	handler.SetConfigStore(configStore)
 	server := &http.Server{Handler: api.RequireBearer(handler, *bearerToken), ReadHeaderTimeout: 15 * time.Second}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
+	var runner engine.Runner
+	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
-		runner, err := engine.NewHTTPRunner(engine.HTTPRunnerConfig{
+		runner, err = engine.NewHTTPRunner(engine.HTTPRunnerConfig{
 			Endpoint: *runnerURL, UnixSocket: *runnerSocket,
 		})
 		if err != nil {
 			log.Fatal(err)
 		}
+	} else if *agentURL != "" || *agentSocket != "" {
+		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer, Store: store})
+		if clientErr != nil {
+			log.Fatal(clientErr)
+		}
+		worktrees, worktreeErr := engine.NewWorktreeManager(store, filepath.Join(*home, "wfe-worktrees"))
+		if worktreeErr != nil {
+			log.Fatal(worktreeErr)
+		}
+		worktreeManager = worktrees
+		workflowRegistry, registryErr := wfe.NewRegistry(*workflowDir)
+		if registryErr != nil {
+			log.Fatal(registryErr)
+		}
+		runner, err = engine.NewNativeRunner(store, worktrees, agents, nil, artifacts, workflowRegistry, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	if runner != nil {
 		workflowEngine, err := engine.New(store, artifacts, *workflowDir, runner)
 		if err != nil {
 			log.Fatal(err)
 		}
 		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
+		var liveMu sync.Mutex
+		lastConcurrency := *concurrency
+		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}
+		readInt := func(key string, fallback int) int {
+			value, ok, err := configStore.IntValue(key)
+			if err != nil {
+				log.Printf("invalid live config %s: %v", key, err)
+				return fallback
+			}
+			if !ok {
+				return fallback
+			}
+			return value
+		}
+		scheduler.SetConcurrencySource(func() int {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			lastConcurrency = readInt("autonomy.concurrency", lastConcurrency)
+			return lastConcurrency
+		})
+		scheduler.SetPolicySource(func() engine.RunPolicy {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			lastPolicy.MaxTurns = readInt("autonomy.max_turns", lastPolicy.MaxTurns)
+			lastPolicy.MaxWall = time.Duration(readInt("autonomy.max_wall_secs", int(lastPolicy.MaxWall/time.Second))) * time.Second
+			lastPolicy.MaxResumes = readInt("autonomy.max_resumes", lastPolicy.MaxResumes)
+			lastPolicy.StaleAbandon = time.Duration(readInt("autonomy.stale_abandon_secs", int(lastPolicy.StaleAbandon/time.Second))) * time.Second
+			if value, ok, err := configStore.BoolValue("autonomy.auto_resume_cap_parks"); err != nil {
+				log.Printf("invalid live config autonomy.auto_resume_cap_parks: %v", err)
+			} else if ok {
+				lastPolicy.AutoResumeWall = value
+			}
+			return lastPolicy
+		})
 		handler.SetSchedulerNotify(scheduler.Notify)
+		handler.SetSchedulerCancel(scheduler.Cancel)
+		if worktreeManager != nil {
+			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
+		}
 		go scheduler.Run(rootCtx)
+		// Trigger definitions are live UI/config state. Re-read them every scan so
+		// a saved workflow or run-policy change takes effect without a restart.
+		go func() {
+			for {
+				handler.ScanTriggers(rootCtx)
+				interval := configStore.Int("trigger.scan_interval_secs", 5)
+				if interval < 1 {
+					interval = 1
+				}
+				timer := time.NewTimer(time.Duration(interval) * time.Second)
+				select {
+				case <-rootCtx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+		}()
 	}
 
 	var listener net.Listener

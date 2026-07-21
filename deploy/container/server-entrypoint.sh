@@ -20,6 +20,14 @@ fi
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
+wfe_pid=""
+export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
+case "$AIMEE_WFE_ENGINE" in
+    go|c) ;;
+    *) printf '[server-entrypoint] fatal: AIMEE_WFE_ENGINE must be exactly go or c\n' >&2; exit 2 ;;
+esac
+export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
+WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 
 # The server's worker threads need a 64 MB stack; the 8 MB container default
 # overflows and SIGSEGVs on real queries. Raise the soft limit here (inherited
@@ -101,6 +109,14 @@ log() { printf '[server-entrypoint] %s\n' "$*"; }
 
 shutdown() {
     [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+    [ -n "$wfe_pid" ] && kill "$wfe_pid" 2>/dev/null || true
+	_wait=0
+	while { [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; } || { [ -n "$wfe_pid" ] && kill -0 "$wfe_pid" 2>/dev/null; }; do
+		[ "$_wait" -ge 50 ] && break
+		_wait=$((_wait + 1)); sleep 0.1
+	done
+	[ -n "$server_pid" ] && kill -KILL "$server_pid" 2>/dev/null || true
+	[ -n "$wfe_pid" ] && kill -KILL "$wfe_pid" 2>/dev/null || true
     webchat_stop
 }
 trap 'shutdown' TERM INT
@@ -154,11 +170,61 @@ log "pre-warming server-hosted OAuth CLIs (background)"
 runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
+rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
 server_pid=$!
 
-wait "$server_pid"
-status=$?
+if [ "$AIMEE_WFE_ENGINE" = go ]; then
+    if [ ! -x /usr/local/bin/aimee-wfe ]; then
+        log "fatal: AIMEE_WFE_ENGINE=go but /usr/local/bin/aimee-wfe is unavailable"
+        shutdown
+        exit 1
+    fi
+    # The C process is a temporary stateless agent resource plane. Wait for its
+    # HTTP socket, then put all WFE state/admission/execution on the Go socket.
+    _wait=0
+    while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
+        kill -0 "$server_pid" 2>/dev/null || break
+        _wait=$((_wait + 1))
+        sleep 0.1
+    done
+    if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
+        log "fatal: C agent resource plane did not become ready"
+        shutdown
+        exit 1
+    fi
+    log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
+    runuser -u aimee -- aimee-wfe \
+        --home "$AIMEE_HOME" \
+        --socket "$AIMEE_WFE_HTTP_SOCKET" \
+        --config "$AIMEE_HOME/aimee.yaml" \
+        --workflow-dir "$AIMEE_HOME/workflows" \
+        --agent-service-socket "$AIMEE_HOME/aimee-http.sock" &
+    wfe_pid=$!
+fi
+
+if [ -n "$wfe_pid" ]; then
+    # POSIX sh has no portable wait -n. GNU tail's PID watcher gives us the same
+    # first-exit notification without a shell polling loop.
+    watch_dir=$(mktemp -d /tmp/aimee-plane-watch.XXXXXX)
+    watch_fifo="$watch_dir/first"
+    mkfifo "$watch_fifo"
+    ( tail -s 0.1 --pid="$server_pid" -f /dev/null; printf '%s\n' server > "$watch_fifo" ) & server_watch=$!
+    ( tail -s 0.1 --pid="$wfe_pid" -f /dev/null; printf '%s\n' wfe > "$watch_fifo" ) & wfe_watch=$!
+    IFS= read -r first < "$watch_fifo"
+    kill "$server_watch" "$wfe_watch" 2>/dev/null || true
+    wait "$server_watch" 2>/dev/null || true
+    wait "$wfe_watch" 2>/dev/null || true
+    rm -f "$watch_fifo"
+    rmdir "$watch_dir"
+    log "$first plane exited; terminating its peer so the container restarts as one unit"
+    shutdown
+    wait "$server_pid" 2>/dev/null || true
+    wait "$wfe_pid" 2>/dev/null || true
+    status=1
+else
+    if wait "$server_pid"; then status=0; else status=$?; fi
+fi
 log "aimee-server exited (status $status); shutting down webchat"
 shutdown
 exit "$status"

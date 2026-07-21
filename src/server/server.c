@@ -2297,7 +2297,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * workflow engine's live providers + executors so submitted proposals can run
     * end-to-end server-side. Registration runs nothing on its own — a run begins
     * only when intake creates a work item and the autonomy driver advances it. */
-   wfe_autonomy_register();
+   const char *wfe_engine = getenv("AIMEE_WFE_ENGINE");
+   if (!(wfe_engine && strcmp(wfe_engine, "go") == 0))
+      wfe_autonomy_register();
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
     * precede any toolset_registry_init() / build_tools_array(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME

@@ -3,11 +3,11 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"path"
@@ -18,14 +18,164 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+// ScanTriggers evaluates the live UI/config trigger registry and graph-native
+// trigger.watch-dir starts. It is safe to call on every scheduler tick: filing
+// uses immutable git identities and DB1 deduplication.
+func (s *Server) ScanTriggers(ctx context.Context) {
+	for _, request := range s.triggerRequests() {
+		if request.Error != "" {
+			continue
+		}
+		if err := s.scanTrigger(ctx, request); err != nil {
+			s.setTriggerError(request, err.Error())
+			slog.Error("scan workflow trigger", "workspace", request.Workspace, "workflow", request.Pipeline, "error", err)
+		} else {
+			s.setTriggerError(request, "")
+		}
+	}
+}
+
+func triggerKey(request triggerFireRequest) string {
+	return request.Origin + "\x00" + request.Source + "\x00" + request.Workspace + "\x00" + request.Pipeline + "\x00" + request.Event + "\x00" + request.Ref
+}
+func (s *Server) setTriggerError(request triggerFireRequest, message string) {
+	s.triggerErrorsMu.Lock()
+	defer s.triggerErrorsMu.Unlock()
+	if message == "" {
+		delete(s.triggerErrors, triggerKey(request))
+	} else {
+		s.triggerErrors[triggerKey(request)] = message
+	}
+}
+func (s *Server) triggerError(request triggerFireRequest) string {
+	s.triggerErrorsMu.Lock()
+	defer s.triggerErrorsMu.Unlock()
+	return s.triggerErrors[triggerKey(request)]
+}
+
+func (s *Server) triggerRequests() []triggerFireRequest {
+	var out []triggerFireRequest
+	if s.config != nil {
+		if rules, err := s.config.TriggerRules(); err != nil {
+			slog.Error("load workflow trigger rules", "error", err)
+		} else {
+			for _, rule := range rules {
+				if rule.Source != "watch-dir" && rule.Source != "proposals" {
+					out = append(out, triggerFireRequest{Source: rule.Source, Event: rule.Event, Ref: rule.Schedule,
+						Pipeline: rule.Pipeline.Template, Workspace: rule.Pipeline.Workspace, Mode: rule.Mode,
+						Origin: "config", Error: "source is not supported by the Go WFE trigger scanner"})
+					continue
+				}
+				out = append(out, triggerFireRequest{Source: rule.Source, Event: rule.Event,
+					Workspace: rule.Pipeline.Workspace, Ref: rule.Schedule,
+					Pipeline: rule.Pipeline.Template, Mode: rule.Mode, MaxSpend: rule.Pipeline.MaxSpendUSD, Origin: "config"})
+			}
+		}
+	}
+	if registry, err := s.workflowRegistry(); err == nil {
+		if definitions, listErr := registry.List(); listErr == nil {
+			for _, summary := range definitions {
+				definition, loadErr := registry.Load(summary.Name)
+				if loadErr != nil {
+					continue
+				}
+				start, ok := definition.Node(definition.Start)
+				if !ok && len(definition.Nodes) > 0 {
+					start = definition.Nodes[0]
+					ok = true
+				}
+				if !ok || start.Block != "trigger.watch-dir" {
+					continue
+				}
+				workspace := paramText(start.Params, "workspace")
+				if workspace == "" {
+					continue
+				}
+				out = append(out, triggerFireRequest{Source: "watch-dir",
+					Event:     paramDefault(start.Params, "dir", "docs/proposals/pending"),
+					Workspace: workspace, Ref: paramText(start.Params, "ref"), Pipeline: definition.Name,
+					Mode: paramDefault(start.Params, "mode", "autonomous"), MaxSpend: paramFloat(start.Params, "max_spend_usd"), Origin: "workflow"})
+			}
+		}
+	}
+	return out
+}
+
+func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) error {
+	if request.Ref == "" {
+		request.Ref = defaultScanRef(ctx, request.Workspace)
+	}
+	directory := request.Event
+	if directory == "" {
+		directory = "docs/proposals/pending"
+	}
+	listing, err := gitOutput(ctx, request.Workspace, "ls-tree", "-r", "--name-only", request.Ref, "--", directory)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range strings.Split(string(listing), "\n") {
+		if candidate == "" {
+			continue
+		}
+		request.Proposal = candidate
+		_, _, fileErr := s.fileProposal(ctx, request)
+		if fileErr == nil {
+			if s.notify != nil {
+				s.notify()
+			}
+			continue
+		}
+		if strings.Contains(fileErr.Error(), "already filed") {
+			continue
+		}
+		if strings.Contains(fileErr.Error(), "admission full") {
+			// Every candidate remains eligible on the next tick. Continue so one
+			// full/invalid rule never prevents later rules from being inspected.
+			continue
+		}
+		return fileErr
+	}
+	return nil
+}
+
+func defaultScanRef(ctx context.Context, workspace string) string {
+	return "HEAD"
+}
+
+func paramText(params map[string]any, key string) string {
+	value, _ := params[key].(string)
+	return value
+}
+
+func paramDefault(params map[string]any, key, fallback string) string {
+	if value := paramText(params, key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func paramFloat(params map[string]any, key string) float64 {
+	switch value := params[key].(type) {
+	case float64:
+		return value
+	case int:
+		return float64(value)
+	default:
+		return 0
+	}
+}
+
 type triggerFireRequest struct {
-	Source    string `json:"source"`
-	Proposal  string `json:"proposal"`
-	Workspace string `json:"workspace"`
-	Ref       string `json:"ref"`
-	Pipeline  string `json:"pipeline"`
-	Mode      string `json:"mode"`
-	Event     string `json:"event"`
+	Source    string  `json:"source"`
+	Proposal  string  `json:"proposal"`
+	Workspace string  `json:"workspace"`
+	Ref       string  `json:"ref"`
+	Pipeline  string  `json:"pipeline"`
+	Mode      string  `json:"mode"`
+	Event     string  `json:"event"`
+	MaxSpend  float64 `json:"max_spend_usd,omitempty"`
+	Origin    string  `json:"-"`
+	Error     string  `json:"-"`
 }
 
 func (s *Server) triggerFire(w http.ResponseWriter, r *http.Request) {
@@ -112,17 +262,16 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if err != nil {
 		return "", "", fmt.Errorf("read proposal blob: %w", err)
 	}
-	definition, err := wfe.LoadDefinition(filepath.Join(s.workflowDir, request.Pipeline+".yaml"))
+	registry, err := s.workflowRegistry()
+	if err != nil {
+		return "", "", err
+	}
+	definition, err := registry.Pin(request.Pipeline)
 	if err != nil {
 		return "", "", err
 	}
 	identity := fmt.Sprintf("git:%s:%s:%s:%s:%s", commit, proposalPath, wfe.Hash(content),
 		request.Pipeline, request.Mode)
-	if existing, err := s.db.WorkItemByProposal(ctx, workspace, identity); err == nil {
-		return "", "", fmt.Errorf("proposal already filed as %s", existing.ID)
-	} else if !errors.Is(err, sql.ErrNoRows) && !strings.Contains(err.Error(), "no rows") {
-		return "", "", err
-	}
 	workItemID, err := mintWorkItemID()
 	if err != nil {
 		return "", "", err
@@ -134,10 +283,21 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if start == "" {
 		start = definition.Nodes[0].ID
 	}
-	if err := s.db.CreateWorkItem(ctx, db1.CreateWorkItem{
+	cap := 2
+	if s.config != nil {
+		cap = s.config.Int("trigger.max_concurrent", cap)
+	}
+	if err := s.db.AdmitRoot(ctx, db1.CreateWorkItem{
 		ID: workItemID, Repo: workspace, ProposalPath: identity, WorkflowName: definition.Name,
 		WorkflowVersion: definition.Version, StartStage: start, Mode: request.Mode,
-	}); err != nil {
+		SourcePath: proposalPath, MaxCostUSD: request.MaxSpend,
+	}, cap); err != nil {
+		_ = s.artifacts.DeleteWorkItem(workItemID)
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			if existing, findErr := s.db.WorkItemByProposal(ctx, workspace, identity); findErr == nil {
+				return "", "", fmt.Errorf("proposal already filed as %s", existing.ID)
+			}
+		}
 		return "", "", err
 	}
 	return workItemID, proposalPath, nil

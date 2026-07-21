@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -11,36 +12,86 @@ import (
 	"strings"
 	"sync"
 
+	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
 type Server struct {
-	db          *db1.Store
-	artifacts   *wfe.ArtifactStore
-	workflowDir string
-	mux         *http.ServeMux
-	notify      func()
-	triggerMu   sync.Mutex
+	db              *db1.Store
+	artifacts       *wfe.ArtifactStore
+	workflowDir     string
+	workflows       *wfe.Registry
+	config          *appconfig.Store
+	mux             *http.ServeMux
+	notify          func()
+	cancel          func(string)
+	cleanupWorktree func(context.Context, db1.WorkItem) error
+	triggerMu       sync.Mutex
+	triggerErrorsMu sync.Mutex
+	triggerErrors   map[string]string
 }
 
-func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) *Server {
+func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {
 	dir := ""
 	if len(workflowDir) > 0 {
 		dir = workflowDir[0]
 	}
-	s := &Server{db: db, artifacts: artifacts, workflowDir: dir, mux: http.NewServeMux()}
+	var registry *wfe.Registry
+	var err error
+	if dir != "" {
+		registry, err = wfe.NewRegistry(dir)
+		if err != nil {
+			return nil, err
+		}
+	}
+	s := &Server{db: db, artifacts: artifacts, workflowDir: dir, workflows: registry, mux: http.NewServeMux(), triggerErrors: make(map[string]string)}
 	s.mux.HandleFunc("GET /v1/health", s.health)
 	s.mux.HandleFunc("GET /v1/workflow/items", s.items)
 	s.mux.HandleFunc("GET /v1/workflow/items/all", s.items)
 	s.mux.HandleFunc("GET /v1/workflow/items/{id}", s.item)
 	s.mux.HandleFunc("GET /v1/workflow/items/{id}/events", s.events)
 	s.mux.HandleFunc("GET /v1/workflow/items/{id}/proposal", s.proposal)
+	s.mux.HandleFunc("POST /v1/workflow/items/{id}/pause", s.workflowPause)
+	s.mux.HandleFunc("POST /v1/workflow/items/{id}/resume", s.workflowResume)
+	s.mux.HandleFunc("POST /v1/workflow/items/{id}/gate", s.workflowGate)
+	s.mux.HandleFunc("POST /v1/workflow/items/{id}/stop", s.workflowStop)
+	s.mux.HandleFunc("DELETE /v1/workflow/items/{id}", s.workflowDelete)
+	s.mux.HandleFunc("GET /v1/workflow/blocks", s.workflowBlocks)
+	s.mux.HandleFunc("PUT /v1/workflow/blocks/{name}", s.workflowBlockPut)
+	s.mux.HandleFunc("DELETE /v1/workflow/blocks/{name}", s.workflowBlockDelete)
+	s.mux.HandleFunc("GET /v1/workflow/defs", s.workflowDefinitions)
+	s.mux.HandleFunc("GET /v1/workflow/defs/{name}", s.workflowDefinition)
+	s.mux.HandleFunc("POST /v1/workflow/validate", s.workflowValidate)
+	s.mux.HandleFunc("POST /v1/workflow/save", s.workflowSave)
+	s.mux.HandleFunc("GET /v1/workflow/triggers", s.workflowTriggers)
+	s.mux.HandleFunc("GET /v1/workflow/config", s.configGet)
+	s.mux.HandleFunc("POST /v1/workflow/config/set", s.configSet)
+	s.mux.HandleFunc("GET /v1/config", s.configGet)
+	s.mux.HandleFunc("POST /v1/config/set", s.configSet)
 	s.mux.HandleFunc("POST /v1/trigger/fire", s.triggerFire)
-	return s
+	s.mux.HandleFunc("POST /v1/dev/submit", s.devSubmit)
+	return s, nil
 }
 
-func (s *Server) SetSchedulerNotify(notify func()) { s.notify = notify }
+func (s *Server) SetSchedulerNotify(notify func())       { s.notify = notify }
+func (s *Server) SetSchedulerCancel(cancel func(string)) { s.cancel = cancel }
+func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, db1.WorkItem) error) {
+	s.cleanupWorktree = cleanup
+}
+func (s *Server) SetConfigStore(store *appconfig.Store) { s.config = store }
+
+func (s *Server) workflowRegistry() (*wfe.Registry, error) {
+	if s.workflows != nil {
+		return s.workflows, nil
+	}
+	registry, err := wfe.NewRegistry(s.workflowDir)
+	if err != nil {
+		return nil, err
+	}
+	s.workflows = registry
+	return registry, nil
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)

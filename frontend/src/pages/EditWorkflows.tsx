@@ -107,7 +107,7 @@ function readTddTest(node: GNode): Participant {
 }
 
 // Read the participants a node currently declares, from whichever param shape it
-// uses: a roundtable's panel (required = delegates, personas = the lenses) or a
+// uses: a roundtable's panel (required = personas, pins = positive agent pins) or a
 // single-action step's persona/delegate. Returns [] when none are set.
 function readParticipants(node: GNode): Participant[] {
   const p = (node.params || {}) as Record<string, unknown>;
@@ -115,8 +115,10 @@ function readParticipants(node: GNode): Participant[] {
   const strs = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   if (Array.isArray(panel.required) || Array.isArray(panel.personas)) {
-    const dels = strs(panel.required);
-    const pers = strs(panel.personas);
+	const pins = (panel.pins || {}) as Record<string, unknown>;
+	const legacy = Array.isArray(panel.personas) && !panel.pins;
+	const pers = legacy ? strs(panel.personas) : strs(panel.required);
+	const dels = legacy ? strs(panel.required) : pers.map((persona) => typeof pins[persona] === "string" ? String(pins[persona]) : "");
     const n = Math.max(dels.length, pers.length);
     const out: Participant[] = [];
     for (let i = 0; i < n; i++)
@@ -1068,8 +1070,8 @@ function NodeInspector({
 
   // Serialize the structured fields back into the node's params, preserving any
   // params the form doesn't manage (e.g. freeze base_branch, gate.human policy).
-  //   roundtable -> panel.required = delegates (engine-consumed, validator needs
-  //                 >=2), panel.personas = the lenses, quorum
+  //   roundtable -> panel.required = personas and panel.pins contains only
+  //                 explicit positive persona->agent requirements.
   //   single     -> persona + delegate (forward params; honored once the
   //                 author/implement executors read them)
   const commitStep = (next: {
@@ -1113,14 +1115,13 @@ function NodeInspector({
         const panel: Record<string, unknown> = {
           ...((params.panel as Record<string, unknown>) || {}),
         };
-        const required = cleaned
-          .map((x) => x.delegate || x.persona)
-          .filter(Boolean);
         const lenses = cleaned.map((x) => x.persona).filter(Boolean);
-        if (required.length) panel.required = required;
+        if (lenses.length) panel.required = lenses;
         else delete panel.required;
-        if (lenses.length) panel.personas = lenses;
-        else delete panel.personas;
+		delete panel.personas;
+		const pins = Object.fromEntries(cleaned.filter((x) => x.persona && x.delegate).map((x) => [x.persona, x.delegate]));
+		if (Object.keys(pins).length) panel.pins = pins;
+		else delete panel.pins;
         if (Object.keys(panel).length) params.panel = panel;
         else delete params.panel;
         if (q > 0) params.quorum = q;
@@ -1269,8 +1270,8 @@ function NodeInspector({
           <input
             list="wf-delegate-opts"
             value={p.delegate}
-            placeholder="delegate"
-            title="Delegate that carries out this step ($random picks one at run time)."
+            placeholder="specific agent (optional)"
+            title="Optional positive pin: require this specific agent. Blank allows any enabled, role-eligible delegate."
             onChange={(e) => setPart(i, "delegate", e.target.value)}
             style={{ ...inp, flex: 1, minWidth: 0 }}
           />

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
@@ -29,7 +30,11 @@ func newTestServer(t *testing.T) (*Server, *db1.Store, *wfe.ArtifactStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store, artifacts), store, artifacts
+	server, err := New(store, artifacts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server, store, artifacts
 }
 
 func TestProposalEndpointImportsLegacySourceWithoutTruncation(t *testing.T) {
@@ -174,6 +179,57 @@ nodes:
 	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already filed") {
 		t.Fatalf("duplicate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConfiguredTriggerScannerFilesPendingProposalWithoutManualFire(t *testing.T) {
+	server, store, artifacts := newTestServer(t)
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, "build.yaml"), []byte("name: build\nstart: draft\nnodes:\n  - id: draft\n    block: author.proposal\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server.workflowDir = workflowDir
+	server.workflows = nil
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, "docs/proposals/pending"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	proposal := "# Automatically discovered\n\ncomplete content\n"
+	if err := os.WriteFile(filepath.Join(repo, "docs/proposals/pending/auto.md"), []byte(proposal), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "test@example.invalid")
+	runGit(t, repo, "config", "user.name", "Test")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "proposal")
+	configPath := filepath.Join(root, "aimee.yaml")
+	configText := "trigger:\n  max_concurrent: 2\ntrigger_rules:\n  - source: watch-dir\n    event: docs/proposals/pending\n    mode: autonomous\n    pipeline:\n      template: build\n      workspace: " + strconv.Quote(repo) + "\n"
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configStore, err := appconfig.NewStore(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetConfigStore(configStore)
+	server.ScanTriggers(context.Background())
+	items, err := store.WorkItems(context.Background())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	got, err := artifacts.Proposal(items[0].ID)
+	if err != nil || string(got) != proposal {
+		t.Fatalf("proposal=%q err=%v", got, err)
+	}
+	server.ScanTriggers(context.Background())
+	items, _ = store.WorkItems(context.Background())
+	if len(items) != 1 {
+		t.Fatalf("scanner duplicated proposal: %d items", len(items))
 	}
 }
 

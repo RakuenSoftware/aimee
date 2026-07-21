@@ -36,7 +36,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: implement\n")
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
 	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -96,5 +96,47 @@ func waitStarted(t *testing.T, started <-chan string) string {
 	case <-time.After(2 * time.Second):
 		t.Fatal("workflow did not start")
 		return ""
+	}
+}
+
+func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	registry, err := wfe.NewRegistry(workflowDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := registry.Save("one", []byte("name: one\nnodes:\n  - id: work\n    block: author.proposal\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, _ := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	_ = artifacts.PutProposal("wi_cancel", []byte("proposal"))
+	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: "wi_cancel", Repo: "repo", ProposalPath: "proposal", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	runner := &blockingRunner{started: make(chan string, 1), release: make(chan struct{})}
+	eng, _ := New(store, artifacts, workflowDir, runner)
+	scheduler := NewScheduler(store, eng, 1, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go scheduler.Run(ctx)
+	waitStarted(t, runner.started)
+	if err := store.Pause(t.Context(), "wi_cancel"); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.Cancel("wi_cancel")
+	time.Sleep(30 * time.Millisecond)
+	item, err := store.WorkItem(t.Context(), "wi_cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != "active" || item.PauseReason != "manual" {
+		t.Fatalf("item=%+v", item)
 	}
 }

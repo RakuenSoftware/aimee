@@ -23,7 +23,7 @@ func TestRunnerCrashCannotAbandonOrCrashControlPlane(t *testing.T) {
 	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	definition := []byte("name: build\nstart: plan\nnodes:\n  - id: plan\n    block: author.plan\n")
+	definition := []byte("name: build\nstart: plan\nnodes:\n  - id: plan\n    block: author.proposal\n")
 	if err := os.WriteFile(filepath.Join(workflowDir, "build.yaml"), definition, 0o600); err != nil {
 		t.Fatal(err)
 	}

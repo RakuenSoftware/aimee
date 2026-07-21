@@ -68,6 +68,18 @@ RUN go mod download
 COPY webchat/ ./
 RUN CGO_ENABLED=1 go build -o /out/aimee-webchat .
 
+# Go owns the WFE control plane. It is built and run independently from the
+# temporary C agent resource plane so a provider crash restarts both processes
+# without putting C back in charge of workflow transitions. This is crash
+# containment, not an OS security boundary: both processes currently share the
+# appliance service identity for repository credentials and Unix-socket access.
+FROM golang:1.25-bookworm AS wfe-build
+WORKDIR /src/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-wfe ./cmd/aimee-server
+
 # Collect webchat artifacts into a uniform /webchat layout. The "1" variant pulls
 # from the frontend + Go builds above (only in the build graph when
 # WITH_WEBCHAT=1 selects this stage). The "0" variant is empty → no webchat in the
@@ -211,6 +223,7 @@ RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --sh
 # when no named volume is mounted; operators can bind/name it for backups.
 VOLUME /var/lib/aimee-workspaces
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
+COPY --from=wfe-build /out/aimee-wfe /usr/local/bin/aimee-wfe
 # Static TCP<->UDS bridge; aimee-server docker-cp's it into a proxy-mode delegate sandbox.
 COPY --from=build /src/aimee-forwarder /usr/local/bin/aimee-forwarder
 # See the build stage: delegates reach aimee THROUGH this binary (`aimee mcp serve`

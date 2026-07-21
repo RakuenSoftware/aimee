@@ -15,10 +15,8 @@ func (s *server) handleDevSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	const maxBody = 1 << 20
-	body, _ := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-	if len(body) > maxBody {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "request too large")
+	body, ok := readBoundedBody(w, r, 1<<20)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)

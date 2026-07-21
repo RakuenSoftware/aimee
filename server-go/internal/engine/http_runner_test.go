@@ -21,7 +21,7 @@ func TestHTTPRunnerTransfersCompleteArtifactsAndFeedback(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if request.Proposal != proposal || request.Plan != plan || request.Feedback == nil ||
+		if request.Proposal != proposal || string(request.Inputs["plan"].Content) != plan || request.Feedback == nil ||
 			request.Feedback.Findings[0].Recommendation != recommendation {
 			t.Error("runner boundary received incomplete content")
 		}
@@ -34,7 +34,7 @@ func TestHTTPRunnerTransfersCompleteArtifactsAndFeedback(t *testing.T) {
 	}
 	result, err := runner.Run(t.Context(), StepRequest{
 		Proposal: proposal,
-		Plan:     plan,
+		Inputs:   map[string]wfe.Artifact{"plan": {Content: []byte(plan)}},
 		Feedback: &wfe.ReviewFeedback{Findings: []wfe.Finding{{Recommendation: recommendation}}},
 	})
 	if err != nil {
