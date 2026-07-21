@@ -1,0 +1,11 @@
+{
+  "descriptor_version": 1,
+  "id": "translation",
+  "dependencies": [
+    "ir",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

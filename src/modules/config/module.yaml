@@ -1,0 +1,10 @@
+{
+  "descriptor_version": 1,
+  "id": "config",
+  "dependencies": [
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

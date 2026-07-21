@@ -1,0 +1,13 @@
+{
+  "descriptor_version": 1,
+  "id": "protocols",
+  "dependencies": [
+    "config",
+    "ir",
+    "module-runtime",
+    "translation"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "descriptor_version": 1,
+  "id": "learning",
+  "dependencies": [
+    "config",
+    "ir",
+    "memory",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

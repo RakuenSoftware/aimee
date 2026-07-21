@@ -1,0 +1,15 @@
+{
+  "descriptor_version": 1,
+  "id": "kb-synthesis",
+  "dependencies": [
+    "config",
+    "ir",
+    "memory",
+    "module-runtime",
+    "response-composition"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  }
+}

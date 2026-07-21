@@ -1,0 +1,16 @@
+{
+  "descriptor_version": 1,
+  "id": "tools",
+  "dependencies": [
+    "audit",
+    "config",
+    "execution-policy",
+    "ir",
+    "module-runtime",
+    "vault",
+    "workspace"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

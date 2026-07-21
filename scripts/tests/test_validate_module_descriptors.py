@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -40,6 +41,24 @@ class DescriptorTests(unittest.TestCase):
     def taxonomy(self) -> tuple[set[str], set[str]]:
         return validator.load_inventory(REPO_ROOT)
 
+    def production_repo(self) -> tempfile.TemporaryDirectory[str]:
+        tmp = tempfile.TemporaryDirectory()
+        repo = Path(tmp.name)
+        inventory = repo / validator.INVENTORY_PATH
+        inventory.parent.mkdir(parents=True)
+        shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
+        for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
+            target = repo / "src/modules" / source.parent.name / "module.yaml"
+            target.parent.mkdir(parents=True)
+            shutil.copy2(source, target)
+        return tmp
+
+    def mutate_descriptor(self, repo: Path, identifier: str, mutate) -> None:
+        path = repo / "src/modules" / identifier / "module.yaml"
+        value = json.loads(path.read_text(encoding="utf-8"))
+        mutate(value)
+        path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
     def assert_rule(self, value: object, rule: str) -> None:
         required, optional = self.taxonomy()
         with self.assertRaisesRegex(validator.DescriptorError, f"rule={rule}"):
@@ -53,9 +72,14 @@ class DescriptorTests(unittest.TestCase):
 
     def test_positive_fixture_root_and_exact_count(self) -> None:
         count = validator.validate_roots(
-            REPO_ROOT, [Path("tests/fixtures/modules/positive")], allow_empty=False
+            REPO_ROOT, [Path("tests/fixtures/modules/positive")]
         )
         self.assertEqual(count, 3)
+
+    def test_complete_production_graph(self) -> None:
+        required, optional = self.taxonomy()
+        self.assertEqual(len(required | optional), 26)
+        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 26)
 
     def test_schema_is_generated_byte_for_byte(self) -> None:
         validator.check_schema(REPO_ROOT)
@@ -170,18 +194,134 @@ class DescriptorTests(unittest.TestCase):
                 path.parent.mkdir()
                 path.write_text(json.dumps(self.required()), encoding="utf-8")
             with self.assertRaisesRegex(validator.DescriptorError, "rule=module-duplicate"):
-                validator.validate_roots(REPO_ROOT, [root], allow_empty=False)
+                validator.validate_roots(REPO_ROOT, [root])
 
-    def test_empty_root_requires_explicit_allow_empty(self) -> None:
+    def test_empty_root_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with self.assertRaisesRegex(validator.DescriptorError, "rule=no-descriptors-found"):
-                validator.validate_roots(REPO_ROOT, [root], allow_empty=False)
-            with self.assertRaisesRegex(validator.DescriptorError, "rule=allow-empty-scope"):
-                validator.validate_roots(REPO_ROOT, [root], allow_empty=True)
-        self.assertEqual(
-            validator.validate_roots(REPO_ROOT, [Path("src/modules")], allow_empty=True), 0
-        )
+                validator.validate_roots(REPO_ROOT, [root])
+
+    def test_production_coverage_and_path_mutations(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            (repo / "src/modules/config/module.yaml").unlink()
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=production-coverage"):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            source = repo / "src/modules/config/module.yaml"
+            target = repo / "src/modules/Config/module.yaml"
+            target.parent.mkdir()
+            source.rename(target)
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=production-path"):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_production_selection_policy_mutations(self) -> None:
+        required, optional = self.taxonomy()
+        for identifier in sorted(optional):
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                self.mutate_descriptor(
+                    repo, identifier,
+                    lambda value: value.__setitem__(
+                        "enabled_by_default", not value["enabled_by_default"]
+                    ),
+                )
+                with self.subTest(identifier=identifier, field="enabled_by_default"), \
+                        self.assertRaisesRegex(validator.DescriptorError, "rule=production-default"):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
+
+        for identifier in sorted(required | optional):
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                self.mutate_descriptor(
+                    repo, identifier,
+                    lambda value: value["runtime_toggle"].__setitem__(
+                        "supported", not value["runtime_toggle"]["supported"]
+                    ),
+                )
+                rule = (
+                    "required-runtime-toggle"
+                    if identifier in required
+                    else "production-runtime-toggle"
+                )
+                with self.subTest(identifier=identifier, field="runtime_toggle"), \
+                        self.assertRaisesRegex(validator.DescriptorError, f"rule={rule}"):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
+
+    def test_production_graph_mutations(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            self.mutate_descriptor(
+                repo, "config", lambda value: value.__setitem__(
+                    "dependencies", ["module-runtime", "runtime-web"]
+                )
+            )
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=core-to-optional"):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            self.mutate_descriptor(
+                repo, "module-runtime",
+                lambda value: value.__setitem__("dependencies", ["config"]),
+            )
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=dependency-cycle.*config -> module-runtime -> config",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_aliased_production_root_cannot_bypass_policy(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            self.mutate_descriptor(
+                repo, "runtime-web",
+                lambda value: value.__setitem__("enabled_by_default", False),
+            )
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=production-default"):
+                validator.validate_roots(repo, [Path("src/modules/../modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_inventory_partition_swap_fails_closed(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            path = repo / validator.INVENTORY_PATH
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["required"].remove("config")
+            value["required"].append("plugin-loader")
+            value["optional"].remove("plugin-loader")
+            value["optional"].append("config")
+            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                validator.DescriptorError, r"config/module.yaml.*rule=descriptor-keys"
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
 
     def test_parser_resource_limits(self) -> None:
         tmp, path = self.write_raw(b" " * (validator.MAX_BYTES + 1))

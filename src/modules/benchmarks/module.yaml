@@ -1,0 +1,15 @@
+{
+  "descriptor_version": 1,
+  "id": "benchmarks",
+  "dependencies": [
+    "config",
+    "ir",
+    "memory",
+    "module-runtime",
+    "routing"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  }
+}

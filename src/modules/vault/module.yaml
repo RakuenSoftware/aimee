@@ -1,0 +1,12 @@
+{
+  "descriptor_version": 1,
+  "id": "vault",
+  "dependencies": [
+    "config",
+    "execution-policy",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

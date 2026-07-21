@@ -1,0 +1,16 @@
+{
+  "descriptor_version": 1,
+  "id": "git",
+  "dependencies": [
+    "audit",
+    "config",
+    "execution-policy",
+    "memory",
+    "module-runtime",
+    "vault",
+    "workspace"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

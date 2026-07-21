@@ -1,0 +1,21 @@
+{
+  "descriptor_version": 1,
+  "id": "governance",
+  "dependencies": [
+    "audit",
+    "config",
+    "delegates",
+    "execution-policy",
+    "gateway",
+    "ir",
+    "module-runtime",
+    "protocols",
+    "routing",
+    "tools",
+    "vault"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  }
+}

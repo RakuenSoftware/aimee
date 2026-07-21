@@ -22,6 +22,7 @@ MAX_DEPTH = 32
 MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
+DEFAULT_ON = {"runtime-web", "control-web"}
 
 
 class DescriptorError(ValueError):
@@ -236,27 +237,102 @@ def discover(root: Path) -> list[Path]:
     return sorted(root.rglob("module.yaml"))
 
 
-def validate_roots(repo: Path, roots: list[Path], allow_empty: bool) -> int:
+def _normalized_cycle(cycle: list[str]) -> list[str]:
+    open_cycle = cycle[:-1]
+    rotations = [open_cycle[index:] + open_cycle[:index] for index in range(len(open_cycle))]
+    result = min(rotations)
+    return result + [result[0]]
+
+
+def validate_graph(descriptors: dict[str, tuple[Path, list[str]]],
+                   required: set[str], optional: set[str]) -> None:
+    for identifier, (path, dependencies) in sorted(descriptors.items()):
+        if identifier in required:
+            for index, dependency in enumerate(dependencies):
+                if dependency in optional:
+                    fail("core-to-optional", f"required module {identifier!r} depends on optional "
+                         f"module {dependency!r} in {path}", f"/dependencies/{index}")
+
+    state: dict[str, int] = {identifier: 0 for identifier in descriptors}
+    stack: list[str] = []
+
+    def visit(identifier: str) -> None:
+        state[identifier] = 1
+        stack.append(identifier)
+        for dependency in descriptors[identifier][1]:
+            if dependency not in descriptors:
+                continue
+            if state[dependency] == 0:
+                visit(dependency)
+            elif state[dependency] == 1:
+                start = stack.index(dependency)
+                cycle = _normalized_cycle(stack[start:] + [dependency])
+                fail("dependency-cycle", " -> ".join(cycle), "/dependencies")
+        stack.pop()
+        state[identifier] = 2
+
+    for identifier in sorted(descriptors):
+        if state[identifier] == 0:
+            visit(identifier)
+
+
+def validate_roots(repo: Path, roots: list[Path]) -> int:
     required, optional = load_inventory(repo)
-    production_root = repo / "src/modules"
-    resolved_roots = [root if root.is_absolute() else repo / root for root in roots]
-    if allow_empty and resolved_roots != [production_root]:
-        fail("allow-empty-scope", "--allow-empty is restricted to src/modules")
+    production_root = (repo / "src/modules").resolve()
+    unresolved_roots = [root if root.is_absolute() else repo / root for root in roots]
+    resolved_roots = [root.resolve() for root in unresolved_roots]
     seen: dict[str, Path] = {}
+    graph: dict[str, tuple[Path, list[str]]] = {}
     count = 0
     for root, resolved in zip(roots, resolved_roots, strict=True):
         files = discover(resolved)
-        if not files and not allow_empty:
+        if not files:
             fail("no-descriptors-found", f"no module.yaml files under {root}")
         for path in files:
-            identifier = validate_descriptor(load_json(path), required, optional)
+            value = load_json(path)
+            try:
+                identifier = validate_descriptor(value, required, optional)
+            except DescriptorError as exc:
+                raise DescriptorError(f"{path}: {exc}") from exc
             if identifier in seen:
                 fail(
                     "module-duplicate",
                     f"module {identifier!r} also declared by {seen[identifier]}",
                 )
             seen[identifier] = path
+            graph[identifier] = (path, list(value["dependencies"]))
             count += 1
+    if resolved_roots == [production_root]:
+        expected = required | optional
+        actual = set(seen)
+        if actual != expected:
+            fail("production-coverage", f"missing={sorted(expected-actual)}, "
+                 f"extra={sorted(actual-expected)}")
+        casefold_paths: dict[str, Path] = {}
+        for identifier, path in sorted(seen.items()):
+            relative = path.relative_to(production_root)
+            expected_relative = Path(identifier) / "module.yaml"
+            if relative != expected_relative:
+                fail("production-path", f"{path} must be {production_root / expected_relative}")
+            folded = relative.as_posix().casefold()
+            if folded in casefold_paths and casefold_paths[folded] != path:
+                fail("production-case-collision", f"{path} collides with {casefold_paths[folded]}")
+            casefold_paths[folded] = path
+            value = load_json(path)
+            runtime_supported = value["runtime_toggle"]["supported"]
+            if identifier in required:
+                expected_default = None
+                expected_toggle = False
+            else:
+                expected_default = identifier in DEFAULT_ON
+                expected_toggle = identifier in DEFAULT_ON
+            if identifier in optional and value["enabled_by_default"] is not expected_default:
+                fail("production-default", f"{identifier} enabled_by_default must be "
+                     f"{str(expected_default).lower()}", "/enabled_by_default")
+            if runtime_supported is not expected_toggle:
+                fail("production-runtime-toggle", f"{identifier} runtime_toggle.supported must be "
+                     f"{str(expected_toggle).lower()}", "/runtime_toggle/supported")
+        validate_graph(graph, required, optional)
     return count
 
 
@@ -264,7 +340,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="*", type=Path)
     parser.add_argument("--config-root", type=Path)
-    parser.add_argument("--allow-empty", action="store_true")
     parser.add_argument("--check-schema", action="store_true")
     parser.add_argument("--emit-schema", action="store_true")
     return parser.parse_args(argv)
@@ -281,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             check_schema(repo)
         if not args.roots:
             fail("root", "at least one descriptor root is required")
-        count = validate_roots(repo, args.roots, args.allow_empty)
+        count = validate_roots(repo, args.roots)
     except (DescriptorError, OSError, UnicodeError, ValueError) as exc:
         print(f"validate_module_descriptors: error: {exc}", file=sys.stderr)
         return 1

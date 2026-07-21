@@ -1,0 +1,14 @@
+{
+  "descriptor_version": 1,
+  "id": "routing",
+  "dependencies": [
+    "config",
+    "ir",
+    "learning",
+    "memory",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

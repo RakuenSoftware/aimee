@@ -1,0 +1,17 @@
+{
+  "descriptor_version": 1,
+  "id": "roundtable",
+  "dependencies": [
+    "audit",
+    "config",
+    "delegates",
+    "ir",
+    "module-runtime",
+    "response-composition",
+    "routing"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  }
+}
