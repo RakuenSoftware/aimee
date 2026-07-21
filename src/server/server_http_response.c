@@ -104,8 +104,9 @@ void send_response(int fd, int status, const char *body, const char *request_id)
    int blen = body ? (int)strlen(body) : 0;
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %d\r\n%s%s%sConnection: close\r\n\r\n",
-                       status, reason, blen, rid, reh, rah);
+                       "Content-Length: %d\r\n%s%s%sConnection: %s\r\n\r\n",
+                       status, reason, blen, rid, reh, rah,
+                       server_http_keepalive_peek() ? "keep-alive" : "close");
    write_all_fd(fd, head, hlen);
    if (blen > 0)
       write_all_fd(fd, body, blen);
@@ -127,4 +128,22 @@ void send_rate_limited(int fd, int retry_after, const char *request_id)
                        retry_after, blen, rid);
    write_all_fd(fd, head, hlen);
    write_all_fd(fd, body, blen);
+}
+static _Thread_local int tl_keepalive = 0;
+
+void server_http_keepalive_set(int enabled)
+{
+   tl_keepalive = enabled ? 1 : 0;
+}
+
+int server_http_keepalive_peek(void)
+{
+   return tl_keepalive;
+}
+
+int server_http_keepalive_take(void)
+{
+   int v = tl_keepalive;
+   tl_keepalive = 0;
+   return v;
 }

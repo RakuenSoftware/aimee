@@ -10,6 +10,17 @@
 #define DEC_SERVER_TLS_H 1
 
 #include <openssl/ssl.h>
+#include <stddef.h>
+
+typedef struct
+{
+   char cn[257];
+   char issuer[601];
+   char serial_norm[129];
+   char fingerprint[65];
+   char channel_binding[65];
+   int management_profile;
+} server_tls_peer_cert_t;
 
 #ifdef __cplusplus
 extern "C"
@@ -32,6 +43,11 @@ extern "C"
     * else 0 (cn_out/serial_out emptied). Bearer-only TLS conns return 0. */
    int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
                                 size_t serial_len);
+
+   /* Exact verified leaf identity plus an RFC 5705 exporter binding for this
+    * live TLS connection. Strings are lowercase/canonical where applicable. */
+   int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out);
+   int server_tls_local_fingerprint(SSL *ssl, char out[65]);
 
    /* Run the TLS handshake on an accepted fd. Returns a new SSL* (caller owns it:
     * SSL_shutdown + SSL_free) on success, or NULL on handshake failure. */

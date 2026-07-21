@@ -30,7 +30,8 @@
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
-#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "server_mgmt_status.h"
+#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -66,12 +67,13 @@
 #include "wfe_engine.h"      /* wfe_work_item_create — POST /v1/dev/submit intake */
 #include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
 #include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
-#include "router_advise.h"   /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"   /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"    /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"       /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>        /* mkdir for the proposal artifact dir */
-#include <time.h>            /* unique proposal artifact filename */
+#include <openssl/evp.h>
+#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
+#include <time.h>          /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -114,6 +116,116 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
     * handler only after revocation staples, durable jti consumption, actor
     * propagation, and primary WORM intent/outcome are composed end to end. */
    return err_json(resp, cap, 503, "management control plane is not enabled");
+}
+
+static int mgmt_b64url(const unsigned char *in, size_t n, char *out, size_t cap)
+{
+   size_t need = 4 * ((n + 2) / 3);
+   if (!in || !out || cap <= need)
+      return -1;
+   int got = EVP_EncodeBlock((unsigned char *)out, in, (int)n);
+   if (got <= 0)
+      return -1;
+   for (int i = 0; i < got; i++)
+      out[i] = out[i] == '+' ? '-' : (out[i] == '/' ? '_' : out[i]);
+   while (got > 0 && out[got - 1] == '=')
+      got--;
+   out[got] = '\0';
+   return 0;
+}
+
+static int mgmt_hex_key(const char *hex, unsigned char key[32])
+{
+   if (!hex || strlen(hex) != 64)
+      return -1;
+   for (int i = 0; i < 32; i++)
+   {
+      unsigned a = (unsigned char)hex[i * 2], b = (unsigned char)hex[i * 2 + 1];
+      a = a >= '0' && a <= '9' ? a - '0' : (a >= 'a' && a <= 'f' ? a - 'a' + 10 : 99);
+      b = b >= '0' && b <= '9' ? b - '0' : (b >= 'a' && b <= 'f' ? b - 'a' + 10 : 99);
+      if (a > 15 || b > 15)
+         return -1;
+      key[i] = (unsigned char)((a << 4) | b);
+   }
+   return 0;
+}
+
+static int rh_management_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
+      return err_json(resp, cap, 401, "management client certificate required");
+   if (!target || !target[0])
+      return err_json(resp, cap, 503, "management status is not configured");
+   unsigned char nonce[32];
+   uint64_t expiry = 0, now = (uint64_t)time(NULL);
+   int rc = server_mgmt_nonce_issue(peer, target, now, nonce, &expiry);
+   if (rc != SERVER_MGMT_NONCE_OK)
+      return err_json(resp, cap, rc == SERVER_MGMT_NONCE_SATURATED ? 429 : 503,
+                      rc == SERVER_MGMT_NONCE_SATURATED ? "management challenge capacity reached"
+                                                        : "management challenge unavailable");
+   char enc[48];
+   if (mgmt_b64url(nonce, sizeof(nonce), enc, sizeof(enc)) != 0)
+      return err_json(resp, cap, 503, "management challenge unavailable");
+   snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
+            (unsigned long long)expiry);
+   server_http_keepalive_set(1);
+   return 200;
+}
+
+static int rh_management_health(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
+   const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
+   const char *local_fp = server_http_identity_local_fingerprint();
+   const char *wire = server_http_identity_status_staple();
+   unsigned char pub[32];
+   kb_mgmt_status_t st;
+   if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
+      return err_json(resp, cap, 401, "management client certificate required");
+   if (!target || !target[0] || !key_id || !key_id[0] || mgmt_hex_key(key_hex, pub) != 0 ||
+       !local_fp[0])
+      return err_json(resp, cap, 503, "management status is not configured");
+   if (!wire[0] || kb_mgmt_status_from_json(wire, &st) != 0)
+   {
+      memset(&st, 0, sizeof(st));
+      if (wire[0] && kb_mgmt_status_nonce_from_json(wire, st.nonce) == 0)
+      {
+         server_mgmt_nonce_result_t consumed =
+             server_mgmt_nonce_consume(&st, peer, target, (uint64_t)time(NULL), 0);
+         if (consumed == SERVER_MGMT_NONCE_STORAGE)
+            return err_json(resp, cap, 503, "management status unavailable");
+      }
+      return err_json(resp, cap, 401, "invalid management status staple");
+   }
+   uint64_t hwm = 0, now = (uint64_t)time(NULL);
+   int shape =
+       server_mgmt_status_hwm(&hwm) == 0 && kb_mgmt_status_validate(&st, now, hwm) == 0 &&
+       kb_mgmt_status_verify_signature(&st, pub) == 0 && strcmp(st.key_id, key_id) == 0 &&
+       memcmp(st.caller_issuer, peer->issuer, sizeof(st.caller_issuer)) == 0 &&
+       memcmp(st.caller_serial_norm, peer->serial_norm, sizeof(st.caller_serial_norm)) == 0 &&
+       memcmp(st.caller_fingerprint, peer->fingerprint, sizeof(st.caller_fingerprint)) == 0 &&
+       strcmp(st.target_server_id, target) == 0 &&
+       strcmp(st.target_mgmt_fingerprint, local_fp) == 0 &&
+       strcmp(st.purpose, "management.health.v1") == 0;
+   server_mgmt_nonce_result_t rc = server_mgmt_nonce_consume(&st, peer, target, now, shape);
+   if (rc != SERVER_MGMT_NONCE_OK)
+   {
+      int status = rc == SERVER_MGMT_NONCE_STORAGE    ? 503
+                   : rc == SERVER_MGMT_NONCE_MISMATCH ? 403
+                   : rc == SERVER_MGMT_NONCE_NOT_FOUND || rc == SERVER_MGMT_NONCE_EXPIRED ||
+                           rc == SERVER_MGMT_NONCE_ROLLBACK
+                       ? 409
+                       : 401;
+      return err_json(resp, cap, status, "management status denied");
+   }
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\",\"server_id\":\"%s\"}", target);
+   return 200;
 }
 static int rh_version(const route_req_t *rq, char *resp, int cap)
 {
@@ -1356,6 +1468,8 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 static const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
+    {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0, rh_management_challenge},
+    {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},

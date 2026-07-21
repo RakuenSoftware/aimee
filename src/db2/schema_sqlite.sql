@@ -470,6 +470,8 @@ CREATE TABLE IF NOT EXISTS org_telemetry (  id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_telemetry_source ON org_telemetry(source_event_id);
 CREATE INDEX IF NOT EXISTS idx_org_telemetry_team_created ON org_telemetry(team_id, created_at);
 CREATE TABLE IF NOT EXISTS org_telemetry_allowlist (  event_schema TEXT PRIMARY KEY,  metric_names TEXT NOT NULL,  enabled INTEGER NOT NULL DEFAULT 1,  updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_cert_revocation_generation (singleton INTEGER PRIMARY KEY CHECK(singleton=1), generation INTEGER NOT NULL CHECK(generation>=1), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+INSERT OR IGNORE INTO kb_cert_revocation_generation(singleton,generation) VALUES(1,1);
 CREATE TABLE IF NOT EXISTS kb_server_registry (  server_id TEXT PRIMARY KEY, cert_cn TEXT NOT NULL UNIQUE, mgmt_cert_cn TEXT NOT NULL UNIQUE, owner_issuer TEXT NOT NULL DEFAULT '', owner_subject TEXT NOT NULL DEFAULT '', team_id INTEGER NOT NULL, endpoint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', health TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', last_seen TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', client_issuer TEXT NOT NULL DEFAULT '', client_serial_norm TEXT NOT NULL DEFAULT '', client_fingerprint TEXT NOT NULL DEFAULT '', mgmt_issuer TEXT NOT NULL DEFAULT '', mgmt_serial_norm TEXT NOT NULL DEFAULT '', mgmt_fingerprint TEXT NOT NULL DEFAULT '', enrollment_op TEXT NOT NULL DEFAULT '', client_csr_digest TEXT NOT NULL DEFAULT '', mgmt_csr_digest TEXT NOT NULL DEFAULT '', activation_expires_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_kb_server_registry_team ON kb_server_registry(team_id);
 CREATE TABLE IF NOT EXISTS org_egress_binding (

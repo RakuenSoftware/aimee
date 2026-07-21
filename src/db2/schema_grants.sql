@@ -76,12 +76,13 @@ BEGIN
 
   -- P5-A authoritative registry: runtime reaches state only through audited,
   -- bounded definer APIs; direct reads and writes are unavailable.
-  REVOKE ALL ON kb_server_registry FROM aimee_kb_runtime;
+  REVOKE ALL ON kb_server_registry, kb_cert_revocation_generation FROM aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_list(BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
 
   -- P3a cost attribution. The ledger, rollup, and price tables are WRITTEN ONLY by
   -- the SECURITY DEFINER metering functions (owned by aimee_kb_owner, which bypasses
@@ -321,5 +322,18 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_telemetry_allow(TEXT,TEXT[],BOOLEAN) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_telemetry_allow_show() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_metrics_snapshot() TO aimee_kb_runtime;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_status') THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_status;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_status;
+  REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_status;
 END
 $$;

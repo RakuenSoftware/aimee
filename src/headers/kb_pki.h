@@ -41,7 +41,8 @@ extern "C"
    typedef enum
    {
       KB_PKI_CSR_CLIENT_AUTH = 1,
-      KB_PKI_CSR_SERVER_AUTH = 2
+      KB_PKI_CSR_SERVER_AUTH = 2,
+      KB_PKI_CSR_KB_MANAGEMENT_CLIENT = 3
    } kb_pki_csr_profile_t;
 
    /* Generate a fresh self-signed CA (RSA-2048, CN "aimee-kb-ca", ~10 year
@@ -104,6 +105,11 @@ extern "C"
    int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_name,
                                long valid_secs, kb_pki_csr_profile_t profile, char *cert_pem_out,
                                size_t cert_cap);
+
+   /* Dedicated reverse-management caller profile: fixed CN, clientAuth only,
+    * and the Aimee management-profile certificate extension. */
+   int kb_pki_sign_kb_management_csr(const kb_pki_ca_t *ca, const char *csr_pem, long valid_secs,
+                                     char *cert_pem_out, size_t cert_cap);
 
    /* Atomically validate and issue the two P5 server roles. The CSRs must prove
     * possession of different public keys. On any failure both outputs are

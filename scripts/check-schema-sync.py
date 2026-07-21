@@ -87,6 +87,8 @@ DB1_ONLY_TABLES = {
     "primary_sessions",
     "project_clones",
     "server_sessions",
+    "server_mgmt_nonce",
+    "server_mgmt_status_hwm",
     "session_state",
     "user_memories",
     "session_state_ap_hits",

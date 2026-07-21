@@ -1,6 +1,6 @@
 #include "kb_http_servers.h"
 #include "../../db2/server_registry.h"
-#include "../kb_mgmt_endpoint.h"
+#include "kb_mgmt_endpoint.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
