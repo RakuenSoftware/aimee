@@ -860,6 +860,9 @@ static db2_vault_rewrap_result_t simple_state(db2_vault_rewrap_tx_t *tx, const c
 db2_vault_rewrap_result_t db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *t,
                                                         const uint8_t o[16], int64_t f)
 {
+   if (!tx_owned(t) || t->kind != RW_KIND_STAGING || t->phase != RW_PHASE_STAGING ||
+       !t->secret_exhausted || !t->check_exhausted)
+      return tx_fail(t, DB2_VAULT_REWRAP_INVALID);
    return simple_state(t, "SELECT org_vault_rewrap_stage_finish(?1,?2)", o, f, NULL, NULL,
                        RW_KIND_STAGING, RW_PHASE_STAGING_DONE,
                        RW_STATES_ALL & ~RW_STATE_BIT(DB2_VAULT_REWRAP_PREPARING) &

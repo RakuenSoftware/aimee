@@ -1,6 +1,7 @@
 # P7-reseal-d2a canonical receipts and typed verification foundations
 
-- **State:** planned; production-uninvoked and disabled by construction.
+- **State:** delivered and validated on PostgreSQL 17 (CT260), with focused
+  default and ASAN/UBSAN tests; production-uninvoked and disabled by construction.
 - **Depends on:** P7-reseal-a/c and P7-reseal-d1.
 - **Enables:** P7-reseal-d2b's injected DB x custody reconciler.
 
@@ -233,3 +234,18 @@ duplicated KEK-check code is removed without behavior change, all P7 transitions
 and promoted reads are available only through typed cleansing wrappers, PG can
 prove promoted live/stage equivalence and page all rows within one SERIALIZABLE
 snapshot, ACL reapplication stays closed, and no production invocation exists.
+
+## Delivered validation
+
+- Default server and kb builds plus focused receipt, KEK-check, typed-wrapper,
+  pool, vault-store, TPM-stub, and prepare-classification tests passed.
+- Receipt and vault-store paths passed ASAN/UBSAN, including alias failures,
+  cleansing, canonical receipt binding, transaction phase misuse, response-ID
+  mismatch, cursor termination, and commit uncertainty.
+- The live typed wrapper test passed against PostgreSQL 17 on CT260 with a
+  canonical 208-byte receipt. Fresh and reapplied schema/grants, exact ACLs,
+  verification evidence, concurrency/failure cases, and the complete P1/P7
+  PostgreSQL regression gate passed.
+- Successive adversarial full-branch roundtables were audited claim-by-claim.
+  Their recurring valid findings were incorporated; the release-gate review
+  reported no surviving issues on the hardened tree.
