@@ -1053,7 +1053,7 @@ int main(void)
       compute_pool_close(&g_test_server_ctx.orchestration_pool);
       assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
                                        CAP_DELEGATE, rb, sizeof(rb)) == 503);
-      assert(strstr(rb, "orchestration queue full"));
+      assert(strstr(rb, "orchestration unavailable"));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */

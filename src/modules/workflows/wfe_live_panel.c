@@ -300,7 +300,14 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          snprintf(cfg.ensemble_reference_personas[i], sizeof cfg.ensemble_reference_personas[i],
                   "%s", required[i]);
       }
-      cfg.ensemble_min_successful = nlens;
+      /* Preset/lens bindings above are positive must-use seats. They do not cap
+       * the panel: fill every remaining eligible provider slot, diversity first,
+       * so a 10-seat codex plus a 4-seat MiniMax roster actually runs 14
+       * concurrent reviews rather than one invocation per provider name. */
+      ensemble_filter_panel_authorization(&cfg, &acfg);
+      ensemble_filter_panel_availability(&cfg, &acfg);
+      ensemble_fill_panel_capacity(&cfg, &acfg);
+      cfg.ensemble_min_successful = cfg.ensemble_reference_count;
       cfg.roundtable_replay_verify_enabled = 0;
 
       roundtable_opts_t opts;

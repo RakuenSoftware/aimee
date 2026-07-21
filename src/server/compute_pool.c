@@ -151,10 +151,15 @@ int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg)
 {
    pthread_mutex_lock(&pool->mutex);
 
-   if (pool->shutdown || pool->queue_count >= COMPUTE_QUEUE_SIZE)
+   if (pool->shutdown)
    {
       pthread_mutex_unlock(&pool->mutex);
-      return -1;
+      return COMPUTE_POOL_SUBMIT_CLOSED;
+   }
+   if (pool->queue_count >= COMPUTE_QUEUE_SIZE)
+   {
+      pthread_mutex_unlock(&pool->mutex);
+      return COMPUTE_POOL_SUBMIT_FULL;
    }
 
    pool->queue[pool->queue_tail].fn = fn;
@@ -177,7 +182,7 @@ int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg)
    if (log_high)
       LOG_WARN("compute_pool", "queue depth high: %d/%d (>=%d%%)", log_count, COMPUTE_QUEUE_SIZE,
                COMPUTE_QUEUE_HIGH_PCT);
-   return 0;
+   return COMPUTE_POOL_SUBMIT_OK;
 }
 
 void compute_pool_close(compute_pool_t *pool)

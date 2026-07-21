@@ -382,7 +382,7 @@ The panel is configured under `ensemble` in `aimee.yaml`:
 
 | Field | Meaning |
 |-------|---------|
-| `reference_models` | The panel: diverse model/agent names to fan out to |
+| `reference_models` | Positive must-use model/agent pins; runtime fills all other enabled, eligible `max_parallel` seats, provider-diversity first |
 | `aggregator` | Agent that synthesizes the panel's answers |
 | `min_successful` | Minimum panelists that must answer before degrading (default 2) |
 | `max_cost_usd` | Optional per-run cost cap in USD. **Unset/0 means no limit (the default).** Set a positive value to cap a run |

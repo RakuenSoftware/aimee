@@ -63,9 +63,14 @@ int main(void)
       persona_free(&p);
 
       /* --- reviewer built-ins: read-only, review-oriented roles, no gate --- */
-      const char *reviewers[] = {
-          "qa", "security", "reviewer", "architect", "reviewer-constructive", "technical-writer"};
-      for (int i = 0; i < 6; i++)
+      const char *reviewers[] = {"qa",
+                                 "security",
+                                 "reviewer",
+                                 "architect",
+                                 "reviewer-constructive",
+                                 "technical-writer",
+                                 "original-request"};
+      for (int i = 0; i < 7; i++)
       {
          assert(persona_load(NULL, reviewers[i], &p) == 0);
          assert(p.builtin == 1);
@@ -77,6 +82,8 @@ int main(void)
          assert(has_role(&p, "review") && has_role(&p, "diagnose"));
          assert(!has_role(&p, "code") && !has_role(&p, "refactor")); /* no write roles */
          assert(p.brief_text && strstr(p.brief_text, "READ-ONLY delegates") != NULL);
+         if (strcmp(reviewers[i], "original-request") == 0)
+            assert(strstr(p.brief_text, "blocking drift") != NULL);
          persona_free(&p);
       }
 
@@ -262,8 +269,8 @@ int main(void)
       char dir[PATH_MAX];
       snprintf(dir, sizeof(dir), "%s/defaults", home);
       int w = persona_install_defaults(dir);
-      assert(w == 9); /* engineer, novel, songwriter, qa, security, reviewer, architect,
-                         reviewer-constructive, technical-writer */
+      assert(w == 10); /* engineer, novel, songwriter, qa, security, reviewer, architect,
+                          reviewer-constructive, original-request, technical-writer */
       char path[PATH_MAX];
       snprintf(path, sizeof(path), "%s/novel.md", dir);
       FILE *f = fopen(path, "r");

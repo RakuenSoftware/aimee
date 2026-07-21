@@ -1034,16 +1034,20 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
     * falling back to the generic compute lane, and makes shutdown authoritative. */
    if (ctx && ctx->orchestration_pool_initialized)
    {
-      if (compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j) != 0)
+      int submit_rc = compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j);
+      if (submit_rc != COMPUTE_POOL_SUBMIT_OK)
       {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"orchestration queue full\"}");
+         const char *message = submit_rc == COMPUTE_POOL_SUBMIT_CLOSED ? "orchestration unavailable"
+                                                                       : "orchestration queue full";
+         char detail[96];
+         snprintf(detail, sizeof(detail), "{\"error\":\"%s\"}", message);
+         char *failed = op_run_snapshot(id, op_method, "failed", created, detail);
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
          free(j);
          free(queued);
-         return err_json(resp, cap, 503, "orchestration queue full");
+         return err_json(resp, cap, 503, message);
       }
    }
    else

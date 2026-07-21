@@ -1931,13 +1931,16 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
+   char pin_err[256];
+   if (ensemble_validate_panel_pins(&cfg, &acfg, pin_err, sizeof(pin_err)) != 0)
+      return server_send_error(conn, pin_err, NULL);
+   /* reference_models are positive pins, not an exhaustive roster. Validate
+    * them, then fill every eligible provider seat to configured capacity. */
    ensemble_filter_panel_authorization(&cfg, &acfg);
    /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
     * degraded by a model that is in the list/roster but can't actually run. */
    ensemble_filter_panel_availability(&cfg, &acfg);
+   ensemble_fill_panel_capacity(&cfg, &acfg);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -2126,13 +2129,19 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
    }
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
+   char pin_err[256];
+   if (ensemble_validate_panel_pins(&cfg, &acfg, pin_err, sizeof(pin_err)) != 0)
+   {
+      free(brief.rendered);
+      return server_send_error(conn, pin_err, NULL);
+   }
+   /* reference_models are positive pins, not an exhaustive roster. Validate
+    * them, then fill every eligible provider seat to configured capacity. */
    ensemble_filter_panel_authorization(&cfg, &acfg);
    /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
     * degraded by a model that is in the list/roster but can't actually run. */
    ensemble_filter_panel_availability(&cfg, &acfg);
+   ensemble_fill_panel_capacity(&cfg, &acfg);
    bind_request_session_creds(req);
 
    /* Give the tool-less panelists read-only access to aimee memory + the code

@@ -2450,7 +2450,7 @@ void server_shutdown(server_ctx_t *ctx)
     * observed by the workers within one poll tick; the drain then completes
     * bounded. Presence is torn down after the drain, so a still-running worker
     * never emits onto a closed ring. */
-   turn_registry_cancel_all();
+   turn_registry_begin_shutdown();
    /* Every queued/running async operation is now bounded by a pool worker and
     * every provider turn has observed cancellation. Drain before shared stores
     * and provider state are torn down. */

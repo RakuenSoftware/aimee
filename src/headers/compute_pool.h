@@ -60,8 +60,16 @@ typedef struct
 /* Initialize pool with given number of worker threads. Returns 0 on success. */
 int compute_pool_init(compute_pool_t *pool, int num_threads);
 
-/* Submit work to the pool. Returns 0 on success, -1 if the queue is full or
- * admission has been closed. */
+typedef enum
+{
+   COMPUTE_POOL_SUBMIT_OK = 0,
+   COMPUTE_POOL_SUBMIT_FULL = -1,
+   COMPUTE_POOL_SUBMIT_CLOSED = -2,
+} compute_pool_submit_result_t;
+
+/* Submit work to the pool. Distinguishes temporary queue saturation from the
+ * persistent admission-closed state so callers never advertise shutdown as a
+ * retryable "queue full" condition. */
 int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg);
 
 /* Close admission without waiting for queued/running work. Idempotent. This is

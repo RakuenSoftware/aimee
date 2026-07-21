@@ -101,11 +101,25 @@ func TestExtractJSONObjectSkipsMalformedObjectPreamble(t *testing.T) {
 func TestExtractJSONObjectDoesNotPromoteNestedMalformedPayload(t *testing.T) {
 	for _, response := range []string{
 		`{"broken":,"payload":{"verdict":"approve","findings":[]}}`,
-		`{"broken":[} {"verdict":"approve","findings":[]} ]}`,
 		`{"a":]}`,
+		`{"broken":[} {"verdict":"approve","findings":[]} ]}`,
 	} {
 		if doc, err := extractJSONObject(response); err == nil {
 			t.Fatalf("accepted nested or mismatched payload %q as %s", response, doc)
+		}
+	}
+}
+
+func TestExtractJSONObjectDoesNotPromoteObjectFromTopLevelArray(t *testing.T) {
+	for _, response := range []string{
+		`[{"ok":true}]`,
+		`[broken,{"ok":true}]`,
+		`[[{"ok":true}]]`,
+		`[{"ok":true}`,
+		`[{"a":1,`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("promoted nested array object from %q as %s", response, doc)
 		}
 	}
 }
@@ -151,13 +165,15 @@ func TestExtractJSONObjectRejectsTruncatedAndProseResponses(t *testing.T) {
 
 func TestExtractJSONObjectSkipsManyDisjointMalformedCandidates(t *testing.T) {
 	const malformedCandidates = 10_000
-	response := strings.Repeat(`{,}`, malformedCandidates) + `{"ok":true}`
-	doc, err := extractJSONObject(response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(doc); got != `{"ok":true}` {
-		t.Fatalf("wrong object extracted after %d malformed candidates: %s", malformedCandidates, got)
+	for _, malformed := range []string{`{,}`, `{"a":null,}`} {
+		response := strings.Repeat(malformed, malformedCandidates) + `{"ok":true}`
+		doc, err := extractJSONObject(response)
+		if err != nil {
+			t.Fatalf("failed after %d copies of %q: %v", malformedCandidates, malformed, err)
+		}
+		if got := string(doc); got != `{"ok":true}` {
+			t.Fatalf("wrong object extracted after %d copies of %q: %s", malformedCandidates, malformed, got)
+		}
 	}
 }
 
@@ -169,6 +185,38 @@ func TestExtractJSONObjectSkipsMalformedTokenCandidates(t *testing.T) {
 		}
 		if got := string(doc); got != `{"ok":true}` {
 			t.Fatalf("wrong object extracted after %q: %s", malformed, got)
+		}
+	}
+}
+
+func TestExtractJSONObjectHandlesEscapedQuotesWithoutStateLeak(t *testing.T) {
+	for _, expected := range []string{
+		`{"a":"x\\\"y"}`,
+		`{"a":"\\\""}`,
+	} {
+		response := expected + `{"ok":true}`
+		doc, err := extractJSONObject(response)
+		if err != nil {
+			t.Fatalf("failed escaped-string input %q: %v", response, err)
+		}
+		if got := string(doc); got != expected {
+			t.Fatalf("wrong escaped-string candidate from %q: %s", response, got)
+		}
+	}
+
+	if doc, err := extractJSONObject("{\"a\":\"\\"); err == nil {
+		t.Fatalf("accepted odd-backslash unterminated string as %s", doc)
+	}
+}
+
+func TestExtractJSONObjectFailsClosedAfterMismatchedCandidate(t *testing.T) {
+	for _, response := range []string{
+		`{"a":[}{"ok":true}`,
+		`[} {"ok":true}`,
+		`["x",{"a":[} {"ok":true}]`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("accepted object after ambiguous framing %q as %s", response, doc)
 		}
 	}
 }

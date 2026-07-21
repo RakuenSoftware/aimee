@@ -117,6 +117,12 @@ typedef struct
    int participants_failed; /* participants that returned no usable response in the final round run
                              */
    double cost_usd;
+   /* Explicit assessment of whether the reviewed direction still serves the
+    * originating request. `unclear` is fail-closed for workflow gates: a panel
+    * that did not compare the work to the ask cannot approve it by omission. */
+   char original_request_alignment[16]; /* aligned | drifted | unclear */
+   char original_request_alignment_summary[512];
+   char original_request_alignment_sources[256];
    roundtable_review_item_t items[ROUNDTABLE_MAX_REVIEW_ITEMS];
    int item_count;
    int items_round;

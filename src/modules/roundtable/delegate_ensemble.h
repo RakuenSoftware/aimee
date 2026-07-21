@@ -9,6 +9,8 @@
 #include "config.h"
 #include "roundtable_types.h" /* roundtable_opts_t / roundtable_result_t (owned by the roundtable module) */
 
+#include <stddef.h>
+
 /* Max panelists in a roundtable/ensemble fan-out. Must match the
  * ensemble_reference_models / ensemble_reference_personas array dims in config.h
  * (a _Static_assert in delegate_ensemble.c enforces this). The fan-out arrays
@@ -50,15 +52,15 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                             const roundtable_opts_t *opts, roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
-/* Seed cfg->ensemble_reference_models from the enabled agents when no panel is
- * configured (no-op if ensemble_reference_count > 0). Skips agents flagged
- * primary-only and claude-CLI agents that cannot run server-side. Defaults the
- * aggregator to the first seated model. */
-void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg);
-
 /* 1 if `ag` may sit on a panel: enabled + named, NOT primary-only (agents.json
  * `primary_only`), and a claude-CLI only when server-hosted (is_server_hosted). */
 int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag);
+
+/* Validate explicit positive pins before any filter can remove them. A concrete
+ * pin is a hard must-use requirement: missing, unauthorized, or unavailable
+ * returns -1 and describes the pin in err. "$random" is not a concrete pin. */
+int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg, char *err,
+                                 size_t err_n);
 
 /* Replace each "$random" seat in ensemble.reference_models with a concretely
  * picked review-capable agent (excluding already-seated models for diversity);
@@ -69,8 +71,9 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg);
 
 /* Drop unauthorized/ineligible configured agents (e.g. an unauthorized claude)
  * from an EXPLICIT ensemble.reference_models list and fix up the aggregator. Run
- * after ensemble_default_panel_from_agents so both auto and explicit panels are
- * authorization-gated. Resolves "$random" seats first (see above). */
+ * before ensemble_fill_panel_capacity so explicit pins are authorization-gated
+ * and automatic seats are added only from the eligible roster. Resolves
+ * "$random" seats first (see above). */
 void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg);
 
 /* Drop currently-UNAVAILABLE panelists (unkeyed HTTP agent, missing CLI/tmux,
@@ -79,6 +82,13 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
  * Run after the seed + authorization filter so a configured-but-broken or
  * auto-seeded-but-unkeyed model never burns a seat and degrades the round. */
 void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg);
+
+/* Fill every currently available panel seat after pins have been authorized and
+ * availability-filtered.  Configured reference_models are positive must-use
+ * pins, not an exhaustive allow-list.  Eligible agents are added diversity
+ * first (one seat each), then round-robin up to each agent's max_parallel
+ * capacity, capped by ENSEMBLE_MAX_REFS. */
+void ensemble_fill_panel_capacity(config_t *cfg, const agent_config_t *acfg);
 
 /* Persona name for panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set (any mode), else a mode default

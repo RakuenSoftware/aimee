@@ -36,7 +36,9 @@ aimee delegate aggregate "Design a migration plan for the auth schema"
 
 Configured by `ensemble.*` (see [Settings](SETTINGS.md)):
 
-- `ensemble.reference_models` — diverse model/agent names for the fan-out.
+- `ensemble.reference_models` — positive must-use model/agent pins. Pins never
+  exclude another eligible agent; runtime fills every eligible agent's
+  `max_parallel` capacity, spreading seats across providers before repeats.
 - `ensemble.reference_personas` — optional per-reference persona overrides.
 - `ensemble.aggregator` — the agent that synthesizes the final answer.
 - `ensemble.min_successful` — min references that must succeed before degrading (default 2).
@@ -45,10 +47,16 @@ Configured by `ensemble.*` (see [Settings](SETTINGS.md)):
 ## roundtable — review / debate panel
 
 Runs multiple rounds; each round's panel sees the prior round and returns the
-best round's artifact. Each panelist runs **without file tools** and gets a
-**distinct persona** (security, architect, QA, contrarian, constructive
-reviewer), so it reviews the artifact you give it instead of wandering the
-filesystem — and tool-less models (e.g. codex) can still participate.
+best round's artifact. Review panelists get read-only Aimee index tools and a
+diverse persona lineup (original-request alignment, security, architect, QA,
+contrarian, constructive reviewer).
+
+Every review must explicitly report `original_request_alignment` as `aligned`,
+`drifted`, or `unclear`, with a comparison to the originating request. A useful
+refinement remains aligned; substituting an unrelated goal or deliverable is
+drift. WFE gates fail closed on `drifted`, `unclear`, or an omitted assessment,
+so implementation quality cannot accidentally earn approval for work that does
+not answer the request.
 
 ```bash
 aimee ensemble roundtable "Is this migration plan sound?" --mode review
