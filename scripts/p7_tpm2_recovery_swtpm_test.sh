@@ -120,12 +120,11 @@ run "repeat recovery" prepared-recover "$KEK1" "$SECRET"
 [ "$(nv_gen)" = "$G0" ] || fail "discovery/recovery changed NV"
 
 if command -v flock >/dev/null 2>&1; then
-   flock "$BLOB.reseal.lock" sleep 10 &
+   flock "$BLOB.reseal.lock" sleep 1 &
    LOCK_PID=$!
    sleep 0.1
    run "second-process lock is BUSY" prepared-discover-busy "$SECRET"
-   kill "$LOCK_PID" 2>/dev/null || true
-   wait "$LOCK_PID" 2>/dev/null || true
+   wait "$LOCK_PID" || true
 fi
 
 run "wrong-secret discovery" prepared-discover-wrong-secret "$WRONG_SECRET"
