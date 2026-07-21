@@ -1719,7 +1719,7 @@ $(TESTPREFIX)/unit-test-kb-bedrock-live: $(OBJDIR)/tests/test_kb_bedrock_live.o 
                               $(OBJDIR)/server/aimee_backend_bedrock.o \
                               $(OBJDIR)/server/aimee_ir_stream.o $(OBJDIR)/server/aimee_ir.o \
                               $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
-                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) | $(KB_RESOLVER)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-live: $(OBJDIR)/tests/test_kb_mgmt_live.o \
