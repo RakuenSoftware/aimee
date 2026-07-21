@@ -113,6 +113,11 @@ scan_hex_canary(){
       die "$label raw key found in $(basename "$path")"
     fi
   done
+  while IFS= read -r -d '' path; do
+    if od -An -v -tx1 "$path" | tr -d ' \n' | grep -F "$hex" >/dev/null; then
+      die "$label raw key found in swtpm state"
+    fi
+  done < <(find "$state" -type f -print0)
   if grep -F "$hex" "$log" >/dev/null; then
     die "$label key found in harness log"
   fi
