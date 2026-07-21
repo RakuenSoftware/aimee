@@ -406,8 +406,7 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
 }
 
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
-                             const char *base, char *out, size_t out_cap, char *err,
-                             size_t errlen)
+                             const char *base, char *out, size_t out_cap, char *err, size_t errlen)
 {
    if (out && out_cap)
       out[0] = '\0';

@@ -45,8 +45,7 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
 /* Find the existing open PR for an exact head/base pair. Returns 1 + URL,
  * 0 when absent, or -1 on API/validation failure. */
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
-                             const char *base, char *out, size_t out_cap, char *err,
-                             size_t errlen);
+                             const char *base, char *out, size_t out_cap, char *err, size_t errlen);
 
 /* One GET /pulls/<n> snapshot: is the PR open, merged, mergeable? */
 typedef struct

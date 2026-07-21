@@ -10,7 +10,7 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http_identity.h" /* attested X-Aimee-Webuser principal */
-#include "aimee_home.h" /* aimee_home — managed Go WFE worktree root */
+#include "aimee_home.h"           /* aimee_home — managed Go WFE worktree root */
 #include "cJSON.h"
 #include "config.h" /* MAX_PATH_LEN */
 #include "log.h"
@@ -26,7 +26,7 @@
 #include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
 #include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
-#include "util.h" /* bounded argv execution for structural worktree checks */
+#include "util.h"            /* bounded argv execution for structural worktree checks */
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -366,7 +366,8 @@ static int wfe_managed_repo(const char *workdir_in, const char *repo_in, const c
       snprintf(err, errlen, "managed repository path does not exist");
       return -1;
    }
-   if ((size_t)snprintf(prefix, sizeof(prefix), "%s/wfe-worktrees/", aimee_home()) >= sizeof(prefix) ||
+   if ((size_t)snprintf(prefix, sizeof(prefix), "%s/wfe-worktrees/", aimee_home()) >=
+           sizeof(prefix) ||
        strncmp(workdir, prefix, strlen(prefix)) != 0)
    {
       snprintf(err, errlen, "worktree is outside the managed WFE root");
@@ -390,8 +391,8 @@ static int wfe_managed_repo(const char *workdir_in, const char *repo_in, const c
       }
    }
    struct stat st;
-   const char *top_argv[] = {"git", "-c", "core.hooksPath=/dev/null", "-C", workdir,
-                             "rev-parse", "--show-toplevel", NULL};
+   const char *top_argv[] = {"git",   "-c",        "core.hooksPath=/dev/null", "-C",
+                             workdir, "rev-parse", "--show-toplevel",          NULL};
    char *top_out = NULL;
    if (lstat(workdir_in, &st) != 0 || S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode) ||
        safe_exec_capture_cwd_env_timeout(top_argv, workdir, environ, &top_out, 4096, 5000) != 0 ||
@@ -413,7 +414,8 @@ static int wfe_managed_repo(const char *workdir_in, const char *repo_in, const c
    {
       const char *branch_argv[] = {"git", "-C", workdir, "rev-parse", "--abbrev-ref", "HEAD", NULL};
       char *branch = NULL;
-      int brc = safe_exec_capture_cwd_env_timeout(branch_argv, workdir, environ, &branch, 4096, 5000);
+      int brc =
+          safe_exec_capture_cwd_env_timeout(branch_argv, workdir, environ, &branch, 4096, 5000);
       if (brc != 0 || !branch)
       {
          free(branch);
@@ -487,7 +489,7 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
       if (rc == 0)
       {
          int found = git_pr_find_open_via_api(principal, workdir, head, base, url, sizeof(url), err,
-                                               sizeof(err));
+                                              sizeof(err));
          if (found == 0)
             rc = git_pr_create_via_api_ex(principal, workdir, head, base, title,
                                           "Automated workflow output ready for human review.", url,
@@ -516,8 +518,9 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
       rc = ci == GIT_PR_CI_ERROR ? -1 : 0;
       if (rc == 0)
       {
-         const char *state = ci == GIT_PR_CI_PENDING ? "pending" :
-                             ci == GIT_PR_CI_FAILURE ? "failed" : "passed";
+         const char *state = ci == GIT_PR_CI_PENDING   ? "pending"
+                             : ci == GIT_PR_CI_FAILURE ? "failed"
+                                                       : "passed";
          cJSON_AddStringToObject(out, "state", state);
       }
    }

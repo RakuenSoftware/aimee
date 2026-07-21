@@ -139,17 +139,27 @@ int git_ops_push_dir(const char *principal, const char *repo_dir, const char *re
       snprintf(err, errlen, "managed push ref too long");
       return -1;
    }
-   const char *argv[] = {"git", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=",
-                         "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
-                         "push", "-u", remote_url, refspec, NULL};
+   const char *argv[] = {"git",
+                         "-c",
+                         "core.hooksPath=/dev/null",
+                         "-c",
+                         "credential.helper=",
+                         "-c",
+                         "protocol.allow=never",
+                         "-c",
+                         "protocol.https.allow=always",
+                         "push",
+                         "-u",
+                         remote_url,
+                         refspec,
+                         NULL};
    int token_fd = -1;
-   char **envp = git_cred_inject_build_env_for_repo(principal, remote_url, NULL, NULL, environ,
-                                                     &token_fd);
+   char **envp =
+       git_cred_inject_build_env_for_repo(principal, remote_url, NULL, NULL, environ, &token_fd);
    char **hardened = harden_push_env(envp ? envp : environ);
-   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, repo_dir,
-                                                 hardened ? hardened : (envp ? envp : environ), out,
-                                                 GO_OUT_MAX, GO_TIMEOUT_MS, token_fd,
-                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   int rc = safe_exec_capture_cwd_env_fd_timeout(
+       argv, repo_dir, hardened ? hardened : (envp ? envp : environ), out, GO_OUT_MAX,
+       GO_TIMEOUT_MS, token_fd, token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
    if (token_fd >= 0)
       close(token_fd);
    if (envp)
