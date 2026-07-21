@@ -221,6 +221,39 @@ static void test_symbol_dberror(void)
    assert(evidence_replay_with(&be, &ev, &r) == REPLAY_INDEX_UNAVAILABLE);
 }
 
+static void test_backend_total_larger_than_hit_buffer(void)
+{
+   replay_backend_t be = fake_backend();
+   review_evidence_t ev;
+   memset(&ev, 0, sizeof(ev));
+   reduced_record_t r;
+   g_pc = 1;
+
+   /* Worktree replay returns the true total while filling only the bounded
+    * output sink. The replay layer must preserve that count without reading
+    * beyond any of its three 256-entry hit buffers. */
+   ev.count = 300;
+
+   ev.kind = EV_SYMBOL;
+   snprintf(ev.target, sizeof(ev.target), "symbol");
+   g_symbol_ret = 300;
+   g_symbol_n = 300;
+   assert(evidence_replay_with(&be, &ev, &r) == REPLAY_MATCH);
+   assert(r.count == 300 && strlen(r.idkey) == 64);
+
+   ev.kind = EV_REFS;
+   g_caller_ret = 300;
+   g_caller_n = 300;
+   assert(evidence_replay_with(&be, &ev, &r) == REPLAY_MATCH);
+   assert(r.count == 300 && strlen(r.idkey) == 64);
+
+   ev.kind = EV_SEARCH;
+   g_search_ret = 300;
+   g_search_n = 300;
+   assert(evidence_replay_with(&be, &ev, &r) == REPLAY_MATCH);
+   assert(r.count == 300 && strlen(r.idkey) == 64);
+}
+
 static void test_claimed_idkey_match_and_mismatch(void)
 {
    replay_backend_t be = fake_backend();
@@ -294,6 +327,7 @@ int main(void)
    test_symbol_exists_or_not();
    test_search_positive_and_dberror();
    test_symbol_dberror();
+   test_backend_total_larger_than_hit_buffer();
    test_claimed_idkey_match_and_mismatch();
    test_idkey_cap_and_dedup();
    test_no_backend_degrades();
