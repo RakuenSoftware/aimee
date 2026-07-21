@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -1232,6 +1233,28 @@ static long nosigpipe_bio_ctrl(BIO *bio, int command, long argument, void *point
       return 1;
    case BIO_CTRL_FLUSH:
       return 1;
+   case BIO_CTRL_EOF:
+      return !state || !BIO_get_init(bio);
+   case BIO_CTRL_PENDING:
+   {
+      int pending = 0;
+      return state && state->fd >= 0 && ioctl(state->fd, FIONREAD, &pending) == 0 && pending > 0
+                 ? pending
+                 : 0;
+   }
+   case BIO_CTRL_WPENDING:
+      return 0;
+   case BIO_CTRL_DUP:
+   {
+      BIO *target = pointer;
+      nosigpipe_bio_state_t *target_state = target ? BIO_get_data(target) : NULL;
+      if (!state || !target_state)
+         return 0;
+      target_state->fd = state->fd;
+      BIO_set_init(target, BIO_get_init(bio));
+      BIO_set_shutdown(target, BIO_NOCLOSE); /* A duplicate never gains fd ownership. */
+      return 1;
+   }
    default:
       return 0;
    }
@@ -1245,7 +1268,8 @@ static void nosigpipe_bio_method_init(void)
    int type = BIO_get_new_index();
    if (type < 0)
       return;
-   BIO_METHOD *method = BIO_meth_new(type | BIO_TYPE_SOURCE_SINK, "aimee MSG_NOSIGNAL socket");
+   BIO_METHOD *method =
+       BIO_meth_new(type | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR, "aimee MSG_NOSIGNAL socket");
    if (!method || BIO_meth_set_create(method, nosigpipe_bio_create) != 1 ||
        BIO_meth_set_destroy(method, nosigpipe_bio_destroy) != 1 ||
        BIO_meth_set_read(method, nosigpipe_bio_read) != 1 ||
@@ -1284,6 +1308,25 @@ __attribute__((visibility("hidden"))) int kb_http_client_test__nosigpipe_bio_wri
    int saved_errno = errno;
    BIO_free(bio);
    errno = saved_errno;
+   return result;
+}
+
+__attribute__((visibility("hidden"))) int kb_http_client_test__nosigpipe_ssl_fd(int fd)
+{
+   SSL_CTX *context = SSL_CTX_new(TLS_client_method());
+   SSL *ssl = context ? SSL_new(context) : NULL;
+   BIO *bio = ssl ? nosigpipe_socket_bio(fd) : NULL;
+   if (!ssl || !bio)
+   {
+      BIO_free(bio);
+      SSL_free(ssl);
+      SSL_CTX_free(context);
+      return -1;
+   }
+   SSL_set_bio(ssl, bio, bio);
+   int result = SSL_get_fd(ssl);
+   SSL_free(ssl);
+   SSL_CTX_free(context);
    return result;
 }
 

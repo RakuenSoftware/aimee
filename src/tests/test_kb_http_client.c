@@ -407,6 +407,9 @@ static void sigpipe_transport_isolation(void)
 
    int sockets[2];
    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+   /* SSL_get_fd is how the nonblocking handshake chooses its poll descriptor.
+    * Custom socket BIOs must advertise BIO_TYPE_DESCRIPTOR for this to work. */
+   assert(kb_http_client_test__nosigpipe_ssl_fd(sockets[0]) == sockets[0]);
    assert(close(sockets[1]) == 0);
    errno = 0;
    assert(kb_http_client_test__nosigpipe_bio_write(sockets[0]) < 0);

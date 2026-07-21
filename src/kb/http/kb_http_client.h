@@ -106,6 +106,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
 int kb_http_client_test__tls_eof_is_authenticated(int ssl_error);
 kb_http_result_t kb_http_client_test__wait_fd(int fd, short events, int timeout_ms);
 int kb_http_client_test__nosigpipe_bio_write(int fd);
+int kb_http_client_test__nosigpipe_ssl_fd(int fd);
 kb_http_result_t kb_http_client_test__resolve(const char *host, int timeout_ms, int hang);
 kb_http_result_t kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water);
 kb_http_result_t kb_http_client_test__dns_slots(size_t *used, size_t *high_water);
