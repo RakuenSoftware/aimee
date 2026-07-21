@@ -4,11 +4,11 @@
 
 #include <stddef.h>
 
-#define KB_HTTP_HEADER_BLOCK_MAX (32U * 1024U)
-#define KB_HTTP_HEADER_LINE_MAX  8192U
-#define KB_HTTP_HEADER_COUNT_MAX 64U
-#define KB_HTTP_CHUNK_LINE_MAX   128U
-#define KB_HTTP_BODY_MAX         (16U * 1024U * 1024U)
+#define KB_HTTP_HEADER_BLOCK_MAX    (32U * 1024U)
+#define KB_HTTP_HEADER_LINE_MAX     8192U
+#define KB_HTTP_HEADER_COUNT_MAX    64U
+#define KB_HTTP_CHUNK_LINE_MAX      128U
+#define KB_HTTP_BODY_MAX            (16U * 1024U * 1024U)
 #define KB_HTTP_REQUEST_HEADERS_MAX 32U
 
 typedef enum
@@ -86,8 +86,8 @@ kb_http_result_t kb_http_request_validate(const kb_http_request_t *request);
  * feed returns KB_HTTP_MORE until EOF, or a terminal error/abort. finish_eof succeeds only
  * after exact Content-Length or the complete zero-chunk + empty-trailer terminator. */
 typedef struct kb_http_response_parser kb_http_response_parser_t;
-kb_http_result_t kb_http_response_parser_init(kb_http_response_parser_t **parser,
-                                              size_t body_max, kb_http_headers_fn headers_cb,
+kb_http_result_t kb_http_response_parser_init(kb_http_response_parser_t **parser, size_t body_max,
+                                              kb_http_headers_fn headers_cb,
                                               kb_http_body_fn body_cb, void *context);
 kb_http_result_t kb_http_response_parser_feed(kb_http_response_parser_t *parser,
                                               const unsigned char *bytes, size_t length);
@@ -96,9 +96,8 @@ void kb_http_response_parser_free(kb_http_response_parser_t **parser);
 
 /* Performs exactly one HTTPS POST exchange. `response` is zero on every failure. */
 kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
-                                     kb_http_response_t *response,
-                                     kb_http_headers_fn headers_cb, kb_http_body_fn body_cb,
-                                     void *context);
+                                      kb_http_response_t *response, kb_http_headers_fn headers_cb,
+                                      kb_http_body_fn body_cb, void *context);
 
 /* Private, hidden implementation test hooks.  These are not production ABI. */
 #ifdef KB_HTTP_CLIENT_TESTING

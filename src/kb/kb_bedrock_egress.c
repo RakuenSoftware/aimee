@@ -1445,8 +1445,8 @@ static kb_http_gate_t dispatch_headers(const kb_http_response_t *response, void 
       return KB_HTTP_GATE_DISCARD;
    if (strcmp(response->content_type, context->media_type) != 0)
    {
-      context->first_result = context->streaming ? KB_BEDROCK_MALFORMED_STREAM
-                                                 : KB_BEDROCK_MALFORMED_RESPONSE;
+      context->first_result =
+          context->streaming ? KB_BEDROCK_MALFORMED_STREAM : KB_BEDROCK_MALFORMED_RESPONSE;
       return KB_HTTP_GATE_ABORT;
    }
    return KB_HTTP_GATE_DELIVER;
@@ -1502,9 +1502,9 @@ static kb_http_body_action_t dispatch_body(const unsigned char *bytes, size_t le
    }
    if (dispatch_body_reserve(context, length) != 0)
    {
-      context->first_result =
-          length > KB_BEDROCK_BODY_MAX - context->body_len ? KB_BEDROCK_TOO_LARGE
-                                                           : KB_BEDROCK_INTERNAL_ERROR;
+      context->first_result = length > KB_BEDROCK_BODY_MAX - context->body_len
+                                  ? KB_BEDROCK_TOO_LARGE
+                                  : KB_BEDROCK_INTERNAL_ERROR;
       return KB_HTTP_BODY_CALLER_ABORT;
    }
    memcpy(context->body + context->body_len, bytes, length);

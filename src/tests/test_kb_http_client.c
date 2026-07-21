@@ -104,14 +104,13 @@ static void chunked_boundaries(void)
 
 static void gate_and_abort(void)
 {
-   static const unsigned char denied[] =
-       "HTTP/1.1 429 Slow Down\r\nContent-Type: application/json\r\nContent-Length: 6\r\n\r\nsecret";
+   static const unsigned char denied[] = "HTTP/1.1 429 Slow Down\r\nContent-Type: "
+                                         "application/json\r\nContent-Length: 6\r\n\r\nsecret";
    capture_t discard = {.gate = KB_HTTP_GATE_DELIVER};
    assert(parse_parts(denied, sizeof(denied) - 1, sizeof(denied) - 1, 64, &discard) == KB_HTTP_OK);
    assert(discard.headers_called == 1 && discard.body_called == 0 && discard.body_len == 0);
 
-   static const unsigned char okay[] =
-       "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc";
+   static const unsigned char okay[] = "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc";
    capture_t abort_headers = {.gate = KB_HTTP_GATE_ABORT};
    assert(parse_parts(okay, sizeof(okay) - 1, sizeof(okay) - 1, 64, &abort_headers) ==
           KB_HTTP_CALLBACK_ABORT);
@@ -121,8 +120,7 @@ static void gate_and_abort(void)
    kb_http_response_parser_t *parser = NULL;
    assert(kb_http_response_parser_init(&parser, 64, capture_headers, capture_body, &abort_body) ==
           KB_HTTP_OK);
-   assert(kb_http_response_parser_feed(parser, okay, sizeof(okay) - 1) ==
-          KB_HTTP_CALLBACK_ABORT);
+   assert(kb_http_response_parser_feed(parser, okay, sizeof(okay) - 1) == KB_HTTP_CALLBACK_ABORT);
    assert(kb_http_response_parser_feed(parser, NULL, 0) == KB_HTTP_CALLBACK_ABORT);
    assert(kb_http_response_parser_finish_eof(parser) == KB_HTTP_CALLBACK_ABORT);
    kb_http_response_parser_free(&parser);
@@ -174,13 +172,12 @@ static void malformed_matrix(void)
    {
       capture_t capture = {.gate = KB_HTTP_GATE_DELIVER};
       size_t length = strlen(malformed[i]);
-      kb_http_result_t result = parse_parts((const unsigned char *)malformed[i], length, length / 2,
-                                            64, &capture);
+      kb_http_result_t result =
+          parse_parts((const unsigned char *)malformed[i], length, length / 2, 64, &capture);
       assert(result == KB_HTTP_MALFORMED_RESPONSE || result == KB_HTTP_TOO_LARGE);
    }
 
-   static const unsigned char too_large[] =
-       "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nxxxx";
+   static const unsigned char too_large[] = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nxxxx";
    capture_t capture = {.gate = KB_HTTP_GATE_DELIVER};
    assert(parse_parts(too_large, sizeof(too_large) - 1, 0, 3, &capture) == KB_HTTP_TOO_LARGE);
 }
@@ -234,16 +231,15 @@ static void origin_path_validation(void)
                                 .response_body_max = 64,
                                 .connect_timeout_ms = 1,
                                 .total_timeout_ms = 1};
-   static const char *const valid[] = {"/", "/model/a%3Ab/converse",
-                                       "/a/b:c@d!$&'()*+,;=-._~"};
+   static const char *const valid[] = {"/", "/model/a%3Ab/converse", "/a/b:c@d!$&'()*+,;=-._~"};
    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++)
    {
       request.target = valid[i];
       assert(kb_http_request_validate(&request) == KB_HTTP_OK);
    }
    char raw_non_ascii[] = {'/', 'x', (char)0xc3, (char)0xa9, 0};
-   const char *invalid[] = {"//x", "/x\\y", "/x%", "/x%0", "/x%GG", "/x%0g",
-                            "/x?y", "/x#y", "/x y", "/x\ty", raw_non_ascii};
+   const char *invalid[] = {"//x",  "/x\\y", "/x%",  "/x%0",  "/x%GG",      "/x%0g",
+                            "/x?y", "/x#y",  "/x y", "/x\ty", raw_non_ascii};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
    {
       request.target = invalid[i];

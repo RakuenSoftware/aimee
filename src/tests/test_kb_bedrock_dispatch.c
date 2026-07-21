@@ -26,14 +26,13 @@ typedef struct
 static dispatch_mock_t dispatch_mock;
 
 kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
-                                     kb_http_response_t *response,
-                                     kb_http_headers_fn headers_cb, kb_http_body_fn body_cb,
-                                     void *context)
+                                      kb_http_response_t *response, kb_http_headers_fn headers_cb,
+                                      kb_http_body_fn body_cb, void *context)
 {
    dispatch_mock.calls++;
    memset(response, 0, sizeof(*response));
-   assert(request && request->authority && strstr(request->authority, "bedrock-runtime.") ==
-                                               request->authority);
+   assert(request && request->authority &&
+          strstr(request->authority, "bedrock-runtime.") == request->authority);
    assert(strcmp(request->method, "POST") == 0 && request->target[0] == '/');
    assert(request->response_body_max == KB_BEDROCK_BODY_MAX);
    int hosts = 0;
@@ -292,7 +291,6 @@ static void request_tests(void)
    assert(ir.tool_choice != NULL);
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
    cJSON_Delete(ir.tool_choice);
-
 }
 
 static void response_tests(void)
@@ -846,11 +844,10 @@ static unsigned char *dispatch_stream_body(size_t *out_len)
 {
    static const char *types[] = {"messageStart", "contentBlockDelta", "contentBlockStop",
                                  "messageStop", "metadata"};
-   static const char *json[] = {
-       "{\"role\":\"assistant\"}",
-       "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"ok\"}}",
-       "{\"contentBlockIndex\":0}", "{\"stopReason\":\"end_turn\"}",
-       "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}"};
+   static const char *json[] = {"{\"role\":\"assistant\"}",
+                                "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"ok\"}}",
+                                "{\"contentBlockIndex\":0}", "{\"stopReason\":\"end_turn\"}",
+                                "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}"};
    unsigned char *body = NULL;
    size_t length = 0;
    for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++)
@@ -889,8 +886,8 @@ static void dispatch_wrapper_tests(void)
                                      .body_len = sizeof(good) - 1,
                                      .fragment = 3};
    assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) == KB_BEDROCK_OK);
-   assert(status == 200 && response.n_content == 1 &&
-          strcmp(response.content[0].text, "ok") == 0 && dispatch_mock.body_calls > 1);
+   assert(status == 200 && response.n_content == 1 && strcmp(response.content[0].text, "ok") == 0 &&
+          dispatch_mock.body_calls > 1);
 
    int calls = dispatch_mock.calls;
    snprintf(t.endpoint, sizeof(t.endpoint), "https://forbidden.example");
@@ -905,10 +902,8 @@ static void dispatch_wrapper_tests(void)
           KB_BEDROCK_INVALID_ARGUMENT);
    assert(status == 0 && response.content == NULL && dispatch_mock.calls == calls);
 
-   dispatch_mock = (dispatch_mock_t){.status = 200,
-                                     .content_type = NULL,
-                                     .body = good,
-                                     .body_len = sizeof(good) - 1};
+   dispatch_mock = (dispatch_mock_t){
+       .status = 200, .content_type = NULL, .body = good, .body_len = sizeof(good) - 1};
    assert(kb_bedrock_dispatch_buffered(&t, &request, &c, &response, &status) ==
           KB_BEDROCK_MALFORMED_RESPONSE);
    assert(status == 0 && dispatch_mock.body_calls == 0 && response.content == NULL);

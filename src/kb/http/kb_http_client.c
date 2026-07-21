@@ -158,7 +158,7 @@ static kb_http_result_t parse_headers(kb_http_response_parser_t *p)
          at++;
       if (at + 1 >= p->headers_len || at - start > KB_HTTP_HEADER_LINE_MAX)
          return parser_fail(p, at - start > KB_HTTP_HEADER_LINE_MAX ? KB_HTTP_TOO_LARGE
-                                                                   : KB_HTTP_MALFORMED_RESPONSE);
+                                                                    : KB_HTTP_MALFORMED_RESPONSE);
       size_t length = at - start;
       at += 2;
       if (line_count++ == 0)
@@ -170,8 +170,9 @@ static kb_http_result_t parse_headers(kb_http_response_parser_t *p)
       if (!length)
          break;
       if (line_count > KB_HTTP_HEADER_COUNT_MAX + 1U || block[start] == ' ' || block[start] == '\t')
-         return parser_fail(p, line_count > KB_HTTP_HEADER_COUNT_MAX + 1U ? KB_HTTP_TOO_LARGE
-                                                                         : KB_HTTP_MALFORMED_RESPONSE);
+         return parser_fail(p, line_count > KB_HTTP_HEADER_COUNT_MAX + 1U
+                                   ? KB_HTTP_TOO_LARGE
+                                   : KB_HTTP_MALFORMED_RESPONSE);
       size_t colon = 0;
       while (colon < length && block[start + colon] != ':')
       {
@@ -226,15 +227,13 @@ static kb_http_result_t parse_headers(kb_http_response_parser_t *p)
    if (parser_deadline(p) != KB_HTTP_MORE)
       return p->terminal;
    kb_http_gate_t gate = p->headers_cb(&p->response, p->context);
-   if (gate != KB_HTTP_GATE_DELIVER && gate != KB_HTTP_GATE_DISCARD &&
-       gate != KB_HTTP_GATE_ABORT)
+   if (gate != KB_HTTP_GATE_DELIVER && gate != KB_HTTP_GATE_DISCARD && gate != KB_HTTP_GATE_ABORT)
       return parser_fail(p, KB_HTTP_CALLBACK_ABORT);
    if (gate == KB_HTTP_GATE_ABORT)
       return parser_fail(p, KB_HTTP_CALLBACK_ABORT);
    if (parser_deadline(p) != KB_HTTP_MORE)
       return p->terminal;
-   p->gate = p->response.status >= 200 && p->response.status <= 299 ? gate
-                                                                    : KB_HTTP_GATE_DISCARD;
+   p->gate = p->response.status >= 200 && p->response.status <= 299 ? gate : KB_HTTP_GATE_DISCARD;
    return KB_HTTP_MORE;
 }
 
@@ -328,8 +327,7 @@ kb_http_result_t kb_http_response_parser_feed(kb_http_response_parser_t *p,
          if (c == '\n' && (!p->headers_len || p->headers[p->headers_len - 1] != '\r'))
             return parser_fail(p, KB_HTTP_MALFORMED_RESPONSE);
          p->headers[p->headers_len++] = c;
-         if (p->headers_len >= 4 &&
-             memcmp(p->headers + p->headers_len - 4, "\r\n\r\n", 4) == 0)
+         if (p->headers_len >= 4 && memcmp(p->headers + p->headers_len - 4, "\r\n\r\n", 4) == 0)
          {
             kb_http_result_t result = parse_headers(p);
             if (result != KB_HTTP_MORE)
@@ -349,9 +347,8 @@ kb_http_result_t kb_http_response_parser_feed(kb_http_response_parser_t *p,
          p->remaining -= take;
          p->body_seen += take;
          if (!p->remaining)
-            p->state = p->response.framing == KB_HTTP_FRAMING_CONTENT_LENGTH
-                           ? PARSER_DONE
-                           : PARSER_CHUNK_DATA_CR;
+            p->state = p->response.framing == KB_HTTP_FRAMING_CONTENT_LENGTH ? PARSER_DONE
+                                                                             : PARSER_CHUNK_DATA_CR;
          continue;
       }
       if (p->state == PARSER_CHUNK_SIZE)
@@ -490,8 +487,7 @@ static kb_http_result_t dns_slot_acquire(int64_t deadline)
 {
    if (pthread_once(&dns_slots_once, dns_slots_init) != 0 || !dns_slots_ready)
       return KB_HTTP_INTERNAL_ERROR;
-   struct timespec until = {.tv_sec = deadline / 1000000000LL,
-                            .tv_nsec = deadline % 1000000000LL};
+   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
    if (pthread_mutex_lock(&dns_slots_mutex) != 0)
       return KB_HTTP_INTERNAL_ERROR;
    int wait_result = 0;
@@ -602,8 +598,7 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
       dns_slot_release();
       return KB_HTTP_RESOLVE_ERROR;
    }
-   struct timespec until = {.tv_sec = deadline / 1000000000LL,
-                            .tv_nsec = deadline % 1000000000LL};
+   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
    pthread_mutex_lock(&q->mutex);
    int wait_result = 0;
    while (!q->done && wait_result == 0)
@@ -673,8 +668,9 @@ static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
    }
 }
 
-__attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__wait_fd(int fd, short events, int timeout_ms)
+__attribute__((visibility("hidden"))) kb_http_result_t kb_http_client_test__wait_fd(int fd,
+                                                                                    short events,
+                                                                                    int timeout_ms)
 {
    int64_t now = now_ns();
    if (fd < 0 || timeout_ms <= 0 || now < 0 || now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
@@ -821,9 +817,8 @@ static int origin_path_valid(const char *target)
 kb_http_result_t kb_http_request_validate(const kb_http_request_t *r)
 {
    if (!r || !authority_valid(r->authority) || r->connect_timeout_ms <= 0 ||
-       r->total_timeout_ms <= 0 ||
-       strcmp(r->method ? r->method : "", "POST") != 0 || !origin_path_valid(r->target) ||
-       !r->headers || !r->header_count ||
+       r->total_timeout_ms <= 0 || strcmp(r->method ? r->method : "", "POST") != 0 ||
+       !origin_path_valid(r->target) || !r->headers || !r->header_count ||
        r->header_count > KB_HTTP_REQUEST_HEADERS_MAX || (!r->body && r->body_len) ||
        r->body_len > KB_HTTP_BODY_MAX || !r->response_body_max ||
        r->response_body_max > KB_HTTP_BODY_MAX)
@@ -946,9 +941,8 @@ static kb_http_result_t build_request_bytes(const kb_http_request_t *r, unsigned
 }
 
 kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
-                                     kb_http_response_t *response,
-                                     kb_http_headers_fn headers_cb, kb_http_body_fn body_cb,
-                                     void *context)
+                                      kb_http_response_t *response, kb_http_headers_fn headers_cb,
+                                      kb_http_body_fn body_cb, void *context)
 {
    if (response)
       memset(response, 0, sizeof(*response));
@@ -991,8 +985,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
       goto done;
    ctx = client_context();
    ssl = ctx ? SSL_new(ctx) : NULL;
-   if (!ssl || SSL_set_fd(ssl, fd) != 1 ||
-       SSL_set_tlsext_host_name(ssl, request->authority) != 1 ||
+   if (!ssl || SSL_set_fd(ssl, fd) != 1 || SSL_set_tlsext_host_name(ssl, request->authority) != 1 ||
        SSL_set1_host(ssl, request->authority) != 1)
    {
       result = KB_HTTP_TLS_ERROR;

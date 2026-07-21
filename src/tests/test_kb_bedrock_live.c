@@ -61,8 +61,7 @@ int main(int argc, char **argv)
       return 2;
    }
    db2_bedrock_target_t target;
-   db2_bedrock_target_result_t resolved =
-       db2_model_bedrock_target_resolve(team, argv[1], &target);
+   db2_bedrock_target_result_t resolved = db2_model_bedrock_target_resolve(team, argv[1], &target);
    if (db2_tenant_scope_commit() != 0 || resolved != DB2_BEDROCK_TARGET_OK)
    {
       fprintf(stderr, "kb_bedrock_live: target unavailable (%d)\n", resolved);
@@ -74,13 +73,12 @@ int main(int argc, char **argv)
    aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_request_t request = {.model = argv[1], .messages = &message, .n_messages = 1};
    const char *wrong = getenv("AIMEE_TEST_WRONG_SECRET");
-   kb_bedrock_credentials_t credentials = {.access_key_id = "AKIDEXAMPLE",
-                                            .secret_access_key =
-                                                wrong && strcmp(wrong, "1") == 0 ? "wrong"
-                                                                                 : "secret",
-                                            .session_token = "token",
-                                            .amz_date = "20260101T000000Z",
-                                            .date = "20260101"};
+   kb_bedrock_credentials_t credentials = {
+       .access_key_id = "AKIDEXAMPLE",
+       .secret_access_key = wrong && strcmp(wrong, "1") == 0 ? "wrong" : "secret",
+       .session_token = "token",
+       .amz_date = "20260101T000000Z",
+       .date = "20260101"};
    int status = 0;
    kb_bedrock_result_t result;
    if (streaming)
