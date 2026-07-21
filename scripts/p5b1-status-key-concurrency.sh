@@ -29,8 +29,8 @@ INSERT INTO org_vault_current(principal,agent,cred,version)
  VALUES('org:p5-status','management','ed25519',2);
 INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,state)
  VALUES('platform:p5-status','org:p5-status',NULL,'management','ed25519',1,2,'activated');
-INSERT INTO kb_management_status_key(singleton,custody_key_id,wire_key_id,enabled)
- VALUES(1,'platform:p5-status','status-1',true);
+INSERT INTO kb_management_status_key(singleton,bootstrap_id,custody_key_id,wire_key_id,public_key,enabled)
+ VALUES(1,repeat('9',64),'platform:p5-status','status-1',decode(repeat('44',32),'hex'),true);
 SQL
 
 generation() { psql -Atq "$db" -c "SELECT generation FROM kb_cert_revocation_generation WHERE singleton=1"; }

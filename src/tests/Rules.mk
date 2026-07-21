@@ -525,7 +525,9 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
-                $(TESTPREFIX)/unit-test-management-status-key-ctx
+                $(TESTPREFIX)/unit-test-management-status-key-ctx \
+                $(TESTPREFIX)/unit-test-kb-mgmt-status-provision \
+                $(TESTPREFIX)/unit-test-management-status-runtime
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -1763,6 +1765,17 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status-custody: \
 $(TESTPREFIX)/unit-test-management-status-key-ctx: \
     $(OBJDIR)/tests/test_management_status_key_ctx.o \
     $(OBJDIR)/db2/management_status_key.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-status-provision: \
+    $(OBJDIR)/tests/test_kb_mgmt_status_provision.o \
+    $(OBJDIR)/kb/kb_mgmt_status_provision.o \
+    $(OBJDIR)/modules/vault/vault_crypto.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-management-status-runtime: \
+    $(OBJDIR)/tests/test_management_status_runtime.o \
+    $(OBJDIR)/db2/management_status_runtime.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-kms: $(OBJDIR)/tests/test_vault_kms.o \

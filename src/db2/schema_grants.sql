@@ -339,8 +339,51 @@ BEGIN
     FROM aimee_kb_runtime;
   REVOKE ALL ON FUNCTION kb_management_status_key_candidate(TEXT,TEXT,BIGINT),
     kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA),
-    kb_management_status_key_use_guard(BIGINT),kb_management_status_key_startup_status()
+    kb_management_status_key_use_guard(BIGINT),kb_management_status_key_startup_status(),
+    kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+      BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+    kb_management_status_key_bootstrap_resume(TEXT,TEXT),
+    kb_management_status_key_bootstrap_prepare_activation(TEXT),
+    kb_management_status_key_bootstrap_finalize(TEXT,BYTEA)
     FROM aimee_kb_runtime;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    RETURN;
+  END IF;
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_resume(TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_prepare_activation(TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) OWNER TO aimee_kb_owner';
+  ALTER TABLE public.kb_management_status_key OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_secret OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_current OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_rotation OWNER TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.org_vault_control_require_open(),
+    public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_owner;
+  GRANT SELECT,INSERT,UPDATE ON public.kb_management_status_key,
+    public.org_vault_secret,public.org_vault_current,public.org_vault_rotation
+    TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_audit_event TO aimee_kb_owner;
+  GRANT USAGE,SELECT ON SEQUENCE public.org_vault_secret_id_seq,
+    public.org_vault_rotation_id_seq TO aimee_kb_owner;
+  REVOKE ALL ON FUNCTION
+    kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+      BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+    kb_management_status_key_bootstrap_resume(TEXT,TEXT),
+    kb_management_status_key_bootstrap_prepare_activation(TEXT),
+    kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) FROM PUBLIC;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_migrate') THEN
+    GRANT EXECUTE ON FUNCTION
+      kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+        BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+      kb_management_status_key_bootstrap_resume(TEXT,TEXT),
+      kb_management_status_key_bootstrap_prepare_activation(TEXT),
+      kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) TO aimee_kb_migrate;
+  END IF;
 END
 $$;
 
@@ -388,5 +431,22 @@ BEGIN
     kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA),
     kb_management_status_key_use_guard(BIGINT),
     kb_management_status_key_startup_status() TO aimee_kb_status;
+END
+$$;
+
+DO $$
+DECLARE role_name TEXT;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY[
+    'aimee_kb_runtime','aimee_kb_status','aimee_kb_status_definer','aimee_kb_status_login'
+  ] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION '
+        'kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),'
+        'kb_management_status_key_bootstrap_resume(TEXT,TEXT),'
+        'kb_management_status_key_bootstrap_prepare_activation(TEXT),'
+        'kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) FROM %I',role_name);
+    END IF;
+  END LOOP;
 END
 $$;

@@ -16,6 +16,7 @@ SERVER  = ../aimee-server$(EXEEXT)
 FORWARDER = ../aimee-forwarder$(EXEEXT)
 KB      = ../aimee-kb$(EXEEXT)
 KB_RESOLVER = ../aimee-kb-resolver$(EXEEXT)
+KB_STATUS_PROVISIONER = ../aimee-kb-status-provision$(EXEEXT)
 WEBCHAT = ../aimee-webchat$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
 RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
@@ -460,13 +461,34 @@ KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c
 # P5-B1 authority-only core. These objects intentionally do not enter ordinary
 # aimee-kb/global DB2 linkage; the dedicated listener will own this group.
 STATUS_AUTHORITY_SRCS = kb/kb_mgmt_status_custody.c kb/kb_mgmt_status.c \
-                        kb/kb_vault_protected_use.c db2/management_status_key.c
+                        kb/kb_mgmt_status_provision.c \
+                        kb/kb_vault_protected_use.c db2/management_status_key.c \
+                        db2/management_status_provision.c \
+                        db2/management_status_runtime.c
 STATUS_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_status_custody.o \
                         $(OBJDIR)/kb/kb_mgmt_status.o \
+                        $(OBJDIR)/kb/kb_mgmt_status_provision.o \
                         $(OBJDIR)/kb/kb_vault_protected_use.o \
-                        $(OBJDIR)/db2/management_status_key.o
+                        $(OBJDIR)/db2/management_status_key.o \
+                        $(OBJDIR)/db2/management_status_provision.o \
+                        $(OBJDIR)/db2/management_status_runtime.o
 .PHONY: status-authority-core
 status-authority-core: $(STATUS_AUTHORITY_OBJS)
+
+# Offline, owner-only bootstrap tool. It is deliberately absent from `all`,
+# install targets, runtime images, and ordinary KB linkage.
+STATUS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_status_provision_main.o \
+                          $(OBJDIR)/kb/kb_mgmt_status_provision.o \
+                          $(OBJDIR)/db2/management_status_provision.o \
+                          $(OBJDIR)/db2/db_postgres.o
+STATUS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
+                                $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
+                                $(OBJDIR)/kb/modules/vault/vault_hwm.o \
+                                $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
+                                $(OBJDIR)/kb/modules/vault/vault_server_key.o \
+                                $(OBJDIR)/kb/modules/vault/vault_custody_kms.o \
+                                $(OBJDIR)/kb/modules/vault/vault_store.o
+STATUS_PROVISIONER_PLATFORM_OBJS = $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS))
 KB_OBJS = $(KB_SRCS:%.c=$(OBJDIR)/%.o)
 # The Bedrock egress object exposes a production kb-internal dispatch seam whose
 # pure Converse/IR implementation lives under server/.  Link those leaf objects
@@ -628,12 +650,12 @@ GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_status_provision_main.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
+ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 DEPS = $(ALL_OBJS:.o=.d)
 
@@ -1004,6 +1026,13 @@ $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDI
 $(KB_RESOLVER): kb/http/kb_http_resolver.c kb/http/kb_http_resolver_protocol.h
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -O2 -Wall -Wextra -Werror -I. -o $@ kb/http/kb_http_resolver.c
+
+$(KB_STATUS_PROVISIONER): $(STATUS_PROVISIONER_OBJS) $(STATUS_PROVISIONER_VAULT_OBJS) \
+                          $(STATUS_PROVISIONER_PLATFORM_OBJS) \
+                          $(OBJDIR)/cJSON.o $(OBJDIR)/modules/config/config.o \
+                          $(OBJDIR)/aimee_home.o
+	$(AIMEE_RUNTIME_MUTATION_GUARD)
+	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the

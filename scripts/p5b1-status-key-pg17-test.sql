@@ -48,6 +48,7 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='public' AND p.proname LIKE 'kb_management_status_key_%'
+        AND p.proname NOT LIKE 'kb_management_status_key_bootstrap_%'
         AND p.prosecdef AND NOT (p.proconfig @>
           ARRAY['search_path=pg_catalog, public, pg_temp']::text[])) THEN
     RAISE EXCEPTION 'status definer search_path is not hardened';
@@ -96,6 +97,17 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+DECLARE s RECORD;
+BEGIN
+  SELECT * INTO s FROM kb_management_status_key_startup_status();
+  IF s.seal_epoch<1 OR s.sealed OR s.enabled OR s.custody_key_id IS NOT NULL
+     OR s.wire_key_id IS NOT NULL OR s.public_key IS NOT NULL OR s.version IS NOT NULL
+     OR s.hwm_attestation IS NOT NULL THEN
+    RAISE EXCEPTION 'empty startup status shape mismatch';
+  END IF;
+END $$;
+
 INSERT INTO kb_management_status_key_use_intent(
   use_id,custody_key_id,wire_key_id,version,request_digest,hwm_attestation_digest,
   caller_issuer,caller_serial_norm,
@@ -136,8 +148,8 @@ INSERT INTO org_vault_current(principal,agent,cred,version)
  VALUES('org:p5-status','management','ed25519',2);
 INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,state)
  VALUES('platform:p5-status','org:p5-status',NULL,'management','ed25519',1,2,'activated');
-INSERT INTO kb_management_status_key(singleton,custody_key_id,wire_key_id,enabled)
- VALUES(1,'platform:p5-status','status-1',true);
+INSERT INTO kb_management_status_key(singleton,bootstrap_id,custody_key_id,wire_key_id,public_key,enabled)
+ VALUES(1,repeat('9',64),'platform:p5-status','status-1',decode(repeat('44',32),'hex'),true);
 SELECT set_config('p5b1.generation',generation::text,true)
   FROM kb_cert_revocation_generation WHERE singleton=1;
 

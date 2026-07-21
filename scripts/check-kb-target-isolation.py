@@ -32,7 +32,10 @@ ALLOWED_AGENT_NAMED_SOURCES = {
 
 STATUS_AUTHORITY_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_custody.c",
+    "kb/kb_mgmt_status_provision.c",
     "db2/management_status_key.c",
+    "db2/management_status_provision.c",
+    "db2/management_status_runtime.c",
 }
 
 FORBIDDEN_SOURCE_PREFIXES = (
