@@ -65,8 +65,7 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    {
       int active = atomic_fetch_add(&g_wave_active, 1) + 1;
       int high = atomic_load(&g_wave_high_water);
-      while (active > high &&
-             !atomic_compare_exchange_weak(&g_wave_high_water, &high, active))
+      while (active > high && !atomic_compare_exchange_weak(&g_wave_high_water, &high, active))
          ;
       sleep_ms(100);
       atomic_fetch_sub(&g_wave_active, 1);

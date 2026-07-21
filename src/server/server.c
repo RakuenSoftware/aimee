@@ -87,7 +87,7 @@ typedef struct
    const char *method;
    server_method_handler_t handler;
 } server_method_dispatch_t;
-#define SERVER_REQUEST_POOL_MAX_THREADS 4
+#define SERVER_REQUEST_POOL_MAX_THREADS   4
 #define SERVER_ORCHESTRATION_POOL_THREADS 16
 static const server_method_dispatch_t server_dispatch_table[];
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
