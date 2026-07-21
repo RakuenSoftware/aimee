@@ -142,7 +142,7 @@ int main(void)
    assert(kb_identity_key(&probe, identity, sizeof(identity)) == 0);
    assert(add_member(identity, team) == 0);
    char authority[33];
-   int authority_rc = db2_enrollment_authority_resolve(cert_fp, cert_issuer, cert_serial,
+   int authority_rc = db2_enrollment_authority_resolve(cert_fp, cert_issuer, probe.subject,
                                                         authority);
    if (authority_rc != 0)
       fprintf(stderr, "P2b enrolled identity unresolved fp=%s issuer=%s serial=%s rc=%d\n",

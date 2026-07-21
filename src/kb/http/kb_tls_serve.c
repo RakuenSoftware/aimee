@@ -122,14 +122,26 @@ static const char *http_reason(int status)
       return "Bad Request";
    case 401:
       return "Unauthorized";
+   case 402:
+      return "Payment Required";
    case 403:
       return "Forbidden";
    case 404:
       return "Not Found";
    case 405:
       return "Method Not Allowed";
+   case 409:
+      return "Conflict";
+   case 429:
+      return "Too Many Requests";
    case 500:
       return "Internal Server Error";
+   case 502:
+      return "Bad Gateway";
+   case 503:
+      return "Service Unavailable";
+   case 504:
+      return "Gateway Timeout";
    default:
       return "OK";
    }
@@ -216,10 +228,12 @@ static int mtls_renew(const char *scope_cn, const char *old_fp, const char *old_
       snprintf(resp, (size_t)cap, "{\"error\":\"renew failed: bad CSR\"}");
       return 400;
    }
-   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[256] = "", new_serial[128] = "";
+   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[256] = "", raw_serial[128] = "";
+   char new_serial[128] = "";
    int metadata_ok = kb_pki_ca_fingerprint(cert, new_fp, sizeof(new_fp)) == 0 &&
-                     kb_pki_cert_metadata(cert, new_issuer, sizeof(new_issuer), new_serial,
-                                          sizeof(new_serial)) == 0;
+                     kb_pki_cert_metadata(cert, new_issuer, sizeof(new_issuer), raw_serial,
+                                          sizeof(raw_serial)) == 0 &&
+                     kb_cert_serial_normalize(raw_serial, new_serial, sizeof(new_serial)) == 0;
    kb_principal_t renew_actor = {.kind = KB_PRIN_CERT, .authenticated = 1};
    snprintf(renew_actor.issuer, sizeof(renew_actor.issuer), "%s", old_issuer);
    snprintf(renew_actor.subject, sizeof(renew_actor.subject), "%s", old_serial_norm);

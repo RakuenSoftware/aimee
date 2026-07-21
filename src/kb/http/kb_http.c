@@ -721,9 +721,11 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
        * DER via X509_digest), or revocation checks would silently miss. Live-
        * verified in the S2a integration test. (kb_pki_ca_fingerprint despite its
        * name hashes any cert's DER, not the CA specifically.) */
-      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", serial[128] = "";
+      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
       if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
-          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), serial, sizeof(serial)) != 0 ||
+          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial,
+                               sizeof(raw_serial)) != 0 ||
+          kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
           db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
       {
          free(cert);

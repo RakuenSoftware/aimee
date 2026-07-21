@@ -250,15 +250,22 @@ int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_p
    {
       const char *b = body ? body : "";
       size_t blen = strlen(b);
+      int bodyless = strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0;
+      if (bodyless && blen != 0)
+         goto done;
       size_t cap = strlen(method) + strlen(path) + strlen(host) + blen +
                    (authorization ? strlen(authorization) : 0) + 192;
       char *req = malloc(cap);
       if (!req)
          goto done;
-      int rn = snprintf(req, cap,
-                        "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
-                        "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                        method, path, host, authorization ? authorization : "", blen, b);
+      int rn = bodyless
+                   ? snprintf(req, cap,
+                              "%s %s HTTP/1.1\r\nHost: %s\r\n%sConnection: close\r\n\r\n",
+                              method, path, host, authorization ? authorization : "")
+                   : snprintf(req, cap,
+                              "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
+                              "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                              method, path, host, authorization ? authorization : "", blen, b);
       int wr = (rn > 0 && (size_t)rn < cap) ? SSL_write(ssl, req, rn) : -1;
       free(req);
       if (wr <= 0)
