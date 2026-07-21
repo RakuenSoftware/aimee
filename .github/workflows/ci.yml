@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, testing]
+    branches: [main, testing, feature/core-modularization]
     # `edited` re-runs the gate when a PR title/body is edited after open, so
     # attribution can't be added post-hoc without failing CI.
     types: [opened, synchronize, reopened, edited]
@@ -11,6 +11,12 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  # Every CI job is deliberately read-only: jobs only check out, build, and
+  # inspect the repository; none comments, labels, publishes, or mutates it.
+  # A future write-capable job must opt in with its own minimal permissions.
+  contents: read
 
 jobs:
   no-coauthor-trailers:
