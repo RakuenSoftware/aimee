@@ -12,10 +12,13 @@
 #include "db_schema.h"
 #include "dashboard.h"
 #include "cJSON.h"
+#if AIMEE_WITH_PLUGIN_LOADER
 #include "aimee/plugin-loader/plugin.h"
+#endif
 #include "platform_path.h"
 #include "platform_test_util.h"
 
+#if AIMEE_WITH_PLUGIN_LOADER
 static void write_manifest(const char *plugin_dir, const char *json)
 {
    char manifest_dir[512];
@@ -145,6 +148,7 @@ static void test_plugin_dashboard_api(void)
 
    platform_test_rmrf(tmpdir);
 }
+#endif
 
 static void test_vector_dashboard_falls_back_without_kb_service(void)
 {
@@ -182,7 +186,9 @@ int main(void)
    assert(platform_unsetenv("AIMEE_HOME") == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
+#if AIMEE_WITH_PLUGIN_LOADER
    test_plugin_dashboard_api();
+#endif
    test_vector_dashboard_falls_back_without_kb_service();
 
    if (old_home)

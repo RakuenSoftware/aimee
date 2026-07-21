@@ -6,7 +6,9 @@
 #include "db1.h"
 #include "headers/cmd_hooks_scope.h"
 #include "memory_redirect.h"
+#if AIMEE_WITH_PLUGIN_LOADER
 #include "aimee/plugin-loader/plugin.h"
+#endif
 #include "platform_process.h"
 #include "agent_config.h"
 #include "agent_coord.h"
@@ -326,6 +328,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    if (db1_init(cfg.db1_path) != 0)
       fatal("cannot open database");
 
+#if AIMEE_WITH_PLUGIN_LOADER
    /* Run enabled plugin hooks for this phase.
     * Plugin hook failures are advisory: warn but don't block execution. */
    {
@@ -351,6 +354,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
          free(out);
       }
    }
+#endif
 
    if (strcmp(phase, "pre") == 0)
    {

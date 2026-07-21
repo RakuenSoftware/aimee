@@ -1,5 +1,6 @@
 CC      = gcc
 OBJDIR  = build/obj
+AIMEE_WITH_PLUGIN_LOADER ?= 0
 
 ifeq ($(OS),Windows_NT)
 EXEEXT  = .exe
@@ -84,6 +85,19 @@ endif
 $(shell mkdir -p $(dir $(VERSION_FILE)) && echo "$(GIT_VERSION)" > $(VERSION_FILE))
 endif
 
+# Feature-profile tracking: guarded translation units must rebuild when a
+# compile-time module selection changes in the same worktree.
+FEATURE_PROFILE_FILE = $(OBJDIR)/feature-profile.txt
+CURRENT_FEATURE_PROFILE = plugin-loader=$(AIMEE_WITH_PLUGIN_LOADER)
+PREVIOUS_FEATURE_PROFILE = $(shell cat $(FEATURE_PROFILE_FILE) 2>$(NULLDEV))
+ifneq ($(CURRENT_FEATURE_PROFILE),$(PREVIOUS_FEATURE_PROFILE))
+ifneq ($(PREVIOUS_FEATURE_PROFILE),)
+$(shell $(RM) $(OBJDIR) 2>$(NULLDEV))
+$(info aimee: feature profile changed ($(PREVIOUS_FEATURE_PROFILE) -> $(CURRENT_FEATURE_PROFILE)) — cleaned stale objects in $(OBJDIR))
+endif
+$(shell mkdir -p $(dir $(FEATURE_PROFILE_FILE)) && echo "$(CURRENT_FEATURE_PROFILE)" > $(FEATURE_PROFILE_FILE))
+endif
+
 # Eagerly create platform subdirectories at variable-expansion time so parallel
 # builds (-j) on macOS GNU make 3.81 don't race on directory creation. Order-only
 # prerequisites have edge cases in older make versions; $(shell) is bulletproof.
@@ -92,7 +106,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Imodules/plugin-loader/include -Imodules/module-runtime/include -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/delegates -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/audit -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Imodules/plugin-loader/include -Imodules/module-runtime/include -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/delegates -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/audit -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp -DAIMEE_WITH_PLUGIN_LOADER=$(AIMEE_WITH_PLUGIN_LOADER) $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -295,9 +309,12 @@ CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/conf
             compact.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
             model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c modules/module-runtime/extension.c \
-            modules/plugin-loader/plugin.c modules/plugin-loader/plugin_loader.c modules/memory/memory_provider.c modules/module-runtime/pre_llm_hook.c modules/config/config_plugin.c code_collect.c codex_auth.c \
+            modules/memory/memory_provider.c modules/module-runtime/pre_llm_hook.c modules/config/config_plugin.c code_collect.c codex_auth.c \
             modules/workflows/wfe_iface.c modules/workflows/wfe_def.c modules/workflows/wfe_validate.c modules/workflows/wfe_canonical.c modules/workflows/wfe_custom.c modules/workflows/wfe_manager_artifacts.c modules/workflows/wfe_externalization.c modules/workflows/wfe_native_gate.c modules/workflows/wfe_enforce.c modules/workflows/wfe_deliver.c modules/workflows/wfe_advance.c modules/workflows/wfe_advance_exec.c modules/workflows/wfe_block_resolve.c modules/workflows/wfe_bind_ingress.c modules/workflows/wfe_router.c modules/workflows/wfe_router_catalog.c modules/workflows/wfe_autonomous_route.c \
             harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c
+ifeq ($(AIMEE_WITH_PLUGIN_LOADER),1)
+CORE_SRCS += modules/plugin-loader/plugin.c modules/plugin-loader/plugin_loader.c
+endif
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---
@@ -382,11 +399,13 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c modules/delega
            cmd_core.c cmd_init.c cmd_data.c cmd_infra.c cmd_session_history.c cmd_memory.c cmd_memory_core.c cmd_memory_curiosity.c cmd_memory_embed.c cmd_memory_op.c cmd_memory_pack.c cmd_memory_lint.c cmd_wiki.c cmd_memory_vector.c cmd_index.c cmd_graph.c cmd_rules.c cmd_roadmap.c cmd_auto.c cmd_learning.c cmd_review.c cmd_dogfood.c cmd_identity.c cmd_onboard.c cmd_diagnose.c \
            cmd_hooks.c modules/memory/memory_redirect.c cmd_hooks_scope.c cmd_capabilities.c cmd_session_lifecycle.c cmd_agent.c cmd_agent_setup.c cmd_agent_trace.c cmd_agent_delegate.c cmd_agent_delegate_toolset.c cmd_agent_delegate_status.c modules/delegates/delegate_checkout.c modules/delegates/delegate_prompt_stdin.c \
            cmd_wm.c cmd_sweep.c cmd_cancel.c cmd_rewind.c cmd_branch.c cmd_mcp.c cmd_util.c cmd_table.c cmd_doctor.c cmd_toolset.c \
-           cmd_plugin.c \
            cmd_trajectory.c \
            cmd_slop.c modules/guardrails/cmd_guardrails.c cmd_job.c cmd_roles.c cmd_skill.c cmd_autopilot.c cmd_trigger.c cmd_run.c cmd_kb.c cmd_kb_export.c kb_export_json.c kb_export_obsidian.c kb/kb_lab.c modules/kb_client/kb_client.c modules/kb_client/kb_client_cache.c modules/kb_client/kb_client_ws.c modules/kb_client/kb_client_docs.c kb/kb_doc_hash.c modules/kb_client/kb_client_index.c modules/kb_client/kb_client_index_parse.c modules/kb_client/kb_client_pdf.c modules/kb_client/kb_client_code_embed.c modules/kb_client/kb_client_memory.c modules/kb_client/kb_client_memory_mutations.c modules/kb_client/kb_client_agent.c modules/kb_client/kb_client_dashboard.c modules/kb_client/kb_client_tasks.c modules/kb_client/kb_client_data.c modules/kb_client/kb_client_tool_registry.c modules/kb_client/kb_client_prospective.c modules/kb_client/kb_client_roadmap.c hud.c modules/delegates/delegate_depth.c modules/delegates/delegate_role.c modules/delegates/delegate_prompt.c modules/delegates/delegate_routing.c modules/delegates/delegate_plan.c modules/delegates/delegate_launch.c modules/delegates/delegate_economics.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c \
            turn_narration.c dashboard.c dashboard_kb.c trace_analysis.c cmd_ensemble.c \
            cmd_provider.c cmd_aux.c cmd_audit.c
+ifeq ($(AIMEE_WITH_PLUGIN_LOADER),1)
+CMD_SRCS += cmd_plugin.c
+endif
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Pure client (aimee) ---
@@ -420,6 +439,9 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+ifeq ($(AIMEE_WITH_PLUGIN_LOADER),0)
+    SERVER_SRCS := $(filter-out server/server_plugin.c,$(SERVER_SRCS))
+endif
 SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))

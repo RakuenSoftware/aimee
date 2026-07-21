@@ -9,7 +9,6 @@
 #include "db2/memory_query.h"
 #include "db2/rules.h"
 #include "kb_client.h"
-#include "aimee/plugin-loader/plugin.h"
 #include "headers/cmd_hooks_scope.h"
 #include "platform_process.h"
 #include "agent_config.h"

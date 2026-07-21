@@ -20,7 +20,9 @@
 #include "dashboard.h"
 #include "headers/payload_rewrite.h"
 #include "memory.h"
+#if AIMEE_WITH_PLUGIN_LOADER
 #include "aimee/plugin-loader/plugin.h"
+#endif
 
 #include <ctype.h>
 #include <stdio.h>
@@ -36,6 +38,7 @@
 #define SERVER_DASHBOARD_FALLBACK
 #endif
 
+#if AIMEE_WITH_PLUGIN_LOADER
 typedef struct
 {
    char timestamp[32];
@@ -150,6 +153,7 @@ static int dashboard_load_audit_events(const char *filter_event, dashboard_audit
    fclose(fp);
    return count;
 }
+#endif
 
 char *api_delegations(void)
 {
@@ -347,6 +351,7 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_onboard(void)
    return strdup("{\"error\":\"onboard report is not available from the server-hosted webchat\"}");
 }
 
+#if AIMEE_WITH_PLUGIN_LOADER
 SERVER_DASHBOARD_FALLBACK char *api_dashboard_plugins(void)
 {
    plugin_t plugins[PLUGIN_MAX_PLUGINS];
@@ -425,6 +430,7 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_plugins(void)
    cJSON_Delete(obj);
    return json ? json : strdup("{}");
 }
+#endif
 
 SERVER_DASHBOARD_FALLBACK char *api_doctor(void)
 {

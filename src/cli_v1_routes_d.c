@@ -4,6 +4,7 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include "headers/aimee_features.h"
 #include "platform_path.h"
 #include "cli_client.h"
 #define V1_PROTOCOL_VERSION 1
@@ -617,7 +618,9 @@ static const struct
     {"dashboard.metrics", "GET", "/v1/dashboard/metrics"},
     {"dashboard.onboard", "GET", "/v1/dashboard/onboard"},
     {"dashboard.plans", "GET", "/v1/dashboard/plans"},
+#if AIMEE_WITH_PLUGIN_LOADER
     {"dashboard.plugins", "GET", "/v1/dashboard/plugins"},
+#endif
     {"dashboard.traces", "GET", "/v1/dashboard/traces"},
     {"delegate", "POST", "/v1/delegate/run"},
     {"delegate.backend_exec", "POST", "/v1/delegate/backend_exec"},
@@ -682,9 +685,11 @@ static const struct
     {"optimize.export", "GET", "/v1/optimize/export"},
     {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
+#if AIMEE_WITH_PLUGIN_LOADER
     {"plugin.disable", "POST", "/v1/plugins/disable"},
     {"plugin.enable", "POST", "/v1/plugins/enable"},
     {"plugin.list", "GET", "/v1/plugins"},
+#endif
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
     {"provider.models", "GET", "/v1/provider/models"},

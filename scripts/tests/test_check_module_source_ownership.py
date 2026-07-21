@@ -23,7 +23,13 @@ SPEC.loader.exec_module(checker)
 class ModuleSourceOwnershipTests(unittest.TestCase):
     def fixture(self, root: Path) -> None:
         (root / ".git").mkdir()
-        files = {"src/Makefile", "CMakeLists.txt", "src/tests/Rules.mk"}
+        files = {
+            "src/Makefile",
+            "CMakeLists.txt",
+            "src/tests/Rules.mk",
+            "src/headers/aimee_features.h",
+            "src/modules/plugin-loader/module.yaml",
+        }
         for contract in checker.CONTRACTS:
             files.update((contract.canonical_source, contract.canonical_header,
                           contract.document, *contract.consumers))
@@ -129,6 +135,26 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
             ),
             "legacy-include-removed",
         )
+
+    def test_plugin_loader_profile_defaults_cannot_drift(self) -> None:
+        contract = checker.CONTRACTS[0]
+        mutations = (
+            ("src/Makefile", "AIMEE_WITH_PLUGIN_LOADER ?= 0", "AIMEE_WITH_PLUGIN_LOADER ?= 1"),
+            ("CMakeLists.txt", "plugin manifest loader\" OFF", "plugin manifest loader\" ON"),
+            ("src/headers/aimee_features.h", "AIMEE_WITH_PLUGIN_LOADER 0",
+             "AIMEE_WITH_PLUGIN_LOADER 1"),
+            ("src/modules/plugin-loader/module.yaml", '"enabled_by_default": false',
+             '"enabled_by_default": true'),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(relative=relative):
+                self.assert_rejected(
+                    contract,
+                    lambda root, value, path=relative, old=before, new=after: (
+                        root / path
+                    ).write_text((root / path).read_text().replace(old, new)),
+                    "plugin-loader-profile-default",
+                )
 
 
 if __name__ == "__main__":

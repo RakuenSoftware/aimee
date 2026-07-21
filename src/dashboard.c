@@ -10,7 +10,9 @@
 #include "cJSON.h"
 #include "headers/agent_exec.h"
 #include "headers/memory.h"
+#if AIMEE_WITH_PLUGIN_LOADER
 #include "aimee/plugin-loader/plugin.h"
+#endif
 #include <ctype.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -21,6 +23,7 @@
 
 #define DASHBOARD_MAX_AUDIT_EVENTS 256
 
+#if AIMEE_WITH_PLUGIN_LOADER
 typedef struct
 {
    char timestamp[32];
@@ -144,6 +147,7 @@ static int dashboard_load_audit_events(const char *filter_event, dashboard_audit
    fclose(fp);
    return count;
 }
+#endif
 
 /* --- Embedded HTML dashboard --- */
 
@@ -316,6 +320,7 @@ char *api_dashboard_onboard(void)
    return json ? json : strdup("{}");
 }
 
+#if AIMEE_WITH_PLUGIN_LOADER
 char *api_dashboard_plugins(void)
 {
    plugin_t plugins[PLUGIN_MAX_PLUGINS];
@@ -394,6 +399,7 @@ char *api_dashboard_plugins(void)
    cJSON_Delete(obj);
    return json ? json : strdup("{}");
 }
+#endif
 
 char *api_doctor(void)
 {

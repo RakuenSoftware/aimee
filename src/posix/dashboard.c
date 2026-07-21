@@ -495,12 +495,14 @@ static void handle_request(int fd)
       send_response_cors(fd, 200, "application/json", json, allowed_origin);
       free(json);
    }
+#if AIMEE_WITH_PLUGIN_LOADER
    else if (strcmp(path, "/api/dashboard/plugins") == 0)
    {
       char *json = api_dashboard_plugins();
       send_response_cors(fd, 200, "application/json", json, allowed_origin);
       free(json);
    }
+#endif
    else if (strcmp(path, "/api/dashboard/maintenance") == 0)
    {
       char *json = api_dashboard_maintenance();
