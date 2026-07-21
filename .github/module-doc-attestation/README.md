@@ -122,6 +122,69 @@ The app credential belongs in the deployed service vault. Its permissions are li
 pull-request and Git objects and creating its named check. It must not push, merge, administer the
 repository, or create another app's check.
 
+## Immutable snapshot acquisition
+
+`scripts/module_doc_git_snapshot.py` supplies the Git acquisition boundary used by a future
+repository resolver. It is provider-neutral because it depends on Git Smart HTTP and full refs, not
+on a provider API or webhook format. A trusted provider adapter supplies an HTTPS repository URL,
+opaque full source refs, exact full lowercase SHA-1 commit IDs, and one owned authorization-header
+`bytearray`. The module does not select an OIDC issuer, interpret pull requests, call a provider API,
+or decide which refs and commits are authorized. Production callers must establish those facts
+before calling it. They must also pass a nonempty operator-configured allowlist of canonical HTTPS
+origins; the repository origin must match one entry exactly, including any non-default port.
+Canonical origins use a lowercase host, omit the default port, and contain no path, query, fragment,
+credentials, percent encoding, whitespace, or dot segments.
+
+Production acquisition is Linux-only and fails closed without `memfd_create` and `/proc/self/fd`.
+The authorization header uses the exact canonical field spelling `Authorization`, an arbitrary
+provider-neutral auth scheme, and token68 credentials. It exists in an anonymous, sealed,
+mode-`0600` Git-config descriptor only for the single atomic fetch. Its `extraHeader` setting is
+scoped to the canonical repository URL. The header is not placed in a subprocess command line, an
+environment value, or a named filesystem entry. The descriptor is closed and both the caller's buffer and the
+derived mutable buffers are overwritten before commit validation can begin or a repository handle
+is returned. Every reference to the caller's passed `bytearray` observes that overwrite. Callers must
+not create a separate copy if they require the same lifetime guarantee because the module cannot
+overwrite an object it was not given. Core dumps, swap, and other kernel-mediated copies are outside
+this process-level guarantee and must be controlled by the deployment. Authenticated fetch failures
+return a fixed diagnostic rather than remote-controlled stderr. Authenticated stdout and stderr are
+drained into wipeable buffers and discarded, preventing a server from retaining reflected credential
+fragments in process capture or an error. The subprocess environment is built from a fixed allowlist, so
+caller-provided `GIT_TRACE*`, proxy, and Git configuration variables are not inherited.
+
+Each acquisition creates a fresh bare repository and accepts local destination refs only when they
+match `refs/aimee-snapshot/[a-z][a-z0-9-]{0,63}`; invalid destinations are rejected before fetch. It
+disables redirects and interactive credentials, fetches atomically without tags or `FETCH_HEAD`, and
+retains the fetched refs for the handle's lifetime. It resolves each ref with `^{commit}`, rejects a
+non-commit target, compares the full object ID with the adapter's expected value, and runs
+`git fsck --full --strict --no-reflogs --unreachable` before returning. Any unreachable object rejects
+the snapshot, preventing a server from retaining reflected credentials in an extra object. All later Git commands use isolated
+non-network configuration. The returned repository tree is owner-read-only and exposes no configured
+remote. A
+context-managed handle removes the tree after the body returns or raises any `BaseException`;
+callers that do not use the context manager must call `close()`.
+
+Subprocess time, stdout, stderr, fetch count, and ref length have explicit module constants. Bounded
+tree scans while each subprocess runs detect repository growth, but they are not a storage quota;
+production requires an operator-enforced storage quota on the dedicated temporary parent. The
+operator creates that parent as mode `0700`, owned by the isolated worker UID; the module does not
+create or change ownership of it. Linux
+process-session support is also required: timeout handling terminates the Git process group before
+cleanup. The caller must run the acquisition worker in process isolation without unrelated concurrent
+forks; the module does not enforce that deployment boundary. Python passes the otherwise
+close-on-exec descriptor only to the fetch process, whose Git transport child must also inherit it.
+A host `SIGKILL` can still leave an orphaned snapshot containing the authorized source because no
+process can run cleanup afterward. Deployment therefore
+requires an operator-owned reclaimer for the dedicated temporary parent, with age and ownership
+checks, before this boundary is production-ready. Mode-based read-only state is an accidental-write
+guard, not protection from another process running as the same UID; deployment process isolation is
+the security boundary. The private local-file transport exists only for tests, assumes a
+non-adversarial fixture tree, is confined to a real caller-supplied fixture root, and rejects
+symlinks observed during validation.
+
+This primitive does not make the external verifier deployable. Provider API authorization,
+OIDC-backed workload normalization, durable replay, the publisher, process isolation, and the
+orphaned-snapshot reclaimer remain external deployment prerequisites.
+
 ## Activation order
 
 1. Deploy the reviewed verifier release and a provider-neutral issuer profile.

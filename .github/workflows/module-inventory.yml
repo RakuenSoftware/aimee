@@ -131,6 +131,7 @@ jobs:
           command -v ssh-agent
           command -v ssh-add
           python3 -I scripts/tests/test_module_doc_contract.py -v
+          python3 -I scripts/tests/test_module_doc_git_snapshot.py -v
           python3 -I scripts/tests/test_sign_module_docs.py -v
 
   proposal-ordering:
