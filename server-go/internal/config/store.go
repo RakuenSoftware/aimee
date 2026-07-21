@@ -94,6 +94,7 @@ var policyDefaults = map[string]any{
 	"autonomy.max_turns":             300,
 	"autonomy.max_resumes":           50,
 	"autonomy.stale_abandon_secs":    3600,
+	"autonomy.concurrency":           2,
 }
 
 var configurableTypes = map[string]string{

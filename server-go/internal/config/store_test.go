@@ -37,6 +37,21 @@ func TestPolicyWritesPreserveUnrelatedConfigAndAreImmediatelyLive(t *testing.T) 
 	}
 }
 
+func TestPolicyProjectionIncludesRuntimeConcurrencyDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.yaml")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := store.Values()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := values["autonomy.concurrency"]; got != 2 {
+		t.Fatalf("autonomy.concurrency default=%v, want 2", got)
+	}
+}
+
 func TestEditableProjectionAndStructuralConflictsFailClosed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.yaml")
 	if err := os.WriteFile(path, []byte("provider_token: secret\nautonomy: broken\n"), 0o600); err != nil {

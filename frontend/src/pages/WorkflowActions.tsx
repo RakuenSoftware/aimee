@@ -682,7 +682,7 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
     key: "autonomy.concurrency",
     label: "Concurrency",
     kind: "int",
-    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 8.",
+    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
   },
 ];
 
