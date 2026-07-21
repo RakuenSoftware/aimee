@@ -2467,6 +2467,18 @@ INSERT INTO kb_vault_control(singleton) VALUES (1) ON CONFLICT (singleton) DO NO
 ALTER TABLE kb_vault_control ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE kb_vault_control FROM PUBLIC;
 
+-- Narrow startup seam: runtime may synchronize the process-local primary epoch
+-- without receiving direct table access and without requiring the vault open.
+CREATE OR REPLACE FUNCTION org_vault_control_startup_status()
+RETURNS TABLE(seal_epoch BIGINT,sealed BOOLEAN)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT c.seal_epoch,c.sealed
+    FROM public.kb_vault_control AS c
+   WHERE c.singleton=1;
+$$;
+REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION org_vault_control_require_open() RETURNS BIGINT
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_epoch BIGINT; v_sealed BOOLEAN; v_kind TEXT; v_id TEXT;

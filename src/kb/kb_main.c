@@ -15,6 +15,7 @@
 #include "org_rate.h"
 #include "org_telemetry.h"
 #include "org_model_catalog.h"
+#include "org_vault_key_use.h"
 #include "org_spend.h"
 #include "project.h"
 #include "kb_enroll.h"
@@ -34,6 +35,7 @@
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "vault_server_key.h"    /* startup durable seal-epoch synchronization */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1404,6 +1406,44 @@ int main(int argc, char **argv)
       db2_shutdown();
       agent_http_cleanup();
       return rc;
+   }
+
+   /* Synchronize the in-process use barrier with durable primary control before
+    * any service or worker can admit a key use. PKCS#11/KMS selection may have
+    * already logged in and unsealed its provider; durable `sealed=true` always
+    * wins and is forced into the provider before the epoch is installed. Any
+    * read, seal, or initialization failure is terminal and gets one final
+    * fail-closed seal attempt before process teardown. */
+   {
+      int64_t primary_epoch = 0;
+      int primary_sealed = 0;
+      int status_rc = db2_vault_control_startup_status(&primary_epoch, &primary_sealed);
+      if (status_rc != 0 || primary_epoch < 1 || (primary_sealed != 0 && primary_sealed != 1))
+      {
+         (void)vault_seal();
+         fprintf(stderr, "aimee-kb: vault control startup status invalid; refusing to start\n");
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+      if (primary_sealed && vault_seal() != 0)
+      {
+         (void)vault_seal();
+         fprintf(stderr, "aimee-kb: durable vault is sealed but custody seal failed; "
+                         "refusing to start\n");
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+      if (vault_primary_epoch_initialize((uint64_t)primary_epoch) != VAULT_MAINTENANCE_OK)
+      {
+         (void)vault_seal();
+         fprintf(stderr, "aimee-kb: vault primary seal epoch initialization failed; "
+                         "refusing to start\n");
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
    }
 
    /* Hidden directories (`.git`, `.aimee`, `.worktrees`, etc.) hold

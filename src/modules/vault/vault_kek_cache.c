@@ -6,6 +6,7 @@
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
 #include <openssl/crypto.h>  /* OPENSSL_cleanse */
 #include <pthread.h>
+#include <signal.h>
 #include <string.h>
 
 typedef struct
@@ -18,6 +19,30 @@ typedef struct
 
 static kek_slot_t g_slots[VAULT_KEK_CACHE_SLOTS];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile sig_atomic_t g_fork_child_invalid;
+static pthread_once_t g_atfork_once = PTHREAD_ONCE_INIT;
+static int g_atfork_status = -1;
+
+void vault_kek_cache_after_fork_child(void)
+{
+   g_fork_child_invalid = 1;
+   volatile unsigned char *p = (volatile unsigned char *)g_slots;
+   for (size_t i = 0; i < sizeof(g_slots); i++)
+      p[i] = 0;
+}
+
+static void register_atfork_once(void)
+{
+   g_atfork_status = pthread_atfork(NULL, NULL, vault_kek_cache_after_fork_child);
+}
+
+static int cache_ready(void)
+{
+   return !g_fork_child_invalid && pthread_once(&g_atfork_once, register_atfork_once) == 0 &&
+                  g_atfork_status == 0
+              ? 0
+              : -1;
+}
 
 /* Cleanse the KEK + key fields and free the slot. Caller holds g_lock. */
 static void slot_clear(kek_slot_t *s)
@@ -49,7 +74,8 @@ static kek_slot_t *slot_find_live(const char *principal, long now_epoch)
 
 int vault_kek_cache_put(const char *principal, const uint8_t kek[VAULT_KEK_LEN], long now_epoch)
 {
-   if (!principal || !principal[0] || !kek || strlen(principal) >= VAULT_PRINCIPAL_MAX)
+   if (cache_ready() != 0 || !principal || !principal[0] || !kek ||
+       strlen(principal) >= VAULT_PRINCIPAL_MAX)
       return -1;
 
    pthread_mutex_lock(&g_lock);
@@ -85,8 +111,12 @@ int vault_kek_cache_put(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
 
 int vault_kek_cache_get(const char *principal, long now_epoch, uint8_t kek_out[VAULT_KEK_LEN])
 {
-   if (!principal || !kek_out)
+   if (cache_ready() != 0 || !principal || !kek_out)
+   {
+      if (kek_out)
+         OPENSSL_cleanse(kek_out, VAULT_KEK_LEN);
       return -1;
+   }
    pthread_mutex_lock(&g_lock);
    kek_slot_t *s = slot_find_live(principal, now_epoch);
    int rc = -1;
@@ -103,7 +133,7 @@ int vault_kek_cache_get(const char *principal, long now_epoch, uint8_t kek_out[V
 
 int vault_kek_cache_has(const char *principal, long now_epoch)
 {
-   if (!principal)
+   if (cache_ready() != 0 || !principal)
       return 0;
    pthread_mutex_lock(&g_lock);
    int has = slot_find_live(principal, now_epoch) != NULL;
@@ -113,7 +143,7 @@ int vault_kek_cache_has(const char *principal, long now_epoch)
 
 void vault_kek_cache_evict(const char *principal)
 {
-   if (!principal)
+   if (cache_ready() != 0 || !principal)
       return;
    pthread_mutex_lock(&g_lock);
    for (int i = 0; i < VAULT_KEK_CACHE_SLOTS; i++)
@@ -124,6 +154,8 @@ void vault_kek_cache_evict(const char *principal)
 
 void vault_kek_cache_clear(void)
 {
+   if (cache_ready() != 0)
+      return;
    pthread_mutex_lock(&g_lock);
    for (int i = 0; i < VAULT_KEK_CACHE_SLOTS; i++)
       if (g_slots[i].used)
@@ -133,6 +165,8 @@ void vault_kek_cache_clear(void)
 
 int vault_kek_cache_count(long now_epoch)
 {
+   if (cache_ready() != 0)
+      return 0;
    pthread_mutex_lock(&g_lock);
    int n = 0;
    for (int i = 0; i < VAULT_KEK_CACHE_SLOTS; i++)

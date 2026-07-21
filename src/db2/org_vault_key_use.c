@@ -62,6 +62,46 @@ static int read_envelope(aimee_pg_stmt_t *st, int first, int64_t version,
    return 0;
 }
 
+int db2_vault_control_startup_status(int64_t *epoch_out, int *sealed_out)
+{
+   if (epoch_out)
+      *epoch_out = 0;
+   if (sealed_out)
+      *sealed_out = 0;
+   if (!epoch_out || !sealed_out)
+      return DB2_VAULT_KEY_USE_ERROR;
+   if (db2_tenant_require_pg() != 0)
+      return DB2_VAULT_KEY_USE_ERROR;
+
+   char err[USE_ERR] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT seal_epoch,sealed FROM public.org_vault_control_startup_status()", err,
+       sizeof(err));
+   if (!st)
+      return DB2_VAULT_KEY_USE_ERROR;
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int rc = DB2_VAULT_KEY_USE_ERROR;
+   if (step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) && aimee_pg_column_int64(st, 0) > 0)
+   {
+      const char *sealed = aimee_pg_column_text(st, 1);
+      if (sealed &&
+          ((sealed[0] == 't' && sealed[1] == '\0') || (sealed[0] == 'f' && sealed[1] == '\0') ||
+           (sealed[0] == '1' && sealed[1] == '\0') || (sealed[0] == '0' && sealed[1] == '\0')))
+      {
+         int64_t epoch = aimee_pg_column_int64(st, 0);
+         int is_sealed = sealed[0] == 't' || sealed[0] == '1';
+         if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+         {
+            *epoch_out = epoch;
+            *sealed_out = is_sealed;
+            rc = 0;
+         }
+      }
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}
+
 int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *key_id,
                                 const char *principal, const char *agent, const char *cred,
                                 int64_t version, db2_vault_key_use_envelope_t *out)

@@ -1,4 +1,5 @@
 #include "modules/vault/vault_internal.h"
+#include "modules/vault/vault_kek_cache.h"
 #include "modules/vault/vault_server_key.h"
 
 #include <assert.h>
@@ -83,9 +84,54 @@ static int check_kek(const uint8_t kek[VAULT_KEK_LEN], void *ctx)
    return 23;
 }
 
+typedef struct
+{
+   vault_maintenance_guard_t **guard;
+   int callbacks;
+} reentry_ctx_t;
+
+static int reject_callback_reentry(const uint8_t kek[VAULT_KEK_LEN], void *opaque)
+{
+   reentry_ctx_t *ctx = opaque;
+   assert(kek[0] == 0x6b);
+   assert(vault_maintenance_guard_end(ctx->guard) == VAULT_MAINTENANCE_BUSY);
+   assert(vault_maintenance_guard_seal(*ctx->guard) == VAULT_MAINTENANCE_BUSY);
+   assert(vault_seal() == -1);
+   assert(vault_use_epoch_snapshot() == 0);
+   vault_use_end(); /* must not release the maintenance writer lock */
+   ctx->callbacks++;
+   return 29;
+}
+
+typedef struct
+{
+   pid_t child;
+   int in_child;
+} fork_callback_ctx_t;
+
+static int fork_inside_callback(const uint8_t kek[VAULT_KEK_LEN], void *opaque)
+{
+   fork_callback_ctx_t *ctx = opaque;
+   pid_t pid = fork();
+   assert(pid >= 0);
+   if (pid == 0)
+   {
+      ctx->in_child = 1;
+      for (size_t i = 0; i < VAULT_KEK_LEN; i++)
+         assert(kek[i] == 0); /* MADV_WIPEONFORK, before callback returns */
+      return 41;
+   }
+   ctx->child = pid;
+   return 42;
+}
+
 static void test_primary_epoch_and_operational_use(void)
 {
    bind_sealed();
+   /* PKCS#11/KMS perform their provider login during selection, before durable
+    * control is synchronized. Startup initialization therefore accepts an
+    * already-unsealed provider; kb_main forces a seal first when DB says sealed. */
+   assert(vault_unseal("open", 4) == 0);
    assert(vault_primary_epoch_initialize(0) == VAULT_MAINTENANCE_INVALID);
    assert(vault_primary_epoch_initialize((uint64_t)INT64_MAX + 1) == VAULT_MAINTENANCE_INVALID);
    assert(vault_primary_epoch_initialize(7) == VAULT_MAINTENANCE_OK);
@@ -93,7 +139,6 @@ static void test_primary_epoch_and_operational_use(void)
    assert(vault_primary_epoch_initialize(8) == VAULT_MAINTENANCE_EPOCH);
 
    uint64_t local = vault_use_epoch_snapshot();
-   assert(vault_unseal("open", 4) == 0);
    uint8_t kek[VAULT_KEK_LEN];
    memset(kek, 0xa5, sizeof(kek));
    assert(vault_use_begin(local, 8, kek) == -1);
@@ -101,7 +146,15 @@ static void test_primary_epoch_and_operational_use(void)
       assert(kek[i] == 0);
    assert(vault_use_begin(local, 7, kek) == 0);
    assert(kek[0] == 0x6b);
+   assert(vault_use_epoch_snapshot() == 0);
+   assert(vault_seal() == -1);
+   uint8_t nested[VAULT_KEK_LEN];
+   memset(nested, 0xa5, sizeof(nested));
+   assert(vault_use_begin(local, 7, nested) == -1);
+   for (size_t i = 0; i < sizeof(nested); i++)
+      assert(nested[i] == 0);
    vault_use_end();
+   vault_use_end(); /* idempotent; must not release an unrelated writer */
 
    assert(vault_seal() == 0);
    assert(vault_unseal("open", 4) == 0);
@@ -142,6 +195,9 @@ static void test_guard_identity_kek_and_cleanup(void)
    int callbacks = 0;
    assert(vault_maintenance_guard_with_active_kek(guard, check_kek, &callbacks) == 23);
    assert(callbacks == 1 && g_mock.get_calls == 1);
+   reentry_ctx_t reentry = {.guard = &guard};
+   assert(vault_maintenance_guard_with_active_kek(guard, reject_callback_reentry, &reentry) == 29);
+   assert(reentry.callbacks == 1 && guard != NULL && !g_mock.sealed);
 
    wrong_owner_arg_t arg = {.guard = guard, .rc = 0};
    pthread_t thread;
@@ -224,6 +280,9 @@ static void test_cross_thread_blocks_and_seal_failure_releases(void)
 static void test_fork_child_is_fail_closed(void)
 {
    bind_sealed();
+   uint8_t cached[VAULT_KEK_LEN];
+   memset(cached, 0x7c, sizeof(cached));
+   assert(vault_kek_cache_put("fork-canary", cached, 1) == 0);
    assert(vault_primary_epoch_initialize(31) == VAULT_MAINTENANCE_OK);
    vault_maintenance_guard_t *guard = NULL;
    assert(vault_maintenance_guard_begin(&guard) == VAULT_MAINTENANCE_OK);
@@ -235,13 +294,43 @@ static void test_fork_child_is_fail_closed(void)
       uint8_t kek[VAULT_KEK_LEN];
       int stale_rc = vault_maintenance_guard_seal(inherited);
       int use_rc = vault_use_begin(vault_use_epoch_snapshot(), 31, kek);
-      _exit(stale_rc == VAULT_MAINTENANCE_INVALID && use_rc != 0 ? 0 : 1);
+      int cache_rc = vault_kek_cache_get("fork-canary", 1, kek);
+      vault_custody_set_provider(&g_provider); /* child cannot rebind around invalidation */
+      _exit(stale_rc == VAULT_MAINTENANCE_INVALID && use_rc != 0 && cache_rc != 0 &&
+                    vault_is_sealed()
+                ? 0
+                : 1);
    }
    int status = 0;
    assert(waitpid(pid, &status, 0) == pid);
    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   assert(vault_kek_cache_get("fork-canary", 1, cached) == 0 && cached[0] == 0x7c);
    assert(vault_maintenance_guard_end(&guard) == VAULT_MAINTENANCE_OK);
+   vault_kek_cache_clear();
    puts("  PASS: fork child invalidates inherited authority");
+}
+
+static void test_fork_inside_kek_callback(void)
+{
+   bind_sealed();
+   vault_maintenance_guard_t *guard = NULL;
+   assert(vault_maintenance_guard_begin(&guard) == VAULT_MAINTENANCE_OK);
+   assert(vault_maintenance_guard_unseal(guard, "open", 4) == 0);
+   fork_callback_ctx_t ctx = {0};
+   int rc = vault_maintenance_guard_with_active_kek(guard, fork_inside_callback, &ctx);
+   if (ctx.in_child)
+   {
+      assert(rc == VAULT_MAINTENANCE_INVALID);
+      assert(vault_maintenance_guard_end(&guard) == VAULT_MAINTENANCE_INVALID);
+      assert(guard == NULL && vault_is_sealed());
+      _exit(0);
+   }
+   assert(rc == 42 && ctx.child > 0);
+   int status = 0;
+   assert(waitpid(ctx.child, &status, 0) == ctx.child);
+   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   assert(vault_maintenance_guard_end(&guard) == VAULT_MAINTENANCE_OK);
+   puts("  PASS: fork inside KEK callback wipes child arena and returns fail-closed");
 }
 
 int main(void)
@@ -250,6 +339,7 @@ int main(void)
    test_guard_identity_kek_and_cleanup();
    test_cross_thread_blocks_and_seal_failure_releases();
    test_fork_child_is_fail_closed();
+   test_fork_inside_kek_callback();
    vault_custody_set_provider(NULL);
    puts("vault_maintenance_guard: all tests passed");
    return 0;

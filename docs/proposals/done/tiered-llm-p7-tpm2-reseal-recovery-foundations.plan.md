@@ -1,7 +1,8 @@
 # P7-reseal-d1 recovery, guard, and completion foundations
 
 - **State:** delivered and validated on PostgreSQL 17 plus swtpm (CT260), with
-  default and ASAN/UBSAN builds; no production caller or operator enablement.
+  default and ASAN/UBSAN builds; only fail-closed startup epoch synchronization
+  is wired in production, with no recovery/rotation caller or operator enablement.
 - **Depends on:** P7-reseal-a prepared TPM2 artifacts, P7-reseal-b primary
   barrier, and P7-reseal-c bounded staging/promotion.
 
@@ -14,11 +15,12 @@ guard with explicit primary/local epoch synchronization, require durable key-use
 admission to match the local epoch exactly, and add owner-only `completed` and
 fail-closed quarantine transitions to the Postgres state machine.
 
-This slice adds no HTTP route, management RPC, CLI, scheduler, startup worker,
-external WORM drain, or automatic TPM operation. Its new TPM and database seams
-remain uncalled by production orchestration. The default non-TPM build remains
-fail-closed. Successful completion leaves both the provider and primary vault
-sealed; operational unseal belongs to P7-reseal-d3.
+This slice adds no HTTP route, management RPC, CLI, scheduler, recovery worker,
+external WORM drain, or automatic TPM operation. Its TPM recovery and database
+transition seams remain uncalled by production orchestration; only the narrow
+runtime-safe startup status seam initializes the local epoch barrier. The default
+non-TPM build remains fail-closed. Successful completion leaves both the provider
+and primary vault sealed; operational unseal belongs to P7-reseal-d3.
 
 ## Receipt discovery and prepared-KEK recovery
 
@@ -103,15 +105,21 @@ is registered separately from its allocation so an alias, stale, forged, or
 wrong-thread pointer is rejected without dereferencing freed/untrusted memory.
 Failure and owner `end` cleanse and unmap guard material, release the writer lock
 exactly once, then restore the prior cancellation state. Wrong-thread calls leave
-the live guard and lock untouched. At-fork handlers invalidate inherited guard,
-lock, epoch-sync, provider-cache, and TPM prepared-lock state in the child, which
-must restart initialization rather than use inherited custody state.
+the live guard and lock untouched. At-fork handlers permanently invalidate the
+child image, wipe fixed-address file/principal/TPM caches, and close the child's
+copy of any prepared-operation flock without touching inherited pthread or ESYS
+objects. Every custody API then fails before locking; the child must `exec` before
+using custody again.
 
 Only guard-owned functions may touch custody while the writer lock is held; they
 call lock-assuming internals and never recursively enter public
 `vault_unseal`/`vault_seal`. `with_active_kek` places the KEK in a guard-owned,
-`mlock`ed and `MADV_DONTDUMP` arena, invokes a synchronous callback while the
-exclusive lock remains held, then cleanses it before return. The pointer cannot
+`mlock`ed, `MADV_DONTDUMP`, and `MADV_WIPEONFORK` arena, invokes a synchronous
+callback while the exclusive lock remains held, then cleanses it before return.
+Callback-active state rejects guard end/seal/unseal/sync recursion, and TLS use
+ownership rejects public seal/use recursion rather than deadlocking or releasing
+the writer lock. A callback-side fork observes a kernel-wiped child arena and its
+return path fails without touching inherited locks. The pointer cannot
 escape by contract and no raw-KEK getter is added. Guard `seal` clears every KEK
 cache and advances the process-local transition generation even if provider seal
 reports failure. Owner `end` also performs this fail-closed seal/cache-clear
@@ -122,9 +130,11 @@ Keep two distinct authorities under `g_use_lock`: `g_use_epoch` is the
 process-local transition generation, while `g_primary_seal_epoch` plus an
 initialized bit is the last explicitly synchronized Postgres barrier epoch.
 They are never assigned to each other. `vault_primary_epoch_initialize` is
-startup-only: it takes the exclusive lock, requires the provider sealed and no
-guard/use active, accepts a positive signed-64 epoch once or as an exact replay,
-and rejects a different second initialization. It cannot unseal or obtain a KEK.
+startup-only: it takes the exclusive lock, requires no guard/use active, accepts
+a positive signed-64 epoch once or as an exact replay, and rejects a different
+second initialization. The selected PKCS#11/KMS provider may already be unsealed
+by its startup login; the caller first forces a seal whenever durable control
+says sealed. Initialization cannot unseal or obtain a KEK.
 Provider rebind, seal, fork, and test reset advance the local generation and
 invalidate primary synchronization.
 
@@ -230,8 +240,9 @@ completed.
   include cancellation/thread stress and concurrent second-process artifact-lock
   attempts; scan database, artifacts, logs, and process outputs for raw KEK
   canaries.
-- Source/link inventory proves there is still no production start/resume/status
-  caller, route, scheduler, startup hook, or operator capability.
+- Source/link inventory proves there is still no production recovery/rotation
+  caller, route, scheduler, worker, or operator capability beyond the fail-closed
+  startup epoch synchronization.
 
 ## Deferred to P7-reseal-d2/d3
 

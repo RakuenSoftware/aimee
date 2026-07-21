@@ -41,6 +41,7 @@ static void tpm2_set_err(char *errbuf, size_t errlen, const char *msg)
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <openssl/sha.h>    /* SHA256 */
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,6 +111,47 @@ static tpm2_ctx_t g_ctx = {
     .nv_handle = ESYS_TR_NONE,
     .nv_index = 0,
 };
+static volatile sig_atomic_t g_tpm2_fork_child_invalid;
+static pthread_once_t g_tpm2_atfork_once = PTHREAD_ONCE_INIT;
+static int g_tpm2_atfork_status = -1;
+static volatile sig_atomic_t g_reseal_lock_fd = -1;
+
+static void tpm2_after_fork_child_impl(void *vctx)
+{
+   tpm2_ctx_t *ctx = vctx;
+   g_tpm2_fork_child_invalid = 1;
+   if (ctx)
+   {
+      volatile uint8_t *p = ctx->kek;
+      for (size_t i = 0; i < sizeof(ctx->kek); i++)
+         p[i] = 0;
+      ctx->kek_ready = 0;
+      ctx->sealed = 1;
+      ctx->nv_auth_ready = 0;
+   }
+   if (g_reseal_lock_fd >= 0)
+      (void)close(g_reseal_lock_fd);
+   g_reseal_lock_fd = -1;
+}
+
+static void tpm2_after_fork_child(void)
+{
+   tpm2_after_fork_child_impl(&g_ctx);
+}
+
+static void register_tpm2_atfork_once(void)
+{
+   g_tpm2_atfork_status = pthread_atfork(NULL, NULL, tpm2_after_fork_child);
+}
+
+static int tpm2_process_ready(void)
+{
+   return !g_tpm2_fork_child_invalid &&
+                  pthread_once(&g_tpm2_atfork_once, register_tpm2_atfork_once) == 0 &&
+                  g_tpm2_atfork_status == 0
+              ? 0
+              : -1;
+}
 
 /* Domain-separation salt for the secret->authValue HKDF (distinct from the file
  * provider's SERVER_KEK_SALT and the mock's salt). NOT password-hardening. */
@@ -881,8 +923,12 @@ static int blob_file_digest_validate(tpm2_ctx_t *ctx, const char *path,
 static int tpm2_get_kek(void *vctx, uint8_t kek[VAULT_KEK_LEN])
 {
    tpm2_ctx_t *ctx = vctx;
-   if (!kek || !ctx)
+   if (tpm2_process_ready() != 0 || !kek || !ctx)
+   {
+      if (kek)
+         OPENSSL_cleanse(kek, VAULT_KEK_LEN);
       return -1;
+   }
    pthread_mutex_lock(&ctx->mu);
    int rc = 0;
    if (ctx->sealed || !ctx->kek_ready)
@@ -900,6 +946,8 @@ static int tpm2_rotate(void *vctx, const char *server_principal, int *out_princi
                        int *out_creds, char *backup_path, size_t backup_path_len, char *errbuf,
                        size_t errlen)
 {
+   if (tpm2_process_ready() != 0)
+      return -1;
    (void)vctx;
    (void)server_principal;
    (void)out_principals;
@@ -916,7 +964,7 @@ static int tpm2_rotate(void *vctx, const char *server_principal, int *out_princi
 static int tpm2_is_sealed(void *vctx)
 {
    tpm2_ctx_t *ctx = vctx;
-   if (!ctx)
+   if (tpm2_process_ready() != 0 || !ctx)
       return 1;
    pthread_mutex_lock(&ctx->mu);
    int s = ctx->sealed;
@@ -1040,7 +1088,7 @@ out:
 static int tpm2_unseal(void *vctx, const void *params, size_t len)
 {
    tpm2_ctx_t *ctx = vctx;
-   if (!ctx || (!params && len))
+   if (tpm2_process_ready() != 0 || !ctx || (!params && len))
       return -1;
 
    pthread_mutex_lock(&ctx->mu);
@@ -1076,7 +1124,7 @@ out:
 static int tpm2_seal(void *vctx)
 {
    tpm2_ctx_t *ctx = vctx;
-   if (!ctx)
+   if (tpm2_process_ready() != 0 || !ctx)
       return -1;
    pthread_mutex_lock(&ctx->mu);
    OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek)); /* flush the materialized KEK */
@@ -1094,10 +1142,12 @@ static const vault_custody_provider_t g_tpm2_provider = {
     .is_sealed = tpm2_is_sealed,
     .unseal = tpm2_unseal,
     .seal = tpm2_seal,
+    .after_fork_child = tpm2_after_fork_child_impl,
 };
 
 const vault_custody_provider_t *vault_custody_tpm2_provider(void)
 {
+   (void)tpm2_process_ready();
    return &g_tpm2_provider;
 }
 
@@ -1203,7 +1253,7 @@ static int seal_generation(tpm2_ctx_t *ctx, const uint8_t kek[VAULT_KEK_LEN], ui
 int vault_custody_tpm2_provision(const uint8_t kek[VAULT_KEK_LEN], const char *secret, char *errbuf,
                                  size_t errlen)
 {
-   if (!kek || !secret)
+   if (tpm2_process_ready() != 0 || !kek || !secret)
    {
       tpm2_set_err(errbuf, errlen, "tpm2 provision: null kek or secret");
       return -1;
@@ -1275,6 +1325,7 @@ static int reseal_lock(void)
       close(fd);
       return -1;
    }
+   g_reseal_lock_fd = fd;
    return fd;
 }
 
@@ -1282,6 +1333,8 @@ static void reseal_unlock(int fd)
 {
    if (fd >= 0)
    {
+      if (g_reseal_lock_fd == fd)
+         g_reseal_lock_fd = -1;
       (void)flock(fd, LOCK_UN);
       close(fd);
    }
@@ -1460,7 +1513,8 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
 {
    if (out)
       memset(out, 0, sizeof(*out));
-   if (!operation_id || !new_kek || !secret || !out || expected_old_generation == UINT64_MAX)
+   if (tpm2_process_ready() != 0 || !operation_id || !new_kek || !secret || !out ||
+       expected_old_generation == UINT64_MAX)
       return VAULT_TPM2_RESEAL_ERR;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
@@ -1557,7 +1611,8 @@ int vault_custody_tpm2_reseal_discover(const uint8_t operation_id[16],
       OPENSSL_cleanse(receipt, sizeof(*receipt));
    if (status)
       *status = VAULT_TPM2_RESEAL_CORRUPT;
-   if (!operation_id || !secret || !receipt || !status || expected_old_generation == UINT64_MAX)
+   if (tpm2_process_ready() != 0 || !operation_id || !secret || !receipt || !status ||
+       expected_old_generation == UINT64_MAX)
       return VAULT_TPM2_RESEAL_ERR;
 
    pthread_mutex_lock(&g_ctx.mu);
@@ -1603,7 +1658,7 @@ int vault_custody_tpm2_reseal_recover_kek(const vault_tpm2_reseal_receipt_t *rec
 {
    if (new_kek)
       OPENSSL_cleanse(new_kek, VAULT_KEK_LEN);
-   if (!receipt || !secret || !new_kek)
+   if (tpm2_process_ready() != 0 || !receipt || !secret || !new_kek)
       return VAULT_TPM2_RESEAL_ERR;
 
    pthread_mutex_lock(&g_ctx.mu);
@@ -1670,7 +1725,7 @@ int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt,
 {
    if (out)
       *out = VAULT_TPM2_RESEAL_CORRUPT;
-   if (!secret || !out)
+   if (tpm2_process_ready() != 0 || !secret || !out)
       return VAULT_TPM2_RESEAL_ERR;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
@@ -1687,7 +1742,7 @@ int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt,
 {
    if (out)
       *out = VAULT_TPM2_RESEAL_CORRUPT;
-   if (!receipt || !secret || !out)
+   if (tpm2_process_ready() != 0 || !receipt || !secret || !out)
       return VAULT_TPM2_RESEAL_ERR;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
@@ -1769,7 +1824,7 @@ out:
 
 int vault_custody_tpm2_reseal_abort(const vault_tpm2_reseal_receipt_t *receipt, const char *secret)
 {
-   if (!receipt || !secret)
+   if (tpm2_process_ready() != 0 || !receipt || !secret)
       return VAULT_TPM2_RESEAL_ERR;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
@@ -1796,7 +1851,8 @@ int vault_custody_tpm2_reseal_cleanup(const vault_tpm2_reseal_receipt_t *receipt
                                       const char *secret,
                                       vault_tpm2_cleanup_authorization_t authorization)
 {
-   if (!receipt || !secret || authorization != VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED)
+   if (tpm2_process_ready() != 0 || !receipt || !secret ||
+       authorization != VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED)
       return VAULT_TPM2_RESEAL_ERR;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
@@ -1822,7 +1878,7 @@ int vault_custody_tpm2_reseal_cleanup(const vault_tpm2_reseal_receipt_t *receipt
 
 int vault_custody_tpm2_reseal(const uint8_t new_kek[VAULT_KEK_LEN], const char *secret)
 {
-   if (!new_kek || !secret)
+   if (tpm2_process_ready() != 0 || !new_kek || !secret)
       return -1;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = -1;
@@ -1869,7 +1925,9 @@ out:
 
 int vault_custody_tpm2_nv_generation(const char *secret, uint64_t *out_gen)
 {
-   if (!secret || !out_gen)
+   if (out_gen)
+      *out_gen = 0;
+   if (tpm2_process_ready() != 0 || !secret || !out_gen)
       return -1;
    pthread_mutex_lock(&g_ctx.mu);
    int rc = -1;
@@ -1890,6 +1948,8 @@ out:
 
 void vault_custody_tpm2_reset(void)
 {
+   if (tpm2_process_ready() != 0)
+      return;
    pthread_mutex_lock(&g_ctx.mu);
    OPENSSL_cleanse(g_ctx.kek, sizeof(g_ctx.kek));
    g_ctx.kek_ready = 0;

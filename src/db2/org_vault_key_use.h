@@ -24,6 +24,10 @@ typedef struct
    size_t hwm_attestation_len;
 } db2_vault_key_use_envelope_t;
 
+/* Read the authoritative primary epoch during startup, including while sealed.
+ * Outputs are zeroed on every failure. */
+int db2_vault_control_startup_status(int64_t *epoch_out, int *sealed_out);
+
 int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *key_id,
                                 const char *principal, const char *agent, const char *cred,
                                 int64_t version, db2_vault_key_use_envelope_t *out);

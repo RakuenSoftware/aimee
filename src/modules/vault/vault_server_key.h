@@ -139,9 +139,11 @@ int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void 
 int vault_maintenance_guard_seal(vault_maintenance_guard_t *guard);
 int vault_maintenance_guard_end(vault_maintenance_guard_t **guard);
 
-/* Startup-only synchronization with the durable kb_control.seal_epoch. The
- * provider must still be sealed and no maintenance guard or key use may be
- * active. Exact replay is idempotent; a differing second initialization fails. */
+/* Startup-only synchronization with the durable kb_control.seal_epoch. No
+ * maintenance guard or key use may be active. The selected provider may already
+ * be unsealed by its startup login (PKCS#11/KMS); the caller is responsible for
+ * first forcing a seal when durable control says sealed. Exact replay is
+ * idempotent; a differing second initialization fails. */
 int vault_primary_epoch_initialize(uint64_t primary_epoch);
 
 #endif /* DEC_VAULT_SERVER_KEY_H */

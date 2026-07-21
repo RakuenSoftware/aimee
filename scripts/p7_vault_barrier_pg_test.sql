@@ -48,12 +48,31 @@ END $$;
 
 DELETE FROM kb_vault_control WHERE singleton=1;
 SELECT p7_expect_sealed('SELECT org_vault_control_require_open()');
+DO $$ BEGIN
+  IF (SELECT count(*) FROM org_vault_control_startup_status())<>0 THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: startup status fabricated missing singleton';
+  END IF;
+END $$;
 INSERT INTO kb_vault_control(singleton,sealed,seal_epoch) VALUES(1,true,2);
 SELECT p7_expect_sealed('SELECT org_vault_control_require_open()');
+DO $$ DECLARE ep BIGINT; is_sealed BOOLEAN;
+BEGIN
+  SELECT seal_epoch,sealed INTO STRICT ep,is_sealed FROM org_vault_control_startup_status();
+  IF ep<>2 OR is_sealed IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: sealed startup status mismatch';
+  END IF;
+END $$;
 UPDATE kb_vault_control SET maintenance_kind='reseal',maintenance_id='op-1' WHERE singleton=1;
 SELECT p7_expect_sealed('SELECT org_vault_control_require_open()');
 UPDATE kb_vault_control SET sealed=false,seal_epoch=7,maintenance_kind='',maintenance_id=''
  WHERE singleton=1;
+DO $$ DECLARE ep BIGINT; is_sealed BOOLEAN;
+BEGIN
+  SELECT seal_epoch,sealed INTO STRICT ep,is_sealed FROM org_vault_control_startup_status();
+  IF ep<>7 OR is_sealed IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: open startup status mismatch';
+  END IF;
+END $$;
 
 SELECT set_config('aimee.principal','owner',true);
 INSERT INTO kb_team(id,name) VALUES(970721,'p7_barrier');
@@ -175,7 +194,8 @@ BEGIN
   IF (SELECT array_agg(p.proname::TEXT ORDER BY p.proname::TEXT) FROM pg_proc p JOIN pg_namespace n
       ON n.oid=p.pronamespace WHERE n.nspname='public' AND
       p.proname LIKE 'org_vault_control_%') IS DISTINCT FROM
-      ARRAY['org_vault_control_lock_exclusive','org_vault_control_require_open']::TEXT[] THEN
+      ARRAY['org_vault_control_lock_exclusive','org_vault_control_require_open',
+            'org_vault_control_startup_status']::TEXT[] THEN
     RAISE EXCEPTION 'P7 barrier FAIL: maintenance mutation API exposed';
   END IF;
   IF NOT EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -194,6 +214,19 @@ BEGIN
         p.prosecdef AND p.provolatile='v' AND
         p.proconfig @> ARRAY['search_path=public']::TEXT[])<>2 THEN
     RAISE EXCEPTION 'P7 barrier FAIL: control helper security attributes drift';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.proname='org_vault_control_startup_status' AND
+        p.prosecdef AND p.provolatile='s' AND
+        p.proconfig @> ARRAY['search_path=pg_catalog, public, pg_temp']::TEXT[] AND
+        p.prosrc LIKE '%public.kb_vault_control%') OR
+     EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+       CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a
+       WHERE n.nspname='public' AND p.proname='org_vault_control_startup_status' AND
+         a.grantee=0 AND a.privilege_type='EXECUTE') OR
+     NOT has_function_privilege('aimee_kb_runtime',
+       'public.org_vault_control_startup_status()','EXECUTE') THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: startup status security/privilege drift';
   END IF;
   IF (SELECT column_default IS NOT NULL FROM information_schema.columns
       WHERE table_schema='public' AND table_name='org_vault_key_use_intent' AND
@@ -253,7 +286,8 @@ DO $$ BEGIN
 END $$;
 
 SET ROLE aimee_kb_runtime;
-DO $$ BEGIN
+DO $$ DECLARE ep BIGINT; is_sealed BOOLEAN;
+BEGIN
   BEGIN PERFORM 1 FROM kb_vault_control;
     RAISE EXCEPTION 'P7 barrier FAIL: runtime read control row';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
@@ -263,6 +297,10 @@ DO $$ BEGIN
   BEGIN PERFORM org_vault_control_lock_exclusive();
     RAISE EXCEPTION 'P7 barrier FAIL: runtime executed exclusive lock helper';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  SELECT seal_epoch,sealed INTO STRICT ep,is_sealed FROM org_vault_control_startup_status();
+  IF ep<>7 OR is_sealed IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'P7 barrier FAIL: runtime sealed startup status mismatch';
+  END IF;
 END $$;
 RESET ROLE;
 
