@@ -11,6 +11,7 @@
 #include "git_oauth_github.h"
 #include "git_ops.h"
 #include "git_org_repos.h"
+#include "git_pr_api.h"
 #include "git_project.h"
 #include "git_ssh_agent.h"
 #include "index.h"
@@ -18,6 +19,7 @@
 #include "workspace_scope.h"
 
 #include <stdio.h>
+#include <string.h>
 
 int git_project_clone(const char *principal, const char *url, const char *name, const char *org,
                       const char *token, char *out_path, size_t path_cap, char *out_ref,
@@ -143,6 +145,100 @@ int git_ops_session_dir(const char *principal, const char *project, const char *
    (void)session_id;
    if (out && out_len)
       out[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
+/* The internal forge resource is parsed and routed by server_http in this test
+ * binary, but its network side effects belong to the focused git/forge tests.
+ * Keep this target hermetic while still satisfying the route's link closure. */
+int git_ops_push_dir(const char *principal, const char *repo_dir, const char *remote_url,
+                     const char *branch, char **out, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)remote_url;
+   (void)branch;
+   if (out)
+      *out = NULL;
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
+int git_pr_https_origin_url(const char *repo_dir, char *out, size_t out_cap, char *err,
+                            size_t errlen)
+{
+   (void)repo_dir;
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
+int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const char *head,
+                             const char *base, const char *title, const char *body, char *out,
+                             size_t out_cap, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)head;
+   (void)base;
+   (void)title;
+   (void)body;
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
+int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
+                             const char *base, char *out, size_t out_cap, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)head;
+   (void)base;
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+   return 0;
+}
+
+int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
+                        char *err, size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)number;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
+git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int number, char *err,
+                              size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)number;
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return GIT_PR_CI_ERROR;
+}
+
+int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,
+                         size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)number;
    if (err && errlen)
       snprintf(err, errlen, "stub");
    return -1;
