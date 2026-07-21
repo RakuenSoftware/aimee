@@ -117,7 +117,7 @@ DECLARE actual TEXT[];
 DECLARE writers TEXT[];
 DECLARE expected_writers TEXT[] := ARRAY[
   'org_vault_delete','org_vault_kek_check_set','org_vault_key_use_admit','org_vault_put',
-  'org_vault_rewrap','org_vault_rotation_checkpoint_old_ref','org_vault_rotation_claim',
+  'org_vault_rewrap','org_vault_rewrap_promote','org_vault_rotation_checkpoint_old_ref','org_vault_rotation_claim',
   'org_vault_rotation_fail_claimed','org_vault_rotation_finalize',
   'org_vault_rotation_heartbeat','org_vault_rotation_release','org_vault_rotation_remediate',
   'org_vault_rotation_stage','org_vault_rotation_stage_claimed','org_vault_rotation_start',
