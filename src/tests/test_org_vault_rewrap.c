@@ -18,7 +18,10 @@ enum
 {
    QUERY_STATE,
    QUERY_BEGIN,
-   QUERY_SNAPSHOT
+   QUERY_SNAPSHOT,
+   QUERY_VERIFY_SUMMARY,
+   QUERY_VERIFY_SECRET,
+   QUERY_VERIFY_CHECK
 };
 
 static int g_conn, g_returns, g_discards;
@@ -29,6 +32,10 @@ static const char *g_stmt_state = "XX000";
 static aimee_pg_prepare_error_t g_prepare_failure = AIMEE_PG_PREPARE_OK;
 static int g_empty_rows;
 static const char *g_returned_op = "01000000000000000000000000000000";
+static const char *g_state_response = "promoted";
+static const char *g_check_principal = "a";
+static int64_t g_summary_secrets, g_summary_checks, g_secret_id = 1;
+static int g_verify_page_rows;
 
 int db2_pool_active(void)
 {
@@ -81,7 +88,15 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *s, aimee_pg_prepare_er
    g_stmt.step = 0;
    g_stmt.query = strstr(s, "org_vault_rewrap_begin")
                       ? QUERY_BEGIN
-                      : (strstr(s, "org_vault_rewrap_snapshot") ? QUERY_SNAPSHOT : QUERY_STATE);
+                      : (strstr(s, "org_vault_rewrap_snapshot")
+                             ? QUERY_SNAPSHOT
+                             : (strstr(s, "org_vault_rewrap_verify_summary")
+                                    ? QUERY_VERIFY_SUMMARY
+                                    : (strstr(s, "org_vault_rewrap_verify_secret_page")
+                                           ? QUERY_VERIFY_SECRET
+                                           : (strstr(s, "org_vault_rewrap_verify_check_page")
+                                                  ? QUERY_VERIFY_CHECK
+                                                  : QUERY_STATE))));
    if (kind)
       *kind = AIMEE_PG_PREPARE_OK;
    return &g_stmt;
@@ -103,6 +118,8 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *e, size_t n)
       s->step++;
       return AIMEE_PG_ERR;
    }
+   if (s->query == QUERY_VERIFY_SECRET || s->query == QUERY_VERIFY_CHECK)
+      return s->step++ < g_verify_page_rows ? AIMEE_PG_ROW : AIMEE_PG_DONE;
    if (g_empty_rows && s->step++ == 0)
       return AIMEE_PG_DONE;
    return s->step++ == 0 ? AIMEE_PG_ROW : AIMEE_PG_DONE;
@@ -145,18 +162,28 @@ int aimee_pg_column_is_null(aimee_pg_stmt_t *s, int c)
 {
    if (s->query == QUERY_SNAPSHOT)
       return !(c == 2 || c == 3 || c == 4 || c == 5 || c == 8 || c == 9);
+   if (s->query == QUERY_VERIFY_SUMMARY || s->query == QUERY_VERIFY_SECRET ||
+       s->query == QUERY_VERIFY_CHECK)
+      return 0;
    return 1;
 }
 int aimee_pg_column_bytes(aimee_pg_stmt_t *s, int c)
 {
-   (void)s;
-   (void)c;
+   if (s->query == QUERY_VERIFY_SUMMARY)
+      return c >= 2 && c <= 4 ? 32 : 0;
+   if (s->query == QUERY_VERIFY_SECRET)
+      return c == 5 ? VAULT_WRAPPED_DEK_LEN : 0;
+   if (s->query == QUERY_VERIFY_CHECK)
+      return c == 2 ? (int)strlen(g_check_principal) : 0;
    return 0;
 }
 const void *aimee_pg_column_blob(aimee_pg_stmt_t *s, int c)
 {
-   (void)s;
-   (void)c;
+   static const uint8_t zero[VAULT_WRAPPED_DEK_LEN] = {0};
+   if (s->query == QUERY_VERIFY_SUMMARY || (s->query == QUERY_VERIFY_SECRET && c == 5))
+      return zero;
+   if (s->query == QUERY_VERIFY_CHECK)
+      return c == 2 ? (const void *)g_check_principal : (const void *)zero;
    return NULL;
 }
 const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
@@ -165,12 +192,20 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
       return c == 0 ? g_returned_op : "preparing";
    if (s->query == QUERY_SNAPSHOT)
       return c == 0 ? g_returned_op : "preparing";
-   return "promoted";
+   if (s->query == QUERY_VERIFY_SECRET)
+      return c == 1 ? "principal" : (c == 2 ? "agent" : "cred");
+   if (s->query == QUERY_VERIFY_CHECK)
+      return g_check_principal;
+   return g_state_response;
 }
 int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int c)
 {
    if (s->query == QUERY_SNAPSHOT)
       return c == 5 ? 1 : (c == 2 || c == 3 ? 1 : 0);
+   if (s->query == QUERY_VERIFY_SUMMARY)
+      return c == 0 ? g_summary_secrets : g_summary_checks;
+   if (s->query == QUERY_VERIFY_SECRET)
+      return c == 0 ? g_secret_id : 1;
    return 1;
 }
 
@@ -181,6 +216,15 @@ static int all_zero(const void *ptr, size_t len)
    for (size_t i = 0; i < len; i++)
       any |= p[i];
    return any == 0;
+}
+
+static int all_byte(const void *ptr, size_t len, unsigned char value)
+{
+   const unsigned char *p = ptr;
+   for (size_t i = 0; i < len; i++)
+      if (p[i] != value)
+         return 0;
+   return 1;
 }
 
 static void test_sqlstate_mapping(void)
@@ -303,6 +347,14 @@ static void test_receipt_identity_binding(void)
    assert(vault_reseal_receipt_encode(&receipt, wire) == 0);
 
    db2_vault_rewrap_tx_t *tx = NULL;
+   /* Exact length alone is insufficient: the typed persistence seam must reject
+    * a same-length receipt whose canonical AIMRSEAL header is corrupt. */
+   wire[0] ^= 0x80;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_record_prepared(tx, op, 1, 7, 8, wire) == DB2_VAULT_REWRAP_INVALID);
+   db2_vault_rewrap_tx_rollback(&tx);
+   wire[0] ^= 0x80;
+
    assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
    assert(db2_vault_rewrap_record_prepared(tx, other_op, 1, 7, 8, wire) ==
           DB2_VAULT_REWRAP_INVALID);
@@ -320,16 +372,50 @@ static void test_receipt_identity_binding(void)
 static void test_page_cap_rejection(void)
 {
    uint8_t op[16] = {1};
+   const size_t oversized = DB2_VAULT_REWRAP_PAGE_MAX + 1;
    size_t count = 99;
-   db2_vault_rewrap_secret_t *rows = calloc(DB2_VAULT_REWRAP_PAGE_MAX + 1, sizeof(*rows));
-   assert(rows);
+   db2_vault_rewrap_secret_t *secrets = malloc(oversized * sizeof(*secrets));
+   db2_vault_rewrap_check_t *checks = malloc(oversized * sizeof(*checks));
+   assert(secrets && checks);
+   memset(secrets, 0xa5, oversized * sizeof(*secrets));
+   memset(checks, 0xa5, oversized * sizeof(*checks));
    db2_vault_rewrap_tx_t *tx = NULL;
    assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, 0, 1, rows, DB2_VAULT_REWRAP_PAGE_MAX + 1,
-                                              &count) == DB2_VAULT_REWRAP_INVALID);
-   assert(count == 0);
+   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, 0, 1, secrets, oversized, &count) ==
+          DB2_VAULT_REWRAP_INVALID);
+   assert(count == 0 && all_zero(secrets, DB2_VAULT_REWRAP_PAGE_MAX * sizeof(*secrets)) &&
+          all_byte(&secrets[DB2_VAULT_REWRAP_PAGE_MAX], sizeof(*secrets), 0xa5));
    db2_vault_rewrap_tx_rollback(&tx);
-   free(rows);
+
+   db2_vault_rewrap_cursor_t cursor = {0}, next;
+   memset(&next, 0xa5, sizeof(next));
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_source_check_page(tx, op, 1, &cursor, 1, checks, oversized, &count,
+                                             &next) == DB2_VAULT_REWRAP_INVALID);
+   assert(count == 0 && all_zero(checks, DB2_VAULT_REWRAP_PAGE_MAX * sizeof(*checks)) &&
+          all_byte(&checks[DB2_VAULT_REWRAP_PAGE_MAX], sizeof(*checks), 0xa5) &&
+          all_zero(&next, sizeof(next)));
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   memset(secrets, 0xa5, oversized * sizeof(*secrets));
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 0, 1, secrets, oversized, &count) ==
+          DB2_VAULT_REWRAP_INVALID);
+   assert(count == 0 && all_zero(secrets, DB2_VAULT_REWRAP_PAGE_MAX * sizeof(*secrets)) &&
+          all_byte(&secrets[DB2_VAULT_REWRAP_PAGE_MAX], sizeof(*secrets), 0xa5));
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   memset(checks, 0xa5, oversized * sizeof(*checks));
+   memset(&next, 0xa5, sizeof(next));
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_check_page(tx, op, 1, &cursor, 1, checks, oversized, &count,
+                                             &next) == DB2_VAULT_REWRAP_INVALID);
+   assert(count == 0 && all_zero(checks, DB2_VAULT_REWRAP_PAGE_MAX * sizeof(*checks)) &&
+          all_byte(&checks[DB2_VAULT_REWRAP_PAGE_MAX], sizeof(*checks), 0xa5) &&
+          all_zero(&next, sizeof(next)));
+   db2_vault_rewrap_tx_rollback(&tx);
+   free(checks);
+   free(secrets);
 }
 
 static void test_operation_id_binding_and_failure_clear(void)
@@ -416,6 +502,145 @@ static void test_ops_vtable_complete(void)
           o->verify_secret_page && o->verify_check_page && o->verify_crypto_ack && o->complete);
 }
 
+static void test_authoritative_verification_exhaustion(void)
+{
+   uint8_t op[16] = {1};
+   db2_vault_rewrap_tx_t *tx = NULL;
+   db2_vault_rewrap_verify_summary_t summary;
+   db2_vault_rewrap_secret_t secret;
+   db2_vault_rewrap_check_t check;
+   db2_vault_rewrap_cursor_t cursor = {0}, next = {0};
+   size_t count = 0;
+
+   g_summary_secrets = g_summary_checks = 1;
+   g_verify_page_rows = 0;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, op, 1, &summary) == DB2_VAULT_REWRAP_OK);
+   g_verify_page_rows = 1;
+   g_secret_id = 1;
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(count == 1);
+   assert(db2_vault_rewrap_verify_crypto_ack(tx, op, 1) == DB2_VAULT_REWRAP_INVALID);
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, op, 1, &summary) == DB2_VAULT_REWRAP_OK);
+   g_verify_page_rows = 1;
+   g_secret_id = 1;
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   g_verify_page_rows = 0;
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 1, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(count == 0);
+   g_verify_page_rows = 1;
+   g_check_principal = "a";
+   assert(db2_vault_rewrap_verify_check_page(tx, op, 1, &cursor, 1, &check, 1, &count, &next) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(count == 1 && next.len == 1 && next.bytes[0] == 'a');
+   cursor = next;
+   g_verify_page_rows = 0;
+   assert(db2_vault_rewrap_verify_check_page(tx, op, 1, &cursor, 1, &check, 1, &count, &next) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(count == 0 && next.len == cursor.len &&
+          memcmp(next.bytes, cursor.bytes, cursor.len) == 0);
+   assert(db2_vault_rewrap_verify_crypto_ack(tx, op, 1) == DB2_VAULT_REWRAP_OK);
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   g_summary_secrets = 1;
+   g_summary_checks = 0;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, op, 1, &summary) == DB2_VAULT_REWRAP_OK);
+   g_verify_page_rows = 1;
+   g_secret_id = 1;
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   g_secret_id = 2;
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 1, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_INTEGRITY);
+   assert(count == 0 && all_zero(&secret, sizeof(secret)));
+   db2_vault_rewrap_tx_rollback(&tx);
+   g_verify_page_rows = 0;
+}
+
+static void test_edge_response_states(void)
+{
+   uint8_t op[16] = {1}, digest[32] = {0};
+   db2_vault_rewrap_tx_t *tx = NULL;
+
+#define EXPECT_BAD_STATE(call, response)                                                           \
+   do                                                                                              \
+   {                                                                                               \
+      g_state_response = (response);                                                               \
+      assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);                               \
+      assert((call) == DB2_VAULT_REWRAP_INTEGRITY);                                                \
+      db2_vault_rewrap_tx_rollback(&tx);                                                           \
+   } while (0)
+
+   EXPECT_BAD_STATE(db2_vault_rewrap_stage_finish(tx, op, 1), "custody_prepared");
+   EXPECT_BAD_STATE(db2_vault_rewrap_mark_committing(tx, op, 1), "wraps_staged");
+   EXPECT_BAD_STATE(db2_vault_rewrap_mark_resealed(tx, op, 1, digest), "reseal_committing");
+   EXPECT_BAD_STATE(db2_vault_rewrap_promote(tx, op, 1), "resealed");
+   EXPECT_BAD_STATE(db2_vault_rewrap_abort(tx, op, 1, "failure"), "completed");
+   EXPECT_BAD_STATE(db2_vault_rewrap_recovery_required(tx, op, 1, "failure"), "aborted");
+
+   vault_tpm2_reseal_receipt_t receipt = {.old_generation = 7, .new_generation = 8};
+   memcpy(receipt.operation_id, op, sizeof(op));
+   uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN];
+   assert(vault_reseal_receipt_encode(&receipt, wire) == 0);
+   EXPECT_BAD_STATE(db2_vault_rewrap_record_prepared(tx, op, 1, 7, 8, wire), "preparing");
+
+   g_state_response = "resealed";
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_mark_resealed(tx, op, 1, digest) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && !tx);
+   g_state_response = "aborted";
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_abort(tx, op, 1, "failure") == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && !tx);
+   g_state_response = "recovery_required";
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_recovery_required(tx, op, 1, "failure") == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && !tx);
+
+   db2_vault_rewrap_verify_summary_t summary;
+   db2_vault_rewrap_secret_t secret;
+   db2_vault_rewrap_check_t check;
+   db2_vault_rewrap_cursor_t cursor = {0}, next = {0};
+   size_t count;
+   g_summary_secrets = g_summary_checks = 0;
+   g_verify_page_rows = 0;
+   g_state_response = "promoted";
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, op, 1, &summary) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_check_page(tx, op, 1, &cursor, 1, &check, 1, &count, &next) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_crypto_ack(tx, op, 1) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_complete(tx, op, 1, summary.receipt_digest, summary.inventory_digest,
+                                    summary.stage_digest) == DB2_VAULT_REWRAP_INTEGRITY);
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   cursor = (db2_vault_rewrap_cursor_t){0};
+   next = (db2_vault_rewrap_cursor_t){0};
+   g_state_response = "completed";
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_summary(tx, op, 1, &summary) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_check_page(tx, op, 1, &cursor, 1, &check, 1, &count, &next) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_verify_crypto_ack(tx, op, 1) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_complete(tx, op, 1, summary.receipt_digest, summary.inventory_digest,
+                                    summary.stage_digest) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && !tx);
+
+   g_state_response = "promoted";
+#undef EXPECT_BAD_STATE
+}
+
 static void test_output_clear_helpers(void)
 {
    db2_vault_rewrap_secret_t secrets[2];
@@ -451,6 +676,8 @@ int main(void)
    test_operation_id_binding_and_failure_clear();
    test_page_clearing_and_exhaustion();
    test_ops_vtable_complete();
+   test_authoritative_verification_exhaustion();
+   test_edge_response_states();
    test_output_clear_helpers();
    puts("org_vault_rewrap: public phase/SQLSTATE tests passed");
    return 0;

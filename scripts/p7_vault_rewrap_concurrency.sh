@@ -113,7 +113,9 @@ fi
 # promoted transaction or the unchanged resealed transaction, never a partial set.
 promote_op=44444444444444444444444444444444
 promote_fence=$(sql -c "SELECT fencing_token FROM org_vault_rewrap_begin('owner','disconnect-promote','$promote_op',22,23)")
-sql -c "SELECT org_vault_rewrap_record_prepared('$promote_op',$promote_fence,decode(repeat('70',208),'hex'),sha256(decode(repeat('70',208),'hex')))" >/dev/null
+# Pinned canonical AIMRSEAL v1 receipt for operation 44..44, generation 22 -> 23.
+promote_receipt_hex=41494d525345414c00010000000000c044444444444444444444444444444444000000000000001600000000000000176666666666666666666666666666666666666666666666666666666666666666777777777777777777777777777777777777777777777777777777777777777788888888888888888888888888888888888888888888888888888888888888889999999999999999999999999999999999999999999999999999999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+sql -c "SELECT org_vault_rewrap_record_prepared('$promote_op',$promote_fence,decode('$promote_receipt_hex','hex'),sha256(decode('$promote_receipt_hex','hex')))" >/dev/null
 sql <<SQL
 BEGIN ISOLATION LEVEL SERIALIZABLE;
 DO \$\$ DECLARE r RECORD; n BYTEA; BEGIN
@@ -135,7 +137,7 @@ END \$\$;
 COMMIT;
 SELECT org_vault_rewrap_mark_committing('$promote_op',$promote_fence);
 SELECT org_vault_rewrap_mark_resealed('$promote_op',$promote_fence,
-  sha256(decode(repeat('70',208),'hex')));
+  sha256(decode('$promote_receipt_hex','hex')));
 CREATE OR REPLACE FUNCTION p7_rewrap_pause_update() RETURNS trigger LANGUAGE plpgsql AS
 \$\$ BEGIN PERFORM pg_sleep(10); RETURN NEW; END \$\$;
 CREATE TRIGGER p7_rewrap_pause_update BEFORE UPDATE OF wrapped_dek ON org_vault_secret

@@ -721,14 +721,15 @@ static void verify_typed_wrapper(int64_t fence, const uint8_t new_kek[VAULT_KEK_
 
    int64_t after = 0;
    int64_t secret_seen = 0;
-   while (secret_seen < summary.secret_count)
+   for (;;)
    {
       db2_vault_rewrap_secret_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
       size_t count = 0;
       assert(db2_vault_rewrap_verify_secret_page(tx, opid, fence, after, DB2_VAULT_REWRAP_PAGE_MAX,
                                                  rows, DB2_VAULT_REWRAP_PAGE_MAX,
                                                  &count) == DB2_VAULT_REWRAP_OK);
-      assert(count > 0);
+      if (count == 0)
+         break;
       for (size_t i = 0; i < count; i++)
       {
          uint8_t expected[VAULT_DEK_LEN], actual[VAULT_DEK_LEN];
@@ -745,14 +746,18 @@ static void verify_typed_wrapper(int64_t fence, const uint8_t new_kek[VAULT_KEK_
 
    db2_vault_rewrap_cursor_t cursor = {0}, next = {0};
    int64_t check_seen = 0;
-   while (check_seen < summary.check_count)
+   for (;;)
    {
       db2_vault_rewrap_check_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
       size_t count = 0;
       assert(db2_vault_rewrap_verify_check_page(tx, opid, fence, &cursor, DB2_VAULT_REWRAP_PAGE_MAX,
                                                 rows, DB2_VAULT_REWRAP_PAGE_MAX, &count,
                                                 &next) == DB2_VAULT_REWRAP_OK);
-      assert(count > 0);
+      if (count == 0)
+      {
+         assert(next.len == cursor.len && CRYPTO_memcmp(next.bytes, cursor.bytes, cursor.len) == 0);
+         break;
+      }
       for (size_t i = 0; i < count; i++)
       {
          size_t idx = principal_index(rows[i].principal);
