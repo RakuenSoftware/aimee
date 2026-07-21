@@ -1,6 +1,8 @@
 # P7-reseal-d2b in-process TPM2/Postgres reconciler
 
-- **State:** proposed; production-uninvoked until D3 operator enablement.
+- **State:** delivered and validated on PostgreSQL 17 plus swtpm (CT260), with
+  default and ASAN/UBSAN builds; production-uninvoked until D3 operator
+  enablement.
 - **Depends on:** P7-reseal-a/c/d1 and P7-reseal-d2a.
 - **Enables:** D3 operator authorization, external WORM delivery, cleanup,
   operational unseal, and the exhaustive restart/kill matrix.
@@ -230,3 +232,28 @@ state/status mismatch fails closed through the typed abort/quarantine policy,
 all secret-bearing work stays inside protected/cleansed memory and the exclusive
 guard, real PG17+swtpm validates the integrated protocol on CT260, and no
 production mechanism can invoke it before D3.
+
+## Delivered validation
+
+- The default fake gate covers all nine database states against all seven TPM
+  statuses, a 257-secret/257-check three-page forward path, both authoritative
+  terminal empty pages, START replay, custody-ahead prepare uncertainty, abort
+  reclassification ordering, retained-transaction rollback, callback and guard
+  failures, commit uncertainty, and forbidden call traces. Focused ASAN/UBSAN
+  with leak detection passes.
+- Default server and kb builds pass. The orchestrator object is linked only into
+  the kb vault closure, and source inventory finds no route, CLI, scheduler,
+  startup worker, cleanup call, or other production invocation.
+- CT260 passed the on-demand real PostgreSQL 17 + libtss2 + swtpm gate: wrong
+  secret with no database edge; full START over 257 DEKs and five checks
+  including an empty check; sealed completion; old-KEK rejection and installed
+  KEK verification; old-blob PolicyNV replay denial; fresh-process resume from
+  `preparing` and `custody_prepared`; corrupt-bundle durable quarantine; retained
+  continuation artifacts; and raw old/new key canary scans across PostgreSQL,
+  artifacts, and logs.
+- Adversarial implementation reviews found and closed missing D2a terminal-empty
+  page consumption, post-abort custody reclassification, stale terminal output,
+  receipt/evidence quarantine gaps, uncertain-prepare KEK adoption, retained
+  transaction cleanup, aborted-terminal custody inspection, START replay
+  mismatch classification, and custody-ahead failed-prepare handling. The final
+  focused audit found no remaining blocker.
