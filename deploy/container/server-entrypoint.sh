@@ -10,6 +10,13 @@
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
 
+# Preserve the container runtime's command-override contract.  The image has no
+# default CMD, so arguments here are an operator-supplied command (for example,
+# `aimee-server --version`) and must replace the managed server lifecycle below.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
