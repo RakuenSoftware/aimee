@@ -67,9 +67,22 @@ AUTH_RE = re.compile(
 HEADER_NAME_RE = re.compile(r"\A[a-z0-9-]+\Z")
 
 
-def _buffered_bytes_waiting(reader: Any) -> bool:
-    """Return whether a buffered request reader exposes at least one byte."""
+def _immediate_surplus_queued(reader: Any) -> bool:
+    """Return whether a buffered reader exposes an already-queued suffix."""
     return bool(reader.peek(1))
+
+
+def _exact_sni(server_name: str | None, expected_host: str) -> bool:
+    """Require a present, byte-for-byte exact ASCII SNI hostname."""
+    return server_name is not None and server_name == expected_host
+
+
+def _write_counter(path_text: str | None, value: int) -> None:
+    if path_text:
+        path = Path(path_text)
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(f"{value}\n", encoding="ascii")
+        os.replace(temporary, path)
 
 
 class DuplicateKey(ValueError):
@@ -351,15 +364,16 @@ class MockServer(HTTPServer):
     def __init__(self, address: tuple[str, int], args: argparse.Namespace):
         self.args = args
         self.accepted = 0
+        self.observed = 0
         super().__init__(address, MockHandler)
+
+    def mark_observed(self) -> None:
+        self.observed += 1
+        _write_counter(self.args.observed_file, self.observed)
 
     def mark_accepted(self) -> None:
         self.accepted += 1
-        if self.args.counter_file:
-            path = Path(self.args.counter_file)
-            temporary = path.with_name(path.name + ".tmp")
-            temporary.write_text(f"{self.accepted}\n", encoding="ascii")
-            os.replace(temporary, path)
+        _write_counter(self.args.counter_file, self.accepted)
 
 
 class MockHandler(BaseHTTPRequestHandler):
@@ -393,18 +407,19 @@ class MockHandler(BaseHTTPRequestHandler):
             pass
 
     def _has_surplus_request_bytes(self) -> bool:
-        """Reject bytes beyond Content-Length before producing an oracle result.
+        """Reject an immediately queued/pipelined suffix after Content-Length.
 
         ``rfile`` is buffered, so ``peek`` covers both bytes already consumed from
         TLS into that buffer and bytes immediately readable from the socket.  The
-        short bounded probe makes a single-write request-plus-surplus test
-        deterministic without waiting for EOF from a normal request/response
-        client.
+        bounded probe reliably catches a single-write request-plus-suffix.  It
+        cannot prove that a peer will never send bytes later: Content-Length ends
+        the request, while this response-before-close protocol cannot wait for
+        peer EOF without deadlocking a normal client.
         """
         previous_timeout = self.connection.gettimeout()
         try:
             self.connection.settimeout(0.1)
-            return _buffered_bytes_waiting(self.rfile)
+            return _immediate_surplus_queued(self.rfile)
         except (TimeoutError, socket.timeout, ssl.SSLWantReadError):
             return False
         finally:
@@ -423,6 +438,7 @@ class MockHandler(BaseHTTPRequestHandler):
         os.close(fd)
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        self.server.mark_observed()
         args = self.server.args
         if (
             self.request_version != "HTTP/1.1"
@@ -620,8 +636,15 @@ def self_test() -> None:
         "/model/model/converse", headers, names, headers["x-amz-content-sha256"], "us-east-1"
     )
     assert len(first) == 64 and hmac.compare_digest(first, second)
-    assert _buffered_bytes_waiting(io.BufferedReader(io.BytesIO(b"surplus")))
-    assert not _buffered_bytes_waiting(io.BufferedReader(io.BytesIO(b"")))
+    with_suffix = io.BufferedReader(io.BytesIO(b"bodyqueued-suffix"))
+    assert with_suffix.read(4) == b"body"
+    assert _immediate_surplus_queued(with_suffix)
+    without_suffix = io.BufferedReader(io.BytesIO(b"body"))
+    assert without_suffix.read(4) == b"body"
+    assert not _immediate_surplus_queued(without_suffix)
+    assert _exact_sni("bedrock-runtime.us-east-1.amazonaws.com", headers["host"])
+    assert not _exact_sni(None, headers["host"])
+    assert not _exact_sni("wrong.invalid", headers["host"])
     assert "unclean-eof" in CASES
     assert "unclean-eof" not in (
         "stream-success",
@@ -646,6 +669,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-path", help="exact encoded origin-form request target")
     parser.add_argument("--no-session-token", action="store_true")
     parser.add_argument("--counter-file", help="atomically updated accepted-request count")
+    parser.add_argument("--observed-file", help="atomically updated observed-request count")
     parser.add_argument("--ready-file", help="created after the TLS listener is ready")
     args = parser.parse_args()
     if args.self_test:
@@ -690,9 +714,21 @@ def main() -> int:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(args.cert, args.key)
+
+    def require_exact_sni(
+        _tls_socket: ssl.SSLSocket,
+        server_name: str | None,
+        _initial_context: ssl.SSLContext,
+    ) -> int | None:
+        if _exact_sni(server_name, args.expected_host):
+            return None
+        print(f"case={args.case} rejected=sni", file=sys.stderr, flush=True)
+        return ssl.ALERT_DESCRIPTION_UNRECOGNIZED_NAME
+
+    context.set_servername_callback(require_exact_sni)
     server.socket = context.wrap_socket(server.socket, server_side=True)
-    if args.counter_file:
-        Path(args.counter_file).write_text("0\n", encoding="ascii")
+    _write_counter(args.counter_file, 0)
+    _write_counter(args.observed_file, 0)
     if args.ready_file:
         Path(args.ready_file).write_text(f"{server.server_port}\n", encoding="ascii")
     print(f"case={args.case} ready port={server.server_port}", file=sys.stderr, flush=True)

@@ -34,6 +34,7 @@ scratch_dir=$(mktemp -d /tmp/aimee-p6c-egress.XXXXXX)
 hosts_filtered="$scratch_dir/hosts.filtered"
 mock_ready="$scratch_dir/mock.ready"
 mock_counter="$scratch_dir/mock.accepted"
+mock_observed="$scratch_dir/mock.observed"
 mock_log="$scratch_dir/mock.log"
 case_log="$scratch_dir/case.log"
 ca_key="$scratch_dir/ca.key"
@@ -56,6 +57,7 @@ mock_pid=''
 hosts_changed=0
 system_ca_installed=0
 db_seeded=0
+deferred_signal=''
 readonly hosts_line="127.0.0.1 $bedrock_host # aimee-p6c-egress-ct260 pid=$$"
 readonly system_ca_cert="/usr/local/share/ca-certificates/aimee-p6c-egress-ct260-pid-$$.crt"
 
@@ -106,8 +108,29 @@ SQL
   rmdir -- "$scratch_dir" 2>/dev/null || rc=1
   exit "$rc"
 }
+
+restore_termination_traps() {
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
+
+defer_termination() {
+  [[ -n $deferred_signal ]] || deferred_signal=$1
+}
+
+exit_for_deferred_signal() {
+  case $deferred_signal in
+    HUP) exit 129 ;;
+    INT) exit 130 ;;
+    TERM) exit 143 ;;
+    '') return ;;
+    *) die 'internal deferred-signal state is invalid' ;;
+  esac
+}
+
 trap cleanup EXIT
-trap 'exit 130' HUP INT TERM
+restore_termination_traps
 
 if awk -v wanted="$bedrock_host" '
   /^[[:space:]]*#/ { next }
@@ -116,16 +139,16 @@ if awk -v wanted="$bedrock_host" '
 ' /etc/hosts; then
   die 'Bedrock test hostname already exists in /etc/hosts; refusing ambiguous mutation'
 fi
-printf '%s\n' "$hosts_line" >>/etc/hosts
 hosts_changed=1
+printf '%s\n' "$hosts_line" >>/etc/hosts
 
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
   -subj '/CN=aimee-p6c-ct260-test-ca' -keyout "$ca_key" -out "$ca_cert" \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign' >/dev/null 2>&1
 
-cp -- "$ca_cert" "$system_ca_cert"
 system_ca_installed=1
+cp -- "$ca_cert" "$system_ca_cert"
 update-ca-certificates >/dev/null
 
 printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
@@ -152,7 +175,11 @@ openssl x509 -req -sha256 -days 1 -in "$wrong_ca_server_csr" \
   -CA "$wrong_ca_cert" -CAkey "$wrong_ca_key" -CAcreateserial \
   -extfile "$cert_ext" -out "$wrong_ca_server_cert" >/dev/null 2>&1
 
-psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" >/dev/null <<'SQL'
+trap 'defer_termination HUP' HUP
+trap 'defer_termination INT' INT
+trap 'defer_termination TERM' TERM
+seed_rc=0
+psql -X -q -v ON_ERROR_STOP=1 "$AIMEE_TEST_PG_URL" >/dev/null <<'SQL' || seed_rc=$?
 BEGIN;
 DO $guard$
 BEGIN
@@ -180,7 +207,12 @@ SELECT org_model_entitle('model', 960260);
 SELECT org_model_entitle('p6c-unsupported', 960260);
 COMMIT;
 SQL
-db_seeded=1
+if (( seed_rc == 0 )); then
+  db_seeded=1
+fi
+restore_termination_traps
+exit_for_deferred_signal
+(( seed_rc == 0 )) || exit "$seed_rc"
 
 make -C src -j"$(nproc)" build/obj/tests/unit-test-kb-bedrock-live >/dev/null
 
@@ -192,7 +224,8 @@ start_mock() {
   : >"$mock_log"
   python3 scripts/p6c_bedrock_mock.py --cert "$cert" --key "$key" \
     --bind 127.0.0.1 --port 443 --case "$case_id" \
-    --counter-file "$mock_counter" --ready-file "$mock_ready" 2>"$mock_log" &
+    --counter-file "$mock_counter" --observed-file "$mock_observed" \
+    --ready-file "$mock_ready" 2>"$mock_log" &
   mock_pid=$!
   local attempt=0
   while (( attempt < 100 )); do
@@ -212,11 +245,27 @@ accepted_count() {
   printf '%s' "$value"
 }
 
+observed_count() {
+  local value
+  [[ -f $mock_observed ]] || die 'mock observed counter is missing'
+  IFS= read -r value <"$mock_observed"
+  [[ $value =~ ^[0-9]+$ ]] || die 'mock observed counter is malformed'
+  printf '%s' "$value"
+}
+
 assert_count() {
   local expected=$1
   local actual
   actual=$(accepted_count)
   [[ $actual == "$expected" ]] || die "accepted counter mismatch (want $expected, got $actual)"
+}
+
+assert_observed() {
+  local expected=$1
+  local actual
+  actual=$(observed_count)
+  [[ $actual == "$expected" ]] ||
+    die "observed counter mismatch (want $expected, got $actual)"
 }
 
 run_success() {
@@ -245,6 +294,7 @@ run_failure() {
 start_mock nonstream-success
 run_success buffered-success buffered
 assert_count 1
+assert_observed 1
 stop_mock
 
 start_mock fragmented-stream-success
@@ -263,6 +313,7 @@ if AIMEE_TEST_WRONG_SECRET=1 AIMEE_TEST_TEAM_ID="$team_id" \
   die 'wrong-secret unexpectedly succeeded'
 fi
 assert_count 0
+assert_observed 1
 stop_mock
 
 for case_id in wrong-media non-2xx malformed-framing; do
@@ -295,9 +346,11 @@ assert_count 0
 stop_mock
 
 start_mock nonstream-success
+pre_network_observed=$(observed_count)
 for model_id in p6c-missing p6c-unentitled p6c-unsupported; do
   run_failure "pre-network-$model_id" "$model_id" buffered
   assert_count 0
+  assert_observed "$pre_network_observed"
 done
 stop_mock
 
