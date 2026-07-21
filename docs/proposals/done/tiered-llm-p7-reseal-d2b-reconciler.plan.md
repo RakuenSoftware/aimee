@@ -256,4 +256,6 @@ production mechanism can invoke it before D3.
   receipt/evidence quarantine gaps, uncertain-prepare KEK adoption, retained
   transaction cleanup, aborted-terminal custody inspection, START replay
   mismatch classification, and custody-ahead failed-prepare handling. The final
-  focused audit found no remaining blocker.
+  sealed review additionally hardened scratch-database identifier handling,
+  fail-closed non-Linux compilation, injected page-count/cursor validation, and
+  typed epoch-sync results; the hardened CT260 gate remained green.
