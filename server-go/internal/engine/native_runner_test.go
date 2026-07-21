@@ -111,6 +111,28 @@ func TestExtractJSONObjectReturnsFirstAdjacentObject(t *testing.T) {
 	}
 }
 
+func TestExtractJSONObjectAcceptsClosingBraceInsideString(t *testing.T) {
+	expected := `{"a":"}"}`
+	doc, err := extractJSONObject(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != expected {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
+func TestExtractJSONObjectRecoversAfterUnclosedProseBrace(t *testing.T) {
+	expected := `{"verdict":"approve","findings":[]}`
+	doc, err := extractJSONObject("provider preamble { broken " + expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc); got != expected {
+		t.Fatalf("wrong object extracted: %s", got)
+	}
+}
+
 func TestExtractJSONObjectRejectsTruncatedAndProseResponses(t *testing.T) {
 	for _, response := range []string{`{"a":"unterminated\\`, "provider returned prose", "{"} {
 		if doc, err := extractJSONObject(response); err == nil {
