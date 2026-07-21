@@ -84,12 +84,13 @@ the independent CT260 mock peer remain the next slices.
    that error delta takes precedence as `CALLBACK_ABORT`.
 9. The engine enforces AWS's documented lifecycle: exactly one `messageStart` before known
    content events; `contentBlockStart` is tool-use only; because AWS omits start for text and
-   reasoning, their first delta implicitly opens the index; later deltas must match the open
+   reasoning, their first delta opens the index and synthesizes the required IR block-start
+   before its block-delta; later deltas must match the open
    kind; every block stops exactly once and indexes are not reused; `messageStop` occurs once
    with no open blocks; metadata occurs exactly once after it and is terminal. Missing,
    fractional, negative, or >=64 indexes fail closed. Finish requires both terminal events,
-   no open blocks, and no partial bytes. Metadata retains the converged second TURN_STOP
-   usage delta.
+   no open blocks, and no partial bytes. `messageStop` retains its reason internally and
+   metadata emits the single terminal TURN_STOP with that reason plus usage.
 
 ## API and implementation
 

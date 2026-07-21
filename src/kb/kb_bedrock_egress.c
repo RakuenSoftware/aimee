@@ -69,6 +69,46 @@ static int node_budget_add(size_t *nodes, size_t add)
    return 0;
 }
 
+static int utf8_valid(const unsigned char *p, size_t n)
+{
+   size_t i = 0;
+   while (i < n)
+   {
+      unsigned char lead = p[i++];
+      if (lead < 0x80)
+         continue;
+      size_t need;
+      unsigned char second_min = 0x80, second_max = 0xbf;
+      if (lead >= 0xc2 && lead <= 0xdf)
+         need = 1;
+      else if (lead >= 0xe0 && lead <= 0xef)
+      {
+         need = 2;
+         if (lead == 0xe0)
+            second_min = 0xa0;
+         else if (lead == 0xed)
+            second_max = 0x9f;
+      }
+      else if (lead >= 0xf0 && lead <= 0xf4)
+      {
+         need = 3;
+         if (lead == 0xf0)
+            second_min = 0x90;
+         else if (lead == 0xf4)
+            second_max = 0x8f;
+      }
+      else
+         return 0;
+      if (need > n - i || p[i] < second_min || p[i] > second_max)
+         return 0;
+      for (size_t j = 1; j < need; j++)
+         if (p[i + j] < 0x80 || p[i + j] > 0xbf)
+            return 0;
+      i += need;
+   }
+   return 1;
+}
+
 static int bedrock_identifier(const char *s)
 {
    size_t n = s ? strnlen(s, 65) : 0;
@@ -96,7 +136,19 @@ static int strict_base64(const char *s)
    for (size_t i = n - padding; i < n; i++)
       if (s[i] != '=')
          return 0;
-   return padding <= 2;
+   int tail = 0;
+   unsigned char c = (unsigned char)s[n - padding - 1];
+   if (c >= 'A' && c <= 'Z')
+      tail = c - 'A';
+   else if (c >= 'a' && c <= 'z')
+      tail = c - 'a' + 26;
+   else if (c >= '0' && c <= '9')
+      tail = c - '0' + 52;
+   else if (c == '+')
+      tail = 62;
+   else if (c == '/')
+      tail = 63;
+   return padding <= 2 && (padding != 2 || (tail & 15) == 0) && (padding != 1 || (tail & 3) == 0);
 }
 
 static int string_budget(const char *s, size_t *total)
@@ -104,7 +156,7 @@ static int string_budget(const char *s, size_t *total)
    if (!s)
       return -1;
    size_t n = strnlen(s, 1024U * 1024U + 1U);
-   if (n > 1024U * 1024U)
+   if (n > 1024U * 1024U || !utf8_valid((const unsigned char *)s, n))
       return -1;
    if (*total > KB_BEDROCK_BODY_MAX - n)
       return -1;
@@ -112,20 +164,81 @@ static int string_budget(const char *s, size_t *total)
    return 0;
 }
 
-static int json_budget(const cJSON *j, unsigned depth, size_t *nodes, size_t *strings)
+static int json_key_compare(const void *a, const void *b)
+{
+   const cJSON *const *ka = a;
+   const cJSON *const *kb = b;
+   return strcmp((*ka)->string, (*kb)->string);
+}
+
+/* Return 0 for unique keys, -1 for duplicates/malformed keys, and -2 for OOM.
+ * Sorting bounds duplicate detection to O(m log m) for an m-member object. */
+static int json_unique_keys(const cJSON *j)
+{
+   size_t count = 0;
+   for (const cJSON *c = j->child; c; c = c->next)
+   {
+      size_t n = c->string ? strnlen(c->string, 1024U * 1024U + 1U) : 0;
+      if (!c->string || n > 1024U * 1024U || !utf8_valid((const unsigned char *)c->string, n))
+         return -1;
+      count++;
+   }
+   if (count < 2)
+      return 0;
+   if (count > SIZE_MAX / sizeof(cJSON *))
+      return -2;
+   const cJSON **keys = malloc(count * sizeof(*keys));
+   if (!keys)
+      return -2;
+   size_t i = 0;
+   for (const cJSON *c = j->child; c; c = c->next)
+      keys[i++] = c;
+   qsort(keys, count, sizeof(*keys), json_key_compare);
+   int result = 0;
+   for (i = 1; i < count; i++)
+      if (strcmp(keys[i - 1]->string, keys[i]->string) == 0)
+      {
+         result = -1;
+         break;
+      }
+   free(keys);
+   return result;
+}
+
+static int json_children_fit(const cJSON *j, size_t remaining)
+{
+   size_t count = 0;
+   for (const cJSON *c = j->child; c; c = c->next)
+      if (++count > remaining)
+         return 0;
+   return 1;
+}
+
+static int json_budget(const cJSON *j, unsigned depth, size_t *nodes, size_t *strings, int *oom)
 {
    if (!j || depth > KB_JSON_DEPTH_MAX || ++*nodes > KB_JSON_NODE_MAX)
+      return -1;
+   if (!(cJSON_IsNull(j) || cJSON_IsBool(j) || cJSON_IsNumber(j) || cJSON_IsString(j) ||
+         cJSON_IsArray(j) || cJSON_IsObject(j)) ||
+       (cJSON_IsNumber(j) && !isfinite(j->valuedouble)))
       return -1;
    if ((j->string && string_budget(j->string, strings) != 0) ||
        (cJSON_IsString(j) && string_budget(j->valuestring, strings) != 0))
       return -1;
    if (cJSON_IsObject(j))
-      for (const cJSON *a = j->child; a; a = a->next)
-         for (const cJSON *b = a->next; b; b = b->next)
-            if (a->string && b->string && strcmp(a->string, b->string) == 0)
-               return -1;
+   {
+      if (!json_children_fit(j, KB_JSON_NODE_MAX - *nodes))
+         return -1;
+      int unique = json_unique_keys(j);
+      if (unique != 0)
+      {
+         if (unique == -2)
+            *oom = 1;
+         return -1;
+      }
+   }
    for (const cJSON *c = j->child; c; c = c->next)
-      if (json_budget(c, depth + 1, nodes, strings) != 0)
+      if (json_budget(c, depth + 1, nodes, strings, oom) != 0)
          return -1;
    return 0;
 }
@@ -138,7 +251,7 @@ static int image_format_ok(const char *media_type)
            strcmp(media_type, "image/webp") == 0);
 }
 
-static int block_ok(const aimee_block_t *b, size_t *strings, size_t *nodes, int system)
+static int block_ok(const aimee_block_t *b, size_t *strings, size_t *nodes, int system, int *oom)
 {
    if (!b || b->cache_control)
       return 0;
@@ -158,13 +271,13 @@ static int block_ok(const aimee_block_t *b, size_t *strings, size_t *nodes, int 
       return bedrock_identifier(b->tool_id) && bedrock_identifier(b->tool_name) && b->tool_input &&
              cJSON_IsObject(b->tool_input) && node_budget_add(nodes, 4) == 0 &&
              string_budget(b->tool_id, strings) == 0 && string_budget(b->tool_name, strings) == 0 &&
-             json_budget(b->tool_input, 1, nodes, strings) == 0;
+             json_budget(b->tool_input, 1, nodes, strings, oom) == 0;
    case AIMEE_BLK_TOOL_RESULT:
       return bedrock_identifier(b->tool_id) && b->tool_result && node_budget_add(nodes, 7) == 0 &&
              (cJSON_IsString(b->tool_result) || cJSON_IsObject(b->tool_result) ||
               cJSON_IsArray(b->tool_result)) &&
              string_budget(b->tool_id, strings) == 0 &&
-             json_budget(b->tool_result, 1, nodes, strings) == 0;
+             json_budget(b->tool_result, 1, nodes, strings, oom) == 0;
    case AIMEE_BLK_THINKING:
       return b->text && b->text[0] && node_budget_add(nodes, b->thinking_signature ? 5 : 4) == 0 &&
              string_budget(b->text, strings) == 0 &&
@@ -174,7 +287,7 @@ static int block_ok(const aimee_block_t *b, size_t *strings, size_t *nodes, int 
    }
 }
 
-static int request_preflight(const aimee_request_t *ir)
+static int request_preflight(const aimee_request_t *ir, int *oom)
 {
    if (!ir || ir->n_system < 0 || ir->n_system > 4096 || ir->n_messages <= 0 ||
        ir->n_messages > 1024 || ir->n_tools < 0 || ir->n_tools > 256 || ir->n_stop < 0 ||
@@ -191,7 +304,7 @@ static int request_preflight(const aimee_request_t *ir)
    if (ir->n_system && node_budget_add(&nodes, 1) != 0)
       return 0;
    for (int i = 0; i < ir->n_system; i++)
-      if (!block_ok(&ir->system[i], &strings, &nodes, 1))
+      if (!block_ok(&ir->system[i], &strings, &nodes, 1, oom))
          return 0;
    for (int i = 0; i < ir->n_messages; i++)
    {
@@ -202,7 +315,7 @@ static int request_preflight(const aimee_request_t *ir)
          return 0;
       blocks += (size_t)m->n_blocks;
       for (int j = 0; j < m->n_blocks; j++)
-         if (!block_ok(&m->blocks[j], &strings, &nodes, 0))
+         if (!block_ok(&m->blocks[j], &strings, &nodes, 0, oom))
             return 0;
    }
    for (int i = 0; i < ir->n_tools; i++)
@@ -211,7 +324,7 @@ static int request_preflight(const aimee_request_t *ir)
           node_budget_add(&nodes, ir->tools[i].description ? 6 : 5) != 0 ||
           string_budget(ir->tools[i].name, &strings) != 0 ||
           (ir->tools[i].description && string_budget(ir->tools[i].description, &strings) != 0) ||
-          json_budget(ir->tools[i].schema, 1, &nodes, &strings) != 0)
+          json_budget(ir->tools[i].schema, 1, &nodes, &strings, oom) != 0)
          return 0;
    for (int i = 0; i < ir->n_stop; i++)
       if (!ir->stop_sequences[i] || !ir->stop_sequences[i][0] || node_budget_add(&nodes, 1) != 0 ||
@@ -227,14 +340,15 @@ static int request_preflight(const aimee_request_t *ir)
    {
       if (!ir->n_tools || !cJSON_IsObject(ir->tool_choice))
          return 0;
+      if (json_budget(ir->tool_choice, 1, &nodes, &strings, oom) != 0)
+         return 0;
       cJSON *type = cJSON_GetObjectItemCaseSensitive(ir->tool_choice, "type");
       int tool = cJSON_IsString(type) && strcmp(type->valuestring, "tool") == 0;
       if (!cJSON_IsString(type) ||
           (strcmp(type->valuestring, "auto") != 0 && strcmp(type->valuestring, "any") != 0 &&
            strcmp(type->valuestring, "tool") != 0) ||
           cJSON_GetArraySize(ir->tool_choice) != (tool ? 2 : 1) ||
-          node_budget_add(&nodes, (tool ? 3U : 2U) + !ir->n_tools) != 0 ||
-          json_budget(ir->tool_choice, 1, &nodes, &strings) != 0)
+          node_budget_add(&nodes, (tool ? 3U : 2U) + !ir->n_tools) != 0)
          return 0;
       if (tool)
       {
@@ -422,14 +536,21 @@ kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *t,
                                                   const kb_bedrock_credentials_t *c,
                                                   kb_bedrock_wire_request_t *out)
 {
-   if (!out || out->initialized != KB_BEDROCK_REQUEST_MAGIC || !ir || !c)
+   if (!out || out->initialized != KB_BEDROCK_REQUEST_MAGIC)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   /* A failed rebuild must never leave a previously signed request reusable. */
+   kb_bedrock_wire_request_clear(out);
+   if (!ir || !c)
       return KB_BEDROCK_INVALID_ARGUMENT;
    kb_bedrock_result_t target_result = target_policy_check(t, streaming);
    if (target_result != KB_BEDROCK_OK)
       return target_result;
    if (!model_path_ok(t->model_id))
       return KB_BEDROCK_INVALID_TARGET;
-   if (!request_preflight(ir) || !credential_safe(c))
+   int preflight_oom = 0;
+   if (!request_preflight(ir, &preflight_oom))
+      return preflight_oom ? KB_BEDROCK_INTERNAL_ERROR : KB_BEDROCK_INVALID_ARGUMENT;
+   if (!credential_safe(c))
       return KB_BEDROCK_INVALID_ARGUMENT;
    kb_bedrock_wire_request_t q;
    kb_bedrock_wire_request_init(&q);
@@ -528,13 +649,19 @@ static int json_boundary(const cJSON *j, unsigned depth, size_t *nodes)
        (j->string && !ascii_safe(j->string, 1024U * 1024U + 1U, 1)))
       return -1;
    if (cJSON_IsObject(j))
-      for (const cJSON *a = j->child; a; a = a->next)
-         for (const cJSON *b = a->next; b; b = b->next)
-            if (a->string && b->string && strcmp(a->string, b->string) == 0)
-               return -1;
-   for (const cJSON *c = j->child; c; c = c->next)
-      if (json_boundary(c, depth + 1, nodes) != 0)
+   {
+      if (!json_children_fit(j, KB_JSON_NODE_MAX - *nodes))
          return -1;
+      int unique = json_unique_keys(j);
+      if (unique != 0)
+         return unique;
+   }
+   for (const cJSON *c = j->child; c; c = c->next)
+   {
+      int boundary = json_boundary(c, depth + 1, nodes);
+      if (boundary != 0)
+         return boundary;
+   }
    return 0;
 }
 
@@ -612,12 +739,46 @@ static int converse_response_strict(cJSON *j)
 typedef struct
 {
    const unsigned char *p, *end;
+   size_t nodes;
 } json_syntax_t;
 
 static void json_syntax_ws(json_syntax_t *s)
 {
    while (s->p < s->end && (*s->p == ' ' || *s->p == '\t' || *s->p == '\r' || *s->p == '\n'))
       s->p++;
+}
+
+static int json_syntax_utf8(json_syntax_t *s, unsigned char lead)
+{
+   size_t need;
+   unsigned char second_min = 0x80, second_max = 0xbf;
+   if (lead >= 0xc2 && lead <= 0xdf)
+      need = 1;
+   else if (lead >= 0xe0 && lead <= 0xef)
+   {
+      need = 2;
+      if (lead == 0xe0)
+         second_min = 0xa0;
+      else if (lead == 0xed)
+         second_max = 0x9f; /* exclude UTF-8 encoded surrogate code points */
+   }
+   else if (lead >= 0xf0 && lead <= 0xf4)
+   {
+      need = 3;
+      if (lead == 0xf0)
+         second_min = 0x90;
+      else if (lead == 0xf4)
+         second_max = 0x8f; /* cap at U+10FFFF */
+   }
+   else
+      return 0;
+   if ((size_t)(s->end - s->p) < need || s->p[0] < second_min || s->p[0] > second_max)
+      return 0;
+   for (size_t i = 1; i < need; i++)
+      if (s->p[i] < 0x80 || s->p[i] > 0xbf)
+         return 0;
+   s->p += need;
+   return 1;
 }
 
 static int json_syntax_string(json_syntax_t *s)
@@ -631,6 +792,12 @@ static int json_syntax_string(json_syntax_t *s)
          return 1;
       if (c < 0x20)
          return 0;
+      if (c >= 0x80)
+      {
+         if (!json_syntax_utf8(s, c))
+            return 0;
+         continue;
+      }
       if (c != '\\')
          continue;
       if (s->p == s->end)
@@ -640,10 +807,32 @@ static int json_syntax_string(json_syntax_t *s)
          continue;
       if (c != 'u' || (size_t)(s->end - s->p) < 4)
          return 0;
+      unsigned codepoint = 0;
       for (int i = 0; i < 4; i++)
       {
          c = *s->p++;
          if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return 0;
+         codepoint = (codepoint << 4) |
+                     (unsigned)(c <= '9' ? c - '0' : (c <= 'F' ? c - 'A' + 10 : c - 'a' + 10));
+      }
+      if (codepoint >= 0xdc00 && codepoint <= 0xdfff)
+         return 0;
+      if (codepoint >= 0xd800 && codepoint <= 0xdbff)
+      {
+         if ((size_t)(s->end - s->p) < 6 || s->p[0] != '\\' || s->p[1] != 'u')
+            return 0;
+         s->p += 2;
+         unsigned low = 0;
+         for (int i = 0; i < 4; i++)
+         {
+            c = *s->p++;
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+               return 0;
+            low = (low << 4) |
+                  (unsigned)(c <= '9' ? c - '0' : (c <= 'F' ? c - 'A' + 10 : c - 'a' + 10));
+         }
+         if (low < 0xdc00 || low > 0xdfff)
             return 0;
       }
    }
@@ -695,7 +884,7 @@ static int json_syntax_value(json_syntax_t *s, unsigned depth)
    if (depth > KB_JSON_DEPTH_MAX)
       return 0;
    json_syntax_ws(s);
-   if (s->p == s->end)
+   if (s->p == s->end || ++s->nodes > KB_JSON_NODE_MAX)
       return 0;
    if (*s->p == '"')
       return json_syntax_string(s);
@@ -796,10 +985,13 @@ static cJSON *parse_json_exact(const unsigned char *body, size_t len, size_t cap
       while (end < copy + len && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
          end++;
       size_t nodes = 0;
-      if (end != copy + len || json_boundary(j, 1, &nodes) != 0)
+      int boundary = end == copy + len ? json_boundary(j, 1, &nodes) : -1;
+      if (boundary != 0)
       {
          cJSON_Delete(j);
          j = NULL;
+         if (boundary == -2 && oom)
+            *oom = 1;
       }
    }
    OPENSSL_cleanse(copy, len + 1);
@@ -991,7 +1183,9 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
          return KB_BEDROCK_MALFORMED_STREAM;
       cJSON *usage = cJSON_GetObjectItemCaseSensitive(j, "usage");
       if (!cJSON_IsObject(usage) || !nonnegative_long(usage, "inputTokens") ||
-          !nonnegative_long(usage, "outputTokens"))
+          !nonnegative_long(usage, "outputTokens") ||
+          !optional_nonnegative_long(usage, "cacheReadInputTokens") ||
+          !optional_nonnegative_long(usage, "cacheWriteInputTokens"))
          return KB_BEDROCK_MALFORMED_STREAM;
       s->metadata = 1;
    }
@@ -1012,6 +1206,10 @@ static kb_bedrock_result_t process_frame(kb_bedrock_stream_t *s, const aws_es_me
 {
    if (m->headers_truncated || header_count(m, ":message-type") != 1 || !m->message_type ||
        m->message_type->value_type != AWS_ES_HDR_STRING)
+      return KB_BEDROCK_MALFORMED_STREAM;
+   /* Metadata is terminal for every frame class.  After messageStop, only the
+    * metadata event may follow; errors and exceptions cannot reopen the turn. */
+   if (s->metadata || (s->message_stopped && m->msg_type != AWS_ES_MSG_EVENT))
       return KB_BEDROCK_MALFORMED_STREAM;
    if (m->msg_type == AWS_ES_MSG_ERROR)
    {

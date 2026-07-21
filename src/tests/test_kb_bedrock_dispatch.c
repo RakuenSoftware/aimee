@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,9 +84,51 @@ static void request_tests(void)
    }
 
    db2_bedrock_target_t t = target("aws", "us-east-1", "model");
-   ir.has_top_k = 1;
    kb_bedrock_wire_request_t q;
    kb_bedrock_wire_request_init(&q);
+   char invalid_text[] = {'x', (char)0xc0, (char)0xaf, 0};
+   block.text = invalid_text;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   char truncated_text[] = {'x', (char)0xe2, (char)0x82, 0};
+   block.text = truncated_text;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   char surrogate_text[] = {'x', (char)0xed, (char)0xa0, (char)0x80, 0};
+   block.text = surrogate_text;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   block.text = "\xf0\x9f\x98\x80";
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_OK);
+   kb_bedrock_wire_request_clear(&q);
+   block.text = "hello";
+   cJSON *schema = cJSON_CreateObject();
+   cJSON *bad_choice_type = cJSON_CreateString("auto");
+   cJSON *bad_choice = cJSON_CreateObject();
+   assert(schema && bad_choice_type && bad_choice);
+   free(bad_choice_type->valuestring);
+   bad_choice_type->valuestring = NULL;
+   cJSON_AddItemToObject(bad_choice, "type", bad_choice_type);
+   aimee_tool_t one_tool = {.name = "tool", .schema = schema};
+   ir.tools = &one_tool;
+   ir.n_tools = 1;
+   ir.tool_choice = bad_choice;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   cJSON *bad_key_choice = cJSON_Parse("{\"type\":\"auto\"}");
+   assert(bad_key_choice && bad_key_choice->child);
+   free(bad_key_choice->child->string);
+   bad_key_choice->child->string = NULL;
+   ir.tool_choice = bad_key_choice;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   ir.tool_choice = NULL;
+   assert(cJSON_AddNumberToObject(schema, "x", 1) != NULL && schema->child);
+   free(schema->child->string);
+   schema->child->string = NULL;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   ir.tools = NULL;
+   ir.n_tools = 0;
+   ir.tool_choice = NULL;
+   cJSON_Delete(bad_choice);
+   cJSON_Delete(bad_key_choice);
+   cJSON_Delete(schema);
+   ir.has_top_k = 1;
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
    t.endpoint[0] = 'x';
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
@@ -108,7 +151,11 @@ static void request_tests(void)
    assert(kb_bedrock_wire_request_headers(&q, headers, KB_BEDROCK_MAX_HEADERS, &n_headers) ==
           KB_BEDROCK_OK);
    assert(n_headers == 5);
-   kb_bedrock_wire_request_clear(&q);
+   kb_bedrock_credentials_t stale_failure = c;
+   stale_failure.date = "20260102";
+   assert(kb_bedrock_wire_request_build(&t, &ir, 1, &stale_failure, &q) ==
+          KB_BEDROCK_INVALID_ARGUMENT);
+   assert(q.body == NULL && q.body_len == 0 && q.host[0] == 0 && q.sig.authorization[0] == 0);
 
    c = credentials();
    c.date = "20260102";
@@ -147,9 +194,24 @@ static void request_tests(void)
    assert(block.tool_input != NULL);
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
    cJSON_Delete(block.tool_input);
+   block.tool_id = "id";
+   block.tool_input = cJSON_CreateRaw("{bad-json");
+   assert(block.tool_input != NULL);
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   cJSON_Delete(block.tool_input);
+   block.tool_input = cJSON_CreateObject();
+   assert(block.tool_input != NULL);
+   assert(cJSON_AddNumberToObject(block.tool_input, "value", NAN) != NULL);
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   cJSON_Delete(block.tool_input);
    block = (aimee_block_t){
        .type = AIMEE_BLK_IMAGE, .media_type = "image/png", .media_ref = "not base64"};
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   block.media_ref = "AB==";
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   block.media_ref = "AA==";
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_OK);
+   kb_bedrock_wire_request_clear(&q);
    snprintf(t.model_id, sizeof(t.model_id), "model/");
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
    snprintf(t.model_id, sizeof(t.model_id), "model");
@@ -225,14 +287,24 @@ static void response_tests(void)
        "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
        "{\"text\":\"x\\u0000y\"}]}},\"stopReason\":\"end_turn\","
        "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
-   const unsigned char *invalid[] = {
-       not_object,        duplicate_key,      negative_usage, fractional_usage, inexact_usage,
-       ambiguous_content, extra_union_member, nul_escape,     empty_content,    empty_text};
-   const size_t invalid_len[] = {sizeof(not_object) - 1,         sizeof(duplicate_key) - 1,
-                                 sizeof(negative_usage) - 1,     sizeof(fractional_usage) - 1,
-                                 sizeof(inexact_usage) - 1,      sizeof(ambiguous_content) - 1,
-                                 sizeof(extra_union_member) - 1, sizeof(nul_escape) - 1,
-                                 sizeof(empty_content) - 1,      sizeof(empty_text) - 1};
+   static const unsigned char lone_high_surrogate[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
+       "{\"text\":\"\\uD800\"}]}},\"stopReason\":\"end_turn\","
+       "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   static const unsigned char lone_low_surrogate[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
+       "{\"text\":\"\\uDC00\"}]}},\"stopReason\":\"end_turn\","
+       "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   const unsigned char *invalid[] = {not_object,         duplicate_key,       negative_usage,
+                                     fractional_usage,   inexact_usage,       ambiguous_content,
+                                     extra_union_member, nul_escape,          empty_content,
+                                     empty_text,         lone_high_surrogate, lone_low_surrogate};
+   const size_t invalid_len[] = {sizeof(not_object) - 1,          sizeof(duplicate_key) - 1,
+                                 sizeof(negative_usage) - 1,      sizeof(fractional_usage) - 1,
+                                 sizeof(inexact_usage) - 1,       sizeof(ambiguous_content) - 1,
+                                 sizeof(extra_union_member) - 1,  sizeof(nul_escape) - 1,
+                                 sizeof(empty_content) - 1,       sizeof(empty_text) - 1,
+                                 sizeof(lone_high_surrogate) - 1, sizeof(lone_low_surrogate) - 1};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
    {
       assert(kb_bedrock_nonstream_parse(invalid[i], invalid_len[i], &r) ==
@@ -254,6 +326,74 @@ static void response_tests(void)
           KB_BEDROCK_OK);
    assert(r.n_content == 1 && strcmp(r.content[0].text, "x\\u0000y") == 0);
    aimee_response_free(&r);
+
+   static const unsigned char surrogate_pair[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
+       "{\"text\":\"\\uD83D\\uDE00\"}]}},\"stopReason\":\"end_turn\","
+       "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   assert(kb_bedrock_nonstream_parse(surrogate_pair, sizeof(surrogate_pair) - 1, &r) ==
+          KB_BEDROCK_OK);
+   aimee_response_free(&r);
+
+   static const unsigned char invalid_utf8[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[{\"text\":\"\xc0\xaf\"}]}},"
+       "\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   assert(kb_bedrock_nonstream_parse(invalid_utf8, sizeof(invalid_utf8) - 1, &r) ==
+          KB_BEDROCK_MALFORMED_RESPONSE);
+   unsigned char encoded_surrogate[sizeof(invalid_utf8) + 1];
+   memcpy(encoded_surrogate, invalid_utf8, sizeof(invalid_utf8));
+   unsigned char *bad_text = (unsigned char *)strstr((char *)encoded_surrogate, "\xc0\xaf");
+   assert(bad_text != NULL);
+   bad_text[0] = 0xed;
+   bad_text[1] = 0xa0;
+   memmove(bad_text + 3, bad_text + 2,
+           sizeof(invalid_utf8) - (size_t)(bad_text + 2 - encoded_surrogate));
+   bad_text[2] = 0x80;
+   assert(kb_bedrock_nonstream_parse(encoded_surrogate, sizeof(invalid_utf8), &r) ==
+          KB_BEDROCK_MALFORMED_RESPONSE);
+
+   static const unsigned char valid_utf8[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[{\"text\":"
+       "\"\xf0\x9f\x98\x80\"}]}},"
+       "\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   assert(kb_bedrock_nonstream_parse(valid_utf8, sizeof(valid_utf8) - 1, &r) == KB_BEDROCK_OK);
+   aimee_response_free(&r);
+}
+
+static size_t parser_allocations;
+
+static void *counting_cjson_malloc(size_t size)
+{
+   parser_allocations++;
+   return malloc(size);
+}
+
+static void response_preparse_node_cap_test(void)
+{
+   const size_t values = 17000;
+   size_t cap = values * 2 + 16;
+   unsigned char *body = malloc(cap);
+   assert(body != NULL);
+   size_t at = 0;
+   memcpy(body + at, "{\"x\":[", 6);
+   at += 6;
+   for (size_t i = 0; i < values; i++)
+   {
+      body[at++] = '0';
+      if (i + 1 < values)
+         body[at++] = ',';
+   }
+   body[at++] = ']';
+   body[at++] = '}';
+   cJSON_Hooks hooks = {.malloc_fn = counting_cjson_malloc, .free_fn = free};
+   cJSON_InitHooks(&hooks);
+   parser_allocations = 0;
+   aimee_response_t response;
+   kb_bedrock_response_init(&response);
+   assert(kb_bedrock_nonstream_parse(body, at, &response) == KB_BEDROCK_MALFORMED_RESPONSE);
+   assert(parser_allocations == 0);
+   cJSON_InitHooks(NULL);
+   free(body);
 }
 
 static void stream_state_tests(void)
@@ -271,6 +411,8 @@ typedef struct
    int count;
    int abort_after;
    aimee_delta_type_t type[16];
+   aimee_stop_reason_t stop_reason;
+   long usage_in, usage_out;
    char error[128];
 } delta_log_t;
 
@@ -279,6 +421,12 @@ static int collect_delta(const aimee_delta_t *delta, void *ctx)
    delta_log_t *log = ctx;
    assert(log->count < (int)(sizeof(log->type) / sizeof(log->type[0])));
    log->type[log->count++] = delta->type;
+   if (delta->type == AIMEE_DELTA_TURN_STOP)
+   {
+      log->stop_reason = delta->stop_reason;
+      log->usage_in = delta->usage_in;
+      log->usage_out = delta->usage_out;
+   }
    if (delta->type == AIMEE_DELTA_ERROR && delta->error_message)
       snprintf(log->error, sizeof(log->error), "%s", delta->error_message);
    return log->abort_after > 0 && log->count >= log->abort_after;
@@ -343,10 +491,11 @@ static void stream_lifecycle_tests(void)
    assert(kb_bedrock_stream_finish(stream) == KB_BEDROCK_OK);
    assert(log.count == 5);
    assert(log.type[0] == AIMEE_DELTA_TURN_START);
-   assert(log.type[1] == AIMEE_DELTA_BLOCK_DELTA);
-   assert(log.type[2] == AIMEE_DELTA_BLOCK_STOP);
-   assert(log.type[3] == AIMEE_DELTA_TURN_STOP);
+   assert(log.type[1] == AIMEE_DELTA_BLOCK_START);
+   assert(log.type[2] == AIMEE_DELTA_BLOCK_DELTA);
+   assert(log.type[3] == AIMEE_DELTA_BLOCK_STOP);
    assert(log.type[4] == AIMEE_DELTA_TURN_STOP);
+   assert(log.stop_reason == AIMEE_STOP_END_TURN && log.usage_in == 3 && log.usage_out == 1);
    assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
 }
 
@@ -432,6 +581,36 @@ static void stream_provider_error_tests(void)
    assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
 }
 
+static void stream_terminal_error_tests(void)
+{
+   for (int with_metadata = 0; with_metadata <= 1; with_metadata++)
+      for (int exception = 0; exception <= 1; exception++)
+      {
+         delta_log_t log = {0};
+         kb_bedrock_stream_t *stream = NULL;
+         assert(kb_bedrock_stream_init(&stream, collect_delta, &log) == KB_BEDROCK_OK);
+         feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+         feed_event(stream, "contentBlockDelta",
+                    "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}");
+         feed_event(stream, "contentBlockStop", "{\"contentBlockIndex\":0}");
+         feed_event(stream, "messageStop", "{\"stopReason\":\"end_turn\"}");
+         if (with_metadata)
+            feed_event(stream, "metadata", "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}");
+         int callbacks = log.count;
+         uint8_t *frame = NULL;
+         size_t frame_len = 0;
+         if (exception)
+            assert(test_aws_es_exception("throttlingException", "{\"message\":\"late\"}", &frame,
+                                         &frame_len) == 0);
+         else
+            assert(test_aws_es_error("LateError", "late", &frame, &frame_len) == 0);
+         assert(feed_frame(stream, &frame, frame_len) == KB_BEDROCK_MALFORMED_STREAM);
+         assert(log.count == callbacks);
+         assert_poisoned(stream);
+         assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+      }
+}
+
 static void stream_order_and_abort_tests(void)
 {
    kb_bedrock_stream_t *stream = NULL;
@@ -450,15 +629,17 @@ static void stream_order_and_abort_tests(void)
       const char *type;
       const char *json;
       int start_first;
-   } cases[] = {{"contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}", 0},
-                {"contentBlockStop", "{\"contentBlockIndex\":0}", 1},
-                {"contentBlockDelta", "{\"contentBlockIndex\":0.5,\"delta\":{\"text\":\"x\"}}", 1},
-                {"contentBlockDelta", "{\"contentBlockIndex\":64,\"delta\":{\"text\":\"x\"}}", 1},
-                {"contentBlockDelta", "{\"delta\":{\"text\":\"x\"}}", 1},
-                {"contentBlockDelta",
-                 "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\",\"future\":{}}}", 1},
-                {"metadata", "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}", 1},
-                {"messageStart", "{\"role\":\"assistant\"}", 1}};
+   } cases[] = {
+       {"contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}", 0},
+       {"contentBlockStop", "{\"contentBlockIndex\":0}", 1},
+       {"contentBlockDelta", "{\"contentBlockIndex\":0.5,\"delta\":{\"text\":\"x\"}}", 1},
+       {"contentBlockDelta", "{\"contentBlockIndex\":64,\"delta\":{\"text\":\"x\"}}", 1},
+       {"contentBlockDelta", "{\"delta\":{\"text\":\"x\"}}", 1},
+       {"contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\",\"future\":{}}}",
+        1},
+       {"contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"\\uD800\"}}", 1},
+       {"metadata", "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}", 1},
+       {"messageStart", "{\"role\":\"assistant\"}", 1}};
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
    {
       kb_bedrock_stream_t *stream = NULL;
@@ -499,6 +680,41 @@ static void stream_order_and_abort_tests(void)
    assert(abort_log.count == 1);
    assert_poisoned(stream);
    assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+
+   for (int abort_after = 2; abort_after <= 3; abort_after++)
+   {
+      abort_log = (delta_log_t){.abort_after = abort_after};
+      assert(kb_bedrock_stream_init(&stream, collect_delta, &abort_log) == KB_BEDROCK_OK);
+      feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+      assert(feed_event_result(stream, "contentBlockDelta",
+                               "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}") ==
+             KB_BEDROCK_CALLBACK_ABORT);
+      assert(abort_log.count == abort_after);
+      assert(abort_log.type[1] == AIMEE_DELTA_BLOCK_START);
+      if (abort_after == 3)
+         assert(abort_log.type[2] == AIMEE_DELTA_BLOCK_DELTA);
+      assert_poisoned(stream);
+      assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+   }
+
+   const char *bad_cache_metadata[] = {
+       "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadInputTokens\":-1}}",
+       "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadInputTokens\":1.5}}",
+       "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheWriteInputTokens\":\"1\"}}",
+       "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheWriteInputTokens\":1e9999}}"};
+   for (size_t i = 0; i < sizeof(bad_cache_metadata) / sizeof(bad_cache_metadata[0]); i++)
+   {
+      assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
+      feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+      feed_event(stream, "contentBlockDelta",
+                 "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}");
+      feed_event(stream, "contentBlockStop", "{\"contentBlockIndex\":0}");
+      feed_event(stream, "messageStop", "{\"stopReason\":\"end_turn\"}");
+      assert(feed_event_result(stream, "metadata", bad_cache_metadata[i]) ==
+             KB_BEDROCK_MALFORMED_STREAM);
+      assert_poisoned(stream);
+      assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+   }
 
    assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
    feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
@@ -569,10 +785,12 @@ int main(void)
 {
    request_tests();
    response_tests();
+   response_preparse_node_cap_test();
    stream_state_tests();
    stream_lifecycle_tests();
    stream_semantic_header_tests();
    stream_provider_error_tests();
+   stream_terminal_error_tests();
    stream_order_and_abort_tests();
    stream_large_coalesced_test();
    puts("kb bedrock egress: pure request/response engine tests passed");
