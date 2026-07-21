@@ -139,6 +139,14 @@ static void request_tests(void)
    block = (aimee_block_t){
        .type = AIMEE_BLK_IMAGE, .media_type = "image/png", .media_ref = "not base64"};
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   snprintf(t.model_id, sizeof(t.model_id), "model/");
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
+   snprintf(t.model_id, sizeof(t.model_id), "model");
+   memset(&ir, 0, sizeof(ir));
+   ir.tool_choice = cJSON_Parse("{\"type\":\"auto\"}");
+   assert(ir.tool_choice != NULL);
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   cJSON_Delete(ir.tool_choice);
 
    char legacy[16] = "stale";
    int status = 999;
@@ -186,17 +194,21 @@ static void response_tests(void)
        "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
        "{\"text\":\"x\",\"toolUse\":{}}]}},\"stopReason\":\"end_turn\","
        "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   static const unsigned char extra_union_member[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
+       "{\"text\":\"x\",\"future\":{}}]}},\"stopReason\":\"end_turn\","
+       "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
    static const unsigned char nul_escape[] =
        "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
        "{\"text\":\"x\\u0000y\"}]}},\"stopReason\":\"end_turn\","
        "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
-   const unsigned char *invalid[] = {not_object,       duplicate_key, negative_usage,
-                                     fractional_usage, inexact_usage, ambiguous_content,
-                                     nul_escape};
-   const size_t invalid_len[] = {sizeof(not_object) - 1,     sizeof(duplicate_key) - 1,
-                                 sizeof(negative_usage) - 1, sizeof(fractional_usage) - 1,
-                                 sizeof(inexact_usage) - 1,  sizeof(ambiguous_content) - 1,
-                                 sizeof(nul_escape) - 1};
+   const unsigned char *invalid[] = {not_object,         duplicate_key, negative_usage,
+                                     fractional_usage,   inexact_usage, ambiguous_content,
+                                     extra_union_member, nul_escape};
+   const size_t invalid_len[] = {sizeof(not_object) - 1,         sizeof(duplicate_key) - 1,
+                                 sizeof(negative_usage) - 1,     sizeof(fractional_usage) - 1,
+                                 sizeof(inexact_usage) - 1,      sizeof(ambiguous_content) - 1,
+                                 sizeof(extra_union_member) - 1, sizeof(nul_escape) - 1};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
    {
       assert(kb_bedrock_nonstream_parse(invalid[i], invalid_len[i], &r) ==
@@ -209,6 +221,15 @@ static void response_tests(void)
    embedded_nul[12] = 0;
    assert(kb_bedrock_nonstream_parse(embedded_nul, sizeof(good) - 1, &r) ==
           KB_BEDROCK_MALFORMED_RESPONSE);
+
+   static const unsigned char literal_nul_escape[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
+       "{\"text\":\"x\\\\u0000y\"}]}},\"stopReason\":\"end_turn\","
+       "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   assert(kb_bedrock_nonstream_parse(literal_nul_escape, sizeof(literal_nul_escape) - 1, &r) ==
+          KB_BEDROCK_OK);
+   assert(r.n_content == 1 && strcmp(r.content[0].text, "x\\u0000y") == 0);
+   aimee_response_free(&r);
 }
 
 static void stream_state_tests(void)
@@ -399,6 +420,8 @@ static void stream_order_and_abort_tests(void)
                 {"contentBlockDelta", "{\"contentBlockIndex\":0.5,\"delta\":{\"text\":\"x\"}}", 1},
                 {"contentBlockDelta", "{\"contentBlockIndex\":64,\"delta\":{\"text\":\"x\"}}", 1},
                 {"contentBlockDelta", "{\"delta\":{\"text\":\"x\"}}", 1},
+                {"contentBlockDelta",
+                 "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\",\"future\":{}}}", 1},
                 {"metadata", "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}", 1},
                 {"messageStart", "{\"role\":\"assistant\"}", 1}};
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)

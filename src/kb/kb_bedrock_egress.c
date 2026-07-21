@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <math.h>
 #include <openssl/crypto.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -224,7 +225,7 @@ static int request_preflight(const aimee_request_t *ir)
       return 0;
    if (ir->tool_choice)
    {
-      if (!cJSON_IsObject(ir->tool_choice))
+      if (!ir->n_tools || !cJSON_IsObject(ir->tool_choice))
          return 0;
       cJSON *type = cJSON_GetObjectItemCaseSensitive(ir->tool_choice, "type");
       int tool = cJSON_IsString(type) && strcmp(type->valuestring, "tool") == 0;
@@ -397,6 +398,8 @@ static int model_path_ok(const char *id)
          return 0;
       if (!slash)
          break;
+      if (!slash[1])
+         return 0;
       p = slash + 1;
    }
    return 1;
@@ -559,7 +562,7 @@ static int converse_response_strict(cJSON *j)
       int variants = !!cJSON_GetObjectItemCaseSensitive(el, "text") +
                      !!cJSON_GetObjectItemCaseSensitive(el, "toolUse") +
                      !!cJSON_GetObjectItemCaseSensitive(el, "reasoningContent");
-      if (variants != 1)
+      if (variants != 1 || cJSON_GetArraySize(el) != 1)
          return 0;
       cJSON *text = cJSON_GetObjectItemCaseSensitive(el, "text");
       cJSON *tool = cJSON_GetObjectItemCaseSensitive(el, "toolUse");
@@ -572,7 +575,7 @@ static int converse_response_strict(cJSON *j)
          cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
          cJSON *input = cJSON_GetObjectItemCaseSensitive(tool, "input");
          if (!cJSON_IsObject(tool) || !cJSON_IsString(id) || !cJSON_IsString(name) ||
-             !cJSON_IsObject(input))
+             !cJSON_IsObject(input) || cJSON_GetArraySize(tool) != 3)
             return 0;
       }
       if (reasoning)
@@ -581,11 +584,164 @@ static int converse_response_strict(cJSON *j)
          cJSON *text_value = rt ? cJSON_GetObjectItemCaseSensitive(rt, "text") : NULL;
          cJSON *sig = rt ? cJSON_GetObjectItemCaseSensitive(rt, "signature") : NULL;
          if (!cJSON_IsObject(reasoning) || !cJSON_IsObject(rt) || !cJSON_IsString(text_value) ||
-             (sig && !cJSON_IsString(sig)))
+             (sig && !cJSON_IsString(sig)) || cJSON_GetArraySize(reasoning) != 1 ||
+             cJSON_GetArraySize(rt) != (sig ? 2 : 1))
             return 0;
       }
    }
    return 1;
+}
+
+typedef struct
+{
+   const unsigned char *p, *end;
+} json_syntax_t;
+
+static void json_syntax_ws(json_syntax_t *s)
+{
+   while (s->p < s->end && (*s->p == ' ' || *s->p == '\t' || *s->p == '\r' || *s->p == '\n'))
+      s->p++;
+}
+
+static int json_syntax_string(json_syntax_t *s)
+{
+   if (s->p == s->end || *s->p++ != '"')
+      return 0;
+   while (s->p < s->end)
+   {
+      unsigned char c = *s->p++;
+      if (c == '"')
+         return 1;
+      if (c < 0x20)
+         return 0;
+      if (c != '\\')
+         continue;
+      if (s->p == s->end)
+         return 0;
+      c = *s->p++;
+      if (strchr("\"\\/bfnrt", c))
+         continue;
+      if (c != 'u' || (size_t)(s->end - s->p) < 4)
+         return 0;
+      for (int i = 0; i < 4; i++)
+      {
+         c = *s->p++;
+         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return 0;
+      }
+   }
+   return 0;
+}
+
+static int json_syntax_value(json_syntax_t *s, unsigned depth);
+
+static int json_syntax_number(json_syntax_t *s)
+{
+   const unsigned char *p = s->p;
+   if (p < s->end && *p == '-')
+      p++;
+   if (p == s->end)
+      return 0;
+   if (*p == '0')
+      p++;
+   else
+   {
+      if (*p < '1' || *p > '9')
+         return 0;
+      while (p < s->end && *p >= '0' && *p <= '9')
+         p++;
+   }
+   if (p < s->end && *p == '.')
+   {
+      p++;
+      if (p == s->end || *p < '0' || *p > '9')
+         return 0;
+      while (p < s->end && *p >= '0' && *p <= '9')
+         p++;
+   }
+   if (p < s->end && (*p == 'e' || *p == 'E'))
+   {
+      p++;
+      if (p < s->end && (*p == '+' || *p == '-'))
+         p++;
+      if (p == s->end || *p < '0' || *p > '9')
+         return 0;
+      while (p < s->end && *p >= '0' && *p <= '9')
+         p++;
+   }
+   s->p = p;
+   return 1;
+}
+
+static int json_syntax_value(json_syntax_t *s, unsigned depth)
+{
+   if (depth > KB_JSON_DEPTH_MAX)
+      return 0;
+   json_syntax_ws(s);
+   if (s->p == s->end)
+      return 0;
+   if (*s->p == '"')
+      return json_syntax_string(s);
+   if (*s->p == '-' || (*s->p >= '0' && *s->p <= '9'))
+      return json_syntax_number(s);
+   static const char *const literal[] = {"true", "false", "null"};
+   for (size_t i = 0; i < sizeof(literal) / sizeof(literal[0]); i++)
+   {
+      size_t n = strlen(literal[i]);
+      if ((size_t)(s->end - s->p) >= n && memcmp(s->p, literal[i], n) == 0)
+      {
+         s->p += n;
+         return 1;
+      }
+   }
+   unsigned char close;
+   if (*s->p == '{')
+      close = '}';
+   else if (*s->p == '[')
+      close = ']';
+   else
+      return 0;
+   int object = close == '}';
+   s->p++;
+   json_syntax_ws(s);
+   if (s->p < s->end && *s->p == close)
+   {
+      s->p++;
+      return 1;
+   }
+   for (;;)
+   {
+      if (object)
+      {
+         if (!json_syntax_string(s))
+            return 0;
+         json_syntax_ws(s);
+         if (s->p == s->end || *s->p++ != ':')
+            return 0;
+      }
+      if (!json_syntax_value(s, depth + 1))
+         return 0;
+      json_syntax_ws(s);
+      if (s->p == s->end)
+         return 0;
+      if (*s->p == close)
+      {
+         s->p++;
+         return 1;
+      }
+      if (*s->p++ != ',')
+         return 0;
+      json_syntax_ws(s);
+   }
+}
+
+static int json_syntax_exact(const unsigned char *body, size_t len)
+{
+   json_syntax_t syntax = {.p = body, .end = body + len};
+   if (!json_syntax_value(&syntax, 1))
+      return 0;
+   json_syntax_ws(&syntax);
+   return syntax.p == syntax.end;
 }
 
 static cJSON *parse_json_exact(const unsigned char *body, size_t len, size_t cap, int *oom)
@@ -595,8 +751,15 @@ static cJSON *parse_json_exact(const unsigned char *body, size_t len, size_t cap
    int nul_escape = 0;
    for (size_t i = 0; body && i + 6 <= len; i++)
       if (memcmp(body + i, "\\u0000", 6) == 0)
-         nul_escape = 1;
-   if (!body || !len || len > cap || memchr(body, 0, len) || nul_escape)
+      {
+         size_t preceding = 0;
+         for (size_t j = i; j > 0 && body[j - 1] == '\\'; j--)
+            preceding++;
+         if ((preceding & 1U) == 0)
+            nul_escape = 1;
+      }
+   if (!body || !len || len > cap || memchr(body, 0, len) || nul_escape ||
+       !json_syntax_exact(body, len))
       return NULL;
    char *copy = malloc(len + 1);
    if (!copy)
@@ -609,6 +772,8 @@ static cJSON *parse_json_exact(const unsigned char *body, size_t len, size_t cap
    copy[len] = 0;
    const char *end = NULL;
    cJSON *j = cJSON_ParseWithLengthOpts(copy, len + 1, &end, 0);
+   if (!j && oom)
+      *oom = 1; /* Syntax was already proven; parser failure is allocation/internal. */
    if (j)
    {
       while (end < copy + len && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
@@ -737,7 +902,11 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
    {
       cJSON *start = cJSON_GetObjectItemCaseSensitive(j, "start");
       cJSON *tu = start ? cJSON_GetObjectItemCaseSensitive(start, "toolUse") : NULL;
-      if (strict_index(j, &idx) || s->used[idx] || !cJSON_IsObject(tu))
+      cJSON *id = tu ? cJSON_GetObjectItemCaseSensitive(tu, "toolUseId") : NULL;
+      cJSON *name = tu ? cJSON_GetObjectItemCaseSensitive(tu, "name") : NULL;
+      if (strict_index(j, &idx) || s->used[idx] || !cJSON_IsObject(start) ||
+          cJSON_GetArraySize(start) != 1 || !cJSON_IsObject(tu) || cJSON_GetArraySize(tu) != 2 ||
+          !cJSON_IsString(id) || !cJSON_IsString(name))
          return KB_BEDROCK_MALFORMED_STREAM;
       s->used[idx] = s->open[idx] = 1;
       s->kind[idx] = AIMEE_BLK_TOOL_USE;
@@ -750,7 +919,7 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
       int text = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(delta, "text"));
       int tool = cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(delta, "toolUse"));
       int reason = cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(delta, "reasoningContent"));
-      if (text + tool + reason != 1)
+      if (text + tool + reason != 1 || cJSON_GetArraySize(delta) != 1)
          return KB_BEDROCK_MALFORMED_STREAM;
       int kind = text ? AIMEE_BLK_TEXT : (tool ? AIMEE_BLK_TOOL_USE : AIMEE_BLK_THINKING);
       if (!s->open[idx])
