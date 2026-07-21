@@ -551,6 +551,11 @@ static int optional_nonnegative_long(const cJSON *o, const char *key)
    return !cJSON_GetObjectItemCaseSensitive((cJSON *)o, key) || nonnegative_long(o, key);
 }
 
+static int nonempty_string(const cJSON *v)
+{
+   return cJSON_IsString(v) && v->valuestring && v->valuestring[0] != '\0';
+}
+
 static int converse_response_strict(cJSON *j)
 {
    cJSON *output = cJSON_GetObjectItemCaseSensitive(j, "output");
@@ -561,8 +566,8 @@ static int converse_response_strict(cJSON *j)
    cJSON *usage = cJSON_GetObjectItemCaseSensitive(j, "usage");
    if (!cJSON_IsObject(output) || !cJSON_IsObject(message) || !cJSON_IsString(role) ||
        strcmp(role->valuestring, "assistant") != 0 || !cJSON_IsArray(content) ||
-       !cJSON_IsString(stop) || !cJSON_IsObject(usage) || !nonnegative_long(usage, "inputTokens") ||
-       !nonnegative_long(usage, "outputTokens") ||
+       cJSON_GetArraySize(content) == 0 || !nonempty_string(stop) || !cJSON_IsObject(usage) ||
+       !nonnegative_long(usage, "inputTokens") || !nonnegative_long(usage, "outputTokens") ||
        !optional_nonnegative_long(usage, "cacheReadInputTokens") ||
        !optional_nonnegative_long(usage, "cacheWriteInputTokens"))
       return 0;
@@ -579,14 +584,14 @@ static int converse_response_strict(cJSON *j)
       cJSON *text = cJSON_GetObjectItemCaseSensitive(el, "text");
       cJSON *tool = cJSON_GetObjectItemCaseSensitive(el, "toolUse");
       cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(el, "reasoningContent");
-      if (text && !cJSON_IsString(text))
+      if (text && !nonempty_string(text))
          return 0;
       if (tool)
       {
          cJSON *id = cJSON_GetObjectItemCaseSensitive(tool, "toolUseId");
          cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
          cJSON *input = cJSON_GetObjectItemCaseSensitive(tool, "input");
-         if (!cJSON_IsObject(tool) || !cJSON_IsString(id) || !cJSON_IsString(name) ||
+         if (!cJSON_IsObject(tool) || !nonempty_string(id) || !nonempty_string(name) ||
              !cJSON_IsObject(input) || cJSON_GetArraySize(tool) != 3)
             return 0;
       }
@@ -595,7 +600,7 @@ static int converse_response_strict(cJSON *j)
          cJSON *rt = cJSON_GetObjectItemCaseSensitive(reasoning, "reasoningText");
          cJSON *text_value = rt ? cJSON_GetObjectItemCaseSensitive(rt, "text") : NULL;
          cJSON *sig = rt ? cJSON_GetObjectItemCaseSensitive(rt, "signature") : NULL;
-         if (!cJSON_IsObject(reasoning) || !cJSON_IsObject(rt) || !cJSON_IsString(text_value) ||
+         if (!cJSON_IsObject(reasoning) || !cJSON_IsObject(rt) || !nonempty_string(text_value) ||
              (sig && !cJSON_IsString(sig)) || cJSON_GetArraySize(reasoning) != 1 ||
              cJSON_GetArraySize(rt) != (sig ? 2 : 1))
             return 0;
@@ -902,6 +907,13 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
     * cannot accidentally reopen a stopped turn. */
    if (s->metadata || (s->message_stopped && strcmp(event, "metadata") != 0))
       return KB_BEDROCK_MALFORMED_STREAM;
+   int known = strcmp(event, "messageStart") == 0 || strcmp(event, "contentBlockStart") == 0 ||
+               strcmp(event, "contentBlockDelta") == 0 || strcmp(event, "contentBlockStop") == 0 ||
+               strcmp(event, "messageStop") == 0 || strcmp(event, "metadata") == 0;
+   /* Converse may add event types.  Valid JSON for an unknown, non-terminal
+    * event is deliberately ignored instead of imposing today's lifecycle on it. */
+   if (!known)
+      return KB_BEDROCK_OK;
    if (strcmp(event, "messageStart") == 0)
    {
       if (s->message_started || s->message_stopped)
@@ -918,7 +930,7 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
       cJSON *name = tu ? cJSON_GetObjectItemCaseSensitive(tu, "name") : NULL;
       if (strict_index(j, &idx) || s->used[idx] || !cJSON_IsObject(start) ||
           cJSON_GetArraySize(start) != 1 || !cJSON_IsObject(tu) || cJSON_GetArraySize(tu) != 2 ||
-          !cJSON_IsString(id) || !cJSON_IsString(name))
+          !nonempty_string(id) || !nonempty_string(name))
          return KB_BEDROCK_MALFORMED_STREAM;
       s->used[idx] = s->open[idx] = 1;
       s->kind[idx] = AIMEE_BLK_TOOL_USE;
@@ -928,7 +940,8 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
       cJSON *delta = cJSON_GetObjectItemCaseSensitive(j, "delta");
       if (strict_index(j, &idx) || !cJSON_IsObject(delta))
          return KB_BEDROCK_MALFORMED_STREAM;
-      int text = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(delta, "text"));
+      cJSON *text_value = cJSON_GetObjectItemCaseSensitive(delta, "text");
+      int text = nonempty_string(text_value);
       cJSON *tool_delta = cJSON_GetObjectItemCaseSensitive(delta, "toolUse");
       cJSON *reason_delta = cJSON_GetObjectItemCaseSensitive(delta, "reasoningContent");
       int tool = cJSON_IsObject(tool_delta);
@@ -938,7 +951,7 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
       if ((tool && (cJSON_GetArraySize(tool_delta) != 1 ||
                     !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(tool_delta, "input")))) ||
           (reason && (cJSON_GetArraySize(reason_delta) != 1 ||
-                      !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reason_delta, "text")))))
+                      !nonempty_string(cJSON_GetObjectItemCaseSensitive(reason_delta, "text")))))
          return KB_BEDROCK_MALFORMED_STREAM;
       int kind = text ? AIMEE_BLK_TEXT : (tool ? AIMEE_BLK_TOOL_USE : AIMEE_BLK_THINKING);
       if (!s->open[idx])
@@ -961,9 +974,15 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
    {
       if (s->message_stopped)
          return KB_BEDROCK_MALFORMED_STREAM;
+      int have_block = 0;
       for (int i = 0; i < 64; i++)
+      {
          if (s->open[i])
             return KB_BEDROCK_MALFORMED_STREAM;
+         have_block |= s->used[i];
+      }
+      if (!have_block || !nonempty_string(cJSON_GetObjectItemCaseSensitive(j, "stopReason")))
+         return KB_BEDROCK_MALFORMED_STREAM;
       s->message_stopped = 1;
    }
    else if (strcmp(event, "metadata") == 0)
@@ -976,8 +995,6 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
          return KB_BEDROCK_MALFORMED_STREAM;
       s->metadata = 1;
    }
-   else if (s->message_stopped)
-      return KB_BEDROCK_MALFORMED_STREAM;
    aimee_delta_t d[2];
    int n = bedrock_converse_stream_to_deltas(event, j, &s->ir, d, 2);
    if (n < 0)

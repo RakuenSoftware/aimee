@@ -187,7 +187,7 @@ static void response_tests(void)
    assert(kb_bedrock_nonstream_parse(NULL, 0, &r) == KB_BEDROCK_MALFORMED_RESPONSE);
 
    static const unsigned char trailing_space[] =
-       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[]}},"
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[{\"text\":\"ok\"}]}},"
        "\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0}} \r\n\t";
    assert(kb_bedrock_nonstream_parse(trailing_space, sizeof(trailing_space) - 1, &r) ==
           KB_BEDROCK_OK);
@@ -207,6 +207,12 @@ static void response_tests(void)
        "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[]}},"
        "\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":9007199254740992,"
        "\"outputTokens\":0}}";
+   static const unsigned char empty_content[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[]}},"
+       "\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
+   static const unsigned char empty_text[] =
+       "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":[{\"text\":\"\"}]}},"
+       "\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
    static const unsigned char ambiguous_content[] =
        "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
        "{\"text\":\"x\",\"toolUse\":{}}]}},\"stopReason\":\"end_turn\","
@@ -219,13 +225,14 @@ static void response_tests(void)
        "{\"output\":{\"message\":{\"role\":\"assistant\",\"content\":["
        "{\"text\":\"x\\u0000y\"}]}},\"stopReason\":\"end_turn\","
        "\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}";
-   const unsigned char *invalid[] = {not_object,         duplicate_key, negative_usage,
-                                     fractional_usage,   inexact_usage, ambiguous_content,
-                                     extra_union_member, nul_escape};
+   const unsigned char *invalid[] = {
+       not_object,        duplicate_key,      negative_usage, fractional_usage, inexact_usage,
+       ambiguous_content, extra_union_member, nul_escape,     empty_content,    empty_text};
    const size_t invalid_len[] = {sizeof(not_object) - 1,         sizeof(duplicate_key) - 1,
                                  sizeof(negative_usage) - 1,     sizeof(fractional_usage) - 1,
                                  sizeof(inexact_usage) - 1,      sizeof(ambiguous_content) - 1,
-                                 sizeof(extra_union_member) - 1, sizeof(nul_escape) - 1};
+                                 sizeof(extra_union_member) - 1, sizeof(nul_escape) - 1,
+                                 sizeof(empty_content) - 1,      sizeof(empty_text) - 1};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
    {
       assert(kb_bedrock_nonstream_parse(invalid[i], invalid_len[i], &r) ==
@@ -427,6 +434,17 @@ static void stream_provider_error_tests(void)
 
 static void stream_order_and_abort_tests(void)
 {
+   kb_bedrock_stream_t *stream = NULL;
+   assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
+   feed_event(stream, "futureEvent", "{\"future\":true}");
+   feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+   feed_event(stream, "contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}");
+   feed_event(stream, "contentBlockStop", "{\"contentBlockIndex\":0}");
+   feed_event(stream, "messageStop", "{\"stopReason\":\"end_turn\"}");
+   feed_event(stream, "metadata", "{\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}");
+   assert(kb_bedrock_stream_finish(stream) == KB_BEDROCK_OK);
+   assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+
    struct bad_event
    {
       const char *type;
@@ -453,7 +471,7 @@ static void stream_order_and_abort_tests(void)
       assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
    }
 
-   kb_bedrock_stream_t *stream = NULL;
+   stream = NULL;
    assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
    feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
    feed_event(stream, "contentBlockStart",
@@ -484,6 +502,23 @@ static void stream_order_and_abort_tests(void)
 
    assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
    feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+   assert(feed_event_result(stream, "messageStop", "{\"stopReason\":\"end_turn\"}") ==
+          KB_BEDROCK_MALFORMED_STREAM);
+   assert_poisoned(stream);
+   assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+
+   assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
+   feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+   assert(feed_event_result(stream, "contentBlockDelta",
+                            "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"\"}}") ==
+          KB_BEDROCK_MALFORMED_STREAM);
+   assert_poisoned(stream);
+   assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+
+   assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
+   feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+   feed_event(stream, "contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}");
+   feed_event(stream, "contentBlockStop", "{\"contentBlockIndex\":0}");
    feed_event(stream, "messageStop", "{\"stopReason\":\"end_turn\"}");
    assert(feed_event_result(stream, "contentBlockDelta",
                             "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"late\"}}") ==
@@ -522,6 +557,8 @@ static void stream_large_coalesced_test(void)
    feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
    assert(kb_bedrock_stream_feed(stream, aggregate, aggregate_len) == KB_BEDROCK_OK);
    free(aggregate);
+   feed_event(stream, "contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":{\"text\":\"x\"}}");
+   feed_event(stream, "contentBlockStop", "{\"contentBlockIndex\":0}");
    feed_event(stream, "messageStop", "{\"stopReason\":\"end_turn\"}");
    feed_event(stream, "metadata", "{\"usage\":{\"inputTokens\":0,\"outputTokens\":0}}");
    assert(kb_bedrock_stream_finish(stream) == KB_BEDROCK_OK);
