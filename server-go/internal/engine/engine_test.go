@@ -112,6 +112,15 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 	if _, err := workflowEngine.Advance(t.Context(), first.ID); err != nil {
 		t.Fatal(err)
 	}
+	parked, err := store.WorkItem(t.Context(), first.ID)
+	if err != nil || parked.State != "active" || parked.PauseReason != "runner_unavailable" {
+		t.Fatalf("parked item=%+v err=%v", parked, err)
+	}
+	events, err := store.Events(t.Context(), first.ID, 0, 10)
+	if err != nil || len(events) < 2 || events[len(events)-1].Kind != "pause" ||
+		!strings.Contains(events[len(events)-1].Detail, "temporary runner outage") {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
 	blocked := db1.CreateWorkItem{ID: "wi_blocked", Repo: "repo", ProposalPath: "blocked", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
 	if err := store.AdmitRoot(t.Context(), blocked, 1); !errors.Is(err, db1.ErrAdmissionFull) {
 		t.Fatalf("admission while transiently parked: %v", err)
@@ -136,8 +145,9 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 
 func TestSafeDiagnosticRedactsSecretsWithoutTruncating(t *testing.T) {
 	tail := strings.Repeat("diagnostic detail λ ", 100_000) + "END"
-	got := safeDiagnostic("Authorization: Bearer abc123 https://user:pass@example.test/path token=hidden " + tail)
-	for _, secret := range []string{"abc123", "user:pass", "hidden"} {
+	got := safeDiagnostic(`Authorization: Bearer abc123 https://user:pass@example.test/path token=hidden password="my secret phrase" "access_token":"two words with \"quote\"" secret='three words' Cookie: session=four-words` + "\n" +
+		"AKIAIOSFODNN7EXAMPLE eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2lnbmF0dXJl -----BEGIN PRIVATE KEY-----\nprivate material\n-----END PRIVATE KEY----- " + tail)
+	for _, secret := range []string{"abc123", "user:pass", "hidden", "my secret phrase", "two words", "three words", "four-words", "AKIAIOSFODNN7EXAMPLE", "cGF5bG9hZA", "private material"} {
 		if strings.Contains(got, secret) {
 			t.Fatalf("diagnostic leaked %q", secret)
 		}

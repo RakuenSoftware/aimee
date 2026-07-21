@@ -104,8 +104,13 @@ func TestParkedRootStillConsumesAdmissionCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := events[len(events)-1].Detail; got != "fork/exec git: resource temporarily unavailable" {
-		t.Fatalf("pause detail=%q", got)
+	last := events[len(events)-1]
+	if last.Kind != "pause" || last.Detail != "fork/exec git: resource temporarily unavailable" {
+		t.Fatalf("pause event=%+v", last)
+	}
+	item, err := store.WorkItem(ctx, first.ID)
+	if err != nil || item.PauseReason != "runner_unavailable" {
+		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }
 
