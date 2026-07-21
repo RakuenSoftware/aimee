@@ -4872,7 +4872,11 @@ BEGIN
        'public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean)')
      IS NOT NULL THEN
     EXECUTE 'REVOKE ALL ON FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean) FROM PUBLIC';
-    EXECUTE 'REVOKE ALL ON FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean) FROM aimee_kb_runtime';
+    -- The runtime role is deliberately absent on dev/single-user tiers. Keep
+    -- this upgrade path idempotent there, just like schema_grants.sql.
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aimee_kb_runtime') THEN
+      EXECUTE 'REVOKE ALL ON FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean) FROM aimee_kb_runtime';
+    END IF;
     EXECUTE 'DROP FUNCTION public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],text[],text,boolean)';
   END IF;
 END $drop_obsolete_bedrock_upsert$;
