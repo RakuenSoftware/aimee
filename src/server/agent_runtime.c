@@ -5,7 +5,6 @@
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include "delegate_role.h"
-#include "skill_curator.h"
 #include "skill_review.h"
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
@@ -1583,9 +1582,6 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
             char *resp = kb_client_memory_maintenance_run_json(0, 0, 0);
             free(resp);
          }
-         /* Review fires from server.c hook path; curator runs on scheduler tick. */
-         if (maint_cfg.skills_curator_enabled)
-            skill_curator_maybe();
       }
    }
    int recall_injected = 0;

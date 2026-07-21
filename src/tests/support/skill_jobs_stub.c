@@ -9,8 +9,3 @@ void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id
    (void)ctx;
    (void)session_id;
 }
-
-void server_compute_skill_curator_async(server_ctx_t *ctx)
-{
-   (void)ctx;
-}

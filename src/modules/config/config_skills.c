@@ -47,15 +47,6 @@ int config_parse_skills(config_t *cfg, const cJSON *root)
    }
    issues += skills_int_field(&cfg->skills_review_nudge_interval, skills, "review_nudge_interval",
                               "skills.review_nudge_interval");
-   const cJSON *curator = cJSON_GetObjectItemCaseSensitive(skills, "curator");
-   if (curator && cJSON_IsObject(curator))
-   {
-      const cJSON *en = cJSON_GetObjectItemCaseSensitive(curator, "enabled");
-      if (en)
-         cfg->skills_curator_enabled = cJSON_IsTrue(en) ? 1 : 0;
-   }
-   issues += skills_int_field(&cfg->skills_curator_interval_hours, skills, "curator_interval_hours",
-                              "skills.curator_interval_hours");
    issues += skills_int_field(&cfg->skills_stale_after_days, skills, "stale_after_days",
                               "skills.stale_after_days");
    issues += skills_int_field(&cfg->skills_archive_after_days, skills, "archive_after_days",
