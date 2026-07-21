@@ -7,8 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KB_MGMT_STATUS_HTTP_HEADER_MAX 8192
-#define KB_MGMT_STATUS_HTTP_BODY_MAX   1024
+#define KB_MGMT_STATUS_HTTP_HEADER_MAX  8192
+#define KB_MGMT_STATUS_HTTP_BODY_MAX    1024
 #define KB_MGMT_STATUS_HTTP_HEADERS_MAX 32
 #define KB_MGMT_STATUS_LISTENER_WORKERS 4
 #define KB_MGMT_STATUS_LISTENER_QUEUE   32
@@ -39,8 +39,7 @@ typedef struct
  * caches sessions nor permits tickets, early data, compression, renegotiation,
  * post-handshake authentication, or protocols other than TLS 1.2+. */
 SSL_CTX *kb_mgmt_status_listener_tls_ctx(const char *trust_bundle_path,
-                                         const char *server_cert_path,
-                                         const char *server_key_path);
+                                         const char *server_cert_path, const char *server_key_path);
 
 /* Start one authority listener with four joined workers and a bounded queue.
  * The config strings may be released after return; tls remains caller-owned and
@@ -59,6 +58,6 @@ typedef enum
    KB_MGMT_STATUS_HTTP_TOO_LARGE = -2,
 } kb_mgmt_status_http_result_t;
 kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *input, size_t len,
-                                                        const char **body, size_t *body_len);
+                                                       const char **body, size_t *body_len);
 
 #endif

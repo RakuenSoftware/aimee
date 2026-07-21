@@ -83,7 +83,7 @@ static int ows_value(const unsigned char *begin, const unsigned char *end, const
 }
 
 kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, size_t len,
-                                                        const char **body, size_t *body_len)
+                                                       const char **body, size_t *body_len)
 {
    static const char request_line[] = "POST /v1/management/status HTTP/1.1\r\n";
    const unsigned char *header_end = NULL;
@@ -99,13 +99,12 @@ kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, 
       return KB_MGMT_STATUS_HTTP_TOO_LARGE;
    for (size_t i = 0; i < len; ++i)
    {
-      if (in[i] == 0 || in[i] == 0x7f || (in[i] < 0x20 && in[i] != '\r' && in[i] != '\n' &&
-                                           in[i] != '\t'))
+      if (in[i] == 0 || in[i] == 0x7f ||
+          (in[i] < 0x20 && in[i] != '\r' && in[i] != '\n' && in[i] != '\t'))
          return KB_MGMT_STATUS_HTTP_BAD;
       if (in[i] == '\n' && (i == 0 || in[i - 1] != '\r'))
          return KB_MGMT_STATUS_HTTP_BAD;
-      if (i >= 3 && in[i - 3] == '\r' && in[i - 2] == '\n' && in[i - 1] == '\r' &&
-          in[i] == '\n')
+      if (i >= 3 && in[i - 3] == '\r' && in[i - 2] == '\n' && in[i - 1] == '\r' && in[i] == '\n')
       {
          header_end = in + i + 1;
          header_len = i + 1;
@@ -302,7 +301,8 @@ static void send_response(SSL *ssl, int fd, int64_t deadline, int status, const 
                     "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n"
                     "Connection: close\r\n\r\n",
                     status, reason, body_len);
-   if (n > 0 && (size_t)n < sizeof(header) && ssl_write_all(ssl, fd, deadline, header, (size_t)n) == 0)
+   if (n > 0 && (size_t)n < sizeof(header) &&
+       ssl_write_all(ssl, fd, deadline, header, (size_t)n) == 0)
       (void)ssl_write_all(ssl, fd, deadline, body, body_len);
 }
 
@@ -375,13 +375,13 @@ static void *worker_main(void *opaque)
             unsigned char input[KB_MGMT_STATUS_HTTP_HEADER_MAX + 4 + KB_MGMT_STATUS_HTTP_BODY_MAX];
             const char *body = NULL;
             size_t body_len = 0;
-            if (ssl_read_request(ssl, conn.fd, deadline, input, sizeof(input), &body, &body_len) == 0)
+            if (ssl_read_request(ssl, conn.fd, deadline, input, sizeof(input), &body, &body_len) ==
+                0)
             {
                char response[4096];
                memset(response, 0, sizeof(response));
-               kb_mgmt_status_listener_result_t result =
-                   s->handle(arg->worker_id, &peer, body, body_len, response, sizeof(response),
-                             s->opaque);
+               kb_mgmt_status_listener_result_t result = s->handle(
+                   arg->worker_id, &peer, body, body_len, response, sizeof(response), s->opaque);
                if (result == KB_MGMT_STATUS_LISTENER_OK && memchr(response, 0, sizeof(response)))
                   send_response(ssl, conn.fd, deadline, 200, "OK", response);
                else if (result == KB_MGMT_STATUS_LISTENER_INVALID)
@@ -390,7 +390,8 @@ static void *worker_main(void *opaque)
                else if (result == KB_MGMT_STATUS_LISTENER_DENIED)
                   send_response(ssl, conn.fd, deadline, 403, "Forbidden", "{\"error\":\"denied\"}");
                else if (result == KB_MGMT_STATUS_LISTENER_CONFLICT)
-                  send_response(ssl, conn.fd, deadline, 409, "Conflict", "{\"error\":\"conflict\"}");
+                  send_response(ssl, conn.fd, deadline, 409, "Conflict",
+                                "{\"error\":\"conflict\"}");
                else
                   send_response(ssl, conn.fd, deadline, 503, "Service Unavailable",
                                 "{\"error\":\"unavailable\"}");
@@ -524,8 +525,8 @@ int kb_mgmt_status_listener_start(const kb_mgmt_status_listener_config_t *cfg)
    const char *host = cfg->bind_address && cfg->bind_address[0] ? cfg->bind_address : "0.0.0.0";
    char service[6];
    snprintf(service, sizeof(service), "%u", cfg->port);
-   struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM,
-                            .ai_flags = AI_PASSIVE};
+   struct addrinfo hints = {
+       .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM, .ai_flags = AI_PASSIVE};
    struct addrinfo *addresses = NULL;
    if (getaddrinfo(host, service, &hints, &addresses) != 0)
       return -1;
@@ -554,9 +555,8 @@ int kb_mgmt_status_listener_start(const kb_mgmt_status_listener_config_t *cfg)
    }
    memset(g_active_valid, 0, sizeof(g_active_valid));
    s->listen_fd = fd;
-   s->bound_port = bound.ss_family == AF_INET
-                       ? ntohs(((struct sockaddr_in *)&bound)->sin_port)
-                       : ntohs(((struct sockaddr_in6 *)&bound)->sin6_port);
+   s->bound_port = bound.ss_family == AF_INET ? ntohs(((struct sockaddr_in *)&bound)->sin_port)
+                                              : ntohs(((struct sockaddr_in6 *)&bound)->sin6_port);
    s->tls = cfg->tls;
    s->handle = cfg->handle;
    s->opaque = cfg->opaque;

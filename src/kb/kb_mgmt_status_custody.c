@@ -160,7 +160,7 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
    if (admitted_rc < 0)
    {
       rc = admitted_rc == DB2_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
-                                                       : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+                                                      : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
       goto done;
    }
    if (admitted_rc != 1 || admitted.version != (int64_t)version ||

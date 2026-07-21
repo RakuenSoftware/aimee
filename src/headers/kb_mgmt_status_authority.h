@@ -48,8 +48,8 @@ typedef int (*kb_mgmt_status_sign_fn)(kb_mgmt_status_t *status, void *ctx);
  * exactly the four string fields nonce, target, target_mgmt_fp and purpose.
  * Embedded NUL, duplicate/unknown/missing fields and non-canonical base64url
  * are rejected.  out is cleared on every failure. */
-kb_mgmt_status_authority_result_t
-kb_mgmt_status_request_from_json(const char *raw, size_t raw_len, kb_mgmt_status_request_t *out);
+kb_mgmt_status_authority_result_t kb_mgmt_status_request_from_json(const char *raw, size_t raw_len,
+                                                                   kb_mgmt_status_request_t *out);
 
 /* Pure authority decision. Peer identity must come from verified mTLS. The
  * signing callback is the only private-key seam and is expected to enter the

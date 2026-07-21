@@ -51,9 +51,8 @@ static int exact_management_marker(X509 *cert)
    int pos = X509_get_ext_by_OBJ(cert, oid, -1);
    X509_EXTENSION *ext = pos >= 0 ? X509_get_ext(cert, pos) : NULL;
    ASN1_OCTET_STRING *value = ext ? X509_EXTENSION_get_data(ext) : NULL;
-   int ok = ext && !X509_EXTENSION_get_critical(ext) &&
-            X509_get_ext_by_OBJ(cert, oid, pos) < 0 && value &&
-            ASN1_STRING_length(value) == (int)sizeof(marker) - 1 &&
+   int ok = ext && !X509_EXTENSION_get_critical(ext) && X509_get_ext_by_OBJ(cert, oid, pos) < 0 &&
+            value && ASN1_STRING_length(value) == (int)sizeof(marker) - 1 &&
             CRYPTO_memcmp(ASN1_STRING_get0_data(value), marker, sizeof(marker) - 1) == 0;
    ASN1_OBJECT_free(oid);
    return ok;

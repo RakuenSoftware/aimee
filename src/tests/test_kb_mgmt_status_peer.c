@@ -46,8 +46,8 @@ static void add_marker(X509 *cert, int critical, const char *text)
    ASN1_OBJECT *oid = OBJ_txt2obj("1.3.6.1.4.1.55555.5.1", 1);
    ASN1_OCTET_STRING *value = ASN1_OCTET_STRING_new();
    X509_EXTENSION *ext = NULL;
-   assert(oid && value && ASN1_OCTET_STRING_set(value, (const unsigned char *)text,
-                                                (int)strlen(text)) == 1);
+   assert(oid && value &&
+          ASN1_OCTET_STRING_set(value, (const unsigned char *)text, (int)strlen(text)) == 1);
    ext = X509_EXTENSION_create_by_OBJ(NULL, oid, critical, value);
    assert(ext && X509_add_ext(cert, ext, -1) == 1);
    X509_EXTENSION_free(ext);
@@ -86,8 +86,7 @@ static X509 *make_leaf(X509 *ca, EVP_PKEY *ca_key, EVP_PKEY *key, long serial, i
                                      0) == 1);
    if (!server && profile->duplicate_cn)
       assert(X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-                                        (const unsigned char *)"p5-kb-management", -1, -1, 0) ==
-             1);
+                                        (const unsigned char *)"p5-kb-management", -1, -1, 0) == 1);
    assert(X509_set_issuer_name(cert, X509_get_subject_name(ca)) == 1);
    add_ext(ca, cert, NID_basic_constraints, "critical,CA:FALSE");
    add_ext(ca, cert, NID_key_usage,
@@ -223,14 +222,13 @@ int main(void)
    run_profile(ca, ca_key, server, client_key, &valid, 1);
 
    client_profile_t missing = {0, 0, marker, "p5-kb-management", "clientAuth", 0};
-   client_profile_t wrong = {1, 0, "aimee-p5-kb-management-v2", "p5-kb-management",
-                             "clientAuth", 0};
+   client_profile_t wrong = {1, 0, "aimee-p5-kb-management-v2", "p5-kb-management", "clientAuth",
+                             0};
    client_profile_t critical = {1, 1, marker, "p5-kb-management", "clientAuth", 0};
    client_profile_t duplicate = {2, 0, marker, "p5-kb-management", "clientAuth", 0};
    client_profile_t wrong_cn = {1, 0, marker, "ordinary-client", "clientAuth", 0};
    client_profile_t duplicate_cn = {1, 0, marker, "p5-kb-management", "clientAuth", 1};
-   client_profile_t extra_eku = {1, 0, marker, "p5-kb-management",
-                                 "clientAuth,serverAuth", 0};
+   client_profile_t extra_eku = {1, 0, marker, "p5-kb-management", "clientAuth,serverAuth", 0};
    run_profile(ca, ca_key, server, client_key, &missing, 0);
    run_profile(ca, ca_key, server, client_key, &wrong, 0);
    run_profile(ca, ca_key, server, client_key, &critical, 0);

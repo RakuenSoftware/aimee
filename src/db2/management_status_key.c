@@ -23,8 +23,8 @@ int db2_management_status_key_ctx_open(db2_management_status_key_ctx_t *ctx, con
    return 0;
 }
 
-int db2_management_status_key_ctx_borrow_hardened(
-    db2_management_status_key_ctx_t *ctx, const db2_management_status_runtime_t *runtime)
+int db2_management_status_key_ctx_borrow_hardened(db2_management_status_key_ctx_t *ctx,
+                                                  const db2_management_status_runtime_t *runtime)
 {
    if (!ctx || !runtime || !runtime->connection || runtime->transaction_active ||
        aimee_pg_in_transaction(runtime->connection))
@@ -128,7 +128,8 @@ int db2_management_status_key_admit(db2_management_status_key_ctx_t *ctx,
    char e[256] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(
        ctx->connection,
-       "SELECT * FROM public.kb_management_status_key_admit(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+       "SELECT * FROM "
+       "public.kb_management_status_key_admit(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
        e, sizeof(e));
    if (!s)
       return DB2_VAULT_KEY_USE_ERROR;

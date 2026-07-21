@@ -24,7 +24,8 @@ int main(void)
    close(source_fd);
    char leak_check[160];
    snprintf(leak_check, sizeof(leak_check),
-            "#!/bin/sh\n[ ! -e /proc/self/fd/%d ] || exit 9\nprintf '01234567890123456789012345678901'\n",
+            "#!/bin/sh\n[ ! -e /proc/self/fd/%d ] || exit 9\nprintf "
+            "'01234567890123456789012345678901'\n",
             leak_fd);
    f = fopen(path, "w");
    assert(f);

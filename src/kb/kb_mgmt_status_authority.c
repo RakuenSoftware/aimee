@@ -19,8 +19,8 @@ static int ascii_token(const char *s, size_t min, size_t max)
    if (!bounded(s, min, max))
       return 0;
    for (const unsigned char *p = (const unsigned char *)s; *p; ++p)
-      if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
-            (*p >= '0' && *p <= '9') || *p == '.' || *p == '_' || *p == '-'))
+      if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+            *p == '.' || *p == '_' || *p == '-'))
          return 0;
    return 1;
 }
@@ -95,8 +95,8 @@ static int copy_field(char *out, size_t cap, const char *value)
    return 0;
 }
 
-kb_mgmt_status_authority_result_t
-kb_mgmt_status_request_from_json(const char *raw, size_t raw_len, kb_mgmt_status_request_t *out)
+kb_mgmt_status_authority_result_t kb_mgmt_status_request_from_json(const char *raw, size_t raw_len,
+                                                                   kb_mgmt_status_request_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -163,10 +163,11 @@ static kb_mgmt_status_authority_result_t callback_result(int rc, int lookup)
    return KB_MGMT_STATUS_AUTHORITY_UNAVAILABLE;
 }
 
-kb_mgmt_status_authority_result_t kb_mgmt_status_authority_issue(
-    const kb_mgmt_status_request_t *r, const char *issuer, const char *serial,
-    const char *fingerprint, const char *key_id, uint64_t now, kb_mgmt_status_lookup_fn lookup,
-    void *lookup_ctx, kb_mgmt_status_sign_fn sign, void *sign_ctx, kb_mgmt_status_t *out)
+kb_mgmt_status_authority_result_t
+kb_mgmt_status_authority_issue(const kb_mgmt_status_request_t *r, const char *issuer,
+                               const char *serial, const char *fingerprint, const char *key_id,
+                               uint64_t now, kb_mgmt_status_lookup_fn lookup, void *lookup_ctx,
+                               kb_mgmt_status_sign_fn sign, void *sign_ctx, kb_mgmt_status_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));

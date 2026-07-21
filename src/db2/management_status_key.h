@@ -19,8 +19,8 @@ int db2_management_status_key_ctx_open(db2_management_status_key_ctx_t *, const 
  * role, search_path and row-security assertions have succeeded. The key-use
  * context never closes the borrowed connection. Calls through the two views
  * must remain serialized by their owning worker. */
-int db2_management_status_key_ctx_borrow_hardened(
-    db2_management_status_key_ctx_t *, const db2_management_status_runtime_t *);
+int db2_management_status_key_ctx_borrow_hardened(db2_management_status_key_ctx_t *,
+                                                  const db2_management_status_runtime_t *);
 void db2_management_status_key_ctx_close(db2_management_status_key_ctx_t *);
 
 typedef struct

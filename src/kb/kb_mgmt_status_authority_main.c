@@ -134,9 +134,9 @@ static int lookup_cb(const char *issuer, const char *serial, const char *fingerp
                      char *target_fingerprint, size_t target_fingerprint_len, void *opaque)
 {
    db2_management_status_runtime_t *db = opaque;
-   int rc = db2_management_status_runtime_lookup(db, issuer, serial, fingerprint, target, purpose,
-                                                  generation, target_fingerprint,
-                                                  target_fingerprint_len);
+   int rc =
+       db2_management_status_runtime_lookup(db, issuer, serial, fingerprint, target, purpose,
+                                            generation, target_fingerprint, target_fingerprint_len);
    if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_OK)
       return KB_MGMT_STATUS_CALLBACK_OK;
    if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED)
@@ -154,14 +154,12 @@ static int sign_cb(kb_mgmt_status_t *status, void *opaque)
    if (rc == KB_MGMT_STATUS_CUSTODY_CONFLICT)
       return KB_MGMT_STATUS_CALLBACK_CONFLICT;
    return rc == KB_MGMT_STATUS_CUSTODY_INTEGRITY ? KB_MGMT_STATUS_CALLBACK_INTEGRITY
-                                                  : KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
+                                                 : KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
 }
 
-static kb_mgmt_status_listener_result_t handle_request(size_t worker_id,
-                                                        const kb_mgmt_status_peer_t *peer,
-                                                        const char *body, size_t body_len,
-                                                        char *response, size_t response_cap,
-                                                        void *opaque)
+static kb_mgmt_status_listener_result_t
+handle_request(size_t worker_id, const kb_mgmt_status_peer_t *peer, const char *body,
+               size_t body_len, char *response, size_t response_cap, void *opaque)
 {
    status_service_t *service = opaque;
    kb_mgmt_status_request_t request;
@@ -427,18 +425,18 @@ int main(int argc, char **argv)
    {
       (void)vault_seal();
       SSL_CTX_free(tls);
-      fixed_error(service_rc == -1    ? "database"
-                  : service_rc == -2  ? "startup-state"
-                  : service_rc == -31 ? "startup-binding"
-                  : service_rc == -32 ? "startup-provider"
-                  : service_rc == -330 ? "startup-attestation-length"
+      fixed_error(service_rc == -1      ? "database"
+                  : service_rc == -2    ? "startup-state"
+                  : service_rc == -31   ? "startup-binding"
+                  : service_rc == -32   ? "startup-provider"
+                  : service_rc == -330  ? "startup-attestation-length"
                   : service_rc == -3310 ? "startup-attestation-version-zero"
                   : service_rc == -3311 ? "startup-attestation-version-old"
                   : service_rc == -3312 ? "startup-attestation-version-new"
-                  : service_rc == -332 ? "startup-attestation-signature"
-                  : service_rc == -333 ? "startup-attestation-binding"
-                  : service_rc == -34 ? "startup-epoch"
-                                      : "startup-transaction");
+                  : service_rc == -332  ? "startup-attestation-signature"
+                  : service_rc == -333  ? "startup-attestation-binding"
+                  : service_rc == -34   ? "startup-epoch"
+                                        : "startup-transaction");
       return 69;
    }
    g_status_kms_ready = 1;
@@ -463,10 +461,10 @@ int main(int argc, char **argv)
       return 70;
    }
    kb_mgmt_status_listener_config_t config = {.bind_address = host,
-                                               .port = (uint16_t)port_value,
-                                               .tls = tls,
-                                               .handle = handle_request,
-                                               .opaque = &service};
+                                              .port = (uint16_t)port_value,
+                                              .tls = tls,
+                                              .handle = handle_request,
+                                              .opaque = &service};
    if (kb_mgmt_status_listener_start(&config) != 0)
    {
       g_status_kms_ready = 0;
