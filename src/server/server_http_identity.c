@@ -11,7 +11,8 @@
 #include "server.h"         /* server_ct_equal, SERVER_TOKEN_FILE */
 #include "server_conn_io.h" /* server_conn_io_has_ssl/get_ssl — native-TLS attestation */
 #include "server_tls.h"     /* server_tls_peer_identity — mTLS client cert CN */
-#include "aimee_home.h"     /* aimee_home */
+#include "kb_mgmt_status.h"
+#include "aimee_home.h" /* aimee_home */
 #include "platform_ipc.h"
 #include "vault_principal.h"
 #include <pthread.h>
@@ -42,6 +43,9 @@ static _Thread_local char tl_session_hdr[80] = "";
  * key), so it only risks two >2KB bearers that share a 2KB prefix sharing a disable
  * bucket — a benign availability edge, not a security boundary. */
 static _Thread_local char tl_bearer[2048] = "";
+static _Thread_local char tl_status_staple[KB_MGMT_STATUS_JSON_MAX + 1] = "";
+static _Thread_local server_tls_peer_cert_t tl_peer_cert;
+static _Thread_local char tl_local_fingerprint[65] = "";
 
 /* The shared secret that authenticates a webchat `webuser:` assertion is the
  * server.token file (0600, in AIMEE_HOME — the secret only the webchat backend
@@ -114,11 +118,15 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    /* mTLS: a verified client cert on this TLS conn yields a per-client cert:<CN>
     * principal (resolved + sanitized in vault_principal_resolve). */
    char cert_cn[VAULT_CERT_CN_MAX + 1] = "";
+   memset(&tl_peer_cert, 0, sizeof(tl_peer_cert));
+   tl_local_fingerprint[0] = '\0';
    if (is_tls)
    {
       char serial[80];
-      server_tls_peer_identity(server_conn_io_get_ssl(fd), cert_cn, sizeof(cert_cn), serial,
-                               sizeof(serial));
+      SSL *ssl = server_conn_io_get_ssl(fd);
+      server_tls_peer_identity(ssl, cert_cn, sizeof(cert_cn), serial, sizeof(serial));
+      server_tls_peer_cert(ssl, &tl_peer_cert);
+      server_tls_local_fingerprint(ssl, tl_local_fingerprint);
    }
    tl_transport = vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_token_ok,
                                           cert_cn, tl_principal, sizeof(tl_principal));
@@ -127,6 +135,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
     * buffered gateway handlers. Purely additive; empty when absent. */
    tl_session_hdr[0] = '\0';
    tl_bearer[0] = '\0';
+   tl_status_staple[0] = '\0';
    if (buf)
    {
       http_header(buf, "aimee-session-id", tl_session_hdr, sizeof(tl_session_hdr));
@@ -135,6 +144,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
       if (http_header(buf, "Authorization", authz, sizeof(authz)) &&
           strncasecmp(authz, "Bearer ", 7) == 0)
          snprintf(tl_bearer, sizeof(tl_bearer), "%s", authz + 7);
+      http_header(buf, "X-Aimee-Management-Status", tl_status_staple, sizeof(tl_status_staple));
    }
 }
 
@@ -146,6 +156,21 @@ const char *server_http_identity_session_hdr(void)
 const char *server_http_identity_bearer(void)
 {
    return tl_bearer;
+}
+
+const char *server_http_identity_status_staple(void)
+{
+   return tl_status_staple;
+}
+
+const server_tls_peer_cert_t *server_http_identity_peer_cert(void)
+{
+   return tl_peer_cert.fingerprint[0] ? &tl_peer_cert : NULL;
+}
+
+const char *server_http_identity_local_fingerprint(void)
+{
+   return tl_local_fingerprint;
 }
 
 const char *server_http_identity_principal(void)
@@ -170,6 +195,9 @@ void server_http_identity_clear(void)
    tl_query = "";
    tl_session_hdr[0] = '\0';
    memset(tl_bearer, 0, sizeof(tl_bearer)); /* zero the secret, don't just truncate */
+   memset(tl_status_staple, 0, sizeof(tl_status_staple));
+   memset(&tl_peer_cert, 0, sizeof(tl_peer_cert));
+   memset(tl_local_fingerprint, 0, sizeof(tl_local_fingerprint));
 }
 
 void server_http_identity_set_query(const char *q)

@@ -29,6 +29,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_runtime') THEN
     CREATE ROLE aimee_kb_runtime NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status') THEN
+    CREATE ROLE aimee_kb_status NOLOGIN;
+  END IF;
 END
 $$;
 
@@ -36,6 +39,7 @@ $$;
 -- properties db2_init boot-asserts (B4/N4): a mismatch here or an operator
 -- over-grant is caught at boot, not silently tolerated.
 ALTER ROLE aimee_kb_runtime NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+ALTER ROLE aimee_kb_status NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
 ALTER ROLE aimee_kb_migrate NOBYPASSRLS NOSUPERUSER;
 
 -- migrate acts as owner for DDL; runtime never does.
@@ -44,6 +48,8 @@ GRANT aimee_kb_owner TO aimee_kb_migrate;
 -- Schema usage: runtime may resolve objects but NOT create them.
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;
+GRANT USAGE ON SCHEMA public TO aimee_kb_status;
+REVOKE CREATE ON SCHEMA public FROM aimee_kb_status;
 
 -- NOTE: table/sequence/function GRANTs live in schema_grants.sql, applied AFTER
 -- schema.sql (the tables must exist first). Provisioning order is:

@@ -24,6 +24,7 @@ typedef struct
    char server_id[128], endpoint[512], status[32];
    char management_issuer[601], management_serial_norm[129], management_fingerprint[65];
    char enrollment_state[32], revoked_at[64];
+   int64_t revocation_generation;
 } db2_server_snapshot_t;
 int db2_server_registry_list(int64_t, db2_server_row_t *, int);
 int db2_server_registry_get(int64_t, const char *, db2_server_row_t *);
@@ -34,4 +35,6 @@ int db2_server_registry_finalize(const char *, const char *, const char *,
 int db2_server_registry_heartbeat(const char *, const char *, const char *, const char *,
                                   const char *, const char *);
 int db2_server_registry_snapshot(int64_t, const char *, db2_server_snapshot_t *);
+int db2_management_status_lookup(const char *, const char *, const char *, const char *,
+                                 const char *, int64_t *, char *, size_t);
 #endif

@@ -191,7 +191,8 @@ int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapsh
    aimee_pg_stmt_t *s = aimee_pg_prepare(
        c,
        "SELECT server_id,endpoint,status,mgmt_issuer,mgmt_serial_norm,mgmt_fingerprint,"
-       "enrollment_state,revoked_at FROM kb_server_registry_snapshot(?1,?2)",
+       "enrollment_state,revoked_at,revocation_generation FROM "
+       "kb_server_registry_snapshot(?1,?2)",
        e, sizeof(e));
    if (!s)
       return -1;
@@ -209,7 +210,47 @@ int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapsh
       cp(r->management_fingerprint, sizeof(r->management_fingerprint), aimee_pg_column_text(s, 5));
       cp(r->enrollment_state, sizeof(r->enrollment_state), aimee_pg_column_text(s, 6));
       cp(r->revoked_at, sizeof(r->revoked_at), aimee_pg_column_text(s, 7));
+      r->revocation_generation = aimee_pg_column_int64(s, 8);
       rc = 0;
+   }
+   aimee_pg_finalize(s);
+   return rc;
+}
+
+int db2_management_status_lookup(const char *issuer, const char *serial, const char *fingerprint,
+                                 const char *target, const char *purpose, int64_t *generation,
+                                 char *target_fingerprint, size_t target_fingerprint_len)
+{
+   if (db2_tenant_require_pg() != 0 || !issuer || !serial || !fingerprint || !target || !purpose ||
+       !generation || !target_fingerprint || target_fingerprint_len < 65)
+      return -1;
+   void *c = db2_conn();
+   if (!c)
+      return -1;
+   char e[256];
+   aimee_pg_stmt_t *s =
+       aimee_pg_prepare(c,
+                        "SELECT revocation_generation,target_mgmt_fingerprint FROM "
+                        "kb_management_status_lookup(?1,?2,?3,?4,?5)",
+                        e, sizeof(e));
+   if (!s)
+      return -1;
+   aimee_pg_bind_text(s, "?1", issuer);
+   aimee_pg_bind_text(s, "?2", serial);
+   aimee_pg_bind_text(s, "?3", fingerprint);
+   aimee_pg_bind_text(s, "?4", target);
+   aimee_pg_bind_text(s, "?5", purpose);
+   int rc = -1;
+   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW)
+   {
+      int64_t g = aimee_pg_column_int64(s, 0);
+      const char *fp = aimee_pg_column_text(s, 1);
+      if (g >= 1 && fp && strlen(fp) == 64)
+      {
+         *generation = g;
+         cp(target_fingerprint, target_fingerprint_len, fp);
+         rc = 0;
+      }
    }
    aimee_pg_finalize(s);
    return rc;

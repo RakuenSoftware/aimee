@@ -108,6 +108,11 @@ typedef struct
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 
+/* Narrow request-scoped keepalive used by the P5 management challenge. */
+void server_http_keepalive_set(int enabled);
+int server_http_keepalive_peek(void);
+int server_http_keepalive_take(void);
+
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
 
