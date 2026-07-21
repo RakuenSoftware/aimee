@@ -3,8 +3,9 @@
  * Drives active autonomous work items forward via wfe_autonomy_run on a
  * background thread, so a submitted proposal runs to completion (or to a human
  * gate) regardless of who is connected. Wakes on notify (submit / gate satisfied)
- * and on a periodic backstop sweep. Each sweep drives eligible items via a
- * bounded worker pool (AIMEE_AUTONOMY_CONCURRENCY, default 8) in LRU order;
+ * and on a periodic backstop sweep. The live scheduler keeps a bounded set of
+ * in-flight workers (AIMEE_AUTONOMY_CONCURRENCY, default 8) and fills open
+ * slots from a fresh LRU snapshot whenever work arrives or a worker finishes;
  * DB transaction safety across workers is the db1 txn gate. */
 #include "wfe_scheduler.h"
 
@@ -16,6 +17,7 @@
 #include "wfe_store.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -28,6 +30,23 @@ static pthread_cond_t g_cv = PTHREAD_COND_INITIALIZER;
 static int g_started;
 static int g_running;
 static int g_notified;
+
+typedef struct
+{
+   int active;
+   char work_item_id[80];
+} live_slot_t;
+
+static live_slot_t g_live_slots[64];
+static int g_live_workers;
+
+typedef struct
+{
+   char work_item_id[80];
+   time_t until;
+} live_cooldown_t;
+
+static live_cooldown_t g_live_cooldowns[64];
 
 /* Drive every active autonomous work item one autonomy pass. wfe_autonomy_run is
  * safe to call on a human-parked item (pending_human / stuck / operator_paused):
@@ -184,8 +203,14 @@ static void *wfe_sched_worker(void *arg)
    }
 }
 
-void wfe_scheduler_run_once(void)
+/* Collect a fresh, priority-sorted set of driveable items. This shared selector
+ * keeps deterministic synchronous sweeps and the live capacity-aware dispatcher
+ * on exactly the same eligibility, cleanup, auto-resume, and ordering policy. */
+static int wfe_sched_collect(db1_work_item_t **run_out)
 {
+   if (!run_out)
+      return 0;
+   *run_out = NULL;
    /* LRU order (least-recently-updated first): a fixed newest-first order lets
     * the busiest items eat every sweep and starve the rest (observed live: 2 of
     * 13 slices monopolized 3.5h of sweeps). With the parallel pass below the
@@ -209,7 +234,7 @@ void wfe_scheduler_run_once(void)
    db1_work_item_t *items = NULL;
    int n = db1_work_item_list_lru(&items);
    if (n <= 0 || !items)
-      return;
+      return 0;
    /* Eligible autonomy targets are collected during the (cheap, sequential)
     * cleanup walk, then driven by a bounded worker pool. */
    db1_work_item_t *run = malloc((size_t)n * sizeof *run);
@@ -269,21 +294,7 @@ void wfe_scheduler_run_once(void)
          }
          run[j + 1] = tmp;
       }
-      sched_pass_t pass = {run, run_n, 0, PTHREAD_MUTEX_INITIALIZER};
-      long want = wfe_sched_concurrency();
-      int k = (int)((want < run_n) ? want : run_n);
-      pthread_t tids[64];
-      int spawned = 0;
-      for (int i = 0; i < k; i++)
-         if (pthread_create(&tids[spawned], NULL, wfe_sched_worker, &pass) == 0)
-            spawned++;
-      if (spawned == 0)
-         wfe_sched_worker(&pass); /* thread creation failed: degrade to inline */
-      for (int i = 0; i < spawned; i++)
-         pthread_join(tids[i], NULL);
-      pthread_mutex_destroy(&pass.lock);
    }
-   free(run);
    free(items);
 
    /* Age-based orphan GC: reap wfe-worktrees dirs no live work item owns (a deleted
@@ -304,6 +315,188 @@ void wfe_scheduler_run_once(void)
    int reaped = wfe_worktree_orphan_gc((rl && rl[0]) ? rl : ".", grace);
    if (reaped > 0)
       aimee_log(LOG_INFO, "wfe-sched", "orphan-GC reaped %d stale worktree(s)", reaped);
+
+   *run_out = run;
+   return run ? run_n : 0;
+}
+
+void wfe_scheduler_run_once(void)
+{
+   db1_work_item_t *run = NULL;
+   int run_n = wfe_sched_collect(&run);
+   if (run_n > 0)
+   {
+      sched_pass_t pass = {run, run_n, 0, PTHREAD_MUTEX_INITIALIZER};
+      long want = wfe_sched_concurrency();
+      int k = (int)((want < run_n) ? want : run_n);
+      pthread_t tids[64];
+      int spawned = 0;
+      for (int i = 0; i < k; i++)
+         if (pthread_create(&tids[spawned], NULL, wfe_sched_worker, &pass) == 0)
+            spawned++;
+      if (spawned == 0)
+         wfe_sched_worker(&pass); /* thread creation failed: degrade to inline */
+      for (int i = 0; i < spawned; i++)
+         pthread_join(tids[i], NULL);
+      pthread_mutex_destroy(&pass.lock);
+   }
+   free(run);
+}
+
+typedef struct
+{
+   int slot;
+   char work_item_id[80];
+} live_worker_arg_t;
+
+static void wfe_live_cooldown_set_locked(const char *work_item_id)
+{
+   int target = -1;
+   time_t oldest = 0;
+   for (int i = 0; i < 64; i++)
+   {
+      if (strcmp(g_live_cooldowns[i].work_item_id, work_item_id) == 0)
+      {
+         target = i;
+         break;
+      }
+      if (target < 0 || !g_live_cooldowns[i].work_item_id[0] || g_live_cooldowns[i].until < oldest)
+      {
+         target = i;
+         oldest = g_live_cooldowns[i].until;
+      }
+   }
+   if (target >= 0)
+   {
+      snprintf(g_live_cooldowns[target].work_item_id, sizeof(g_live_cooldowns[target].work_item_id),
+               "%s", work_item_id);
+      g_live_cooldowns[target].until = time(NULL) + WFE_SCHED_BACKSTOP_SECS;
+   }
+}
+
+static int wfe_live_cooling_locked(const char *work_item_id)
+{
+   time_t now = time(NULL);
+   for (int i = 0; i < 64; i++)
+      if (strcmp(g_live_cooldowns[i].work_item_id, work_item_id) == 0)
+         return g_live_cooldowns[i].until > now;
+   return 0;
+}
+
+static void wfe_live_slot_release(int slot, const char *work_item_id, int backoff)
+{
+   pthread_mutex_lock(&g_lock);
+   if (slot >= 0 && slot < 64 && g_live_slots[slot].active &&
+       strcmp(g_live_slots[slot].work_item_id, work_item_id) == 0)
+   {
+      g_live_slots[slot].active = 0;
+      g_live_slots[slot].work_item_id[0] = '\0';
+      if (g_live_workers > 0)
+         g_live_workers--;
+   }
+   if (backoff)
+      wfe_live_cooldown_set_locked(work_item_id);
+   g_notified = 1; /* immediately offer the freed slot to another item */
+   pthread_cond_signal(&g_cv);
+   pthread_mutex_unlock(&g_lock);
+}
+
+static void *wfe_live_worker(void *arg)
+{
+   live_worker_arg_t *worker = arg;
+   char err[256] = "";
+   if (wfe_autonomy_run(worker->work_item_id, err, sizeof err) != 0)
+      aimee_log(LOG_WARN, "wfe-sched", "autonomy run %s: %s", worker->work_item_id,
+                err[0] ? err : "error");
+   db1_work_item_t item;
+   int backoff = db1_work_item_get(worker->work_item_id, &item) == 1 &&
+                 strcmp(item.state, "active") == 0 && item.pause_reason[0] &&
+                 wfe_sched_driveable(item.pause_reason);
+   wfe_live_slot_release(worker->slot, worker->work_item_id, backoff);
+   free(worker);
+   return NULL;
+}
+
+/* Atomically reserve a live slot and fence the same item from being dispatched
+ * twice across notifications/backstop scans. Returns slot, -1 at capacity, or
+ * -2 when this item is already in flight, or -3 during the normal backstop
+ * cooldown for a self-resolving pause (CI/panel/merge/fan-in polling). */
+static int wfe_live_slot_claim(const char *work_item_id, int limit)
+{
+   pthread_mutex_lock(&g_lock);
+   if (wfe_live_cooling_locked(work_item_id))
+   {
+      pthread_mutex_unlock(&g_lock);
+      return -3;
+   }
+   if (!g_running || g_live_workers >= limit)
+   {
+      pthread_mutex_unlock(&g_lock);
+      return -1;
+   }
+   int free_slot = -1;
+   for (int i = 0; i < 64; i++)
+   {
+      if (g_live_slots[i].active && strcmp(g_live_slots[i].work_item_id, work_item_id) == 0)
+      {
+         pthread_mutex_unlock(&g_lock);
+         return -2;
+      }
+      if (!g_live_slots[i].active && free_slot < 0)
+         free_slot = i;
+   }
+   if (free_slot < 0)
+   {
+      pthread_mutex_unlock(&g_lock);
+      return -1;
+   }
+   g_live_slots[free_slot].active = 1;
+   snprintf(g_live_slots[free_slot].work_item_id, sizeof(g_live_slots[free_slot].work_item_id),
+            "%s", work_item_id);
+   g_live_workers++;
+   pthread_mutex_unlock(&g_lock);
+   return free_slot;
+}
+
+/* Fill every currently-open slot from a FRESH snapshot. Unlike the synchronous
+ * sweep, this does not join long-running autonomy calls: a later submit/worker
+ * completion wakes the manager, which can populate spare capacity immediately. */
+static void wfe_scheduler_dispatch_available(void)
+{
+   db1_work_item_t *run = NULL;
+   int run_n = wfe_sched_collect(&run);
+   int limit = (int)wfe_sched_concurrency();
+   for (int i = 0; i < run_n; i++)
+   {
+      int slot = wfe_live_slot_claim(run[i].work_item_id, limit);
+      if (slot == -1)
+         break;
+      if (slot == -2 || slot == -3)
+         continue;
+
+      live_worker_arg_t *worker = calloc(1, sizeof *worker);
+      if (!worker)
+      {
+         wfe_live_slot_release(slot, run[i].work_item_id, 0);
+         continue;
+      }
+      worker->slot = slot;
+      snprintf(worker->work_item_id, sizeof(worker->work_item_id), "%s", run[i].work_item_id);
+
+      pthread_attr_t attr;
+      pthread_attr_init(&attr);
+      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+      pthread_t tid;
+      int rc = pthread_create(&tid, &attr, wfe_live_worker, worker);
+      pthread_attr_destroy(&attr);
+      if (rc != 0)
+      {
+         wfe_live_slot_release(slot, run[i].work_item_id, 0);
+         free(worker);
+         aimee_log(LOG_WARN, "wfe-sched", "failed to start worker for %s", run[i].work_item_id);
+      }
+   }
+   free(run);
 }
 
 static void *wfe_scheduler_loop(void *arg)
@@ -319,7 +512,7 @@ static void *wfe_scheduler_loop(void *arg)
       }
       pthread_mutex_unlock(&g_lock);
 
-      wfe_scheduler_run_once();
+      wfe_scheduler_dispatch_available();
 
       pthread_mutex_lock(&g_lock);
       if (g_running && !g_notified)
@@ -361,6 +554,9 @@ void wfe_scheduler_init(void)
 void wfe_scheduler_notify(void)
 {
    pthread_mutex_lock(&g_lock);
+   /* A gate/webhook/operator notification may make a self-resolving item ready
+    * before its polling backstop expires. Re-scan it immediately. */
+   memset(g_live_cooldowns, 0, sizeof(g_live_cooldowns));
    g_notified = 1;
    pthread_cond_signal(&g_cv);
    pthread_mutex_unlock(&g_lock);
@@ -379,6 +575,11 @@ void wfe_scheduler_shutdown(void)
    pthread_mutex_unlock(&g_lock);
    pthread_join(g_thread, NULL);
    pthread_mutex_lock(&g_lock);
+   while (g_live_workers > 0)
+      pthread_cond_wait(&g_cv, &g_lock);
    g_started = 0;
+   g_notified = 0;
+   memset(g_live_slots, 0, sizeof(g_live_slots));
+   memset(g_live_cooldowns, 0, sizeof(g_live_cooldowns));
    pthread_mutex_unlock(&g_lock);
 }
