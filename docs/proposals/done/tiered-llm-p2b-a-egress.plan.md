@@ -1,6 +1,7 @@
 # P2b-a — buffered kb Bedrock egress authority
 
-- **State:** roundtable-converged plan v5; v4 verified minority findings incorporated.
+- **State:** COMPLETE (2026-07-21). Roundtable-converged plan v5; implementation and
+  adversarial branch review converged, with real PG17/swtpm/CT260 validation.
 - **Depends on:** P1 identity/RLS, P2a catalog, P3a pricing/audit, P4a budget,
   P4b rate, P6a/P6b/P6c Bedrock cores, and P7 signed-HWM use-in-place.
 - **Scope boundary:** one real, certificate-authenticated, non-streaming Bedrock Converse
