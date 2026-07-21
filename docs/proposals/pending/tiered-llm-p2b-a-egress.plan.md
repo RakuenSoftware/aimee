@@ -1,6 +1,6 @@
 # P2b-a — buffered kb Bedrock egress authority
 
-- **State:** plan review v4; v3 blockers incorporated, requires final convergence.
+- **State:** roundtable-converged plan v5; v4 verified minority findings incorporated.
 - **Depends on:** P1 identity/RLS, P2a catalog, P3a pricing/audit, P4a budget,
   P4b rate, P6a/P6b/P6c Bedrock cores, and P7 signed-HWM use-in-place.
 - **Scope boundary:** one real, certificate-authenticated, non-streaming Bedrock Converse
@@ -82,6 +82,10 @@ credential is logged or persisted.
    DB/audit failure rolls back every row and returns no certificate. The old leaf and
    grants remain independently revocable until explicit retirement. Initial redeem
    creates the 128-bit random `authority_id`; no CN/scope string is an authority key.
+   Schema upgrade assigns each legacy enrollment its own deterministic unique lineage
+   derived from its immutable fingerprint and WORM-records the backfill; it never
+   guesses that two legacy rows share a lineage. The next authenticated renewal from
+   that row establishes normal lineage continuity.
 2. Harden the mTLS HTTP reader before exposing egress: reject any Transfer-Encoding
    and malformed or duplicate `Content-Length` globally; permit absent length only
    for a method/route that accepts no body and reject any body octets in that case.
@@ -91,8 +95,10 @@ credential is logged or persisted.
    complete request; never pass bytes beyond the declared body. Apply socket/SSL read
    and write deadlines. Reject bare LF, obsolete folded headers, whitespace before a
    colon, invalid header-name/value bytes, multiple request lines, absolute-form
-   egress targets, and bytes after the declared request. Preserve bodyless GET behavior
-   for enrollment/metrics routes.
+   egress targets, and bytes after the declared request when those octets are already
+   buffered. Preserve bodyless GET behavior for enrollment/metrics routes. Because
+   every response closes the connection, do not wait for client EOF before responding;
+   close without parsing any later bytes.
 3. Replace the listener's single blocking connection loop with a fixed-size bounded
    worker pool and bounded accepted-fd queue. Saturation closes/refuses without
    allocating request-sized buffers. Each worker owns one connection, always clears
@@ -135,7 +141,7 @@ After strict parsing, discard authority-bearing raw sidecars and validate the te
 typed IR against explicit P6 bounds. Before admission, use a new pure P6 serializer to
 produce the exact canonical unsigned Bedrock request body that will later be signed.
 Hash a domain-separated length-prefixed transcript with literal domain
-`aimee.p2b.egress.v1` and fields in this fixed order: canonical transport identity,
+`aimee.p2b.egress.v1` and fields in this fixed order: stable enrollment `authority_id`,
 request UUID, resolved team, project-presence+value, catalog model, and the exact
 canonical Bedrock body bytes. The body includes every accepted message, sampling,
 stop, model, and generation field; no second ad-hoc IR field list can drift. Do not
@@ -198,9 +204,16 @@ One short PostgreSQL transaction performs:
 5. budget reservation at the conservative maximum;
 6. `org_token_audit_start`, then commit the already-inserted `admitted` claim.
 
+The legacy `origin_cert_cn` parameter/column names in P3/P4 are migrated semantically
+to carry the stable `authority_id` for egress budget/audit idempotency; exact
+certificate-instance origin remains a separate immutable dispatch/P7 audit field.
+Wrappers and SQL signatures are updated together so no layer accidentally mixes the
+two namespaces.
+
 Any denial/error rolls the whole transaction back, including the rate-window bump.
 An exact existing request returns its durable state and never re-admits, reuses a key,
-or dispatches; a digest/team/binding mismatch is an integrity conflict. Replay access
+or dispatches; a digest/team/immutable-admission-snapshot mismatch is an integrity
+conflict (comparison uses the stored first-claim snapshot, never the current binding). Replay access
 requires the same authenticated active enrollment lineage; the namespace survives
 certificate renewal and default/team changes, so retrying an old request after renewal
 cannot acquire a new dispatch right or silently rebind its team. The immutable row
@@ -230,7 +243,8 @@ Include a production startup plus periodic runner, coordinated by a singleton ad
 lock and bounded batches. Recovery increments/revokes the ownership generation. The
 owner must present the token+generation for every transition, recheck it immediately
 before P7 invocation, and hold the dispatch row lock from a final fenced check through
-the complete vendor-request write; loss of the DB transaction/lock aborts before the
+the complete vendor-request write on a dedicated DB ownership-guard connection (P7
+uses its normal separate tenant transaction); loss of the guard transaction/lock aborts before the
 write. A resumed expired owner cannot use the key, write, or settle after recovery.
 It never touches a key or network. Process death followed by restart must converge
 without operator DML.
@@ -243,8 +257,9 @@ errors conservatively charge the maximum. Over-ceiling or arithmetic-overflow us
 follows the full-liability evidence/fence path above.
 No HTTP status or response byte is exposed to the client until this terminal
 transaction commits. An unknown commit outcome returns only a content-free ambiguous
-error and leaves/reconciles the dispatch as `uncertain`; it never reports a 200 from
-in-memory provider success. Failpoints cover before commit, after commit, and before
+error, then a fresh connection may reread the row: a proven committed terminal remains
+immutable, while only a still-nonterminal row is recovered to `uncertain`. It never
+reports a 200 from in-memory provider success. Failpoints cover before commit, after commit, and before
 the first client response byte.
 
 ## Vault-sign/network split
@@ -266,10 +281,16 @@ remove pointer-only credential overloads from production linkage; compatibility
 wrappers may exist only in pure test objects. Embedded NUL and non-terminated inputs
 must be rejected length-safely, and static/ASAN instrumentation proves no production
 signing layer calls `strlen` or retains a secret view.
+Audit the SigV4 result and implementation: only canonical request, string-to-sign,
+signature, authorization, date, and explicitly allowed public/session header material
+may survive; cleanse every derived signing key/HMAC scratch on all exits. P2b-a's
+owned request contains no session token and tests scan it for the secret and derived
+key canaries after callback return.
 
 The P7 callback uses a length-aware, allocation-free scanner over the borrowed locked
 arena to strictly parse one bounded vault plaintext JSON object containing
-`access_key_id`, `secret_access_key`, and optional `session_token`, rejects duplicate
+exactly `access_key_id` and `secret_access_key`; P2b-a direct IAM credentials reject a
+`session_token` (STS/session credentials are deferred). The parser rejects duplicate
 or unknown keys, rejects escapes rather than decoding into heap strings, accepts a
 non-NUL-terminated buffer, points offset/length credential views into the locked
 arena, builds the signed owned request, and returns. Any unavoidable temporary is
