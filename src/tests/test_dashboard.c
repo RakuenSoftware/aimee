@@ -12,7 +12,7 @@
 #include "db_schema.h"
 #include "dashboard.h"
 #include "cJSON.h"
-#include "../headers/plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 

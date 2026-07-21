@@ -3,13 +3,38 @@
 ## Purpose and classification
 
 Module-runtime is required core and the dependency root for module contracts. It owns contracts
-that required Aimee execution must provide whether or not any optional module is selected. Its first
-physical implementation family is the synchronous pre-LLM hook registry at
+that required Aimee execution must provide whether or not any optional module is selected. Its
+extension ABI is implemented at `src/modules/module-runtime/extension.c`, with the canonical header
+`src/modules/module-runtime/include/aimee/module-runtime/extension.h`. Its synchronous pre-LLM hook
+registry is at
 `src/modules/module-runtime/pre_llm_hook.c`, with its public contract at
 `src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h`.
 
-This slice changes ownership and include paths only. It does not change configuration, activation,
-symbol names, callback order, output assembly, or failure behavior.
+These ownership slices do not change configuration or activation semantics.
+
+## Extension ABI and registries
+
+The required extension contract defines the kind and permission taxonomies, their stable string
+vocabulary, typed contribution records,
+`plugin_ctx_t`, context lifecycle, and process-local registries. `plugin_ctx_create` installs the
+typed registration callbacks, and `plugin_ctx_destroy` runs the registered shutdown callback.
+Tool and hook callbacks write to bounded module-runtime registries instead of the legacy no-op
+placeholders. Memory-provider and context-engine callbacks are deliberately unset by the dependency
+root and are installed by plugin-loader only when it creates a dynamic-plugin context.
+The canonical implementation, optional loader contract, and focused test consume it through
+`src/modules/module-runtime/extension.c`,
+`src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h`, and
+`src/tests/test_plugin.c`.
+
+Module-runtime does not parse manifests, persist installed-plugin state, inspect plugin directories,
+or call `dlopen`. Those optional responsibilities belong to plugin-loader, which depends on this
+contract. The required side has no include or symbol dependency on plugin-loader.
+
+Concurrent registry mutation is unsupported. Extensions register during single-threaded startup,
+and consumers read the process-global typed registries only after initialization. Adding concurrent
+registration requires synchronization or a snapshot API before changing that lifecycle contract.
+Slash and CLI commands use the existing process-global command registries and the same 64-entry
+capacity they had before this ownership move.
 
 ## Pre-LLM hook contract
 
@@ -68,6 +93,7 @@ forwarding header because the repository has no installed-header export for this
 shared guard at `scripts/check_module_source_ownership.py` enforces canonical ownership for this and
 the preceding plugin-loader move without duplicating a checker per module.
 
-The next contract slice classifies `plugin.c`, `plugin.h`, `plugin_ctx.c`, and `plugin_ctx.h` per
-symbol. Required extension ABI and registries move here; optional manifest discovery, installation,
-enable/disable, removal, and dynamic loading remain with plugin-loader.
+The legacy `plugin.c`/`plugin.h` mix is split by ownership. The unreferenced `plugin_ctx.c` and
+`plugin_ctx.h` wrapper island was removed after call-site, build-manifest, and installed-header
+inventory found no consumer; the required `plugin_ctx_create` and `plugin_ctx_destroy` symbols remain
+in this module. Plugin-loader link omission remains a separate consumer/profile slice.

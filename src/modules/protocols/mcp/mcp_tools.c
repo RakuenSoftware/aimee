@@ -4,7 +4,7 @@
 #include "mcp_skill_tools.h"
 #include "mcp_tools.h"
 #include "mcp_tools_gateway.h"
-#include "plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include "session_search_tool.h"
 #include "log.h"
 #include <stdio.h>

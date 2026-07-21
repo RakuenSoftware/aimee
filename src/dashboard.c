@@ -10,7 +10,7 @@
 #include "cJSON.h"
 #include "headers/agent_exec.h"
 #include "headers/memory.h"
-#include "headers/plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include <ctype.h>
 #include <sys/stat.h>
 #include <time.h>

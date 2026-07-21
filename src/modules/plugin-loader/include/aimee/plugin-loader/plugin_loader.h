@@ -14,7 +14,7 @@
 #ifndef DEC_PLUGIN_LOADER_H
 #define DEC_PLUGIN_LOADER_H 1
 
-#include "plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 
 #ifdef __cplusplus
 extern "C"

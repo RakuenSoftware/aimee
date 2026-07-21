@@ -5,7 +5,9 @@
     "audit",
     "config",
     "execution-policy",
-    "module-runtime"
+    "memory",
+    "module-runtime",
+    "response-composition"
   ],
   "enabled_by_default": false,
   "runtime_toggle": {

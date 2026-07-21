@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../headers/plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include "aimee/plugin-loader/plugin_loader.h"
 #include "platform_test_util.h"
 

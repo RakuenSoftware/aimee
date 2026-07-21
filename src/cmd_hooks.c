@@ -6,7 +6,7 @@
 #include "db1.h"
 #include "headers/cmd_hooks_scope.h"
 #include "memory_redirect.h"
-#include "headers/plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include "platform_process.h"
 #include "agent_config.h"
 #include "agent_coord.h"

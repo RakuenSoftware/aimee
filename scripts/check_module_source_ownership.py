@@ -69,6 +69,47 @@ CONTRACTS = (
         document="docs/modules/module-runtime.md",
         document_markers=("system prompt", "plugin_chook_apply_pre_llm"),
     ),
+    Contract(
+        module="plugin-loader-contract",
+        legacy_source="src/plugin.c",
+        legacy_header="src/headers/plugin.h",
+        canonical_source="src/modules/plugin-loader/plugin.c",
+        canonical_header="src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
+        canonical_include="aimee/plugin-loader/plugin.h",
+        make_source="modules/plugin-loader/plugin.c",
+        cmake_source="${AIMEE_SRC_DIR}/modules/plugin-loader/plugin.c",
+        legacy_cmake_source="${AIMEE_SRC_DIR}/plugin.c",
+        test_object="$(OBJDIR)/modules/plugin-loader/plugin.o",
+        legacy_test_object="$(OBJDIR)/plugin.o",
+        consumers=(
+            "src/modules/plugin-loader/plugin.c",
+            "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
+            "src/tests/test_plugin.c",
+        ),
+        document="docs/modules/plugin-loader.md",
+        document_markers=("plugin_manifest_parse", "plugin_load_and_register",
+                          "plugin_permission_name", "plugin_permission_from_str"),
+    ),
+    Contract(
+        module="module-runtime-extension",
+        legacy_source="src/plugin_ctx.c",
+        legacy_header="src/headers/plugin_ctx.h",
+        canonical_source="src/modules/module-runtime/extension.c",
+        canonical_header="src/modules/module-runtime/include/aimee/module-runtime/extension.h",
+        canonical_include="aimee/module-runtime/extension.h",
+        make_source="modules/module-runtime/extension.c",
+        cmake_source="${AIMEE_SRC_DIR}/modules/module-runtime/extension.c",
+        legacy_cmake_source="${AIMEE_SRC_DIR}/plugin_ctx.c",
+        test_object="$(OBJDIR)/modules/module-runtime/extension.o",
+        legacy_test_object="$(OBJDIR)/plugin_ctx.o",
+        consumers=(
+            "src/modules/module-runtime/extension.c",
+            "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
+            "src/tests/test_plugin.c",
+        ),
+        document="docs/modules/module-runtime.md",
+        document_markers=("plugin_ctx_create", "plugin_ctx_destroy"),
+    ),
 )
 
 
@@ -113,7 +154,8 @@ def validate_contract(root: Path, contract: Contract, makefile: str, cmake: str,
     require(contract.legacy_cmake_source not in cmake, "core-source-unique",
             f"{contract.module}: CMake legacy source")
 
-    require(rules.count(contract.test_object) == 1, "focused-test-object",
+    # One canonical object can appear in several independently linked test targets.
+    require(rules.count(contract.test_object) >= 1, "focused-test-object",
             f"{contract.module}: canonical object")
     require(contract.legacy_test_object not in rules, "focused-test-object",
             f"{contract.module}: legacy object")
@@ -145,6 +187,37 @@ def validate(root: Path) -> None:
     rules = read(root, "src/tests/Rules.mk")
     for contract in CONTRACTS:
         validate_contract(root, contract, makefile, cmake, rules)
+
+    source = "\n".join(read(root, relative) for relative in source_files(root))
+    for symbol in (
+        "plugin_ctx_create_ex",
+        "plugin_ctx_destroy_ex",
+        "plugin_ctx_name",
+        "plugin_ctx_source_path",
+        "plugin_ctx_kind",
+        "plugin_ctx_set_source_path",
+        "plugin_ctx_set_kind",
+        "plugin_ctx_register_tool",
+        "plugin_ctx_register_hook",
+        "plugin_ctx_register_slash_command",
+        "plugin_ctx_register_cli_subcommand",
+        "plugin_ctx_register_memory_provider",
+        "plugin_ctx_register_context_engine",
+    ):
+        require(not re.search(rf"\b{symbol}\b", source), "dead-wrapper-removed", symbol)
+
+    runtime_root = root / "src/modules/module-runtime"
+    for path in runtime_root.rglob("*"):
+        if path.is_file() and path.suffix in {".c", ".h"}:
+            require("aimee/plugin-loader/" not in path.read_text(encoding="utf-8"),
+                    "core-to-optional-edge", path.relative_to(root).as_posix())
+
+    for relative in source_files(root):
+        content = read(root, relative)
+        require('#include "headers/plugin.h"' not in content,
+                "legacy-include-removed", relative)
+        require('#include "headers/plugin_ctx.h"' not in content,
+                "legacy-include-removed", relative)
 
     require(makefile.count("-Imodules/plugin-loader/include") == 1,
             "module-include-root", "Make plugin-loader include root")

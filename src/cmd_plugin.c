@@ -1,6 +1,6 @@
 /* cmd_plugin.c: aimee plugin install/list/enable/disable/remove CLI commands */
 #include "aimee.h"
-#include "headers/plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include "commands.h"
 #include "cJSON.h"
 #include <errno.h>
