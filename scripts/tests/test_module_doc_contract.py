@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 import tempfile
 import unittest
 
@@ -32,6 +34,7 @@ def oidc_profile() -> dict[str, object]:
         "jwks": {
             "uri": "https://issuer.example.invalid/jwks",
             "tls_spki_sha256": ["1" * 64],
+            "key_thumbprints_sha256": ["3" * 64],
             "max_age_seconds": 3600,
         },
         "allowed_algorithms": ["ES256", "RS256"],
@@ -123,9 +126,14 @@ class ModuleDocContractTests(unittest.TestCase):
             "candidate_revision": "b" * 40,
             "base_ref": "feature/core-modularization",
             "head_ref": "slice/module-doc-contracts",
+            "workflow_identity": workload["workflow_identity"],
+            "workflow_revision": workload["workflow_revision"],
+            "run_identity": workload["run_identity"],
+            "attempt": workload["attempt"],
             "trigger_check_identity": workload["trigger_check_identity"],
         })
         contract.bind_workload_to_target(workload, target, pull_request=1708)
+        self.assertRegex(contract.replay_binding(workload, target), r"^[0-9a-f]{64}$")
         bad = dict(token_claims)
         bad["iss"] = "https://other.example.invalid"
         self.assert_rule("oidc-issuer-mismatch", lambda: contract.normalize_verified_oidc_claims(
@@ -194,8 +202,12 @@ class ModuleDocContractTests(unittest.TestCase):
 
     def test_trust_policy_roles_and_verification_time(self) -> None:
         at = datetime(2027, 1, 1, tzinfo=timezone.utc)
-        key_one = "ssh-ed25519 " + "A" * 68
-        key_two = "ssh-ed25519 " + "B" * 68
+        def public_key(byte: int) -> str:
+            key_type = b"ssh-ed25519"
+            blob = struct.pack(">I", len(key_type)) + key_type + struct.pack(">I", 32) + bytes([byte]) * 32
+            return "ssh-ed25519 " + base64.b64encode(blob).decode("ascii")
+        key_one = public_key(1)
+        key_two = public_key(2)
         policy = {
             "schema": "aimee.module-doc-trust.v1", "epoch": 1,
             "identities": [
@@ -207,6 +219,13 @@ class ModuleDocContractTests(unittest.TestCase):
         }
         identities = contract.validate_trust_policy(policy, at=at)
         self.assertEqual(set(identities), {"owner@example", "reviewer@example"})
+        canonical = contract.canonical_trust_policy(policy, at=at)
+        self.assertEqual(set(contract.load_canonical_trust_policy(canonical, at=at)), set(identities))
+        self.assert_rule("trust-policy-canonical", lambda: contract.load_canonical_trust_policy(
+            canonical + b"\n", at=at
+        ))
+        contract.validate_trust_epoch(1, 2)
+        self.assert_rule("trust-policy-epoch", lambda: contract.validate_trust_epoch(2, 2))
         subject = json.loads((FIXTURES / "positive/subject.json").read_text(encoding="ascii"))
         contract.authorize_subject(subject, identities, oidc_iat=int(at.timestamp()))
         swapped = dict(subject)
@@ -254,6 +273,14 @@ class ModuleDocContractTests(unittest.TestCase):
             contract.verify_sshsig(subject, signature, "owner@example", canonical_key, Path(shutil.which("ssh-keygen")))
             self.assert_rule("sshsig-verify", lambda: contract.verify_sshsig(
                 subject + b"x", signature, "owner@example", canonical_key, Path(shutil.which("ssh-keygen"))
+            ))
+            signed_sha256 = subprocess.run(
+                ["ssh-keygen", "-Y", "sign", "-f", str(key), "-n", "aimee.module-doc.v1", "-O", "hashalg=sha256"],
+                input=subject, check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            self.assert_rule("sshsig-hash", lambda: contract.verify_sshsig(
+                subject, signed_sha256.stdout, "owner@example", canonical_key,
+                Path(shutil.which("ssh-keygen")),
             ))
 
 

@@ -8,12 +8,15 @@ the provider-independent workload record defined here.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import struct
 import tempfile
 from typing import Callable, NamedTuple, NoReturn
 
@@ -160,7 +163,9 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
             fail("oidc-issuer", "issuer must be an exact HTTPS URL without trailing slash")
 
     jwks = _exact_object(
-        profile["jwks"], {"uri", "tls_spki_sha256", "max_age_seconds"}, "oidc-jwks-shape"
+        profile["jwks"],
+        {"uri", "tls_spki_sha256", "key_thumbprints_sha256", "max_age_seconds"},
+        "oidc-jwks-shape",
     )
     if not _string(jwks["uri"], "oidc-jwks-uri").startswith("https://"):
         fail("oidc-jwks-uri", "JWKS URI must use HTTPS")
@@ -169,6 +174,13 @@ def validate_oidc_profile(value: object) -> dict[str, object]:
         fail("oidc-jwks-pins", "at least one lowercase SHA-256 SPKI pin is required")
     if pins != sorted(set(pins)):
         fail("oidc-jwks-pins", "SPKI pins must be sorted and unique")
+    thumbprints = jwks["key_thumbprints_sha256"]
+    if not isinstance(thumbprints, list) or not thumbprints or not all(
+        isinstance(item, str) and HEX_64_RE.fullmatch(item) for item in thumbprints
+    ):
+        fail("oidc-jwks-keys", "at least one lowercase SHA-256 JWK thumbprint is required")
+    if thumbprints != sorted(set(thumbprints)):
+        fail("oidc-jwks-keys", "JWK thumbprints must be sorted and unique")
     if type(jwks["max_age_seconds"]) is not int or not 1 <= jwks["max_age_seconds"] <= 86400:
         fail("oidc-jwks-max-age", "max_age_seconds must be an integer in [1, 86400]")
 
@@ -304,7 +316,8 @@ def validate_candidate_target(value: object) -> dict[str, str]:
     target = _exact_object(
         value,
         {"schema", "repository_identity", "pull_request", "protected_base_revision",
-         "candidate_revision", "base_ref", "head_ref", "trigger_check_identity"},
+         "candidate_revision", "base_ref", "head_ref", "workflow_identity",
+         "workflow_revision", "run_identity", "attempt", "trigger_check_identity"},
         "candidate-target-shape",
     )
     if target["schema"] != "aimee.candidate-target.v1":
@@ -314,7 +327,10 @@ def validate_candidate_target(value: object) -> dict[str, str]:
     for field in ("protected_base_revision", "candidate_revision"):
         if not isinstance(target[field], str) or not re.fullmatch(r"[0-9a-f]{40}", target[field]):
             fail("candidate-target-revision", f"{field} must be a full lowercase commit ID")
-    for field in ("repository_identity", "base_ref", "head_ref", "trigger_check_identity"):
+    for field in (
+        "repository_identity", "base_ref", "head_ref", "workflow_identity",
+        "workflow_revision", "run_identity", "attempt", "trigger_check_identity",
+    ):
         if not isinstance(target[field], str) or not target[field]:
             fail("candidate-target-field", f"{field} must be a non-empty string")
     return target
@@ -325,10 +341,29 @@ def bind_workload_to_target(
 ) -> None:
     if target["pull_request"] != pull_request:
         fail("target-request-binding", "repository API returned a different pull request")
-    if target["repository_identity"] != workload["repository_identity"]:
-        fail("target-repository-binding", "repository identity mismatch")
-    if target["trigger_check_identity"] != workload["trigger_check_identity"]:
-        fail("target-trigger-binding", "trigger check identity mismatch")
+    bindings = {
+        "repository_identity": "target-repository-binding",
+        "workflow_identity": "target-workflow-binding",
+        "workflow_revision": "target-workflow-binding",
+        "run_identity": "target-run-binding",
+        "attempt": "target-run-binding",
+        "trigger_check_identity": "target-trigger-binding",
+    }
+    for field, rule in bindings.items():
+        if target[field] != workload[field]:
+            fail(rule, f"{field} mismatch")
+
+
+def replay_binding(workload: dict[str, object], target: dict[str, object]) -> str:
+    fields = (
+        workload["issuer"], workload["token_id"], workload["repository_identity"],
+        workload["run_identity"], workload["attempt"], workload["trigger_check_identity"],
+        str(target["pull_request"]), target["protected_base_revision"],
+        target["candidate_revision"],
+    )
+    if any(not isinstance(item, str) or not item for item in fields):
+        fail("replay-binding", "binding fields must be non-empty strings")
+    return sha256("\0".join(fields).encode("utf-8"))
 
 
 def validate_v2_metadata(value: object, *, optional: bool) -> dict[str, object]:
@@ -605,8 +640,7 @@ def validate_trust_policy(value: object, *, at: datetime) -> dict[str, dict[str,
         if item["role"] not in {"owner", "reviewer"}:
             fail("trust-policy-role", "role must be owner or reviewer")
         public_key = _string(item["public_key"], "trust-policy-key")
-        parts = public_key.split()
-        if len(parts) != 2 or parts[0] != "ssh-ed25519" or public_key in keys:
+        if not _valid_ed25519_public_key(public_key) or public_key in keys:
             fail("trust-policy-key", "key must be a unique canonical Ed25519 public key")
         keys.add(public_key)
         not_before = parse_timestamp(item["not_before"], "trust-policy-not-before")
@@ -616,6 +650,99 @@ def validate_trust_policy(value: object, *, at: datetime) -> dict[str, dict[str,
             fail("trust-policy-authorization", f"identity {identity!r} is not authorized at verification time")
         result[identity] = item
     return result
+
+
+TRUST_IDENTITY_KEYS = (
+    "identity", "role", "public_key", "not_before", "not_after", "revoked_at"
+)
+
+
+def canonical_trust_policy(value: object, *, at: datetime) -> bytes:
+    identities = validate_trust_policy(value, at=at)
+    assert isinstance(value, dict)
+    ordered_entries = [
+        {key: identities[identity][key] for key in TRUST_IDENTITY_KEYS}
+        for identity in sorted(identities)
+    ]
+    ordered = {
+        "schema": value["schema"],
+        "epoch": value["epoch"],
+        "identities": ordered_entries,
+    }
+    return (json.dumps(ordered, indent=2, ensure_ascii=True, separators=(",", ": ")) + "\n").encode("ascii")
+
+
+def load_canonical_trust_policy(raw: bytes, *, at: datetime) -> dict[str, dict[str, object]]:
+    value = strict_json_bytes(raw)
+    canonical = canonical_trust_policy(value, at=at)
+    if raw != canonical:
+        fail("trust-policy-canonical", "trust policy bytes are not canonical")
+    return validate_trust_policy(value, at=at)
+
+
+def validate_trust_epoch(previous: object, current: object) -> None:
+    if type(previous) is not int or type(current) is not int or current <= previous:
+        fail("trust-policy-epoch", "a trust-policy change must increase the protected epoch")
+
+
+def _ssh_string(raw: bytes, offset: int) -> tuple[bytes, int]:
+    if offset + 4 > len(raw):
+        fail("sshsig-format", "truncated SSH string length")
+    size = struct.unpack(">I", raw[offset:offset + 4])[0]
+    start = offset + 4
+    end = start + size
+    if end > len(raw):
+        fail("sshsig-format", "truncated SSH string")
+    return raw[start:end], end
+
+
+def _valid_ed25519_public_key(public_key: str) -> bool:
+    parts = public_key.split(" ")
+    if len(parts) != 2 or parts[0] != "ssh-ed25519" or not parts[1]:
+        return False
+    try:
+        decoded = base64.b64decode(parts[1], validate=True)
+        key_type, offset = _ssh_string(decoded, 0)
+        key_bytes, offset = _ssh_string(decoded, offset)
+    except (binascii.Error, ContractError):
+        return False
+    return key_type == b"ssh-ed25519" and len(key_bytes) == 32 and offset == len(decoded)
+
+
+def _validate_sshsig_envelope(signature: bytes) -> None:
+    begin = b"-----BEGIN SSH SIGNATURE-----\n"
+    end = b"-----END SSH SIGNATURE-----\n"
+    if not signature.startswith(begin) or not signature.endswith(end) or b"\r" in signature:
+        fail("sshsig-armor", "signature must be canonical ASCII armor with final LF")
+    encoded = signature[len(begin):-len(end)]
+    lines = encoded.splitlines()
+    if not lines or any(not line or len(line) > 76 for line in lines):
+        fail("sshsig-armor", "signature armor has invalid line wrapping")
+    try:
+        decoded = base64.b64decode(b"".join(lines), validate=True)
+    except binascii.Error:
+        fail("sshsig-armor", "signature armor is not canonical base64")
+    if not decoded.startswith(b"SSHSIG") or len(decoded) < 10:
+        fail("sshsig-format", "missing SSHSIG magic")
+    version = struct.unpack(">I", decoded[6:10])[0]
+    if version != 1:
+        fail("sshsig-format", "unsupported SSHSIG version")
+    offset = 10
+    public_blob, offset = _ssh_string(decoded, offset)
+    namespace, offset = _ssh_string(decoded, offset)
+    reserved, offset = _ssh_string(decoded, offset)
+    hash_algorithm, offset = _ssh_string(decoded, offset)
+    _, offset = _ssh_string(decoded, offset)
+    if offset != len(decoded):
+        fail("sshsig-format", "trailing SSHSIG bytes")
+    key_type, key_offset = _ssh_string(public_blob, 0)
+    key_bytes, key_offset = _ssh_string(public_blob, key_offset)
+    if key_offset != len(public_blob) or key_type != b"ssh-ed25519" or len(key_bytes) != 32:
+        fail("sshsig-key-type", "signature key must be Ed25519")
+    if namespace != b"aimee.module-doc.v1" or reserved != b"":
+        fail("sshsig-namespace", "signature namespace or reserved field is invalid")
+    if hash_algorithm != b"sha512":
+        fail("sshsig-hash", "signature hash algorithm must be SHA-512")
 
 
 def authorize_subject(
@@ -679,12 +806,15 @@ def validate_publisher_result(value: object, target: dict[str, object]) -> dict[
 
 def verify_sshsig(subject: bytes, signature: bytes, identity: str, public_key: str, ssh_keygen: Path) -> None:
     """Verify one Ed25519 SSHSIG without invoking a shell."""
-    if not signature.startswith(b"-----BEGIN SSH SIGNATURE-----\n") or not signature.endswith(b"-----END SSH SIGNATURE-----\n") or b"\r" in signature:
-        fail("sshsig-armor", "signature must be canonical ASCII armor with final LF")
+    _validate_sshsig_envelope(signature)
     try:
         signature.decode("ascii", "strict")
     except UnicodeDecodeError:
         fail("sshsig-armor", "signature armor must be ASCII")
+    if not IDENTITY_RE.fullmatch(identity) or not _valid_ed25519_public_key(public_key):
+        fail("sshsig-signer", "signer identity or public key is invalid")
+    if not ssh_keygen.is_absolute() or not ssh_keygen.is_file():
+        fail("sshsig-tool", "ssh-keygen must be an absolute regular-file path")
     with tempfile.TemporaryDirectory(prefix="aimee-sshsig-") as tmp:
         root = Path(tmp)
         allowed = root / "allowed_signers"
