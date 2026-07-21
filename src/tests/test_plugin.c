@@ -6,9 +6,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../headers/plugin.h"
+#include "aimee/plugin-loader/plugin.h"
+#include "aimee/module-runtime/extension.h"
 #include "cJSON.h"
 #include "platform_test_util.h"
+
+static int shutdown_calls;
+
+static void record_shutdown(plugin_ctx_t *ctx)
+{
+   (void)ctx;
+   shutdown_calls++;
+}
 
 /* Write a minimal plugin.json manifest into a temp dir */
 static void write_manifest(const char *plugin_dir, const char *json)
@@ -389,6 +398,59 @@ int main(void)
       assert(found);
       cJSON_Delete(arr);
       free(json);
+   }
+
+   /* ---------------------------------------------------------------
+    * 17. Required extension ABI owns context lifecycle and registries
+    * ------------------------------------------------------------- */
+   {
+      assert(strcmp(plugin_kind_name(PLUGIN_KIND_BACKEND), "backend") == 0);
+      assert(plugin_kind_from_str("platform") == PLUGIN_KIND_PLATFORM);
+      assert(plugin_kind_from_str(NULL) == PLUGIN_KIND_STANDALONE);
+      assert(plugin_kind_from_str("unknown") == PLUGIN_KIND_STANDALONE);
+
+      plugin_ctx_t *ctx = plugin_ctx_create();
+      assert(ctx != NULL);
+      assert(ctx->register_tool && ctx->register_hook);
+      assert(ctx->register_slash_command && ctx->register_cli_subcommand);
+      assert(ctx->register_delegate_backend && ctx->register_platform_adapter);
+      assert(ctx->register_memory_provider == NULL);
+      assert(ctx->register_context_engine == NULL);
+      assert(ctx->register_model_provider);
+
+      plugin_tool_count = 0;
+      plugin_tool_t tool = {.name = "extension_tool"};
+      assert(ctx->register_tool(ctx, NULL) == -1);
+      assert(ctx->register_tool(ctx, &tool) == 0);
+      assert(plugin_tool_count == 1);
+      assert(strcmp(plugin_tools[0].name, "extension_tool") == 0);
+      int saved_tool_count = plugin_tool_count;
+      plugin_tool_count = PLUGIN_MAX_TOOLS;
+      assert(ctx->register_tool(ctx, &tool) == -1);
+      assert(plugin_tool_count == PLUGIN_MAX_TOOLS);
+      plugin_tool_count = saved_tool_count;
+
+      plugin_hook_count = 0;
+      plugin_hook_t hook = {.event = "PreToolUse", .command = "/bin/true"};
+      assert(ctx->register_hook(ctx, NULL) == -1);
+      assert(ctx->register_hook(ctx, &hook) == 0);
+      assert(plugin_hook_count == 1);
+      assert(strcmp(plugin_hooks[0].event, "PreToolUse") == 0);
+      int saved_hook_count = plugin_hook_count;
+      plugin_hook_count = PLUGIN_MAX_HOOKS;
+      assert(ctx->register_hook(ctx, &hook) == -1);
+      assert(plugin_hook_count == PLUGIN_MAX_HOOKS);
+      plugin_hook_count = saved_hook_count;
+
+      plugin_slash_command_count = 0;
+      plugin_slash_cmd_t slash = {.name = "status"};
+      assert(ctx->register_slash_command(ctx, &slash) == 0);
+      assert(plugin_slash_command_count == 1);
+      assert(strcmp(plugin_slash_commands[0].name, "status") == 0);
+
+      ctx->on_shutdown = record_shutdown;
+      plugin_ctx_destroy(ctx);
+      assert(shutdown_calls == 1);
    }
 
    /* Cleanup */

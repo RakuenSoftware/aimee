@@ -98,6 +98,38 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
                         "module-document",
                     )
 
+    def test_removed_wrapper_symbols_cannot_return(self) -> None:
+        contract = checker.CONTRACTS[-1]
+        self.assert_rejected(
+            contract,
+            lambda root, value: (root / value.canonical_source).write_text(
+                (root / value.canonical_source).read_text() + "\nplugin_ctx_create_ex\n"
+            ),
+            "dead-wrapper-removed",
+        )
+
+    def test_required_runtime_cannot_include_optional_loader(self) -> None:
+        contract = checker.CONTRACTS[-1]
+        self.assert_rejected(
+            contract,
+            lambda root, value: (root / value.canonical_source).write_text(
+                (root / value.canonical_source).read_text()
+                + '\n#include "aimee/plugin-loader/plugin.h"\n'
+            ),
+            "core-to-optional-edge",
+        )
+
+    def test_retired_plugin_headers_cannot_be_included(self) -> None:
+        contract = checker.CONTRACTS[-1]
+        self.assert_rejected(
+            contract,
+            lambda root, value: (root / value.canonical_source).write_text(
+                (root / value.canonical_source).read_text()
+                + '\n#include "headers/plugin_ctx.h"\n'
+            ),
+            "legacy-include-removed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

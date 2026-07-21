@@ -9,9 +9,11 @@ plugin runtime to load enabled entries. Its owned implementation is
 `src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h` and is included as
 `aimee/plugin-loader/plugin_loader.h`.
 
-This module does not own the core extension ABI, extension registries, pre-LLM hook contract,
-plugin manifest persistence, or plugin management commands. Those responsibilities are still
-mixed in legacy files and are the subject of the next core ABI split.
+This module does not own the core extension ABI, extension registries, or pre-LLM hook contract.
+It does own optional plugin manifest persistence, management commands, and dynamic loading. The
+manifest implementation is `src/modules/plugin-loader/plugin.c`; its canonical contract is
+`src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h`, included as
+`aimee/plugin-loader/plugin.h`.
 
 ## Classification and link profile
 
@@ -20,8 +22,8 @@ optional and disabled by default. That metadata does not describe the current bi
 profile remains unconditional: Make and CMake still list the discovery source in their core source
 lists. There is no build-time, link-time, or runtime-removal guarantee in this slice.
 
-The current change establishes a new physical owner. The link profile remains unconditional until
-the contract-split slice proves plugin-loader is not required for the core link closure.
+The physical owners are now separated. The link profile remains unconditional until a later
+consumer/profile slice proves plugin-loader is absent from the core link closure.
 
 ## Public contracts
 
@@ -32,17 +34,24 @@ The discovery header exports three functions:
 - `plugin_loader_discover_all` discovers, filters, and registers plugins without making individual
   plugin failures fatal to server startup.
 
-The header currently retains a transitional `plugin.h` include because `plugin_t`, manifest
-parsing, and load registration are still declared by the mixed legacy contract. That allowance
-expires with the next contract-split slice. Any new symbol pulled from `plugin.h` into
-`plugin_loader.c` or its header requires reopening this ownership contract.
+`plugin_load_and_register` is documented under the optional contract in
+`aimee/plugin-loader/plugin.h`; it is the only entry point that installs bridges and invokes
+`on_init`, and it does not invoke `on_shutdown` in this slice.
+
+The discovery header includes the canonical loader contract for `plugin_t`, manifest parsing, and
+load registration. That contract depends one-way on `aimee/module-runtime/extension.h`;
+module-runtime never includes plugin-loader.
 
 ## Dependencies and consumers
 
 The implementation consumes configuration, Aimee home-path resolution, logging, manifest parsing,
-and load-registration contracts. Direct consumers of the relocated header are the implementation
+load-registration contracts, and the memory-provider/context-engine registration bridges it
+installs on dynamic-plugin contexts. Direct consumers of the relocated header are the implementation
 itself, Aimee Runtime startup in `src/server/server_main.c`, and the focused loader test in
 `src/tests/test_plugin_loader.c`.
+
+The descriptor therefore declares the required `memory` and `response-composition` dependencies in
+addition to `module-runtime`, configuration, execution policy, and audit.
 
 The required server currently invokes discovery during composition. This is migration debt, not
 evidence that an optional module is absent from required code.
@@ -57,16 +66,17 @@ retain their existing behavior. Individual entries must already be enabled befor
 ## Discovery order and data
 
 Discovery visits bundled plugins, then user plugins, then project plugins. Later sources replace an
-earlier same-named entry. Plugin manifests and the in-memory `plugin_t` representation remain owned
-by the mixed legacy plugin contract; this module does not introduce a new persistence format or
-migration.
+earlier same-named entry. Plugin manifests and the in-memory `plugin_t` representation are owned
+here; this split does not introduce a new persistence format or migration.
 
 ## Security and privacy
 
 Project discovery stays opt-in because project content is less trusted than bundled or user-owned
 content. Missing required environment variables cause an entry to be skipped. Dynamic-loading,
-permission, execution-policy, and audit enforcement are not redesigned here. OIDC and SSHSIG module
-documentation attestation are separate governance hardening and do not gate this physical move.
+permission, execution-policy, and audit enforcement are not redesigned here. The management entry
+points and their existing server/dashboard authorization guards are unchanged by the source move.
+OIDC and SSHSIG module documentation attestation are separate governance hardening and do not gate
+this physical move.
 
 ## Failure behavior and diagnostics
 
@@ -90,17 +100,27 @@ This slice adds no installed public-header export. There is no forwarding header
 `src/headers/plugin_loader.h`; any future export or compatibility shim needs an explicit contract
 decision.
 
-The migration gap is deliberate and bounded:
+The contract split is complete: `plugin_manifest_parse`, `plugin_load_and_register`, registry
+persistence, install/enable/remove, manifest hook/tool aggregation, and dynamic loading live here.
+Canonical consumers include `src/modules/plugin-loader/plugin.c`,
+`src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h`, and
+`src/tests/test_plugin.c`.
 
-1. `plugin.c` and `plugin.h` still mix manifest/install/loading functions with required extension
-   ABI and registries.
-2. `plugin_ctx.c` and `plugin_ctx.h` remain ABI-adjacent pending per-symbol classification.
-3. Required consumers still link the loader discovery unit unconditionally.
+The required runtime co-locates `plugin_permission_name` and `plugin_permission_from_str` with the
+permission enum. Plugin-loader consumes that stable vocabulary when reading and writing manifests.
+For dynamic libraries, plugin-loader sets identity and memory/context bridge callbacks before it
+invokes `register()`. If registration succeeds, plugin-loader invokes the plugin's `on_init`
+against the registered context. `on_shutdown` is the registered shutdown callback that
+`plugin_ctx_destroy` would invoke; in the current build, plugin-loader does not call
+`plugin_ctx_destroy` during normal operation, and plugin contexts and library handles remain alive
+for the process lifetime. No plugin unload path exists in this slice, so bridge code is never
+unloaded while a plugin can call it. A future unload-capable slice must invoke `on_shutdown` before
+destroying the context and calling `dlclose` on the handle.
 
-The next slice performs the per-symbol audit and core ABI split: required ABI and registries move
-to `module-runtime`; manifest discovery, installation, enable/disable, removal, and dynamic loading
-remain candidates for plugin-loader. It then updates
-consumers to core registry contracts and proves the required link closure excludes plugin-loader.
+One migration gap remains deliberate and bounded. Required builds still link plugin-loader because
+current dashboard, MCP, CLI, and startup composition surfaces consume installed-plugin state. The
+next slice must either make each surface conditional on plugin-loader selection or replace it with
+a required module-runtime capability query, then prove omission from the object and symbol closure.
 
 ## Extension and removal rules
 

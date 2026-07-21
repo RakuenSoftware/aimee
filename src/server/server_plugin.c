@@ -1,7 +1,7 @@
 /* server_plugin.c: server handlers for plugin registry operations */
 #include "aimee.h"
 #include "server.h"
-#include "plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 #include "cJSON.h"
 #include "json_fluent.h"
 

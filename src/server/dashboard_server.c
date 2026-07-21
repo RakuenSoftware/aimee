@@ -20,7 +20,7 @@
 #include "dashboard.h"
 #include "headers/payload_rewrite.h"
 #include "memory.h"
-#include "plugin.h"
+#include "aimee/plugin-loader/plugin.h"
 
 #include <ctype.h>
 #include <stdio.h>
