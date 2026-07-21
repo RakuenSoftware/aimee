@@ -66,8 +66,18 @@ extern "C"
    int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out);
    int db1_coord_job_complete_task(int task_id, const char *result);
    int db1_coord_job_fail_task(int task_id, const char *error);
+   /* Owner-fenced variants for durable workers. A completion/failure from an
+    * earlier claim attempt is rejected after the task has been requeued. */
+   int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result);
+   int db1_coord_job_fail_task_owned(int task_id, const char *claimed_by, const char *error);
    int db1_coord_job_release_task(int task_id);
    int db1_coord_job_release_task_bounded(int task_id, int max_requeues);
+   int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by,
+                                                int max_requeues);
+   /* Recover tasks owned by a dispatcher incarnation that can no longer exist.
+    * Claims below max_requeues return to pending; exhausted claims fail. */
+   int db1_coord_job_recover_owner(const char *claimed_by, int max_requeues, int *requeued_out,
+                                   int *failed_out);
    int db1_coord_job_get(int job_id, db1_coord_job_t *out);
    int db1_coord_job_list_tasks(int job_id, db1_coord_task_t *out, int max);
    int db1_coord_job_cancel(int job_id);

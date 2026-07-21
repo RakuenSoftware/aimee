@@ -212,26 +212,28 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    if (strcmp(status_text, "ok") == 0)
    {
       cJSON *r = cJSON_GetObjectItemCaseSensitive(resp, "response");
-      db1_coord_job_complete_task(cctx->coord_task_id, cJSON_IsString(r) ? r->valuestring : "");
+      db1_coord_job_complete_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                        cJSON_IsString(r) ? r->valuestring : "");
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
       config_t cfg;
       config_load(&cfg);
-      if (db1_coord_job_release_task_bounded(cctx->coord_task_id,
-                                             cfg.concurrency_preempt_requeue_max) == 0)
+      if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                                   cfg.concurrency_preempt_requeue_max) == 0)
       {
          server_coord_dispatcher_notify();
          return;
       }
-      db1_coord_job_fail_task(cctx->coord_task_id, "preempt requeue cap exhausted");
+      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                    "preempt requeue cap exhausted");
    }
    else
    {
       cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      db1_coord_job_fail_task(cctx->coord_task_id, (cJSON_IsString(m) && m->valuestring[0])
-                                                       ? m->valuestring
-                                                       : "delegate failed");
+      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                    (cJSON_IsString(m) && m->valuestring[0]) ? m->valuestring
+                                                                             : "delegate failed");
    }
    server_coord_dispatcher_notify();
 }
