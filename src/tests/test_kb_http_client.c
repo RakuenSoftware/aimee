@@ -1,8 +1,13 @@
+#define KB_HTTP_CLIENT_TESTING 1
 #include "kb/http/kb_http_client.h"
 
 #include <assert.h>
+#include <openssl/ssl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 typedef struct
 {
@@ -246,6 +251,26 @@ static void origin_path_validation(void)
    }
 }
 
+static void authenticated_tls_eof_policy(void)
+{
+   assert(kb_http_client_test__tls_eof_is_authenticated(SSL_ERROR_ZERO_RETURN));
+   assert(!kb_http_client_test__tls_eof_is_authenticated(SSL_ERROR_SYSCALL));
+   assert(!kb_http_client_test__tls_eof_is_authenticated(SSL_ERROR_SSL));
+   assert(!kb_http_client_test__tls_eof_is_authenticated(SSL_ERROR_WANT_READ));
+}
+
+static void poll_readiness_precedes_hangup(void)
+{
+   int sockets[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+   assert(write(sockets[1], "x", 1) == 1);
+   assert(close(sockets[1]) == 0);
+   assert(kb_http_client_test__wait_fd(sockets[0], POLLIN, 1000) == KB_HTTP_OK);
+   char byte = 0;
+   assert(read(sockets[0], &byte, 1) == 1 && byte == 'x');
+   assert(close(sockets[0]) == 0);
+}
+
 int main(void)
 {
    content_length_boundaries();
@@ -255,6 +280,8 @@ int main(void)
    malformed_matrix();
    request_validation();
    origin_path_validation();
+   authenticated_tls_eof_policy();
+   poll_readiness_precedes_hangup();
    puts("kb http client: strict parser and request validation passed");
    return 0;
 }

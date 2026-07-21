@@ -464,6 +464,58 @@ typedef struct
    char service[16];
 } dns_query_t;
 
+/* getaddrinfo_a() can outlive its caller after a deadline.  Keep a slot until the
+ * completion notification runs, including when gai_cancel() cannot cancel the
+ * request, so repeated timeouts cannot create an unbounded queue of resolver
+ * work and callback-owned allocations. */
+#define DNS_QUERY_PROCESS_CAP 16U
+static pthread_mutex_t dns_slots_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t dns_slots_cond;
+static pthread_once_t dns_slots_once = PTHREAD_ONCE_INIT;
+static size_t dns_slots_used;
+static int dns_slots_ready;
+
+static void dns_slots_init(void)
+{
+   pthread_condattr_t attr;
+   if (pthread_condattr_init(&attr) != 0)
+      return;
+   if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) == 0 &&
+       pthread_cond_init(&dns_slots_cond, &attr) == 0)
+      dns_slots_ready = 1;
+   pthread_condattr_destroy(&attr);
+}
+
+static kb_http_result_t dns_slot_acquire(int64_t deadline)
+{
+   if (pthread_once(&dns_slots_once, dns_slots_init) != 0 || !dns_slots_ready)
+      return KB_HTTP_INTERNAL_ERROR;
+   struct timespec until = {.tv_sec = deadline / 1000000000LL,
+                            .tv_nsec = deadline % 1000000000LL};
+   if (pthread_mutex_lock(&dns_slots_mutex) != 0)
+      return KB_HTTP_INTERNAL_ERROR;
+   int wait_result = 0;
+   while (dns_slots_used >= DNS_QUERY_PROCESS_CAP && wait_result == 0)
+      wait_result = pthread_cond_timedwait(&dns_slots_cond, &dns_slots_mutex, &until);
+   kb_http_result_t result = KB_HTTP_OK;
+   if (dns_slots_used >= DNS_QUERY_PROCESS_CAP)
+      result = wait_result == ETIMEDOUT || deadline_expired(deadline) ? KB_HTTP_TIMEOUT
+                                                                      : KB_HTTP_INTERNAL_ERROR;
+   else
+      dns_slots_used++;
+   pthread_mutex_unlock(&dns_slots_mutex);
+   return result;
+}
+
+static void dns_slot_release(void)
+{
+   pthread_mutex_lock(&dns_slots_mutex);
+   if (dns_slots_used)
+      dns_slots_used--;
+   pthread_cond_signal(&dns_slots_cond);
+   pthread_mutex_unlock(&dns_slots_mutex);
+}
+
 static void dns_query_release(dns_query_t *q)
 {
    if (atomic_fetch_sub(&q->refs, 1) == 1)
@@ -487,6 +539,7 @@ static void dns_complete(union sigval value)
       freeaddrinfo(q->request.ar_result);
       q->request.ar_result = NULL;
    }
+   dns_slot_release();
    dns_query_release(q);
 }
 
@@ -494,14 +547,21 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
                                          struct addrinfo **result)
 {
    *result = NULL;
+   kb_http_result_t slot_result = dns_slot_acquire(deadline);
+   if (slot_result != KB_HTTP_OK)
+      return slot_result;
    dns_query_t *q = calloc(1, sizeof(*q));
    if (!q)
+   {
+      dns_slot_release();
       return KB_HTTP_INTERNAL_ERROR;
+   }
    if (strnlen(host, sizeof(q->host)) == sizeof(q->host) ||
        strnlen(service, sizeof(q->service)) == sizeof(q->service) ||
        pthread_mutex_init(&q->mutex, NULL) != 0)
    {
       free(q);
+      dns_slot_release();
       return KB_HTTP_INTERNAL_ERROR;
    }
    pthread_condattr_t attr;
@@ -509,6 +569,7 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
    {
       pthread_mutex_destroy(&q->mutex);
       free(q);
+      dns_slot_release();
       return KB_HTTP_INTERNAL_ERROR;
    }
    if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0 ||
@@ -517,6 +578,7 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
       pthread_condattr_destroy(&attr);
       pthread_mutex_destroy(&q->mutex);
       free(q);
+      dns_slot_release();
       return KB_HTTP_INTERNAL_ERROR;
    }
    pthread_condattr_destroy(&attr);
@@ -537,6 +599,7 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
    {
       atomic_store(&q->refs, 1);
       dns_query_release(q);
+      dns_slot_release();
       return KB_HTTP_RESOLVE_ERROR;
    }
    struct timespec until = {.tv_sec = deadline / 1000000000LL,
@@ -549,7 +612,25 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
    {
       q->abandoned = 1;
       pthread_mutex_unlock(&q->mutex);
-      (void)gai_cancel(&q->request);
+      /* EAI_CANCELED, EAI_NOTCANCELED, and EAI_ALLDONE all retain the callback
+       * reference.  glibc still issues the SIGEV_THREAD completion notification;
+       * it alone releases the process slot and the callback-owned lifetime. */
+      switch (gai_cancel(&q->request))
+      {
+      case EAI_CANCELED:
+         /* Cancellation is completion; the registered notification owns q. */
+         break;
+      case EAI_NOTCANCELED:
+         /* Resolver work continues; the registered notification owns q. */
+         break;
+      case EAI_ALLDONE:
+         /* Completion raced the timeout; its notification still owns q. */
+         break;
+      default:
+         /* An implementation-specific failure cannot prove callback absence.
+          * Retaining its reference and cap slot is the only memory-safe choice. */
+         break;
+      }
       dns_query_release(q);
       return KB_HTTP_TIMEOUT;
    }
@@ -577,13 +658,28 @@ static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
       {
          if (deadline_expired(deadline))
             return KB_HTTP_TIMEOUT;
-         return (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) ? KB_HTTP_IO_ERROR : KB_HTTP_OK;
+         if (pfd.revents & (POLLERR | POLLNVAL))
+            return KB_HTTP_IO_ERROR;
+         if (pfd.revents & events)
+            return KB_HTTP_OK;
+         if (pfd.revents & POLLHUP)
+            return KB_HTTP_IO_ERROR;
+         continue;
       }
       if (rc == 0)
          return KB_HTTP_TIMEOUT;
       if (errno != EINTR)
          return KB_HTTP_IO_ERROR;
    }
+}
+
+__attribute__((visibility("hidden"))) kb_http_result_t
+kb_http_client_test__wait_fd(int fd, short events, int timeout_ms)
+{
+   int64_t now = now_ns();
+   if (fd < 0 || timeout_ms <= 0 || now < 0 || now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
+      return KB_HTTP_INVALID_ARGUMENT;
+   return wait_fd(fd, events, now + (int64_t)timeout_ms * 1000000LL);
 }
 
 static kb_http_result_t connect_deadline(struct addrinfo *addresses, int64_t deadline, int *out_fd)
@@ -770,12 +866,36 @@ static SSL_CTX *client_context(void)
       return NULL;
    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-   if (SSL_CTX_set_default_verify_paths(ctx) != 1)
+   /* Do not consult SSL_CERT_FILE/SSL_CERT_DIR: egress trust is anchored only in
+    * an administrator-managed Linux system bundle at a fixed location. */
+   static const char *const system_bundles[] = {
+       "/etc/ssl/certs/ca-certificates.crt",                /* Debian/Ubuntu */
+       "/etc/pki/tls/certs/ca-bundle.crt",                  /* RHEL/Fedora */
+       "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", /* RHEL alternate */
+       "/etc/ssl/ca-bundle.pem"                             /* SUSE */
+   };
+   int trust_loaded = 0;
+   for (size_t i = 0; i < sizeof(system_bundles) / sizeof(system_bundles[0]); i++)
+   {
+      ERR_clear_error();
+      if (SSL_CTX_load_verify_locations(ctx, system_bundles[i], NULL) == 1)
+      {
+         trust_loaded = 1;
+         break;
+      }
+   }
+   if (!trust_loaded)
    {
       SSL_CTX_free(ctx);
       return NULL;
    }
    return ctx;
+}
+
+__attribute__((visibility("hidden"))) int
+kb_http_client_test__tls_eof_is_authenticated(int ssl_error)
+{
+   return ssl_error == SSL_ERROR_ZERO_RETURN;
 }
 
 static kb_http_result_t build_request_bytes(const kb_http_request_t *r, unsigned char **out,
@@ -930,7 +1050,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
          continue;
       }
       int error = SSL_get_error(ssl, rc);
-      if (error == SSL_ERROR_ZERO_RETURN || (error == SSL_ERROR_SYSCALL && rc == 0))
+      if (kb_http_client_test__tls_eof_is_authenticated(error))
       {
          result = deadline_expired(deadline) ? KB_HTTP_TIMEOUT
                                              : kb_http_response_parser_finish_eof(parser);

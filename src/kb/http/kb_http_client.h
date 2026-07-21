@@ -100,4 +100,10 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
                                      kb_http_headers_fn headers_cb, kb_http_body_fn body_cb,
                                      void *context);
 
+/* Private, hidden implementation test hooks.  These are not production ABI. */
+#ifdef KB_HTTP_CLIENT_TESTING
+int kb_http_client_test__tls_eof_is_authenticated(int ssl_error);
+kb_http_result_t kb_http_client_test__wait_fd(int fd, short events, int timeout_ms);
+#endif
+
 #endif
